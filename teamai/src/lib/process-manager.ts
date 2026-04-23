@@ -29,23 +29,15 @@ export class ProcessManager extends EventEmitter {
 
     const args = [
       '-p',
-      '--input-format', 'stream-json',
+      '--input-format', 'text',
       '--output-format', 'stream-json',
       '--verbose',
-      '--cwd', opts.cwd,
     ];
-
-    if (opts.model) {
-      args.push('--model', opts.model);
-    }
-
-    if (opts.permissionMode) {
-      args.push('--permission-mode', opts.permissionMode);
-    }
 
     const proc = spawn('claude', args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env },
+      cwd: opts.cwd,
     });
 
     // Parse NDJSON from stdout line by line
@@ -96,11 +88,17 @@ export class ProcessManager extends EventEmitter {
     return Array.from(this.sessions.values());
   }
 
+  writeToSession(id: string, data: string): void {
+    const session = this.sessions.get(id);
+    if (session) {
+      session.process.stdin.write(data + '\n');
+    }
+  }
+
   terminateSession(id: string): void {
     const session = this.sessions.get(id);
     if (session) {
-      session.process.kill();
-      this.sessions.delete(id);
+      session.process.kill('SIGTERM');
     }
   }
 }
