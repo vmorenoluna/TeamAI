@@ -29,10 +29,18 @@ export class ProcessManager extends EventEmitter {
 
     const args = [
       '-p',
-      '--input-format', 'text',
+      '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
     ];
+
+    if (opts.model) {
+      args.push('--model', opts.model);
+    }
+
+    if (opts.permissionMode) {
+      args.push('--permission-mode', opts.permissionMode);
+    }
 
     const proc = spawn('claude', args, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -63,6 +71,14 @@ export class ProcessManager extends EventEmitter {
     });
 
     proc.on('exit', (code) => {
+      if (buffer.trim()) {
+        try {
+          const event = JSON.parse(buffer);
+          this.emit('event', { sessionId: id, event });
+        } catch {
+          this.emit('raw', { sessionId: id, data: buffer });
+        }
+      }
       const session = this.sessions.get(id);
       if (session) session.status = code === 0 ? 'done' : 'error';
       this.emit('exit', { sessionId: id, code });
@@ -80,26 +96,35 @@ export class ProcessManager extends EventEmitter {
     return id;
   }
 
+  /**
+   * Send a message to an existing session.
+   */
+  sendMessage(sessionId: string, content: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || !session.process.stdin?.writable) {
+      throw new Error(`Session ${sessionId} not available`);
+    }
+    const msg = { type: 'user', message: { role: 'user', content } };
+    session.process.stdin.write(JSON.stringify(msg) + '\n');
+  }
+
+  /**
+   * Kill a session's subprocess.
+   */
+  killSession(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.process.kill('SIGTERM');
+      session.status = 'done';
+    }
+  }
+
   getSession(id: string): AgentSession | undefined {
     return this.sessions.get(id);
   }
 
-  getallSessions(): AgentSession[] {
+  getAllSessions(): AgentSession[] {
     return Array.from(this.sessions.values());
-  }
-
-  writeToSession(id: string, data: string): void {
-    const session = this.sessions.get(id);
-    if (session) {
-      session.process.stdin.write(data + '\n');
-    }
-  }
-
-  terminateSession(id: string): void {
-    const session = this.sessions.get(id);
-    if (session) {
-      session.process.kill('SIGTERM');
-    }
   }
 }
 
