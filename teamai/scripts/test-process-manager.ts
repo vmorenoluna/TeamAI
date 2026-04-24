@@ -1,45 +1,36 @@
-const { processManager } = require('../src/lib/process-manager');
+import { processManager } from '../src/lib/process-manager';
 
 async function runTest() {
   const cwd = process.cwd();
-  const taskId = 'test-task-123';
-  const role = 'general';
-
-  console.log(`Starting test for ProcessManager in ${cwd}`);
-  console.log(`Type of processManager: ${typeof processManager}`);
-
-  const sessionId = processManager.createSession({
-    taskId,
-    role,
-    cwd,
-  });
-
-  console.log(`Session created: ${sessionId}`);
 
   processManager.on('event', (data) => {
-    console.log(`[EVENT]`, JSON.stringify(data, null, 2));
+    console.log('[EVENT]', JSON.stringify(data, null, 2));
+  });
+
+  processManager.on('raw', (data) => {
+    console.log('[RAW]', data.data);
   });
 
   processManager.on('error', (data) => {
-    console.error(`[ERROR]`, data);
+    console.error('[ERROR]', data);
   });
 
   processManager.on('exit', (data) => {
-    console.log(`[EXIT]`, data);
+    console.log('[EXIT]', data);
     process.exit(0);
   });
 
-  // Wait a bit for the process to start
-  await new Promise(resolve => setTimeout(resolve, 2000));
+  const sessionId = processManager.createSession({ taskId: 'test-task-123', role: 'general', cwd });
+  console.log(`Session created: ${sessionId}`);
 
-  console.log('Sending command: "What is 2+2?"');
-  processManager.writeToSession(sessionId, 'What is 2+2?\n');
+  await new Promise(resolve => setTimeout(resolve, 1000));
 
-  // Wait for some response, then terminate
-  await new Promise(resolve => setTimeout(resolve, 5000));
-  console.log('Terminating session...');
-  processManager.terminateSession(sessionId);
+  console.log('Sending: "What is 2+2?"');
+  processManager.sendMessage(sessionId, 'What is 2+2?');
 
+  await new Promise(resolve => setTimeout(resolve, 15000));
+  console.log('Killing session...');
+  processManager.killSession(sessionId);
 }
 
 runTest().catch(err => {

@@ -20,7 +20,7 @@ app.prepare().then(() => {
     processManager.on('event', handler);
     processManager.on('error', handler);
     ws.on('close', () => {
-      process					processManager.off('event', handler);
+      processManager.off('event', handler);
       processManager.off('error', handler);
     });
   });
