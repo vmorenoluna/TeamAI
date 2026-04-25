@@ -3,6 +3,7 @@ import { parse } from 'url';
 import next from 'next';
 import { WebSocketServer, WebSocket } from 'ws';
 import { processManager } from './src/lib/process-manager';
+import { findInterruptedTasks } from './src/lib/recovery';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
 const handle = app.getRequestHandler();
@@ -48,5 +49,13 @@ app.prepare().then(() => {
   const host = process.env.HOST || '0.0.0.0';
   server.listen(3000, host, () => {
     console.log(`> Ready on http://${host}:3000`);
+    // Detect tasks interrupted by previous server shutdown
+    const interrupted = findInterruptedTasks();
+    if (interrupted.length > 0) {
+      console.log(`[recovery] ${interrupted.length} interrupted task(s) detected:`);
+      for (const t of interrupted) {
+        console.log(`  • ${t.title} (${t.phase}) in ${t.projectName}`);
+      }
+    }
   });
 });
