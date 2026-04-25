@@ -5,6 +5,9 @@ import { getOrchestrator } from '@/lib/orchestrator';
 import { getActiveProjectPath } from './projects';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'crypto';
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { execSync } from 'child_process';
 
 async function getStores() {
   const projectPath = await getActiveProjectPath();
@@ -58,4 +61,35 @@ export async function getTask(id: string) {
 export async function getTaskEvents(taskId: string) {
   const { taskStore } = await getStores();
   return taskStore.getEvents(taskId);
+}
+
+export async function getTaskArtifacts(taskId: string) {
+  const { taskStore } = await getStores();
+  const projectPath = await getActiveProjectPath();
+  const task = taskStore.getById(taskId);
+  if (!task) throw new Error(`Task ${taskId} not found`);
+
+  const dir = taskStore.getDirById(taskId);
+
+  const specPath = join(dir, 'spec.md');
+  const spec = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
+
+  const qaPath = join(dir, 'qa_report.json');
+  const qaReport = existsSync(qaPath)
+    ? JSON.parse(readFileSync(qaPath, 'utf-8'))
+    : null;
+
+  let diff: string | null = null;
+  if (task.branch) {
+    try {
+      diff = execSync(`git diff main...${task.branch}`, {
+        cwd: projectPath,
+        encoding: 'utf-8',
+      });
+    } catch {
+      diff = null;
+    }
+  }
+
+  return { spec, qaReport, diff };
 }
