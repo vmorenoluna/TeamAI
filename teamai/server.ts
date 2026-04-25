@@ -16,7 +16,8 @@ app.prepare().then(() => {
   const wss = new WebSocketServer({ noServer: true });
   wss.on('connection', (ws) => {
     const handler = ({ sessionId, event }: any) => {
-      ws.send(JSON.stringify({ sessionId, event }));
+      const taskId = processManager.getSession(sessionId)?.taskId;
+      ws.send(JSON.stringify({ sessionId, taskId, event }));
     };
     processManager.on('event', handler);
     processManager.on('error', handler);
