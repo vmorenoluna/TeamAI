@@ -21,7 +21,14 @@ export function useAgentStream(taskId: string): AgentEvent[] {
         // ignore malformed messages
       }
     };
-    return () => ws.close();
+    return () => {
+      // Avoid "closed before connection established" warning in React StrictMode
+      if (ws.readyState === WebSocket.CONNECTING) {
+        ws.addEventListener('open', () => ws.close());
+      } else {
+        ws.close();
+      }
+    };
   }, [taskId]);
 
   return events;
