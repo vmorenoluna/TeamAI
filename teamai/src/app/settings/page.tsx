@@ -1,8 +1,10 @@
 import { getRoles } from '@/app/actions/roles';
 import { getActiveProject } from '@/app/actions/projects';
 import { getPipelineConfig } from '@/app/actions/pipeline';
+import { getProvidersConfig } from '@/app/actions/providers';
 import { RoleEditor } from '@/components/role-editor';
 import { PipelineConfigEditor } from '@/components/pipeline-config';
+import { ProviderConfigEditor } from '@/components/provider-config';
 
 export default async function SettingsPage() {
   const activeProject = await getActiveProject();
@@ -11,7 +13,9 @@ export default async function SettingsPage() {
     return <div className="p-6 text-sm text-slate-500">No active project selected.</div>;
   }
 
-  const [roles, pipelineConfig] = await Promise.all([getRoles(), getPipelineConfig()]);
+  const [roles, pipelineConfig, providersConfig] = await Promise.all([
+    getRoles(), getPipelineConfig(), getProvidersConfig(),
+  ]);
 
   return (
     <div className="flex flex-col h-full">
@@ -28,6 +32,15 @@ export default async function SettingsPage() {
             Choose which phases run and configure QA behaviour.
           </p>
           <PipelineConfigEditor config={pipelineConfig} />
+        </section>
+
+        {/* Provider config */}
+        <section>
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Providers</h2>
+          <p className="text-xs text-slate-500 mb-4">
+            Configure which model and backend each agent role uses. Leave role fields blank to inherit the default.
+          </p>
+          <ProviderConfigEditor config={providersConfig} />
         </section>
 
         {/* Role editor */}

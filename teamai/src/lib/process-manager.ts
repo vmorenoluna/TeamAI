@@ -24,6 +24,7 @@ export class ProcessManager extends EventEmitter {
     cwd: string;
     model?: string;
     permissionMode?: string;
+    env?: Record<string, string>;
   }): string {
     const id = randomUUID();
 
@@ -44,7 +45,7 @@ export class ProcessManager extends EventEmitter {
 
     const proc = spawn('claude', args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: { ...process.env, ...(opts.env ?? {}) },
       cwd: opts.cwd,
     });
 
