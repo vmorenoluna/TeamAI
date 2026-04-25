@@ -1,6 +1,25 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
+import { join } from 'path';
+import * as pty from 'node-pty';
+import { readFileSync, existsSync } from 'fs';
+
+function findExecutable(name: string): string {
+  try {
+    const cmd = process.platform === 'win32' ? `where ${name}` : `which ${name}`;
+    return execSync(cmd, { encoding: 'utf-8' }).trim().split(/\r?\n/)[0].trim();
+  } catch {
+    return name;
+  }
+}
+
+export interface TerminalSession {
+  id: string;
+  ptyProcess: pty.IPty;
+  role: string;
+  projectPath: string;
+}
 
 export interface AgentSession {
   id: string;
@@ -13,6 +32,7 @@ export interface AgentSession {
 
 export class ProcessManager extends EventEmitter {
   private sessions: Map<string, AgentSession> = new Map();
+  private terminalSessions: Map<string, TerminalSession> = new Map();
 
   /**
    * Spawn a new Claude CLI subprocess for an agent session.
@@ -126,6 +146,62 @@ export class ProcessManager extends EventEmitter {
 
   getAllSessions(): AgentSession[] {
     return Array.from(this.sessions.values());
+  }
+
+  // ── PTY terminal sessions ──────────────────────────────────────────────────
+
+  createTerminalSession(opts: {
+    projectPath: string;
+    role: string;
+    model?: string;
+  }): string {
+    const id = randomUUID();
+    const roleFile = join(opts.projectPath, '.claude', 'roles', opts.role);
+    // Read content inline to avoid Windows path issues with --append-system-prompt-file
+    const roleContent = existsSync(roleFile) ? readFileSync(roleFile, 'utf-8') : '';
+    const args = roleContent ? ['--append-system-prompt', roleContent] : [];
+    if (opts.model) args.push('--model', opts.model);
+
+    const claudeBin = findExecutable('claude');
+    const ptyProcess = pty.spawn(claudeBin, args, {
+      name: 'xterm-color',
+      cols: 120,
+      rows: 40,
+      cwd: opts.projectPath,
+      env: process.env as Record<string, string>,
+    });
+
+    ptyProcess.onData((data) => {
+      this.emit('terminal-data', { sessionId: id, data });
+    });
+
+    ptyProcess.onExit(() => {
+      this.terminalSessions.delete(id);
+      this.emit('terminal-exit', { sessionId: id });
+    });
+
+    this.terminalSessions.set(id, { id, ptyProcess, role: opts.role, projectPath: opts.projectPath });
+    return id;
+  }
+
+  writeToTerminal(sessionId: string, data: string): void {
+    this.terminalSessions.get(sessionId)?.ptyProcess.write(data);
+  }
+
+  resizeTerminal(sessionId: string, cols: number, rows: number): void {
+    this.terminalSessions.get(sessionId)?.ptyProcess.resize(cols, rows);
+  }
+
+  killTerminalSession(sessionId: string): void {
+    const s = this.terminalSessions.get(sessionId);
+    if (s) {
+      s.ptyProcess.kill();
+      this.terminalSessions.delete(sessionId);
+    }
+  }
+
+  getTerminalSessions(): TerminalSession[] {
+    return Array.from(this.terminalSessions.values());
   }
 }
 
