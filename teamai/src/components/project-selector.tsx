@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { setActiveProject, addProject } from '@/app/actions/projects';
+import { setActiveProject, addProject, removeProject } from '@/app/actions/projects';
 import { DirectoryBrowser } from './directory-browser';
 import type { Project } from '@/lib/project-store';
 
@@ -17,6 +17,7 @@ export function ProjectSelector({ projects, activeProjectPath }: Props) {
   const [showDialog, setShowDialog] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
   const [pathValue, setPathValue] = useState('');
+  const [addError, setAddError] = useState<string | null>(null);
 
   function handleSelect(path: string) {
     startTransition(async () => {
@@ -26,10 +27,23 @@ export function ProjectSelector({ projects, activeProjectPath }: Props) {
   }
 
   function handleAdd(formData: FormData) {
+    setAddError(null);
     startTransition(async () => {
-      await addProject(formData);
-      setShowDialog(false);
-      setPathValue('');
+      const result = await addProject(formData);
+      if ('error' in result) {
+        setAddError(result.error);
+      } else {
+        setShowDialog(false);
+        setPathValue('');
+        router.refresh();
+      }
+    });
+  }
+
+  function handleRemove(e: React.MouseEvent, path: string) {
+    e.stopPropagation();
+    startTransition(async () => {
+      await removeProject(path);
       router.refresh();
     });
   }
@@ -55,18 +69,26 @@ export function ProjectSelector({ projects, activeProjectPath }: Props) {
 
       <ul className="space-y-1">
         {projects.map(p => (
-          <li key={p.path}>
+          <li key={p.path} className="group flex items-center gap-1">
             <button
               onClick={() => handleSelect(p.path)}
               disabled={isPending}
               title={p.path}
-              className={`w-full text-left px-3 py-2 rounded text-sm truncate transition-colors ${
+              className={`flex-1 min-w-0 text-left px-3 py-2 rounded text-sm truncate transition-colors ${
                 p.path === activeProjectPath
                   ? 'bg-slate-700 text-white'
                   : 'text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
               {p.name}
+            </button>
+            <button
+              onClick={(e) => handleRemove(e, p.path)}
+              disabled={isPending}
+              title="Remove project"
+              className="opacity-0 group-hover:opacity-100 shrink-0 px-1 py-1 text-slate-500 hover:text-red-400 transition-all"
+            >
+              ×
             </button>
           </li>
         ))}
@@ -118,10 +140,13 @@ export function ProjectSelector({ projects, activeProjectPath }: Props) {
                   className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-500"
                 />
               </div>
+              {addError && (
+                <p className="text-sm text-red-500">{addError}</p>
+              )}
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => { setShowDialog(false); setPathValue(''); }}
+                  onClick={() => { setShowDialog(false); setPathValue(''); setAddError(null); }}
                   className="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors"
                 >
                   Cancel

@@ -54,14 +54,25 @@ export async function setActiveProject(projectPath: string) {
   revalidatePath('/');
 }
 
-export async function addProject(formData: FormData) {
+export async function addProject(
+  formData: FormData,
+): Promise<{ error: string } | { ok: true }> {
   const path = formData.get('path') as string;
   const name = formData.get('name') as string | null;
-  const project = projectStore.add(path, name || undefined);
+  try {
+    projectStore.add(path, name || undefined);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown';
+    return {
+      error: msg === 'already_registered'
+        ? 'This project is already registered.'
+        : `Failed to add project: ${msg}`,
+    };
+  }
   const cookieStore = await cookies();
   cookieStore.set(ACTIVE_PROJECT_COOKIE, path);
   revalidatePath('/');
-  return project;
+  return { ok: true };
 }
 
 export async function removeProject(projectPath: string) {
