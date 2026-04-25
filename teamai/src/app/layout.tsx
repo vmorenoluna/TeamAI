@@ -19,7 +19,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full`}>
-      <body className="h-full flex antialiased bg-slate-50 dark:bg-slate-950">
+      <body suppressHydrationWarning className="h-full flex antialiased bg-slate-50 dark:bg-slate-950">
         <aside className="w-60 shrink-0 flex flex-col bg-slate-900 text-slate-100">
           <div className="px-4 py-5 border-b border-slate-700">
             <span className="text-lg font-bold tracking-tight">TeamAI</span>

@@ -3,6 +3,30 @@
 import { projectStore } from '@/lib/project-store';
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
+import { readdirSync } from 'fs';
+import { join, dirname } from 'path';
+import { homedir } from 'os';
+
+export interface BrowseResult {
+  path: string;
+  parent: string | null;
+  entries: { name: string; path: string }[];
+}
+
+export async function browseDirectory(dirPath?: string): Promise<BrowseResult> {
+  const target = dirPath ?? homedir();
+  let entries: { name: string; path: string }[] = [];
+  try {
+    entries = readdirSync(target, { withFileTypes: true })
+      .filter(e => e.isDirectory() && e.name !== 'node_modules')
+      .map(e => ({ name: e.name, path: join(target, e.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    // Permission denied or invalid path
+  }
+  const parent = dirname(target) !== target ? dirname(target) : null;
+  return { path: target, parent, entries };
+}
 
 const ACTIVE_PROJECT_COOKIE = 'activeProject';
 
