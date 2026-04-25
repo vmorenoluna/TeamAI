@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import path from 'path';
 import { processManager } from './process-manager';
 import { TaskStore } from './task-store';
@@ -39,7 +39,16 @@ export class Orchestrator {
     this.taskStore = new TaskStore(projectRoot);
   }
 
+  private getPipelineConfig(): { phases: string[]; maxQaAttempts: number; parallelSubtasks: boolean } {
+    const cfgPath = path.join(this.projectRoot, '.teamai', 'pipeline.json');
+    if (existsSync(cfgPath)) {
+      try { return JSON.parse(readFileSync(cfgPath, 'utf-8')); } catch { /* use defaults */ }
+    }
+    return { phases: ['spec', 'plan', 'implement', 'qa-review', 'merge'], maxQaAttempts: 3, parallelSubtasks: true };
+  }
+
   async runTask(taskId: string, description: string): Promise<void> {
+    const config = this.getPipelineConfig();
     const slug = this.slugify(description);
     const branch = `feat/${slug}`;
     const worktreePath = path.join(this.projectRoot, '..', 'worktrees', slug);
@@ -53,8 +62,12 @@ export class Orchestrator {
       worktreePath,
       branch,
       qaAttempt: 0,
-      maxQaAttempts: 3,
+      maxQaAttempts: config.maxQaAttempts,
     };
+
+    // Skip phases not in the config (e.g. if spec is removed, start from plan)
+    const firstPhase = (config.phases[0] ?? 'spec') as PipelinePhase;
+    pipeline.phase = firstPhase;
 
     this.pipelines.set(taskId, pipeline);
     this.taskStore.update(taskId, { branch }); // persist branch so review panel can read it

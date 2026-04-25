@@ -1,17 +1,17 @@
 import { getRoles } from '@/app/actions/roles';
 import { getActiveProject } from '@/app/actions/projects';
+import { getPipelineConfig } from '@/app/actions/pipeline';
 import { RoleEditor } from '@/components/role-editor';
+import { PipelineConfigEditor } from '@/components/pipeline-config';
 
 export default async function SettingsPage() {
   const activeProject = await getActiveProject();
 
   if (!activeProject) {
-    return (
-      <div className="p-6 text-sm text-slate-500">No active project selected.</div>
-    );
+    return <div className="p-6 text-sm text-slate-500">No active project selected.</div>;
   }
 
-  const roles = await getRoles();
+  const [roles, pipelineConfig] = await Promise.all([getRoles(), getPipelineConfig()]);
 
   return (
     <div className="flex flex-col h-full">
@@ -20,13 +20,21 @@ export default async function SettingsPage() {
         <p className="text-xs text-slate-500 mt-0.5">{activeProject.path}</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-6 space-y-8">
+        {/* Pipeline config */}
         <section>
-          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">
-            Agent Roles
-          </h2>
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Pipeline Configuration</h2>
           <p className="text-xs text-slate-500 mb-4">
-            Edit agent personas to tailor behavior to your project. Changes take effect on the next pipeline run.
+            Choose which phases run and configure QA behaviour.
+          </p>
+          <PipelineConfigEditor config={pipelineConfig} />
+        </section>
+
+        {/* Role editor */}
+        <section>
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Agent Roles</h2>
+          <p className="text-xs text-slate-500 mb-4">
+            Edit agent personas to tailor behaviour to your project. Changes take effect on the next pipeline run.
           </p>
           <div className="space-y-2">
             {roles.map(role => (
