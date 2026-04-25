@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { Task } from '@/lib/task-store';
 
 const PHASE_BADGE: Record<string, string> = {
@@ -27,7 +28,7 @@ function relativeTime(iso: string): string {
 export function TaskCard({ task }: { task: Task }) {
   const badge = PHASE_BADGE[task.phase] ?? PHASE_BADGE.backlog;
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-md p-3 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-md transition-shadow cursor-pointer">
+    <Link href={`/task/${task.id}`} className="block bg-white dark:bg-slate-900 rounded-md p-3 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600 transition-all">
       <p className="text-sm font-medium text-slate-900 dark:text-white leading-snug mb-2">
         {task.title}
       </p>
@@ -39,6 +40,6 @@ export function TaskCard({ task }: { task: Task }) {
           {relativeTime(task.createdAt)}
         </span>
       </div>
-    </div>
+    </Link>
   );
 }
