@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -35,9 +35,9 @@ export class ProjectStore {
    */
   add(projectPath: string, name?: string): Project {
     const projects = this.getAll();
-    if (projects.some(p => p.path === projectPath)) {
-      throw new Error(`Project already registered: ${projectPath}`);
-    }
+    const existing = projects.find(p => p.path === projectPath);
+
+    if (existing) throw new Error('already_registered');
 
     this.scaffold(projectPath);
 
@@ -69,17 +69,33 @@ export class ProjectStore {
     ];
 
     for (const { src, dest } of targets) {
-      if (!existsSync(dest)) {
-        mkdirSync(dest, { recursive: true });
-        cpSync(src, dest, { recursive: true });
+      mkdirSync(dest, { recursive: true });
+      for (const file of readdirSync(src)) {
+        const destFile = join(dest, file);
+        if (!existsSync(destFile)) {
+          cpSync(join(src, file), destFile);
+        }
       }
     }
 
     mkdirSync(join(projectPath, '.teamai'), { recursive: true });
 
+    // Copy teamai-workflow.md into .claude/ if not already there
+    const workflowDest = join(projectPath, '.claude', 'teamai-workflow.md');
+    if (!existsSync(workflowDest)) {
+      cpSync(join(DEFAULTS_DIR, 'teamai-workflow.md'), workflowDest);
+    }
+
+    // Ensure root CLAUDE.md references the workflow file
+    const IMPORT_LINE = '@.claude/teamai-workflow.md';
     const claudeMdPath = join(projectPath, 'CLAUDE.md');
     if (!existsSync(claudeMdPath)) {
-      cpSync(join(DEFAULTS_DIR, 'CLAUDE.md'), claudeMdPath);
+      writeFileSync(claudeMdPath, IMPORT_LINE + '\n');
+    } else {
+      const content = readFileSync(claudeMdPath, 'utf-8');
+      if (!content.includes(IMPORT_LINE)) {
+        writeFileSync(claudeMdPath, IMPORT_LINE + '\n' + content);
+      }
     }
   }
 }

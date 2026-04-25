@@ -1,4 +1,4 @@
-# CLAUDE.md
+# TeamAI Workflow
 
 This project uses an automated pipeline managed by an external orchestrator.
 When you receive slash commands (/spec, /plan, /implement, /qa-review, /qa-fix, /merge),
