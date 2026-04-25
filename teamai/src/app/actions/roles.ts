@@ -1,6 +1,6 @@
 'use server';
 
-import { readFileSync, writeFileSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
@@ -48,4 +48,12 @@ export async function saveRole(filename: string, content: string): Promise<void>
   }
   writeFileSync(join(dir, filename), content, 'utf-8');
   revalidatePath('/settings');
+}
+
+export async function resetRole(filename: string): Promise<string> {
+  const defaultPath = join(process.cwd(), 'defaults', 'roles', filename);
+  if (!existsSync(defaultPath)) throw new Error(`No default for ${filename}`);
+  const defaultContent = readFileSync(defaultPath, 'utf-8');
+  await saveRole(filename, defaultContent);
+  return defaultContent;
 }
