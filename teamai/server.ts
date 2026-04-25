@@ -12,7 +12,8 @@ app.prepare().then(() => {
     handle(req, res, parse(req.url!, true));
   });
 
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  // noServer: true so we handle upgrades manually and don't block Next.js HMR
+  const wss = new WebSocketServer({ noServer: true });
   wss.on('connection', (ws) => {
     const handler = ({ sessionId, event }: any) => {
       ws.send(JSON.stringify({ sessionId, event }));
@@ -23,6 +24,16 @@ app.prepare().then(() => {
       processManager.off('event', handler);
       processManager.off('error', handler);
     });
+  });
+
+  server.on('upgrade', (request, socket, head) => {
+    const { pathname } = parse(request.url!, true);
+    if (pathname === '/ws') {
+      wss.handleUpgrade(request, socket, head, (client) => {
+        wss.emit('connection', client, request);
+      });
+    }
+    // All other paths (e.g. /_next/webpack-hmr) fall through to Next.js
   });
 
   const host = process.env.HOST || '0.0.0.0';
