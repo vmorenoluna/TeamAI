@@ -41,6 +41,7 @@ export function Sidebar({ projects, activeProjectPath }: Props) {
         {[
           { href: '/', label: 'Kanban', icon: '▦' },
           { href: '/insights', label: 'Insights', icon: '◎' },
+          { href: '/ideation', label: 'Ideation', icon: '◈' },
           { href: '/roadmap', label: 'Roadmap', icon: '◉' },
           { href: '/settings', label: 'Settings', icon: '⚙' },
         ].map(({ href, label, icon }) => (

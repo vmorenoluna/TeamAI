@@ -113,6 +113,18 @@ export function KanbanBoard({ tasks }: { tasks: Task[] }) {
                   className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Reference images <span className="font-normal text-slate-400">(optional)</span>
+                </label>
+                <input
+                  name="references"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="w-full text-sm text-slate-600 dark:text-slate-400 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-slate-100 dark:file:bg-slate-700 file:text-slate-700 dark:file:text-slate-300 hover:file:bg-slate-200"
+                />
+              </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
