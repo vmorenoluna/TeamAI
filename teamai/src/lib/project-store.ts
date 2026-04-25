@@ -80,6 +80,12 @@ export class ProjectStore {
 
     mkdirSync(join(projectPath, '.teamai'), { recursive: true });
 
+    // Scaffold pipeline.json if not present
+    const pipelineDest = join(projectPath, '.teamai', 'pipeline.json');
+    if (!existsSync(pipelineDest)) {
+      cpSync(join(DEFAULTS_DIR, 'pipeline.json'), pipelineDest);
+    }
+
     // Copy teamai-workflow.md into .claude/ if not already there
     const workflowDest = join(projectPath, '.claude', 'teamai-workflow.md');
     if (!existsSync(workflowDest)) {
