@@ -13,9 +13,10 @@ export function useAgentStream(taskId: string): AgentEvent[] {
     const ws = new WebSocket(`ws://${window.location.host}/ws`);
     ws.onmessage = (msg) => {
       try {
-        const data: AgentEvent = JSON.parse(msg.data);
-        if (data.taskId === taskId) {
-          setEvents(prev => [...prev, data]);
+        const data = JSON.parse(msg.data);
+        // Only handle agent event messages (not phase-change or other server events)
+        if (data.taskId === taskId && data.event !== undefined) {
+          setEvents(prev => [...prev, data as AgentEvent]);
         }
       } catch {
         // ignore malformed messages

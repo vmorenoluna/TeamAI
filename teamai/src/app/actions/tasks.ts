@@ -1,7 +1,7 @@
 'use server';
 
 import { TaskStore } from '@/lib/task-store';
-import { Orchestrator } from '@/lib/orchestrator';
+import { getOrchestrator } from '@/lib/orchestrator';
 import { getActiveProjectPath } from './projects';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'crypto';
@@ -10,7 +10,7 @@ async function getStores() {
   const projectPath = await getActiveProjectPath();
   return {
     taskStore: new TaskStore(projectPath),
-    orchestrator: new Orchestrator(projectPath),
+    orchestrator: getOrchestrator(projectPath),
   };
 }
 
@@ -28,7 +28,8 @@ export async function runTask(taskId: string) {
   const { taskStore, orchestrator } = await getStores();
   const task = taskStore.getById(taskId);
   if (!task) throw new Error(`Task ${taskId} not found`);
-  orchestrator.runTask(taskId, task.description);
+  // Fire and forget — pipeline runs asynchronously, phase changes broadcast via WebSocket
+  orchestrator.runTask(taskId, task.description).catch(console.error);
   revalidatePath('/');
 }
 

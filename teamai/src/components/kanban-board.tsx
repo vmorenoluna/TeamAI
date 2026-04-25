@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { createTask } from '@/app/actions/tasks';
+import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskCard } from './task-card';
 import type { Task } from '@/lib/task-store';
 
@@ -29,6 +30,7 @@ export function KanbanBoard({ tasks }: { tasks: Task[] }) {
   const router = useRouter();
   const [showDialog, setShowDialog] = useState(false);
   const [isPending, startTransition] = useTransition();
+  usePhaseSync();
 
   function handleCreate(formData: FormData) {
     startTransition(async () => {

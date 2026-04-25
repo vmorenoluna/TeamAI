@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAgentStream } from '@/hooks/use-agent-stream';
 
 function formatEvent(event: any): string | null {
@@ -16,7 +16,6 @@ function formatEvent(event: any): string | null {
       const parts: string[] = [];
       for (const block of blocks) {
         if (block.type === 'text' && block.text) {
-          // Ensure Windows-style newlines work in xterm
           parts.push(block.text.replace(/\n/g, '\r\n'));
         } else if (block.type === 'tool_use') {
           parts.push(`\x1b[33m▶ ${block.name}\x1b[0m\r\n`);
@@ -45,6 +44,8 @@ function formatEvent(event: any): string | null {
 export function AgentPanel({ taskId }: { taskId: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<{ terminal: any; fitAddon: any } | null>(null);
+  const writtenRef = useRef(0); // tracks how many events have been written
+  const [termReady, setTermReady] = useState(false);
   const events = useAgentStream(taskId);
 
   // Initialise xterm once on mount
@@ -83,6 +84,7 @@ export function AgentPanel({ taskId }: { taskId: string }) {
       terminal.open(container);
       fitAddon.fit();
       termRef.current = { terminal, fitAddon };
+      setTermReady(true); // triggers replay of any buffered events
 
       observer = new ResizeObserver(() => fitAddon.fit());
       observer.observe(container);
@@ -92,17 +94,21 @@ export function AgentPanel({ taskId }: { taskId: string }) {
       observer?.disconnect();
       terminal?.dispose();
       termRef.current = null;
+      writtenRef.current = 0;
+      setTermReady(false);
     };
   }, []);
 
-  // Write each new event to the terminal
+  // Write all unwritten events whenever events grow or terminal becomes ready
   useEffect(() => {
-    if (!termRef.current || events.length === 0) return;
+    if (!termReady || !termRef.current) return;
     const { terminal } = termRef.current;
-    const latest = events[events.length - 1];
-    const text = formatEvent(latest.event);
-    if (text) terminal.write(text);
-  }, [events]);
+    for (let i = writtenRef.current; i < events.length; i++) {
+      const text = formatEvent(events[i].event);
+      if (text) terminal.write(text);
+    }
+    writtenRef.current = events.length;
+  }, [events, termReady]);
 
   return (
     <div className="flex flex-col h-full rounded-lg overflow-hidden border border-slate-700 bg-slate-950">
