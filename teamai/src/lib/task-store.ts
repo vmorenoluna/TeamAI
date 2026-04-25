@@ -45,6 +45,14 @@ export class TaskStore {
     return task;
   }
 
+  update(id: string, fields: Partial<Omit<Task, 'id' | 'createdAt'>>): void {
+    const task = this.getById(id);
+    if (!task) throw new Error(`Task ${id} not found`);
+    const updated = { ...task, ...fields, updatedAt: new Date().toISOString() };
+    const dir = this.getDirById(id);
+    writeFileSync(join(dir, 'task.json'), JSON.stringify(updated, null, 2));
+  }
+
   updatePhase(id: string, phase: string): void {
     const task = this.getById(id);
     if (!task) throw new Error(`Task ${id} not found`);

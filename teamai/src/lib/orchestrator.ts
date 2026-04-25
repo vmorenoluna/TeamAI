@@ -57,6 +57,7 @@ export class Orchestrator {
     };
 
     this.pipelines.set(taskId, pipeline);
+    this.taskStore.update(taskId, { branch }); // persist branch so review panel can read it
     this.advancePhase(pipeline, 'spec');
     await this.executePhase(pipeline);
   }

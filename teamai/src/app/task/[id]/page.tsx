@@ -1,10 +1,11 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { getTask } from '@/app/actions/tasks';
+import { getTask, getTaskArtifacts } from '@/app/actions/tasks';
 import { getActiveProject } from '@/app/actions/projects';
 import { AgentPanel } from '@/components/agent-panel';
 import { RunTaskButton } from '@/components/run-task-button';
 import { PhaseSyncer } from '@/components/phase-syncer';
+import { ReviewPanel } from '@/components/review-panel';
 
 const PHASE_BADGE: Record<string, string> = {
   backlog:           'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
@@ -24,15 +25,16 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
 
   const activeProject = await getActiveProject();
   if (!activeProject) {
-    return (
-      <div className="p-6 text-sm text-slate-500">No active project selected.</div>
-    );
+    return <div className="p-6 text-sm text-slate-500">No active project selected.</div>;
   }
 
   const task = await getTask(id);
   if (!task) notFound();
 
   const badge = PHASE_BADGE[task.phase] ?? PHASE_BADGE.backlog;
+  const isAwaiting = task.phase === 'awaiting-review';
+
+  const artifacts = isAwaiting ? await getTaskArtifacts(id) : null;
 
   return (
     <div className="flex flex-col h-full">
@@ -69,10 +71,24 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
         </p>
       </div>
 
-      {/* Phase syncer — refreshes page when orchestrator advances the pipeline */}
       <PhaseSyncer />
 
-      {/* Agent panel */}
+      {/* Review panel (awaiting-review phase) */}
+      {isAwaiting && artifacts && (
+        <div className="shrink-0 px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 overflow-y-auto max-h-[50vh]">
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">
+            Human Review
+          </h2>
+          <ReviewPanel
+            taskId={task.id}
+            spec={artifacts.spec}
+            qaReport={artifacts.qaReport}
+            diff={artifacts.diff}
+          />
+        </div>
+      )}
+
+      {/* Agent output */}
       <div className="flex-1 min-h-0 p-4">
         <AgentPanel taskId={task.id} />
       </div>
