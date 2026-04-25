@@ -86,6 +86,12 @@ export class ProjectStore {
       cpSync(join(DEFAULTS_DIR, 'pipeline.json'), pipelineDest);
     }
 
+    // Scaffold providers.json if not present
+    const providersDest = join(projectPath, '.teamai', 'providers.json');
+    if (!existsSync(providersDest)) {
+      cpSync(join(DEFAULTS_DIR, 'providers.json'), providersDest);
+    }
+
     // Copy teamai-workflow.md into .claude/ if not already there
     const workflowDest = join(projectPath, '.claude', 'teamai-workflow.md');
     if (!existsSync(workflowDest)) {
