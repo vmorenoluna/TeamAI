@@ -16,15 +16,36 @@ app.prepare().then(() => {
   // noServer: true so we handle upgrades manually and don't block Next.js HMR
   const wss = new WebSocketServer({ noServer: true });
   wss.on('connection', (ws) => {
-    const handler = ({ sessionId, event }: any) => {
+    // Agent event streaming
+    const agentHandler = ({ sessionId, event }: any) => {
       const taskId = processManager.getSession(sessionId)?.taskId;
       ws.send(JSON.stringify({ sessionId, taskId, event }));
     };
-    processManager.on('event', handler);
-    processManager.on('error', handler);
+    processManager.on('event', agentHandler);
+    processManager.on('error', agentHandler);
+
+    // PTY terminal data streaming
+    const terminalHandler = ({ sessionId, data }: any) => {
+      ws.send(JSON.stringify({ type: 'terminal', sessionId, data }));
+    };
+    processManager.on('terminal-data', terminalHandler);
+
+    // Messages from browser → PTY input / resize
+    ws.on('message', (msg: Buffer) => {
+      try {
+        const parsed = JSON.parse(msg.toString());
+        if (parsed.type === 'terminal-input') {
+          processManager.writeToTerminal(parsed.sessionId, parsed.data);
+        } else if (parsed.type === 'terminal-resize') {
+          processManager.resizeTerminal(parsed.sessionId, parsed.cols, parsed.rows);
+        }
+      } catch { /* ignore malformed */ }
+    });
+
     ws.on('close', () => {
-      processManager.off('event', handler);
-      processManager.off('error', handler);
+      processManager.off('event', agentHandler);
+      processManager.off('error', agentHandler);
+      processManager.off('terminal-data', terminalHandler);
     });
   });
 
