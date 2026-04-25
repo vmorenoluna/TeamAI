@@ -1,7 +1,7 @@
 import { createServer } from 'http';
 import { parse } from 'url';
 import next from 'next';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
 import { processManager } from './src/lib/process-manager';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
@@ -25,6 +25,14 @@ app.prepare().then(() => {
       processManager.off('event', handler);
       processManager.off('error', handler);
     });
+  });
+
+  // Broadcast phase-change events from the Orchestrator to all connected clients
+  processManager.on('phase-change', (data: any) => {
+    const msg = JSON.stringify({ type: 'phase-change', taskId: data.taskId, phase: data.phase });
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) client.send(msg);
+    }
   });
 
   server.on('upgrade', (request, socket, head) => {

@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { getTask } from '@/app/actions/tasks';
 import { getActiveProject } from '@/app/actions/projects';
 import { AgentPanel } from '@/components/agent-panel';
+import { RunTaskButton } from '@/components/run-task-button';
+import { PhaseSyncer } from '@/components/phase-syncer';
 
 const PHASE_BADGE: Record<string, string> = {
   backlog:           'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
@@ -52,9 +54,12 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
               </p>
             )}
           </div>
-          <span className={`shrink-0 text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded ${badge}`}>
-            {task.phase}
-          </span>
+          <div className="flex items-center gap-3 shrink-0">
+            {task.phase === 'backlog' && <RunTaskButton taskId={task.id} />}
+            <span className={`text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded ${badge}`}>
+              {task.phase}
+            </span>
+          </div>
         </div>
         <p className="mt-2 text-xs text-slate-400">
           Created {new Date(task.createdAt).toLocaleString()}
@@ -63,6 +68,9 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
           )}
         </p>
       </div>
+
+      {/* Phase syncer — refreshes page when orchestrator advances the pipeline */}
+      <PhaseSyncer />
 
       {/* Agent panel */}
       <div className="flex-1 min-h-0 p-4">

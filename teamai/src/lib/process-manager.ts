@@ -128,4 +128,12 @@ export class ProcessManager extends EventEmitter {
   }
 }
 
-export const processManager = new ProcessManager();
+// Store on global so server.ts and Next.js server actions share the same instance
+// across module contexts (Next.js loads server actions in a separate module graph).
+declare global {
+  // eslint-disable-next-line no-var
+  var __processManager: ProcessManager | undefined;
+}
+
+export const processManager: ProcessManager =
+  global.__processManager ?? (global.__processManager = new ProcessManager());
