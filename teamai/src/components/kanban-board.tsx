@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation';
 import { createTask } from '@/app/actions/tasks';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskCard } from './task-card';
+import { TaskPanel } from './task-panel';
 import type { Task } from '@/lib/task-store';
+import type { InterruptedTask } from '@/lib/recovery';
 
 const COLUMNS = [
   { phase: 'backlog', label: 'Backlog' },
@@ -26,11 +28,19 @@ function normalizePhase(phase: string): string {
   return phase;
 }
 
-export function KanbanBoard({ tasks }: { tasks: Task[] }) {
+interface Props {
+  tasks: Task[];
+  interrupted: InterruptedTask[];
+}
+
+export function KanbanBoard({ tasks, interrupted }: Props) {
   const router = useRouter();
   const [showDialog, setShowDialog] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   usePhaseSync();
+
+  const interruptedMap = new Map(interrupted.map(t => [t.taskId, t]));
 
   function handleCreate(formData: FormData) {
     startTransition(async () => {
@@ -41,7 +51,7 @@ export function KanbanBoard({ tasks }: { tasks: Task[] }) {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950">
       <div className="flex items-center justify-between px-6 py-4 border-b bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 shrink-0">
         <h1 className="text-base font-semibold text-slate-900 dark:text-white">Board</h1>
         <button
@@ -52,32 +62,53 @@ export function KanbanBoard({ tasks }: { tasks: Task[] }) {
         </button>
       </div>
 
-      <div className="flex-1 overflow-x-auto">
-        <div className="flex gap-3 p-4 h-full" style={{ minWidth: 'max-content' }}>
-          {COLUMNS.map(col => {
-            const colTasks = tasks.filter(t => normalizePhase(t.phase) === col.phase);
-            return (
-              <div
-                key={col.phase}
-                className="flex flex-col w-60 shrink-0 bg-slate-100 dark:bg-slate-800 rounded-lg overflow-hidden"
-              >
-                <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-200 dark:border-slate-700">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                    {col.label}
-                  </span>
-                  <span className="text-xs font-medium text-slate-400 bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
-                    {colTasks.length}
-                  </span>
-                </div>
-                <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                  {colTasks.map(task => (
-                    <TaskCard key={task.id} task={task} />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+      {/* Split view: kanban left, task panel right */}
+      <div className="flex flex-1 min-h-0">
+        {/* Board columns */}
+        <div className={`flex flex-col min-h-0 min-w-0 transition-all duration-200 ${selectedTaskId ? 'w-[55%]' : 'flex-1'}`}>
+          <div className="flex-1 overflow-x-auto">
+            <div className="flex gap-3 p-4 h-full" style={{ minWidth: 'max-content' }}>
+              {COLUMNS.map(col => {
+                const colTasks = tasks.filter(t => normalizePhase(t.phase) === col.phase);
+                return (
+                  <div
+                    key={col.phase}
+                    className="flex flex-col w-60 shrink-0 bg-slate-100 dark:bg-slate-800 rounded-lg overflow-hidden"
+                  >
+                    <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-200 dark:border-slate-700">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                        {col.label}
+                      </span>
+                      <span className="text-xs font-medium text-slate-400 bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
+                        {colTasks.length}
+                      </span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                      {colTasks.map(task => (
+                        <TaskCard
+                          key={task.id}
+                          task={task}
+                          interrupted={interruptedMap.get(task.id)}
+                          onSelect={setSelectedTaskId}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
+
+        {/* Task detail panel */}
+        {selectedTaskId && (
+          <div className="w-[45%] shrink-0 min-h-0">
+            <TaskPanel
+              taskId={selectedTaskId}
+              onClose={() => setSelectedTaskId(null)}
+            />
+          </div>
+        )}
       </div>
 
       {showDialog && (

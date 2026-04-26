@@ -2,7 +2,6 @@ import { getTasks } from './actions/tasks';
 import { getActiveProject } from './actions/projects';
 import { getInterruptedTasks } from './actions/recovery';
 import { KanbanBoard } from '@/components/kanban-board';
-import { RecoveryBanner } from '@/components/recovery-banner';
 import type { Task } from '@/lib/task-store';
 
 export default async function Home() {
@@ -25,10 +24,5 @@ export default async function Home() {
 
   const interrupted = await getInterruptedTasks();
 
-  return (
-    <>
-      <RecoveryBanner tasks={interrupted} />
-      <KanbanBoard tasks={tasks} />
-    </>
-  );
+  return <KanbanBoard tasks={tasks} interrupted={interrupted} />;
 }
