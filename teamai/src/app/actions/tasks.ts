@@ -93,3 +93,53 @@ export async function getTaskArtifacts(taskId: string) {
 
   return { spec, qaReport, diff };
 }
+
+export async function getTaskFull(taskId: string) {
+  const { taskStore } = await getStores();
+  const projectPath = await getActiveProjectPath();
+
+  const task = taskStore.getById(taskId);
+  if (!task) throw new Error(`Task ${taskId} not found`);
+
+  const allTasks = taskStore.getAll();
+  const dependencies = allTasks.filter(t => task.dependencies?.includes(t.id));
+  const dependents = allTasks.filter(t => t.dependencies?.includes(taskId));
+
+  const dir = taskStore.getDirById(taskId);
+
+  const specPath = join(dir, 'spec.md');
+  const spec = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
+
+  const planPath = join(dir, 'plan.json');
+  let plan: any = null;
+  if (existsSync(planPath)) {
+    try { plan = JSON.parse(readFileSync(planPath, 'utf-8')); } catch { /* skip */ }
+  }
+
+  const qaPath = join(dir, 'qa_report.json');
+  let qaReport: any = null;
+  if (existsSync(qaPath)) {
+    try { qaReport = JSON.parse(readFileSync(qaPath, 'utf-8')); } catch { /* skip */ }
+  }
+
+  let diff: string | null = null;
+  if (task.branch) {
+    try {
+      diff = execSync(`git diff main...${task.branch}`, { cwd: projectPath, encoding: 'utf-8' });
+    } catch { /* no diff yet */ }
+  }
+
+  return { task, allTasks, dependencies, dependents, spec, plan, qaReport, diff };
+}
+
+export async function setTaskRoleOverride(taskId: string, role: string | null): Promise<void> {
+  const { taskStore } = await getStores();
+  taskStore.update(taskId, { roleOverride: role ?? undefined });
+  revalidatePath(`/task/${taskId}`);
+}
+
+export async function setTaskDependencies(taskId: string, depIds: string[]): Promise<void> {
+  const { taskStore } = await getStores();
+  taskStore.update(taskId, { dependencies: depIds });
+  revalidatePath(`/task/${taskId}`);
+}

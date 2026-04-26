@@ -7,6 +7,8 @@ export interface Task {
   description: string;
   phase: string;
   branch?: string;
+  dependencies?: string[];  // IDs of tasks this task depends on
+  roleOverride?: string;    // role filename (e.g. 'coder.md') for implement phase
   createdAt: string;
   updatedAt: string;
 }
