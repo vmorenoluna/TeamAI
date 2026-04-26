@@ -7,8 +7,9 @@ export interface Task {
   description: string;
   phase: string;
   branch?: string;
-  dependencies?: string[];  // IDs of tasks this task depends on
-  roleOverride?: string;    // role filename (e.g. 'coder.md') for implement phase
+  dependencies?: string[];     // IDs of tasks this task depends on
+  roleOverride?: string;       // role filename (e.g. 'coder.md') for implement phase
+  rateLimitedUntil?: string;   // ISO timestamp — set when pipeline is paused by API rate limit
   createdAt: string;
   updatedAt: string;
 }

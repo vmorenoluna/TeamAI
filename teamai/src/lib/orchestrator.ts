@@ -5,6 +5,12 @@ import { processManager, type AgentSession } from './process-manager';
 import { TaskStore } from './task-store';
 import { resolveProvider, providerToSessionOpts } from './providers';
 
+class RateLimitError extends Error {
+  constructor(public resetsAt: number) {
+    super(`Rate limited until ${new Date(resetsAt * 1000).toISOString()}`);
+  }
+}
+
 type PipelinePhase =
   | 'spec'
   | 'plan'
@@ -71,9 +77,14 @@ export class Orchestrator {
     pipeline.phase = firstPhase;
 
     this.pipelines.set(taskId, pipeline);
-    this.taskStore.update(taskId, { branch }); // persist branch so review panel can read it
-    this.advancePhase(pipeline, 'spec');
-    await this.executePhase(pipeline);
+    this.taskStore.update(taskId, { branch });
+    this.advancePhase(pipeline, firstPhase);
+    try {
+      await this.executePhase(pipeline);
+    } catch (e) {
+      if (e instanceof RateLimitError) this.handleRateLimit(pipeline, e.resetsAt);
+      else throw e;
+    }
   }
 
   async approveTask(taskId: string, strategy: MergeStrategy): Promise<void> {
@@ -246,12 +257,27 @@ export class Orchestrator {
 
   private waitForCompletion(sessionId: string): Promise<void> {
     return new Promise((resolve, reject) => {
+      let rateLimitResetsAt: number | null = null;
+
       const onEvent = ({ sessionId: sid, event }: any) => {
         if (sid !== sessionId) return;
+
+        // Capture rate-limit reset time if the limit is hit
+        if (event.type === 'rate_limit_event' && event.rate_limit_info) {
+          const info = event.rate_limit_info;
+          if (info.status !== 'allowed' && info.resetsAt) {
+            rateLimitResetsAt = info.resetsAt as number;
+          }
+        }
+
         if (event.type === 'result') {
           processManager.off('event', onEvent);
           processManager.off('exit', onExit);
-          resolve();
+          if (event.is_error && rateLimitResetsAt) {
+            reject(new RateLimitError(rateLimitResetsAt));
+          } else {
+            resolve();
+          }
         }
       };
       const onExit = ({ sessionId: sid, code }: any) => {
@@ -259,11 +285,41 @@ export class Orchestrator {
         processManager.off('event', onEvent);
         processManager.off('exit', onExit);
         if (code === 0 || code === null) resolve();
+        else if (rateLimitResetsAt) reject(new RateLimitError(rateLimitResetsAt));
         else reject(new Error(`Session exited with code ${code}`));
       };
       processManager.on('event', onEvent);
       processManager.on('exit', onExit);
     });
+  }
+
+  private handleRateLimit(pipeline: TaskPipeline, resetsAt: number): void {
+    const resetsAtMs = resetsAt * 1000;
+    const waitMs = Math.max(resetsAtMs - Date.now(), 0);
+    const resetsAtISO = new Date(resetsAtMs).toISOString();
+
+    this.taskStore.update(pipeline.taskId, { rateLimitedUntil: resetsAtISO });
+
+    // Broadcast so the UI can show the countdown
+    processManager.emit('phase-change', {
+      taskId: pipeline.taskId,
+      phase: pipeline.phase,
+      rateLimitedUntil: resetsAtISO,
+    });
+
+    const mins = Math.ceil(waitMs / 60000);
+    console.log(`[rate-limit] Task ${pipeline.taskId} paused for ~${mins}min. Resuming at ${resetsAtISO}`);
+
+    setTimeout(async () => {
+      console.log(`[rate-limit] Resuming task ${pipeline.taskId}`);
+      this.taskStore.update(pipeline.taskId, { rateLimitedUntil: undefined });
+      try {
+        await this.executePhase(pipeline);
+      } catch (e) {
+        if (e instanceof RateLimitError) this.handleRateLimit(pipeline, e.resetsAt);
+        else console.error(`[orchestrator] Task ${pipeline.taskId} failed after rate-limit retry:`, e);
+      }
+    }, waitMs);
   }
 
   private slugify(text: string): string {
