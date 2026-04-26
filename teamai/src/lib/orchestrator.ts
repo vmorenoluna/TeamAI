@@ -269,7 +269,7 @@ export class Orchestrator {
   private sessionOpts(role: AgentSession['role'], cwd: string, taskId: string) {
     const providerCfg = resolveProvider(this.projectRoot, role);
     const providerOpts = providerToSessionOpts(providerCfg);
-    return { taskId, role, cwd, ...providerOpts };
+    return { taskId, role, cwd, permissionMode: 'bypassPermissions', ...providerOpts };
   }
 }
 
