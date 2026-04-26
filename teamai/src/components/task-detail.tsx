@@ -251,6 +251,18 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
           </div>
         </div>
 
+        {/* Rate-limit banner */}
+        {task.rateLimitedUntil && (
+          <div className="mt-2 mb-1 flex items-center gap-2 text-xs bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-700 text-amber-800 dark:text-amber-300 rounded-md px-3 py-1.5">
+            <span>⏳</span>
+            <span>
+              Pipeline paused — API token limit hit. Auto-resuming at{' '}
+              <strong>{new Date(task.rateLimitedUntil).toLocaleTimeString()}</strong>
+              {' '}({new Date(task.rateLimitedUntil).toLocaleDateString()}).
+            </span>
+          </div>
+        )}
+
         {/* Meta row: timestamps + role override */}
         <div className="flex items-center gap-4 flex-wrap mb-3">
           <p className="text-xs text-slate-400">

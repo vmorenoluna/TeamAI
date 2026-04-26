@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { ProjectSelector } from './project-selector';
+import { DarkModeToggle } from './dark-mode-toggle';
 import type { Project } from '@/lib/project-store';
 
 interface Props {
@@ -38,6 +39,7 @@ export function Sidebar({ projects, activeProjectPath }: Props) {
 
       {/* Nav links */}
       <nav className="border-t border-slate-700 py-2">
+        <DarkModeToggle collapsed={collapsed} />
         {[
           { href: '/', label: 'Kanban', icon: '▦' },
           { href: '/insights', label: 'Insights', icon: '◎' },
