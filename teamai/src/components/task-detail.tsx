@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AgentPanel } from './agent-panel';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
 import { RunTaskButton } from './run-task-button';
-import { setTaskRoleOverride, setTaskDependencies } from '@/app/actions/tasks';
+import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 import type { RoleDefinition } from '@/app/actions/roles';
 
@@ -50,6 +50,84 @@ function TaskPill({ task }: { task: Task }) {
         {task.phase}
       </span>
     </Link>
+  );
+}
+
+function DepPicker({
+  label,
+  candidates,
+  selectedIds,
+  onToggle,
+}: {
+  label: string;
+  candidates: Task[];
+  selectedIds: string[];
+  onToggle: (id: string, checked: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, []);
+
+  const filtered = candidates.filter(t =>
+    t.title.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => { setOpen(o => !o); setSearch(''); }}
+        className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+      >
+        + {label}
+      </button>
+
+      {open && (
+        <div className="absolute z-20 top-full left-0 mt-1.5 w-72 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-xl overflow-hidden">
+          <div className="p-2 border-b border-slate-100 dark:border-slate-700">
+            <input
+              autoFocus
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search tasks…"
+              className="w-full px-2.5 py-1.5 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-slate-400"
+            />
+          </div>
+          <ul className="max-h-64 overflow-y-auto py-1">
+            {filtered.length === 0 && (
+              <li className="px-3 py-2 text-xs text-slate-400">No tasks found.</li>
+            )}
+            {filtered.map(t => {
+              const checked = selectedIds.includes(t.id);
+              const badge = PHASE_BADGE[t.phase] ?? PHASE_BADGE.backlog;
+              return (
+                <li key={t.id}>
+                  <label className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={e => onToggle(t.id, e.target.checked)}
+                      className="rounded border-slate-300 dark:border-slate-600"
+                    />
+                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate">{t.title}</span>
+                    <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${badge}`}>
+                      {t.phase}
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -106,8 +184,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [isPending, startTransition] = useTransition();
-  const [showDepPicker, setShowDepPicker] = useState(false);
-  const [selectedDeps, setSelectedDeps] = useState<string[]>(task.dependencies ?? []);
 
   const badge = PHASE_BADGE[task.phase] ?? PHASE_BADGE.backlog;
   const isAwaiting = task.phase === 'awaiting-review';
@@ -127,19 +203,25 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
     });
   }
 
-  function toggleDep(id: string) {
-    setSelectedDeps(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  function handleDepToggle(depId: string, checked: boolean) {
+    startTransition(async () => {
+      if (checked) await addDependency(task.id, depId);
+      else await removeDependency(task.id, depId);
+      router.refresh();
+    });
   }
 
-  function saveDeps() {
+  function handleBlockToggle(blockedId: string, checked: boolean) {
     startTransition(async () => {
-      await setTaskDependencies(task.id, selectedDeps);
-      setShowDepPicker(false);
+      if (checked) await addBlock(task.id, blockedId);
+      else await removeBlock(task.id, blockedId);
       router.refresh();
     });
   }
 
   const otherTasks = allTasks.filter(t => t.id !== task.id);
+  const dependencyIds = dependencies.map(t => t.id);
+  const dependentIds = dependents.map(t => t.id);
 
   return (
     <div className="flex flex-col h-full">
@@ -233,70 +315,72 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
               />
             )}
 
-            {/* Dependencies */}
+            {/* Depends on */}
             <section>
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                  Dependencies ({dependencies.length})
-                </h3>
-                <button
-                  onClick={() => setShowDepPicker(p => !p)}
-                  className="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                >
-                  {showDepPicker ? 'Cancel' : 'Edit'}
-                </button>
+              <div className="flex items-center gap-2 mb-3">
+                <DepPicker
+                  label="Depends on"
+                  candidates={otherTasks}
+                  selectedIds={dependencyIds}
+                  onToggle={handleDepToggle}
+                />
+                <DepPicker
+                  label="Blocks"
+                  candidates={otherTasks}
+                  selectedIds={dependentIds}
+                  onToggle={handleBlockToggle}
+                />
               </div>
 
-              {showDepPicker ? (
-                <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-3 space-y-2 bg-white dark:bg-slate-900">
-                  {otherTasks.length === 0 && (
-                    <p className="text-xs text-slate-400">No other tasks yet.</p>
-                  )}
-                  {otherTasks.map(t => (
-                    <label key={t.id} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedDeps.includes(t.id)}
-                        onChange={() => toggleDep(t.id)}
-                        className="rounded border-slate-300"
-                      />
-                      <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{t.title}</span>
-                      <span className={`shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${PHASE_BADGE[t.phase] ?? PHASE_BADGE.backlog}`}>
-                        {t.phase}
-                      </span>
-                    </label>
-                  ))}
-                  <button
-                    onClick={saveDeps}
-                    disabled={isPending}
-                    className="mt-2 px-3 py-1 text-xs font-medium bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded disabled:opacity-40"
-                  >
-                    Save
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {dependencies.length === 0 ? (
-                    <p className="text-xs text-slate-400">None</p>
-                  ) : (
-                    dependencies.map(t => <TaskPill key={t.id} task={t} />)
-                  )}
+              {dependencies.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    Depends on
+                  </p>
+                  <div className="space-y-1.5">
+                    {dependencies.map(t => (
+                      <div key={t.id} className="flex items-center gap-2 group">
+                        <TaskPill task={t} />
+                        <button
+                          onClick={() => handleDepToggle(t.id, false)}
+                          disabled={isPending}
+                          className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-400 text-sm leading-none transition-all disabled:opacity-30"
+                          title="Remove"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
-            </section>
 
-            {/* Dependents */}
-            <section>
-              <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                Required by ({dependents.length})
-              </h3>
-              <div className="space-y-1.5">
-                {dependents.length === 0 ? (
-                  <p className="text-xs text-slate-400">Nothing depends on this task.</p>
-                ) : (
-                  dependents.map(t => <TaskPill key={t.id} task={t} />)
-                )}
-              </div>
+              {dependents.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    Blocks
+                  </p>
+                  <div className="space-y-1.5">
+                    {dependents.map(t => (
+                      <div key={t.id} className="flex items-center gap-2 group">
+                        <TaskPill task={t} />
+                        <button
+                          onClick={() => handleBlockToggle(t.id, false)}
+                          disabled={isPending}
+                          className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-400 text-sm leading-none transition-all disabled:opacity-30"
+                          title="Remove"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {dependencies.length === 0 && dependents.length === 0 && (
+                <p className="text-xs text-slate-400">No dependencies set.</p>
+              )}
             </section>
           </div>
         )}

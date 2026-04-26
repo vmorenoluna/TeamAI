@@ -138,8 +138,45 @@ export async function setTaskRoleOverride(taskId: string, role: string | null): 
   revalidatePath(`/task/${taskId}`);
 }
 
-export async function setTaskDependencies(taskId: string, depIds: string[]): Promise<void> {
+export async function addDependency(taskId: string, depId: string): Promise<void> {
   const { taskStore } = await getStores();
-  taskStore.update(taskId, { dependencies: depIds });
+  const task = taskStore.getById(taskId);
+  if (!task) return;
+  const deps = task.dependencies ?? [];
+  if (!deps.includes(depId)) taskStore.update(taskId, { dependencies: [...deps, depId] });
   revalidatePath(`/task/${taskId}`);
+  revalidatePath(`/task/${depId}`);
+  revalidatePath('/');
+}
+
+export async function removeDependency(taskId: string, depId: string): Promise<void> {
+  const { taskStore } = await getStores();
+  const task = taskStore.getById(taskId);
+  if (!task) return;
+  taskStore.update(taskId, { dependencies: (task.dependencies ?? []).filter(id => id !== depId) });
+  revalidatePath(`/task/${taskId}`);
+  revalidatePath(`/task/${depId}`);
+  revalidatePath('/');
+}
+
+// "This task blocks blockedTaskId" — add thisTaskId to the other task's dependencies
+export async function addBlock(thisTaskId: string, blockedTaskId: string): Promise<void> {
+  const { taskStore } = await getStores();
+  const blocked = taskStore.getById(blockedTaskId);
+  if (!blocked) return;
+  const deps = blocked.dependencies ?? [];
+  if (!deps.includes(thisTaskId)) taskStore.update(blockedTaskId, { dependencies: [...deps, thisTaskId] });
+  revalidatePath(`/task/${thisTaskId}`);
+  revalidatePath(`/task/${blockedTaskId}`);
+  revalidatePath('/');
+}
+
+export async function removeBlock(thisTaskId: string, blockedTaskId: string): Promise<void> {
+  const { taskStore } = await getStores();
+  const blocked = taskStore.getById(blockedTaskId);
+  if (!blocked) return;
+  taskStore.update(blockedTaskId, { dependencies: (blocked.dependencies ?? []).filter(id => id !== thisTaskId) });
+  revalidatePath(`/task/${thisTaskId}`);
+  revalidatePath(`/task/${blockedTaskId}`);
+  revalidatePath('/');
 }
