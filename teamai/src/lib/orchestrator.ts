@@ -142,6 +142,10 @@ export class Orchestrator {
     const planPath = path.join(pipeline.specPath, 'plan.json');
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
 
+    // Honour per-task role override set by the user in the UI
+    const task = this.taskStore.getById(pipeline.taskId);
+    const coderRole = (task?.roleOverride ?? 'coder.md').replace('.md', '') as AgentSession['role'];
+
     const groups = new Map<string, any[]>();
     for (const subtask of plan.subtasks) {
       const group = subtask.parallel_group || String(subtask.id);
@@ -152,7 +156,7 @@ export class Orchestrator {
     for (const [, subtasks] of groups) {
       await Promise.allSettled(
         subtasks.map(async (subtask: any) => {
-          const sessionId = processManager.createSession(this.sessionOpts('coder', pipeline.worktreePath, pipeline.taskId));
+          const sessionId = processManager.createSession(this.sessionOpts(coderRole, pipeline.worktreePath, pipeline.taskId));
           const prompt =
             `/implement Subtask ${subtask.id}: ${subtask.title}\n\n` +
             `${subtask.description}\n\n` +
