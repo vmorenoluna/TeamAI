@@ -83,8 +83,12 @@ export class Orchestrator {
     try {
       await this.executePhase(pipeline);
     } catch (e) {
-      if (e instanceof RateLimitError) this.handleRateLimit(pipeline, e.resetsAt);
-      else throw e;
+      if (e instanceof RateLimitError) {
+        this.handleRateLimit(pipeline, e.resetsAt);
+      } else {
+        console.error(`[orchestrator] Task ${taskId} failed:`, e);
+        this.advancePhase(pipeline, 'failed');
+      }
     }
   }
 

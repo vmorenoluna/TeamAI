@@ -20,11 +20,6 @@ export interface ContainerInfo {
   remoteWorkspaceFolder: string;
 }
 
-// Docker on Windows accepts forward-slash paths
-function toDockerPath(p: string): string {
-  return process.platform === 'win32' ? p.replace(/\\/g, '/') : p;
-}
-
 function devcontainerBin(): string {
   const ext = process.platform === 'win32' ? '.cmd' : '';
   const local = path.join(process.cwd(), 'node_modules', '.bin', `devcontainer${ext}`);
@@ -82,24 +77,11 @@ export class ContainerManager extends EventEmitter {
   }
 
   private async _doStart(record: ContainerRecord): Promise<void> {
-    const home = os.homedir();
-    const mounts: string[] = [];
-
-    for (const [src, dst, extra] of [
-      [path.join(home, '.claude'),    '/root/.claude',    ''],
-      [path.join(home, '.gitconfig'), '/root/.gitconfig', ''],
-      [path.join(home, '.ssh'),       '/root/.ssh',       ',readonly'],
-    ] as [string, string, string][]) {
-      if (existsSync(src)) {
-        mounts.push(`type=bind,source=${toDockerPath(src)},target=${dst}${extra}`);
-      }
-    }
-
     const args = [
       'up',
       '--workspace-folder', record.projectRoot,
-      '--output-format', 'json',
-      ...mounts.flatMap(m => ['--mount', m]),
+      '--log-format', 'json',
+      '--skip-post-create', // postCreateCommand runs separately; don't fail startup on it
     ];
 
     try {
@@ -109,6 +91,9 @@ export class ContainerManager extends EventEmitter {
       record.state = 'running';
       record.startPromise = null;
       this._emit(record, 'running');
+      console.log(`[container] Started — id=${containerId} workspace=${remoteWorkspaceFolder}`);
+      // Copy host credentials into the container after startup
+      await this._copyCredentials(containerId);
       this._watchEvents(record);
     } catch (err) {
       record.state = 'stopped';
@@ -117,6 +102,25 @@ export class ContainerManager extends EventEmitter {
       record.startPromise = null;
       this._emit(record, 'stopped');
       throw err;
+    }
+  }
+
+  private async _copyCredentials(containerId: string): Promise<void> {
+    const home = os.homedir();
+    const copies: [string, string][] = [
+      [path.join(home, '.claude'),    '/root/.claude'],
+      [path.join(home, '.gitconfig'), '/root/.gitconfig'],
+      [path.join(home, '.ssh'),       '/root/.ssh'],
+    ];
+    for (const [src, dst] of copies) {
+      if (!existsSync(src)) continue;
+      await new Promise<void>(resolve => {
+        // docker cp src/. dst copies directory contents; for files use src directly
+        const srcArg = src.endsWith(path.sep) ? src : src;
+        const proc = spawn('docker', ['cp', `${srcArg}/.`, `${containerId}:${dst}`]);
+        proc.on('exit', () => resolve()); // best-effort; ignore errors
+        proc.on('error', () => resolve());
+      });
     }
   }
 
@@ -130,17 +134,15 @@ export class ContainerManager extends EventEmitter {
       proc.on('error', err => reject(new Error(`devcontainer not found: ${err.message}`)));
       proc.on('exit', code => {
         if (code !== 0) return reject(new Error(`devcontainer up failed (exit ${code}):\n${stderr}`));
-        const jsonLine = stdout.trim().split('\n').filter(l => l.trimStart().startsWith('{')).pop();
-        if (!jsonLine) return reject(new Error(`No JSON in devcontainer output:\n${stdout}`));
-        try {
-          const result = JSON.parse(jsonLine);
-          if (result.outcome !== 'success') {
-            return reject(new Error(`devcontainer up outcome: ${result.outcome}\n${stderr}`));
-          }
-          resolve({ containerId: result.containerId, remoteWorkspaceFolder: result.remoteWorkspaceFolder });
-        } catch {
-          reject(new Error(`Failed to parse devcontainer output:\n${stdout}`));
+        // With --log-format json each line is a JSON object; the result line contains "outcome"
+        const resultLine = stdout.trim().split('\n')
+          .map(l => { try { return JSON.parse(l); } catch { return null; } })
+          .find(o => o && 'outcome' in o);
+        if (!resultLine) return reject(new Error(`No result JSON in devcontainer output:\n${stdout}`));
+        if (resultLine.outcome !== 'success') {
+          return reject(new Error(`devcontainer up outcome: ${resultLine.outcome}\n${stderr}`));
         }
+        resolve({ containerId: resultLine.containerId, remoteWorkspaceFolder: resultLine.remoteWorkspaceFolder });
       });
     });
   }
@@ -150,7 +152,7 @@ export class ContainerManager extends EventEmitter {
       'events',
       '--filter', `container=${record.containerId}`,
       '--filter', 'event=die',
-      '--format', '{{.Status}}',
+      '--format', '{{.Action}}',
     ]);
     record.eventWatcher = watcher;
     watcher.stdout?.on('data', () => this._onContainerDied(record));
