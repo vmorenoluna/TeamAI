@@ -62,7 +62,7 @@ The app has a two-column shell that fills the entire viewport:
 | `/ideation` | Ideation | AI brainstorming for new tasks |
 | `/terminals` | Terminals | Interactive PTY terminals per task |
 | `/roadmap` | Roadmap | Pipeline roadmap view |
-| `/settings` | Settings | Project configuration |
+| `/settings` | Settings | Project configuration: container isolation, pipeline phases, providers, agent roles |
 
 ---
 
@@ -238,7 +238,49 @@ Shown when Claude API rate limit was hit; app auto-retries at the displayed time
 
 ---
 
-## 6. User Journeys
+## 6. Settings Page (`/settings`)
+
+Four sections, rendered top-to-bottom:
+
+### Container Isolation
+```
+┌──────────────────────────────────────────────────────────┐
+│  Run agents in devcontainer                    [ ○──]    │
+│  Requires .devcontainer/devcontainer.json.               │
+│  All tasks share one long-lived container;               │
+│  worktrees go to .worktrees/.                            │
+├──────────────────────────────────────────────────────────┤
+│  Container status:  [STOPPED]                            │  ← only shown when enabled
+└──────────────────────────────────────────────────────────┘
+```
+- **Toggle**: enables/disables container mode for all pipeline agents on this project
+- **Status badge**: appears below the toggle row when enabled; updates live via WebSocket without page reload
+  - `STOPPED` (gray) — no container running yet
+  - `STARTING…` (blue) — `devcontainer up` in progress (first task triggered it)
+  - `RUNNING` (green) — container is up, agents will use `docker exec`
+  - `RESTARTING…` (amber) — container died mid-task, one restart attempt underway
+- Requires the project to have a `.devcontainer/devcontainer.json`
+- Container mounts host `~/.claude`, `~/.gitconfig`, `~/.ssh` (read-only) automatically
+
+### Pipeline Configuration
+- Checkboxes for active phases: Spec, Plan, Implement, QA Review, Merge
+- Max QA attempts spinner (default 3)
+- Parallel subtasks checkbox
+- "Save Pipeline Config" button
+
+### Providers
+- Default model + backend (anthropic / bedrock / vertex / ollama) for all roles
+- Per-role overrides: Planner, Coder, QA Reviewer, QA Fixer, Merger
+- "Save Provider Config" button
+
+### Agent Roles
+- Expandable accordion per role (analyst, coder, merger, planner, qa-fixer, qa-reviewer)
+- Edit the system prompt / persona for each agent
+- Changes take effect on the next pipeline run
+
+---
+
+## 7. User Journeys
 
 ### Journey 1 — First-time Setup
 
@@ -368,6 +410,25 @@ Shown when Claude API rate limit was hit; app auto-retries at the displayed time
 
 ---
 
+### Journey 12 — Enabling Container Isolation
+
+1. Ensure the project has a `.devcontainer/devcontainer.json`
+2. Navigate to **Settings** (`⚙` in sidebar)
+3. At the top, find the **Container Isolation** section
+4. Click the toggle next to "Run agents in devcontainer"
+5. Toggle flips on; "Container status: **STOPPED**" badge appears below
+6. Create or start a new task — the status badge transitions: `STOPPED → STARTING… → RUNNING`
+7. While `STARTING…`, the app is waiting for `devcontainer up` to finish building the image
+8. Once `RUNNING`, all pipeline agents for this project run inside the container
+9. To disable: click the toggle again — status badge disappears, future sessions run directly
+
+**If container dies mid-task:**
+- Affected task card moves to **Failed**
+- Status badge briefly shows `RESTARTING…` then returns to `RUNNING` (one automatic restart)
+- Resume the failed task manually via its ▶ play button
+
+---
+
 ### Journey 11 — Adding Multiple Projects
 
 1. Click **"+ Add"** in the Projects section
@@ -394,6 +455,7 @@ Shown when Claude API rate limit was hit; app auto-retries at the displayed time
 | ReviewPanel | Overview tab (awaiting-review only) | Merge/PR/Reject actions |
 | RateLimitBanner | Overview tab (when rate limited) | Amber warning with retry time |
 | TerminalPane | Terminal tab | xterm.js terminal with event replay |
+| ContainerConfigEditor | Settings — Container Isolation | Toggle + live status badge (stopped/starting/running/restarting) |
 
 ---
 
@@ -421,3 +483,4 @@ Shown when Claude API rate limit was hit; app auto-retries at the displayed time
 - **Persistent sidebar**: sidebar state (collapsed/expanded, active project) survives navigation between routes
 - **Tab badges**: Spec and QA tabs show a numeric badge when content exists (e.g. "Spec 1", "QA 1")
 - **Breadcrumb**: "← Board" link in panel header navigates back to `/` (for future deep-link support)
+- **Container status badge**: live updates via WebSocket `container-state` events — no page refresh needed; transitions between stopped/starting/running/restarting as the devcontainer lifecycle progresses
