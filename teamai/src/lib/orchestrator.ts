@@ -2,6 +2,7 @@ import { execSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import path from 'path';
 import { processManager, type AgentSession } from './process-manager';
+import { readContainerConfig } from './container-manager';
 import { TaskStore } from './task-store';
 import { resolveProvider, providerToSessionOpts } from './providers';
 
@@ -58,7 +59,7 @@ export class Orchestrator {
     const config = this.getPipelineConfig();
     const slug = this.slugify(description);
     const branch = `feat/${slug}`;
-    const worktreePath = path.join(this.projectRoot, '..', 'worktrees', slug);
+    const worktreePath = path.join(this.getWorktreeBase(), slug);
     const specPath = this.taskStore.getDirById(taskId);
 
     const pipeline: TaskPipeline = {
@@ -124,7 +125,7 @@ export class Orchestrator {
   }
 
   private async runSpec(pipeline: TaskPipeline): Promise<void> {
-    const sessionId = processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId));
+    const sessionId = await processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId));
     pipeline.sessionId = sessionId;
     processManager.sendMessage(sessionId, `/spec ${pipeline.description}`);
     await this.waitForCompletion(sessionId);
@@ -134,7 +135,7 @@ export class Orchestrator {
   }
 
   private async runPlan(pipeline: TaskPipeline): Promise<void> {
-    const sessionId = processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId));
+    const sessionId = await processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId));
     pipeline.sessionId = sessionId;
     processManager.sendMessage(sessionId, `/plan ${pipeline.specPath}/spec.md`);
     await this.waitForCompletion(sessionId);
@@ -167,7 +168,7 @@ export class Orchestrator {
     for (const [, subtasks] of groups) {
       await Promise.allSettled(
         subtasks.map(async (subtask: any) => {
-          const sessionId = processManager.createSession(this.sessionOpts(coderRole, pipeline.worktreePath, pipeline.taskId));
+          const sessionId = await processManager.createSession(this.sessionOpts(coderRole, pipeline.worktreePath, pipeline.taskId));
           const prompt =
             `/implement Subtask ${subtask.id}: ${subtask.title}\n\n` +
             `${subtask.description}\n\n` +
@@ -186,7 +187,7 @@ export class Orchestrator {
 
   private async runQaReview(pipeline: TaskPipeline): Promise<void> {
     pipeline.qaAttempt++;
-    const sessionId = processManager.createSession(this.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId));
+    const sessionId = await processManager.createSession(this.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId));
     pipeline.sessionId = sessionId;
     processManager.sendMessage(sessionId, `/qa-review ${pipeline.specPath}/spec.md`);
     await this.waitForCompletion(sessionId);
@@ -206,7 +207,7 @@ export class Orchestrator {
   }
 
   private async runQaFix(pipeline: TaskPipeline): Promise<void> {
-    const sessionId = processManager.createSession(this.sessionOpts('qa-fixer', pipeline.worktreePath, pipeline.taskId));
+    const sessionId = await processManager.createSession(this.sessionOpts('qa-fixer', pipeline.worktreePath, pipeline.taskId));
     pipeline.sessionId = sessionId;
     processManager.sendMessage(sessionId, `/qa-fix ${pipeline.specPath}/qa_report.json`);
     await this.waitForCompletion(sessionId);
@@ -216,7 +217,7 @@ export class Orchestrator {
   }
 
   private async runMerge(pipeline: TaskPipeline): Promise<void> {
-    const sessionId = processManager.createSession(this.sessionOpts('merger', this.projectRoot, pipeline.taskId));
+    const sessionId = await processManager.createSession(this.sessionOpts('merger', this.projectRoot, pipeline.taskId));
     pipeline.sessionId = sessionId;
     processManager.sendMessage(sessionId, `/merge ${pipeline.branch}`);
     await this.waitForCompletion(sessionId);
@@ -231,7 +232,7 @@ export class Orchestrator {
   private async runCreatePR(pipeline: TaskPipeline): Promise<void> {
     execSync(`git push -u origin "${pipeline.branch}"`, { cwd: pipeline.worktreePath });
 
-    const sessionId = processManager.createSession(this.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId));
+    const sessionId = await processManager.createSession(this.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId));
     pipeline.sessionId = sessionId;
 
     const specContent = readFileSync(path.join(pipeline.specPath, 'spec.md'), 'utf-8');
@@ -326,10 +327,16 @@ export class Orchestrator {
     return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
   }
 
+  private getWorktreeBase(): string {
+    return readContainerConfig(this.projectRoot).enabled
+      ? path.join(this.projectRoot, '.worktrees')
+      : path.join(this.projectRoot, '..', 'worktrees');
+  }
+
   private sessionOpts(role: AgentSession['role'], cwd: string, taskId: string) {
     const providerCfg = resolveProvider(this.projectRoot, role);
     const providerOpts = providerToSessionOpts(providerCfg);
-    return { taskId, role, cwd, permissionMode: 'bypassPermissions', ...providerOpts };
+    return { taskId, role, cwd, projectRoot: this.projectRoot, permissionMode: 'bypassPermissions', ...providerOpts };
   }
 }
 

@@ -2,9 +2,11 @@ import { getRoles } from '@/app/actions/roles';
 import { getActiveProject } from '@/app/actions/projects';
 import { getPipelineConfig } from '@/app/actions/pipeline';
 import { getProvidersConfig } from '@/app/actions/providers';
+import { getContainerConfig, getContainerState } from '@/app/actions/containers';
 import { RoleEditor } from '@/components/role-editor';
 import { PipelineConfigEditor } from '@/components/pipeline-config';
 import { ProviderConfigEditor } from '@/components/provider-config';
+import { ContainerConfigEditor } from '@/components/container-config';
 
 export default async function SettingsPage() {
   const activeProject = await getActiveProject();
@@ -13,8 +15,8 @@ export default async function SettingsPage() {
     return <div className="p-6 text-sm text-slate-500">No active project selected.</div>;
   }
 
-  const [roles, pipelineConfig, providersConfig] = await Promise.all([
-    getRoles(), getPipelineConfig(), getProvidersConfig(),
+  const [roles, pipelineConfig, providersConfig, containerConfig, containerState] = await Promise.all([
+    getRoles(), getPipelineConfig(), getProvidersConfig(), getContainerConfig(), getContainerState(),
   ]);
 
   return (
@@ -25,6 +27,19 @@ export default async function SettingsPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-8">
+        {/* Container config */}
+        <section>
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Container Isolation</h2>
+          <p className="text-xs text-slate-500 mb-4">
+            Run pipeline agents inside the project&apos;s devcontainer for OS-level isolation.
+          </p>
+          <ContainerConfigEditor
+            config={containerConfig}
+            initialState={containerState}
+            projectPath={activeProject.path}
+          />
+        </section>
+
         {/* Pipeline config */}
         <section>
           <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Pipeline Configuration</h2>

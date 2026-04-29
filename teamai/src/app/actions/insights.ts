@@ -18,7 +18,7 @@ export async function getOrCreateInsightsSession(): Promise<string> {
     const session = processManager.getSession(existing);
     if (session && session.status === 'running') return existing;
   }
-  const sessionId = processManager.createSession({
+  const sessionId = await processManager.createSession({
     taskId: `insights::${projectPath}`,
     role: 'general',
     cwd: projectPath,

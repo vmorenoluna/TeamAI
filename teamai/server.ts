@@ -3,6 +3,7 @@ import { parse } from 'url';
 import next from 'next';
 import { WebSocketServer, WebSocket } from 'ws';
 import { processManager } from './src/lib/process-manager';
+import { containerManager } from './src/lib/container-manager';
 import { findInterruptedTasks } from './src/lib/recovery';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
@@ -52,6 +53,14 @@ app.prepare().then(() => {
   // Broadcast phase-change events from the Orchestrator to all connected clients
   processManager.on('phase-change', (data: any) => {
     const msg = JSON.stringify({ type: 'phase-change', taskId: data.taskId, phase: data.phase });
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) client.send(msg);
+    }
+  });
+
+  // Broadcast container lifecycle state changes to all connected clients
+  containerManager.on('container-state', (data: { projectRoot: string; state: string }) => {
+    const msg = JSON.stringify({ type: 'container-state', projectRoot: data.projectRoot, state: data.state });
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) client.send(msg);
     }

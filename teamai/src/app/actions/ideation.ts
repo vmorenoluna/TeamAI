@@ -14,7 +14,7 @@ const sessions: Map<string, string> =
 
 export async function startIdeationScan(): Promise<string> {
   const projectPath = await getActiveProjectPath();
-  const sessionId = processManager.createSession({
+  const sessionId = await processManager.createSession({
     taskId: `ideation::${projectPath}`,
     role: 'general',
     cwd: projectPath,
