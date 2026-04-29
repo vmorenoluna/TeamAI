@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { join } from 'path';
 import * as pty from 'node-pty';
 import { readFileSync, existsSync } from 'fs';
+import { containerManager, readContainerConfig, hostToContainerPath } from './container-manager';
 
 function findExecutable(name: string): string {
   try {
@@ -36,42 +37,62 @@ export class ProcessManager extends EventEmitter {
 
   /**
    * Spawn a new Claude CLI subprocess for an agent session.
-   * The process stays alive for multi-turn conversation.
+   * When projectRoot is provided and container mode is enabled, the session
+   * runs via `docker exec` inside the project's devcontainer.
    */
-  createSession(opts: {
+  async createSession(opts: {
     taskId: string;
     role: AgentSession['role'];
     cwd: string;
     model?: string;
     permissionMode?: string;
     env?: Record<string, string>;
-  }): string {
+    projectRoot?: string;
+  }): Promise<string> {
     const id = randomUUID();
 
-    const args = [
+    const claudeArgs = [
       '-p',
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
     ];
 
-    if (opts.model) {
-      args.push('--model', opts.model);
-    }
+    if (opts.model) claudeArgs.push('--model', opts.model);
 
-    if (opts.permissionMode) {
-      args.push('--permission-mode', opts.permissionMode);
-    }
+    let proc: ChildProcess;
 
-    const proc = spawn('claude', args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...(opts.env ?? {}) },
-      cwd: opts.cwd,
-    });
+    if (opts.projectRoot && readContainerConfig(opts.projectRoot).enabled) {
+      const { containerId, remoteWorkspaceFolder } =
+        await containerManager.ensureContainer(opts.projectRoot);
+
+      const containerCwd = hostToContainerPath(opts.cwd, opts.projectRoot, remoteWorkspaceFolder);
+      const envFlags = Object.entries(opts.env ?? {}).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+
+      // In container mode use --dangerously-skip-permissions (safe inside isolated container)
+      claudeArgs.push('--dangerously-skip-permissions');
+
+      proc = spawn('docker', [
+        'exec', '-i',
+        '-w', containerCwd,
+        ...envFlags,
+        containerId,
+        'claude',
+        ...claudeArgs,
+      ], { stdio: ['pipe', 'pipe', 'pipe'] });
+    } else {
+      if (opts.permissionMode) claudeArgs.push('--permission-mode', opts.permissionMode);
+
+      proc = spawn('claude', claudeArgs, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, ...(opts.env ?? {}) },
+        cwd: opts.cwd,
+      });
+    }
 
     // Parse NDJSON from stdout line by line
     let buffer = '';
-    proc.stdout.on('data', (chunk: Buffer) => {
+    proc.stdout!.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -87,7 +108,7 @@ export class ProcessManager extends EventEmitter {
       }
     });
 
-    proc.stderr.on('data', (chunk: Buffer) => {
+    proc.stderr!.on('data', (chunk: Buffer) => {
       this.emit('error', { sessionId: id, error: chunk.toString() });
     });
 

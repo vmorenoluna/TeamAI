@@ -20,7 +20,7 @@ async function runTest() {
     process.exit(0);
   });
 
-  const sessionId = processManager.createSession({ taskId: 'test-task-123', role: 'general', cwd });
+  const sessionId = await processManager.createSession({ taskId: 'test-task-123', role: 'general', cwd });
   console.log(`Session created: ${sessionId}`);
 
   await new Promise(resolve => setTimeout(resolve, 1000));

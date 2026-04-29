@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@devcontainers/cli": "^0.86.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "cross-env": "^10.1.0",
