@@ -238,6 +238,20 @@ Shown when Claude API rate limit was hit; app auto-retries at the displayed time
 
 ---
 
+## 5a. Ideation Page (`/ideation`)
+
+Header: "Ideation" title + "Scan the codebase for improvements, vulnerabilities, and tech debt." subtitle.
+
+Below: `IdeationScanner` component:
+- **"Run Scan"** button — triggers a Claude agent scan of the active codebase
+- While scanning: button changes to "Scanning…" (disabled)
+- After scan: results appear in a scrollable monospace pre-formatted block; "Scan complete" badge shown
+- Empty state: "Click 'Run Scan' to analyse the codebase."
+
+Dark mode: `bg-white dark:bg-slate-900` on page root; result block uses `bg-slate-50 dark:bg-slate-900` with border.
+
+---
+
 ## 5b. Insights Page (`/insights`)
 
 Header: "Insights" title + "Chat with Claude about the active project." subtitle.
@@ -274,6 +288,8 @@ Dark mode: `bg-white dark:bg-slate-900`.
 ---
 
 ## 6. Settings Page (`/settings`)
+
+Dark mode: `bg-white dark:bg-slate-900` on page root (covers both the header strip and the scrollable content area below it).
 
 Four sections, rendered top-to-bottom:
 
