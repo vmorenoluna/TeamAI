@@ -2,7 +2,6 @@ import { spawn, ChildProcess } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { EventEmitter } from 'events';
 import path from 'path';
-import os from 'os';
 
 export type ContainerState = 'stopped' | 'starting' | 'running' | 'restarting';
 
@@ -32,6 +31,8 @@ export function readContainerConfig(projectRoot: string): { enabled: boolean } {
   try { return JSON.parse(readFileSync(cfgPath, 'utf-8')); } catch { return { enabled: false }; }
 }
 
+// Translate a host absolute path into the equivalent path inside the container.
+// hostProjectRoot (host) maps to containerWorkspace (container).
 export function hostToContainerPath(
   hostPath: string,
   hostProjectRoot: string,
@@ -76,12 +77,23 @@ export class ContainerManager extends EventEmitter {
     return this.records.get(projectRoot)?.state ?? 'stopped';
   }
 
+  // Returns the running container info synchronously — for use in orchestrator git commands.
+  // Returns null if the container is not currently running.
+  getRunningContainer(projectRoot: string): ContainerInfo | null {
+    const r = this.records.get(projectRoot);
+    if (r?.state === 'running' && r.containerId && r.remoteWorkspaceFolder) {
+      return { containerId: r.containerId, remoteWorkspaceFolder: r.remoteWorkspaceFolder };
+    }
+    return null;
+  }
+
   private async _doStart(record: ContainerRecord): Promise<void> {
+    // Credential mounts (claude, gitconfig, ssh) are declared in devcontainer.json.
+    // postCreateCommand installs claude, playwright-mcp, and gh CLI.
     const args = [
       'up',
       '--workspace-folder', record.projectRoot,
       '--log-format', 'json',
-      '--skip-post-create', // postCreateCommand runs separately; don't fail startup on it
     ];
 
     try {
@@ -90,10 +102,8 @@ export class ContainerManager extends EventEmitter {
       record.remoteWorkspaceFolder = remoteWorkspaceFolder;
       record.state = 'running';
       record.startPromise = null;
-      this._emit(record, 'running');
       console.log(`[container] Started — id=${containerId} workspace=${remoteWorkspaceFolder}`);
-      // Copy host credentials into the container after startup
-      await this._copyCredentials(containerId);
+      this._emit(record, 'running');
       this._watchEvents(record);
     } catch (err) {
       record.state = 'stopped';
@@ -105,26 +115,7 @@ export class ContainerManager extends EventEmitter {
     }
   }
 
-  private async _copyCredentials(containerId: string): Promise<void> {
-    const home = os.homedir();
-    const copies: [string, string][] = [
-      [path.join(home, '.claude'),    '/root/.claude'],
-      [path.join(home, '.gitconfig'), '/root/.gitconfig'],
-      [path.join(home, '.ssh'),       '/root/.ssh'],
-    ];
-    for (const [src, dst] of copies) {
-      if (!existsSync(src)) continue;
-      await new Promise<void>(resolve => {
-        // docker cp src/. dst copies directory contents; for files use src directly
-        const srcArg = src.endsWith(path.sep) ? src : src;
-        const proc = spawn('docker', ['cp', `${srcArg}/.`, `${containerId}:${dst}`]);
-        proc.on('exit', () => resolve()); // best-effort; ignore errors
-        proc.on('error', () => resolve());
-      });
-    }
-  }
-
-  private _spawnDevcontainerUp(args: string[]): Promise<{ containerId: string; remoteWorkspaceFolder: string }> {
+  private _spawnDevcontainerUp(args: string[]): Promise<ContainerInfo> {
     return new Promise((resolve, reject) => {
       const proc = spawn(devcontainerBin(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '';
@@ -134,7 +125,7 @@ export class ContainerManager extends EventEmitter {
       proc.on('error', err => reject(new Error(`devcontainer not found: ${err.message}`)));
       proc.on('exit', code => {
         if (code !== 0) return reject(new Error(`devcontainer up failed (exit ${code}):\n${stderr}`));
-        // With --log-format json each line is a JSON object; the result line contains "outcome"
+        // With --log-format json each line is a JSON object; find the result line (has "outcome")
         const resultLine = stdout.trim().split('\n')
           .map(l => { try { return JSON.parse(l); } catch { return null; } })
           .find(o => o && 'outcome' in o);
@@ -176,7 +167,7 @@ export class ContainerManager extends EventEmitter {
     this._emit(record, 'restarting');
 
     record.startPromise = this._doStart(record).catch(() => {
-      // _doStart sets state = 'stopped' on failure; nothing extra needed
+      // _doStart sets state = 'stopped' on failure
     });
   }
 
