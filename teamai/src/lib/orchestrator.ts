@@ -1,8 +1,8 @@
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import path from 'path';
 import { processManager, type AgentSession } from './process-manager';
-import { readContainerConfig } from './container-manager';
+import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
 import { TaskStore } from './task-store';
 import { resolveProvider, providerToSessionOpts } from './providers';
 
@@ -145,10 +145,7 @@ export class Orchestrator {
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 
-    execSync(
-      `git worktree add "${pipeline.worktreePath}" -b "${pipeline.branch}"`,
-      { cwd: this.projectRoot }
-    );
+    this._execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], this.projectRoot);
 
     this.advancePhase(pipeline, 'implement');
     await this.executePhase(pipeline);
@@ -227,14 +224,14 @@ export class Orchestrator {
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 
-    execSync(`git worktree remove "${pipeline.worktreePath}"`, { cwd: this.projectRoot });
-    execSync(`git branch -d "${pipeline.branch}"`, { cwd: this.projectRoot });
+    this._execGit(['worktree', 'remove', pipeline.worktreePath], this.projectRoot);
+    this._execGit(['branch', '-d', pipeline.branch], this.projectRoot);
 
     this.advancePhase(pipeline, 'done');
   }
 
   private async runCreatePR(pipeline: TaskPipeline): Promise<void> {
-    execSync(`git push -u origin "${pipeline.branch}"`, { cwd: pipeline.worktreePath });
+    this._execGit(['push', '-u', 'origin', pipeline.branch], pipeline.worktreePath);
 
     const sessionId = await processManager.createSession(this.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId));
     pipeline.sessionId = sessionId;
@@ -329,6 +326,25 @@ export class Orchestrator {
 
   private slugify(text: string): string {
     return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
+  }
+
+  // Run a git command either directly on the host or via docker exec inside the container.
+  // Any arg that is a subpath of projectRoot is automatically translated to the container path.
+  private _execGit(args: string[], hostCwd: string): void {
+    if (readContainerConfig(this.projectRoot).enabled) {
+      const info = containerManager.getRunningContainer(this.projectRoot);
+      if (info) {
+        const containerCwd = hostToContainerPath(hostCwd, this.projectRoot, info.remoteWorkspaceFolder);
+        const mappedArgs = args.map(a =>
+          path.isAbsolute(a) && a.startsWith(this.projectRoot)
+            ? hostToContainerPath(a, this.projectRoot, info.remoteWorkspaceFolder)
+            : a
+        );
+        execFileSync('docker', ['exec', '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
+        return;
+      }
+    }
+    execFileSync('git', args, { cwd: hostCwd });
   }
 
   private getWorktreeBase(): string {

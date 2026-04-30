@@ -1,7 +1,11 @@
 {
   "name": "TeamAI Dev",
-  "image": "mcr.microsoft.com/devcontainers/base:jammy",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
   "remoteUser": "vscode",
+
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
 
   "mounts": [
     "source=${localEnv:USERPROFILE}\\.claude,target=/home/vscode/.claude,type=bind",
@@ -9,7 +13,7 @@
     "source=${localEnv:USERPROFILE}\\.ssh,target=/home/vscode/.ssh,type=bind,readonly"
   ],
 
-  "postCreateCommand": "curl -fsSL https://claude.ai/install.sh | bash && git config --global core.autocrlf false",
+  "postCreateCommand": "npm install -g @anthropic-ai/claude-code playwright-mcp && git config --global core.autocrlf false",
 
   "forwardPorts": [3000],
 
