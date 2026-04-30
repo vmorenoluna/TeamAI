@@ -58,10 +58,10 @@ The app has a two-column shell that fills the entire viewport:
 | Route | Page | Description |
 |---|---|---|
 | `/` | Kanban Board | Main working view |
-| `/insights` | Insights | (placeholder) |
+| `/insights` | Insights | Chat with Claude about the active codebase |
 | `/ideation` | Ideation | AI brainstorming for new tasks |
-| `/terminals` | Terminals | Interactive PTY terminals per task |
-| `/roadmap` | Roadmap | Pipeline roadmap view |
+| `/terminals` | Terminals | Interactive PTY Claude sessions pre-loaded with a role persona |
+| `/roadmap` | Roadmap | Roadmap view (placeholder, coming later) |
 | `/settings` | Settings | Project configuration: container isolation, pipeline phases, providers, agent roles |
 
 ---
@@ -238,6 +238,41 @@ Shown when Claude API rate limit was hit; app auto-retries at the displayed time
 
 ---
 
+## 5b. Insights Page (`/insights`)
+
+Header: "Insights" title + "Chat with Claude about the active project." subtitle.
+
+Below: full-height chat interface (`InsightsChat` component):
+- **Message area**: scrollable list of chat bubbles. User messages are dark pill (right-aligned); assistant replies are light card with border (left-aligned). Streaming replies show an animated cursor.
+- **Input bar** (pinned bottom): multi-line textarea + "Send" button. Press Enter to send (Shift+Enter for new line). Placeholder: "Ask about the codebase… (Enter to send)". Disabled while connecting or waiting for response.
+
+Dark mode: `bg-white dark:bg-slate-900` on root; input area has a top border separator.
+
+---
+
+## 5c. Terminals Page (`/terminals`)
+
+Header: "Terminals" title + subtitle + **"+ New Terminal"** button (top-right).
+
+Clicking "+ New Terminal" opens a modal:
+- **Role** dropdown (all available agent roles)
+- **Model** text field (optional override, defaults to project provider setting)
+- Cancel / Open buttons
+
+Once opened, terminals appear in a responsive grid (1 column for 1 terminal, 2 columns for 2+). Each terminal panel is a dark xterm.js instance pre-loaded with the chosen role's system prompt. Multiple terminals can run simultaneously.
+
+Dark mode: `bg-slate-50 dark:bg-slate-950` on root content area; terminal panels are always `bg-slate-950` (terminals are inherently dark).
+
+---
+
+## 5d. Roadmap Page (`/roadmap`)
+
+Placeholder page. Shows "Coming in a later step." White/dark background matching the app theme. Will show pipeline roadmap when implemented.
+
+Dark mode: `bg-white dark:bg-slate-900`.
+
+---
+
 ## 6. Settings Page (`/settings`)
 
 Four sections, rendered top-to-bottom:
@@ -260,7 +295,12 @@ Four sections, rendered top-to-bottom:
   - `RUNNING` (green) — container is up, agents will use `docker exec`
   - `RESTARTING…` (amber) — container died mid-task, one restart attempt underway
 - Requires the project to have a `.devcontainer/devcontainer.json`
-- Container mounts host `~/.claude`, `~/.gitconfig`, `~/.ssh` (read-only) automatically
+- The TeamAI devcontainer (`javascript-node:20` image) automatically installs:
+  - `@anthropic-ai/claude-code` — Claude CLI for agent sessions
+  - `playwright-mcp` — Playwright MCP server
+  - `gh` (GitHub CLI) — for PR creation
+- Host credentials mounted automatically: `~/.claude`, `~/.gitconfig`, `~/.ssh` (read-only)
+- Git worktrees are created **inside** the container at `<workspace>/.worktrees/<slug>` so git metadata uses container-relative paths
 
 ### Pipeline Configuration
 - Checkboxes for active phases: Spec, Plan, Implement, QA Review, Merge
