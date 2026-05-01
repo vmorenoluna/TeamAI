@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, rmSync } from 'fs';
 import { join } from 'path';
 
 export interface Task {
@@ -97,6 +97,11 @@ export class TaskStore {
       }
     }
     throw new Error(`Task directory not found for id ${id}`);
+  }
+
+  delete(id: string): void {
+    const dir = this.getDirById(id);
+    rmSync(dir, { recursive: true, force: true });
   }
 
   getDirBySlug(slug: string): string {

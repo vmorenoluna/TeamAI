@@ -27,6 +27,12 @@ export async function createTask(formData: FormData) {
   return { id };
 }
 
+export async function deleteTask(taskId: string) {
+  const { taskStore } = await getStores();
+  taskStore.delete(taskId);
+  revalidatePath('/');
+}
+
 export async function runTask(taskId: string) {
   const { taskStore, orchestrator } = await getStores();
   const task = taskStore.getById(taskId);
