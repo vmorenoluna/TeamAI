@@ -7,7 +7,7 @@ import { AgentPanel } from './agent-panel';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
 import { RunTaskButton } from './run-task-button';
-import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock } from '@/app/actions/tasks';
+import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock, deleteTask } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 import type { RoleDefinition } from '@/app/actions/roles';
 
@@ -219,6 +219,15 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
     });
   }
 
+  function handleDelete() {
+    if (!confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
+    startTransition(async () => {
+      await deleteTask(task.id);
+      router.push('/');
+      router.refresh();
+    });
+  }
+
   const otherTasks = allTasks.filter(t => t.id !== task.id);
   const dependencyIds = dependencies.map(t => t.id);
   const dependentIds = dependents.map(t => t.id);
@@ -248,6 +257,14 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
             <span className={`text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded ${badge}`}>
               {task.phase}
             </span>
+            <button
+              onClick={handleDelete}
+              disabled={isPending}
+              title="Delete task"
+              className="text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors disabled:opacity-50 text-sm px-1"
+            >
+              🗑
+            </button>
           </div>
         </div>
 
