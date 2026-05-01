@@ -141,7 +141,7 @@ export class Orchestrator {
   private async runPlan(pipeline: TaskPipeline): Promise<void> {
     const sessionId = await processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId));
     pipeline.sessionId = sessionId;
-    processManager.sendMessage(sessionId, `/plan ${pipeline.specPath}/spec.md`);
+    processManager.sendMessage(sessionId, `/plan ${this._toAgentPath(pipeline.specPath)}/spec.md`);
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 
@@ -190,7 +190,7 @@ export class Orchestrator {
     pipeline.qaAttempt++;
     const sessionId = await processManager.createSession(this.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId));
     pipeline.sessionId = sessionId;
-    processManager.sendMessage(sessionId, `/qa-review ${pipeline.specPath}/spec.md`);
+    processManager.sendMessage(sessionId, `/qa-review ${this._toAgentPath(pipeline.specPath)}/spec.md`);
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 
@@ -210,7 +210,7 @@ export class Orchestrator {
   private async runQaFix(pipeline: TaskPipeline): Promise<void> {
     const sessionId = await processManager.createSession(this.sessionOpts('qa-fixer', pipeline.worktreePath, pipeline.taskId));
     pipeline.sessionId = sessionId;
-    processManager.sendMessage(sessionId, `/qa-fix ${pipeline.specPath}/qa_report.json`);
+    processManager.sendMessage(sessionId, `/qa-fix ${this._toAgentPath(pipeline.specPath)}/qa_report.json`);
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
     this.advancePhase(pipeline, 'qa-review');
@@ -330,6 +330,17 @@ export class Orchestrator {
 
   // Run a git command either directly on the host or via docker exec inside the container.
   // Any arg that is a subpath of projectRoot is automatically translated to the container path.
+  // Translate a host absolute path to the container-relative equivalent when
+  // container mode is enabled. Used so message content sent to agents inside
+  // the container references paths that actually exist there.
+  private _toAgentPath(hostPath: string): string {
+    if (readContainerConfig(this.projectRoot).enabled) {
+      const info = containerManager.getRunningContainer(this.projectRoot);
+      if (info) return hostToContainerPath(hostPath, this.projectRoot, info.remoteWorkspaceFolder);
+    }
+    return hostPath;
+  }
+
   private _execGit(args: string[], hostCwd: string): void {
     if (readContainerConfig(this.projectRoot).enabled) {
       const info = containerManager.getRunningContainer(this.projectRoot);
