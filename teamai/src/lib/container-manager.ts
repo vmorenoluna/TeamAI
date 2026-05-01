@@ -124,16 +124,23 @@ export class ContainerManager extends EventEmitter {
       proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
       proc.on('error', err => reject(new Error(`devcontainer not found: ${err.message}`)));
       proc.on('exit', code => {
-        if (code !== 0) return reject(new Error(`devcontainer up failed (exit ${code}):\n${stderr}`));
         // With --log-format json each line is a JSON object; find the result line (has "outcome")
         const resultLine = stdout.trim().split('\n')
           .map(l => { try { return JSON.parse(l); } catch { return null; } })
           .find(o => o && 'outcome' in o);
-        if (!resultLine) return reject(new Error(`No result JSON in devcontainer output:\n${stdout}`));
-        if (resultLine.outcome !== 'success') {
-          return reject(new Error(`devcontainer up outcome: ${resultLine.outcome}\n${stderr}`));
+
+        // Accept the container even on non-zero exit if we have a containerId —
+        // postCreateCommand failures (e.g. from bind-mounted files) leave a working container.
+        if (resultLine?.containerId && resultLine?.remoteWorkspaceFolder) {
+          if (resultLine.outcome !== 'success') {
+            console.warn(`[container] devcontainer up exited with outcome "${resultLine.outcome}" — continuing anyway (postCreateCommand likely partial)`);
+          }
+          return resolve({ containerId: resultLine.containerId, remoteWorkspaceFolder: resultLine.remoteWorkspaceFolder });
         }
-        resolve({ containerId: resultLine.containerId, remoteWorkspaceFolder: resultLine.remoteWorkspaceFolder });
+
+        if (code !== 0) return reject(new Error(`devcontainer up failed (exit ${code}):\n${stderr}`));
+        if (!resultLine) return reject(new Error(`No result JSON in devcontainer output:\n${stdout}`));
+        return reject(new Error(`devcontainer up outcome: ${resultLine.outcome}\n${stderr}`));
       });
     });
   }

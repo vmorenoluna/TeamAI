@@ -74,6 +74,7 @@ export class ProcessManager extends EventEmitter {
 
       proc = spawn('docker', [
         'exec', '-i',
+        '-u', 'node',            // run as the devcontainer remote user
         '-w', containerCwd,
         ...envFlags,
         containerId,

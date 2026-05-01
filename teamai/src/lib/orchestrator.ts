@@ -340,7 +340,7 @@ export class Orchestrator {
             ? hostToContainerPath(a, this.projectRoot, info.remoteWorkspaceFolder)
             : a
         );
-        execFileSync('docker', ['exec', '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
+        execFileSync('docker', ['exec', '-u', 'node', '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
         return;
       }
     }
