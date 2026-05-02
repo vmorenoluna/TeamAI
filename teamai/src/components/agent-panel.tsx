@@ -44,7 +44,8 @@ function formatEvent(event: any): string | null {
 export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialOutput?: string | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<{ terminal: any; fitAddon: any } | null>(null);
-  const writtenRef = useRef(0); // tracks how many events have been written
+  const writtenRef = useRef(0);        // index into live events array
+  const initialWrittenRef = useRef(false); // whether initialOutput has been rendered
   const [termReady, setTermReady] = useState(false);
   const events = useAgentStream(taskId);
 
@@ -95,23 +96,32 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
       terminal?.dispose();
       termRef.current = null;
       writtenRef.current = 0;
+      initialWrittenRef.current = false;
       setTermReady(false);
     };
   }, []);
 
-  // Write historical log on first ready, then stream live events
+  // Write historical log once when ready, then append live events incrementally
   useEffect(() => {
     if (!termReady || !termRef.current) return;
     const { terminal } = termRef.current;
-    if (initialOutput && writtenRef.current === 0) {
+
+    // Write persisted history exactly once
+    if (initialOutput && !initialWrittenRef.current) {
+      initialWrittenRef.current = true;
       terminal.write(initialOutput.replace(/\n/g, '\r\n'));
       terminal.write('\r\n\x1b[36m── live stream ──\x1b[0m\r\n');
+      terminal.scrollToTop();
     }
+
+    // Append only new live events since last render
+    const hadNewEvents = events.length > writtenRef.current;
     for (let i = writtenRef.current; i < events.length; i++) {
       const text = formatEvent(events[i].event);
       if (text) terminal.write(text);
     }
     writtenRef.current = events.length;
+    if (hadNewEvents) terminal.scrollToBottom();
   }, [events, termReady, initialOutput]);
 
   return (
@@ -120,7 +130,9 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
         <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           Agent Output
         </span>
-        <span className="text-xs text-slate-500">{events.length} events</span>
+        <span className="text-xs text-slate-500">
+          {initialOutput ? 'history' : ''}{initialOutput && events.length > 0 ? ' + ' : ''}{events.length > 0 ? `${events.length} live` : initialOutput ? '' : '0 events'}
+        </span>
       </div>
       <div ref={containerRef} className="flex-1 min-h-0 p-1" />
     </div>
