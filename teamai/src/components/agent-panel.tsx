@@ -113,7 +113,7 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
       const delta = initialOutput.slice(initLenRef.current);
       initLenRef.current = initialOutput.length;
       terminal.write(delta.replace(/\n/g, '\r\n'));
-      if (isFirstWrite) terminal.scrollToTop();
+      if (isFirstWrite) requestAnimationFrame(() => terminal.scrollToTop());
     }
 
     // Append only new live events since last render
