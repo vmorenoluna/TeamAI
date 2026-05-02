@@ -44,8 +44,8 @@ function formatEvent(event: any): string | null {
 export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialOutput?: string | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<{ terminal: any; fitAddon: any } | null>(null);
-  const writtenRef = useRef(0);        // index into live events array
-  const initialWrittenRef = useRef(false); // whether initialOutput has been rendered
+  const writtenRef = useRef(0);           // index into live events array
+  const initLenRef = useRef(0);           // chars of initialOutput already written
   const [termReady, setTermReady] = useState(false);
   const events = useAgentStream(taskId);
 
@@ -96,22 +96,24 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
       terminal?.dispose();
       termRef.current = null;
       writtenRef.current = 0;
-      initialWrittenRef.current = false;
+      initLenRef.current = 0;
       setTermReady(false);
     };
   }, []);
 
-  // Write historical log once when ready, then append live events incrementally
+  // Append historical log incrementally (output.log grows as phases complete),
+  // then stream live events on top.
   useEffect(() => {
     if (!termReady || !termRef.current) return;
     const { terminal } = termRef.current;
 
-    // Write persisted history exactly once
-    if (initialOutput && !initialWrittenRef.current) {
-      initialWrittenRef.current = true;
-      terminal.write(initialOutput.replace(/\n/g, '\r\n'));
-      terminal.write('\r\n\x1b[36m── live stream ──\x1b[0m\r\n');
-      terminal.scrollToTop();
+    // Write new portion of persisted log (delta since last render)
+    if (initialOutput && initialOutput.length > initLenRef.current) {
+      const isFirstWrite = initLenRef.current === 0;
+      const delta = initialOutput.slice(initLenRef.current);
+      initLenRef.current = initialOutput.length;
+      terminal.write(delta.replace(/\n/g, '\r\n'));
+      if (isFirstWrite) terminal.scrollToTop();
     }
 
     // Append only new live events since last render
@@ -131,7 +133,7 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
           Agent Output
         </span>
         <span className="text-xs text-slate-500">
-          {initialOutput ? 'history' : ''}{initialOutput && events.length > 0 ? ' + ' : ''}{events.length > 0 ? `${events.length} live` : initialOutput ? '' : '0 events'}
+          {events.length > 0 ? `${events.length} events` : initialOutput ? 'history' : '0 events'}
         </span>
       </div>
       <div ref={containerRef} className="flex-1 min-h-0 p-1" />
