@@ -27,6 +27,13 @@ export async function createTask(formData: FormData) {
   return { id };
 }
 
+export async function moveTask(taskId: string, targetPhase: string) {
+  const { orchestrator } = await getStores();
+  // Fire-and-forget (pipeline runs async)
+  orchestrator.moveTaskToPhase(taskId, targetPhase).catch(console.error);
+  revalidatePath('/');
+}
+
 export async function deleteTask(taskId: string) {
   const { taskStore } = await getStores();
   taskStore.delete(taskId);

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
 
 export interface Task {
@@ -102,6 +102,21 @@ export class TaskStore {
   delete(id: string): void {
     const dir = this.getDirById(id);
     rmSync(dir, { recursive: true, force: true });
+  }
+
+  // Remove pipeline artifacts at or after a given level so the pipeline can re-run from there.
+  // level: 'spec' | 'plan' | 'qa'
+  clearArtifacts(id: string, level: 'spec' | 'plan' | 'qa'): void {
+    const dir = this.getDirById(id);
+    const files: Record<string, string[]> = {
+      spec: ['spec.md', 'plan.json', 'qa_report.json'],
+      plan: ['plan.json', 'qa_report.json'],
+      qa:   ['qa_report.json'],
+    };
+    for (const f of files[level]) {
+      const p = join(dir, f);
+      if (existsSync(p)) unlinkSync(p);
+    }
   }
 
   getDirBySlug(slug: string): string {
