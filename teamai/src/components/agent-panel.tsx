@@ -50,6 +50,8 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<{ terminal: any; fitAddon: any } | null>(null);
   const writtenRef = useRef(0);           // index into live events array
+  const initialOutputRef = useRef(initialOutput); // always holds the latest value for the init callback
+  initialOutputRef.current = initialOutput;
   const [termReady, setTermReady] = useState(false);
   const events = useAgentStream(taskId);
 
@@ -91,8 +93,17 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
       terminal.loadAddon(fitAddon);
       terminal.open(container);
       fitAddon.fit();
+
+      // Write persisted log immediately — avoids race with termReady state updates
+      const logContent = initialOutputRef.current;
+      if (logContent) {
+        terminal.write(logContent.replace(/\n/g, '\r\n'));
+        termWriteMap.set(terminal, logContent.length);
+        requestAnimationFrame(() => terminal.scrollToTop());
+      }
+
       termRef.current = { terminal, fitAddon };
-      setTermReady(true); // triggers replay of any buffered events
+      setTermReady(true); // triggers live event streaming
 
       observer = new ResizeObserver(() => fitAddon.fit());
       observer.observe(container);
