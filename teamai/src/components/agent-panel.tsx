@@ -41,11 +41,15 @@ function formatEvent(event: any): string | null {
   }
 }
 
+// Tracks per-terminal-instance how many chars of initialOutput have been written.
+// Using the terminal object as key means a fresh xterm always starts at 0,
+// surviving React StrictMode double-invoke and Fast Refresh ref preservation.
+const termWriteMap = new WeakMap<object, number>();
+
 export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialOutput?: string | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<{ terminal: any; fitAddon: any } | null>(null);
   const writtenRef = useRef(0);           // index into live events array
-  const initLenRef = useRef(0);           // chars of initialOutput already written
   const [termReady, setTermReady] = useState(false);
   const events = useAgentStream(taskId);
 
@@ -58,9 +62,8 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
     let fitAddon: any;
     let observer: ResizeObserver;
 
-    // Reset write-tracking refs whenever xterm re-initialises (StrictMode, Fast Refresh)
+    // Reset live-event counter whenever xterm re-initialises
     writtenRef.current = 0;
-    initLenRef.current = 0;
 
     Promise.all([
       import('@xterm/xterm'),
@@ -100,24 +103,28 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
       terminal?.dispose();
       termRef.current = null;
       writtenRef.current = 0;
-      initLenRef.current = 0;
       setTermReady(false);
     };
   }, []);
 
-  // Append historical log incrementally (output.log grows as phases complete),
-  // then stream live events on top.
+  // Append historical log incrementally per terminal instance, then stream live events.
+  // termWriteMap (WeakMap keyed on the terminal object) tracks how many chars of
+  // initialOutput this specific xterm instance has already received — surviving
+  // StrictMode double-invoke and Fast Refresh ref preservation.
   useEffect(() => {
     if (!termReady || !termRef.current) return;
     const { terminal } = termRef.current;
 
-    // Write new portion of persisted log (delta since last render)
-    if (initialOutput && initialOutput.length > initLenRef.current) {
-      const isFirstWrite = initLenRef.current === 0;
-      const delta = initialOutput.slice(initLenRef.current);
-      initLenRef.current = initialOutput.length;
-      terminal.write(delta.replace(/\n/g, '\r\n'));
-      if (isFirstWrite) requestAnimationFrame(() => terminal.scrollToTop());
+    // Write new portion of persisted log for THIS terminal instance
+    if (initialOutput) {
+      const written = termWriteMap.get(terminal) ?? 0;
+      if (initialOutput.length > written) {
+        const isFirstWrite = written === 0;
+        const delta = initialOutput.slice(written);
+        termWriteMap.set(terminal, initialOutput.length);
+        terminal.write(delta.replace(/\n/g, '\r\n'));
+        if (isFirstWrite) requestAnimationFrame(() => terminal.scrollToTop());
+      }
     }
 
     // Append only new live events since last render
