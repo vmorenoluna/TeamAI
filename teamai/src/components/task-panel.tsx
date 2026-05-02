@@ -13,12 +13,36 @@ export function TaskPanel({ taskId, onClose }: { taskId: string; onClose: () => 
   const [roles, setRoles] = useState<RoleDefinition[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    setLoading(true);
-    setData(null);
+  const refresh = (silent = false) => {
+    if (!silent) setLoading(true);
     Promise.all([getTaskFull(taskId), getRoles()])
       .then(([full, r]) => { setData(full); setRoles(r); })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!silent) setLoading(false); });
+  };
+
+  // Initial load
+  useEffect(() => {
+    setData(null);
+    refresh();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
+
+  // Re-fetch silently on phase-change so Spec/Plan/QA/Terminal update without close+reopen
+  useEffect(() => {
+    const ws = new WebSocket(`ws://${window.location.host}/ws`);
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'phase-change' && msg.taskId === taskId) {
+          refresh(true);
+        }
+      } catch { /* ignore */ }
+    };
+    return () => {
+      if (ws.readyState === WebSocket.CONNECTING) ws.addEventListener('open', () => ws.close());
+      else ws.close();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
   return (
