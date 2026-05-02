@@ -35,6 +35,7 @@ interface Props {
   plan: any;
   qaReport: any;
   diff: string | null;
+  agentOutput?: string | null;
   roles: RoleDefinition[];
 }
 
@@ -180,7 +181,7 @@ function QAReportView({ qaReport }: { qaReport: any }) {
   );
 }
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, plan, qaReport, diff, roles }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, plan, qaReport, diff, agentOutput, roles }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [isPending, startTransition] = useTransition();
@@ -417,7 +418,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
         {/* TERMINAL */}
         {activeTab === 'terminal' && (
           <div className="p-4 h-full">
-            <AgentPanel taskId={task.id} />
+            <AgentPanel taskId={task.id} initialOutput={agentOutput} />
           </div>
         )}
 

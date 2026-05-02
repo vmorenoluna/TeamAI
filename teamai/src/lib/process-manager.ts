@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
 import * as pty from 'node-pty';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, appendFileSync } from 'fs';
 import { containerManager, readContainerConfig, hostToContainerPath } from './container-manager';
 
 function findExecutable(name: string): string {
@@ -48,6 +48,7 @@ export class ProcessManager extends EventEmitter {
     permissionMode?: string;
     env?: Record<string, string>;
     projectRoot?: string;
+    logFile?: string;   // append formatted agent output here for cross-phase persistence
   }): Promise<string> {
     const id = randomUUID();
 
@@ -92,6 +93,7 @@ export class ProcessManager extends EventEmitter {
     }
 
     // Parse NDJSON from stdout line by line
+    const { logFile } = opts;
     let buffer = '';
     proc.stdout!.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
@@ -102,6 +104,7 @@ export class ProcessManager extends EventEmitter {
           try {
             const event = JSON.parse(line);
             this.emit('event', { sessionId: id, event });
+            if (logFile) this._appendToLog(logFile, event);
           } catch {
             this.emit('raw', { sessionId: id, data: line });
           }
@@ -137,6 +140,27 @@ export class ProcessManager extends EventEmitter {
     });
 
     return id;
+  }
+
+  private _appendToLog(logFile: string, event: any): void {
+    try {
+      let text = '';
+      if (event.type === 'system' && event.subtype === 'init') {
+        text = `◆ Session started — ${event.model}\n`;
+      } else if (event.type === 'assistant') {
+        const blocks: any[] = event.message?.content ?? [];
+        for (const b of blocks) {
+          if (b.type === 'text' && b.text) text += b.text;
+          else if (b.type === 'tool_use') text += `▶ ${b.name}\n`;
+        }
+      } else if (event.type === 'result') {
+        const cost = typeof event.total_cost_usd === 'number' ? ` — $${event.total_cost_usd.toFixed(4)}` : '';
+        text = event.subtype === 'success'
+          ? `\n✓ Done${cost} (${event.duration_ms}ms)\n`
+          : `\n✗ Failed: ${event.result ?? 'unknown error'}\n`;
+      }
+      if (text) appendFileSync(logFile, text);
+    } catch { /* best-effort */ }
   }
 
   /**
