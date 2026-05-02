@@ -58,6 +58,10 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
     let fitAddon: any;
     let observer: ResizeObserver;
 
+    // Reset write-tracking refs whenever xterm re-initialises (StrictMode, Fast Refresh)
+    writtenRef.current = 0;
+    initLenRef.current = 0;
+
     Promise.all([
       import('@xterm/xterm'),
       import('@xterm/addon-fit'),
