@@ -53,6 +53,7 @@ export function TaskPanel({ taskId, onClose }: { taskId: string; onClose: () => 
             plan={data.plan}
             qaReport={data.qaReport}
             diff={data.diff}
+            agentOutput={data.agentOutput}
             roles={roles}
           />
         </div>

@@ -1,5 +1,5 @@
 import { execSync, execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'fs';
 import path from 'path';
 import { processManager, type AgentSession } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
@@ -129,7 +129,9 @@ export class Orchestrator {
   }
 
   private async runSpec(pipeline: TaskPipeline): Promise<void> {
-    const sessionId = await processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId));
+    const logFile = path.join(pipeline.specPath, 'output.log');
+    this._phaseHeader(logFile, 'spec');
+    const sessionId = await processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
     processManager.sendMessage(sessionId, `/spec ${pipeline.description}`);
     await this.waitForCompletion(sessionId);
@@ -139,7 +141,9 @@ export class Orchestrator {
   }
 
   private async runPlan(pipeline: TaskPipeline): Promise<void> {
-    const sessionId = await processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId));
+    const logFile = path.join(pipeline.specPath, 'output.log');
+    this._phaseHeader(logFile, 'plan');
+    const sessionId = await processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
     processManager.sendMessage(sessionId, `/plan ${this._toAgentPath(pipeline.specPath)}/spec.md`);
     await this.waitForCompletion(sessionId);
@@ -166,10 +170,12 @@ export class Orchestrator {
       groups.get(group)!.push(subtask);
     }
 
+    const logFile = path.join(pipeline.specPath, 'output.log');
     for (const [, subtasks] of groups) {
       await Promise.allSettled(
         subtasks.map(async (subtask: any) => {
-          const sessionId = await processManager.createSession(this.sessionOpts(coderRole, pipeline.worktreePath, pipeline.taskId));
+          this._phaseHeader(logFile, `implement — subtask ${subtask.id}: ${subtask.title}`);
+          const sessionId = await processManager.createSession(this.sessionOpts(coderRole, pipeline.worktreePath, pipeline.taskId, logFile));
           const prompt =
             `/implement Subtask ${subtask.id}: ${subtask.title}\n\n` +
             `${subtask.description}\n\n` +
@@ -188,7 +194,9 @@ export class Orchestrator {
 
   private async runQaReview(pipeline: TaskPipeline): Promise<void> {
     pipeline.qaAttempt++;
-    const sessionId = await processManager.createSession(this.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId));
+    const logFile = path.join(pipeline.specPath, 'output.log');
+    this._phaseHeader(logFile, `qa-review (attempt ${pipeline.qaAttempt})`);
+    const sessionId = await processManager.createSession(this.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
     processManager.sendMessage(sessionId, `/qa-review ${this._toAgentPath(pipeline.specPath)}/spec.md`);
     await this.waitForCompletion(sessionId);
@@ -208,7 +216,9 @@ export class Orchestrator {
   }
 
   private async runQaFix(pipeline: TaskPipeline): Promise<void> {
-    const sessionId = await processManager.createSession(this.sessionOpts('qa-fixer', pipeline.worktreePath, pipeline.taskId));
+    const logFile = path.join(pipeline.specPath, 'output.log');
+    this._phaseHeader(logFile, 'qa-fix');
+    const sessionId = await processManager.createSession(this.sessionOpts('qa-fixer', pipeline.worktreePath, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
     processManager.sendMessage(sessionId, `/qa-fix ${this._toAgentPath(pipeline.specPath)}/qa_report.json`);
     await this.waitForCompletion(sessionId);
@@ -218,7 +228,9 @@ export class Orchestrator {
   }
 
   private async runMerge(pipeline: TaskPipeline): Promise<void> {
-    const sessionId = await processManager.createSession(this.sessionOpts('merger', this.projectRoot, pipeline.taskId));
+    const logFile = path.join(pipeline.specPath, 'output.log');
+    this._phaseHeader(logFile, 'merge');
+    const sessionId = await processManager.createSession(this.sessionOpts('merger', this.projectRoot, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
     processManager.sendMessage(sessionId, `/merge ${pipeline.branch}`);
     await this.waitForCompletion(sessionId);
@@ -364,10 +376,16 @@ export class Orchestrator {
       : path.join(this.projectRoot, '..', 'worktrees');
   }
 
-  private sessionOpts(role: AgentSession['role'], cwd: string, taskId: string) {
+  private sessionOpts(role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) {
     const providerCfg = resolveProvider(this.projectRoot, role);
     const providerOpts = providerToSessionOpts(providerCfg);
-    return { taskId, role, cwd, projectRoot: this.projectRoot, permissionMode: 'bypassPermissions', ...providerOpts };
+    return { taskId, role, cwd, projectRoot: this.projectRoot, permissionMode: 'bypassPermissions', logFile, ...providerOpts };
+  }
+
+  private _phaseHeader(logFile: string, phase: string): void {
+    try {
+      appendFileSync(logFile, `\n${'─'.repeat(40)}\n▶ ${phase.toUpperCase()}\n${'─'.repeat(40)}\n`);
+    } catch { /* best-effort */ }
   }
 }
 

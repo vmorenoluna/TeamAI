@@ -41,7 +41,7 @@ function formatEvent(event: any): string | null {
   }
 }
 
-export function AgentPanel({ taskId }: { taskId: string }) {
+export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialOutput?: string | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<{ terminal: any; fitAddon: any } | null>(null);
   const writtenRef = useRef(0); // tracks how many events have been written
@@ -99,16 +99,20 @@ export function AgentPanel({ taskId }: { taskId: string }) {
     };
   }, []);
 
-  // Write all unwritten events whenever events grow or terminal becomes ready
+  // Write historical log on first ready, then stream live events
   useEffect(() => {
     if (!termReady || !termRef.current) return;
     const { terminal } = termRef.current;
+    if (initialOutput && writtenRef.current === 0) {
+      terminal.write(initialOutput.replace(/\n/g, '\r\n'));
+      terminal.write('\r\n\x1b[36m── live stream ──\x1b[0m\r\n');
+    }
     for (let i = writtenRef.current; i < events.length; i++) {
       const text = formatEvent(events[i].event);
       if (text) terminal.write(text);
     }
     writtenRef.current = events.length;
-  }, [events, termReady]);
+  }, [events, termReady, initialOutput]);
 
   return (
     <div className="flex flex-col h-full rounded-lg overflow-hidden border border-slate-700 bg-slate-950">

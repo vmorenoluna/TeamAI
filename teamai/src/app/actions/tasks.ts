@@ -135,7 +135,10 @@ export async function getTaskFull(taskId: string) {
     } catch { /* no diff yet */ }
   }
 
-  return { task, allTasks, dependencies, dependents, spec, plan, qaReport, diff };
+  const outputPath = join(dir, 'output.log');
+  const agentOutput = existsSync(outputPath) ? readFileSync(outputPath, 'utf-8') : null;
+
+  return { task, allTasks, dependencies, dependents, spec, plan, qaReport, diff, agentOutput };
 }
 
 export async function setTaskRoleOverride(taskId: string, role: string | null): Promise<void> {
