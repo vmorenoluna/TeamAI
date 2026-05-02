@@ -1,5 +1,5 @@
 import { execSync, execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, rmSync } from 'fs';
 import path from 'path';
 import { processManager, type AgentSession } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
@@ -55,7 +55,50 @@ export class Orchestrator {
     return { phases: ['spec', 'plan', 'implement', 'qa-review', 'merge'], maxQaAttempts: 3, parallelSubtasks: true };
   }
 
-  async runTask(taskId: string, description: string): Promise<void> {
+  // Move a task to a target phase, smart-detecting which earlier phase to start from
+  // based on which artifacts already exist, then run the pipeline from there.
+  async moveTaskToPhase(taskId: string, targetPhase: string): Promise<void> {
+    const task = this.taskStore.getById(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+    const dir = this.taskStore.getDirById(taskId);
+
+    // Phases that require no pipeline action
+    const noRunPhases = ['backlog', 'awaiting-review', 'failed', 'done'];
+    if (noRunPhases.includes(targetPhase)) {
+      this.taskStore.updatePhase(taskId, targetPhase);
+      processManager.emit('phase-change', { taskId, phase: targetPhase });
+      return;
+    }
+
+    const hasSpec = existsSync(path.join(dir, 'spec.md'));
+    const hasPlan = existsSync(path.join(dir, 'plan.json'));
+
+    // Determine actual start phase and clear stale artifacts
+    let startPhase: PipelinePhase = 'spec';
+    if (targetPhase === 'spec') {
+      this.taskStore.clearArtifacts(taskId, 'spec');
+      startPhase = 'spec';
+    } else if (targetPhase === 'plan') {
+      this.taskStore.clearArtifacts(taskId, 'plan');
+      startPhase = hasSpec ? 'plan' : 'spec';
+    } else if (targetPhase === 'implement') {
+      this.taskStore.clearArtifacts(taskId, 'qa');
+      if (hasPlan) startPhase = 'implement';
+      else if (hasSpec) startPhase = 'plan';
+      else startPhase = 'spec';
+    } else if (targetPhase === 'qa-review') {
+      this.taskStore.clearArtifacts(taskId, 'qa');
+      if (hasPlan) startPhase = 'implement';
+      else if (hasSpec) startPhase = 'plan';
+      else startPhase = 'spec';
+    } else {
+      startPhase = targetPhase as PipelinePhase;
+    }
+
+    await this.runTask(taskId, task.description, startPhase);
+  }
+
+  async runTask(taskId: string, description: string, startPhase?: PipelinePhase): Promise<void> {
     const config = this.getPipelineConfig();
     const slug = this.slugify(description);
     const branch = `feat/${slug}`;
@@ -73,8 +116,8 @@ export class Orchestrator {
       maxQaAttempts: config.maxQaAttempts,
     };
 
-    // Skip phases not in the config (e.g. if spec is removed, start from plan)
-    const firstPhase = (config.phases[0] ?? 'spec') as PipelinePhase;
+    // Use provided startPhase, else first phase in config
+    const firstPhase = startPhase ?? (config.phases[0] ?? 'spec') as PipelinePhase;
     pipeline.phase = firstPhase;
 
     this.pipelines.set(taskId, pipeline);
@@ -133,7 +176,11 @@ export class Orchestrator {
     this._phaseHeader(logFile, 'spec');
     const sessionId = await processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
-    processManager.sendMessage(sessionId, `/spec ${pipeline.description}`);
+    // Pass the explicit output path so the agent writes spec.md to the task's directory,
+    // not a new directory derived from the description slug.
+    const agentSpecPath = this._toAgentPath(pipeline.specPath);
+    processManager.sendMessage(sessionId,
+      `/spec ${pipeline.description}\n\nIMPORTANT: Write the spec file to \`${agentSpecPath}/spec.md\` (use this exact path, not a new subdirectory).`);
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
     this.advancePhase(pipeline, 'plan');

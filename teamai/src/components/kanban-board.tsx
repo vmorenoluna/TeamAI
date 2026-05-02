@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { createTask } from '@/app/actions/tasks';
+import { createTask, moveTask } from '@/app/actions/tasks';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskCard } from './task-card';
 import { TaskPanel } from './task-panel';
@@ -38,6 +38,8 @@ export function KanbanBoard({ tasks, interrupted }: Props) {
   const [showDialog, setShowDialog] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [dragOverPhase, setDragOverPhase] = useState<string | null>(null);
   usePhaseSync();
 
   const interruptedMap = new Map(interrupted.map(t => [t.taskId, t]));
@@ -47,6 +49,30 @@ export function KanbanBoard({ tasks, interrupted }: Props) {
       await createTask(formData);
       setShowDialog(false);
       router.refresh();
+    });
+  }
+
+  function handleDragStart(taskId: string) {
+    setDraggingTaskId(taskId);
+  }
+
+  function handleDragEnd() {
+    setDraggingTaskId(null);
+    setDragOverPhase(null);
+  }
+
+  function handleDrop(targetPhase: string) {
+    if (!draggingTaskId) return;
+    const task = tasks.find(t => t.id === draggingTaskId);
+    if (!task || normalizePhase(task.phase) === targetPhase) {
+      setDraggingTaskId(null);
+      setDragOverPhase(null);
+      return;
+    }
+    startTransition(async () => {
+      await moveTask(draggingTaskId, targetPhase);
+      setDraggingTaskId(null);
+      setDragOverPhase(null);
     });
   }
 
@@ -70,10 +96,18 @@ export function KanbanBoard({ tasks, interrupted }: Props) {
             <div className="flex gap-3 p-4 h-full" style={{ minWidth: 'max-content' }}>
               {COLUMNS.map(col => {
                 const colTasks = tasks.filter(t => normalizePhase(t.phase) === col.phase);
+                const isDropTarget = draggingTaskId !== null && dragOverPhase === col.phase;
                 return (
                   <div
                     key={col.phase}
-                    className="flex flex-col w-60 shrink-0 bg-slate-100 dark:bg-slate-800 rounded-lg overflow-hidden"
+                    className={`flex flex-col w-60 shrink-0 rounded-lg overflow-hidden transition-colors ${
+                      isDropTarget
+                        ? 'bg-blue-100 dark:bg-blue-900/40 ring-2 ring-blue-400'
+                        : 'bg-slate-100 dark:bg-slate-800'
+                    }`}
+                    onDragOver={e => { e.preventDefault(); setDragOverPhase(col.phase); }}
+                    onDragLeave={() => setDragOverPhase(null)}
+                    onDrop={() => handleDrop(col.phase)}
                   >
                     <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-200 dark:border-slate-700">
                       <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
@@ -85,12 +119,19 @@ export function KanbanBoard({ tasks, interrupted }: Props) {
                     </div>
                     <div className="flex-1 overflow-y-auto p-2 space-y-2">
                       {colTasks.map(task => (
-                        <TaskCard
+                        <div
                           key={task.id}
-                          task={task}
-                          interrupted={interruptedMap.get(task.id)}
-                          onSelect={setSelectedTaskId}
-                        />
+                          draggable
+                          onDragStart={() => handleDragStart(task.id)}
+                          onDragEnd={handleDragEnd}
+                          className={draggingTaskId === task.id ? 'opacity-40' : ''}
+                        >
+                          <TaskCard
+                            task={task}
+                            interrupted={interruptedMap.get(task.id)}
+                            onSelect={setSelectedTaskId}
+                          />
+                        </div>
                       ))}
                     </div>
                   </div>
