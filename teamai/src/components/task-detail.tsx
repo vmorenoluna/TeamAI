@@ -328,8 +328,8 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
         </div>
       </div>
 
-      {/* Tab content */}
-      <div className="flex-1 min-h-0 overflow-auto">
+      {/* Tab content — overflow-hidden when terminal tab is active so xterm handles its own scroll */}
+      <div className={`flex-1 min-h-0 ${activeTab === 'terminal' ? 'overflow-hidden' : 'overflow-auto'}`}>
 
         {/* OVERVIEW */}
         {activeTab === 'overview' && (

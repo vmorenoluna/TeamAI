@@ -67,7 +67,7 @@ export function TaskPanel({ taskId, onClose }: { taskId: string; onClose: () => 
       )}
 
       {!loading && data && (
-        <div className="flex-1 min-h-0 overflow-auto">
+        <div className="flex-1 min-h-0 overflow-hidden">
           <TaskDetail
             task={data.task}
             allTasks={data.allTasks}
