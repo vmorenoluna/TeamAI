@@ -9,7 +9,7 @@
     "source=${localEnv:USERPROFILE}\\.ssh,target=/home/node/.ssh,type=bind,readonly"
   ],
 
-  "postCreateCommand": "npm install -g @anthropic-ai/claude-code playwright-mcp && sudo apt-get update -q && sudo apt-get install -y -q gh",
+  "postCreateCommand": "npm install -g @anthropic-ai/claude-code playwright-mcp && sudo apt-get update -q && sudo apt-get install -y -q gh && sudo git config --system --add safe.directory '*'",
 
   "forwardPorts": [3000],
 
