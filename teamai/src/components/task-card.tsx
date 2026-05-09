@@ -35,9 +35,10 @@ interface Props {
   task: Task;
   interrupted?: InterruptedTask;
   onSelect: (id: string) => void;
+  isMoving?: boolean;
 }
 
-export function TaskCard({ task, interrupted, onSelect }: Props) {
+export function TaskCard({ task, interrupted, onSelect, isMoving }: Props) {
   const badge = PHASE_BADGE[task.phase] ?? PHASE_BADGE.backlog;
   const [expanded, setExpanded] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -54,9 +55,20 @@ export function TaskCard({ task, interrupted, onSelect }: Props) {
 
   return (
     <div
-      onClick={() => onSelect(task.id)}
-      className="relative bg-white dark:bg-slate-900 rounded-md p-3 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600 transition-all cursor-pointer group"
+      onClick={() => isMoving ? null : onSelect(task.id)}
+      className={`relative bg-white dark:bg-slate-900 rounded-md p-3 shadow-sm border transition-all cursor-pointer group ${
+        isMoving
+          ? 'border-blue-300 dark:border-blue-600 shadow-md pointer-events-none opacity-90'
+          : 'border-slate-200 dark:border-slate-700 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600'
+      }`}
     >
+      {/* Moving indicator */}
+      {isMoving && (
+        <div className="absolute top-2 right-2 flex items-center gap-1">
+          <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
+          <span className="text-[10px] text-blue-500 font-medium">moving</span>
+        </div>
+      )}
       {/* Play button for interrupted tasks */}
       {interrupted && (
         <button

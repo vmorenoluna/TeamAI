@@ -82,7 +82,8 @@ The competitor analysis provides the strategic findings (feature gaps, positioni
 ### 3b. Generate Roadmap Items
 For each finding, create a roadmap item with:
 - **Title**: concise feature/fix name
-- **pority**: P0 (urgent) / P1 (high) / P2 (medium) / P3 (low)
+- **Category**: one of: Critical Fix | Security | Performance | DX | New Feature | Competitive Response | Infrastructure
+- **Priority**: P0 (urgent) / P1 (high) / P2 (medium) / P3 (low)
 - **Complexity**: 1 (trivial) to 5 (major effort)
 - **Description**: 2-3 sentences explaining what and why
 - **Affected files**: list of files/modules involved
@@ -114,8 +115,20 @@ Save the roadmap to `.teamai/roadmap/roadmap-{date}.md` with:
 3. Competitor comparison matrix (if competitor analysis was run)
 4. Phased roadmap with all items
 
-Also save `.teamai/roadmap/roadmap-{date}.json` with structured data so the UI
-can render the roadmap items as cards on the Kanban board.
+Also save `.teamai/roadmap/roadmap-{date}.json` with this exact JSON structure:
+```json
+{
+  "generated_at": "ISO 8601 timestamp",
+  "executive_summary": "3-5 sentence summary",
+  "competitor_analysis_run": true/false,
+  "phases": {
+    "now": [{ "title": "...", "priority": "P0", "complexity": 3, "category": "...", "description": "...", "affected_files": [], "source": "..." }],
+    "next": [...],
+    "later": [...],
+    "icebox": [...]
+  }
+}
+```
 
 Print a summary of the top 10 highest-priority items to stdout.
 ```

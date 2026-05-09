@@ -55,9 +55,22 @@ export class Orchestrator {
     return { phases: ['spec', 'plan', 'implement', 'qa-review', 'merge'], maxQaAttempts: 3, parallelSubtasks: true };
   }
 
+  // Cancel a running pipeline for a task — kills the active session and removes
+  // the in-memory pipeline so a new one can start cleanly.
+  cancelPipeline(taskId: string): void {
+    const pipeline = this.pipelines.get(taskId);
+    if (pipeline?.sessionId) {
+      processManager.killSession(pipeline.sessionId);
+    }
+    this.pipelines.delete(taskId);
+  }
+
   // Move a task to a target phase, smart-detecting which earlier phase to start from
   // based on which artifacts already exist, then run the pipeline from there.
   async moveTaskToPhase(taskId: string, targetPhase: string): Promise<void> {
+    // Cancel any currently running pipeline for this task before starting a new one
+    this.cancelPipeline(taskId);
+
     const task = this.taskStore.getById(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
     const dir = this.taskStore.getDirById(taskId);
@@ -91,6 +104,24 @@ export class Orchestrator {
       if (hasPlan) startPhase = 'implement';
       else if (hasSpec) startPhase = 'plan';
       else startPhase = 'spec';
+    } else if (targetPhase === 'merge' || targetPhase === 'create-pr') {
+      // Merge/PR requires the worktree and branch to exist. If missing,
+      // restart from the earliest phase needed to recreate them.
+      const worktreeBase = this.getWorktreeBase();
+      const worktreePath = path.join(worktreeBase, this.slugify(task.description));
+      const worktreeExists = existsSync(worktreePath);
+      const branchExists = !!task.branch;
+
+      if (hasPlan && worktreeExists && branchExists) {
+        startPhase = targetPhase as PipelinePhase;
+      } else if (hasPlan) {
+        // Plan exists but worktree/branch missing — recreate from implement
+        startPhase = 'implement';
+      } else if (hasSpec) {
+        startPhase = 'plan';
+      } else {
+        startPhase = 'spec';
+      }
     } else {
       startPhase = targetPhase as PipelinePhase;
     }
@@ -99,6 +130,9 @@ export class Orchestrator {
   }
 
   async runTask(taskId: string, description: string, startPhase?: PipelinePhase): Promise<void> {
+    // Cancel any currently running pipeline for this task before starting a new one
+    this.cancelPipeline(taskId);
+
     const config = this.getPipelineConfig();
     const slug = this.slugify(description);
     const branch = `feat/${slug}`;
