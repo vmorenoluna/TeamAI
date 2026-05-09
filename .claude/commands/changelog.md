@@ -6,6 +6,5 @@ Generate release notes from recent git history.
 2. Group commits by type (feat, fix, chore, docs, refactor, test).
 3. Write release notes in Keep a Changelog format.
 4. Highlight breaking changes prominently.
-5. Write the result to `.teamai/roadmap/changelog-{date}.md`.
-6. Print the changelog to stdout.
+5. Print the changelog to stdout.
 ```

@@ -1984,578 +1984,67 @@ function useAgentStream(taskId: string) {
 
 ## 8. Implementation Roadmap
 
-Each step is designed to be self-contained and testable before moving to the next. A Claude Code instance should execute these in order.
+Each step is designed to be self-contained and testable before moving to the next.
 
-### Step 1: Project Scaffold
+### ✅ Step 1: Project Scaffold
+Next.js project scaffolded with all dependencies, custom `server.ts`, and `npm run dev` working on port 3000.
 
-**Goal:** Empty Next.js project with dependencies installed.
+### ✅ Step 2: Role Definitions + Slash Commands
+All 6 role files and 9 command files exist in `defaults/`. `teamai-workflow.md` scaffolded via `@`-import in project `CLAUDE.md`.
 
-```bash
-npx create-next-app@latest teamai --typescript --tailwind --app --src-dir
-cd teamai
-npm install ws xterm @xterm/addon-fit uuid node-pty
-npm install -D @types/ws @types/node-pty
-npx shadcn@latest init
-npx shadcn@latest add button card badge dialog input textarea tabs
-```
+### ✅ Step 3: Memory & MCP Server Setup
+Auto Memory confirmed active. GitHub MCP server configured (needs `GITHUB_TOKEN` env var to connect).
 
-Create directories:
-```bash
-mkdir -p defaults/roles defaults/commands src/lib
-```
+### ✅ Step 4: Process Manager
+`src/lib/process-manager.ts` spawns Claude CLI subprocesses with NDJSON streaming. Tested with `scripts/test-process-manager.ts`.
 
-Create `server.ts` in the project root (the custom server wrapper from Section 2.1). Update `package.json` scripts:
-```json
-{
-  "scripts": {
-    "dev": "npx tsx server.ts",
-    "build": "next build",
-    "start": "NODE_ENV=production npx tsx server.ts"
-  }
-}
-```
+### ✅ Step 5: Task Store + Project Store + Server Actions
+`TaskStore`, `ProjectStore`, and all server actions implemented. Projects scaffold defaults on registration.
 
-**Done when:** `npm run dev` starts on port 3000 without errors.
+### ✅ Step 6: Project Selector + Kanban Board UI
+Sidebar with project selector (add/remove/switch, directory browser). Kanban board with 9 columns, New Task dialog, live phase sync.
 
-### Step 2: Role Definitions + Slash Commands
+### ✅ Step 7: Agent Panel with Streaming Output
+xterm.js agent panel on task detail page. `useAgentStream` WebSocket hook filters events by `taskId`. `PhaseSyncer` keeps badge live.
 
-**Goal:** All 6 role files from Section 3 and all 8 slash command files from Section 4 exist in the `defaults/` directory (these get scaffolded into target projects on registration).
+### ✅ Step 8: Orchestrator
+Full spec→plan→implement→qa→awaiting-review pipeline. Phase-change events broadcast via WebSocket. `processManager` and `orchestrators` stored on `global` to share across Next.js module contexts. Run Pipeline button on task detail page.
 
-Create each role file in `defaults/roles/`:
-- `analyst.md`
-- `planner.md`
-- `coder.md`
-- `qa-reviewer.md`
-- `qa-fixer.md`
-- `merger.md`
+### ✅ Step 9: Human Review Panel
+`ReviewPanel` on task detail page when phase is `awaiting-review`. Shows QA report (pass/fail badges), spec, git diff. Merge Locally / Open PR / Reject with Feedback actions.
 
-Create each command file in `defaults/commands/`:
-- `spec.md` (references `roles/analyst.md`)
-- `plan.md` (references `roles/planner.md`)
-- `implement.md` (references `roles/coder.md`)
-- `qa-review.md` (references `roles/qa-reviewer.md`)
-- `qa-fix.md` (references `roles/qa-fixer.md`)
-- `merge.md` (references `roles/merger.md`)
-- `roadmap.md` (references `roles/analyst.md`)
-- `changelog.md` (no role — purely procedural)
+### ✅ Step 10: Insights Chat
+`/insights` page with streaming chat bubbles. Long-lived Claude session per project; messages sent via server action, responses stream via WebSocket.
 
-Also create `defaults/CLAUDE.md` with the template from Section 9.
+### ⏭ Step 11: Roadmap & Changelog
+Not yet implemented. Roadmap page renders streaming agent output for the `/roadmap` command and a phased view of results. Changelog generates release notes from git history.
 
-**Test:** Copy `defaults/roles/` and `defaults/commands/` into a test git repo's `.claude/` directory. Open `claude` in that repo, type `/spec Add a dark mode toggle`, verify Claude reads the analyst role file and creates files in `.teamai/`.
+### ✅ Step 12: Role Editor (Settings Page)
+`/settings` page lists all 6 roles as collapsible cards with editable textarea. Save writes to disk immediately. Reset to Default restores from `defaults/roles/`.
 
-### Step 3: Memory & MCP Server Setup
+### ⏭ Step 13: GitHub Integration
+Not yet implemented. Would list open GitHub issues and allow importing them as tasks.
 
-**Goal:** Auto Memory is active and GitHub MCP server is configured.
+### ✅ Step 14: Polish & Hardening
+Collapsible sidebar (icon-only strip when collapsed). Task cards show truncated description with more/less toggle.
 
-Verify Auto Memory is enabled (it's on by default in Claude Code v2.1.59+):
-```bash
-# Open a Claude session and check
-claude
-# Type /memory — look for "Auto-memory: on"
-# Also check if "Auto-dream" is available (rolling out gradually — not all accounts have it yet)
-# If Auto Dream is off and can't be toggled, you can still run /dream manually for one-time consolidation
-```
+### ✅ Step 15: Customizable Pipeline Phases
+`pipeline.json` in `.teamai/` controls active phases, max QA attempts, and parallel subtasks. Orchestrator reads it before each run. UI in Settings.
 
-Install the GitHub MCP server:
-```bash
-claude mcp add github --scope project -- npx -y @modelcontextprotocol/server-github
-```
+### ✅ Step 16: Ideation & Reference Images
+`/ideation` page with Run Scan button streaming `/ideation` output. New Task dialog accepts reference image uploads saved to `.teamai/{slug}/references/`.
 
-**Test:** Open `claude` in the project, do some work, close the session. Start a new session — verify Claude references something from the previous session. Also verify the GitHub MCP tools are available by asking "List open issues on this repo."
+### ✅ Step 17: Session Recovery
+On server startup, scans all registered projects for in-progress tasks and shows an amber resume banner with per-task Resume buttons.
 
-### Step 4: Process Manager
+### ✅ Step 18: Multi-Provider Support
+`providers.json` in `.teamai/` configures model and provider per role. `ProcessManager.createSession` merges env overrides. Provider Config section in Settings.
 
-**Goal:** `src/lib/process-manager.ts` from Section 6.2 is implemented and tested.
+### ⏭ Step 19: Remote Access & Notifications
+Not yet implemented. Tailscale for remote access; Web Push / Telegram webhook for review-ready notifications.
 
-Write the ProcessManager class. Write a simple test script (`scripts/test-process-manager.ts`) that:
-1. Creates a session
-2. Sends "What is 2+2?"
-3. Prints the streamed response events
-4. Kills the session
-
-**Test:** `npx tsx scripts/test-process-manager.ts` prints JSON events from Claude.
-
-### Step 5: Task Store + Project Store + Server Actions
-
-**Goal:** `src/lib/task-store.ts` from Section 6.4, `src/lib/project-store.ts` from Section 6.5, and all server actions from Sections 7.2–7.4 are implemented.
-
-Write:
-1. The `TaskStore` class (takes a project path, reads/writes `.teamai/` in that project)
-2. The `ProjectStore` class (manages `~/.teamai/projects.json`, scaffolds defaults into new projects)
-3. The `defaults/` directory containing the default role files, command files, and CLAUDE.md template
-4. `app/actions/projects.ts` — `addProject`, `removeProject`, `setActiveProject`, `getProjects`, `getActiveProjectPath`
-5. `app/actions/tasks.ts` — all task actions, using `getActiveProjectPath()` to instantiate the correct TaskStore
-6. `app/actions/roles.ts` — all role actions, using `getActiveProjectPath()` to find the correct `.claude/roles/`
-
-**Test:**
-1. Start the app. No projects registered yet — the UI shows an "Add Project" prompt.
-2. Add a project by providing a path to a local git repo. Verify `.claude/roles/`, `.claude/commands/`, `.teamai/`, and `CLAUDE.md` are scaffolded in the target project (only if they didn't already exist).
-3. Create a task via the UI. Verify `{project-path}/.teamai/{slug}/task.json` is created.
-4. Add a second project. Switch between them — verify each has its own independent task list.
-
-### Step 6: Project Selector + Kanban Board UI
-
-**Goal:** Main layout has a sidebar with project selector. Main page shows a drag-and-drop Kanban board for the active project.
-
-Implement:
-- `src/app/layout.tsx` — root layout with sidebar containing the project selector and navigation links (Kanban, Insights, Roadmap, Settings)
-- `src/components/project-selector.tsx` — lists registered projects, highlights the active one, has "Add Project" button that opens a dialog for the project path
-- `src/components/kanban-board.tsx` — columns for each phase
-- `src/components/task-card.tsx` — card with title, phase badge, timestamp
-- `src/app/page.tsx` — Server Component that calls `getTasks()` (reads from active project's `.teamai/`) and renders the board
-- "New Task" dialog that calls the `createTask` server action via a form
-
-**Test:**
-1. Open the app, add a project, see it appear in the sidebar.
-2. Create a task, see it in the Backlog column.
-3. Add a second project, switch to it — Kanban board shows that project's tasks (empty at first).
-4. Switch back — original project's tasks reappear.
-
-### Step 7: Agent Panel with Streaming Output
-
-**Goal:** Task detail page shows real-time streaming output from the Claude CLI subprocess.
-
-Implement:
-- `src/components/agent-panel.tsx` — renders streaming events using xterm.js
-- `src/app/task/[id]/page.tsx` — shows task details + agent panel
-- The `useAgentStream` React hook from Section 7.3 connects to the WebSocket server in `server.ts`
-
-Wire up: when a session runs for a task, ProcessManager emits events → server.ts WebSocket broadcasts them → the agent panel renders them in real-time.
-
-**Test:** Manually trigger a session for a task, see Claude's output appear in the browser in real-time.
-
-### Step 8: Orchestrator
-
-**Goal:** `src/lib/orchestrator.ts` from Section 6.3 is implemented.
-
-Write the Orchestrator class. The `runTask` server action (already in `actions/tasks.ts`) calls `orchestrator.runTask()` which drives the pipeline asynchronously.
-
-Wire up the Kanban board: when pipeline phase changes, the orchestrator pushes a phase-change event via WebSocket → the browser receives it and calls `router.refresh()` to re-render the Server Component with updated task data.
-
-**Test:** Create a task, click "Run", watch it progress through Spec → Plan → Implement → QA → **Review** (pauses here, waiting for human).
-
-### Step 9: Human Review Panel
-
-**Goal:** When a task reaches `awaiting-review`, the UI shows a review panel where the human can inspect the work and choose what happens next.
-
-Implement:
-- `src/components/review-panel.tsx` — shows:
-  - The git diff (`git diff main...{branch}`)
-  - The QA report with pass/fail badges
-  - The original spec for reference
-  - Three action buttons:
-    - **"Merge Locally"** → calls `approveTask(id, 'local-merge')` server action → runs AI-powered semantic merge
-    - **"Open Pull Request"** → calls `approveTask(id, 'pull-request')` server action → pushes branch and creates PR via GitHub MCP
-    - **"Reject with Feedback"** → opens a text input, then calls `rejectTask(id, feedback)` server action → sends task back to Implement phase
-
-All three actions are already defined in `app/actions/tasks.ts` and call through to the orchestrator.
-
-Also implement the QA loop (already in the orchestrator code from Section 6.3):
-- If QA passes → card moves to **Review** (human gate)
-- If QA fails → card moves to QA Fix → back to QA Review (up to 3 attempts)
-- If still failing after 3 → card moves to **Failed** (human must review)
-
-**Test:**
-1. Run a task, let it reach Review. Click "Merge Locally" → task moves to Done.
-2. Run another task, let it reach Review. Click "Open Pull Request" → branch is pushed, PR is created on GitHub, task moves to Done.
-3. Run another task, let it reach Review. Click "Reject with Feedback", type feedback → task goes back to In Progress and re-runs implementation.
-
-### Step 10: Insights Chat
-
-**Goal:** A separate page where you can chat with Claude about the codebase.
-
-Implement:
-- `src/app/insights/page.tsx` — chat interface
-- Uses ProcessManager to create a long-lived "general" session
-- Messages sent via the WebSocket, responses rendered in a chat bubble UI
-
-**Test:** Open /insights, ask "What does the auth module do?", get a streaming response.
-
-### Step 11: Roadmap & Changelog
-
-**Goal:** The `/roadmap` and `/changelog` commands are accessible from the UI with proper rendering. The `/roadmap` command delegates to `/ideation` for its codebase scan (no duplicated logic).
-
-**Roadmap implementation:**
-- Add a `/roadmap` page at `src/app/roadmap/page.tsx`
-- The page has a "Generate Roadmap" button — clicking it runs `/roadmap` which:
-  1. Runs `/ideation` internally (or reads a recent scan if one exists from the last 24 hours)
-  2. Auto-discovers competitors via web search
-  3. Produces the phased roadmap combining both sources
-- A "Skip Competitor Analysis" checkbox is available for faster runs (passes `--skip-competitors`)
-- The agent's streaming output is shown in an agent panel while it works
-- Once complete, read the generated `.teamai/roadmap/roadmap-{date}.json` and render:
-  - A phased view (Now / Next / Later / Icebox) with item cards
-  - Each item tagged with its source: "ideation" (tactical) or "competitor-analysis" (strategic)
-  - The auto-discovered competitor list with rationale for each selection
-  - A competitor comparison matrix table
-  - An "Import to Kanban" button per item that creates a task from the roadmap item
-- Also add a "Roadmap History" sidebar that lists previous roadmap runs by date
-
-**Changelog implementation:**
-- Add a "Generate Changelog" button (on the main page or a settings page)
-- Triggers `/changelog` via ProcessManager
-- Renders the markdown output in a modal or dedicated view
-
-**Test:**
-1. Run `/ideation` first, then `/roadmap` within 24 hours → verify the roadmap reuses the existing ideation report instead of re-scanning.
-2. Run `/roadmap` with no prior ideation report → verify it runs the scan itself.
-3. Run `/roadmap --skip-competitors` → verify it produces phased items from ideation findings only.
-4. Click "Import to Kanban" on a roadmap item → verify a new task appears in Backlog.
-5. Run `/changelog` → verify release notes are generated from git history.
-
-### Step 12: Role Editor (Settings Page)
-
-**Goal:** Users can view and edit agent role definitions from the UI.
-
-Implement:
-- `src/app/actions/roles.ts` — `getRoles()`, `getRole()`, `saveRole()` server actions from Section 7.3
-- `src/app/settings/page.tsx` — Server Component that lists all roles from `.claude/roles/`
-- `src/components/role-editor.tsx` — Client Component with a markdown textarea editor per role, a Save button, and a "Reset to Default" button that restores the original content from Section 3
-
-The settings page shows each role as a collapsible card with the role name as the header. Expanding a card shows the full markdown content in an editable textarea. The user edits the persona, clicks Save, and the file is written to disk immediately. The next pipeline run picks up the changes automatically.
-
-**Test:**
-1. Open `/settings`, see all 6 roles listed.
-2. Edit the QA Reviewer role to add "Always check for SQL injection vulnerabilities."
-3. Save, then run a pipeline — verify the QA review output reflects the custom instruction.
-4. Edit a role file directly on disk with a text editor, reload `/settings` — verify the UI shows the updated content.
-
-### Step 13: GitHub Integration
-
-**Goal:** Import issues from GitHub and trigger the pipeline on them.
-
-Implement:
-- A panel that lists open GitHub issues (via the GitHub MCP server or GitHub API directly)
-- "Import as Task" button that creates a task from an issue
-- After pipeline completes, option to create a PR
-
-**Test:** Import a GitHub issue, run the pipeline on it, verify a PR could be created.
-
-### Step 14: Polish & Hardening
-
-**Goal:** Production-ready quality.
-
-- Add error handling and retry logic to the orchestrator
-- Add project configuration to the settings page: project path, max parallel agents, MCP server management
-- Add keyboard shortcuts
-- Add dark mode and theme support
-- Add mobile-responsive layout
-- Add loading states and progress indicators for each pipeline phase
-- **Collapsible sidebar** — toggle button to hide/show the project selector and nav for more screen space
-- **Expandable task descriptions** — long task descriptions in Kanban cards are truncated with a "Show more" toggle
-
-**Test:** Verify dark mode works, sidebar collapses cleanly, and long task descriptions expand/collapse.
-
-### Step 15: Customizable Pipeline Phases
-
-**Goal:** Users can configure which pipeline phases run and in what order, per project.
-
-Implement:
-- A `pipeline.json` config file in each project's `.teamai/` directory:
-```json
-{
-  "phases": ["spec", "plan", "implement", "qa-review", "merge"],
-  "maxQaAttempts": 3,
-  "parallelSubtasks": true
-}
-```
-- Removing a phase (e.g., dropping `"spec"` if you write specs manually) skips it
-- Adding custom phases is supported by mapping phase names to slash commands
-- The orchestrator reads this config before starting a pipeline and adjusts its flow
-- The settings page has a "Pipeline Configuration" section with a drag-and-drop phase reorderer and toggles to enable/disable each phase
-
-**Test:**
-1. Remove `"spec"` from the pipeline config, write a spec manually, run the pipeline — verify it starts at `"plan"`.
-2. Set `maxQaAttempts` to 1 — verify the QA loop only runs once.
-3. Reorder phases in the UI, save, run a pipeline — verify the new order is followed.
-
-### Step 16: Ideation & Reference Images
-
-**Goal:** The `/ideation` command is accessible from the UI, and tasks support attached reference images.
-
-**Ideation:**
-- Add an `/ideation` page at `src/app/ideation/page.tsx`
-- "Run Scan" button triggers the `/ideation` command
-- Results render as a severity-grouped table with expandable rows
-- Each finding has an "Import to Kanban" button that creates a fix task
-
-**Reference images:**
-- The "New Task" dialog has a file upload area for images (PNG, JPG, WEBP)
-- Uploaded images are saved to `.teamai/{task-slug}/references/`
-- The `/implement` command is updated to include: "Check `.teamai/{slug}/references/` for any design mockups or screenshots. If images exist, read them and use them as visual guidance for your implementation."
-- The task detail page shows reference images in a gallery above the agent panel
-
-**Test:**
-1. Run `/ideation` → verify it produces findings grouped by security/performance/quality/infrastructure.
-2. Create a task with a reference screenshot attached → run the pipeline → verify the agent references the image in its implementation.
-
-### Step 17: Session Recovery
-
-**Goal:** If the server restarts while a pipeline is running, detect and resume in-progress tasks.
-
-Implement:
-- On server startup, scan all projects' `.teamai/` directories for tasks with `phase` not in `["backlog", "done", "failed", "awaiting-review"]`
-- For each in-progress task, check if its worktree still exists and has uncommitted work
-- Show a "Resume" banner in the UI listing interrupted tasks
-- Clicking "Resume" restarts the pipeline from the current phase (not from the beginning)
-- The orchestrator writes a `pipeline-state.json` file in the task directory before each phase transition, recording enough state to resume (current phase, QA attempt count, session IDs)
-
-**Test:**
-1. Start a pipeline, kill the server mid-implementation.
-2. Restart the server — verify the "Resume" banner appears.
-3. Click Resume — verify the pipeline continues from the implementation phase, not from spec.
-
-### Step 18: Multi-Provider Support
-
-**Goal:** Users can configure which LLM backend each agent role uses, per project.
-
-Claude Code already supports multiple backends via environment variables and flags. TeamAI exposes this as a per-project, per-role configuration.
-
-Implement:
-- Add a `providers.json` config file in each project's `.teamai/` directory:
-```json
-{
-  "default": {
-    "model": "opus",
-    "provider": "anthropic"
-  },
-  "roles": {
-    "coder": { "model": "sonnet", "provider": "anthropic" },
-    "qa-reviewer": { "model": "opus", "provider": "anthropic" },
-    "planner": { "model": "opus", "provider": "bedrock", "env": { "AWS_REGION": "us-west-2" } }
-  }
-}
-```
-- The ProcessManager reads this config and sets the appropriate `--model` flag and environment variables when spawning each session
-- For Bedrock: sets `CLAUDE_CODE_USE_BEDROCK=1` + AWS credentials
-- For Vertex: sets `CLAUDE_CODE_USE_VERTEX=1` + GCP credentials
-- For Ollama: sets `ANTHROPIC_BASE_URL=http://localhost:11434`
-- The settings page has a "Providers" section where users configure per-role model assignments
-- A "Test Connection" button per provider verifies credentials work
-
-**Test:**
-1. Configure the coder role to use Sonnet and the QA reviewer to use Opus — run a pipeline — verify different models are used for each phase.
-2. Configure a role to use Bedrock — verify the CLI subprocess receives the correct environment variables.
-
-### Step 19: Remote Access & Notifications
-
-**Goal:** Use TeamAI from your phone when away from your desk, and get notified when tasks need attention.
-
-**Remote access via Tailscale (primary approach):**
-
-TeamAI is a web app on `localhost:3000`. Since Step 14 makes it mobile-responsive, the only missing piece is reaching it from outside your local network. Tailscale is a zero-config mesh VPN that gives every device a stable IP on a private network.
-
-Setup:
-1. Install Tailscale on your desktop and phone (free for personal use, 1-minute setup)
-2. Both devices join the same Tailnet
-3. Your desktop gets a stable IP like `100.x.y.z`
-4. Open `http://100.x.y.z:3000` on your phone — full TeamAI UI, Kanban board, review panel, everything
-5. Update `server.ts` to bind to `0.0.0.0` instead of `localhost` so it accepts connections from the Tailscale interface
-
-This gives you the complete TeamAI experience on your phone: create tasks, run pipelines, watch agent streaming, approve/reject in the review panel, edit roles, generate roadmaps.
-
-**Push notifications:**
-
-When a task reaches `awaiting-review` or `failed`, you want your phone to buzz. Options ranked by simplicity:
-
-1. **Web Push Notifications** (simplest) — the browser on your phone can receive push notifications. When the orchestrator changes a task to `awaiting-review`, fire a web push notification. Works natively in Chrome/Firefox on Android; on iOS requires the app to be added to Home Screen as a PWA.
-
-2. **Telegram/Discord bot** (most reliable) — a small webhook that posts to a Telegram chat or Discord channel when tasks need attention. ~20 lines of code in a server action. Works everywhere, no browser needed.
-
-3. **Claude Code Channels** (native but heavier) — Claude Code's pub/sub messaging system can push messages to connected clients. Overkill for notifications but useful if you later want Claude Code instances to communicate with each other.
-
-Implement option 1 (Web Push) as default, option 2 (Telegram) as a setting:
-
-```typescript
-// In the orchestrator, after setting phase to 'awaiting-review':
-import { sendNotification } from '@/lib/notifications';
-
-// After: taskStore.updatePhase(pipeline.taskId, 'awaiting-review');
-await sendNotification({
-  title: `Task ready for review: ${pipeline.description}`,
-  body: 'QA passed. Choose: Merge Locally, Open PR, or Reject.',
-  url: `/task/${pipeline.taskId}`,
-});
-```
-
-**Ad-hoc terminal access via Remote Control (complement):**
-
-For quick one-off work outside the pipeline — like asking Claude a question about the codebase or making a manual fix — use Claude Code's built-in Remote Control:
-
-1. On your desktop: `claude remote-control` in the target project directory
-2. Scan the QR code with the Claude mobile app
-3. You get a raw Claude Code terminal session on your phone with full access to the project's files, MCP servers, and tools
-
-This is complementary to TeamAI — it gives you a direct terminal session, while TeamAI gives you the structured pipeline UI. Use Remote Control for ad-hoc work; use TeamAI's web UI for pipeline management.
-
-**Test:**
-1. Install Tailscale on desktop and phone. Open TeamAI from the phone browser via the Tailscale IP — verify the full UI works including Kanban, task detail, and review panel.
-2. Run a pipeline, let it reach `awaiting-review` — verify a push notification appears on the phone.
-3. Tap the notification — verify it opens the review panel for that task.
-4. Start a Remote Control session for a target project — verify you can interact with Claude Code directly from the Claude mobile app.
-
-### Step 20: Agent Terminal Sessions
-
-**Goal:** Users can open an interactive Claude Code terminal session pre-loaded with any role they've defined, for ad-hoc work outside the pipeline.
-
-**How it works:**
-
-Claude Code's `--append-system-prompt-file` flag injects additional text into the system prompt of any session. We use this to load the selected role's markdown file, giving the session a specific persona from the start:
-
-```bash
-claude \
-  --append-system-prompt-file .claude/roles/qa-reviewer.md \
-  --cwd /path/to/project
-```
-
-This spawns a full interactive Claude Code PTY session with the QA Reviewer persona already loaded. The user can then ask questions, run commands, or do ad-hoc work — all with the agent thinking like that role.
-
-**Two terminal modes:**
-
-| Mode | Technology | Experience |
-|---|---|---|
-| **Interactive PTY** (recommended) | `node-pty` + xterm.js | Full Claude Code interactive UI: slash commands, tab completion, permission prompts, `Ctrl+C`. Matches what Aperant's agent terminals do. |
-| **Streaming JSON** | `--input-format stream-json` + xterm.js | Simpler, no native addon needed, but loses interactive Claude Code features. |
-
-Implement Mode 1 (PTY) for richness. `node-pty` is a native Node.js addon that requires compilation but is well-maintained and used by VS Code's terminal.
-
-**Implementation:**
-
-Add to `ProcessManager`:
-
-```typescript
-import * as pty from 'node-pty';
-
-interface TerminalSession {
-  id: string;
-  ptyProcess: pty.IPty;
-  role: string;
-  projectPath: string;
-}
-
-createTerminalSession(opts: {
-  projectPath: string;
-  role: string;         // filename e.g. 'qa-reviewer.md'
-  model?: string;
-}): string {
-  const id = randomUUID();
-  const roleFile = join(opts.projectPath, '.claude', 'roles', opts.role);
-
-  const args = [
-    '--append-system-prompt-file', roleFile,
-    '--cwd', opts.projectPath,
-  ];
-
-  if (opts.model) args.push('--model', opts.model);
-
-  const ptyProcess = pty.spawn('claude', args, {
-    name: 'xterm-color',
-    cols: 120,
-    rows: 40,
-    cwd: opts.projectPath,
-    env: { ...process.env },
-  });
-
-  // Pipe PTY output to WebSocket clients subscribed to this session
-  ptyProcess.onData((data) => {
-    this.emit('terminal-data', { sessionId: id, data });
-  });
-
-  this.terminalSessions.set(id, { id, ptyProcess, role: opts.role, projectPath: opts.projectPath });
-  return id;
-}
-
-writeToTerminal(sessionId: string, data: string): void {
-  const session = this.terminalSessions.get(sessionId);
-  if (session) session.ptyProcess.write(data);
-}
-
-resizeTerminal(sessionId: string, cols: number, rows: number): void {
-  const session = this.terminalSessions.get(sessionId);
-  if (session) session.ptyProcess.resize(cols, rows);
-}
-```
-
-**UI — Terminals page (`src/app/terminals/page.tsx`):**
-
-- Lists all active terminal sessions for the current project
-- "New Terminal" button opens a dialog with:
-  - **Role selector** — dropdown of all roles in `.claude/roles/` (from `getRoles()`)
-  - **Model selector** — optional override (defaults to project's default provider)
-  - "Open" button spawns the session
-- Each session renders in an xterm.js panel with the role name and color-coded border
-- Sessions persist until manually closed; closing kills the PTY process
-- Users can have multiple terminals open simultaneously — one per role if they want
-
-**WebSocket routing:**
-
-Terminal output is a continuous stream of bytes (not structured JSON events). Add a second WebSocket message type to `server.ts`:
-
-```typescript
-wss.on('connection', (ws) => {
-  // Existing: structured agent events
-  const agentHandler = ({ sessionId, event }: any) => {
-    ws.send(JSON.stringify({ type: 'agent', sessionId, event }));
-  };
-  processManager.on('event', agentHandler);
-
-  // New: raw terminal bytes
-  const terminalHandler = ({ sessionId, data }: any) => {
-    ws.send(JSON.stringify({ type: 'terminal', sessionId, data }));
-  };
-  processManager.on('terminal-data', terminalHandler);
-
-  // Input from browser → PTY
-  ws.on('message', (msg) => {
-    const parsed = JSON.parse(msg.toString());
-    if (parsed.type === 'terminal-input') {
-      processManager.writeToTerminal(parsed.sessionId, parsed.data);
-    }
-    if (parsed.type === 'terminal-resize') {
-      processManager.resizeTerminal(parsed.sessionId, parsed.cols, parsed.rows);
-    }
-  });
-
-  ws.on('close', () => {
-    processManager.off('event', agentHandler);
-    processManager.off('terminal-data', terminalHandler);
-  });
-});
-```
-
-**Test:**
-1. Open Terminals page, click "New Terminal", select the Coder role — verify a PTY session starts with the coder persona active.
-2. Ask the terminal "What's your role?" — verify Claude responds in character as the coder.
-3. Open a second terminal with the QA Reviewer role simultaneously — verify both run independently.
-4. Resize the browser window — verify the terminal reflows correctly.
-5. Create a custom role in Settings, then open a terminal with it — verify the custom persona is applied.
-6. Close a terminal — verify the PTY process is killed cleanly.
-
-This file is scaffolded into each target project when it's first registered (stored in `defaults/CLAUDE.md` in the app repo). It teaches Claude about the pipeline:
-
-```markdown
-# CLAUDE.md
-
-This project uses an automated pipeline managed by an external orchestrator.
-When you receive slash commands (/spec, /plan, /implement, /qa-review, /qa-fix, /merge),
-follow their instructions precisely and output structured files as specified.
-
-## Key Conventions
-- Specs live in `.teamai/{slug}/`
-- Each spec directory contains: spec.md, plan.json, qa_report.json
-- Implementation happens in git worktrees (you're already in one)
-- Commit messages follow Conventional Commits: feat(), fix(), chore()
-- Run tests after every change before committing
-- Match existing code style exactly
-
-## Memory
-Claude Code's Auto Memory is enabled for this project. Claude will automatically:
-- Save useful patterns, decisions, and lessons learned as it works.
-- Load relevant memories at the start of each session.
-- Consolidate and prune stale memories via Auto Dream.
-You can inspect memories at ~/.claude/projects/<project>/memory/ or run /memory in a session.
-```
-
+### ✅ Step 20: Agent Terminal Sessions
+`/terminals` page with interactive PTY sessions via `node-pty` + xterm.js. Role persona injected via `--append-system-prompt`. Multiple terminals open simultaneously with color-coded borders. Keyboard input and resize routed via WebSocket.
 ---
 
 ## 10. File Checklist
