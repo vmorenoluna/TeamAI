@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createTask, moveTask } from '@/app/actions/tasks';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
@@ -40,9 +40,32 @@ export function KanbanBoard({ tasks, interrupted }: Props) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [dragOverPhase, setDragOverPhase] = useState<string | null>(null);
-  usePhaseSync();
+
+  // Optimistic phase map — shows the card in the target column immediately after drop
+  const [optimisticPhases, setOptimisticPhases] = useState<Map<string, string>>(new Map());
+  const optimisticTimeoutRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  // Clear optimistic phase when WebSocket confirms the change
+  const clearOptimistic = useCallback((taskId: string) => {
+    setOptimisticPhases(prev => {
+      const next = new Map(prev);
+      next.delete(taskId);
+      return next;
+    });
+    const t = optimisticTimeoutRef.current.get(taskId);
+    if (t) { clearTimeout(t); optimisticTimeoutRef.current.delete(taskId); }
+  }, []);
+
+  usePhaseSync({
+    onPhaseChange: (taskId) => clearOptimistic(taskId),
+  });
 
   const interruptedMap = new Map(interrupted.map(t => [t.taskId, t]));
+
+  // Get the effective phase for a task, considering optimistic updates
+  const effectivePhase = useCallback((task: Task): string => {
+    return optimisticPhases.get(task.id) ?? task.phase;
+  }, [optimisticPhases]);
 
   function handleCreate(formData: FormData) {
     startTransition(async () => {
@@ -64,15 +87,35 @@ export function KanbanBoard({ tasks, interrupted }: Props) {
   function handleDrop(targetPhase: string) {
     if (!draggingTaskId) return;
     const task = tasks.find(t => t.id === draggingTaskId);
-    if (!task || normalizePhase(task.phase) === targetPhase) {
+    if (!task || normalizePhase(effectivePhase(task)) === targetPhase) {
       setDraggingTaskId(null);
       setDragOverPhase(null);
       return;
     }
+
+    // Optimistic UI: immediately show the card in the target column
+    setOptimisticPhases(prev => {
+      const next = new Map(prev);
+      next.set(draggingTaskId, targetPhase);
+      return next;
+    });
+
+    setDraggingTaskId(null);
+    setDragOverPhase(null);
+
+    // Clear optimistic phase after 10s if WebSocket hasn't confirmed
+    const existing = optimisticTimeoutRef.current.get(draggingTaskId);
+    if (existing) clearTimeout(existing);
+    optimisticTimeoutRef.current.set(draggingTaskId, setTimeout(() => {
+      setOptimisticPhases(prev => {
+        const next = new Map(prev);
+        next.delete(draggingTaskId);
+        return next;
+      });
+    }, 10000));
+
     startTransition(async () => {
       await moveTask(draggingTaskId, targetPhase);
-      setDraggingTaskId(null);
-      setDragOverPhase(null);
     });
   }
 
@@ -95,14 +138,16 @@ export function KanbanBoard({ tasks, interrupted }: Props) {
           <div className="flex-1 overflow-x-auto">
             <div className="flex gap-3 p-4 h-full" style={{ minWidth: 'max-content' }}>
               {COLUMNS.map(col => {
-                const colTasks = tasks.filter(t => normalizePhase(t.phase) === col.phase);
+                const colTasks = tasks.filter(t => normalizePhase(effectivePhase(t)) === col.phase);
                 const isDropTarget = draggingTaskId !== null && dragOverPhase === col.phase;
+                const isSameColumn = draggingTaskId !== null &&
+                  tasks.find(t => t.id === draggingTaskId && normalizePhase(effectivePhase(t)) === col.phase);
                 return (
                   <div
                     key={col.phase}
-                    className={`flex flex-col w-60 shrink-0 rounded-lg overflow-hidden transition-colors ${
-                      isDropTarget
-                        ? 'bg-blue-100 dark:bg-blue-900/40 ring-2 ring-blue-400'
+                    className={`flex flex-col w-60 shrink-0 rounded-lg overflow-hidden transition-all duration-150 ${
+                      isDropTarget && !isSameColumn
+                        ? 'bg-blue-100 dark:bg-blue-900/40 ring-2 ring-blue-400 scale-[1.02]'
                         : 'bg-slate-100 dark:bg-slate-800'
                     }`}
                     onDragOver={e => { e.preventDefault(); setDragOverPhase(col.phase); }}
@@ -113,7 +158,11 @@ export function KanbanBoard({ tasks, interrupted }: Props) {
                       <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                         {col.label}
                       </span>
-                      <span className="text-xs font-medium text-slate-400 bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded-full">
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full transition-colors ${
+                        isDropTarget && !isSameColumn
+                          ? 'bg-blue-200 dark:bg-blue-700 text-blue-700 dark:text-blue-200'
+                          : 'bg-slate-200 dark:bg-slate-700 text-slate-400'
+                      }`}>
                         {colTasks.length}
                       </span>
                     </div>
@@ -124,12 +173,16 @@ export function KanbanBoard({ tasks, interrupted }: Props) {
                           draggable
                           onDragStart={() => handleDragStart(task.id)}
                           onDragEnd={handleDragEnd}
-                          className={draggingTaskId === task.id ? 'opacity-40' : ''}
+                          className={`transition-opacity duration-150 ${
+                            draggingTaskId === task.id ? 'opacity-40 scale-95' : ''
+                          } ${optimisticPhases.has(task.id) ? 'animate-pulse' : ''}`}
+                          style={{ cursor: 'grab' }}
                         >
                           <TaskCard
                             task={task}
                             interrupted={interruptedMap.get(task.id)}
                             onSelect={setSelectedTaskId}
+                            isMoving={optimisticPhases.has(task.id)}
                           />
                         </div>
                       ))}

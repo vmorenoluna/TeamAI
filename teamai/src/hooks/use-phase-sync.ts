@@ -1,8 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
-export function usePhaseSync() {
+interface UsePhaseSyncOptions {
+  onPhaseChange?: (taskId: string, phase: string) => void;
+}
+
+export function usePhaseSync(opts?: UsePhaseSyncOptions) {
   const router = useRouter();
+  const onPhaseChangeRef = useRef(opts?.onPhaseChange);
+  onPhaseChangeRef.current = opts?.onPhaseChange;
 
   useEffect(() => {
     const ws = new WebSocket(`ws://${window.location.host}/ws`);
@@ -10,6 +16,7 @@ export function usePhaseSync() {
       try {
         const data = JSON.parse(msg.data);
         if (data.type === 'phase-change') {
+          onPhaseChangeRef.current?.(data.taskId, data.phase);
           router.refresh();
         }
       } catch {

@@ -61,7 +61,7 @@ The app has a two-column shell that fills the entire viewport:
 | `/insights` | Insights | Chat with Claude about the active codebase |
 | `/ideation` | Ideation | AI brainstorming for new tasks |
 | `/terminals` | Terminals | Interactive PTY Claude sessions pre-loaded with a role persona |
-| `/roadmap` | Roadmap | Roadmap view (placeholder, coming later) |
+| `/roadmap` | Roadmap | Two-tab view: Roadmap (phased AI-generated items) + Changelog (release notes from git history) |
 | `/settings` | Settings | Project configuration: container isolation, pipeline phases, providers, agent roles |
 
 ---
@@ -100,13 +100,39 @@ Each column has:
 │  Task title text            [▶]  │  ← play button (only if interrupted)
 │  Description preview…  more      │  ← truncated at 80 chars; "more/less" toggle
 │  [PHASE badge]       4d ago      │
+│  ● moving                        │  ← blue pulsing dot (only during drag transition)
 └──────────────────────────────────┘
 ```
 
 - **Play button** `▶`: green circle overlay, top-right corner. Only shown on tasks that were interrupted mid-pipeline (process crashed / app restarted). Clicking resumes the pipeline immediately without opening the panel.
 - **Phase badge**: color-coded pill per phase (blue=spec, indigo=plan, amber=implement, orange=qa, purple=awaiting-review, teal=merge, red=failed, green=done)
 - **Timestamp**: relative time since creation ("just now", "4m ago", "2h ago", "3d ago")
+- **Moving indicator**: blue pulsing dot + "moving" label appears on the card after a drag-and-drop until the WebSocket confirms the phase change. Card shows `pointer-events-none` and reduced opacity during transition.
 - **Clicking the card body** opens the Task Detail Panel
+
+### Drag-and-Drop
+
+Tasks can be dragged from any column to any other column. On drop, the orchestrator determines the correct pipeline starting phase based on existing artifacts:
+
+| Drop target | Prerequisites checked | Behavior |
+|---|---|---|
+| Backlog / Review / Failed / Done | None | Phase updates immediately; no pipeline spawned |
+| Spec | None | Clears stale spec.md; runs spec from scratch |
+| Planning | spec.md exists? | Runs Planning if spec exists, else starts from Spec |
+| In Progress | plan.json exists? | Runs Implement if plan exists, else starts from Plan (or Spec) |
+| QA | plan.json exists? | Clears QA artifacts; runs Implement if plan exists, else falls back |
+| Merging | worktree + branch exist? | Merges if both exist; falls back to Implement → Plan → Spec as needed |
+
+**Pipeline cancellation**: If a task is already mid-pipeline when dropped again, the running session is killed before starting the new one — no duplicate agents.
+
+**Optimistic UI**: The card immediately appears in the target column on drop. A 10-second safety timeout clears the optimistic placement if the WebSocket confirmation never arrives. When the server confirms via WebSocket `phase-change`, the card transitions from optimistic to confirmed (pulse animation stops, moving indicator disappears).
+
+**Visual feedback during drag**:
+- **Dragged card**: `opacity-40` + `scale-95` — visually lifts out of the source column
+- **Valid drop target column**: blue background glow (`ring-2 ring-blue-400`) + slight scale up (`scale-[1.02]`), count badge turns blue — only if the target is a different column
+- **Same column**: no glow effect (drop to same column is a no-op)
+- **Moving card**: `animate-pulse` on the card wrapper + blue pulsing dot + "moving" label until WebSocket confirms
+- **Cursor**: `cursor: grab` on all draggable cards
 
 ---
 
@@ -281,9 +307,205 @@ Dark mode: `bg-slate-50 dark:bg-slate-950` on root content area; terminal panels
 
 ## 5d. Roadmap Page (`/roadmap`)
 
-Placeholder page. Shows "Coming in a later step." White/dark background matching the app theme. Will show pipeline roadmap when implemented.
+Two-tab layout: **Roadmap** and **Changelog**.
 
-Dark mode: `bg-white dark:bg-slate-900`.
+Dark mode: `bg-white dark:bg-slate-900` on page root; card areas use `bg-slate-50 dark:bg-slate-900` with border.
+
+Spec: `.teamai/roadmap-changelog/spec.md`
+
+### Page Header
+```
+┌──────────────────────────────────────────────────────────┐
+│  Roadmap  │  Changelog                                   │
+│  ─────────────────────────────────────────────────────── │
+│  [tab content area]                                      │
+└──────────────────────────────────────────────────────────┘
+```
+
+No active project → both tabs show: "Select or add a project from the sidebar to get started."
+
+---
+
+### Roadmap Tab
+
+#### Controls bar (top)
+```
+☐ Skip competitor research        [Generate Roadmap ▶]
+
+History: [Select a previous run ▾]
+```
+- **Skip competitor research** checkbox: when checked, appends `--skip-competitors` to the `/roadmap` command sent to the agent.
+- **"Generate Roadmap"** button: dark pill (same style as "Run Scan" in Ideation). While running, shows "Generating…" (disabled). Returns to "Generate Roadmap" after completion.
+- **History dropdown**: populated by `getRoadmapReports()` — lists `roadmap-{date}.json` files newest-first. Selecting one calls `getRoadmapReport(filename)` and renders that report without spawning a new session.
+
+#### Empty state (no report generated)
+```
+No roadmap generated yet. Click 'Generate Roadmap' to start.
+```
+
+#### Streaming output (while agent is running)
+Scrollable pre-formatted block identical to IdeationScanner — latest text from `event.type === 'assistant'` messages via `useSessionStream`:
+```
+┌─────────────────────────────────────────────────────────┐
+│ Phase 1: Codebase Audit...                              │
+│ Reading README.md...                                     │
+│ Running ideation scan...                                 │
+│  ...                                                     │
+└─────────────────────────────────────────────────────────┘
+```
+Monospace font, `text-xs`, `bg-slate-50 dark:bg-slate-900`, `border border-slate-200 dark:border-slate-700`.
+
+#### Phased card view (after completion or on mount)
+Triggered by `result` event after generation, or **auto-loaded on page mount** if `roadmap-{date}.json` files already exist in `.teamai/roadmap/` — the most recent one is loaded automatically without running the agent. If a generation is still in-flight (session ID persisted in `sessionStorage`), the component reconnects to the active session and resumes streaming output.
+
+**Executive summary** paragraph rendered above the four phase sections (sourced from `RoadmapReport.executive_summary`).
+
+Four sections rendered top-to-bottom (each collapsible; section header shows item count):
+
+```
+── Phase 1 — Now ──────────────────────────── (N items) ──
+  ┌──────────────────────────────────────────────────────┐
+  │  [P0]  Title of item                    [Critical Fix]│
+  │  Complexity: ●●●○○  (3/5)                            │
+  │  Description text here (2-3 sentences)               │
+  │  Source: ideation                                    │
+  └──────────────────────────────────────────────────────┘
+  ...
+
+── Phase 2 — Next ─────────────────────────── (N items) ──
+── Phase 3 — Later ────────────────────────── (N items) ──
+── Icebox ─────────────────────────────────── (N items) ──
+```
+
+**Roadmap item card fields:**
+- Priority badge: `P0` (red), `P1` (orange), `P2` (amber), `P3` (gray) — consistent light/dark
+- Title (bold, `text-sm`)
+- Category label (right-aligned, `text-xs`, slate)
+- Complexity: 5 filled/empty dots (● = filled, ○ = empty) matching the numeric value
+- Description (`text-xs text-slate-600 dark:text-slate-400`)
+- Source: "ideation" | "competitor-analysis" (`text-xs italic`)
+- Competitive context (if present): italic note below source
+
+---
+
+### Changelog Tab
+
+#### Controls bar
+```
+[Generate Changelog ▶]
+
+Previous changelogs: [Select ▾]
+```
+- **"Generate Changelog"** button: same dark-pill style. Shows "Generating…" while running.
+- **Previous changelogs** dropdown: populated by `getChangelogReports()` — lists `changelog-{date}.md` files newest-first. Selecting one loads that file via `getLatestChangelog(filename)` without re-running.
+
+#### Streaming output (while running)
+Same scrollable pre-formatted block as Roadmap tab.
+
+#### Changelog result (after completion)
+The agent writes `changelog-{date}.md` to `.teamai/roadmap/`. The UI reads it on `result` event and renders it inside a `<pre className="whitespace-pre-wrap font-mono text-xs">` block. (`@tailwindcss/typography` is not installed; use `<pre>` rather than `prose` classes.)
+
+```
+┌────────────────────────────────────────────────────────┐
+│ ## [Unreleased] — 2026-05-01                           │
+│                                                        │
+│ ### Added                                              │
+│ - feat(roadmap): implement roadmap and changelog page  │
+│ - feat(insights): streaming chat with codebase         │
+│                                                        │
+│ ### Fixed                                              │
+│ - fix(qa): handle empty QA report gracefully           │
+└────────────────────────────────────────────────────────┘
+```
+
+The most recent changelog is **auto-loaded on page mount** (no agent needed) if a file already exists. Changelog generation sessions also persist their session ID in `sessionStorage` so a mid-run changelog can be reconnected if the user navigates away and returns.
+
+#### Empty state (no changelog generated)
+```
+No changelog generated yet. Click 'Generate Changelog' to start.
+```
+
+---
+
+### Server Actions (`src/app/actions/roadmap.ts`)
+
+| Action | Returns | Description |
+|---|---|---|
+| `startRoadmapGeneration(skipCompetitors)` | `Promise<string>` | Spawns session, sends `/roadmap [--skip-competitors]`; stores session ID in `global.__roadmapSessions` under key `roadmap::<projectPath>` |
+| `startChangelogGeneration()` | `Promise<string>` | Spawns session, sends `/changelog`; stores session ID under key `changelog::<projectPath>` |
+| `getRoadmapReports()` | `Promise<{filename,date}[]>` | Lists `roadmap-*.json` newest-first |
+| `getRoadmapReport(filename)` | `Promise<RoadmapReport>` | Reads + normalizes JSON; validates filename against `/^roadmap-\d{4}-\d{2}-\d{2}\.json$/`; throws `"Malformed roadmap JSON: ${filename}"` if JSON is invalid |
+| `getChangelogReports()` | `Promise<{filename,date}[]>` | Lists `changelog-*.md` newest-first |
+| `getLatestChangelog(filename)` | `Promise<string>` | Reads raw markdown; validates filename against `/^changelog-\d{4}-\d{2}-\d{2}\.md$/` |
+| `getActiveRoadmapSession(type)` | `Promise<string \| null>` | Looks up `global.__roadmapSessions` for `${type}::<projectPath>`; returns session ID if `processManager.getSession(id)?.status === 'running'`, otherwise `null`. Used for reconnect on page mount. |
+
+All filename-accepting actions validate against strict regex before filesystem access (path traversal prevention).
+
+Session globals follow the `global.__roadmapSessions` pattern used by ideation and insights.
+
+### Type Definitions (exported from `src/app/actions/roadmap.ts`)
+
+```typescript
+export interface RoadmapItem {
+  title: string;
+  priority: 'P0' | 'P1' | 'P2' | 'P3';
+  complexity: 1 | 2 | 3 | 4 | 5;
+  category: 'Critical Fix' | 'Security' | 'Performance' | 'DX' | 'New Feature' | 'Competitive Response' | 'Infrastructure';
+  description: string;
+  affected_files: string[];
+  source: 'ideation' | 'competitor-analysis';
+  competitive_context?: string;
+}
+
+export interface RoadmapReport {
+  generated_at: string;          // ISO 8601
+  executive_summary: string;
+  competitor_analysis_run: boolean;
+  phases: {
+    now: RoadmapItem[];          // Phase 1: P0 + quick P1 (complexity ≤ 2)
+    next: RoadmapItem[];         // Phase 2: remaining P1 + high-impact P2
+    later: RoadmapItem[];        // Phase 3: P2 + P3
+    icebox: RoadmapItem[];
+  };
+}
+```
+
+`getRoadmapReport` normalizes two fallback shapes: flat `{ items: RoadmapItem[] }` (partition by priority/complexity rules) and `{ items: (RoadmapItem & { phase })[] }` (group by item.phase).
+
+**Known gaps (command files — both must be fixed as part of this feature):**
+- `defaults/commands/roadmap.md` §3b is missing the `category` field and has typo "pority" → "priority". Without the fix, agents will not emit `category` and card category labels will be blank. Already-scaffolded projects need their `.claude/commands/roadmap.md` updated manually.
+- `defaults/commands/changelog.md` has typo "changog" and lacks a file-write step. Without the fix, changelog output is only printed to stdout and the UI's auto-load on mount will find no files. Already-scaffolded projects need their `.claude/commands/changelog.md` updated manually.
+
+### Components
+- `src/app/roadmap/page.tsx` — replaces placeholder; thin wrapper around `RoadmapView`
+- `src/components/roadmap-view.tsx` — `'use client'` — tabs, generate buttons, streaming block, phased card view, history selectors, markdown rendering
+
+---
+
+### User Journey — Generating a Roadmap
+
+1. Navigate to **Roadmap** (`◉` in sidebar)
+2. Optionally check **"Skip competitor research"**
+3. Click **"Generate Roadmap"**
+4. Button shows "Generating…"; streaming output block appears with live agent text
+5. Agent finishes (may take several minutes for full competitor analysis)
+6. Phased card view renders automatically; executive summary appears above Phase 1
+7. History dropdown adds today's date as the latest option
+
+### User Journey — Viewing Past Roadmaps
+
+1. Navigate to **Roadmap**
+2. Open the **History** dropdown
+3. Select a previous date
+4. Phased card view updates to show that run's items (no agent spawned)
+
+### User Journey — Generating a Changelog
+
+1. Navigate to **Roadmap**, click **Changelog** tab
+2. Click **"Generate Changelog"**
+3. Agent runs `git log` and streams release notes to stdout and writes `changelog-{date}.md`
+4. On `result` event, markdown is rendered in the result area
+5. Previous changelogs dropdown adds today's entry
 
 ---
 
@@ -512,6 +734,7 @@ Four sections, rendered top-to-bottom:
 | RateLimitBanner | Overview tab (when rate limited) | Amber warning with retry time |
 | TerminalPane | Terminal tab | xterm.js terminal with event replay |
 | ContainerConfigEditor | Settings — Container Isolation | Toggle + live status badge (stopped/starting/running/restarting) |
+| RoadmapView | `/roadmap` | Tabbed roadmap+changelog page: generate buttons, streaming output, phased card view, history selectors |
 
 ---
 
@@ -535,7 +758,8 @@ Four sections, rendered top-to-bottom:
 
 - **Split view**: clicking a card → 55/45 kanban+panel; clicking `×` → back to full-width kanban
 - **Live updates**: WebSocket pushes phase-change events → cards move between columns in real time without page reload
-- **Optimistic UI**: task creation shows "Creating…" spinner; board refreshes after server confirms
+- **Optimistic UI**: task creation shows "Creating…" spinner; board refreshes after server confirms. Drag-and-drop shows card in target column immediately, confirmed by WebSocket phase-change event with 10-second safety timeout
+- **Drag-and-drop**: cards are draggable between all columns; drop triggers smart pipeline resumption (skips completed phases, kills running sessions before restarting); valid drop targets glow blue with scale animation; dragged cards show reduced opacity + scale-95; moving cards show blue pulsing dot + "moving" label + animate-pulse until WebSocket confirms
 - **Persistent sidebar**: sidebar state (collapsed/expanded, active project) survives navigation between routes
 - **Tab badges**: Spec and QA tabs show a numeric badge when content exists (e.g. "Spec 1", "QA 1")
 - **Breadcrumb**: "← Board" link in panel header navigates back to `/` (for future deep-link support)
