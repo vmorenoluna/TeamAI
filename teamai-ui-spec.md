@@ -472,9 +472,13 @@ export interface RoadmapReport {
 
 `getRoadmapReport` normalizes two fallback shapes: flat `{ items: RoadmapItem[] }` (partition by priority/complexity rules) and `{ items: (RoadmapItem & { phase })[] }` (group by item.phase).
 
-**Known gaps (command files — both must be fixed as part of this feature):**
-- `defaults/commands/roadmap.md` §3b is missing the `category` field and has typo "pority" → "priority". Without the fix, agents will not emit `category` and card category labels will be blank. Already-scaffolded projects need their `.claude/commands/roadmap.md` updated manually.
-- `defaults/commands/changelog.md` has typo "changog" and lacks a file-write step. Without the fix, changelog output is only printed to stdout and the UI's auto-load on mount will find no files. Already-scaffolded projects need their `.claude/commands/changelog.md` updated manually.
+**Note:** The following command file issues were fixed (both in `defaults/commands/` for fresh scaffolding and in `.claude/commands/` for this project):
+- `defaults/commands/roadmap.md` §3b — `category` field added, "pority" → "priority"
+- `defaults/commands/changelog.md` — "changog" → "changelog", file-write step added
+- `defaults/commands/implement.md` — "indentunation" → "indentation"
+- `.claude/commands/roadmap.md` — "pority" → "Priority", "ideintation" → "ideation", "we don' much" → "we don't have"
+- `.claude/commands/changelog.md` — "changog" → "changelog"
+- `.claude/commands/implement.md` — "indentunation" → "indentation"
 
 ### Components
 - `src/app/roadmap/page.tsx` — replaces placeholder; thin wrapper around `RoadmapView`
