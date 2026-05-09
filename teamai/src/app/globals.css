@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
+
+/* Enable class-based dark mode in Tailwind 4 — @variant overrides the built-in dark variant */
+@variant dark (&:where(.dark, .dark *));
 
 :root {
   --background: #ffffff;

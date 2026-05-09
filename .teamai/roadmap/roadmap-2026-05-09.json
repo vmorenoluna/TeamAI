@@ -1,0 +1,257 @@
+{
+  "generated_at": "2026-05-09T00:00:00.000Z",
+  "executive_summary": "TeamAI is a self-hosted Next.js web application that orchestrates multi-agent Claude Code CLI workflows — replacing what would otherwise be manual, single-agent Claude sessions with a browser-based pipeline manager. The product is in early-stage development (v0.1.0) with a functioning core: Kanban board with drag-and-drop, WebSocket-based live streaming, 9-column pipeline (spec → plan → implement → QA → review → merge), devcontainer isolation, and PTY terminal sessions. The immediate priorities are hardening the pipeline against failures (P0), closing competitive feature gaps around multi-LLM support and autonomous execution (P1), and building the foundations for production readiness — test coverage, collaboration, and CI/CD integration (P2). The product is uniquely positioned as a self-hosted, private alternative to cloud-based AI coding agents like Devin, appealing to teams that value data sovereignty and customizable agent personas.",
+  "competitor_analysis_run": true,
+  "phases": {
+    "now": [
+      {
+        "title": "Pipeline crash recovery — auto-detect stale sessions and orphaned worktrees",
+        "priority": "P0",
+        "complexity": 2,
+        "category": "Critical Fix",
+        "description": "When the server crashes or restarts mid-pipeline, stale session references and orphaned git worktrees can persist, causing errors on the next pipeline run. Implement startup recovery that scans for and cleans up stale sessions and worktrees.",
+        "affected_files": ["src/lib/orchestrator.ts", "src/lib/process-manager.ts", "src/lib/recovery.ts", "src/app/actions/recovery.ts"],
+        "source": "ideation"
+      },
+      {
+        "title": "Add TypeScript typecheck and lint to pre-commit hooks",
+        "priority": "P0",
+        "complexity": 2,
+        "category": "DX",
+        "description": "No automated quality gates exist before commits. Add husky + lint-staged to run tsc --noEmit and eslint on staged files before every commit, preventing broken code from entering the repository.",
+        "affected_files": ["package.json", ".husky/pre-commit"],
+        "source": "ideation"
+      },
+      {
+        "title": "Prevent concurrent edits to same task — add phase-lock per task",
+        "priority": "P0",
+        "complexity": 3,
+        "category": "Critical Fix",
+        "description": "If two pipeline runs or drag-and-drop events target the same task simultaneously, they can create duplicate subprocesses or corrupt the task's state directory. Implement an in-memory lock per task that prevents concurrent pipeline execution.",
+        "affected_files": ["src/lib/orchestrator.ts", "src/app/actions/tasks.ts"],
+        "source": "ideation"
+      },
+      {
+        "title": "Fix terminal feature — wire up xterm.js PTY sessions properly",
+        "priority": "P0",
+        "complexity": 3,
+        "category": "Critical Fix",
+        "description": "xterm.js and node-pty are installed and the ProcessManager has terminal session support, but the Terminals page and TerminalPanel component are described as incomplete. Wire up the existing PTY infrastructure to the UI so users can open interactive Claude sessions from the Terminals page.",
+        "affected_files": ["src/components/terminal-panel.tsx", "src/components/terminals-view.tsx", "src/app/terminals/page.tsx", "src/app/actions/terminals.ts"],
+        "source": "ideation"
+      },
+      {
+        "title": "Multi-LLM provider support — add OpenAI, Gemini, and local (Ollama) backends",
+        "priority": "P1",
+        "complexity": 4,
+        "category": "Competitive Response",
+        "description": "TeamAI currently only supports Claude via Anthropic, Bedrock, and Vertex. Every major competitor (Devin, CrewAI, OpenHands, Copilot Workspace) supports multiple LLM providers. Add provider adapters for OpenAI, Google Gemini, and local models via Ollama so users aren't locked into a single AI vendor.",
+        "affected_files": ["src/lib/providers.ts", "src/lib/process-manager.ts", "defaults/providers.json", "src/app/actions/providers.ts", "src/components/provider-config.tsx"],
+        "source": "competitor-analysis",
+        "competitive_context": "Devin supports Claude + GPT + custom models. CrewAI supports any LLM via LangChain. OpenHands supports multiple backends. Copilot Workspace uses GPT-4 + Copilot model."
+      },
+      {
+        "title": "Write project README with setup, architecture, and contributor guide",
+        "priority": "P1",
+        "complexity": 1,
+        "category": "DX",
+        "description": "The current README.md is the stock Next.js template with no TeamAI-specific content. Replace it with a comprehensive guide covering: project overview, setup instructions, architecture diagram, configuration reference, and contribution guidelines.",
+        "affected_files": ["teamai/README.md"],
+        "source": "ideation"
+      }
+    ],
+    "next": [
+      {
+        "title": "Autonomous mode — allow tasks to auto-advance through all phases without manual drops",
+        "priority": "P1",
+        "complexity": 4,
+        "category": "New Feature",
+        "description": "Currently each pipeline phase transition requires human action (drag-and-drop or play button). Add an 'Auto' toggle per task or per project that enables the orchestrator to chain all phases automatically: spec → plan → implement → QA → await review (pause) → merge/PR. This matches Devin's core autonomous workflow.",
+        "affected_files": ["src/lib/orchestrator.ts", "src/components/kanban-board.tsx", "src/components/task-card.tsx", "src/app/actions/tasks.ts"],
+        "source": "competitor-analysis",
+        "competitive_context": "Devin's primary differentiator is fully autonomous execution from prompt to deployed code. Copilot Workspace also auto-advances from spec to PR."
+      },
+      {
+        "title": "Sandbox execution by default — always run agents in isolated environment",
+        "priority": "P1",
+        "complexity": 4,
+        "category": "Security",
+        "description": "Container isolation via devcontainer is optional and off by default. Make agent sandboxing the default behavior: auto-create a lightweight Docker container per project (or use the existing devcontainer) and run all agent sessions inside it. This prevents agents from accidentally modifying host files outside the project.",
+        "affected_files": ["src/lib/container-manager.ts", "src/lib/orchestrator.ts", "src/lib/process-manager.ts", "src/components/container-config.tsx"],
+        "source": "competitor-analysis",
+        "competitive_context": "OpenHands runs all agents in Docker sandboxes by default. Devin has managed sandboxes. TeamAI's current opt-in devcontainer is a weaker security posture."
+      },
+      {
+        "title": "Comprehensive test suite — unit, integration, and E2E tests",
+        "priority": "P1",
+        "complexity": 4,
+        "category": "DX",
+        "description": "The project has zero test coverage. Add Vitest for unit/integration tests covering the ProcessManager, Orchestrator, and TaskStore. Add Playwright E2E tests for the Kanban board, task creation, drag-and-drop, and settings pages. This is a prerequisite for confident development of any other feature.",
+        "affected_files": ["package.json", "vitest.config.ts", "src/**/*.test.ts", "e2e/**/*.spec.ts"],
+        "source": "ideation"
+      },
+      {
+        "title": "GitLab + Bitbucket integration — extend beyond GitHub-only PR creation",
+        "priority": "P1",
+        "complexity": 4,
+        "category": "New Feature",
+        "description": "The merge/create-pr phase only supports GitHub. Add GitLab merge request and Bitbucket pull request creation so TeamAI can be used with any major Git hosting platform. This directly capitalizes on a gap Copilot Workspace cannot fill.",
+        "affected_files": ["src/lib/orchestrator.ts", "src/app/actions/tasks.ts", "src/components/review-panel.tsx"],
+        "source": "competitor-analysis",
+        "competitive_context": "Copilot Workspace is GitHub-only. This is the single biggest market gap — teams on GitLab/Bitbucket have no spec-driven AI PR tool."
+      },
+      {
+        "title": "Browser testing in QA phase — integrate Playwright MCP into the qa-review step",
+        "priority": "P1",
+        "complexity": 3,
+        "category": "New Feature",
+        "description": "Playwright MCP is already installed and configured (.mcp.json). Add a browser testing step to the QA review phase: the qa-reviewer agent uses Playwright MCP to open the app, run through acceptance criteria, and report visual/functional issues in the QA report.",
+        "affected_files": ["defaults/commands/qa-review.md", "defaults/roles/qa-reviewer.md", "src/lib/orchestrator.ts"],
+        "source": "competitor-analysis",
+        "competitive_context": "Devin has integrated Playwright testing. TeamAI already has the MCP server configured — it just needs pipeline integration."
+      },
+      {
+        "title": "Database persistence layer — SQLite or Postgres for task state",
+        "priority": "P2",
+        "complexity": 4,
+        "category": "Infrastructure",
+        "description": "Task state is currently stored as JSON files on disk. This works for single-user local use but won't scale to multi-user, concurrent access, or large task volumes. Add an optional database backend (SQLite for simplicity, Postgres for scale) with the same TaskStore interface.",
+        "affected_files": ["src/lib/task-store.ts", "package.json"],
+        "source": "ideation"
+      },
+      {
+        "title": "Task search, filter, and sort on the Kanban board",
+        "priority": "P2",
+        "complexity": 2,
+        "category": "DX",
+        "description": "As the number of tasks grows, finding specific cards becomes difficult. Add a search bar above the board that filters cards by title/description, and dropdowns to filter by phase, priority, or date range.",
+        "affected_files": ["src/components/kanban-board.tsx", "src/app/page.tsx"],
+        "source": "ideation"
+      }
+    ],
+    "later": [
+      {
+        "title": "CI/CD integration — trigger pipelines from GitHub/GitLab webhooks",
+        "priority": "P2",
+        "complexity": 3,
+        "category": "New Feature",
+        "description": "Allow TeamAI pipelines to be triggered automatically by webhook events: new issue → spec, new PR → QA review, push to main → changelog generation. Add a webhook endpoint and per-project webhook configuration.",
+        "affected_files": ["server.ts", "src/lib/orchestrator.ts", "src/app/actions/pipeline.ts"],
+        "source": "ideation"
+      },
+      {
+        "title": "Notification system — desktop and webhook notifications for phase transitions",
+        "priority": "P2",
+        "complexity": 2,
+        "category": "New Feature",
+        "description": "Users currently have to watch the board to know when a phase completes. Add browser notifications (via Notification API) when a task reaches 'awaiting-review', and webhook notifications (Slack, Discord, custom) for pipeline events.",
+        "affected_files": ["src/hooks/use-phase-sync.ts", "src/components/kanban-board.tsx", "src/app/actions/pipeline.ts"],
+        "source": "ideation"
+      },
+      {
+        "title": "Multi-user collaboration — shared projects, task assignment, activity feed",
+        "priority": "P2",
+        "complexity": 5,
+        "category": "New Feature",
+        "description": "TeamAI is single-user local-only. Add authentication (OAuth or simple token), user management, shared project access, task assignment, and an activity feed showing who did what. This is the biggest feature jump — requires auth, database, and real-time sync.",
+        "affected_files": ["src/lib/task-store.ts", "src/app/actions/projects.ts", "src/components/sidebar.tsx", "server.ts"],
+        "source": "competitor-analysis",
+        "competitive_context": "Devin and Copilot Workspace both have team collaboration. OpenHands and CrewAI are single-user."
+      },
+      {
+        "title": "Analytics dashboard — pipeline success rates, agent costs, throughput metrics",
+        "priority": "P2",
+        "complexity": 3,
+        "category": "New Feature",
+        "description": "Add an analytics page or dashboard cards showing: pipeline success/failure rates per phase, average time per phase, total Claude API costs, tasks completed per week, and QA pass rates. This helps teams measure the ROI of their AI pipeline.",
+        "affected_files": ["src/app/insights/page.tsx", "src/components/insights-chat.tsx", "src/app/actions/insights.ts"],
+        "source": "competitor-analysis",
+        "competitive_context": "Devin shows productivity metrics and cost tracking in their dashboard."
+      },
+      {
+        "title": "VS Code / JetBrains extension — trigger and monitor pipelines from IDE",
+        "priority": "P2",
+        "complexity": 4,
+        "category": "New Feature",
+        "description": "Create IDE extensions that let developers create tasks, view pipeline status, and review agent output without leaving their editor. The extension communicates with the TeamAI server via its existing REST API and WebSocket.",
+        "affected_files": ["New: vscode-extension/", "New: jetbrains-plugin/"],
+        "source": "competitor-analysis",
+        "competitive_context": "Devin, Cursor, and Copilot all have IDE integrations. This is table-stakes for developer tooling."
+      },
+      {
+        "title": "Bulk task operations — select multiple cards, move/delete/archive in batch",
+        "priority": "P3",
+        "complexity": 2,
+        "category": "DX",
+        "description": "Add multi-select to the Kanban board (shift+click, ctrl+click) with bulk actions: move selected to phase X, delete selected, archive selected. This is a quality-of-life improvement for managing many tasks.",
+        "affected_files": ["src/components/kanban-board.tsx", "src/components/task-card.tsx", "src/app/actions/tasks.ts"],
+        "source": "ideation"
+      },
+      {
+        "title": "Task templates — pre-defined task types with default descriptions and agent assignments",
+        "priority": "P3",
+        "complexity": 2,
+        "category": "DX",
+        "description": "Allow users to save and reuse task templates: 'Bug Fix', 'Feature Request', 'Refactor', 'Documentation Update' — each with a default description structure, suggested agent role, and reference image placeholder.",
+        "affected_files": ["src/components/kanban-board.tsx", "src/lib/task-store.ts", "src/app/actions/tasks.ts"],
+        "source": "ideation"
+      }
+    ],
+    "icebox": [
+      {
+        "title": "Keyboard shortcuts — navigate board, open panels, move cards via keyboard",
+        "priority": "P3",
+        "complexity": 2,
+        "category": "DX",
+        "description": "Add keyboard navigation to the Kanban board: arrow keys to move between cards, Enter to open panel, Shift+1-9 to move card to phase column, Escape to close panel/modal. Display a '?' shortcut reference overlay.",
+        "affected_files": ["src/components/kanban-board.tsx", "src/components/task-card.tsx"],
+        "source": "ideation"
+      },
+      {
+        "title": "Undo/redo for task moves and phase transitions",
+        "priority": "P3",
+        "complexity": 3,
+        "category": "DX",
+        "description": "Implement an undo/redo stack for task operations (move, phase change, delete) so users can recover from accidental drag-and-drop actions. Show a subtle toast notification with 'Undo' button after each action.",
+        "affected_files": ["src/components/kanban-board.tsx", "src/lib/task-store.ts"],
+        "source": "ideation"
+      },
+      {
+        "title": "Mobile-responsive layout — adaptive board for tablet and phone",
+        "priority": "P3",
+        "complexity": 4,
+        "category": "DX",
+        "description": "The Kanban board assumes desktop-width viewport. Add responsive breakpoints: tablet shows 3 columns with horizontal scroll, phone shows single-column list view with phase filter.",
+        "affected_files": ["src/components/kanban-board.tsx", "src/components/sidebar.tsx", "src/app/layout.tsx", "src/app/globals.css"],
+        "source": "ideation"
+      },
+      {
+        "title": "Export/import — migrate tasks and pipeline configs between TeamAI instances",
+        "priority": "P3",
+        "complexity": 2,
+        "category": "Infrastructure",
+        "description": "Add an export button that packages a project's .teamai/ state (tasks, configs, specs) into a portable archive. Add an import button that merges or replaces state from an export file. Useful for migrating between machines.",
+        "affected_files": ["src/app/actions/projects.ts", "src/app/settings/page.tsx"],
+        "source": "ideation"
+      },
+      {
+        "title": "Dark mode schedule — auto-switch based on system preference or time of day",
+        "priority": "P3",
+        "complexity": 1,
+        "category": "DX",
+        "description": "Currently dark mode is a manual toggle persisted to localStorage. Add an 'Auto' option that follows the system prefers-color-scheme media query, and optionally a schedule (e.g., dark mode from 7pm to 7am).",
+        "affected_files": ["src/components/dark-mode-toggle.tsx"],
+        "source": "ideation"
+      },
+      {
+        "title": "Agent persona marketplace — share and import custom role/command templates",
+        "priority": "P3",
+        "complexity": 3,
+        "category": "New Feature",
+        "description": "Allow users to export their custom agent roles and commands as shareable templates, and import templates from a community repository. This would let the community build specialized agents (e.g., 'Rust Reviewer', 'Accessibility Auditor', 'Database Optimizer').",
+        "affected_files": ["src/app/actions/roles.ts", "src/components/role-editor.tsx", "src/app/settings/page.tsx"],
+        "source": "ideation"
+      }
+    ]
+  }
+}
