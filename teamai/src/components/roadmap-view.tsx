@@ -10,6 +10,7 @@ import {
   getLatestChangelog,
   getActiveRoadmapSession,
   convertToTask,
+  clearLinkedTaskId,
   deleteRoadmapItem,
   getLinkedTaskStatuses,
   type RoadmapItem,
@@ -869,13 +870,15 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
               onError={(errorMsg) => {
                 // Only handle "not found" errors - other errors (network, etc.) should not redirect
                 if (!errorMsg.includes('not found')) return;
-                // Task was deleted - find the corresponding roadmap item and show its detail
+                // Task was deleted - auto-clear the stale linkedTaskId and show roadmap item detail
                 setSelectedTaskId(null);
                 if (rmReport && rmFilename) {
                   for (const phaseKey of ['now', 'next', 'later', 'icebox'] as const) {
                     const items = rmReport.phases[phaseKey];
                     const idx = items.findIndex(item => item.linkedTaskId === selectedTaskId);
                     if (idx !== -1) {
+                      // Clear the stale link automatically
+                      clearLinkedTaskId(rmFilename, idx, phaseKey);
                       setSelectedRoadmapItem({
                         item: items[idx],
                         phaseKey,
