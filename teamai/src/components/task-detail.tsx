@@ -279,6 +279,23 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
           </p>
         )}
 
+        {/* Source info (for tasks converted from roadmap) */}
+        {task.source && (
+          <div className="mb-3 flex items-center gap-3 text-xs">
+            <span className="text-slate-500">Source:</span>
+            <span className={`px-2 py-0.5 rounded font-medium ${
+              task.source === 'competitor-analysis'
+                ? 'bg-amber-900/30 text-amber-400'
+                : 'bg-blue-900/30 text-blue-400'
+            }`}>
+              {task.source === 'competitor-analysis' ? 'Competitor Analysis' : 'Ideation'}
+            </span>
+            {task.competitiveContext && (
+              <span className="text-amber-400 italic">{task.competitiveContext}</span>
+            )}
+          </div>
+        )}
+
         {/* Rate-limit banner */}
         {!readonly && task.rateLimitedUntil && (
           <div className="mt-2 mb-1 flex items-center gap-2 text-xs bg-amber-950/30 border border-amber-800/50 text-amber-300 rounded-md px-3 py-1.5">
