@@ -45,16 +45,16 @@ export function IdeationScanner() {
         <button
           onClick={handleScan}
           disabled={isPending || (running && !done)}
-          className="px-4 py-2 text-sm font-medium bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-md hover:bg-slate-700 disabled:opacity-40 transition-colors"
+          className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
         >
           {running && !done ? 'Scanning…' : 'Run Scan'}
         </button>
-        {done && <span className="text-xs text-green-600 dark:text-green-400">Scan complete</span>}
+        {done && <span className="text-xs text-green-400">Scan complete</span>}
       </div>
 
       {latestText && (
-        <div className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
-          <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+        <div className="flex-1 overflow-y-auto bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4">
+          <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
             {latestText}
           </pre>
         </div>

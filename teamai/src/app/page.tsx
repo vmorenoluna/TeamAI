@@ -9,7 +9,7 @@ export default async function Home() {
 
   if (!activeProject) {
     return (
-      <div className="flex flex-1 items-center justify-center text-slate-500 dark:text-slate-400">
+      <div className="flex flex-1 items-center justify-center text-slate-400">
         <p className="text-sm">Select or add a project from the sidebar to get started.</p>
       </div>
     );

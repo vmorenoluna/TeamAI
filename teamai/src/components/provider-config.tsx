@@ -21,18 +21,18 @@ function ModelRow({
   onProvider: (v: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-3 py-2 border-b border-slate-100 dark:border-slate-800 last:border-0">
-      <span className="w-28 text-sm text-slate-600 dark:text-slate-400 shrink-0 capitalize">{label}</span>
+    <div className="flex items-center gap-3 py-2 border-b border-[#1e293b] last:border-0">
+      <span className="w-28 text-sm text-slate-400 shrink-0 capitalize">{label}</span>
       <input
         value={model}
         onChange={e => onModel(e.target.value)}
         placeholder="claude-sonnet-4-6"
-        className="flex-1 px-2 py-1 text-xs border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-slate-400"
+        className="flex-1 px-2 py-1 text-xs border border-[#334155] rounded bg-[#11131b] text-white focus:outline-none focus:ring-1 focus:ring-[#2563eb] placeholder-slate-500"
       />
       <select
         value={provider}
         onChange={e => onProvider(e.target.value)}
-        className="px-2 py-1 text-xs border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-400"
+        className="px-2 py-1 text-xs border border-[#334155] rounded bg-[#11131b] text-slate-300 focus:outline-none focus:ring-1 focus:ring-[#2563eb]"
       >
         {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
       </select>
@@ -67,7 +67,7 @@ export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">Default (all roles)</p>
+        <p className="text-xs font-medium text-slate-400 mb-2">Default (all roles)</p>
         <ModelRow
           label="Default"
           model={cfg.default.model}
@@ -77,7 +77,7 @@ export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
         />
       </div>
       <div>
-        <p className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">Role overrides</p>
+        <p className="text-xs font-medium text-slate-400 mb-2">Role overrides</p>
         {ROLES.map(role => (
           <ModelRow
             key={role}
@@ -92,7 +92,7 @@ export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
       <button
         onClick={handleSave}
         disabled={isPending}
-        className="px-4 py-1.5 text-sm font-medium bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-md hover:bg-slate-700 disabled:opacity-40 transition-colors"
+        className="px-4 py-1.5 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
       >
         {saved ? 'Saved!' : isPending ? 'Saving…' : 'Save Provider Config'}
       </button>
