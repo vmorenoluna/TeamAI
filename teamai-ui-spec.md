@@ -39,12 +39,10 @@ The app has a two-column shell that fills the entire viewport:
 ┌─────────────────────────────────────────────────────────┐
 │  SIDEBAR (240px)  │  MAIN CONTENT (flex-1)              │
 │                   │                                     │
-│  TeamAI logo      │  Page content varies by route       │
-│  Collapse ←       │                                     │
+│  TeamAI logo      │  [Project tabs row] ← top of main   │
+│  Collapse ←       │  ─────────────────────────────      │
 │  ─────────────    │                                     │
-│  [Project A] [B] [+]  ← project tabs (scrollable)       │
-│  ─────────────    │                                     │
-│  ▦ Kanban         │                                     │
+│  ▦ Kanban         │  Page content varies by route       │
 │  ◎ Insights       │                                     │
 │  ◈ Ideation       │                                     │
 │  ▶ Terminals      │                                     │
@@ -57,9 +55,8 @@ The app has a two-column shell that fills the entire viewport:
 ### Sidebar — Expanded State
 - **Header**: "TeamAI" branding + `←` collapse button
 - **Background**: `bg-[#11131b]` (deep navy) — permanently dark
-- **Project tabs row**: horizontal scrollable row of project tabs right below the header. Each project is a rounded pill tab (`px-3 py-1.5`, `max-w-[120px]`, truncated name). Active project highlighted in royal blue (`bg-[#2563eb] text-white`). Inactive tabs: `text-slate-400`, hover shows `bg-[#1a1f2e] text-white`. Remove button (`×`) is a small circle overlay at top-right of each tab, visible on hover. A `+` button at the end opens the Add Project dialog. No "PROJECTS" label.
-- **Navigation**: vertical list of icon + label links below the project tabs row; fills remaining space with `flex-1 overflow-y-auto`. Active link highlighted with `bg-[#2563eb]/15` + `border-r-2 border-[#2563eb]`. Inactive: `text-slate-400`, hover shows `bg-[#1a1f2e] text-white`. Kanban nav also highlighted on `/task/[id]` routes. No dark mode toggle.
-- **Sections reflect active project**: all page content updates when a different project tab is selected.
+- **Navigation**: vertical list of icon + label links; fills remaining space with `flex-1 overflow-y-auto`. Active link highlighted with `bg-[#2563eb]/15` + `border-r-2 border-[#2563eb]`. Inactive: `text-slate-400`, hover shows `bg-[#1a1f2e] text-white`. Kanban nav also highlighted on `/task/[id]` routes. No dark mode toggle.
+- **Project tabs row is NOT in the sidebar** — it appears at the top of the main content area (see below)
 
 ### Sidebar — Collapsed State
 - Sidebar narrows to ~48px icon strip
@@ -71,13 +68,17 @@ The app has a two-column shell that fills the entire viewport:
 ### Theme
 - **Dark-only** — no light mode toggle exists. The midnight palette (`#11131b`, `#1a1f2e`, `#1e2333`) is the permanent UI theme.
 
-### Project Tabs
-- Horizontal scrollable row of project tabs between the header and nav links
-- Active tab: `bg-[#2563eb] text-white` (royal blue)
-- Inactive tab: `text-slate-400 hover:bg-[#1a1f2e] hover:text-white`
+### Project Tabs (Main Content Header)
+- Horizontal scrollable row of project tabs positioned at the **top of the main content area**, above the page content
+- **Tab styling** (not button/pill): flat appearance with bottom border indicator
+  - Active tab: `text-white border-b-2 border-[#2563eb]` (white text, blue bottom border)
+  - Inactive tab: `text-slate-500 border-b-2 border-transparent hover:text-slate-300 hover:border-[#334155]`
+  - No `rounded-md` — tabs are flat with a bottom underline style
+- **Sizing**: `px-4 py-2.5 text-sm` (larger than before: text-sm instead of text-xs, more padding)
+- Max width per tab: `max-w-[140px]` (longer project names fit)
 - Remove button (×): circular overlay at top-right, hidden by default, appears on hover (`group-hover:opacity-100`)
 - `+` button at end opens the Add Project modal (same dialog as before)
-- When collapsed, the project tabs row is hidden entirely
+- When collapsed sidebar has no effect on project tabs row visibility
 
 ---
 
@@ -249,6 +250,15 @@ Layout (top to bottom):
 2. **Row 2:** Task title (large heading, `text-white`)
 3. **Row 3:** Description text (`text-slate-300`, never blue)
 4. **Row 4:** `Created … · Updated …` timestamps + **Agent** dropdown
+
+**Source info (for roadmap-converted tasks):** Below the description, if the task was created from a roadmap item, a source section appears:
+```
+Source: [Ideation] or [Competitor Analysis]   ← colored badge
+Competitive context: (if applicable)           ← amber italic text
+```
+- "Ideation" badge: blue (`bg-blue-900/30 text-blue-400`)
+- "Competitor Analysis" badge: amber (`bg-amber-900/30 text-amber-400`)
+- Competitive context text shown in amber italic below the badge if `competitiveContext` exists
 
 **Tabs:** Horizontal tab bar with bottom-border active indicator (`border-b-2 border-[#2563eb]`). Active tab: `text-white`. Inactive tab: `text-slate-500 hover:text-slate-300`. Tab badges (e.g., "1") shown on Spec/QA tabs when content exists.
 
@@ -448,106 +458,71 @@ Each column has a header with the phase label (uppercase, `text-xs font-semibold
 
 ---
 
-### Roadmap Item Card — States and Behaviors
+### Roadmap Item Card — Click Behavior
 
-Every card is clickable (`cursor-pointer`). Behavior depends on whether the item has been converted to a kanban ticket:
+**Unlinked card click:** Opens the **Roadmap Item Detail Overlay** (see below). No expand/collapse.
 
-#### A. Unlinked Card (not converted to a ticket)
+**Linked card click:** Opens the task detail in a floating window overlay (same pattern as the kanban board). The roadmap content behind the window is non-interactive (`pointer-events-none select-none`) and scrolling is disabled (`overflow-hidden`). Clicking the backdrop, pressing Escape, or clicking the `×` button closes the window.
 
-```
-┌───────────────────────────────────────────┐
-│  [P0]  Add user authentication  [Security]│  ← priority badge + title + category
-│  Complexity: ●●●○○  (3/5)                  │
-│  Description text (line-clamp-3)…          │  ← truncated to 3 lines
-│  Source: ideation                          │
-│  Click to expand details                   │  ← italic hint, slate
-│  ───────────────────────────────────────── │
-│  [+ Convert to ticket]                 [✕] │  ← actions row (thin top border)
-└───────────────────────────────────────────┘
-```
-
-**Card body click (anywhere except the buttons):** Expands/collapses the card to show full details.
-
-**Expanded state:**
-- Description shows full text (no `line-clamp-3`)
-- **Affected Files** section appears below description: header label "AFFECTED FILES" in uppercase, followed by monospace file paths (`text-[10px] font-mono truncate`)
-- Blue border (`border-blue-300 dark:border-blue-700`) with subtle blue background tint (`bg-blue-50/30 dark:bg-blue-950/10`)
-- Hover border becomes blue (`hover:border-blue-400 dark:hover:border-blue-500`)
-- "Click to collapse" hint appears at bottom in blue italic (`text-[10px]`)
-- Only ONE card can be expanded at a time; clicking a different card collapses the previously expanded one and expands the new one
-
-**+" Convert to ticket" button:**
-- Blue text (`text-blue-600 dark:text-blue-400`), 11px font, medium weight
-- On click: shows "Converting…" (disabled, `opacity-40`)
-- Calls `convertToTask(filename, itemIndex, phaseKey)` server action — creates a new task in the kanban board's Backlog column, writes `linkedTaskId` back to the roadmap JSON
-- On success: card refreshes as a **linked card** (see below) with a phase badge
-- On failure: red error text "Action failed — please try again." appears on the card for 5 seconds, then auto-clears. Convert button re-enables.
-- If the card is expanded when converted, it collapses automatically
-- **Idempotent:** If the item is already linked, the server returns the existing taskId (no duplicate task created)
-- **Click propagation is stopped** (`e.stopPropagation()`) — clicking convert does NOT trigger expand/collapse
-- **Only one convert at a time:** the `convertingKey` state tracks which card is converting; clicking convert on a different card while one is in progress has no effect (the second click is ignored until the first completes)
-
-**✕ Delete button:**
+**✕ Delete button** (on any card):
 - Subtle: `opacity-40` by default, `opacity-100` on card hover (`group-hover/card:opacity-100`)
 - 11px, slate color, turns red on hover
 - On click: `window.confirm('Remove this item from the roadmap?')` dialog appears
 - On confirm: shows "…" (disabled), calls `deleteRoadmapItem(filename, itemIndex, phaseKey)`
 - On success: item is removed from the JSON, kanban refreshes
-- On failure: same 5-second error state as convert
-- If the card is expanded when deleted, it collapses automatically
-- Click propagation is stopped (`e.stopPropagation()`) — deleting does NOT trigger expand/collapse
+- On failure: red error text "Action failed — please try again." appears for 5 seconds, then auto-clears
+- Click propagation is stopped (`e.stopPropagation()`) — deleting does NOT open detail overlay
+- If the card was linked to a kanban ticket, the ticket is NOT deleted — only the roadmap reference is removed
 
-#### B. Linked Card (converted to a ticket)
+### Roadmap Item Detail Overlay
+
+Opened by clicking any roadmap item card (linked or unlinked). A floating window overlay appears over the roadmap with a semi-transparent blurred backdrop.
 
 ```
-┌───────────────────────────────────────────┐
-│  [P0]  Add user authentication  [Security]│
-│  Complexity: ●●●○○  (3/5)                  │
-│  Description text (line-clamp-3)…          │
-│  Source: ideation                          │
-│  Click to view task                        │  ← italic hint, slate
-│  ───────────────────────────────────────── │
-│  [IMPLEMENT]                          [✕] │  ← phase badge from kanban status
-└───────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│  [P0]  Add user authentication         [Security]    [×]   │  ← title bar with priority + category
+│  ──────────────────────────────────────────────────────────│
+│  Source: Ideation                           ●●●○○ (3/5)    │  ← source badge + complexity dots
+│                                                            │
+│  Description                                               │
+│  Full description text here...                             │
+│                                                            │
+│  Competitive context (if applicable)                       │  ← amber italic, only if present
+│  Amazon's new feature requires response...                 │
+│                                                            │
+│  Affected Files                                            │
+│  src/auth/login.ts                                         │  ← monospace paths
+│  src/auth/register.ts                                      │
+│                                                            │
+│  Phase: Now                                                │
+│                                                            │
+│                    [Close]  [Convert to Ticket ▶]          │  ← action bar
+└────────────────────────────────────────────────────────────┘
 ```
 
-**Card body click:** Opens the task detail in a floating window overlay (same pattern as the kanban board). No expand/collapse for linked cards. The roadmap content behind the window is non-interactive (`pointer-events-none select-none`) and scrolling is disabled (`overflow-hidden`). Clicking the backdrop, pressing Escape, or clicking the `×` button closes the window.
+**Title bar:** Priority badge + title + category (right-aligned) + `×` close button.
 
-**Phase badge (bottom-left):**
-- Color-coded badge matching the kanban board phase palette (see §8 Color & Phase Palette)
-- Shows the current pipeline phase of the linked task (e.g., `SPEC`, `IMPLEMENT`, `QA-REVIEW`, `DONE`)
-- Uppercase, `text-[10px] font-semibold`, tracking-wider
-- Fetched on mount via `getLinkedTaskStatuses(linkedTaskIds)` server action — returns `{ taskId: { phase, title } | null }`
-- If the task status hasn't loaded yet: shows "…" in slate
-- If the linked task was deleted/not found: shows "…" in slate (graceful degradation)
+**Source info:** Badge showing "Ideation" (blue) or "Competitor Analysis" (amber) + competitive context text in amber italic below (only shown if `competitive_context` exists).
 
-**Real-time status sync:**
-- `PhasedKanban` listens for WebSocket `phase-change` events via the `usePhaseSync` hook
-- When a linked task's phase changes on the kanban board (e.g., dragged from Spec → In Progress), the roadmap card's phase badge updates in real time without a page reload
-- The `onPhaseChange` callback checks if the changed taskId is in `allLinkedIds`, and if so, updates the corresponding entry in `linkedStatuses` state
+**Complexity dots:** Filled/empty circles with `aria-label="Complexity N out of 5"`.
 
-**✕ Delete button:** Same behavior as unlinked cards — removes from roadmap. The linked kanban ticket is NOT deleted (only the roadmap reference is removed).
+**Description:** Full description text (not truncated).
 
-#### C. Error State
+**Affected Files:** Monospace list of file paths (only shown if `affected_files` array has entries).
 
-When a convert or delete operation fails:
-- Card border turns red (`border-red-300 dark:border-red-700`), background tinted red (`bg-red-50 dark:bg-red-950/20`)
-- Red error text "Action failed — please try again." appears (`text-[10px] text-red-600`)
-- Error auto-clears after 5 seconds via `setTimeout`
-- Convert/delete buttons are disabled during the operation
+**Phase info:** Shows which phase the item is in (Now/Next/Later/Icebox).
 
-#### D. Visual Summary — All Card States
+**Action bar:**
+- **Close button**: closes the overlay, returns to roadmap
+- **Convert to Ticket button** (blue, primary):
+  - For unlinked items: creates a kanban task in Backlog, writes `linkedTaskId` back to roadmap JSON, then opens the newly created task's detail
+  - On failure: red error text "Action failed — please try again." appears for 5 seconds
 
-| State | Border (light / dark) | Background (light / dark) | Click Action | Hover Effect | Convert Btn | Delete Btn |
-|---|---|---|---|---|---|---|
-| Normal (unlinked, collapsed) | `border-slate-200` / `dark:border-slate-700` | `bg-white` / `dark:bg-slate-800` | Expand card | `border-slate-400` + shadow | "+ Convert…" (active) | ✕ (hover-revealed) |
-| Expanded (unlinked) | `border-blue-300` / `dark:border-blue-700` | `bg-blue-50/30` / `dark:bg-blue-950/10` | Collapse card | `border-blue-400` + shadow | "+ Convert…" (active) | ✕ (hover-revealed) |
-| Linked (collapsed) | `border-slate-200` / `dark:border-slate-700` | `bg-white` / `dark:bg-slate-800` | Navigate to task | `border-slate-400` + shadow | None (phase badge) | ✕ (hover-revealed) |
-| Error | `border-red-300` / `dark:border-red-700` | `bg-red-50` / `dark:bg-red-950/20` | Expand card (if unlinked) | `border-slate-400` + shadow | Disabled | Disabled |
-| Converting | Normal border | Normal background | Expand card (if unlinked) | `border-slate-400` + shadow | "Converting…" (disabled, `opacity-40`) | Disabled |
-| Deleting | Normal border | Normal background | Expand card (if unlinked) | `border-slate-400` + shadow | Disabled | "…" (disabled, `opacity-40`) |
+**Note:** This overlay is only shown for **unlinked** roadmap items. **Linked** items (already converted to a kanban ticket) open the kanban task detail directly when clicked — they bypass this overlay.
 
-All states have `cursor-pointer`, `hover:shadow-md`, and `transition-all` for smooth transitions between states. Converting and Deleting are transient states (<1s normally) that auto-resolve to Normal/Linked (on success) or Error (on failure).
+**Mutual exclusivity with task panel:** Opening a roadmap item detail closes any open task panel (`setSelectedTaskId(null)`).
+
+**Stale link auto-cleanup:** If a linked roadmap item's kanban task was deleted (server returns "not found"), the `linkedTaskId` is automatically cleared from the roadmap JSON via `clearLinkedTaskId()`. The user sees the roadmap item detail instead of a "failed to load task" error. No manual unlink action needed.
 
 ---
 
@@ -613,6 +588,7 @@ Text color: `text-slate-400 dark:text-slate-500`.
 | `convertToTask(filename, itemIndex, phaseKey)` | `Promise<{ taskId: string }>` | Creates a kanban Board task from a roadmap item. Validates `phaseKey` against `['now','next','later','icebox']`; reads the roadmap JSON, gets the item, checks for existing `linkedTaskId` (idempotent — returns existing ID if already converted). Creates task via `TaskStore.create()` in Backlog phase, writes `linkedTaskId` back to JSON. Revalidates `/` and `/roadmap` paths. |
 | `deleteRoadmapItem(filename, itemIndex, phaseKey)` | `Promise<void>` | Removes an item from the roadmap JSON by index. Validates filename and phaseKey. Splices the item from the phase array, writes back JSON, revalidates paths. Does NOT delete the linked kanban ticket if one exists. |
 | `getLinkedTaskStatuses(linkedTaskIds)` | `Promise<Record<string, { phase: string; title: string } \| null>>` | Batch-looks up kanban task statuses. For each taskId, returns `{ phase, title }` if the task exists, or `null` if it was deleted. Used on mount and after refresh to populate linked card phase badges. |
+| `clearLinkedTaskId(filename, itemIndex, phaseKey)` | `Promise<void>` | Clears the `linkedTaskId` from a roadmap item. Called automatically when a linked kanban task is not found (task was deleted) — no user action needed. |
 
 All filename-accepting actions validate against strict regex before filesystem access (path traversal prevention: `/^roadmap-\d{4}-\d{2}-\d{2}\.json$/` and `/^changelog-\d{4}-\d{2}-\d{2}\.md$/`).
 
@@ -630,7 +606,7 @@ export interface RoadmapItem {
   affected_files: string[];
   source: 'ideation' | 'competitor-analysis';
   competitive_context?: string;
-  linkedTaskId?: string;         // set when user converts this item to a kanban ticket via "+ Convert to ticket"
+  linkedTaskId?: string;         // set when user converts this item to a kanban ticket
 }
 
 export interface RoadmapReport {
@@ -643,6 +619,17 @@ export interface RoadmapReport {
     later: RoadmapItem[];        // Phase 3: P2 + P3
     icebox: RoadmapItem[];
   };
+}
+
+// Task interface (from task-store.ts)
+export interface Task {
+  id: string;
+  title: string;
+  description: string;
+  phase: string;
+  source?: 'ideation' | 'competitor-analysis';   // set when converted from roadmap
+  competitiveContext?: string;                     // set when converted from roadmap
+  // ... other fields
 }
 ```
 
@@ -663,7 +650,7 @@ export interface RoadmapReport {
 - `src/components/roadmap-view.tsx` — `'use client'` — full roadmap/changelog page with:
   - **RoadmapView**: parent component managing tab state (persisted to `sessionStorage`), roadmap/changelog generation sessions, history dropdowns (always visible; disabled with "None generated yet" when empty), session reconnect on mount, streaming output display via `useSessionStream`
   - **PhasedKanban**: horizontal 4-column kanban layout (Now/Next/Later/Icebox), linked status fetching via `getLinkedTaskStatuses`, real-time WebSocket status sync via `usePhaseSync`, convert/delete/expand actions with loading + error states
-  - **RoadmapCard**: individual item card with priority badge, complexity dots (accessible: `role="img" aria-label="Complexity N out of 5"` wrapper with `aria-hidden` dots), description (collapsed: `line-clamp-3`, expanded: full + affected files), source info, expand/navigate hints, "+ Convert to ticket" button, "✕" delete button (hover-revealed), phase badge for linked items, error display
+  - **RoadmapCard**: individual item card with priority badge, complexity dots (accessible: `role="img" aria-label="Complexity N out of 5"` wrapper with `aria-hidden` dots), description, source info, "Click to convert & view task" hint, "✕" delete button (hover-revealed), phase badge for linked items, error display. Clicking any card opens the detail overlay (no expand/collapse).
   - **StreamingBlock**: re-usable monospace streaming output block for agent text
 
 ---
@@ -685,15 +672,15 @@ export interface RoadmapReport {
 3. Select a previous date
 4. Phased kanban view updates to show that run's items (no agent spawned)
 
-### User Journey — Expanding Roadmap Card Details
+### User Journey — Viewing Roadmap Item Details
 
 1. Navigate to **Roadmap** tab with a loaded report
 2. Hover over any card — note the cursor changes to pointer, border + shadow highlight on hover
-3. Click an **unlinked** card (one showing "+ Convert to ticket")
-4. Card expands: description shows full text (no longer truncated), **Affected Files** list appears with monospace file paths, border turns blue, "Click to collapse" hint appears
-5. Click the same card again — it collapses back to 3-line description
-6. With one card expanded, click a different unlinked card — the first card collapses, the new one expands (only one expanded at a time)
-7. Click a **linked** card (one showing a phase badge) — it opens the task detail in a floating window overlay over the roadmap (no expansion). The roadmap behind the window is dimmed with a blurred backdrop, matching the kanban board pattern.
+3. Click any card (linked or unlinked) — the **Roadmap Item Detail Overlay** opens
+4. View the full description, source info (Ideation or Competitor Analysis badge + context), complexity dots, affected files, and phase
+5. Click **Close** or click the backdrop or press Escape to return to the roadmap
+6. For **unlinked** items: click **Convert to Ticket** to create a kanban task and open its detail
+7. For **linked** items: the phase badge shows the current kanban status; click "Already converted" to navigate to the task detail directly
 
 ### User Journey — Converting a Roadmap Item to a Kanban Ticket
 

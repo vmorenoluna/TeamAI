@@ -283,6 +283,42 @@ export async function convertToTask(
   return { taskId };
 }
 
+// ── Clear linked task ID from a roadmap item ───────────────────────────────
+
+export async function clearLinkedTaskId(
+  filename: string,
+  itemIndex: number,
+  phaseKey: string,
+): Promise<void> {
+  const projectPath = await getActiveProjectPath();
+  if (!VALID_PHASES.includes(phaseKey as any)) throw new Error(`Invalid phase: ${phaseKey}`);
+  if (!/^roadmap-\d{4}-\d{2}-\d{2}\.json$/.test(filename)) {
+    throw new Error(`Invalid roadmap filename: ${filename}`);
+  }
+
+  const dir = join(projectPath, '.teamai', 'roadmap');
+  const filePath = join(dir, filename);
+  let report: RoadmapReport;
+  try {
+    report = JSON.parse(readFileSync(filePath, 'utf-8')) as RoadmapReport;
+  } catch {
+    throw new Error(`Cannot read roadmap file: ${filename}`);
+  }
+
+  const items = report.phases?.[phaseKey as keyof typeof report.phases];
+  if (!items || !Array.isArray(items) || itemIndex >= items.length) {
+    throw new Error(`Item not found at index ${itemIndex} in phase ${phaseKey}`);
+  }
+
+  // Clear the linkedTaskId
+  if (items[itemIndex].linkedTaskId) {
+    items[itemIndex].linkedTaskId = undefined;
+    writeFileSync(filePath, JSON.stringify(report, null, 2));
+    revalidatePath('/');
+    revalidatePath('/roadmap');
+  }
+}
+
 // ── Delete a roadmap item ────────────────────────────────────────────────────
 
 export async function deleteRoadmapItem(

@@ -101,8 +101,7 @@
           "src/app/actions/tasks.ts"
         ],
         "source": "competitor-analysis",
-        "competitive_context": "Devin's primary differentiator is fully autonomous execution from prompt to deployed code. Copilot Workspace also auto-advances from spec to PR.",
-        "linkedTaskId": "55d8132e-cfa4-44fb-a51a-28abfc9bc4dc"
+        "competitive_context": "Devin's primary differentiator is fully autonomous execution from prompt to deployed code. Copilot Workspace also auto-advances from spec to PR."
       },
       {
         "title": "Sandbox execution by default — always run agents in isolated environment",
