@@ -37,6 +37,7 @@ interface Props {
   diff: string | null;
   agentOutput?: string | null;
   roles: RoleDefinition[];
+  onClose?: () => void;
 }
 
 function TaskPill({ task }: { task: Task }) {
@@ -181,7 +182,7 @@ function QAReportView({ qaReport }: { qaReport: any }) {
   );
 }
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, plan, qaReport, diff, agentOutput, roles }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, plan, qaReport, diff, agentOutput, roles, onClose }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [isPending, startTransition] = useTransition();
@@ -224,8 +225,13 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
     if (!confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
     startTransition(async () => {
       await deleteTask(task.id);
-      router.push('/');
-      router.refresh();
+      if (onClose) {
+        onClose();
+        router.refresh();
+      } else {
+        router.push('/');
+        router.refresh();
+      }
     });
   }
 

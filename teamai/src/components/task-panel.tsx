@@ -79,6 +79,7 @@ export function TaskPanel({ taskId, onClose }: { taskId: string; onClose: () => 
             diff={data.diff}
             agentOutput={data.agentOutput}
             roles={roles}
+            onClose={onClose}
           />
         </div>
       )}
