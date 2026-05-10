@@ -29,7 +29,8 @@
           "package.json",
           ".husky/pre-commit"
         ],
-        "source": "ideation"
+        "source": "ideation",
+        "linkedTaskId": "5d6c2454-88a0-4d05-9f29-b8af6ce311e8"
       },
       {
         "title": "Prevent concurrent edits to same task — add phase-lock per task",
@@ -41,7 +42,8 @@
           "src/lib/orchestrator.ts",
           "src/app/actions/tasks.ts"
         ],
-        "source": "ideation"
+        "source": "ideation",
+        "linkedTaskId": "ac4f61ee-9735-4d10-9485-3dda280dc1e7"
       },
       {
         "title": "Fix terminal feature — wire up xterm.js PTY sessions properly",
@@ -99,7 +101,8 @@
           "src/app/actions/tasks.ts"
         ],
         "source": "competitor-analysis",
-        "competitive_context": "Devin's primary differentiator is fully autonomous execution from prompt to deployed code. Copilot Workspace also auto-advances from spec to PR."
+        "competitive_context": "Devin's primary differentiator is fully autonomous execution from prompt to deployed code. Copilot Workspace also auto-advances from spec to PR.",
+        "linkedTaskId": "55d8132e-cfa4-44fb-a51a-28abfc9bc4dc"
       },
       {
         "title": "Sandbox execution by default — always run agents in isolated environment",
@@ -114,7 +117,8 @@
           "src/components/container-config.tsx"
         ],
         "source": "competitor-analysis",
-        "competitive_context": "OpenHands runs all agents in Docker sandboxes by default. Devin has managed sandboxes. TeamAI's current opt-in devcontainer is a weaker security posture."
+        "competitive_context": "OpenHands runs all agents in Docker sandboxes by default. Devin has managed sandboxes. TeamAI's current opt-in devcontainer is a weaker security posture.",
+        "linkedTaskId": "2509cb61-a260-4553-b1f0-bdba7d40fde2"
       },
       {
         "title": "Comprehensive test suite — unit, integration, and E2E tests",
@@ -195,7 +199,8 @@
           "src/lib/orchestrator.ts",
           "src/app/actions/pipeline.ts"
         ],
-        "source": "ideation"
+        "source": "ideation",
+        "linkedTaskId": "cd3e122b-247b-4882-8a2f-fc901fa00a4d"
       },
       {
         "title": "Notification system — desktop and webhook notifications for phase transitions",
@@ -208,7 +213,8 @@
           "src/components/kanban-board.tsx",
           "src/app/actions/pipeline.ts"
         ],
-        "source": "ideation"
+        "source": "ideation",
+        "linkedTaskId": "9370858b-3aa4-4b89-86f8-1e0f6c141a20"
       },
       {
         "title": "Multi-user collaboration — shared projects, task assignment, activity feed",

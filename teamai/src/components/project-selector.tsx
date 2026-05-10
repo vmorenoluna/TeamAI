@@ -58,17 +58,17 @@ export function ProjectSelector({ projects, activeProjectPath, collapsed = false
   if (collapsed) return null;
 
   return (
-    <div className="flex items-center gap-0.5 px-2 py-2 overflow-x-auto shrink-0 border-b border-[#1e293b]">
+    <div className="flex items-center gap-0 px-3 py-2 overflow-x-auto shrink-0 border-b border-[#1e293b]">
       {projects.map(p => (
         <div key={p.path} className="group relative shrink-0">
           <button
             onClick={() => handleSelect(p.path)}
             disabled={isPending}
             title={p.path}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors truncate max-w-[120px] ${
+            className={`px-4 py-2.5 text-sm font-medium transition-colors truncate max-w-[140px] border-b-2 ${
               p.path === activeProjectPath
-                ? 'bg-[#2563eb] text-white'
-                : 'text-slate-400 hover:bg-[#1a1f2e] hover:text-white'
+                ? 'text-white border-[#2563eb]'
+                : 'text-slate-500 border-transparent hover:text-slate-300 hover:border-[#334155]'
             }`}
           >
             {p.name}
@@ -88,7 +88,7 @@ export function ProjectSelector({ projects, activeProjectPath, collapsed = false
       <button
         onClick={() => setShowDialog(true)}
         title="Add project"
-        className="shrink-0 px-2.5 py-1.5 text-xs font-medium rounded-md text-slate-500 hover:text-white hover:bg-[#1a1f2e] transition-colors leading-none"
+        className="shrink-0 px-3 py-2.5 text-sm font-medium text-slate-500 hover:text-slate-300 transition-colors leading-none border-b-2 border-transparent"
       >
         +
       </button>

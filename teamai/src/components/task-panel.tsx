@@ -8,7 +8,7 @@ import type { RoleDefinition } from '@/app/actions/roles';
 
 type FullData = Awaited<ReturnType<typeof getTaskFull>>;
 
-export function TaskPanel({ taskId, onClose, readonly = false }: { taskId: string; onClose: () => void; readonly?: boolean }) {
+export function TaskPanel({ taskId, onClose, readonly = false, onError }: { taskId: string; onClose: () => void; readonly?: boolean; onError?: (error: string) => void }) {
   const [data, setData] = useState<FullData | null>(null);
   const [roles, setRoles] = useState<RoleDefinition[]>([]);
   const [loading, setLoading] = useState(true);
@@ -17,6 +17,11 @@ export function TaskPanel({ taskId, onClose, readonly = false }: { taskId: strin
     if (!silent) setLoading(true);
     Promise.all([getTaskFull(taskId), getRoles()])
       .then(([full, r]) => { setData(full); setRoles(r); })
+      .catch((e) => {
+        if (!silent && onError) {
+          onError(e instanceof Error ? e.message : 'Failed to load task');
+        }
+      })
       .finally(() => { if (!silent) setLoading(false); });
   };
 

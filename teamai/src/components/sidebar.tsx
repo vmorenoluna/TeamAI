@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { ProjectSelector } from './project-selector';
 import type { Project } from '@/lib/project-store';
 
 interface Props {
@@ -31,11 +30,8 @@ export function Sidebar({ projects, activeProjectPath }: Props) {
         </button>
       </div>
 
-      {/* Project tabs row */}
-      <ProjectSelector projects={projects} activeProjectPath={activeProjectPath} collapsed={collapsed} />
-
       {/* Nav links */}
-      <nav className={`flex-1 overflow-y-auto py-2 ${collapsed ? 'border-t border-[#1e293b]' : ''}`}>
+      <nav className={`flex-1 overflow-y-auto py-2 border-t border-[#1e293b]`}>
         {[
           { href: '/', label: 'Kanban', icon: '▦', match: (p: string) => p === '/' || p.startsWith('/task') },
           { href: '/insights', label: 'Insights', icon: '◎' },

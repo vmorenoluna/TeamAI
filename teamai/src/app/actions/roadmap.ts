@@ -271,7 +271,7 @@ export async function convertToTask(
   // Create a task in the kanban board
   const taskStore = new TaskStore(projectPath);
   const taskId = randomUUID();
-  taskStore.create(taskId, item.title, item.description);
+  taskStore.create(taskId, item.title, item.description, item.source, item.competitive_context);
 
   // Write linkedTaskId back to the roadmap JSON
   item.linkedTaskId = taskId;
