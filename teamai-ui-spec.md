@@ -176,7 +176,7 @@ Clicking a task card opens a split-view panel on the right. The kanban board com
 ┌──────────────────────────────────────────────────────────┐
 │  KANBAN (55%)           │  TASK PANEL (45%)              │
 │                         │  ─────────────── [×]           │
-│  [board columns...]     │  ← Board        [PHASE BADGE]  │
+│  [board columns...]     │  ← Board  [PHASE BADGE] [🗑]   │
 │                         │  Task Title                    │
 │                         │  Description text              │
 │                         │  Created … · Updated …         │
@@ -196,6 +196,7 @@ Clicking a task card opens a split-view panel on the right. The kanban board com
 - Description text
 - Created / Updated timestamps
 - **Agent dropdown**: "Auto (pipeline default)" or any named role — overrides which AI agent persona handles the next pipeline step for this task. Options: Product Analyst, Senior Developer, Git Integration Specialist, Implementation Planner, Bug Fix Specialist, QA Reviewer
+- **🗑 Delete button** (trash icon, right side of header): slate color, turns red on hover. On click, `window.confirm('Delete "{title}"? This cannot be undone.')` dialog appears. On confirm: shows disabled state, calls `deleteTask(taskId)` server action. On success: **panel closes immediately** (if opened from kanban split view) or **navigates to `/`** (if on the dedicated `/task/[id]` page). The kanban board refreshes to remove the deleted card. Only visible/clickable when no pipeline is actively running (the button is always present but disabled via `isPending` during the operation).
 
 ### Tabs
 
@@ -334,9 +335,9 @@ No active project → both tabs show: "Select or add a project from the sidebar 
 
 History: [Select a previous run ▾]
 ```
-- **Skip competitor research** checkbox: when checked, appends `--skip-competitors` to the `/roadmap` command sent to the agent.
+- **Skip competitor research** checkbox: when checked, appends `--skip-competitors` to the `/roadmap` command sent to the agent. The checkbox is **disabled while a generation is running** — it cannot be toggled mid-generation. Its value is only read when the "Generate Roadmap" button is clicked.
 - **"Generate Roadmap"** button: dark pill (same style as "Run Scan" in Ideation). While running, shows "Generating…" (disabled). Returns to "Generate Roadmap" after completion.
-- **History dropdown**: populated by `getRoadmapReports()` — lists `roadmap-{date}.json` files newest-first. Selecting one calls `getRoadmapReport(filename)` and renders that report without spawning a new session.
+- **History dropdown**: populated by `getRoadmapReports()` — lists `roadmap-{date}.json` files newest-first. Selecting one calls `getRoadmapReport(filename)` and renders that report without spawning a new session. While loading the selected report, the current kanban view remains visible — there is no loading spinner; the phasing data simply swaps when the fetch completes. If the selected file is corrupt or missing, the current view remains unchanged (silent error — no alert or error message).
 
 #### Empty state (no report generated)
 ```
@@ -355,36 +356,131 @@ Scrollable pre-formatted block identical to IdeationScanner — latest text from
 ```
 Monospace font, `text-xs`, `bg-slate-50 dark:bg-slate-900`, `border border-slate-200 dark:border-slate-700`.
 
-#### Phased card view (after completion or on mount)
-Triggered by `result` event after generation, or **auto-loaded on page mount** if `roadmap-{date}.json` files already exist in `.teamai/roadmap/` — the most recent one is loaded automatically without running the agent. If a generation is still in-flight (session ID persisted in `sessionStorage`), the component reconnects to the active session and resumes streaming output.
+#### Phased Kanban View (after completion or on mount)
+Triggered by `result` event after generation, or **auto-loaded on page mount** if `roadmap-{date}.json` files already exist in `.teamai/roadmap/` — the most recent one is loaded automatically without running the agent. If a generation is still in-flight (session ID persisted in `sessionStorage`), the component reconnects to the active session and resumes streaming output. **Reconnect UX:** When reconnecting to an in-flight session, the "Generate Roadmap" button immediately shows "Generating…" (disabled), the streaming output block reappears with any accumulated text from the agent, and new events stream in live — the user sees no interruption or "Reconnecting…" indicator.
 
-**Executive summary** paragraph rendered above the four phase sections (sourced from `RoadmapReport.executive_summary`).
+**Executive summary** paragraph rendered above the kanban columns (sourced from `RoadmapReport.executive_summary`). If `competitor_analysis_run` is true, a small note "Competitor analysis was run for this roadmap." appears in amber below.
 
-Four sections rendered top-to-bottom (each collapsible; section header shows item count):
+Four columns in a horizontal scrollable kanban layout (mirroring the main kanban board), each 288px wide (`w-72`):
 
 ```
-── Phase 1 — Now ──────────────────────────── (N items) ──
-  ┌──────────────────────────────────────────────────────┐
-  │  [P0]  Title of item                    [Critical Fix]│
-  │  Complexity: ●●●○○  (3/5)                            │
-  │  Description text here (2-3 sentences)               │
-  │  Source: ideation                                    │
-  └──────────────────────────────────────────────────────┘
-  ...
-
-── Phase 2 — Next ─────────────────────────── (N items) ──
-── Phase 3 — Later ────────────────────────── (N items) ──
-── Icebox ─────────────────────────────────── (N items) ──
+┌─ Phase 1 — Now ───┬─ Phase 2 — Next ──┬─ Phase 3 — Later ─┬─ Icebox ──────────┐
+│ (N)               │ (N)               │ (N)               │ (N)               │
+│ ┌───────────────┐ │ ┌───────────────┐ │ ┌───────────────┐ │ ┌───────────────┐ │
+│ │[P0] Title     │ │ │[P1] Title     │ │ │[P2] Title     │ │ │[P3] Title     │ │
+│ │Complex:●●●○○ │ │ │Complex:●●○○○ │ │ │Complex:●○○○○ │ │ │Complex:●●○○○ │ │
+│ │Description…  │ │ │Description…  │ │ │Description…  │ │ │Description…  │ │
+│ │              │ │ │              │ │ │              │ │ │              │ │
+│ │Source: …     │ │ │Source: …     │ │ │Source: …     │ │ │Source: …     │ │
+│ │[+ Convert]  ✕│ │ │[spec badge] ✕│ │ │[+ Convert]  ✕│ │ │[+ Convert]  ✕│ │
+│ └───────────────┘ │ └───────────────┘ │ └───────────────┘ │ └───────────────┘ │
+└───────────────────┴───────────────────┴───────────────────┴───────────────────┘
 ```
 
-**Roadmap item card fields:**
-- Priority badge: `P0` (red), `P1` (orange), `P2` (amber), `P3` (gray) — consistent light/dark
-- Title (bold, `text-sm`)
-- Category label (right-aligned, `text-xs`, slate)
-- Complexity: 5 filled/empty dots (● = filled, ○ = empty) matching the numeric value
-- Description (`text-xs text-slate-600 dark:text-slate-400`)
-- Source: "ideation" | "competitor-analysis" (`text-xs italic`)
-- Competitive context (if present): italic note below source
+Each column has a header with the phase label (uppercase, `text-xs font-semibold`) and an item count badge (rounded-full, slate background). Columns with no items show "No items" in italic. Empty kanban columns have `min-h-[120px]`.
+
+---
+
+### Roadmap Item Card — States and Behaviors
+
+Every card is clickable (`cursor-pointer`). Behavior depends on whether the item has been converted to a kanban ticket:
+
+#### A. Unlinked Card (not converted to a ticket)
+
+```
+┌───────────────────────────────────────────┐
+│  [P0]  Add user authentication  [Security]│  ← priority badge + title + category
+│  Complexity: ●●●○○  (3/5)                  │
+│  Description text (line-clamp-3)…          │  ← truncated to 3 lines
+│  Source: ideation                          │
+│  Click to expand details                   │  ← italic hint, slate
+│  ───────────────────────────────────────── │
+│  [+ Convert to ticket]                 [✕] │  ← actions row (thin top border)
+└───────────────────────────────────────────┘
+```
+
+**Card body click (anywhere except the buttons):** Expands/collapses the card to show full details.
+
+**Expanded state:**
+- Description shows full text (no `line-clamp-3`)
+- **Affected Files** section appears below description: header label "AFFECTED FILES" in uppercase, followed by monospace file paths (`text-[10px] font-mono truncate`)
+- Blue border (`border-blue-300 dark:border-blue-700`) with subtle blue background tint (`bg-blue-50/30 dark:bg-blue-950/10`)
+- Hover border becomes blue (`hover:border-blue-400 dark:hover:border-blue-500`)
+- "Click to collapse" hint appears at bottom in blue italic (`text-[10px]`)
+- Only ONE card can be expanded at a time; clicking a different card collapses the previously expanded one and expands the new one
+
+**+" Convert to ticket" button:**
+- Blue text (`text-blue-600 dark:text-blue-400`), 11px font, medium weight
+- On click: shows "Converting…" (disabled, `opacity-40`)
+- Calls `convertToTask(filename, itemIndex, phaseKey)` server action — creates a new task in the kanban board's Backlog column, writes `linkedTaskId` back to the roadmap JSON
+- On success: card refreshes as a **linked card** (see below) with a phase badge
+- On failure: red error text "Action failed — please try again." appears on the card for 5 seconds, then auto-clears. Convert button re-enables.
+- If the card is expanded when converted, it collapses automatically
+- **Idempotent:** If the item is already linked, the server returns the existing taskId (no duplicate task created)
+- **Click propagation is stopped** (`e.stopPropagation()`) — clicking convert does NOT trigger expand/collapse
+- **Only one convert at a time:** the `convertingKey` state tracks which card is converting; clicking convert on a different card while one is in progress has no effect (the second click is ignored until the first completes)
+
+**✕ Delete button:**
+- Subtle: `opacity-40` by default, `opacity-100` on card hover (`group-hover/card:opacity-100`)
+- 11px, slate color, turns red on hover
+- On click: `window.confirm('Remove this item from the roadmap?')` dialog appears
+- On confirm: shows "…" (disabled), calls `deleteRoadmapItem(filename, itemIndex, phaseKey)`
+- On success: item is removed from the JSON, kanban refreshes
+- On failure: same 5-second error state as convert
+- If the card is expanded when deleted, it collapses automatically
+- Click propagation is stopped (`e.stopPropagation()`) — deleting does NOT trigger expand/collapse
+
+#### B. Linked Card (converted to a ticket)
+
+```
+┌───────────────────────────────────────────┐
+│  [P0]  Add user authentication  [Security]│
+│  Complexity: ●●●○○  (3/5)                  │
+│  Description text (line-clamp-3)…          │
+│  Source: ideation                          │
+│  Click to view task                        │  ← italic hint, slate
+│  ───────────────────────────────────────── │
+│  [IMPLEMENT]                          [✕] │  ← phase badge from kanban status
+└───────────────────────────────────────────┘
+```
+
+**Card body click:** Navigates to the task detail page at `/task/{linkedTaskId}` via Next.js `router.push()`. No expand/collapse for linked cards.
+
+**Phase badge (bottom-left):**
+- Color-coded badge matching the kanban board phase palette (see §8 Color & Phase Palette)
+- Shows the current pipeline phase of the linked task (e.g., `SPEC`, `IMPLEMENT`, `QA-REVIEW`, `DONE`)
+- Uppercase, `text-[10px] font-semibold`, tracking-wider
+- Fetched on mount via `getLinkedTaskStatuses(linkedTaskIds)` server action — returns `{ taskId: { phase, title } | null }`
+- If the task status hasn't loaded yet: shows "…" in slate
+- If the linked task was deleted/not found: shows "…" in slate (graceful degradation)
+
+**Real-time status sync:**
+- `PhasedKanban` listens for WebSocket `phase-change` events via the `usePhaseSync` hook
+- When a linked task's phase changes on the kanban board (e.g., dragged from Spec → In Progress), the roadmap card's phase badge updates in real time without a page reload
+- The `onPhaseChange` callback checks if the changed taskId is in `allLinkedIds`, and if so, updates the corresponding entry in `linkedStatuses` state
+
+**✕ Delete button:** Same behavior as unlinked cards — removes from roadmap. The linked kanban ticket is NOT deleted (only the roadmap reference is removed).
+
+#### C. Error State
+
+When a convert or delete operation fails:
+- Card border turns red (`border-red-300 dark:border-red-700`), background tinted red (`bg-red-50 dark:bg-red-950/20`)
+- Red error text "Action failed — please try again." appears (`text-[10px] text-red-600`)
+- Error auto-clears after 5 seconds via `setTimeout`
+- Convert/delete buttons are disabled during the operation
+
+#### D. Visual Summary — All Card States
+
+| State | Border (light / dark) | Background (light / dark) | Click Action | Hover Effect | Convert Btn | Delete Btn |
+|---|---|---|---|---|---|---|
+| Normal (unlinked, collapsed) | `border-slate-200` / `dark:border-slate-700` | `bg-white` / `dark:bg-slate-800` | Expand card | `border-slate-400` + shadow | "+ Convert…" (active) | ✕ (hover-revealed) |
+| Expanded (unlinked) | `border-blue-300` / `dark:border-blue-700` | `bg-blue-50/30` / `dark:bg-blue-950/10` | Collapse card | `border-blue-400` + shadow | "+ Convert…" (active) | ✕ (hover-revealed) |
+| Linked (collapsed) | `border-slate-200` / `dark:border-slate-700` | `bg-white` / `dark:bg-slate-800` | Navigate to task | `border-slate-400` + shadow | None (phase badge) | ✕ (hover-revealed) |
+| Error | `border-red-300` / `dark:border-red-700` | `bg-red-50` / `dark:bg-red-950/20` | Expand card (if unlinked) | `border-slate-400` + shadow | Disabled | Disabled |
+| Converting | Normal border | Normal background | Expand card (if unlinked) | `border-slate-400` + shadow | "Converting…" (disabled, `opacity-40`) | Disabled |
+| Deleting | Normal border | Normal background | Expand card (if unlinked) | `border-slate-400` + shadow | Disabled | "…" (disabled, `opacity-40`) |
+
+All states have `cursor-pointer`, `hover:shadow-md`, and `transition-all` for smooth transitions between states. Converting and Deleting are transient states (<1s normally) that auto-resolve to Normal/Linked (on success) or Error (on failure).
 
 ---
 
@@ -397,13 +493,13 @@ Four sections rendered top-to-bottom (each collapsible; section header shows ite
 Previous changelogs: [Select ▾]
 ```
 - **"Generate Changelog"** button: same dark-pill style. Shows "Generating…" while running.
-- **Previous changelogs** dropdown: populated by `getChangelogReports()` — lists `changelog-{date}.md` files newest-first. Selecting one loads that file via `getLatestChangelog(filename)` without re-running.
+- **Previous changelogs** dropdown: populated by `getChangelogReports()` — lists `changelog-{date}.md` files newest-first. Selecting one calls `getLatestChangelog(filename)` and renders it without re-running. While loading, the current markdown (if any) remains visible — there is no loading spinner; the text simply swaps when the fetch completes. If the selected file is corrupt or missing, the current view remains unchanged (silent error — no alert or error message).
 
 #### Streaming output (while running)
 Same scrollable pre-formatted block as Roadmap tab.
 
 #### Changelog result (after completion)
-The agent writes `changelog-{date}.md` to `.teamai/roadmap/`. The UI reads it on `result` event and renders it inside a `<pre className="whitespace-pre-wrap font-mono text-xs">` block. (`@tailwindcss/typography` is not installed; use `<pre>` rather than `prose` classes.)
+The agent writes `changelog-{date}.md` to `.teamai/roadmap/`. The UI reads it on `result` event and renders it inside a `<pre className="whitespace-pre-wrap font-mono text-xs text-slate-700 dark:text-slate-300">` block inside a bordered container (`bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700`). (`@tailwindcss/typography` is not installed; use `<pre>` rather than `prose` classes.)
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -418,7 +514,13 @@ The agent writes `changelog-{date}.md` to `.teamai/roadmap/`. The UI reads it on
 └────────────────────────────────────────────────────────┘
 ```
 
-The most recent changelog is **auto-loaded on page mount** (no agent needed) if a file already exists. Changelog generation sessions also persist their session ID in `sessionStorage` so a mid-run changelog can be reconnected if the user navigates away and returns.
+The most recent changelog is **auto-loaded on page mount** (no agent needed) if a file already exists. Changelog generation sessions also persist their session ID in `sessionStorage` so a mid-run changelog can be reconnected if the user navigates away and returns. **Reconnect UX:** When reconnecting to an in-flight session, the "Generate Changelog" button immediately shows "Generating…" (disabled), the streaming output block reappears with any accumulated text from the agent, and new events stream in live — the user sees no interruption or "Reconnecting…" indicator.
+
+#### Changelog error state
+If the agent session exits with an error (non-zero exit code) or the `startChangelogGeneration` server action throws, the streaming block remains visible with the last agent text. No separate error UI is rendered — the user sees whatever the agent output before crashing. The "Generate Changelog" button returns to its normal state so the user can retry.
+
+#### Changelog empty file handling
+If a changelog `.md` file exists but contains only whitespace or is empty, the `<pre>` block renders as an empty box (no visible text). The file is still listed in the history dropdown for consistency.
 
 #### Empty state (no changelog generated)
 ```
@@ -433,13 +535,16 @@ No changelog generated yet. Click 'Generate Changelog' to start.
 |---|---|---|
 | `startRoadmapGeneration(skipCompetitors)` | `Promise<string>` | Spawns session, sends `/roadmap [--skip-competitors]`; stores session ID in `global.__roadmapSessions` under key `roadmap::<projectPath>` |
 | `startChangelogGeneration()` | `Promise<string>` | Spawns session, sends `/changelog`; stores session ID under key `changelog::<projectPath>` |
-| `getRoadmapReports()` | `Promise<{filename,date}[]>` | Lists `roadmap-*.json` newest-first |
-| `getRoadmapReport(filename)` | `Promise<RoadmapReport>` | Reads + normalizes JSON; validates filename against `/^roadmap-\d{4}-\d{2}-\d{2}\.json$/`; throws `"Malformed roadmap JSON: ${filename}"` if JSON is invalid |
-| `getChangelogReports()` | `Promise<{filename,date}[]>` | Lists `changelog-*.md` newest-first |
+| `getRoadmapReports()` | `Promise<{filename,date}[]>` | Lists `roadmap-*.json` newest-first from `.teamai/roadmap/` |
+| `getRoadmapReport(filename)` | `Promise<RoadmapReport>` | Reads + normalizes JSON; validates filename against `/^roadmap-\d{4}-\d{2}-\d{2}\.json$/`; throws `"Malformed roadmap JSON: ${filename}"` if JSON is invalid; normalizes flat-item and phased-item shapes |
+| `getChangelogReports()` | `Promise<{filename,date}[]>` | Lists `changelog-*.md` newest-first from `.teamai/roadmap/` |
 | `getLatestChangelog(filename)` | `Promise<string>` | Reads raw markdown; validates filename against `/^changelog-\d{4}-\d{2}-\d{2}\.md$/` |
 | `getActiveRoadmapSession(type)` | `Promise<string \| null>` | Looks up `global.__roadmapSessions` for `${type}::<projectPath>`; returns session ID if `processManager.getSession(id)?.status === 'running'`, otherwise `null`. Used for reconnect on page mount. |
+| `convertToTask(filename, itemIndex, phaseKey)` | `Promise<{ taskId: string }>` | Creates a kanban Board task from a roadmap item. Validates `phaseKey` against `['now','next','later','icebox']`; reads the roadmap JSON, gets the item, checks for existing `linkedTaskId` (idempotent — returns existing ID if already converted). Creates task via `TaskStore.create()` in Backlog phase, writes `linkedTaskId` back to JSON. Revalidates `/` and `/roadmap` paths. |
+| `deleteRoadmapItem(filename, itemIndex, phaseKey)` | `Promise<void>` | Removes an item from the roadmap JSON by index. Validates filename and phaseKey. Splices the item from the phase array, writes back JSON, revalidates paths. Does NOT delete the linked kanban ticket if one exists. |
+| `getLinkedTaskStatuses(linkedTaskIds)` | `Promise<Record<string, { phase: string; title: string } \| null>>` | Batch-looks up kanban task statuses. For each taskId, returns `{ phase, title }` if the task exists, or `null` if it was deleted. Used on mount and after refresh to populate linked card phase badges. |
 
-All filename-accepting actions validate against strict regex before filesystem access (path traversal prevention).
+All filename-accepting actions validate against strict regex before filesystem access (path traversal prevention: `/^roadmap-\d{4}-\d{2}-\d{2}\.json$/` and `/^changelog-\d{4}-\d{2}-\d{2}\.md$/`).
 
 Session globals follow the `global.__roadmapSessions` pattern used by ideation and insights.
 
@@ -455,6 +560,7 @@ export interface RoadmapItem {
   affected_files: string[];
   source: 'ideation' | 'competitor-analysis';
   competitive_context?: string;
+  linkedTaskId?: string;         // set when user converts this item to a kanban ticket via "+ Convert to ticket"
 }
 
 export interface RoadmapReport {
@@ -472,6 +578,8 @@ export interface RoadmapReport {
 
 `getRoadmapReport` normalizes two fallback shapes: flat `{ items: RoadmapItem[] }` (partition by priority/complexity rules) and `{ items: (RoadmapItem & { phase })[] }` (group by item.phase).
 
+`convertToTask` is idempotent: if `item.linkedTaskId` is already set, it returns the existing taskId without creating a duplicate.
+
 **Note:** The following command file issues were fixed (both in `defaults/commands/` for fresh scaffolding and in `.claude/commands/` for this project):
 - `defaults/commands/roadmap.md` §3b — `category` field added, "pority" → "priority"
 - `defaults/commands/changelog.md` — "changog" → "changelog", file-write step added
@@ -481,8 +589,12 @@ export interface RoadmapReport {
 - `.claude/commands/implement.md` — "indentunation" → "indentation"
 
 ### Components
-- `src/app/roadmap/page.tsx` — replaces placeholder; thin wrapper around `RoadmapView`
-- `src/components/roadmap-view.tsx` — `'use client'` — tabs, generate buttons, streaming block, phased card view, history selectors, markdown rendering
+- `src/app/roadmap/page.tsx` — thin wrapper around `RoadmapView`, passes `noProject` prop from project context
+- `src/components/roadmap-view.tsx` — `'use client'` — full roadmap/changelog page with:
+  - **RoadmapView**: parent component managing tab state (persisted to `sessionStorage`), roadmap/changelog generation sessions, history dropdowns, session reconnect on mount, streaming output display via `useSessionStream`
+  - **PhasedKanban**: horizontal 4-column kanban layout (Now/Next/Later/Icebox), linked status fetching via `getLinkedTaskStatuses`, real-time WebSocket status sync via `usePhaseSync`, convert/delete/expand actions with loading + error states
+  - **RoadmapCard**: individual item card with priority badge, complexity dots, description (collapsed: `line-clamp-3`, expanded: full + affected files), source info, expand/navigate hints, "+ Convert to ticket" button, "✕" delete button (hover-revealed), phase badge for linked items, error display
+  - **StreamingBlock**: re-usable monospace streaming output block for agent text
 
 ---
 
@@ -493,7 +605,7 @@ export interface RoadmapReport {
 3. Click **"Generate Roadmap"**
 4. Button shows "Generating…"; streaming output block appears with live agent text
 5. Agent finishes (may take several minutes for full competitor analysis)
-6. Phased card view renders automatically; executive summary appears above Phase 1
+6. Phased kanban view renders automatically; executive summary appears above the four columns
 7. History dropdown adds today's date as the latest option
 
 ### User Journey — Viewing Past Roadmaps
@@ -501,7 +613,49 @@ export interface RoadmapReport {
 1. Navigate to **Roadmap**
 2. Open the **History** dropdown
 3. Select a previous date
-4. Phased card view updates to show that run's items (no agent spawned)
+4. Phased kanban view updates to show that run's items (no agent spawned)
+
+### User Journey — Expanding Roadmap Card Details
+
+1. Navigate to **Roadmap** tab with a loaded report
+2. Hover over any card — note the cursor changes to pointer, border + shadow highlight on hover
+3. Click an **unlinked** card (one showing "+ Convert to ticket")
+4. Card expands: description shows full text (no longer truncated), **Affected Files** list appears with monospace file paths, border turns blue, "Click to collapse" hint appears
+5. Click the same card again — it collapses back to 3-line description
+6. With one card expanded, click a different unlinked card — the first card collapses, the new one expands (only one expanded at a time)
+7. Click a **linked** card (one showing a phase badge) — it navigates to the task detail page at `/task/{id}` (no expansion)
+
+### User Journey — Converting a Roadmap Item to a Kanban Ticket
+
+1. Navigate to **Roadmap** tab with a loaded report
+2. Find an unlinked card (showing "+ Convert to ticket" button at bottom-left)
+3. Click **"+ Convert to ticket"**
+4. Button changes to "Converting…" (disabled, `opacity-40`)
+5. On success (typically <1s): the card refreshes — the convert button is replaced by a phase badge (e.g., `BACKLOG`) showing the linked kanban task's current phase
+6. The card now shows "Click to view task" instead of "Click to expand details"
+7. Navigate to the **Kanban Board** (`/`) — the new task appears in the **Backlog** column
+8. Navigate back to **Roadmap** — the card still shows its linked phase badge (persisted in JSON)
+9. If the server action fails: red error text "Action failed — please try again." appears for 5 seconds
+
+### User Journey — Real-Time Phase Sync on Linked Cards
+
+1. Convert a roadmap item to a ticket (see above)
+2. Open the roadmap in one tab; open the kanban board in another (or keep both visible)
+3. On the kanban board, start the task's pipeline — the card moves from Backlog → Spec → Planning → In Progress
+4. Switch back to the roadmap tab — the roadmap card's phase badge updates in real time: `BACKLOG` → `SPEC` → `PLAN` → `IMPLEMENT`
+5. No page refresh required — status syncs via WebSocket `phase-change` events
+
+### User Journey — Deleting a Roadmap Item
+
+1. Navigate to **Roadmap** tab with a loaded report
+2. Hover over any card — the **✕** delete button becomes visible (opacity transition from 40% → 100%)
+3. Click the **✕** button
+4. A browser `confirm()` dialog appears: "Remove this item from the roadmap?"
+5. Click **Cancel** — nothing happens, card remains
+6. Click **OK** — the button shows "…" (loading), the item is removed from the roadmap JSON
+7. On success: the kanban refreshes, the card disappears from its column
+8. On failure: red error text appears on the card for 5 seconds
+9. **Note:** If the card was linked to a kanban ticket, the ticket is NOT deleted — only the roadmap reference is removed
 
 ### User Journey — Generating a Changelog
 
@@ -655,7 +809,20 @@ Four sections, rendered top-to-bottom:
 
 ---
 
-### Journey 8 — Overriding Agent Role
+### Journey 8 — Deleting a Task from the Kanban Board
+
+1. On the Kanban board, click a task card to open the Task Detail Panel (split view, 55/45)
+2. In the panel header (right side, next to the phase badge), find the **🗑 delete button**
+3. Click the **🗑** button
+4. A browser `confirm()` dialog appears: "Delete \"{title}\"? This cannot be undone."
+5. Click **Cancel** — nothing happens, panel stays open, task remains
+6. Click the same card again to reopen the panel, click **🗑** again
+7. Click **OK** — the button is briefly disabled
+8. On success: the **panel closes immediately** (kanban returns to full width), the board refreshes, and the card disappears from its column
+9. **Alternate path — dedicated task page:** Navigate directly to `/task/{id}` (no kanban visible). Click **🗑**, confirm, and the page navigates back to `/` (the kanban board) after deletion
+10. If the server action fails: a network error may appear in the console; the task remains in its column
+
+### Journey 8b — Overriding Agent Role
 
 1. Open a task's detail panel
 2. In the header area, find the **Agent** dropdown (default: "Auto (pipeline default)")
@@ -729,8 +896,8 @@ Four sections, rendered top-to-bottom:
 | Sidebar | Always visible | Navigation, projects, dark mode |
 | KanbanBoard | `/` | 9-column board with horizontal scroll |
 | TaskCard | Board columns | Card with play button, phase badge, timestamps |
-| TaskPanel | Board right side | Slide-in detail panel, 45% width |
-| TaskDetail | Inside panel | Tabbed content: Overview/Terminal/Spec/Plan/QA |
+| TaskPanel | Board right side | Slide-in detail panel, 45% width. Receives `onClose` from KanbanBoard — closing the panel sets `selectedTaskId` to null. WebSocket re-fetches data silently on phase-change events. Passes `onClose` through to TaskDetail for delete-panel-close flow. |
+| TaskDetail | Inside panel or `/task/[id]` page | Tabbed content: Overview/Terminal/Spec/Plan/QA. Accepts optional `onClose` prop. When `onClose` is provided (panel mode): delete closes the panel via `onClose()`. When absent (page mode): delete navigates to `/` via `router.push()`. |
 | DepPicker | Overview tab | Searchable task picker for dependencies |
 | DarkModeToggle | Sidebar nav | ☾/☀ toggle with localStorage persistence |
 | NewTaskModal | Board header | Create task form with image upload |
@@ -738,7 +905,9 @@ Four sections, rendered top-to-bottom:
 | RateLimitBanner | Overview tab (when rate limited) | Amber warning with retry time |
 | TerminalPane | Terminal tab | xterm.js terminal with event replay |
 | ContainerConfigEditor | Settings — Container Isolation | Toggle + live status badge (stopped/starting/running/restarting) |
-| RoadmapView | `/roadmap` | Tabbed roadmap+changelog page: generate buttons, streaming output, phased card view, history selectors |
+| RoadmapView | `/roadmap` | Tabbed roadmap+changelog page: generate buttons, streaming output, history selectors, session reconnect |
+| PhasedKanban | Inside RoadmapView | Horizontal 4-column kanban (Now/Next/Later/Icebox) with linked status badges, real-time WebSocket sync, convert/delete actions |
+| RoadmapCard | Inside PhasedKanban | Per-item card: expand/collapse (unlinked) or navigate (linked), priority badge, complexity dots, affected files, "+ Convert to ticket" button, phase badge, delete button, error state |
 
 ---
 
@@ -760,7 +929,8 @@ Four sections, rendered top-to-bottom:
 
 ## 9. Key Interaction Patterns
 
-- **Split view**: clicking a card → 55/45 kanban+panel; clicking `×` → back to full-width kanban
+- **Split view**: clicking a card → 55/45 kanban+panel; clicking `×` → back to full-width kanban; deleting a task from the panel → panel closes automatically, board refreshes
+- **Delete task**: 🗑 button in panel header. `confirm()` dialog before deletion. In panel mode (kanban split view), deletion closes the panel via `onClose` callback. In page mode (`/task/[id]`), deletion navigates to `/`. The `deleteTask` server action removes the task from the TaskStore and revalidates the board path.
 - **Live updates**: WebSocket pushes phase-change events → cards move between columns in real time without page reload
 - **Optimistic UI**: task creation shows "Creating…" spinner; board refreshes after server confirms. Drag-and-drop shows card in target column immediately, confirmed by WebSocket phase-change event with 10-second safety timeout
 - **Drag-and-drop**: cards are draggable between all columns; drop triggers smart pipeline resumption (skips completed phases, kills running sessions before restarting); valid drop targets glow blue with scale animation; dragged cards show reduced opacity + scale-95; moving cards show blue pulsing dot + "moving" label + animate-pulse until WebSocket confirms
