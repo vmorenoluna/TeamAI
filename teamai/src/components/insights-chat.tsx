@@ -83,7 +83,7 @@ export function InsightsChat() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-slate-900">
+    <div className="flex flex-col h-full">
       {/* Messages */}
       <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
@@ -95,8 +95,8 @@ export function InsightsChat() {
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
               msg.role === 'user'
-                ? 'bg-slate-900 dark:bg-slate-600 text-white rounded-br-sm'
-                : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-bl-sm'
+                ? 'bg-[#2563eb] text-white rounded-br-sm'
+                : 'bg-[#1e2333] border border-[#1e293b] text-slate-200 rounded-bl-sm'
             }`}>
               {msg.content}
               {msg.streaming && (
@@ -109,7 +109,7 @@ export function InsightsChat() {
       </div>
 
       {/* Input */}
-      <div className="shrink-0 border-t border-slate-200 dark:border-slate-700 p-4">
+      <div className="shrink-0 border-t border-[#1e293b] p-4">
         <div className="flex gap-2">
           <textarea
             value={input}
@@ -118,12 +118,12 @@ export function InsightsChat() {
             rows={2}
             placeholder={sessionId ? 'Ask about the codebase… (Enter to send)' : 'Connecting…'}
             disabled={!sessionId || isPending}
-            className="flex-1 min-w-0 px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none disabled:opacity-50"
+                        className="flex-1 min-w-0 px-3 py-2 text-sm border border-[#334155] rounded-lg bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] resize-none disabled:opacity-50 placeholder-slate-500"
           />
           <button
             onClick={handleSend}
             disabled={!sessionId || !input.trim() || isPending}
-            className="px-4 py-2 text-sm font-medium bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-lg hover:bg-slate-700 disabled:opacity-40 transition-colors shrink-0 self-end"
+                        className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors shrink-0 self-end"
           >
             Send
           </button>

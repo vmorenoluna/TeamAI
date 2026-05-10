@@ -31,31 +31,31 @@ export function DirectoryBrowser({ onSelect, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg mx-4 flex flex-col overflow-hidden" style={{ maxHeight: '70vh' }}>
+      <div className="relative bg-[#1e2333] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] w-full max-w-lg mx-4 flex flex-col overflow-hidden" style={{ maxHeight: '70vh' }}>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700 shrink-0">
-          <span className="text-sm font-semibold text-slate-900 dark:text-white">Select folder</span>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e293b] shrink-0">
+          <span className="text-sm font-semibold text-white">Select folder</span>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg leading-none"
+            className="text-slate-400 hover:text-white text-lg leading-none transition-colors"
           >
             ×
           </button>
         </div>
 
         {/* Breadcrumb / current path */}
-        <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 shrink-0">
+        <div className="flex items-center gap-2 px-4 py-2 bg-[#11131b] border-b border-[#1e293b] shrink-0">
           {result?.parent != null && (
             <button
               onClick={() => navigate(result.parent!)}
               disabled={isPending}
-              className="text-xs font-medium text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-40 shrink-0"
+              className="text-xs font-medium text-slate-400 hover:text-white disabled:opacity-40 shrink-0 transition-colors"
             >
               ← Up
             </button>
           )}
-          <span className="text-xs font-mono text-slate-600 dark:text-slate-400 truncate">
+          <span className="text-xs font-mono text-slate-400 truncate">
             {result?.path ?? '…'}
           </span>
         </div>
@@ -72,7 +72,7 @@ export function DirectoryBrowser({ onSelect, onClose }: Props) {
             <button
               key={entry.path}
               onClick={() => navigate(entry.path)}
-              className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-left text-slate-300 hover:bg-[#1a1f2e] transition-colors"
             >
               <FolderIcon />
               {entry.name}
@@ -81,17 +81,17 @@ export function DirectoryBrowser({ onSelect, onClose }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-4 py-3 border-t border-slate-200 dark:border-slate-700 shrink-0">
+        <div className="flex items-center justify-end gap-3 px-4 py-3 border-t border-[#1e293b] shrink-0">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors"
+            className="px-3 py-1.5 text-sm text-slate-400 hover:text-white transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={() => result && onSelect(result.path)}
             disabled={!result || isPending}
-            className="px-3 py-1.5 text-sm font-medium bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-md hover:bg-slate-700 dark:hover:bg-slate-100 transition-colors disabled:opacity-50"
+            className="px-3 py-1.5 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] transition-colors disabled:opacity-50"
           >
             Select this folder
           </button>

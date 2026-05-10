@@ -7,6 +7,31 @@
 
 ## 1. Application Shell
 
+### Design System — “Midnight” Dark-First Theme
+
+TeamAI uses a deep "midnight" dark mode palette inspired by Google Stitch, optimized for high-fidelity engineering workflows:
+
+| Token | Value | Usage |
+|---|---|---|
+| `#11131b` | Deep navy/slate | Primary surface: sidebar, page backgrounds |
+| `#1a1f2e` | Surface bright | Secondary surfaces, hover states |
+| `#1e2333` | Surface card | Cards, panels, modals |
+| `#2563eb` | Royal blue accent | Active states, primary buttons, nav highlights |
+| `#1d4ed8` | Accent hover | Button hover states |
+| `#1e293b` | Border | Card/panel borders |
+| `#334155` | Border light | Input borders, scrollbar thumbs |
+| `#ffffff` | Text primary | Titles, headings |
+| `#cbd5e1` | Text secondary | Body text (slate-300) |
+| `#94a3b8` | Text muted | Secondary labels (slate-400) |
+| `#64748b` | Text dim | Timestamps, hints (slate-500) |
+| `#34d399` | Emerald-400 | Streaming agent output on black terminals |
+
+**Typography:** Inter (sans-serif) for UI, Geist Mono for code. Text hierarchy: `text-lg font-bold` for page titles, `text-xs font-semibold` for badges, `text-[10px]` for dense metadata.
+
+**Borders & Radius:** Every card, button, and modal uses `rounded-lg` (8px). Consistent 1px borders (`border-[#1e293b]`). Cards are flat — no shadows except on hover (`hover:shadow-md`).
+
+**Dark-only:** The UI is permanently dark. There is no light mode toggle — the midnight palette is the only theme.
+
 ### Layout
 The app has a two-column shell that fills the entire viewport:
 
@@ -17,39 +42,42 @@ The app has a two-column shell that fills the entire viewport:
 │  TeamAI logo      │  Page content varies by route       │
 │  Collapse ←       │                                     │
 │  ─────────────    │                                     │
-│  PROJECTS         │                                     │
-│  · Sample-project   ×    │                                     │
-│  · TeamAI    ×    │                                     │
-│  + Add            │                                     │
+│  [Project A] [B] [+]  ← project tabs (scrollable)       │
 │  ─────────────    │                                     │
-│  ☾ Dark mode      │                                     │
 │  ▦ Kanban         │                                     │
 │  ◎ Insights       │                                     │
 │  ◈ Ideation       │                                     │
 │  ▶ Terminals      │                                     │
 │  ◉ Roadmap        │                                     │
 │  ⚙ Settings       │                                     │
+│                   │                                     │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ### Sidebar — Expanded State
 - **Header**: "TeamAI" branding + `←` collapse button
-- **Projects section**: label "PROJECTS" + "+ Add" button; list of added projects, each with a name button (activates it) and `×` remove button; active project is visually highlighted
-- **Navigation**: vertical list of icon + label links; dark mode toggle at top; active link is highlighted
+- **Background**: `bg-[#11131b]` (deep navy) — permanently dark
+- **Project tabs row**: horizontal scrollable row of project tabs right below the header. Each project is a rounded pill tab (`px-3 py-1.5`, `max-w-[120px]`, truncated name). Active project highlighted in royal blue (`bg-[#2563eb] text-white`). Inactive tabs: `text-slate-400`, hover shows `bg-[#1a1f2e] text-white`. Remove button (`×`) is a small circle overlay at top-right of each tab, visible on hover. A `+` button at the end opens the Add Project dialog. No "PROJECTS" label.
+- **Navigation**: vertical list of icon + label links below the project tabs row; fills remaining space with `flex-1 overflow-y-auto`. Active link highlighted with `bg-[#2563eb]/15` + `border-r-2 border-[#2563eb]`. Inactive: `text-slate-400`, hover shows `bg-[#1a1f2e] text-white`. Kanban nav also highlighted on `/task/[id]` routes. No dark mode toggle.
+- **Sections reflect active project**: all page content updates when a different project tab is selected.
 
 ### Sidebar — Collapsed State
 - Sidebar narrows to ~48px icon strip
 - Header shows only `→` expand button
-- Navigation shows icon-only buttons (no labels)
-- Projects list is hidden
+- Project tabs row is hidden entirely
+- Navigation shows icon-only buttons (no labels) with a `border-t` separator from the header
 - More horizontal space for main content — board shows more columns
 
-### Dark Mode Toggle
-- Button at top of nav: `☾ Dark mode` (when in light mode) / `☀ Light mode` (when in dark mode)
-- Clicking toggles the entire app's color scheme
-- Preference persisted to `localStorage` — survives page reload
-- No flash on load (inline `<script>` applies class before paint)
-- Sidebar background always stays dark regardless of mode
+### Theme
+- **Dark-only** — no light mode toggle exists. The midnight palette (`#11131b`, `#1a1f2e`, `#1e2333`) is the permanent UI theme.
+
+### Project Tabs
+- Horizontal scrollable row of project tabs between the header and nav links
+- Active tab: `bg-[#2563eb] text-white` (royal blue)
+- Inactive tab: `text-slate-400 hover:bg-[#1a1f2e] hover:text-white`
+- Remove button (×): circular overlay at top-right, hidden by default, appears on hover (`group-hover:opacity-100`)
+- `+` button at end opens the Add Project modal (same dialog as before)
+- When collapsed, the project tabs row is hidden entirely
 
 ---
 
@@ -74,6 +102,11 @@ The app has a two-column shell that fills the entire viewport:
 ### Board header
 - Left: "Board" heading
 - Right: "+ New Task" button (dark pill)
+
+### Board Surface
+- Background: `bg-[#11131b]` (primary surface)
+- Column headers: uppercase label (`text-xs font-semibold text-slate-400`) + count badge (`bg-[#1e293b] text-slate-300`, rounded-full)
+- Empty column filler: `min-h-[120px]`
 
 ### Columns
 Nine fixed columns in order, each 240px wide, scrollable horizontally:
@@ -104,12 +137,13 @@ Each column has:
 └──────────────────────────────────┘
 ```
 
+- **Card styling**: `bg-[#1e2333]` surface with `border border-[#1e293b]`, `rounded-lg` (8px), no shadow. Flat design with subtle hover shadow (`hover:shadow-md`).
 - **Play button** `▶`: green circle overlay, top-right corner. Only shown on tasks that were interrupted mid-pipeline (process crashed / app restarted). Clicking resumes the pipeline immediately without opening the panel.
 - **Phase badge**: color-coded pill per phase (blue=spec, indigo=plan, amber=implement, orange=qa, purple=awaiting-review, teal=merge, red=failed, green=done)
-- **Description text**: `text-slate-600 dark:text-slate-300` — neutral body text, never blue or link-colored. Truncated at 80 chars with a "more"/"less" toggle. The toggle button has no underline (to avoid looking like a link).
-- **Timestamp**: relative time since creation ("just now", "4m ago", "2h ago", "3d ago")
+- **Description text**: `text-slate-300` — neutral body text, never blue or link-colored. Truncated at 80 chars with a "more"/"less" toggle. The toggle button has no underline (to avoid looking like a link).
+- **Timestamp**: relative time since creation ("just now", "4m ago", "2h ago", "3d ago") — `text-slate-500`
 - **Moving indicator**: blue pulsing dot + "moving" label appears on the card after a drag-and-drop until the WebSocket confirms the phase change. Card shows `pointer-events-none` and reduced opacity during transition.
-- **Clicking the card body** opens the Task Detail Panel
+- **Clicking the card body** opens the Task Detail Window (floating overlay over the kanban board)
 
 ### Drag-and-Drop
 
@@ -169,43 +203,66 @@ Triggered by: "+ New Task" button in board header.
 
 ---
 
-## 5. Task Detail Panel
+## 5. Task Detail Window
 
-Clicking a task card opens a split-view panel on the right. The kanban board compresses to ~55% width; the panel takes ~45%.
+Clicking a task card opens a **floating window overlay** on top of the kanban board. The kanban board remains at full width behind a semi-transparent blurred backdrop.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  KANBAN (55%)           │  TASK PANEL (45%)              │
-│                         │  ─────────────── [×]           │
-│  [board columns...]     │  ← Board  [PHASE BADGE] [🗑]   │
-│                         │  Task Title                    │
-│                         │  Description text              │
-│                         │  Created … · Updated …         │
-│                         │  Agent: [Auto (pipeline) ▾]    │
-│                         │  ────────────────────────────  │
-│                         │  Overview Terminal Spec Plan QA│
-│                         │  ────────────────────────────  │
-│                         │  [tab content]                 │
+│  KANBAN BOARD (full width, dimmed)                       │
+│  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐  │
+│  │  TASK WINDOW (centered, 90% height, max-w-4xl)       │  │
+│  │  ┌─────────────────────────────────────────────────┐ │  │
+│  │  │ Task Title              [PHASE BADGE]        [×]│ │  │  ← title bar
+│  │  │─────────────────────────────────────────────────│ │  │
+│  │  │ ← Board                                    [🗑] │ │  │
+│  │  │ Task Title (heading)                            │ │  │
+│  │  │ Description text                                │ │  │
+│  │  │ Created … · Updated …      Agent: [Auto ▾]      │ │  │
+│  │  │─────────────────────────────────────────────────│ │  │
+│  │  │ Overview  Terminal  Spec  Plan  QA              │ │  │  ← tabs
+│  │  │─────────────────────────────────────────────────│ │  │
+│  │  │ [tab content — scrollable]                      │ │  │
+│  │  │                                                 │ │  │
+│  │  └─────────────────────────────────────────────────┘ │  │
+│  └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘  │
 └──────────────────────────────────────────────────────────┘
 ```
 
-### Panel Header
+### Window Behavior
+
+- **Backdrop**: semi-transparent black overlay (`bg-black/40`) with `backdrop-blur-sm` applied to the kanban board area only
+- **Window sizing**: `max-w-4xl` width, `h-[90%]` height (capped at `max-h-[900px]`), centered vertically and horizontally with `p-6` padding
+- **Window styling**: `rounded-xl shadow-2xl border border-[#1e293b] bg-[#1e2333]` — matching the midnight card surface
+- **Animation**: `animate-modal-in` (150ms zoom-in-95 + fade-in keyframes)
+- **Backdrop click**: clicking the dimmed backdrop area closes the window
+- **Escape key**: pressing Escape closes the window
+- **Click propagation**: clicking inside the window itself does NOT close it (`e.stopPropagation()`)
+- **Background lock**: while the window is open, the kanban board behind it is non-interactive (`pointer-events-none select-none`) and scrolling is disabled (`overflow-hidden`)
+- **Title bar**: shows the task title (truncated), a color-coded phase badge, and an `×` close button with hover background (`hover:bg-[#1e293b]`). During loading, the title shows "Loading…"
+- **Multiple windows**: only one task window can be open at a time; opening a different card replaces the current window
+
+### Window Header (inside the scrollable content area)
 
 Layout (top to bottom):
-1. **Row 1:** `← Board` breadcrumb (left) + **Phase badge** + **🗑 Delete button** (right)
-2. **Row 2:** Task title (large heading, `text-slate-900 dark:text-white`)
-3. **Row 3:** Description text (`text-slate-600 dark:text-slate-300`, never blue)
+1. **Row 1:** `← Board` breadcrumb (left, `text-slate-400 hover:text-slate-200`) + **Phase badge** + **🗑 Delete button** (right, `text-slate-500 hover:text-red-400`)
+2. **Row 2:** Task title (large heading, `text-white`)
+3. **Row 3:** Description text (`text-slate-300`, never blue)
 4. **Row 4:** `Created … · Updated …` timestamps + **Agent** dropdown
 
+**Tabs:** Horizontal tab bar with bottom-border active indicator (`border-b-2 border-[#2563eb]`). Active tab: `text-white`. Inactive tab: `text-slate-500 hover:text-slate-300`. Tab badges (e.g., "1") shown on Spec/QA tabs when content exists.
+
+**Terminal tab:** xterm.js with pure black background (`#000000`) and emerald foreground (`#34d399`) for streaming agent output.
+
 **Individual elements:**
-- `×` close button (top-right strip, above the header) — collapses panel, restores full-width kanban
+- `×` close button (title bar, far right) — closes the window, kanban returns to full-width interactive state
 - `← Board` breadcrumb link
 - Phase badge (color-coded, same as card)
 - Task title (large heading)
 - Description text — neutral body color, not link-colored
 - **Created / Updated timestamps**: both always shown (there is no "Run Pipeline" button in the panel header). Even newly created tasks where `createdAt === updatedAt` show both timestamps with identical values.
 - **Agent dropdown**: "Auto (pipeline default)" or any named role — overrides which AI agent persona handles the next pipeline step for this task. Options: Product Analyst, Senior Developer, Git Integration Specialist, Implementation Planner, Bug Fix Specialist, QA Reviewer
-- **🗑 Delete button** (trash icon, right side of header): slate color, turns red on hover. On click, `window.confirm('Delete "{title}"? This cannot be undone.')` dialog appears. On confirm: shows disabled state, calls `deleteTask(taskId)` server action. On success: **panel closes immediately** (if opened from kanban split view) or **navigates to `/`** (if on the dedicated `/task/[id]` page). The kanban board refreshes to remove the deleted card. The button is always present but disabled via `isPending` during the operation.
+- **🗑 Delete button** (trash icon, right side of header): slate color, turns red on hover. On click, `window.confirm('Delete "{title}"? This cannot be undone.')` dialog appears. On confirm: shows disabled state, calls `deleteTask(taskId)` server action. On success: **window closes immediately** (if opened from kanban overlay) or **navigates to `/`** (if on the dedicated `/task/[id]` page). The kanban board refreshes to remove the deleted card. The button is always present but disabled via `isPending` during the operation.
 
 ### Tabs
 
@@ -279,12 +336,12 @@ Shown when Claude API rate limit was hit; app auto-retries at the displayed time
 Header: "Ideation" title + "Scan the codebase for improvements, vulnerabilities, and tech debt." subtitle.
 
 Below: `IdeationScanner` component:
-- **"Run Scan"** button — triggers a Claude agent scan of the active codebase
-- While scanning: button changes to "Scanning…" (disabled)
-- After scan: results appear in a scrollable monospace pre-formatted block; "Scan complete" badge shown
+- **"Run Scan"** button — dark pill (`bg-[#2563eb] hover:bg-[#1d4ed8] text-white rounded-lg`), triggers a Claude agent scan of the active codebase
+- While scanning: button changes to "Scanning…" (disabled, `opacity-40`)
+- After scan: results appear in a scrollable monospace pre-formatted block (`bg-[#1a1f2e] border border-[#1e293b] rounded-lg`, monospace `text-xs`); "Scan complete" badge shown
 - Empty state: "Click 'Run Scan' to analyse the codebase."
 
-Dark mode: `bg-white dark:bg-slate-900` on page root; result block uses `bg-slate-50 dark:bg-slate-900` with border.
+Dark mode: `bg-[#11131b]` on page root (always dark-first). No light mode variant.
 
 ---
 
@@ -293,25 +350,25 @@ Dark mode: `bg-white dark:bg-slate-900` on page root; result block uses `bg-slat
 Header: "Insights" title + "Chat with Claude about the active project." subtitle.
 
 Below: full-height chat interface (`InsightsChat` component):
-- **Message area**: scrollable list of chat bubbles. User messages are dark pill (right-aligned); assistant replies are light card with border (left-aligned). Streaming replies show an animated cursor.
-- **Input bar** (pinned bottom): multi-line textarea + "Send" button. Press Enter to send (Shift+Enter for new line). Placeholder: "Ask about the codebase… (Enter to send)". Disabled while connecting or waiting for response.
+- **Message area**: scrollable list of chat bubbles on `bg-[#11131b]`. User messages are dark pill (`bg-[#2563eb] text-white`, right-aligned); assistant replies are card with border (`bg-[#1e2333] border border-[#1e293b]`, left-aligned). Streaming replies show an animated cursor.
+- **Input bar** (pinned bottom): multi-line textarea (`bg-[#1a1f2e] border border-[#1e293b] rounded-lg text-slate-200`) + "Send" button (`bg-[#2563eb]`). Press Enter to send (Shift+Enter for new line). Placeholder: "Ask about the codebase… (Enter to send)". Disabled while connecting or waiting for response.
 
-Dark mode: `bg-white dark:bg-slate-900` on root; input area has a top border separator.
+Dark mode: `bg-[#11131b]` on root (always dark-first). Input area has a top border separator (`border-[#1e293b]`).
 
 ---
 
 ## 5c. Terminals Page (`/terminals`)
 
-Header: "Terminals" title + subtitle + **"+ New Terminal"** button (top-right).
+Header: "Terminals" title + subtitle + **"+ New Terminal"** button (top-right, `bg-[#2563eb]`).
 
-Clicking "+ New Terminal" opens a modal:
+Clicking "+ New Terminal" opens a modal (`bg-[#1e2333] border-[#1e293b]`):
 - **Role** dropdown (all available agent roles)
 - **Model** text field (optional override, defaults to project provider setting)
-- Cancel / Open buttons
+- Cancel (`text-slate-300 hover:text-white`) / Open buttons
 
-Once opened, terminals appear in a responsive grid (1 column for 1 terminal, 2 columns for 2+). Each terminal panel is a dark xterm.js instance pre-loaded with the chosen role's system prompt. Multiple terminals can run simultaneously.
+Once opened, terminals appear in a responsive grid (1 column for 1 terminal, 2 columns for 2+). Each terminal panel is a dark xterm.js instance (`bg-[#000000]` with `#34d399` emerald foreground) pre-loaded with the chosen role's system prompt. Multiple terminals can run simultaneously.
 
-Dark mode: `bg-slate-50 dark:bg-slate-950` on root content area; terminal panels are always `bg-slate-950` (terminals are inherently dark).
+Dark mode: `bg-[#11131b]` on root content area (always dark-first). No project message: `text-slate-500`.
 
 ---
 
@@ -454,7 +511,7 @@ Every card is clickable (`cursor-pointer`). Behavior depends on whether the item
 └───────────────────────────────────────────┘
 ```
 
-**Card body click:** Navigates to the task detail page at `/task/{linkedTaskId}` via Next.js `router.push()`. No expand/collapse for linked cards.
+**Card body click:** Opens the task detail in a floating window overlay (same pattern as the kanban board). No expand/collapse for linked cards. The roadmap content behind the window is non-interactive (`pointer-events-none select-none`) and scrolling is disabled (`overflow-hidden`). Clicking the backdrop, pressing Escape, or clicking the `×` button closes the window.
 
 **Phase badge (bottom-left):**
 - Color-coded badge matching the kanban board phase palette (see §8 Color & Phase Palette)
@@ -636,7 +693,7 @@ export interface RoadmapReport {
 4. Card expands: description shows full text (no longer truncated), **Affected Files** list appears with monospace file paths, border turns blue, "Click to collapse" hint appears
 5. Click the same card again — it collapses back to 3-line description
 6. With one card expanded, click a different unlinked card — the first card collapses, the new one expands (only one expanded at a time)
-7. Click a **linked** card (one showing a phase badge) — it navigates to the task detail page at `/task/{id}` (no expansion)
+7. Click a **linked** card (one showing a phase badge) — it opens the task detail in a floating window overlay over the roadmap (no expansion). The roadmap behind the window is dimmed with a blurred backdrop, matching the kanban board pattern.
 
 ### User Journey — Converting a Roadmap Item to a Kanban Ticket
 
@@ -682,7 +739,7 @@ export interface RoadmapReport {
 
 ## 6. Settings Page (`/settings`)
 
-Dark mode: `bg-white dark:bg-slate-900` on page root (covers both the header strip and the scrollable content area below it).
+Dark mode: `bg-[#11131b]` on page root (covers both the header strip and the scrollable content area below it). Cards/panels use `bg-[#1e2333] border border-[#1e293b] rounded-lg`. Inputs use `bg-[#1a1f2e] border-[#334155] text-slate-200`.
 
 Four sections, rendered top-to-bottom:
 
@@ -753,9 +810,9 @@ Four sections, rendered top-to-bottom:
 6. Click **"Create Task"**
 7. Button shows "Creating..." briefly
 8. Modal closes; new card appears in **Backlog** column
-9. Click the card to open the Task Detail Panel
+9. Click the card to open the Task Detail Window (floating overlay)
 10. Optionally change the Agent dropdown from "Auto" to a specific role
-11. Close the panel
+11. Close the window (click backdrop, press Escape, or click `×`)
 12. The pipeline starts automatically or can be resumed via play button
 
 ---
@@ -763,7 +820,7 @@ Four sections, rendered top-to-bottom:
 ### Journey 3 — Monitoring a Running Task
 
 1. A task moves from Backlog → Spec → Planning → In Progress automatically as the pipeline runs
-2. Click the task card to open the panel
+2. Click the task card to open the floating task window
 3. Click the **Terminal** tab
 4. Watch live agent output stream in the xterm.js terminal
 5. Click **Spec** tab to read the generated specification
@@ -776,7 +833,7 @@ Four sections, rendered top-to-bottom:
 
 1. Task card moves to the **Review** column (phase: `awaiting-review`)
 2. Card no longer has a ▶ play button (it's awaiting human decision)
-3. Click the card to open the panel
+3. Click the card to open the floating task window
 4. On **Overview** tab, see:
    - QA Report accordion (expand to read pass/fail details)
    - Spec accordion (expand to re-read what was built)
@@ -810,7 +867,7 @@ Four sections, rendered top-to-bottom:
 
 ### Journey 7 — Setting Up Task Dependencies
 
-1. Open a task's detail panel
+1. Open a task's detail window
 2. On **Overview** tab, click **"+ Depends on"**
 3. A searchable dropdown appears listing all other tasks
 4. Type to filter by name
@@ -824,20 +881,20 @@ Four sections, rendered top-to-bottom:
 
 ### Journey 8 — Deleting a Task from the Kanban Board
 
-1. On the Kanban board, click a task card to open the Task Detail Panel (split view, 55/45)
-2. In the panel header (right side, next to the phase badge), find the **🗑 delete button**
+1. On the Kanban board, click a task card to open the Task Detail Window (floating overlay with blurred backdrop)
+2. In the window header (right side, next to the phase badge), find the **🗑 delete button**
 3. Click the **🗑** button
 4. A browser `confirm()` dialog appears: "Delete \"{title}\"? This cannot be undone."
-5. Click **Cancel** — nothing happens, panel stays open, task remains
-6. Click the same card again to reopen the panel, click **🗑** again
+5. Click **Cancel** — nothing happens, window stays open, task remains
+6. Click the same card again to reopen the window, click **🗑** again
 7. Click **OK** — the button is briefly disabled
-8. On success: the **panel closes immediately** (kanban returns to full width), the board refreshes, and the card disappears from its column
+8. On success: the **window closes immediately** (backdrop disappears, kanban returns to interactive), the board refreshes, and the card disappears from its column
 9. **Alternate path — dedicated task page:** Navigate directly to `/task/{id}` (no kanban visible). Click **🗑**, confirm, and the page navigates back to `/` (the kanban board) after deletion
 10. If the server action fails: a network error may appear in the console; the task remains in its column
 
 ### Journey 8b — Overriding Agent Role
 
-1. Open a task's detail panel
+1. Open a task's detail window
 2. In the header area, find the **Agent** dropdown (default: "Auto (pipeline default)")
 3. Click to open dropdown; options:
    - Auto (pipeline default)
@@ -852,13 +909,6 @@ Four sections, rendered top-to-bottom:
 6. Next pipeline step for this task will use the chosen role's persona and system prompt
 
 ---
-
-### Journey 9 — Toggling Dark / Light Mode
-
-1. In sidebar, click **"☾ Dark mode"** (or **"☀ Light mode"**)
-2. Entire app color scheme switches instantly
-3. Preference remembered — same mode on next visit
-4. Sidebar always stays dark regardless of mode
 
 ---
 
@@ -906,44 +956,82 @@ Four sections, rendered top-to-bottom:
 
 | Component | Location | Description |
 |---|---|---|
-| Sidebar | Always visible | Navigation, projects, dark mode |
+| Sidebar | Always visible | Header, project tabs row, nav links |
 | KanbanBoard | `/` | 9-column board with horizontal scroll |
 | TaskCard | Board columns | Card with play button, phase badge, timestamps |
-| TaskPanel | Board right side | Slide-in detail panel, 45% width. Receives `onClose` from KanbanBoard — closing the panel sets `selectedTaskId` to null. WebSocket re-fetches data silently on phase-change events. Passes `onClose` through to TaskDetail for delete-panel-close flow. |
+| TaskPanel | Window overlay | Floating window frame with title bar (task title + phase badge + × close), backdrop, Escape key handling. Receives `onClose` from KanbanBoard. WebSocket re-fetches data silently on phase-change events. Passes `onClose` through to TaskDetail for delete-window-close flow. |
 | TaskDetail | Inside panel or `/task/[id]` page | Tabbed content: Overview/Terminal/Spec/Plan/QA. Accepts optional `onClose` prop. When `onClose` is provided (panel mode): delete closes the panel via `onClose()`. When absent (page mode): delete navigates to `/` via `router.push()`. |
 | DepPicker | Overview tab | Searchable task picker for dependencies |
-| DarkModeToggle | Sidebar nav | ☾/☀ toggle with localStorage persistence |
+
 | NewTaskModal | Board header | Create task form with image upload |
 | ReviewPanel | Overview tab (awaiting-review only) | Merge/PR/Reject actions |
 | RateLimitBanner | Overview tab (when rate limited) | Amber warning with retry time |
 | TerminalPane | Terminal tab | xterm.js terminal with event replay |
 | ContainerConfigEditor | Settings — Container Isolation | Toggle + live status badge (stopped/starting/running/restarting) |
-| RoadmapView | `/roadmap` | Tabbed roadmap+changelog page: generate buttons, streaming output, history selectors (always visible), session reconnect. Changelog dropdown always shown (disabled when empty). Complexity dots have `role="img" aria-label="Complexity N out of 5"` for accessibility. |
+| RoadmapView | `/roadmap` | Tabbed roadmap+changelog page: generate buttons, streaming output, history selectors (always visible), session reconnect. Changelog dropdown always shown (disabled when empty). Complexity dots have `role="img" aria-label="Complexity N out of 5"` for accessibility. Linked roadmap items open task detail in a floating window overlay matching the kanban board pattern. |
 | PhasedKanban | Inside RoadmapView | Horizontal 4-column kanban (Now/Next/Later/Icebox) with linked status badges, real-time WebSocket sync, convert/delete actions |
 | RoadmapCard | Inside PhasedKanban | Per-item card: expand/collapse (unlinked) or navigate (linked), priority badge, complexity dots, affected files, "+ Convert to ticket" button, phase badge, delete button, error state |
 
 ---
 
-## 8. Color & Phase Palette
+## 8. Design Tokens & Color Palette
 
-| Phase | Badge color (light) | Badge color (dark) |
+### Midnight Theme Tokens
+
+| Token | Hex | Tailwind Equivalent | Usage |
+|---|---|---|---|
+| Surface | `#11131b` | — | Primary: sidebar, page backgrounds |
+| Surface Bright | `#1a1f2e` | — | Secondary: hover states, secondary panels |
+| Surface Card | `#1e2333` | — | Cards, modals, panels |
+| Accent | `#2563eb` | blue-600 | Active states, primary buttons, nav highlight |
+| Accent Hover | `#1d4ed8` | blue-700 | Button hover states |
+| Border | `#1e293b` | slate-800 | Card/panel borders |
+| Border Input | `#334155` | slate-700 | Input borders, scrollbar |
+| Text Primary | `#ffffff` | white | Titles, headings |
+| Text Secondary | `#cbd5e1` | slate-300 | Body text |
+| Text Muted | `#94a3b8` | slate-400 | Secondary labels |
+| Text Dim | `#64748b` | slate-500 | Timestamps, hints |
+| Terminal BG | `#000000` | black | xterm.js terminal background |
+| Terminal FG | `#34d399` | emerald-400 | Streaming agent output |
+
+### Phase Badge Palette
+
+| Phase | Background | Text |
 |---|---|---|
-| backlog | gray | gray |
-| spec | blue | blue |
-| plan | indigo | indigo |
-| implement | amber | amber |
-| qa-review / qa-fix | orange | orange |
-| awaiting-review | purple | purple |
-| merge / create-pr | teal | teal |
-| failed | red | red |
-| done | green | green |
+| backlog | `bg-slate-800` | `text-slate-300` |
+| spec | `bg-blue-900/30` | `text-blue-400` |
+| plan | `bg-indigo-900/30` | `text-indigo-400` |
+| implement | `bg-amber-900/30` | `text-amber-400` |
+| qa-review / qa-fix | `bg-orange-900/30` | `text-orange-400` |
+| awaiting-review | `bg-purple-900/30` | `text-purple-400` |
+| merge / create-pr | `bg-teal-900/30` | `text-teal-400` |
+| failed | `bg-red-900/30` | `text-red-400` |
+| done | `bg-green-900/30` | `text-green-400` |
+
+### Roadmap Priority Badges
+
+| Priority | Background | Text |
+|---|---|---|
+| P0 | `bg-red-900/30` | `text-red-400` |
+| P1 | `bg-orange-900/30` | `text-orange-400` |
+| P2 | `bg-amber-900/30` | `text-amber-400` |
+| P3 | `bg-slate-800` | `text-slate-400` |
+
+### Container Status Badges
+
+| Status | Background | Text |
+|---|---|---|
+| Stopped | `bg-slate-800` | `text-slate-400` |
+| Starting | `bg-blue-900/30` | `text-blue-300` |
+| Running | `bg-green-900/30` | `text-green-300` |
+| Restarting | `bg-amber-900/30` | `text-amber-300` |
 
 ---
 
 ## 9. Key Interaction Patterns
 
-- **Split view**: clicking a card → 55/45 kanban+panel; clicking `×` → back to full-width kanban; deleting a task from the panel → panel closes automatically, board refreshes
-- **Delete task**: 🗑 button in panel header. `confirm()` dialog before deletion. In panel mode (kanban split view), deletion closes the panel via `onClose` callback. In page mode (`/task/[id]`), deletion navigates to `/`. The `deleteTask` server action removes the task from the TaskStore and revalidates the board path.
+- **Floating window overlay**: clicking a card → full-width kanban with centered floating window overlay (backdrop-blur, shadow-2xl, rounded-xl); clicking backdrop / Escape key / `×` button → window closes, kanban returns to normal; deleting a task from the window → window closes automatically, board refreshes
+- **Delete task**: 🗑 button in window header. `confirm()` dialog before deletion. In window overlay mode, deletion closes the window via `onClose` callback. In page mode (`/task/[id]`), deletion navigates to `/`. The `deleteTask` server action removes the task from the TaskStore and revalidates the board path.
 - **Live updates**: WebSocket pushes phase-change events → cards move between columns in real time without page reload
 - **Optimistic UI**: task creation shows "Creating…" spinner; board refreshes after server confirms. Drag-and-drop shows card in target column immediately, confirmed by WebSocket phase-change event with 10-second safety timeout
 - **Drag-and-drop**: cards are draggable between all columns; drop triggers smart pipeline resumption (skips completed phases, kills running sessions before restarting); valid drop targets glow blue with scale animation; dragged cards show reduced opacity + scale-95; moving cards show blue pulsing dot + "moving" label + animate-pulse until WebSocket confirms

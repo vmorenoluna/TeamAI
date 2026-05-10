@@ -6,10 +6,10 @@ import type { ContainerConfig } from '@/app/actions/containers';
 import type { ContainerState } from '@/lib/container-manager';
 
 const STATE_BADGE: Record<ContainerState, { label: string; cls: string }> = {
-  stopped:    { label: 'Stopped',    cls: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400' },
-  starting:   { label: 'Starting…',  cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' },
-  running:    { label: 'Running',    cls: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' },
-  restarting: { label: 'Restarting…', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300' },
+  stopped:    { label: 'Stopped',    cls: 'bg-slate-700 text-slate-400' },
+  starting:   { label: 'Starting…',  cls: 'bg-blue-900/40 text-blue-300' },
+  running:    { label: 'Running',    cls: 'bg-green-900/40 text-green-300' },
+  restarting: { label: 'Restarting…', cls: 'bg-amber-900/40 text-amber-300' },
 };
 
 interface Props {
@@ -55,9 +55,9 @@ export function ContainerConfigEditor({ config, initialState, projectPath }: Pro
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+      <div className="flex items-center justify-between p-3 rounded-lg border border-[#1e293b] bg-[#1a1f2e]">
         <div className="space-y-0.5">
-          <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+          <p className="text-sm font-medium text-slate-200">
             Run agents in devcontainer
           </p>
           <p className="text-xs text-slate-500">
@@ -71,11 +71,11 @@ export function ContainerConfigEditor({ config, initialState, projectPath }: Pro
           aria-checked={enabled}
           role="switch"
           className={`relative ml-4 inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none disabled:opacity-50 ${
-            enabled ? 'bg-slate-900 dark:bg-white' : 'bg-slate-300 dark:bg-slate-600'
+            enabled ? 'bg-[#2563eb]' : 'bg-[#334155]'
           }`}
         >
           <span
-            className={`inline-block h-4 w-4 rounded-full bg-white dark:bg-slate-900 shadow transition-transform ${
+            className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
               enabled ? 'translate-x-4' : 'translate-x-0'
             }`}
           />
@@ -84,7 +84,7 @@ export function ContainerConfigEditor({ config, initialState, projectPath }: Pro
 
       {enabled && (
         <div className="flex items-center gap-2 px-1">
-          <span className="text-xs text-slate-500 dark:text-slate-400">Container status:</span>
+          <span className="text-xs text-slate-400">Container status:</span>
           <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${badge.cls}`}>
             {badge.label}
           </span>

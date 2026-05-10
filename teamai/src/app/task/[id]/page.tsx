@@ -9,7 +9,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
 
   const activeProject = await getActiveProject();
   if (!activeProject) {
-    return <div className="p-6 text-sm text-slate-500">No active project selected.</div>;
+    return <div className="p-6 text-sm text-slate-400">No active project selected.</div>;
   }
 
   const [full, roles] = await Promise.all([

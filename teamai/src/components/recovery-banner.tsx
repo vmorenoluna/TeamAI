@@ -18,9 +18,8 @@ export function RecoveryBanner({ tasks }: { tasks: InterruptedTask[] }) {
     });
   }
 
-  return (
-    <div className="shrink-0 bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-800 px-6 py-3">
-      <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 mb-2">
+  return (      <div className="shrink-0 bg-amber-950/30 border-b border-amber-800/50 px-6 py-3">
+      <p className="text-xs font-semibold text-amber-300 mb-2">
         {tasks.length} interrupted task{tasks.length > 1 ? 's' : ''} detected from previous session
       </p>
       <div className="flex flex-wrap gap-2">

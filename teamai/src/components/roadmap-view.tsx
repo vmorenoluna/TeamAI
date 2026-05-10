@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useTransition, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   startRoadmapGeneration,
   startChangelogGeneration,
@@ -18,6 +17,7 @@ import {
 } from '@/app/actions/roadmap';
 import { useSessionStream } from '@/hooks/use-session-stream';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
+import { TaskPanel } from './task-panel';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,10 +37,10 @@ const PHASE_LABELS: Record<keyof RoadmapReport['phases'], string> = {
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
-  P0: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-  P1: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
-  P2: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  P3: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+  P0: 'bg-red-900/30 text-red-400',
+  P1: 'bg-orange-900/30 text-orange-400',
+  P2: 'bg-amber-900/30 text-amber-400',
+  P3: 'bg-slate-800 text-slate-400',
 };
 
 function ComplexityDots({ value }: { value: number }) {
@@ -50,7 +50,7 @@ function ComplexityDots({ value }: { value: number }) {
         <span
           key={n}
           aria-hidden
-          className={`text-xs ${n <= value ? 'text-blue-500 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`}
+          className={`text-xs ${n <= value ? 'text-blue-400' : 'text-slate-600'}`}
         >
           ●
         </span>
@@ -63,8 +63,8 @@ function ComplexityDots({ value }: { value: number }) {
 
 function StreamingBlock({ text }: { text: string }) {
   return (
-    <div className="bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 p-4 max-h-80 overflow-y-auto">
-      <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+    <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-80 overflow-y-auto">
+      <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
         {text}
       </pre>
     </div>
@@ -72,17 +72,17 @@ function StreamingBlock({ text }: { text: string }) {
 }
 
 const LINKED_PHASE_BADGE: Record<string, string> = {
-  backlog: 'bg-slate-200 text-slate-700 dark:bg-slate-600 dark:text-slate-200',
-  spec: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
-  plan: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300',
-  implement: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300',
-  'qa-review': 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
-  'qa-fix': 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
-  'awaiting-review': 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
-  merge: 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300',
-  'create-pr': 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300',
-  failed: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
-  done: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+  backlog: 'bg-slate-700 text-slate-200',
+  spec: 'bg-blue-900/30 text-blue-300',
+  plan: 'bg-indigo-900/30 text-indigo-300',
+  implement: 'bg-amber-900/30 text-amber-300',
+  'qa-review': 'bg-orange-900/30 text-orange-300',
+  'qa-fix': 'bg-orange-900/30 text-orange-300',
+  'awaiting-review': 'bg-purple-900/30 text-purple-300',
+  merge: 'bg-teal-900/30 text-teal-300',
+  'create-pr': 'bg-teal-900/30 text-teal-300',
+  failed: 'bg-red-900/30 text-red-300',
+  done: 'bg-green-900/30 text-green-300',
 };
 
 // ── Roadmap item card ────────────────────────────────────────────────────────
@@ -138,12 +138,12 @@ function RoadmapCard({
   return (
     <div
       onClick={handleCardClick}
-      className={`bg-white dark:bg-slate-800 rounded-lg border p-3 flex flex-col gap-2 group/card transition-all cursor-pointer ${
+      className={`bg-[#1e2333] rounded-lg border p-3 flex flex-col gap-2 group/card transition-all cursor-pointer ${
         hasError
-          ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/20'
+          ? 'border-red-800 bg-red-950/20'
           : isExpanded
-            ? 'border-blue-300 dark:border-blue-700 bg-blue-50/30 dark:bg-blue-950/10 hover:border-blue-400 dark:hover:border-blue-500'
-            : 'border-slate-200 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-500'
+            ? 'border-[#2563eb] bg-blue-950/10 hover:border-blue-400'
+            : 'border-[#1e293b] hover:border-[#334155]'
       } hover:shadow-md`}
     >
       {/* Header: priority + title + category */}
@@ -152,36 +152,36 @@ function RoadmapCard({
           <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded ${PRIORITY_COLORS[item.priority]}`}>
             {item.priority}
           </span>
-          <span className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+          <span className="text-sm font-semibold text-white truncate">
             {item.title}
           </span>
-        </div>
-        <span className="shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
+        </div>          <span className="shrink-0 text-[10px] text-slate-500">
+            {item.category}
           {item.category}
         </span>
       </div>
 
       {/* Complexity */}
-      <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+      <div className="flex items-center gap-2 text-xs text-slate-400">
         <span>Complexity:</span>
         <ComplexityDots value={item.complexity} />
         <span className="tabular-nums">({item.complexity}/5)</span>
       </div>
 
       {/* Description — truncated when collapsed, full when expanded */}
-      <p className={`text-xs text-slate-600 dark:text-slate-400 leading-relaxed ${isExpanded ? '' : 'line-clamp-3'}`}>
+      <p className={`text-xs text-slate-400 leading-relaxed ${isExpanded ? '' : 'line-clamp-3'}`}>
         {item.description}
       </p>
 
       {/* Affected files — only shown when expanded */}
       {isExpanded && item.affected_files && item.affected_files.length > 0 && (
-        <div className="border-t border-slate-100 dark:border-slate-700 pt-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+        <div className="border-t border-[#1e293b] pt-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
             Affected Files
           </span>
           <ul className="mt-1 space-y-0.5">
             {item.affected_files.map((f, i) => (
-              <li key={i} className="text-[10px] text-slate-500 dark:text-slate-400 font-mono truncate">
+              <li key={i} className="text-[10px] text-slate-400 font-mono truncate">
                 {f}
               </li>
             ))}
@@ -190,10 +190,10 @@ function RoadmapCard({
       )}
 
       {/* Source */}
-      <div className="flex items-center gap-3 text-[11px] text-slate-400 dark:text-slate-500">
+      <div className="flex items-center gap-3 text-[11px] text-slate-400">
         <span className="italic">Source: {item.source}</span>
         {item.competitive_context && (
-          <span className="italic text-amber-600 dark:text-amber-400">
+          <span className="italic text-amber-400">
             {item.competitive_context}
           </span>
         )}
@@ -201,20 +201,20 @@ function RoadmapCard({
 
       {/* Error message */}
       {hasError && (
-        <p className="text-[10px] text-red-600 dark:text-red-400">
+        <p className="text-[10px] text-red-400">
           Action failed — please try again.
         </p>
       )}
 
       {/* Expand hint — only on unlinked, collapsed cards */}
       {!isLinked && !isExpanded && !hasError && (
-        <p className="text-[10px] text-slate-400 dark:text-slate-500 italic">
+        <p className="text-[10px] text-slate-500 italic">
           Click to expand details
         </p>
       )}
 
       {/* Actions row */}
-      <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-700">
+      <div className="flex items-center justify-between gap-2 pt-1 border-t border-[#1e293b]">
         {/* Left: linked status badge or convert button */}
         {isLinked ? (
           statusBadge ? (
@@ -222,13 +222,13 @@ function RoadmapCard({
               {linkedStatus?.phase ?? '…'}
             </span>
           ) : (
-            <span className="text-[10px] text-slate-400 dark:text-slate-500">…</span>
+            <span className="text-[10px] text-slate-400">…</span>
           )
         ) : (
           <button
             onClick={handleConvertClick}
             disabled={isConverting || hasError}
-            className="text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 disabled:opacity-40 transition-colors"
+            className="text-[11px] font-medium text-blue-400 hover:text-blue-300 disabled:opacity-40 transition-colors"
           >
             {isConverting ? 'Converting…' : '+ Convert to ticket'}
           </button>
@@ -239,7 +239,7 @@ function RoadmapCard({
           onClick={handleDeleteClick}
           disabled={isDeleting}
           title="Delete from roadmap"
-          className="text-[11px] text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 disabled:opacity-40 opacity-40 group-hover/card:opacity-100 focus-visible:opacity-100 transition-all"
+          className="text-[11px] text-slate-600 hover:text-red-400 disabled:opacity-40 opacity-40 group-hover/card:opacity-100 focus-visible:opacity-100 transition-all"
         >
           {isDeleting ? '…' : '✕'}
         </button>
@@ -247,14 +247,14 @@ function RoadmapCard({
 
       {/* Collapse hint — only on expanded cards */}
       {isExpanded && !isLinked && (
-        <p className="text-[10px] text-blue-500 dark:text-blue-400 italic">
+        <p className="text-[10px] text-blue-400 italic">
           Click to collapse
         </p>
       )}
 
       {/* Navigation hint — only on linked cards */}
       {isLinked && (
-        <p className="text-[10px] text-slate-400 dark:text-slate-500 italic">
+        <p className="text-[10px] text-slate-500 italic">
           Click to view task
         </p>
       )}
@@ -361,14 +361,13 @@ function PhasedKanban({
 
   return (
     <div className="space-y-2">
-      {report.executive_summary && (
-        <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-          {report.executive_summary}
-        </p>
+      {report.executive_summary && (          <p className="text-sm text-slate-400 leading-relaxed">
+            {report.executive_summary}
+          </p>
       )}
 
       {report.competitor_analysis_run && (
-        <p className="text-xs text-amber-600 dark:text-amber-400">
+        <p className="text-xs text-amber-400">
           Competitor analysis was run for this roadmap.
         </p>
       )}
@@ -379,14 +378,14 @@ function PhasedKanban({
           {(['now', 'next', 'later', 'icebox'] as const).map(phaseKey => (
             <div
               key={phaseKey}
-              className="flex flex-col w-72 shrink-0 rounded-lg bg-slate-100 dark:bg-slate-800 overflow-hidden"
+              className="flex flex-col w-72 shrink-0 rounded-lg bg-[#1a1f2e] overflow-hidden"
             >
               {/* Column header */}
-              <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-200 dark:border-slate-700">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+              <div className="flex items-center justify-between px-3 py-2.5 border-b border-[#1e293b]">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">
                   {PHASE_LABELS[phaseKey]}
                 </span>
-                <span className="text-xs font-medium px-1.5 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-400">
+                <span className="text-xs font-medium px-1.5 py-0.5 rounded-full bg-[#1e293b] text-slate-500">
                   {phases[phaseKey].length}
                 </span>
               </div>
@@ -431,7 +430,6 @@ function PhasedKanban({
 type Tab = 'roadmap' | 'changelog';
 
 export function RoadmapView({ noProject }: { noProject: boolean }) {
-  const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     try { return (sessionStorage.getItem('roadmap-tab') as Tab) ?? 'roadmap'; }
     catch { return 'roadmap'; }
@@ -451,6 +449,8 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
   const [clRunning, setClRunning] = useState(false);
   const [clMarkdown, setClMarkdown] = useState<string | null>(null);
   const [clHistory, setClHistory] = useState<{ filename: string; date: string }[]>([]);
+
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const rmStream = useSessionStream(rmSessionId);
   const clStream = useSessionStream(clSessionId);
@@ -570,11 +570,21 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     try { sessionStorage.setItem('changelog-session', clSessionId); } catch { /* noop */ }
   }, [clDone, clSessionId]);
 
+  // Close the task window on Escape key
+  useEffect(() => {
+    if (!selectedTaskId) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setSelectedTaskId(null);
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [selectedTaskId]);
+
   // ── Handlers ─────────────────────────────────────────────────────────────
 
   const handleSelectTask = useCallback((taskId: string) => {
-    router.push(`/task/${taskId}`);
-  }, [router]);
+    setSelectedTaskId(taskId);
+  }, []);
 
   function handleGenerateRoadmap() {
     setRmRunning(true);
@@ -623,15 +633,15 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
   if (noProject) {
     return (
-      <div className="flex flex-col h-full p-6 bg-slate-50 dark:bg-slate-950">
+      <div className="flex flex-col h-full p-6 bg-[#11131b]">
         {/* Tabs */}
-        <div className="flex gap-0 border-b border-slate-200 dark:border-slate-700 mb-4">
+        <div className="flex gap-0 border-b border-[#1e293b] mb-4">
           <button
             onClick={() => persistTab('roadmap')}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'roadmap'
-                ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white'
-                : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                ? 'border-[#2563eb] text-white'
+                : 'border-transparent text-slate-400 hover:text-slate-300'
             }`}
           >
             Roadmap
@@ -640,14 +650,14 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
             onClick={() => persistTab('changelog')}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'changelog'
-                ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white'
-                : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                ? 'border-[#2563eb] text-white'
+                : 'border-transparent text-slate-400 hover:text-slate-300'
             }`}
           >
             Changelog
           </button>
         </div>
-        <p className="text-sm text-slate-400 dark:text-slate-500">Select or add a project from the sidebar to get started.</p>
+        <p className="text-sm text-slate-400">Select or add a project from the sidebar to get started.</p>
       </div>
     );
   }
@@ -655,38 +665,37 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full p-6 bg-slate-50 dark:bg-slate-950">
+    <div className={`flex flex-col h-full p-6 bg-[#11131b] relative ${selectedTaskId ? 'overflow-hidden' : ''}`}>
       {/* Tab bar */}
-      <div className="flex gap-0 border-b border-slate-200 dark:border-slate-700 mb-4 shrink-0">
+      <div className="flex gap-0 border-b border-[#1e293b] mb-4 shrink-0">
         <button
           onClick={() => persistTab('roadmap')}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'roadmap'
-              ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+              ? 'border-[#2563eb] text-white'
+              : 'border-transparent text-slate-400 hover:text-slate-300'
           }`}
         >
           Roadmap
         </button>
         <button
           onClick={() => persistTab('changelog')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'changelog'
-              ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
-          }`}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${            activeTab === 'changelog'
+                ? 'border-[#2563eb] text-white'
+                : 'border-transparent text-slate-400 hover:text-slate-300'
+            }`}
         >
           Changelog
         </button>
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className={`flex-1 overflow-y-auto min-h-0 ${selectedTaskId ? 'pointer-events-none select-none' : ''}`}>
         {activeTab === 'roadmap' && (
           <div className="flex flex-col gap-4">
             {/* Controls */}
             <div className="flex items-center gap-4 flex-wrap">
-              <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 cursor-pointer select-none">
+              <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={skipCompetitors}
@@ -699,18 +708,18 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
               <button
                 onClick={handleGenerateRoadmap}
                 disabled={isPending || (rmRunning && !rmDone)}
-                className="px-4 py-2 text-sm font-medium bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-md hover:bg-slate-700 dark:hover:bg-slate-200 disabled:opacity-40 transition-colors"
+                className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
               >
                 {rmRunning && !rmDone ? 'Generating…' : 'Generate Roadmap'}
               </button>
 
               {rmHistory.length > 0 && (
-                <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+                <div className="flex items-center gap-2 text-sm text-slate-400">
                   <span>History:</span>
                   <select
                     onChange={e => { if (e.target.value) handleSelectRoadmapHistory(e.target.value); }}
                     defaultValue=""
-                    className="text-sm border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    className="text-sm border border-[#334155] rounded px-2 py-1 bg-[#1a1f2e] text-slate-200"
                   >
                     <option value="" disabled>Select a previous run</option>
                     {rmHistory.map(r => (
@@ -736,7 +745,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
             {/* Empty state */}
             {!rmRunning && !rmReport && !rmLatestText && (
-              <p className="text-sm text-slate-400 dark:text-slate-500">
+              <p className="text-sm text-slate-400">
                 No roadmap generated yet. Click &apos;Generate Roadmap&apos; to start.
               </p>
             )}
@@ -750,29 +759,27 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
               <button
                 onClick={handleGenerateChangelog}
                 disabled={isPending || (clRunning && !clDone)}
-                className="px-4 py-2 text-sm font-medium bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-md hover:bg-slate-700 dark:hover:bg-slate-200 disabled:opacity-40 transition-colors"
+                className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
               >
                 {clRunning && !clDone ? 'Generating…' : 'Generate Changelog'}
               </button>
 
-              <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+              <div className="flex items-center gap-2 text-sm text-slate-400">
                 <span>Previous changelogs:</span>
                 <select
                   onChange={e => { if (e.target.value) handleSelectChangelogHistory(e.target.value); }}
                   defaultValue=""
                   disabled={clHistory.length === 0}
-                  className="text-sm border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-white disabled:opacity-40"
+                  className="text-sm border border-[#334155] rounded px-2 py-1 bg-[#1a1f2e] text-slate-200 disabled:opacity-40"
                 >
                   {clHistory.length === 0 ? (
                     <option value="" disabled>None generated yet</option>
-                  ) : (
-                    <>
-                      <option value="" disabled>Select</option>
-                      {clHistory.map(c => (
-                        <option key={c.filename} value={c.filename}>{c.date}</option>
-                      ))}
-                    </>
-                  )}
+                  ) : [
+                    <option key="placeholder" value="" disabled>Select</option>,
+                    ...clHistory.map(c => (
+                      <option key={c.filename} value={c.filename}>{c.date}</option>
+                    ))
+                  ]}
                 </select>
               </div>
             </div>
@@ -782,8 +789,8 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
             {/* Changelog result */}
             {clMarkdown && (
-              <div className="bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 p-4 max-h-[60vh] overflow-y-auto">
-                <pre className="whitespace-pre-wrap font-mono text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+              <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-[60vh] overflow-y-auto">
+                <pre className="whitespace-pre-wrap font-mono text-xs text-slate-300 leading-relaxed">
                   {clMarkdown}
                 </pre>
               </div>
@@ -791,13 +798,35 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
             {/* Empty state */}
             {!clRunning && !clMarkdown && !clLatestText && (
-              <p className="text-sm text-slate-400 dark:text-slate-500">
+              <p className="text-sm text-slate-400">
                 No changelog generated yet. Click &apos;Generate Changelog&apos; to start.
               </p>
             )}
           </div>
         )}
       </div>
+
+      {/* Floating task window overlay */}
+      {selectedTaskId && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center p-6">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setSelectedTaskId(null)}
+          />
+          {/* Window */}
+          <div
+            className="relative w-full max-w-[800px] h-[90%] max-h-[900px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
+            onClick={e => e.stopPropagation()}
+          >
+            <TaskPanel
+              taskId={selectedTaskId}
+              onClose={() => setSelectedTaskId(null)}
+              readonly
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

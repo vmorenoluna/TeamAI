@@ -8,7 +8,7 @@ import type { RoleDefinition } from '@/app/actions/roles';
 
 type FullData = Awaited<ReturnType<typeof getTaskFull>>;
 
-export function TaskPanel({ taskId, onClose }: { taskId: string; onClose: () => void }) {
+export function TaskPanel({ taskId, onClose, readonly = false }: { taskId: string; onClose: () => void; readonly?: boolean }) {
   const [data, setData] = useState<FullData | null>(null);
   const [roles, setRoles] = useState<RoleDefinition[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,7 +28,9 @@ export function TaskPanel({ taskId, onClose }: { taskId: string; onClose: () => 
   }, [taskId]);
 
   // Re-fetch silently on phase-change so Spec/Plan/QA/Terminal update without close+reopen
+  // Skip in readonly mode — no tabs to update
   useEffect(() => {
+    if (readonly) return;
     const ws = new WebSocket(`ws://${window.location.host}/ws`);
     ws.onmessage = (e) => {
       try {
@@ -43,31 +45,44 @@ export function TaskPanel({ taskId, onClose }: { taskId: string; onClose: () => 
       else ws.close();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId]);
+  }, [taskId, readonly]);
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-700 overflow-hidden">
-      {/* Close strip */}
-      <div className="shrink-0 flex items-center justify-end px-3 py-1 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+    <>
+      {/* Title bar */}
+      <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-[#1e293b] bg-[#1a1f2e] select-none">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm font-semibold text-white truncate">
+            {loading ? 'Loading…' : data?.task?.title ?? 'Task Details'}
+          </span>
+          {data?.task && (
+            <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+              ({ backlog: 'bg-slate-800 text-slate-300', spec: 'bg-blue-900/40 text-blue-300', plan: 'bg-indigo-900/40 text-indigo-300', implement: 'bg-amber-900/40 text-amber-300', 'qa-review': 'bg-orange-900/40 text-orange-300', 'qa-fix': 'bg-orange-900/40 text-orange-300', 'awaiting-review': 'bg-purple-900/40 text-purple-300', merge: 'bg-teal-900/40 text-teal-300', failed: 'bg-red-900/40 text-red-300', done: 'bg-green-900/40 text-green-300' })[data.task.phase] ?? 'bg-slate-800 text-slate-300'
+            }`}>
+              {data.task.phase}
+            </span>
+          )}
+        </div>
         <button
           onClick={onClose}
-          title="Close panel"
-          className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-lg leading-none px-1 transition-colors"
+          title="Close window"
+          className="shrink-0 ml-3 w-7 h-7 flex items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-[#1e293b] transition-colors text-lg leading-none"
         >
           ×
         </button>
       </div>
 
-      {loading && (
-        <div className="flex-1 flex items-center justify-center text-sm text-slate-400">Loading…</div>
-      )}
+      {/* Content */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {loading && (
+          <div className="h-full flex items-center justify-center text-sm text-slate-500">Loading…</div>
+        )}
 
-      {!loading && !data && (
-        <div className="flex-1 flex items-center justify-center text-sm text-red-400">Failed to load task.</div>
-      )}
+        {!loading && !data && (
+          <div className="h-full flex items-center justify-center text-sm text-red-400">Failed to load task.</div>
+        )}
 
-      {!loading && data && (
-        <div className="flex-1 min-h-0 overflow-hidden">
+        {!loading && data && (
           <TaskDetail
             task={data.task}
             allTasks={data.allTasks}
@@ -80,9 +95,10 @@ export function TaskPanel({ taskId, onClose }: { taskId: string; onClose: () => 
             agentOutput={data.agentOutput}
             roles={roles}
             onClose={onClose}
+            readonly={readonly}
           />
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   );
 }
