@@ -86,12 +86,12 @@ export function TaskCard({ task, interrupted, onSelect, isMoving }: Props) {
       </p>
 
       {displayDesc && (
-        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-snug">
+        <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 leading-snug">
           {displayDesc}
           {longDesc && (
             <button
               onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
-              className="ml-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 underline"
+              className="ml-1 text-slate-400 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-200"
             >
               {expanded ? 'less' : 'more'}
             </button>

@@ -45,10 +45,11 @@ const PRIORITY_COLORS: Record<string, string> = {
 
 function ComplexityDots({ value }: { value: number }) {
   return (
-    <span className="inline-flex gap-0.5">
+    <span className="inline-flex gap-0.5" role="img" aria-label={`Complexity ${value} out of 5`}>
       {[1, 2, 3, 4, 5].map(n => (
         <span
           key={n}
+          aria-hidden
           className={`text-xs ${n <= value ? 'text-blue-500 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`}
         >
           ●
@@ -622,7 +623,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
   if (noProject) {
     return (
-      <div className="flex flex-col h-full p-6 bg-white dark:bg-slate-900">
+      <div className="flex flex-col h-full p-6 bg-slate-50 dark:bg-slate-950">
         {/* Tabs */}
         <div className="flex gap-0 border-b border-slate-200 dark:border-slate-700 mb-4">
           <button
@@ -646,7 +647,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
             Changelog
           </button>
         </div>
-        <p className="text-sm text-slate-400">Select or add a project from the sidebar to get started.</p>
+        <p className="text-sm text-slate-400 dark:text-slate-500">Select or add a project from the sidebar to get started.</p>
       </div>
     );
   }
@@ -654,7 +655,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full p-6 bg-white dark:bg-slate-900">
+    <div className="flex flex-col h-full p-6 bg-slate-50 dark:bg-slate-950">
       {/* Tab bar */}
       <div className="flex gap-0 border-b border-slate-200 dark:border-slate-700 mb-4 shrink-0">
         <button
@@ -735,7 +736,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
             {/* Empty state */}
             {!rmRunning && !rmReport && !rmLatestText && (
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-slate-400 dark:text-slate-500">
                 No roadmap generated yet. Click &apos;Generate Roadmap&apos; to start.
               </p>
             )}
@@ -754,21 +755,26 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
                 {clRunning && !clDone ? 'Generating…' : 'Generate Changelog'}
               </button>
 
-              {clHistory.length > 0 && (
-                <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
-                  <span>Previous changelogs:</span>
-                  <select
-                    onChange={e => { if (e.target.value) handleSelectChangelogHistory(e.target.value); }}
-                    defaultValue=""
-                    className="text-sm border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value="" disabled>Select</option>
-                    {clHistory.map(c => (
-                      <option key={c.filename} value={c.filename}>{c.date}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+                <span>Previous changelogs:</span>
+                <select
+                  onChange={e => { if (e.target.value) handleSelectChangelogHistory(e.target.value); }}
+                  defaultValue=""
+                  disabled={clHistory.length === 0}
+                  className="text-sm border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-white disabled:opacity-40"
+                >
+                  {clHistory.length === 0 ? (
+                    <option value="" disabled>None generated yet</option>
+                  ) : (
+                    <>
+                      <option value="" disabled>Select</option>
+                      {clHistory.map(c => (
+                        <option key={c.filename} value={c.filename}>{c.date}</option>
+                      ))}
+                    </>
+                  )}
+                </select>
+              </div>
             </div>
 
             {/* Streaming output */}
@@ -785,7 +791,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
             {/* Empty state */}
             {!clRunning && !clMarkdown && !clLatestText && (
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-slate-400 dark:text-slate-500">
                 No changelog generated yet. Click &apos;Generate Changelog&apos; to start.
               </p>
             )}

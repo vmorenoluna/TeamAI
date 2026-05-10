@@ -106,6 +106,7 @@ Each column has:
 
 - **Play button** `▶`: green circle overlay, top-right corner. Only shown on tasks that were interrupted mid-pipeline (process crashed / app restarted). Clicking resumes the pipeline immediately without opening the panel.
 - **Phase badge**: color-coded pill per phase (blue=spec, indigo=plan, amber=implement, orange=qa, purple=awaiting-review, teal=merge, red=failed, green=done)
+- **Description text**: `text-slate-600 dark:text-slate-300` — neutral body text, never blue or link-colored. Truncated at 80 chars with a "more"/"less" toggle. The toggle button has no underline (to avoid looking like a link).
 - **Timestamp**: relative time since creation ("just now", "4m ago", "2h ago", "3d ago")
 - **Moving indicator**: blue pulsing dot + "moving" label appears on the card after a drag-and-drop until the WebSocket confirms the phase change. Card shows `pointer-events-none` and reduced opacity during transition.
 - **Clicking the card body** opens the Task Detail Panel
@@ -189,14 +190,22 @@ Clicking a task card opens a split-view panel on the right. The kanban board com
 ```
 
 ### Panel Header
-- `×` close button (top-right strip) — collapses panel, restores full-width kanban
+
+Layout (top to bottom):
+1. **Row 1:** `← Board` breadcrumb (left) + **Phase badge** + **🗑 Delete button** (right)
+2. **Row 2:** Task title (large heading, `text-slate-900 dark:text-white`)
+3. **Row 3:** Description text (`text-slate-600 dark:text-slate-300`, never blue)
+4. **Row 4:** `Created … · Updated …` timestamps + **Agent** dropdown
+
+**Individual elements:**
+- `×` close button (top-right strip, above the header) — collapses panel, restores full-width kanban
 - `← Board` breadcrumb link
 - Phase badge (color-coded, same as card)
 - Task title (large heading)
-- Description text
-- Created / Updated timestamps
+- Description text — neutral body color, not link-colored
+- **Created / Updated timestamps**: both always shown (there is no "Run Pipeline" button in the panel header). Even newly created tasks where `createdAt === updatedAt` show both timestamps with identical values.
 - **Agent dropdown**: "Auto (pipeline default)" or any named role — overrides which AI agent persona handles the next pipeline step for this task. Options: Product Analyst, Senior Developer, Git Integration Specialist, Implementation Planner, Bug Fix Specialist, QA Reviewer
-- **🗑 Delete button** (trash icon, right side of header): slate color, turns red on hover. On click, `window.confirm('Delete "{title}"? This cannot be undone.')` dialog appears. On confirm: shows disabled state, calls `deleteTask(taskId)` server action. On success: **panel closes immediately** (if opened from kanban split view) or **navigates to `/`** (if on the dedicated `/task/[id]` page). The kanban board refreshes to remove the deleted card. Only visible/clickable when no pipeline is actively running (the button is always present but disabled via `isPending` during the operation).
+- **🗑 Delete button** (trash icon, right side of header): slate color, turns red on hover. On click, `window.confirm('Delete "{title}"? This cannot be undone.')` dialog appears. On confirm: shows disabled state, calls `deleteTask(taskId)` server action. On success: **panel closes immediately** (if opened from kanban split view) or **navigates to `/`** (if on the dedicated `/task/[id]` page). The kanban board refreshes to remove the deleted card. The button is always present but disabled via `isPending` during the operation.
 
 ### Tabs
 
@@ -310,7 +319,7 @@ Dark mode: `bg-slate-50 dark:bg-slate-950` on root content area; terminal panels
 
 Two-tab layout: **Roadmap** and **Changelog**.
 
-Dark mode: `bg-white dark:bg-slate-900` on page root; card areas use `bg-slate-50 dark:bg-slate-900` with border.
+Dark mode: `bg-slate-50 dark:bg-slate-950` on page root (matching the kanban board). Card areas inside the phased kanban use `bg-white dark:bg-slate-800` with `border-slate-200 dark:border-slate-700`.
 
 Spec: `.teamai/roadmap-changelog/spec.md`
 
@@ -323,7 +332,7 @@ Spec: `.teamai/roadmap-changelog/spec.md`
 └──────────────────────────────────────────────────────────┘
 ```
 
-No active project → both tabs show: "Select or add a project from the sidebar to get started."
+No active project → both tabs show: "Select or add a project from the sidebar to get started." (in `text-slate-400 dark:text-slate-500`).
 
 ---
 
@@ -343,6 +352,7 @@ History: [Select a previous run ▾]
 ```
 No roadmap generated yet. Click 'Generate Roadmap' to start.
 ```
+Text color: `text-slate-400 dark:text-slate-500`.
 
 #### Streaming output (while agent is running)
 Scrollable pre-formatted block identical to IdeationScanner — latest text from `event.type === 'assistant'` messages via `useSessionStream`:
@@ -526,6 +536,9 @@ If a changelog `.md` file exists but contains only whitespace or is empty, the `
 ```
 No changelog generated yet. Click 'Generate Changelog' to start.
 ```
+Text color: `text-slate-400 dark:text-slate-500`.
+
+**Previous changelogs dropdown** is always visible (even before any changelog has been generated). When no changelogs exist yet, the dropdown is `disabled` with a single option: "None generated yet".
 
 ---
 
@@ -591,9 +604,9 @@ export interface RoadmapReport {
 ### Components
 - `src/app/roadmap/page.tsx` — thin wrapper around `RoadmapView`, passes `noProject` prop from project context
 - `src/components/roadmap-view.tsx` — `'use client'` — full roadmap/changelog page with:
-  - **RoadmapView**: parent component managing tab state (persisted to `sessionStorage`), roadmap/changelog generation sessions, history dropdowns, session reconnect on mount, streaming output display via `useSessionStream`
+  - **RoadmapView**: parent component managing tab state (persisted to `sessionStorage`), roadmap/changelog generation sessions, history dropdowns (always visible; disabled with "None generated yet" when empty), session reconnect on mount, streaming output display via `useSessionStream`
   - **PhasedKanban**: horizontal 4-column kanban layout (Now/Next/Later/Icebox), linked status fetching via `getLinkedTaskStatuses`, real-time WebSocket status sync via `usePhaseSync`, convert/delete/expand actions with loading + error states
-  - **RoadmapCard**: individual item card with priority badge, complexity dots, description (collapsed: `line-clamp-3`, expanded: full + affected files), source info, expand/navigate hints, "+ Convert to ticket" button, "✕" delete button (hover-revealed), phase badge for linked items, error display
+  - **RoadmapCard**: individual item card with priority badge, complexity dots (accessible: `role="img" aria-label="Complexity N out of 5"` wrapper with `aria-hidden` dots), description (collapsed: `line-clamp-3`, expanded: full + affected files), source info, expand/navigate hints, "+ Convert to ticket" button, "✕" delete button (hover-revealed), phase badge for linked items, error display
   - **StreamingBlock**: re-usable monospace streaming output block for agent text
 
 ---
@@ -905,7 +918,7 @@ Four sections, rendered top-to-bottom:
 | RateLimitBanner | Overview tab (when rate limited) | Amber warning with retry time |
 | TerminalPane | Terminal tab | xterm.js terminal with event replay |
 | ContainerConfigEditor | Settings — Container Isolation | Toggle + live status badge (stopped/starting/running/restarting) |
-| RoadmapView | `/roadmap` | Tabbed roadmap+changelog page: generate buttons, streaming output, history selectors, session reconnect |
+| RoadmapView | `/roadmap` | Tabbed roadmap+changelog page: generate buttons, streaming output, history selectors (always visible), session reconnect. Changelog dropdown always shown (disabled when empty). Complexity dots have `role="img" aria-label="Complexity N out of 5"` for accessibility. |
 | PhasedKanban | Inside RoadmapView | Horizontal 4-column kanban (Now/Next/Later/Icebox) with linked status badges, real-time WebSocket sync, convert/delete actions |
 | RoadmapCard | Inside PhasedKanban | Per-item card: expand/collapse (unlinked) or navigate (linked), priority badge, complexity dots, affected files, "+ Convert to ticket" button, phase badge, delete button, error state |
 

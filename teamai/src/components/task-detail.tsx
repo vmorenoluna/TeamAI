@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { AgentPanel } from './agent-panel';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
-import { RunTaskButton } from './run-task-button';
 import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock, deleteTask } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 import type { RoleDefinition } from '@/app/actions/roles';
@@ -245,22 +244,12 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
 
       {/* Header */}
       <div className="shrink-0 px-6 pt-5 pb-0 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
-        <div className="flex items-start justify-between gap-4 mb-3">
-          <div className="min-w-0">
-            <Link href="/" className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 mb-1 inline-block">
-              ← Board
-            </Link>
-            <h1 className="text-lg font-semibold text-slate-900 dark:text-white leading-snug">
-              {task.title}
-            </h1>
-            {task.description && (
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                {task.description}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {task.phase === 'backlog' && <RunTaskButton taskId={task.id} />}
+        {/* Row 1: breadcrumb + phase badge + delete */}
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <Link href="/" className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+            ← Board
+          </Link>
+          <div className="flex items-center gap-2">
             <span className={`text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded ${badge}`}>
               {task.phase}
             </span>
@@ -274,6 +263,18 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
             </button>
           </div>
         </div>
+
+        {/* Row 2: title */}
+        <h1 className="text-lg font-semibold text-slate-900 dark:text-white leading-snug mb-1">
+          {task.title}
+        </h1>
+
+        {/* Row 3: description */}
+        {task.description && (
+          <p className="mb-2 text-sm text-slate-600 dark:text-slate-300">
+            {task.description}
+          </p>
+        )}
 
         {/* Rate-limit banner */}
         {task.rateLimitedUntil && (
@@ -291,9 +292,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
         <div className="flex items-center gap-4 flex-wrap mb-3">
           <p className="text-xs text-slate-400">
             Created {new Date(task.createdAt).toLocaleString()}
-            {task.updatedAt !== task.createdAt && (
-              <> · Updated {new Date(task.updatedAt).toLocaleString()}</>
-            )}
+            {' · '}Updated {new Date(task.updatedAt).toLocaleString()}
           </p>
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-400">Agent:</span>
