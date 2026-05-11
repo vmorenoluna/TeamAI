@@ -7,7 +7,7 @@ import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 async function getStores() {
   const projectPath = await getActiveProjectPath();
@@ -95,7 +95,7 @@ export async function getTaskArtifacts(taskId: string) {
   let diff: string | null = null;
   if (task.branch) {
     try {
-      diff = execSync(`git diff main...${task.branch}`, {
+      diff = execFileSync('git', ['diff', `main...${task.branch}`], {
         cwd: projectPath,
         encoding: 'utf-8',
       });
@@ -138,7 +138,7 @@ export async function getTaskFull(taskId: string) {
   let diff: string | null = null;
   if (task.branch) {
     try {
-      diff = execSync(`git diff main...${task.branch}`, { cwd: projectPath, encoding: 'utf-8' });
+      diff = execFileSync('git', ['diff', `main...${task.branch}`], { cwd: projectPath, encoding: 'utf-8' });
     } catch { /* no diff yet */ }
   }
 

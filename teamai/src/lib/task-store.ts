@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { slugify } from './utils';
 
 export interface Task {
   id: string;
@@ -14,10 +15,6 @@ export interface Task {
   competitiveContext?: string; // competitor context from roadmap item
   createdAt: string;
   updatedAt: string;
-}
-
-function slugify(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
 }
 
 /**

@@ -1,4 +1,4 @@
-import { spawn, ChildProcess, execSync } from 'child_process';
+import { spawn, ChildProcess, execFileSync } from 'child_process';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
@@ -7,9 +7,15 @@ import { readFileSync, existsSync, appendFileSync } from 'fs';
 import { containerManager, readContainerConfig, hostToContainerPath } from './container-manager';
 
 function findExecutable(name: string): string {
+  // On Windows, where.exe locates commands in PATH.
+  // On Unix, which is a real binary on both Linux and macOS (unlike 'command -v'
+  // which is a shell builtin and cannot be invoked via execFileSync on macOS).
+  // Both are called via execFileSync to avoid shell quoting inconsistencies.
   try {
-    const cmd = process.platform === 'win32' ? `where ${name}` : `which ${name}`;
-    return execSync(cmd, { encoding: 'utf-8' }).trim().split(/\r?\n/)[0].trim();
+    if (process.platform === 'win32') {
+      return execFileSync('where', [name], { encoding: 'utf-8' }).trim().split(/\r?\n/)[0].trim();
+    }
+    return execFileSync('which', [name], { encoding: 'utf-8' }).trim();
   } catch {
     return name;
   }
