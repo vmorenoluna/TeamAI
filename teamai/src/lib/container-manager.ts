@@ -76,11 +76,14 @@ export class ContainerManager extends EventEmitter {
   getState(projectRoot: string): ContainerState {
     const existing = this.records.get(projectRoot);
     if (existing) return existing.state;
-    // No in-memory record — check if a devcontainer for this project already exists in Docker
+    // No in-memory record — check Docker directly for an existing devcontainer
     try {
-      const label = `devcontainer.local_folder=${projectRoot.replace(/\\/g, '\\\\')}`;
+      // Use the label value as-is; Docker stores it with the OS-native path format
+      const label = `devcontainer.local_folder=${projectRoot}`;
       const out = execSync(`docker ps -a --filter "label=${label}" --format "{{.Status}}"`, { encoding: 'utf-8', timeout: 10000 }).trim();
-      if (out.trim()) return 'stopped'; // container exists in Docker (possibly exited) — treat as stoppable, trigger ensureContainer on next call
+      if (out.includes('Up')) return 'running';   // container is up
+      // Any other output (Exited, Created, etc.) means it's not running — treat as stoppable
+      if (out) return 'stopped';
     } catch { /* docker not available or no container */ }
     return 'stopped';
   }
