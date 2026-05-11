@@ -1,8 +1,8 @@
 {
-  "id": "fb100495-0ad1-4a90-9d87-588f02d1798c",
+  "id": "74a3495f-6b4e-4c0a-9bc5-52fd7dfbce8c",
   "title": "Show kanban ticket ID in the ticket details",
-  "description": "Show the kanban ticket ID in the ticket details. ",
-  "phase": "backlog",
-  "createdAt": "2026-05-11T20:36:09.375Z",
-  "updatedAt": "2026-05-11T20:36:09.375Z"
+  "description": "Display the kanban ticket UUID in the ticket detail panel so users can easily reference tickets by ID.",
+  "phase": "done",
+  "createdAt": "2026-05-11T20:44:14.957Z",
+  "updatedAt": "2026-05-11T20:48:58.165Z"
 }
