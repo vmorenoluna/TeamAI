@@ -30,7 +30,7 @@
           ".husky/pre-commit"
         ],
         "source": "ideation",
-        "linkedTaskId": "5d6c2454-88a0-4d05-9f29-b8af6ce311e8"
+        "linkedTaskId": "92122c7e-2878-4c6a-9b02-fe32e79e5909"
       },
       {
         "title": "Prevent concurrent edits to same task — add phase-lock per task",
@@ -43,7 +43,7 @@
           "src/app/actions/tasks.ts"
         ],
         "source": "ideation",
-        "linkedTaskId": "ac4f61ee-9735-4d10-9485-3dda280dc1e7"
+        "linkedTaskId": "51c70a15-5ba8-496b-a064-b4c647176f44"
       },
       {
         "title": "Fix terminal feature — wire up xterm.js PTY sessions properly",
@@ -57,7 +57,8 @@
           "src/app/terminals/page.tsx",
           "src/app/actions/terminals.ts"
         ],
-        "source": "ideation"
+        "source": "ideation",
+        "linkedTaskId": "b2e5b61d-892f-43f1-afaa-27695252a122"
       },
       {
         "title": "Multi-LLM provider support — add OpenAI, Gemini, and local (Ollama) backends",
@@ -73,7 +74,8 @@
           "src/components/provider-config.tsx"
         ],
         "source": "competitor-analysis",
-        "competitive_context": "Devin supports Claude + GPT + custom models. CrewAI supports any LLM via LangChain. OpenHands supports multiple backends. Copilot Workspace uses GPT-4 + Copilot model."
+        "competitive_context": "Devin supports Claude + GPT + custom models. CrewAI supports any LLM via LangChain. OpenHands supports multiple backends. Copilot Workspace uses GPT-4 + Copilot model.",
+        "linkedTaskId": "56c6100b-26a3-4619-aa64-5826f3b5c249"
       },
       {
         "title": "Write project README with setup, architecture, and contributor guide",
@@ -84,7 +86,8 @@
         "affected_files": [
           "teamai/README.md"
         ],
-        "source": "ideation"
+        "source": "ideation",
+        "linkedTaskId": "11fb38fd-8fd1-4d57-8c73-5fe30beeede0"
       }
     ],
     "next": [
@@ -130,7 +133,8 @@
           "src/**/*.test.ts",
           "e2e/**/*.spec.ts"
         ],
-        "source": "ideation"
+        "source": "ideation",
+        "linkedTaskId": "eeb25b2e-f9a9-4eca-aeef-bab67dfa6118"
       },
       {
         "title": "GitLab + Bitbucket integration — extend beyond GitHub-only PR creation",
@@ -197,8 +201,7 @@
           "src/lib/orchestrator.ts",
           "src/app/actions/pipeline.ts"
         ],
-        "source": "ideation",
-        "linkedTaskId": "cd3e122b-247b-4882-8a2f-fc901fa00a4d"
+        "source": "ideation"
       },
       {
         "title": "Notification system — desktop and webhook notifications for phase transitions",
