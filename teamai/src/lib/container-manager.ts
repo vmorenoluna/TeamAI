@@ -1,4 +1,4 @@
-import { spawn, execSync, ChildProcess } from 'child_process';
+import { spawn, execFileSync, ChildProcess } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { EventEmitter } from 'events';
 import path from 'path';
@@ -78,9 +78,16 @@ export class ContainerManager extends EventEmitter {
     if (existing) return existing.state;
     // No in-memory record — check Docker directly for an existing devcontainer
     try {
-      // Use the label value as-is; Docker stores it with the OS-native path format
-      const label = `devcontainer.local_folder=${projectRoot}`;
-      const out = execSync(`docker ps -a --filter "label=${label}" --format "{{.Status}}"`, { encoding: 'utf-8', timeout: 10000 }).trim();
+      // Normalize Windows drive letter to lowercase — Docker stores it lowercase
+      // (e.g. cookie has "C:\..." but devcontainer label is "c:\...")
+      const normalized = projectRoot.replace(/^([A-Z]):/, (_, d) => `${d.toLowerCase()}:`);
+      const label = `devcontainer.local_folder=${normalized}`;
+      // Use execFileSync to bypass shell quoting (backslashes in Windows paths break execSync's shell)
+      const out = execFileSync('docker', [
+        'ps', '-a',
+        '--filter', `label=${label}`,
+        '--format', '{{.Status}}',
+      ], { encoding: 'utf-8', timeout: 10000 }).trim();
       if (out.includes('Up')) return 'running';   // container is up
       // Any other output (Exited, Created, etc.) means it's not running — treat as stoppable
       if (out) return 'stopped';

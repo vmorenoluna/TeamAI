@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition, useEffect, useRef } from 'react';
-import { saveContainerConfig } from '@/app/actions/containers';
+import { saveContainerConfig, getContainerState } from '@/app/actions/containers';
 import type { ContainerConfig } from '@/app/actions/containers';
 import type { ContainerState } from '@/lib/container-manager';
 
@@ -43,6 +43,18 @@ export function ContainerConfigEditor({ config, initialState, projectPath }: Pro
         ws.close();
       }
     };
+  }, [projectPath]);
+
+  // Periodically re-query container state so UI reflects external Docker changes
+  useEffect(() => {
+    let cancelled = false;
+    const id = setInterval(async () => {
+      try {
+        const fresh = await getContainerState();
+        if (!cancelled) setState(fresh);
+      } catch { /* ignore — keep stale state */ }
+    }, 5000);
+    return () => { cancelled = true; clearInterval(id); };
   }, [projectPath]);
 
   function toggle() {

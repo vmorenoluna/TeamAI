@@ -17,7 +17,7 @@
           "src/app/actions/recovery.ts"
         ],
         "source": "ideation",
-        "linkedTaskId": "f1006012-dd26-43d2-808b-cd2ffc1dfc1b"
+        "linkedTaskId": "91f70088-9909-41f6-b6fe-22da8ae6ae0b"
       },
       {
         "title": "Add TypeScript typecheck and lint to pre-commit hooks",
@@ -116,8 +116,7 @@
           "src/components/container-config.tsx"
         ],
         "source": "competitor-analysis",
-        "competitive_context": "OpenHands runs all agents in Docker sandboxes by default. Devin has managed sandboxes. TeamAI's current opt-in devcontainer is a weaker security posture.",
-        "linkedTaskId": "2509cb61-a260-4553-b1f0-bdba7d40fde2"
+        "competitive_context": "OpenHands runs all agents in Docker sandboxes by default. Devin has managed sandboxes. TeamAI's current opt-in devcontainer is a weaker security posture."
       },
       {
         "title": "Comprehensive test suite — unit, integration, and E2E tests",
@@ -212,8 +211,7 @@
           "src/components/kanban-board.tsx",
           "src/app/actions/pipeline.ts"
         ],
-        "source": "ideation",
-        "linkedTaskId": "9370858b-3aa4-4b89-86f8-1e0f6c141a20"
+        "source": "ideation"
       },
       {
         "title": "Multi-user collaboration — shared projects, task assignment, activity feed",
