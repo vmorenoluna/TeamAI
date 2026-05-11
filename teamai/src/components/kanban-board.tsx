@@ -7,7 +7,6 @@ import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskCard } from './task-card';
 import { TaskPanel } from './task-panel';
 import type { Task } from '@/lib/task-store';
-import type { InterruptedTask } from '@/lib/recovery';
 
 const COLUMNS = [
   { phase: 'backlog', label: 'Backlog' },
@@ -30,10 +29,9 @@ function normalizePhase(phase: string): string {
 
 interface Props {
   tasks: Task[];
-  interrupted: InterruptedTask[];
 }
 
-export function KanbanBoard({ tasks, interrupted }: Props) {
+export function KanbanBoard({ tasks }: Props) {
   const router = useRouter();
   const [showDialog, setShowDialog] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -69,8 +67,6 @@ export function KanbanBoard({ tasks, interrupted }: Props) {
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [selectedTaskId]);
-
-  const interruptedMap = new Map(interrupted.map(t => [t.taskId, t]));
 
   // Get the effective phase for a task, considering optimistic updates
   const effectivePhase = useCallback((task: Task): string => {
@@ -188,7 +184,6 @@ export function KanbanBoard({ tasks, interrupted }: Props) {
                       >
                         <TaskCard
                           task={task}
-                          interrupted={interruptedMap.get(task.id)}
                           onSelect={setSelectedTaskId}
                           isMoving={optimisticPhases.has(task.id)}
                         />

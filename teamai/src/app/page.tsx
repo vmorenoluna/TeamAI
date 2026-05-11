@@ -1,6 +1,5 @@
 import { getTasks } from './actions/tasks';
 import { getActiveProject } from './actions/projects';
-import { getInterruptedTasks } from './actions/recovery';
 import { KanbanBoard } from '@/components/kanban-board';
 import type { Task } from '@/lib/task-store';
 
@@ -22,7 +21,5 @@ export default async function Home() {
     // Active project path may be stale
   }
 
-  const interrupted = await getInterruptedTasks();
-
-  return <KanbanBoard tasks={tasks} interrupted={interrupted} />;
+  return <KanbanBoard tasks={tasks} />;
 }

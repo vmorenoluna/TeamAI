@@ -1,23 +1,7 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import type { Task } from '@/lib/task-store';
-import type { InterruptedTask } from '@/lib/recovery';
-import { resumeTask } from '@/app/actions/recovery';
-
-const PHASE_BADGE: Record<string, string> = {
-  backlog:           'bg-slate-800 text-slate-300',
-  spec:              'bg-blue-900/40 text-blue-300',
-  plan:              'bg-indigo-900/40 text-indigo-300',
-  implement:         'bg-amber-900/40 text-amber-300',
-  'qa-review':       'bg-orange-900/40 text-orange-300',
-  'qa-fix':          'bg-orange-900/40 text-orange-300',
-  'awaiting-review': 'bg-purple-900/40 text-purple-300',
-  merge:             'bg-teal-900/40 text-teal-300',
-  'create-pr':       'bg-teal-900/40 text-teal-300',
-  failed:            'bg-red-900/40 text-red-300',
-  done:              'bg-green-900/40 text-green-300',
-};
 
 const DESCRIPTION_LIMIT = 80;
 
@@ -33,25 +17,19 @@ function relativeTime(iso: string): string {
 
 interface Props {
   task: Task;
-  interrupted?: InterruptedTask;
   onSelect: (id: string) => void;
   isMoving?: boolean;
 }
 
-export function TaskCard({ task, interrupted, onSelect, isMoving }: Props) {
-  const badge = PHASE_BADGE[task.phase] ?? PHASE_BADGE.backlog;
+const EXCLUDED_SPINNER_PHASES = new Set(['backlog', 'failed', 'merge', 'create-pr', 'done']);
+
+export function TaskCard({ task, onSelect, isMoving }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const showSpinner = !EXCLUDED_SPINNER_PHASES.has(task.phase);
   const longDesc = task.description && task.description.length > DESCRIPTION_LIMIT;
   const displayDesc = task.description
     ? (longDesc && !expanded ? task.description.slice(0, DESCRIPTION_LIMIT) + '…' : task.description)
     : null;
-
-  function handlePlay(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (!interrupted) return;
-    startTransition(async () => { await resumeTask(interrupted); });
-  }
 
   return (
     <div
@@ -69,16 +47,11 @@ export function TaskCard({ task, interrupted, onSelect, isMoving }: Props) {
           <span className="text-[10px] text-blue-500 font-medium">moving</span>
         </div>
       )}
-      {/* Play button for interrupted tasks */}
-      {interrupted && (
-        <button
-          onClick={handlePlay}
-          disabled={isPending}
-          title="Resume pipeline"
-          className="absolute top-2 right-2 flex items-center justify-center w-6 h-6 rounded-full bg-green-900/40 text-green-300 hover:bg-green-800/60 disabled:opacity-50 transition-colors text-[10px] font-bold"
-        >
-          ▶
-        </button>
+      {/* Spinning circle indicator — shows for active phases */}
+      {showSpinner && (
+        <div className="absolute top-2 right-2" title="Task in progress">
+          <div className="w-3 h-3 rounded-full border-2 border-slate-500 border-t-transparent animate-spin" />
+        </div>
       )}
 
       <p className="text-sm font-medium text-white leading-snug pr-8">
@@ -99,14 +72,9 @@ export function TaskCard({ task, interrupted, onSelect, isMoving }: Props) {
         </p>
       )}
 
-      <div className="flex items-center justify-between gap-2 mt-2">
-        <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${badge}`}>
-          {task.phase}
-        </span>
-        <span className="text-[11px] text-slate-500 shrink-0">
-          {relativeTime(task.createdAt)}
-        </span>
-      </div>
+      <p className="mt-2 text-[11px] text-slate-500">
+        {relativeTime(task.createdAt)}
+      </p>
     </div>
   );
 }
