@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, execSync, ChildProcess } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { EventEmitter } from 'events';
 import path from 'path';
@@ -74,7 +74,15 @@ export class ContainerManager extends EventEmitter {
   }
 
   getState(projectRoot: string): ContainerState {
-    return this.records.get(projectRoot)?.state ?? 'stopped';
+    const existing = this.records.get(projectRoot);
+    if (existing) return existing.state;
+    // No in-memory record — check if a devcontainer for this project already exists in Docker
+    try {
+      const label = `devcontainer.local_folder=${projectRoot.replace(/\\/g, '\\\\')}`;
+      const out = execSync(`docker ps -a --filter "label=${label}" --format "{{.Status}}"`, { encoding: 'utf-8', timeout: 10000 }).trim();
+      if (out.trim()) return 'stopped'; // container exists in Docker (possibly exited) — treat as stoppable, trigger ensureContainer on next call
+    } catch { /* docker not available or no container */ }
+    return 'stopped';
   }
 
   // Returns the running container info synchronously — for use in orchestrator git commands.
