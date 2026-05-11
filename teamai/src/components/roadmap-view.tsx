@@ -113,7 +113,7 @@ function RoadmapCard({
   isExpanded,
   onToggle,
   onSelectTask,
-  onOpenRoadmapItem,
+  onOpenDetail,
 }: RoadmapCardProps) {
   const isLinked = !!item.linkedTaskId;
   const statusBadge = linkedStatus
@@ -134,7 +134,7 @@ function RoadmapCard({
     if (isLinked) {
       onSelectTask(item.linkedTaskId!);
     } else {
-      onOpenRoadmapItem(item, phaseKey, i);
+      onOpenDetail(item);
     }
   }
 
@@ -420,7 +420,7 @@ function PhasedKanban({
                         isExpanded={expandedKey === cardKey}
                         onToggle={() => setExpandedKey(prev => prev === cardKey ? null : cardKey)}
                         onSelectTask={onSelectTask}
-                        onOpenRoadmapItem={(item) => onOpenRoadmapItem(item, phaseKey, i)}
+                        onOpenDetail={(item) => onOpenRoadmapItem(item, phaseKey, i)}
                       />
                     );
                   })
@@ -861,6 +861,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
           {/* Window */}
           <div
             className="relative w-full max-w-[800px] h-[90%] max-h-[900px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
+            style={{ minHeight: '500px' }}
             onClick={e => e.stopPropagation()}
           >
             <TaskPanel
