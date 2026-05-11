@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useTransition, useCallback, useMemo } from 'react';
+import { useState, useEffect, useTransition, useCallback, useMemo, useRef } from 'react';
 import {
   startRoadmapGeneration,
   startChangelogGeneration,
@@ -18,7 +18,8 @@ import {
 } from '@/app/actions/roadmap';
 import { useSessionStream } from '@/hooks/use-session-stream';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
-import { TaskPanel } from './task-panel';
+import { TaskPanel, type FullData } from './task-panel';
+import type { RoleDefinition } from '@/app/actions/roles';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -467,6 +468,9 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     filename: string;
   } | null>(null);
 
+  // Cache task data so reopening a task is instant (no re-fetch / loading flash)
+  const taskCacheRef = useRef<Map<string, { data: FullData; roles: RoleDefinition[] }>>(new Map());
+
   const rmStream = useSessionStream(rmSessionId);
   const clStream = useSessionStream(clSessionId);
 
@@ -860,14 +864,18 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
           />
           {/* Window */}
           <div
-            className="relative w-full max-w-[800px] h-[90%] max-h-[900px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
-            style={{ minHeight: '500px' }}
+            className="relative w-[800px] h-[650px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
             onClick={e => e.stopPropagation()}
           >
             <TaskPanel
               taskId={selectedTaskId}
               onClose={() => setSelectedTaskId(null)}
               readonly
+              cachedData={taskCacheRef.current.get(selectedTaskId)?.data ?? undefined}
+              cachedRoles={taskCacheRef.current.get(selectedTaskId)?.roles}
+              onDataLoaded={(data, roles, tid) => {
+                taskCacheRef.current.set(tid, { data, roles });
+              }}
               onError={(errorMsg) => {
                 // Only handle "not found" errors - other errors (network, etc.) should not redirect
                 if (!errorMsg.includes('not found')) return;
@@ -906,7 +914,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
           />
           {/* Window */}
           <div
-            className="relative w-full max-w-[700px] max-h-[85%] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
+            className="relative w-[700px] h-[550px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
             onClick={e => e.stopPropagation()}
           >
             {/* Title bar */}

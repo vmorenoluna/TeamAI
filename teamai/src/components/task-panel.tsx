@@ -6,17 +6,25 @@ import { getRoles } from '@/app/actions/roles';
 import { TaskDetail } from './task-detail';
 import type { RoleDefinition } from '@/app/actions/roles';
 
-type FullData = Awaited<ReturnType<typeof getTaskFull>>;
+export type FullData = Awaited<ReturnType<typeof getTaskFull>>;
 
-export function TaskPanel({ taskId, onClose, readonly = false, onError }: { taskId: string; onClose: () => void; readonly?: boolean; onError?: (error: string) => void }) {
-  const [data, setData] = useState<FullData | null>(null);
-  const [roles, setRoles] = useState<RoleDefinition[]>([]);
-  const [loading, setLoading] = useState(true);
+export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedData, cachedRoles, onDataLoaded }: {
+  taskId: string;
+  onClose: () => void;
+  readonly?: boolean;
+  onError?: (error: string) => void;
+  cachedData?: FullData | null;
+  cachedRoles?: RoleDefinition[];
+  onDataLoaded?: (data: FullData, roles: RoleDefinition[], taskId: string) => void;
+}) {
+  const [data, setData] = useState<FullData | null>(cachedData ?? null);
+  const [roles, setRoles] = useState<RoleDefinition[]>(cachedRoles ?? []);
+  const [loading, setLoading] = useState(!cachedData);
 
   const refresh = (silent = false) => {
     if (!silent) setLoading(true);
     Promise.all([getTaskFull(taskId), getRoles()])
-      .then(([full, r]) => { setData(full); setRoles(r); })
+      .then(([full, r]) => { setData(full); setRoles(r); onDataLoaded?.(full, r, taskId); })
       .catch((e) => {
         if (!silent && onError) {
           onError(e instanceof Error ? e.message : 'Failed to load task');
@@ -25,8 +33,9 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError }: { task
       .finally(() => { if (!silent) setLoading(false); });
   };
 
-  // Initial load
+  // Initial load — skip fetch if parent provided cached data
   useEffect(() => {
+    if (cachedData) return;
     setData(null);
     refresh();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -80,7 +89,7 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError }: { task
       {/* Content */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {loading && (
-          <div className="h-full flex items-center justify-center text-sm text-slate-500">Loading…</div>
+          <div className="h-full flex items-start justify-center pt-8 text-sm text-slate-500">Loading…</div>
         )}
 
         {!loading && !data && (
