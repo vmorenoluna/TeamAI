@@ -1,10 +1,11 @@
-import { execSync, execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, appendFileSync, rmSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'fs';
 import path from 'path';
 import { processManager, type AgentSession } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
 import { TaskStore } from './task-store';
 import { resolveProvider, providerToSessionOpts } from './providers';
+import { slugify } from './utils';
 
 class RateLimitError extends Error {
   constructor(public resetsAt: number) {
@@ -108,7 +109,7 @@ export class Orchestrator {
       // Merge/PR requires the worktree and branch to exist. If missing,
       // restart from the earliest phase needed to recreate them.
       const worktreeBase = this.getWorktreeBase();
-      const worktreePath = path.join(worktreeBase, this.slugify(task.description));
+      const worktreePath = path.join(worktreeBase, slugify(task.description));
       const worktreeExists = existsSync(worktreePath);
       const branchExists = !!task.branch;
 
@@ -134,7 +135,7 @@ export class Orchestrator {
     this.cancelPipeline(taskId);
 
     const config = this.getPipelineConfig();
-    const slug = this.slugify(description);
+    const slug = slugify(description);
     const branch = `feat/${slug}`;
     const worktreePath = path.join(this.getWorktreeBase(), slug);
     const specPath = this.taskStore.getDirById(taskId);
@@ -415,10 +416,6 @@ export class Orchestrator {
         else console.error(`[orchestrator] Task ${pipeline.taskId} failed after rate-limit retry:`, e);
       }
     }, waitMs);
-  }
-
-  private slugify(text: string): string {
-    return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
   }
 
   // Run a git command either directly on the host or via docker exec inside the container.
