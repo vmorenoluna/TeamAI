@@ -272,6 +272,11 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
           {task.title}
         </h1>
 
+        {/* Ticket ID */}
+        <p className="mb-2 text-xs text-slate-500 font-mono select-all">
+          {task.id}
+        </p>
+
         {/* Row 3: description */}
         {task.description && (
           <p className="mb-2 text-sm text-slate-400">
