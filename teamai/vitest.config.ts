@@ -9,6 +9,11 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     include: ['tests/unit/**/*.test.{ts,tsx}'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/lib/**/*.ts'],
+      reporter: ['text', 'text-summary'],
+    },
     server: {
       deps: {
         inline: ['@/lib/utils', '@/lib/task-store'],

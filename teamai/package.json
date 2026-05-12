@@ -34,6 +34,7 @@
     "@types/react-dom": "^19",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.7.0",
+    "@vitest/coverage-v8": "^1.6.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "husky": "^9.1.7",
@@ -42,7 +43,8 @@
     "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^1.6.1"
-  },    "lint-staged": {
-      "*.{ts,tsx,mts}": "eslint --fix"
-    }
+  },
+  "lint-staged": {
+    "*.{ts,tsx,mts}": "eslint --fix"
+  }
 }

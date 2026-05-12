@@ -23,6 +23,28 @@ const PHASE_BADGE: Record<string, string> = {
   done:              'bg-green-900/40 text-green-300',
 };
 
+interface PlanSubtask {
+  id: string;
+  title: string;
+  description?: string;
+  files?: string[];
+}
+
+export interface PlanData {
+  subtasks?: PlanSubtask[];
+}
+
+interface QACriterion {
+  name: string;
+  status: 'PASS' | 'FAIL';
+  notes?: string;
+}
+
+export interface QAReportData {
+  overall: 'PASS' | 'FAIL';
+  criteria?: QACriterion[];
+}
+
 type Tab = 'overview' | 'terminal' | 'spec' | 'plan' | 'qa';
 
 interface Props {
@@ -31,8 +53,8 @@ interface Props {
   dependencies: Task[];
   dependents: Task[];
   spec: string | null;
-  plan: any;
-  qaReport: any;
+  plan: PlanData | null;
+  qaReport: QAReportData | null;
   diff: string | null;
   agentOutput?: string | null;
   roles: RoleDefinition[];
@@ -133,19 +155,19 @@ function DepPicker({
   );
 }
 
-function PlanSubtasks({ plan }: { plan: any }) {
+function PlanSubtasks({ plan }: { plan: PlanData | null }) {
   if (!plan?.subtasks?.length) return <p className="text-sm text-slate-400">No plan generated yet.</p>;
   return (
     <div className="space-y-2">
-      {plan.subtasks.map((s: any, i: number) => (
-        <div key={i} className="p-3 rounded-lg border border-[#1e293b] bg-[#11131b]">
+      {plan.subtasks.map((s: PlanSubtask, i: number) => (
+        <div key={i} data-testid="plan-subtask" className="p-3 rounded-lg border border-[#1e293b] bg-[#11131b]">
           <p className="text-sm font-medium text-white">
             {s.id}. {s.title}
           </p>
           {s.description && (
             <p className="mt-1 text-xs text-slate-400">{s.description}</p>
           )}
-          {s.files?.length > 0 && (
+          {s.files && s.files.length > 0 && (
             <p className="mt-1 text-xs text-slate-400 font-mono">
               {s.files.join(', ')}
             </p>
@@ -156,7 +178,7 @@ function PlanSubtasks({ plan }: { plan: any }) {
   );
 }
 
-function QAReportView({ qaReport }: { qaReport: any }) {
+function QAReportView({ qaReport }: { qaReport: QAReportData | null }) {
   if (!qaReport) return <p className="text-sm text-slate-400">No QA report generated yet.</p>;
   return (
     <div className="space-y-3">
@@ -167,7 +189,7 @@ function QAReportView({ qaReport }: { qaReport: any }) {
       }`}>
         {qaReport.overall}
       </div>
-      {qaReport.criteria?.map((c: any, i: number) => (
+      {qaReport.criteria?.map((c: QACriterion, i: number) => (
         <div key={i} className="flex items-start gap-2 text-sm">
           <span className={`shrink-0 font-bold ${c.status === 'PASS' ? 'text-green-600' : 'text-red-600'}`}>
             {c.status === 'PASS' ? '✓' : '✗'}
@@ -273,7 +295,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
         </h1>
 
         {/* Ticket ID */}
-        <p className="mb-2 text-xs text-slate-500 font-mono select-all">
+        <p data-testid="task-id" className="mb-2 text-xs text-slate-500 font-mono select-all">
           {task.id}
         </p>
 
