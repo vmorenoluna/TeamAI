@@ -32,4 +32,30 @@ test.describe('Kanban Board', () => {
     const detailPanel = page.locator('text=Board').first();
     await expect(detailPanel).toBeVisible({ timeout: 5_000 });
   });
+
+  test('kanban columns are visible: Backlog, Spec, Plan, Implement, QA Review, Done', async ({ page }) => {
+    await page.goto('/');
+
+    const expectedColumns = ['Backlog', 'Spec', 'Plan', 'Implement', 'QA Review', 'Done'];
+    for (const col of expectedColumns) {
+      const colHeader = page.locator(`text=${col}`).first();
+      await expect(colHeader).toBeVisible({ timeout: 10_000 });
+    }
+  });
+
+  test('shows project prompt or kanban content', async ({ page }) => {
+    await page.goto('/');
+
+    // Check we see a project selector or the main kanban content
+    const bodyText = await page.locator('body').innerText();
+    expect(
+      bodyText.includes('Select or add a project') ||
+      bodyText.includes('Backlog')
+    ).toBeTruthy();
+  });
+
+  test('page has expected title', async ({ page }) => {
+    await page.goto('/');
+    await expect(page).toHaveTitle(/TeamAI/);
+  });
 });
