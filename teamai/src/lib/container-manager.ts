@@ -25,10 +25,26 @@ function devcontainerBin(): string {
   return existsSync(local) ? local : `devcontainer${ext}`;
 }
 
+// Check if Docker is available and running (cached per process lifetime)
+let _dockerAvailable: boolean | null = null;
+export function dockerAvailable(): boolean {
+  if (_dockerAvailable !== null) return _dockerAvailable;
+  try {
+    execFileSync('docker', ['info'], { stdio: 'ignore', timeout: 2000 });
+    _dockerAvailable = true;
+  } catch {
+    _dockerAvailable = false;
+  }
+  return _dockerAvailable;
+}
+
 export function readContainerConfig(projectRoot: string): { enabled: boolean } {
   const cfgPath = path.join(projectRoot, '.teamai', 'container.json');
-  if (!existsSync(cfgPath)) return { enabled: false };
-  try { return JSON.parse(readFileSync(cfgPath, 'utf-8')); } catch { return { enabled: false }; }
+  if (existsSync(cfgPath)) {
+    try { return JSON.parse(readFileSync(cfgPath, 'utf-8')); } catch { /* fall through */ }
+  }
+  // Default: auto-enable when Docker is available, opt-out otherwise
+  return { enabled: dockerAvailable() };
 }
 
 // Translate a host absolute path into the equivalent path inside the container.
@@ -195,7 +211,6 @@ export class ContainerManager extends EventEmitter {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __containerManager: ContainerManager | undefined;
 }
 

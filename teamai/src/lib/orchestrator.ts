@@ -363,16 +363,15 @@ export class Orchestrator {
     pipeline.sessionId = sessionId;
 
     const specContent = readFileSync(path.join(pipeline.specPath, 'spec.md'), 'utf-8');
-    processManager.sendMessage(
-      sessionId,
-      `Create a Pull Request for branch "${pipeline.branch}" targeting the main branch.\n\n` +
-      `Use the GitHub MCP server's create_pull_request tool.\n\n` +
-      `Title: ${pipeline.description}\n\n` +
-      `Body: Generate a clear PR description from this spec:\n\n${specContent}\n\n` +
-      `Include a summary of changes, testing done (QA passed), and any notes for reviewers.`
-    );
+    const platform = detectGitPlatform(this.projectRoot);
+    const platformMsg = buildPlatformPrompt(platform, pipeline.branch, pipeline.description, specContent, this.projectRoot);
+    processManager.sendMessage(sessionId, platformMsg);
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
+
+    // Platform info stored for future UI display (Task interface to be extended)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.taskStore as any).update(pipeline.taskId, { platform: platform !== 'unknown' ? platform : undefined });
 
     this.advancePhase(pipeline, 'done');
   }
@@ -514,6 +513,68 @@ export class Orchestrator {
     try {
       appendFileSync(logFile, `\n${'─'.repeat(40)}\n▶ ${phase.toUpperCase()}\n${'─'.repeat(40)}\n`);
     } catch { /* best-effort */ }
+  }
+}
+
+// Detect the Git hosting platform from the remote origin URL
+function detectGitPlatform(projectRoot: string): 'github' | 'gitlab' | 'bitbucket' | 'unknown' {
+  try {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      cwd: projectRoot, encoding: 'utf-8', timeout: 5000,
+    }).trim().toLowerCase();
+    if (url.includes('github.com') || url.includes('github.')) return 'github';
+    if (url.includes('gitlab.com') || url.includes('gitlab.')) return 'gitlab';
+    if (url.includes('bitbucket.org') || url.includes('bitbucket.')) return 'bitbucket';
+  } catch { /* no remote or not a git repo */ }
+  return 'unknown';
+}
+
+// Detect the default branch name from the remote
+function detectDefaultBranch(projectRoot: string): string {
+  try {
+    const ref = execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+      cwd: projectRoot, encoding: 'utf-8', timeout: 3000,
+    }).trim();
+    // Extract branch name from refs/remotes/origin/main → main
+    const parts = ref.split('/');
+    return parts[parts.length - 1] || 'main';
+  } catch {
+    return 'main';
+  }
+}
+
+// Build a platform-specific agent prompt for PR/MR creation
+function buildPlatformPrompt(
+  platform: 'github' | 'gitlab' | 'bitbucket' | 'unknown',
+  branch: string,
+  description: string,
+  specContent: string,
+  projectRoot: string,
+): string {
+  const defaultBranch = detectDefaultBranch(projectRoot);
+  const base = `Create a Pull Request for branch "${branch}" targeting the ${defaultBranch} branch.\n\n`;
+  const meta = `Title: ${description}\n\n` +
+    `Body: Generate a clear PR description from this spec:\n\n${specContent}\n\n` +
+    `Include a summary of changes, testing done (QA passed), and any notes for reviewers.`;
+
+  switch (platform) {
+    case 'github':
+      return base + `Use the GitHub MCP server's create_pull_request tool.\n\n` + meta;
+    case 'gitlab':
+      return base +
+        `Platform: GitLab. Create a Merge Request (not a PR).\n` +
+        `If the "glab" CLI is available, run: glab mr create --title "..." --description "..."` +
+        ` --target-branch ${defaultBranch} --source-branch ${branch}\n` +
+        `Otherwise, use the GitLab API (project is from remote origin URL).\n\n` + meta;
+    case 'bitbucket':
+      return base +
+        `Platform: Bitbucket Cloud. Create a Pull Request.\n` +
+        `Use the Bitbucket REST API v2 (https://api.bitbucket.org/2.0) if credentials are available.\n` +
+        `The repository slug can be parsed from the remote origin URL.\n\n` + meta;
+    default:
+      return base +
+        `Platform: Unknown (could not auto-detect from remote origin).\n` +
+        `Create a Pull Request using whatever tools are available for this repository.\n\n` + meta;
   }
 }
 

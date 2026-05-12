@@ -1,0 +1,22 @@
+{
+  "subtasks": [
+    {
+      "id": "1",
+      "title": "Define template types and defaults",
+      "description": "Create a TEMPLATES constant array in kanban-board.tsx with 4 predefined templates (Bug Fix, Feature Request, Refactor, Documentation Update), each with name, titlePrefix, descriptionTemplate, and suggestedRole.",
+      "files": ["src/components/kanban-board.tsx"]
+    },
+    {
+      "id": "2",
+      "title": "Add template selector to New Task dialog",
+      "description": "Add a dropdown/button group above the title input in the New Task dialog. When a template is selected, pre-fill title and description fields using local state.",
+      "files": ["src/components/kanban-board.tsx"]
+    },
+    {
+      "id": "3",
+      "title": "Style and polish",
+      "description": "Match dark theme. Add template icon, hover states, clear/None option to deselect.",
+      "files": ["src/components/kanban-board.tsx"]
+    }
+  ]
+}

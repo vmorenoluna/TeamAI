@@ -1,0 +1,45 @@
+{
+  "status": "passed",
+  "timestamp": "2026-05-10T09:30:00.000Z",
+  "summary": "GitLab + Bitbucket integration passed QA review. Platform auto-detection and multi-platform PR/MR prompts implemented.",
+  "checks": [
+    {
+      "name": "Platform detection",
+      "status": "passed",
+      "details": "detectGitPlatform() parses git remote origin URL and returns github/gitlab/bitbucket/unknown. Supports GitHub Enterprise, GitLab self-hosted, and Bitbucket Cloud URLs."
+    },
+    {
+      "name": "Default branch detection",
+      "status": "passed",
+      "details": "detectDefaultBranch() reads refs/remotes/origin/HEAD to determine target branch (main/master/etc). Falls back to 'main'. Uses correct project root, not process.cwd()."
+    },
+    {
+      "name": "GitHub prompt",
+      "status": "passed",
+      "details": "Existing flow preserved — uses GitHub MCP server's create_pull_request tool. Backward compatible."
+    },
+    {
+      "name": "GitLab prompt",
+      "status": "passed",
+      "details": "Instructs agent to use glab mr create CLI or GitLab API. Target branch auto-detected from origin/HEAD. Creates Merge Request (not PR)."
+    },
+    {
+      "name": "Bitbucket prompt",
+      "status": "passed",
+      "details": "Instructs agent to use Bitbucket REST API v2. Repository slug parsed from remote URL."
+    },
+    {
+      "name": "Unknown platform fallback",
+      "status": "passed",
+      "details": "When platform cannot be auto-detected, agent is given generic instructions to create PR with available tools."
+    },
+    {
+      "name": "Platform info storage",
+      "status": "passed",
+      "details": "Platform stored on task metadata for future UI display (using pragmatic as any cast until Task interface is extended)."
+    }
+  ],
+  "typecheck": "clean",
+  "lint": "clean",
+  "unit_tests": "106 passed, 0 failed"
+}

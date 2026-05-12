@@ -40,6 +40,14 @@ export async function deleteTask(taskId: string) {
   revalidatePath('/');
 }
 
+export async function bulkDeleteTasks(taskIds: string[]) {
+  const { taskStore } = await getStores();
+  for (const id of taskIds) {
+    try { taskStore.delete(id); } catch { /* skip missing */ }
+  }
+  revalidatePath('/');
+}
+
 export async function runTask(taskId: string) {
   const { taskStore, orchestrator } = await getStores();
   const task = taskStore.getById(taskId);
@@ -124,12 +132,14 @@ export async function getTaskFull(taskId: string) {
   const spec = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
 
   const planPath = join(dir, 'plan.json');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let plan: any = null;
   if (existsSync(planPath)) {
     try { plan = JSON.parse(readFileSync(planPath, 'utf-8')); } catch { /* skip */ }
   }
 
   const qaPath = join(dir, 'qa_report.json');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let qaReport: any = null;
   if (existsSync(qaPath)) {
     try { qaReport = JSON.parse(readFileSync(qaPath, 'utf-8')); } catch { /* skip */ }

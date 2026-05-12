@@ -1,0 +1,10 @@
+{
+  "id": "10aeb5ee-b767-4251-ace9-7667ab06cfd0",
+  "title": "GitLab + Bitbucket integration — extend beyond GitHub-only PR creation",
+  "description": "The merge/create-pr phase only supports GitHub. Add GitLab merge request and Bitbucket pull request creation so TeamAI can be used with any major Git hosting platform. This directly capitalizes on a gap Copilot Workspace cannot fill.",
+  "phase": "done",
+  "source": "competitor-analysis",
+  "competitiveContext": "Copilot Workspace is GitHub-only. This is the single biggest market gap — teams on GitLab/Bitbucket have no spec-driven AI PR tool.",
+  "createdAt": "2026-05-12T10:18:26.954Z",
+  "updatedAt": "2026-05-12T10:18:26.954Z"
+}
