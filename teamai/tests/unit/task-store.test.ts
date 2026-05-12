@@ -89,12 +89,34 @@ describe('TaskStore', () => {
     expect(() => store.update('ghost', { title: 'x' })).toThrow('not found');
   });
 
+  it('updatePhase throws for nonexistent task', () => {
+    expect(() => store.updatePhase('ghost', 'spec')).toThrow('not found');
+  });
+
+  it('getAll returns empty array when specsDir does not exist', () => {
+    // Constructor creates specsDir via mkdirSync, so we must delete it
+    // AFTER construction to hit the !existsSync early-return at line 75
+    const specsDir = join(testDir, '.teamai');
+    rmSync(specsDir, { recursive: true, force: true });
+    expect(store.getAll()).toEqual([]);
+  });
+
+  it('getAll skips orphan directories without task.json', () => {
+    store.create('task-1', 'Real Task', 'desc');
+    // Create an empty subdirectory in .teamai/ that has no task.json
+    mkdirSync(join(testDir, '.teamai', 'empty-dir'), { recursive: true });
+
+    const all = store.getAll();
+    // Should only return the real task, not the empty dir
+    expect(all).toHaveLength(1);
+    expect(all[0].title).toBe('Real Task');
+  });
+
   it('clearArtifacts removes spec, plan, and qa files', () => {
     store.create('task-1', 'Task', 'Desc');
     const dir = store.getDirById('task-1');
 
     // Simulate artifact files
-
     writeFileSync(join(dir, 'spec.md'), '# spec');
     writeFileSync(join(dir, 'plan.json'), '{}');
     writeFileSync(join(dir, 'qa_report.json'), '{}');
@@ -113,5 +135,48 @@ describe('TaskStore', () => {
     expect(existsSync(join(dir, 'spec.md'))).toBe(true);  // spec preserved
     expect(existsSync(join(dir, 'plan.json'))).toBe(false);
     expect(existsSync(join(dir, 'qa_report.json'))).toBe(false);
+  });
+
+  // ── Coverage: lines 124-125 — getDirBySlug ──
+
+  it('getDirBySlug returns the correct directory path', () => {
+    store.create('task-xyz', 'My Cool Task', 'desc');
+    // The slug is computed from the title by slugify
+    const slugDir = store.getDirBySlug('my-cool-task');
+    expect(slugDir).toContain('.teamai');
+    expect(slugDir).toContain('my-cool-task');
+  });
+
+  // ── Coverage: lines 128-135 — getEvents ──
+
+  it('getEvents returns empty array when no events exist', () => {
+    store.create('task-ev', 'Event Task', 'desc');
+    const events = store.getEvents('task-ev');
+    expect(events).toEqual([]);
+  });
+
+  it('getEvents returns parsed events after phase changes', () => {
+    store.create('task-ev', 'Event Task', 'desc');
+
+    store.updatePhase('task-ev', 'spec');
+    store.updatePhase('task-ev', 'plan');
+
+    const events = store.getEvents('task-ev');
+    expect(events).toHaveLength(2);
+    expect(events[0].phase).toBe('spec');
+    expect(events[0].timestamp).toBeDefined();
+    expect(events[1].phase).toBe('plan');
+    expect(events[1].timestamp).toBeDefined();
+  });
+
+  it('getEvents throws for nonexistent task', () => {
+    expect(() => store.getEvents('does-not-exist')).toThrow('not found');
+  });
+
+  it('getDirById returns correct directory for a created task', () => {
+    store.create('task-dir', 'Dir Test', 'desc');
+    const dir = store.getDirById('task-dir');
+    expect(dir).toContain('.teamai');
+    expect(existsSync(join(dir, 'task.json'))).toBe(true);
   });
 });

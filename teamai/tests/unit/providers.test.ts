@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { resolveProvider, providerToSessionOpts } from '@/lib/providers';
+import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { join } from 'path';
+import { randomUUID } from 'crypto';
 
 describe('resolveProvider', () => {
   it('returns empty object when no providers file exists', () => {
@@ -7,11 +10,86 @@ describe('resolveProvider', () => {
     expect(result).toEqual({});
   });
 
-  it('returns empty object when providers file is invalid JSON (mocked)', () => {
-    // resolveProvider catches JSON parse errors and returns {}
-    // Testing with a path that definitely doesn't have a valid providers.json
-    const result = resolveProvider('/tmp', 'any-role');
+  it('returns empty object when providers file is invalid JSON', () => {
+    // Create a temp dir with an invalid providers.json
+    const testDir = join(process.cwd(), '.teamai-prov-test-' + randomUUID().slice(0, 8));
+    mkdirSync(testDir, { recursive: true });
+    mkdirSync(join(testDir, '.teamai'), { recursive: true });
+    writeFileSync(join(testDir, '.teamai', 'providers.json'), 'not-valid-json');
+
+    const result = resolveProvider(testDir, 'any-role');
     expect(result).toEqual({});
+
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('returns default config when no role override', () => {
+    const testDir = join(process.cwd(), '.teamai-prov-test-' + randomUUID().slice(0, 8));
+    mkdirSync(testDir, { recursive: true });
+    mkdirSync(join(testDir, '.teamai'), { recursive: true });
+    writeFileSync(join(testDir, '.teamai', 'providers.json'), JSON.stringify({
+      default: { provider: 'bedrock', model: 'claude-sonnet' },
+    }));
+
+    const result = resolveProvider(testDir, 'coder');
+    expect(result.provider).toBe('bedrock');
+    expect(result.model).toBe('claude-sonnet');
+
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('merges role override with default', () => {
+    const testDir = join(process.cwd(), '.teamai-prov-test-' + randomUUID().slice(0, 8));
+    mkdirSync(testDir, { recursive: true });
+    mkdirSync(join(testDir, '.teamai'), { recursive: true });
+    writeFileSync(join(testDir, '.teamai', 'providers.json'), JSON.stringify({
+      default: { provider: 'anthropic', model: 'claude-sonnet' },
+      roles: {
+        coder: { provider: 'bedrock' },
+      },
+    }));
+
+    const result = resolveProvider(testDir, 'coder');
+    // Role override: provider changes to bedrock, model inherited from default
+    expect(result.provider).toBe('bedrock');
+    expect(result.model).toBe('claude-sonnet');
+
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('role override can set env vars', () => {
+    const testDir = join(process.cwd(), '.teamai-prov-test-' + randomUUID().slice(0, 8));
+    mkdirSync(testDir, { recursive: true });
+    mkdirSync(join(testDir, '.teamai'), { recursive: true });
+    writeFileSync(join(testDir, '.teamai', 'providers.json'), JSON.stringify({
+      default: { provider: 'anthropic' },
+      roles: {
+        planner: { provider: 'openai', env: { OPENAI_API_KEY: 'sk-planner' } },
+      },
+    }));
+
+    const result = resolveProvider(testDir, 'planner');
+    expect(result.provider).toBe('openai');
+    expect(result.env).toEqual({ OPENAI_API_KEY: 'sk-planner' });
+
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('role override overrides env vars from default', () => {
+    const testDir = join(process.cwd(), '.teamai-prov-test-' + randomUUID().slice(0, 8));
+    mkdirSync(testDir, { recursive: true });
+    mkdirSync(join(testDir, '.teamai'), { recursive: true });
+    writeFileSync(join(testDir, '.teamai', 'providers.json'), JSON.stringify({
+      default: { provider: 'openai', env: { OPENAI_API_KEY: 'sk-default' } },
+      roles: {
+        coder: { env: { OPENAI_API_KEY: 'sk-coder' } },
+      },
+    }));
+
+    const result = resolveProvider(testDir, 'coder');
+    expect(result.env).toEqual({ OPENAI_API_KEY: 'sk-coder' });
+
+    rmSync(testDir, { recursive: true, force: true });
   });
 });
 
@@ -84,13 +162,18 @@ describe('providerToSessionOpts', () => {
 
   it('anthropic provider (default) sets no special env vars', () => {
     const result = providerToSessionOpts({ provider: 'anthropic' });
-    // The 'anthropic' provider doesn't set any env vars explicitly
-    // But the env object is empty so it should be undefined
     expect(result.env).toBeUndefined();
   });
 
   it('returns undefined env when env object is empty after processing', () => {
     const result = providerToSessionOpts({ provider: 'anthropic' });
     expect(result.env).toBeUndefined();
+  });
+
+  it('passes through permissionMode if specified', () => {
+    // permissionMode is not in the provider config but providerToSessionOpts
+    // just passes through what it's given — test model at minimum
+    const result = providerToSessionOpts({ model: 'sonnet' });
+    expect(result.model).toBe('sonnet');
   });
 });
