@@ -15,29 +15,28 @@ test.describe('Terminals Page', () => {
   test('terminals page shows New Terminal button when project selected', async ({ page }) => {
     await page.goto('/terminals');
 
-    const hasHeader = await page.locator('text=Terminals').count();
-    const hasNoProject = await page.locator('text=No active project selected').count();
-
-    expect(hasHeader + hasNoProject).toBeGreaterThan(0);
-
-    // If terminals page loaded with a project, the "New Terminal" button should be visible
-    if (hasHeader > 0) {
-      await expect(page.locator('text=+ New Terminal')).toBeVisible({ timeout: 5_000 });
+    const noProject = page.locator('text=No active project selected');
+    if (await noProject.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      test.skip(true, 'No active project selected');
+      return;
     }
+
+    // Check for the New Terminal button
+    await expect(page.locator('text=+ New Terminal')).toBeVisible({ timeout: 10_000 });
   });
 
   test('opening New Terminal dialog shows role selector', async ({ page }) => {
     await page.goto('/terminals');
 
-    const hasHeader = await page.locator('text=Terminals').count();
-    if (hasHeader === 0) {
+    const noProject = page.locator('text=No active project selected');
+    if (await noProject.isVisible({ timeout: 3_000 }).catch(() => false)) {
       test.skip(true, 'No active project — skipping dialog test');
       return;
     }
 
     // Click the New Terminal button
     const newTerminalButton = page.locator('text=+ New Terminal');
-    await expect(newTerminalButton).toBeVisible({ timeout: 5_000 });
+    await expect(newTerminalButton).toBeVisible({ timeout: 10_000 });
     await newTerminalButton.click();
 
     // Dialog should appear with role selector

@@ -15,34 +15,34 @@ test.describe('Settings Page', () => {
   test('settings page shows configuration sections when project is selected', async ({ page }) => {
     await page.goto('/settings');
 
-    // Check for the settings page header
-    const hasHeader = await page.locator('text=Settings').count();
-    const hasNoProject = await page.locator('text=No active project selected').count();
-
-    // Either we see Settings header or the no-project message
-    expect(hasHeader + hasNoProject).toBeGreaterThan(0);
-
-    // If settings loaded, check for key sections
-    if (hasHeader > 0) {
-      // Container Isolation section
-      await expect(page.locator('text=Container Isolation')).toBeVisible({ timeout: 5_000 });
-      // Pipeline Configuration section
-      await expect(page.locator('text=Pipeline Configuration')).toBeVisible();
-      // Providers section
-      await expect(page.locator('text=Providers')).toBeVisible();
-      // Agent Roles section
-      await expect(page.locator('text=Agent Roles')).toBeVisible();
+    // Check if we have a project
+    const noProject = page.locator('text=No active project selected');
+    if (await noProject.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      test.skip(true, 'No active project selected');
+      return;
     }
+
+    // Wait for the settings header to confirm page loaded
+    await expect(page.locator('text=Settings')).toBeVisible({ timeout: 10_000 });
+
+    // Key sections should be visible — check with generous timeouts
+    // since client components may take a moment to hydrate
+    await expect(page.locator('text=Container Isolation')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('text=Pipeline Configuration')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('text=Providers')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('text=Agent Roles')).toBeVisible({ timeout: 5_000 });
   });
 
   test('provider config dropdown has all provider options', async ({ page }) => {
     await page.goto('/settings');
 
-    const hasHeader = await page.locator('text=Settings').count();
-    if (hasHeader === 0) {
+    const noProject = page.locator('text=No active project selected');
+    if (await noProject.isVisible({ timeout: 3_000 }).catch(() => false)) {
       test.skip(true, 'No active project — skipping provider config test');
       return;
     }
+
+    await expect(page.locator('text=Settings')).toBeVisible({ timeout: 10_000 });
 
     // Find provider dropdowns — at least one select element should be visible
     const selects = page.locator('select');

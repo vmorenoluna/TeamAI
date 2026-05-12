@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ProjectStore } from '@/lib/project-store';
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 
@@ -102,7 +102,47 @@ describe('ProjectStore', () => {
     const project = store.add(projectDir);
 
     // Name is derived from last segment of path
-    expect(project.name).toBe(projectDir.split(/[\\/]/).pop()!);
+    expect(project.name).toBe(projectDir.split(/[\\\\/]/).pop()!);
     expect(project.path).toBe(projectDir);
+  });
+
+  // ── Coverage: lines 20-21 — initial empty projects.json ──
+
+  it('scaffold prepends IMPORT_LINE to existing CLAUDE.md without it', () => {
+    // First add creates default CLAUDE.md
+    store.add(projectDir, 'Test Project');
+    store.remove(projectDir);
+
+    // Replace CLAUDE.md with content that does NOT include the IMPORT_LINE
+    writeFileSync(join(projectDir, 'CLAUDE.md'), '# My custom content\n\nSome docs here.');
+    // Verify it doesn't have the import line yet
+    const before = readFileSync(join(projectDir, 'CLAUDE.md'), 'utf-8');
+    expect(before).not.toContain('@.claude/teamai-workflow.md');
+
+    // Re-add — scaffold should prepend IMPORT_LINE
+    store.add(projectDir, 'Test Project 2');
+
+    const after = readFileSync(join(projectDir, 'CLAUDE.md'), 'utf-8');
+    expect(after).toContain('@.claude/teamai-workflow.md');
+    expect(after).toContain('# My custom content');
+    // IMPORT_LINE should come first
+    expect(after.indexOf('@.claude/teamai-workflow.md')).toBeLessThan(after.indexOf('# My custom content'));
+  });
+
+  // ── Coverage: lines 109-110 ──
+
+  it('scaffold creates CLAUDE.md with IMPORT_LINE when file does not exist', () => {
+    store.add(projectDir, 'Test Project');
+    store.remove(projectDir);
+
+    // Delete the CLAUDE.md entirely
+    unlinkSync(join(projectDir, 'CLAUDE.md'));
+    expect(existsSync(join(projectDir, 'CLAUDE.md'))).toBe(false);
+
+    // Re-add — scaffold should create CLAUDE.md
+    store.add(projectDir, 'Test Project 2');
+
+    const claudeMd = readFileSync(join(projectDir, 'CLAUDE.md'), 'utf-8');
+    expect(claudeMd).toContain('@.claude/teamai-workflow.md');
   });
 });
