@@ -119,7 +119,8 @@
           "src/components/container-config.tsx"
         ],
         "source": "competitor-analysis",
-        "competitive_context": "OpenHands runs all agents in Docker sandboxes by default. Devin has managed sandboxes. TeamAI's current opt-in devcontainer is a weaker security posture."
+        "competitive_context": "OpenHands runs all agents in Docker sandboxes by default. Devin has managed sandboxes. TeamAI's current opt-in devcontainer is a weaker security posture.",
+        "linkedTaskId": "475c4f99-ba12-45b3-a9b5-08c725bb0f80"
       },
       {
         "title": "Comprehensive test suite — unit, integration, and E2E tests",
@@ -148,7 +149,8 @@
           "src/components/review-panel.tsx"
         ],
         "source": "competitor-analysis",
-        "competitive_context": "Copilot Workspace is GitHub-only. This is the single biggest market gap — teams on GitLab/Bitbucket have no spec-driven AI PR tool."
+        "competitive_context": "Copilot Workspace is GitHub-only. This is the single biggest market gap — teams on GitLab/Bitbucket have no spec-driven AI PR tool.",
+        "linkedTaskId": "10aeb5ee-b767-4251-ace9-7667ab06cfd0"
       },
       {
         "title": "Browser testing in QA phase — integrate Playwright MCP into the qa-review step",
@@ -186,7 +188,8 @@
           "src/components/kanban-board.tsx",
           "src/app/page.tsx"
         ],
-        "source": "ideation"
+        "source": "ideation",
+        "linkedTaskId": "7fc25c01-ebc1-4f28-94c9-4d78dd969c3c"
       }
     ],
     "later": [
@@ -243,7 +246,8 @@
           "src/app/actions/insights.ts"
         ],
         "source": "competitor-analysis",
-        "competitive_context": "Devin shows productivity metrics and cost tracking in their dashboard."
+        "competitive_context": "Devin shows productivity metrics and cost tracking in their dashboard.",
+        "linkedTaskId": "abb143d7-4241-4dc9-b27b-87eb685fccd2"
       },
       {
         "title": "VS Code / JetBrains extension — trigger and monitor pipelines from IDE",
@@ -269,7 +273,8 @@
           "src/components/task-card.tsx",
           "src/app/actions/tasks.ts"
         ],
-        "source": "ideation"
+        "source": "ideation",
+        "linkedTaskId": "4572a5a7-8bcb-4597-a4b1-89f2d16fe583"
       },
       {
         "title": "Task templates — pre-defined task types with default descriptions and agent assignments",
@@ -282,7 +287,8 @@
           "src/lib/task-store.ts",
           "src/app/actions/tasks.ts"
         ],
-        "source": "ideation"
+        "source": "ideation",
+        "linkedTaskId": "4f095c24-1886-4c7f-9b2e-f15192d55724"
       }
     ],
     "icebox": [
@@ -308,7 +314,8 @@
           "src/components/kanban-board.tsx",
           "src/lib/task-store.ts"
         ],
-        "source": "ideation"
+        "source": "ideation",
+        "linkedTaskId": "d02909c7-42b4-4982-8199-7c2acf4270c5"
       },
       {
         "title": "Mobile-responsive layout — adaptive board for tablet and phone",

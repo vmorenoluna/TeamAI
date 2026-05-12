@@ -1,0 +1,28 @@
+{
+  "plan": [
+    {
+      "step": 1,
+      "title": "Add Docker availability check",
+      "description": "Add a `dockerAvailable()` helper that tests whether Docker is installed and reachable (e.g., `docker info` exit code 0). Cache result for session.",
+      "files": ["src/lib/container-manager.ts"]
+    },
+    {
+      "step": 2,
+      "title": "Change default config to auto-detect",
+      "description": "Modify `readContainerConfig()` so that when no `container.json` exists, it checks Docker availability and returns `{ enabled: true }` if Docker is available, `{ enabled: false }` otherwise. Update the DEFAULT constant in containers.ts to match.",
+      "files": ["src/lib/container-manager.ts", "src/app/actions/containers.ts"]
+    },
+    {
+      "step": 3,
+      "title": "Update Settings UI to show Docker status",
+      "description": "Add a visual indicator in `container-config.tsx` showing whether Docker is detected, the current auto-detected default, and allow opt-out.",
+      "files": ["src/components/container-config.tsx"]
+    },
+    {
+      "step": 4,
+      "title": "Add Docker available server action",
+      "description": "Add `isDockerAvailable()` server action for the frontend to query Docker status.",
+      "files": ["src/app/actions/containers.ts"]
+    }
+  ]
+}
