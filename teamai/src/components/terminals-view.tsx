@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useTransition } from 'react';
-import { createTerminalSession } from '@/app/actions/terminals';
+import { useState, useTransition, useEffect, useRef } from 'react';
+import { createTerminalSession, closeTerminalSession } from '@/app/actions/terminals';
 import { TerminalPanel } from './terminal-panel';
 import type { RoleDefinition } from '@/app/actions/roles';
 
@@ -26,8 +26,26 @@ export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
   }
 
   function handleClose(sessionId: string) {
+    // Also kill the PTY server-side so resources are freed immediately
+    closeTerminalSession(sessionId).catch(() => {});
     setTerminals(prev => prev.filter(t => t.sessionId !== sessionId));
   }
+
+  // Kill all terminal sessions when the component unmounts (user navigates away).
+  // Use a ref so the cleanup always sees the latest terminals without re-running
+  // on every state change (which would double-close on individual terminal removal).
+  const terminalsRef = useRef(terminals);
+
+  useEffect(() => {
+    terminalsRef.current = terminals;
+    return () => {
+      for (const t of terminalsRef.current) {
+        closeTerminalSession(t.sessionId).catch(() => {});
+      }
+    };
+    // Only run on mount/unmount; terminalsRef.current is always fresh
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -53,7 +71,7 @@ export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
       }`}>
         {terminals.length === 0 && (
           <div className="flex items-center justify-center text-sm text-slate-400">
-            Click "+ New Terminal" to open an interactive Claude session.
+            Click &quot;+ New Terminal&quot; to open an interactive Claude session.
           </div>
         )}
         {terminals.map(t => (

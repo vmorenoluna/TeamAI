@@ -1,0 +1,118 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: TeamAI
+      - button "←" [ref=e5]
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: Projects
+        - button "+ Add" [ref=e10]
+      - list [ref=e11]:
+        - listitem [ref=e12]:
+          - button "Sample-project" [ref=e13]
+          - button "×" [ref=e14]
+        - listitem [ref=e15]:
+          - button "TeamAI" [ref=e16]
+          - button "×" [ref=e17]
+    - navigation [ref=e18]:
+      - button "☾ Dark mode" [ref=e19]:
+        - generic [ref=e20]: ☾
+        - text: Dark mode
+      - link "▦ Kanban" [ref=e21] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e22]: ▦
+        - text: Kanban
+      - link "◎ Insights" [ref=e23] [cursor=pointer]:
+        - /url: /insights
+        - generic [ref=e24]: ◎
+        - text: Insights
+      - link "◈ Ideation" [ref=e25] [cursor=pointer]:
+        - /url: /ideation
+        - generic [ref=e26]: ◈
+        - text: Ideation
+      - link "▶ Terminals" [ref=e27] [cursor=pointer]:
+        - /url: /terminals
+        - generic [ref=e28]: ▶
+        - text: Terminals
+      - link "◉ Roadmap" [ref=e29] [cursor=pointer]:
+        - /url: /roadmap
+        - generic [ref=e30]: ◉
+        - text: Roadmap
+      - link "⚙ Settings" [ref=e31] [cursor=pointer]:
+        - /url: /settings
+        - generic [ref=e32]: ⚙
+        - text: Settings
+  - main [ref=e33]:
+    - generic [ref=e34]:
+      - generic [ref=e35]:
+        - heading "Board" [level=1] [ref=e36]
+        - button "+ New Task" [ref=e37]
+      - generic [ref=e41]:
+        - generic [ref=e42]:
+          - generic [ref=e43]:
+            - generic [ref=e44]: Backlog
+            - generic [ref=e45]: "2"
+          - generic [ref=e46]:
+            - generic [ref=e47] [cursor=pointer]:
+              - paragraph [ref=e48]: Container build test
+              - generic [ref=e49]:
+                - generic [ref=e50]: backlog
+                - generic [ref=e51]: 2m ago
+            - generic [ref=e52] [cursor=pointer]:
+              - paragraph [ref=e53]: Container isolation test
+              - generic [ref=e54]:
+                - generic [ref=e55]: backlog
+                - generic [ref=e56]: 1d ago
+        - generic [ref=e57]:
+          - generic [ref=e58]:
+            - generic [ref=e59]: Spec
+            - generic [ref=e60]: "1"
+          - generic [ref=e62] [cursor=pointer]:
+            - button "▶" [ref=e63]
+            - paragraph [ref=e64]: Test streaming output
+            - paragraph [ref=e65]: Testing the agent panel and xterm.js streaming.
+            - generic [ref=e66]:
+              - generic [ref=e67]: spec
+              - generic [ref=e68]: 5d ago
+        - generic [ref=e70]:
+          - generic [ref=e71]: Planning
+          - generic [ref=e72]: "0"
+        - generic [ref=e75]:
+          - generic [ref=e76]: In Progress
+          - generic [ref=e77]: "0"
+        - generic [ref=e80]:
+          - generic [ref=e81]: QA
+          - generic [ref=e82]: "0"
+        - generic [ref=e84]:
+          - generic [ref=e85]:
+            - generic [ref=e86]: Review
+            - generic [ref=e87]: "1"
+          - generic [ref=e89] [cursor=pointer]:
+            - paragraph [ref=e90]: Stream fix test
+            - paragraph [ref=e91]: Verifying streaming events render in xterm after global fix.
+            - generic [ref=e92]:
+              - generic [ref=e93]: awaiting-review
+              - generic [ref=e94]: 5d ago
+        - generic [ref=e96]:
+          - generic [ref=e97]: Merging
+          - generic [ref=e98]: "0"
+        - generic [ref=e100]:
+          - generic [ref=e101]:
+            - generic [ref=e102]: Failed
+            - generic [ref=e103]: "2"
+          - generic [ref=e104]:
+            - generic [ref=e105] [cursor=pointer]:
+              - paragraph [ref=e106]: Streaming test
+              - paragraph [ref=e107]: Streaming test after global fix.
+              - generic [ref=e108]:
+                - generic [ref=e109]: failed
+                - generic [ref=e110]: 5d ago
+            - generic [ref=e111] [cursor=pointer]:
+              - paragraph [ref=e112]: Say hello
+              - paragraph [ref=e113]: Say hello and tell me a fun fact.
+              - generic [ref=e114]:
+                - generic [ref=e115]: failed
+                - generic [ref=e116]: 5d ago
+        - generic [ref=e118]:
+          - generic [ref=e119]: Done
+          - generic [ref=e120]: "0"

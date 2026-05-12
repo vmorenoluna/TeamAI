@@ -1,0 +1,75 @@
+- generic [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]: TeamAI
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: Projects
+        - button "+ Add" [active] [ref=e8]
+      - list [ref=e9]:
+        - listitem [ref=e10]:
+          - button "Sample-project" [ref=e11]
+      - generic [ref=e118]:
+        - heading "Add Project" [level=2] [ref=e119]
+        - generic [ref=e120]:
+          - generic [ref=e121]:
+            - generic [ref=e122]: Path (absolute path to git repo)
+            - generic [ref=e123]:
+              - textbox "/home/user/my-project" [ref=e124]
+              - button "Browse" [ref=e125]
+          - generic [ref=e126]:
+            - generic [ref=e127]: Name (optional)
+            - textbox "My Project" [ref=e128]
+          - generic [ref=e129]:
+            - button "Cancel" [ref=e130]
+            - button "Add Project" [ref=e131]
+    - navigation [ref=e12]:
+      - link "Kanban" [ref=e13] [cursor=pointer]:
+        - /url: /
+      - link "Insights" [ref=e14] [cursor=pointer]:
+        - /url: /insights
+      - link "Roadmap" [ref=e15] [cursor=pointer]:
+        - /url: /roadmap
+      - link "Settings" [ref=e16] [cursor=pointer]:
+        - /url: /settings
+  - main [ref=e17]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - heading "Board" [level=1] [ref=e32]
+        - button "+ New Task" [ref=e33]
+      - generic [ref=e35]:
+        - generic [ref=e36]:
+          - generic [ref=e37]:
+            - generic [ref=e38]: Backlog
+            - generic [ref=e39]: "1"
+          - generic [ref=e111] [cursor=pointer]:
+            - paragraph [ref=e112]: Add user authentication
+            - generic [ref=e113]:
+              - generic [ref=e114]: backlog
+              - generic [ref=e115]: just now
+        - generic [ref=e42]:
+          - generic [ref=e43]: Spec
+          - generic [ref=e44]: "0"
+        - generic [ref=e47]:
+          - generic [ref=e48]: Planning
+          - generic [ref=e49]: "0"
+        - generic [ref=e52]:
+          - generic [ref=e53]: In Progress
+          - generic [ref=e54]: "0"
+        - generic [ref=e57]:
+          - generic [ref=e58]: QA
+          - generic [ref=e59]: "0"
+        - generic [ref=e62]:
+          - generic [ref=e63]: Review
+          - generic [ref=e64]: "0"
+        - generic [ref=e67]:
+          - generic [ref=e68]: Merging
+          - generic [ref=e69]: "0"
+        - generic [ref=e72]:
+          - generic [ref=e73]: Failed
+          - generic [ref=e74]: "0"
+        - generic [ref=e77]:
+          - generic [ref=e78]: Done
+          - generic [ref=e79]: "0"
+  - button "Open Next.js Dev Tools" [ref=e25] [cursor=pointer]:
+    - img [ref=e26]
+  - alert [ref=e29]

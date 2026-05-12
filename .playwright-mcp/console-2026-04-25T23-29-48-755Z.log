@@ -1,0 +1,14 @@
+[    1045ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[    1473ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[   29310ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[   29678ms] [LOG] [Fast Refresh] done in 480ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[   29816ms] InvalidStateError: Failed to execute 'send' on 'WebSocket': Still in CONNECTING state.
+    at TerminalPanel.useEffect (http://localhost:3000/_next/static/chunks/IdeaProjects_TeamAI_teamai_src_07jj_z2._.js:110:44)
+[   29816ms] InvalidStateError: Failed to execute 'send' on 'WebSocket': Still in CONNECTING state.
+    at TerminalPanel.useEffect (http://localhost:3000/_next/static/chunks/IdeaProjects_TeamAI_teamai_src_07jj_z2._.js:110:44)
+[   29807ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[   29808ms] [LOG] [Fast Refresh] done in 106ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[   68799ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[   68905ms] [LOG] [Fast Refresh] done in 208ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[   69019ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[   69328ms] [LOG] [Fast Refresh] done in 420ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431

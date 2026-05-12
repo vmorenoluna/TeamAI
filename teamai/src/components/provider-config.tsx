@@ -5,7 +5,7 @@ import { saveProvidersConfig } from '@/app/actions/providers';
 import type { ProvidersConfig } from '@/app/actions/providers';
 
 const ROLES = ['planner', 'coder', 'qa-reviewer', 'qa-fixer', 'merger'] as const;
-const PROVIDERS = ['anthropic', 'bedrock', 'vertex', 'ollama'] as const;
+const PROVIDERS = ['anthropic', 'bedrock', 'vertex', 'openai', 'gemini', 'ollama'] as const;
 
 function ModelRow({
   label,

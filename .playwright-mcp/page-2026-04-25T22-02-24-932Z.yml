@@ -1,0 +1,103 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: TeamAI
+      - button "←" [ref=e5]
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: Projects
+        - button "+ Add" [ref=e10]
+      - list [ref=e11]:
+        - listitem [ref=e12]:
+          - button "Sample-project" [ref=e13]
+          - button "×" [ref=e14]
+        - listitem [ref=e15]:
+          - button "TeamAI" [ref=e16]
+          - button "×" [ref=e17]
+    - navigation [ref=e18]:
+      - link "▦ Kanban" [ref=e19] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e20]: ▦
+        - text: Kanban
+      - link "◎ Insights" [ref=e21] [cursor=pointer]:
+        - /url: /insights
+        - generic [ref=e22]: ◎
+        - text: Insights
+      - link "◉ Roadmap" [ref=e23] [cursor=pointer]:
+        - /url: /roadmap
+        - generic [ref=e24]: ◉
+        - text: Roadmap
+      - link "⚙ Settings" [ref=e25] [cursor=pointer]:
+        - /url: /settings
+        - generic [ref=e26]: ⚙
+        - text: Settings
+  - main [ref=e27]:
+    - generic [ref=e28]:
+      - generic [ref=e29]:
+        - heading "Settings" [level=1] [ref=e30]
+        - paragraph [ref=e31]: C:\Users\dev\IdeaProjects\TeamAI
+      - generic [ref=e32]:
+        - generic [ref=e33]:
+          - heading "Pipeline Configuration" [level=2] [ref=e34]
+          - paragraph [ref=e35]: Choose which phases run and configure QA behaviour.
+          - generic [ref=e36]:
+            - generic [ref=e37]:
+              - paragraph [ref=e38]: Active phases
+              - generic [ref=e39]:
+                - generic [ref=e40] [cursor=pointer]:
+                  - checkbox "spec" [checked] [ref=e41]
+                  - generic [ref=e42]: spec
+                - generic [ref=e43] [cursor=pointer]:
+                  - checkbox "plan" [checked] [ref=e44]
+                  - generic [ref=e45]: plan
+                - generic [ref=e46] [cursor=pointer]:
+                  - checkbox "implement" [checked] [ref=e47]
+                  - generic [ref=e48]: implement
+                - generic [ref=e49] [cursor=pointer]:
+                  - checkbox "qa review" [checked] [ref=e50]
+                  - generic [ref=e51]: qa review
+                - generic [ref=e52] [cursor=pointer]:
+                  - checkbox "merge" [checked] [ref=e53]
+                  - generic [ref=e54]: merge
+            - generic [ref=e55]:
+              - generic [ref=e56]:
+                - generic [ref=e57]: Max QA attempts
+                - spinbutton [ref=e58]: "3"
+              - generic [ref=e59] [cursor=pointer]:
+                - checkbox "Parallel subtasks" [checked] [ref=e60]
+                - generic [ref=e61]: Parallel subtasks
+            - button "Save Pipeline Config" [ref=e62]
+        - generic [ref=e63]:
+          - heading "Agent Roles" [level=2] [ref=e64]
+          - paragraph [ref=e65]: Edit agent personas to tailor behaviour to your project. Changes take effect on the next pipeline run.
+          - generic [ref=e66]:
+            - button "Product Analyst analyst.md ▼" [ref=e68]:
+              - generic [ref=e69]:
+                - text: Product Analyst
+                - generic [ref=e70]: analyst.md
+              - generic [ref=e71]: ▼
+            - button "Senior Developer coder.md ▼" [ref=e73]:
+              - generic [ref=e74]:
+                - text: Senior Developer
+                - generic [ref=e75]: coder.md
+              - generic [ref=e76]: ▼
+            - button "Git Integration Specialist merger.md ▼" [ref=e78]:
+              - generic [ref=e79]:
+                - text: Git Integration Specialist
+                - generic [ref=e80]: merger.md
+              - generic [ref=e81]: ▼
+            - button "Implementation Planner planner.md ▼" [ref=e83]:
+              - generic [ref=e84]:
+                - text: Implementation Planner
+                - generic [ref=e85]: planner.md
+              - generic [ref=e86]: ▼
+            - button "Bug Fix Specialist qa-fixer.md ▼" [ref=e88]:
+              - generic [ref=e89]:
+                - text: Bug Fix Specialist
+                - generic [ref=e90]: qa-fixer.md
+              - generic [ref=e91]: ▼
+            - button "QA Reviewer qa-reviewer.md ▼" [ref=e93]:
+              - generic [ref=e94]:
+                - text: QA Reviewer
+                - generic [ref=e95]: qa-reviewer.md
+              - generic [ref=e96]: ▼
