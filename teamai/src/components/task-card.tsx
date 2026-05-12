@@ -33,6 +33,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
 
   return (
     <div
+      data-testid="task-card"
       onClick={() => isMoving ? null : onSelect(task.id)}
       className={`relative bg-[#1e2333] rounded-lg p-3 border transition-all cursor-pointer group ${
         isMoving

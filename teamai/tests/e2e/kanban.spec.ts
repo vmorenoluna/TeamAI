@@ -16,7 +16,7 @@ test.describe('Kanban Board', () => {
     await page.goto('/');
 
     // Wait for task cards to render
-    const cards = page.locator('[class*="rounded-lg"]').filter({ hasText: /./ });
+    const cards = page.locator('[data-testid="task-card"]');
     const count = await cards.count();
     expect(count).toBeGreaterThan(0);
   });
@@ -25,7 +25,7 @@ test.describe('Kanban Board', () => {
     await page.goto('/');
 
     // Find and click the first task card
-    const firstCard = page.locator('[class*="rounded-lg"]').filter({ hasText: /./ }).first();
+    const firstCard = page.locator('[data-testid="task-card"]').first();
     await firstCard.click();
 
     // Task detail panel should appear
