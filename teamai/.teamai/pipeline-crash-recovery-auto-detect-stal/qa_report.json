@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "issues_found": 0,
+  "notes": [
+    "Stale session detection works correctly - checks exitCode !== null || process.killed",
+    "Orphaned worktree detection scans .teamai/worktrees/ and cross-references with task.json",
+    "Startup cleanup orchestrates all three checks (interrupted tasks, stale sessions, orphaned worktrees)",
+    "Stale sessions are both logged AND cleaned up (removeStaleSession called in loop)",
+    "No dead imports - execSync removed",
+    "No regressions in existing findInterruptedTasks or RecoveryBanner functionality",
+    "TypeScript typecheck clean (pre-existing vitest.config.ts error unrelated)"
+  ],
+  "recommendation": "merge"
+}

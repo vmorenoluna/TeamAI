@@ -148,13 +148,13 @@ export class ProcessManager extends EventEmitter {
     return id;
   }
 
-  private _appendToLog(logFile: string, event: any): void {
+  private _appendToLog(logFile: string, event: Record<string, unknown>): void {
     try {
       let text = '';
       if (event.type === 'system' && event.subtype === 'init') {
         text = `◆ Session started — ${event.model}\n`;
       } else if (event.type === 'assistant') {
-        const blocks: any[] = event.message?.content ?? [];
+        const blocks: Record<string, unknown>[] = (event.message as Record<string, unknown>)?.content as Record<string, unknown>[] ?? [];
         for (const b of blocks) {
           if (b.type === 'text' && b.text) text += b.text;
           else if (b.type === 'tool_use') text += `▶ ${b.name}\n`;
@@ -198,6 +198,29 @@ export class ProcessManager extends EventEmitter {
 
   getAllSessions(): AgentSession[] {
     return Array.from(this.sessions.values());
+  }
+
+  /**
+   * Return sessions whose child process has exited (exitCode !== null) or was
+   * killed (process.killed === true).  These represent stale references left
+   * after a server crash or unexpected shutdown.
+   */
+  getStaleSessions(): AgentSession[] {
+    const stale: AgentSession[] = [];
+    for (const session of this.sessions.values()) {
+      if (session.process.exitCode !== null || session.process.killed) {
+        stale.push(session);
+      }
+    }
+    return stale;
+  }
+
+  /**
+   * Remove a stale session from the in-memory map.  Does not attempt to kill
+   * the child process (assumed already dead).
+   */
+  removeStaleSession(sessionId: string): void {
+    this.sessions.delete(sessionId);
   }
 
   // ── PTY terminal sessions ──────────────────────────────────────────────────
@@ -260,7 +283,6 @@ export class ProcessManager extends EventEmitter {
 // Store on global so server.ts and Next.js server actions share the same instance
 // across module contexts (Next.js loads server actions in a separate module graph).
 declare global {
-  // eslint-disable-next-line no-var
   var __processManager: ProcessManager | undefined;
 }
 

@@ -6,7 +6,12 @@
     "dev": "tsx watch server.ts",
     "build": "next build",
     "start": "cross-env NODE_ENV=production tsx server.ts",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "prepare": "cd .. && chmod +x .husky/pre-commit 2>/dev/null; git config core.hooksPath .husky 2>/dev/null; exit 0"
   },
   "dependencies": {
     "@devcontainers/cli": "^0.86.0",
@@ -22,15 +27,22 @@
     "xterm": "^5.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20.19.39",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^4.7.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.2",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
-    "typescript": "^5"
-  }
+    "typescript": "^5",
+    "vitest": "^1.6.1"
+  },    "lint-staged": {
+      "*.{ts,tsx,mts}": "eslint --fix"
+    }
 }

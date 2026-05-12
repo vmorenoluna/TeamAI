@@ -1,0 +1,171 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: TeamAI
+      - button "←" [ref=e5]
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: Projects
+        - button "+ Add" [ref=e10]
+      - list [ref=e11]:
+        - listitem [ref=e12]:
+          - button "Formell" [ref=e13]
+          - button "×" [ref=e14]
+        - listitem [ref=e15]:
+          - button "TeamAI" [ref=e16]
+          - button "×" [ref=e17]
+    - navigation [ref=e18]:
+      - button "☀ Light mode" [ref=e128]:
+        - generic [ref=e20]: ☀
+        - text: Light mode
+      - link "▦ Kanban" [ref=e21] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e22]: ▦
+        - text: Kanban
+      - link "◎ Insights" [ref=e23] [cursor=pointer]:
+        - /url: /insights
+        - generic [ref=e24]: ◎
+        - text: Insights
+      - link "◈ Ideation" [ref=e25] [cursor=pointer]:
+        - /url: /ideation
+        - generic [ref=e26]: ◈
+        - text: Ideation
+      - link "▶ Terminals" [ref=e27] [cursor=pointer]:
+        - /url: /terminals
+        - generic [ref=e28]: ▶
+        - text: Terminals
+      - link "◉ Roadmap" [ref=e29] [cursor=pointer]:
+        - /url: /roadmap
+        - generic [ref=e30]: ◉
+        - text: Roadmap
+      - link "⚙ Settings" [ref=e31] [cursor=pointer]:
+        - /url: /settings
+        - generic [ref=e32]: ⚙
+        - text: Settings
+  - main [ref=e33]:
+    - generic [ref=e34]:
+      - generic [ref=e35]:
+        - heading "Board" [level=1] [ref=e36]
+        - button "+ New Task" [ref=e37]
+      - generic [ref=e38]:
+        - generic [ref=e41]:
+          - generic [ref=e43]:
+            - generic [ref=e44]: Backlog
+            - generic [ref=e45]: "0"
+          - generic [ref=e48]:
+            - generic [ref=e49]: Spec
+            - generic [ref=e50]: "0"
+          - generic [ref=e53]:
+            - generic [ref=e54]: Planning
+            - generic [ref=e55]: "0"
+          - generic [ref=e58]:
+            - generic [ref=e59]: In Progress
+            - generic [ref=e60]: "0"
+          - generic [ref=e63]:
+            - generic [ref=e64]: QA
+            - generic [ref=e65]: "0"
+          - generic [ref=e67]:
+            - generic [ref=e68]:
+              - generic [ref=e69]: Review
+              - generic [ref=e70]: "1"
+            - generic [ref=e72] [cursor=pointer]:
+              - paragraph [ref=e73]: Stream fix test
+              - paragraph [ref=e74]: Verifying streaming events render in xterm after global fix.
+              - generic [ref=e75]:
+                - generic [ref=e76]: awaiting-review
+                - generic [ref=e77]: 6d ago
+          - generic [ref=e79]:
+            - generic [ref=e80]: Merging
+            - generic [ref=e81]: "0"
+          - generic [ref=e83]:
+            - generic [ref=e84]:
+              - generic [ref=e85]: Failed
+              - generic [ref=e86]: "6"
+            - generic [ref=e87]:
+              - generic [ref=e88] [cursor=pointer]:
+                - paragraph [ref=e89]: Implement Roadmap UI
+                - paragraph [ref=e90]:
+                  - text: "The roadmap page renders streaming agent output for the `/roadmap` command and a…"
+                  - button "more" [ref=e91]
+                - generic [ref=e92]:
+                  - generic [ref=e93]: failed
+                  - generic [ref=e94]: 31m ago
+              - generic [ref=e95] [cursor=pointer]:
+                - paragraph [ref=e96]: Container build test
+                - generic [ref=e97]:
+                  - generic [ref=e98]: failed
+                  - generic [ref=e99]: 1d ago
+              - generic [ref=e100] [cursor=pointer]:
+                - paragraph [ref=e101]: Container isolation test
+                - generic [ref=e102]:
+                  - generic [ref=e103]: failed
+                  - generic [ref=e104]: 2d ago
+              - generic [ref=e105] [cursor=pointer]:
+                - paragraph [ref=e106]: Streaming test
+                - paragraph [ref=e107]: Streaming test after global fix.
+                - generic [ref=e108]:
+                  - generic [ref=e109]: failed
+                  - generic [ref=e110]: 6d ago
+              - generic [ref=e111] [cursor=pointer]:
+                - paragraph [ref=e112]: Say hello
+                - paragraph [ref=e113]: Say hello and tell me a fun fact.
+                - generic [ref=e114]:
+                  - generic [ref=e115]: failed
+                  - generic [ref=e116]: 6d ago
+              - generic [ref=e117] [cursor=pointer]:
+                - paragraph [ref=e118]: Test streaming output
+                - paragraph [ref=e119]: Testing the agent panel and xterm.js streaming.
+                - generic [ref=e120]:
+                  - generic [ref=e121]: failed
+                  - generic [ref=e122]: 6d ago
+          - generic [ref=e124]:
+            - generic [ref=e125]: Done
+            - generic [ref=e126]: "0"
+        - generic [ref=e130]:
+          - button "×" [ref=e132]
+          - generic [ref=e134]:
+            - generic [ref=e135]:
+              - generic [ref=e136]:
+                - generic [ref=e137]:
+                  - link "← Board" [ref=e138] [cursor=pointer]:
+                    - /url: /
+                  - heading "Test streaming output" [level=1] [ref=e139]
+                  - paragraph [ref=e140]: Testing the agent panel and xterm.js streaming.
+                - generic [ref=e141]:
+                  - generic [ref=e142]: failed
+                  - button "🗑" [ref=e143]
+              - generic [ref=e144]:
+                - paragraph [ref=e145]: Created 4/25/2026, 10:30:39 AM · Updated 4/30/2026, 10:01:59 PM
+                - generic [ref=e146]:
+                  - generic [ref=e147]: "Agent:"
+                  - combobox [ref=e148]:
+                    - option "Auto (pipeline default)" [selected]
+                    - option "Product Analyst"
+                    - option "Senior Developer"
+                    - option "Git Integration Specialist"
+                    - option "Implementation Planner"
+                    - option "Bug Fix Specialist"
+                    - option "QA Reviewer"
+              - generic [ref=e149]:
+                - button "Overview" [ref=e150]
+                - button "Terminal" [ref=e151]
+                - button "Spec" [ref=e152]
+                - button "Plan" [ref=e153]
+                - button "QA" [ref=e154]
+            - generic [ref=e157]:
+              - generic [ref=e158]:
+                - button "+ Depends on" [ref=e160]
+                - button "+ Blocks" [ref=e162]
+              - paragraph [ref=e163]: No dependencies set.
+  - generic [ref=e168] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e169]:
+      - img [ref=e170]
+    - generic [ref=e173]:
+      - button "Open issues overlay" [ref=e174]:
+        - generic [ref=e175]:
+          - generic [ref=e176]: "0"
+          - generic [ref=e177]: "1"
+        - generic [ref=e178]: Issue
+      - button "Collapse issues badge" [ref=e179]:
+        - img [ref=e180]
+  - alert [ref=e182]

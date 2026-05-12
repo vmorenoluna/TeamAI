@@ -1,0 +1,49 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: TeamAI
+      - button "←" [ref=e5]
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: Projects
+        - button "+ Add" [ref=e10]
+      - list [ref=e11]:
+        - listitem [ref=e12]:
+          - button "TeamAI" [ref=e13]
+          - button "×" [ref=e14]
+    - navigation [ref=e15]:
+      - button "☾ Dark mode" [ref=e16]:
+        - generic [ref=e17]: ☾
+        - text: Dark mode
+      - link "▦ Kanban" [ref=e18] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e19]: ▦
+        - text: Kanban
+      - link "◎ Insights" [ref=e20] [cursor=pointer]:
+        - /url: /insights
+        - generic [ref=e21]: ◎
+        - text: Insights
+      - link "◈ Ideation" [ref=e22] [cursor=pointer]:
+        - /url: /ideation
+        - generic [ref=e23]: ◈
+        - text: Ideation
+      - link "▶ Terminals" [ref=e24] [cursor=pointer]:
+        - /url: /terminals
+        - generic [ref=e25]: ▶
+        - text: Terminals
+      - link "◉ Roadmap" [ref=e26] [cursor=pointer]:
+        - /url: /roadmap
+        - generic [ref=e27]: ◉
+        - text: Roadmap
+      - link "⚙ Settings" [ref=e28] [cursor=pointer]:
+        - /url: /settings
+        - generic [ref=e29]: ⚙
+        - text: Settings
+  - main [ref=e30]:
+    - generic [ref=e31]:
+      - generic [ref=e32]:
+        - generic [ref=e33]:
+          - heading "Terminals" [level=1] [ref=e34]
+          - paragraph [ref=e35]: Interactive Claude sessions pre-loaded with a role persona.
+        - button "+ New Terminal" [ref=e36]
+      - generic [ref=e38]: Click "+ New Terminal" to open an interactive Claude session.
