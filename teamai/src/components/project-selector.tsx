@@ -58,7 +58,7 @@ export function ProjectSelector({ projects, activeProjectPath, collapsed = false
   if (collapsed) return null;
 
   return (
-    <div className="flex items-center gap-0 px-3 py-2 overflow-x-auto shrink-0 border-b border-[#1e293b]">
+    <div className="flex items-center gap-0 px-3 py-2 overflow-x-auto shrink-0 border-b border-[#1e293b] bg-[#11131b]">
       {projects.map(p => (
         <div key={p.path} className="group relative shrink-0">
           <button

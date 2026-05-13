@@ -17,7 +17,7 @@ export function Sidebar({ projects, activeProjectPath }: Props) {
   return (
     <aside className={`shrink-0 flex flex-col bg-[#11131b] text-slate-300 transition-all duration-200 ${collapsed ? 'w-12' : 'w-60'}`}>
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-4 border-b border-[#1e293b]">
+      <div className="flex items-center justify-between px-3 py-4 border-b border-[#1e293b] bg-[#11131b]">
         {!collapsed && (
           <span className="text-lg font-bold tracking-tight text-white">TeamAI</span>
         )}
