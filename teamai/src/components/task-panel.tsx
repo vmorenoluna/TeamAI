@@ -36,6 +36,7 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
   // Initial load — skip fetch if parent provided cached data
   useEffect(() => {
     if (cachedData) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setData(null);
     refresh();
   // eslint-disable-next-line react-hooks/exhaustive-deps

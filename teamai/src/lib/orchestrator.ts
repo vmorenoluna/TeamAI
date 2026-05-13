@@ -1,7 +1,7 @@
 import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'fs';
 import path from 'path';
-import { error as logError, warn as logWarn } from './logger';
+import { warn as logWarn } from './logger';
 import { processManager, type AgentSession } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
 import { TaskStore } from './task-store';

@@ -54,12 +54,12 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
   const termRef = useRef<{ terminal: Terminal; fitAddon: FitAddon } | null>(null);
   const writtenRef = useRef(0);           // index into live events array
   const initialOutputRef = useRef(initialOutput); // always holds the latest value for the init callback
-  initialOutputRef.current = initialOutput;
   const [termReady, setTermReady] = useState(false);
   const events = useAgentStream(taskId);
 
   // Initialise xterm once on mount
   useEffect(() => {
+    initialOutputRef.current = initialOutput;
     const container = containerRef.current;
     if (!container) return;
 
