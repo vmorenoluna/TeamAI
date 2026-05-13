@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
+import { mkdirSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import { createTestProject } from '../utils/test-project';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyOrch = any; // Access private members for test setup
@@ -40,8 +41,7 @@ import { processManager } from '../../src/lib/process-manager';
 
 // Helper to create a test project directory with a task
 function setupTestProject(): { root: string; taskId: string; clean: () => void } {
-  const root = join(process.cwd(), '.teamai-orch-test-' + randomUUID().slice(0, 8));
-  mkdirSync(root, { recursive: true });
+  const { root, clean } = createTestProject();
   mkdirSync(join(root, '.teamai'), { recursive: true });
 
   // Create default pipeline config
@@ -62,10 +62,6 @@ function setupTestProject(): { root: string; taskId: string; clean: () => void }
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }));
-
-  const clean = () => {
-    if (existsSync(root)) rmSync(root, { recursive: true, force: true });
-  };
 
   return { root, taskId, clean };
 }
