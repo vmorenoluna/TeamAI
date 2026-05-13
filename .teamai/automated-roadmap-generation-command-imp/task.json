@@ -2,7 +2,7 @@
   "id": "045db06a-a9ee-457a-9722-bb0df0a1d9bd",
   "title": "Automated roadmap generation command improvements",
   "description": "Improve the /roadmap command to use the ideation scanner results from the UI. Auto-detect competitor list from the project domain. Add a 'Convert to Task' bulk action for roadmap items.",
-  "phase": "backlog",
+  "phase": "spec",
   "source": "ideation",
   "createdAt": "2026-05-13T14:02:07.783Z",
   "updatedAt": "2026-05-13T14:02:07.783Z"

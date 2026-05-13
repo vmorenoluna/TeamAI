@@ -54,7 +54,7 @@ export function IdeationScanner() {
       )}
 
       {!latestText && !running && (
-        <p className="text-sm text-slate-400">Click "Run Scan" to analyse the codebase.</p>
+        <p className="text-sm text-slate-400">Click &quot;Run Scan&quot; to analyse the codebase.</p>
       )}
     </div>
   );

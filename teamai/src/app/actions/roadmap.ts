@@ -10,7 +10,7 @@ import { revalidatePath } from 'next/cache';
 
 // ── Global session tracking (shared across Next.js module contexts) ──────────
 declare global {
-  // eslint-disable-next-line no-var
+   
   var __roadmapSessions: Map<string, string> | undefined;
 }
 const sessions: Map<string, string> =
@@ -40,6 +40,7 @@ export interface RoadmapReport {
   generated_at: string;
   executive_summary: string;
   competitor_analysis_run: boolean;
+  competitors?: string[];  // auto-discovered competitor names
   phases: {
     now: RoadmapItem[];
     next: RoadmapItem[];
@@ -55,6 +56,20 @@ export interface RoadmapReport {
 export async function startRoadmapGeneration(skipCompetitors: boolean = false): Promise<string> {
   const projectPath = await getActiveProjectPath();
   ensureRoadmapDir(projectPath);
+
+  // Find latest ideation report to pass to the roadmap command
+  const ideationDir = join(projectPath, '.teamai', 'ideation');
+  let ideationArg = '';
+  if (existsSync(ideationDir)) {
+    const ideationFiles = readdirSync(ideationDir)
+      .filter(f => f.startsWith('ideation-') && f.endsWith('.json'))
+      .sort()
+      .reverse();
+    if (ideationFiles.length > 0) {
+      ideationArg = ` --ideation-report .teamai/ideation/${ideationFiles[0]}`;
+    }
+  }
+
   const sessionId = await processManager.createSession({
     taskId: `roadmap::${projectPath}`,
     role: 'general',
@@ -62,7 +77,8 @@ export async function startRoadmapGeneration(skipCompetitors: boolean = false): 
   });
   const key = `roadmap::${projectPath}`;
   sessions.set(key, sessionId);
-  const cmd = skipCompetitors ? '/roadmap --skip-competitors' : '/roadmap';
+  const skipFlag = skipCompetitors ? ' --skip-competitors' : '';
+  const cmd = `/roadmap${skipFlag}${ideationArg}`;
   processManager.sendMessage(sessionId, cmd);
   return sessionId;
 }
@@ -155,6 +171,7 @@ export async function getRoadmapReport(filename: string): Promise<RoadmapReport>
       generated_at: raw.generated_at ?? '',
       executive_summary: raw.executive_summary ?? '',
       competitor_analysis_run: raw.competitor_analysis_run ?? false,
+      competitors: raw.competitors,
       phases: {
         now: raw.phases.now ?? [],
         next: raw.phases.next ?? [],
@@ -176,6 +193,7 @@ export async function getRoadmapReport(filename: string): Promise<RoadmapReport>
       generated_at: raw.generated_at ?? '',
       executive_summary: raw.executive_summary ?? '',
       competitor_analysis_run: raw.competitor_analysis_run ?? false,
+      competitors: raw.competitors,
       phases,
     };
   }
@@ -187,6 +205,7 @@ export async function getRoadmapReport(filename: string): Promise<RoadmapReport>
       generated_at: raw.generated_at ?? '',
       executive_summary: raw.executive_summary ?? '',
       competitor_analysis_run: raw.competitor_analysis_run ?? false,
+      competitors: raw.competitors,
       phases,
     };
   }
@@ -196,6 +215,7 @@ export async function getRoadmapReport(filename: string): Promise<RoadmapReport>
     generated_at: raw.generated_at ?? '',
     executive_summary: raw.executive_summary ?? '',
     competitor_analysis_run: raw.competitor_analysis_run ?? false,
+    competitors: raw.competitors,
     phases: raw.phases ?? partitionFlatItems(raw.items ?? []),
   };
 }
@@ -236,7 +256,7 @@ export async function getActiveRoadmapSession(type: 'roadmap' | 'changelog'): Pr
   return null;
 }
 
-// ── Convert roadmap item to kanban ticket ────────────────────────────────────
+// ── Convert roadmap item(s) to kanban ticket(s) ─────────────────────────────
 
 const VALID_PHASES: readonly string[] = ['now', 'next', 'later', 'icebox'];
 
@@ -284,6 +304,65 @@ export async function convertToTask(
   revalidatePath('/roadmap');
 
   return { taskId };
+}
+
+export interface ConvertMultipleInput {
+  itemIndex: number;
+  phaseKey: string;
+}
+
+export async function convertMultipleToTasks(
+  filename: string,
+  items: ConvertMultipleInput[],
+): Promise<{ converted: number; skipped: number; taskIds: string[] }> {
+  const projectPath = await getActiveProjectPath();
+  if (!/^roadmap-\d{4}-\d{2}-\d{2}\.json$/.test(filename)) {
+    throw new Error(`Invalid roadmap filename: ${filename}`);
+  }
+
+  const dir = join(projectPath, '.teamai', 'roadmap');
+  const filePath = join(dir, filename);
+  let report: RoadmapReport;
+  try {
+    report = JSON.parse(readFileSync(filePath, 'utf-8'));
+  } catch {
+    throw new Error(`Cannot read roadmap file: ${filename}`);
+  }
+
+  const taskStore = new TaskStore(projectPath);
+  const taskIds: string[] = [];
+  let converted = 0;
+  let skipped = 0;
+  let dirty = false;
+
+  for (const { itemIndex, phaseKey } of items) {
+    if (!VALID_PHASES.includes(phaseKey)) continue;
+    const phaseItems = report.phases?.[phaseKey];
+    if (!phaseItems || !Array.isArray(phaseItems) || itemIndex >= phaseItems.length) continue;
+
+    const item = phaseItems[itemIndex];
+    if (item.linkedTaskId) {
+      taskIds.push(item.linkedTaskId);
+      skipped++;
+      continue;
+    }
+
+    const taskId = randomUUID();
+    taskStore.create(taskId, item.title, item.description, item.source, item.competitive_context);
+    item.linkedTaskId = taskId;
+    taskIds.push(taskId);
+    converted++;
+    dirty = true;
+  }
+
+  if (dirty) {
+    writeFileSync(filePath, JSON.stringify(report, null, 2));
+  }
+
+  revalidatePath('/');
+  revalidatePath('/roadmap');
+
+  return { converted, skipped, taskIds };
 }
 
 // ── Clear linked task ID from a roadmap item ───────────────────────────────

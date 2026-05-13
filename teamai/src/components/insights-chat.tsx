@@ -34,6 +34,7 @@ export function InsightsChat() {
     if (event.type === 'assistant') {
       const text = extractText(event);
       if (!text) return;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMessages(prev => {
         const last = prev[prev.length - 1];
         if (last?.role === 'assistant' && last.streaming) {
@@ -43,6 +44,7 @@ export function InsightsChat() {
       });
     } else if (event.type === 'result') {
       // Finalise the last assistant message
+       
       setMessages(prev => {
         const last = prev[prev.length - 1];
         if (last?.role === 'assistant') {

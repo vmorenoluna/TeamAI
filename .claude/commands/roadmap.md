@@ -10,7 +10,7 @@ The user may provide arguments in two forms:
 Competitor analysis is **included by default** — the AI discovers competitors automatically
 from the codebase and product domain. The user only needs a flag to opt *out*.
 
-Parse $ARGUMENTS to detect the `--skip-competitors` flag.
+Parse $ARGUMENTS to detect the `--skip-competitors` and `--ideation-report <path>` flags.
 
 ---
 
@@ -18,8 +18,10 @@ Parse $ARGUMENTS to detect the `--skip-competitors` flag.
 
 ## Phase 1: Codebase Audit (via Ideation)
 
-Run the `/ideation` command to produce the codebase scan. If an ideation report from
-the last 24 hours already exists in `.teamai/ideation/`, read it instead of re-running.
+If `--ideation-report <path>` is present in $ARGUMENTS, read that file directly
+instead of running `/ideation`. Otherwise, run the `/ideation` command to produce
+the codebase scan. If an ideation report from the last 24 hours already exists in
+`.teamai/ideation/`, read it instead of re-running.
 
 Also read the project's README, CLAUDE.md, and package.json (or equivalent) to understand:
 - What the product does and who it's for (target audience)
