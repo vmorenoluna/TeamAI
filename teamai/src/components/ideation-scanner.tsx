@@ -3,14 +3,7 @@
 import { useState, useTransition } from 'react';
 import { startIdeationScan } from '@/app/actions/ideation';
 import { useSessionStream } from '@/hooks/use-session-stream';
-
-function extractText(event: any): string {
-  if (event.type !== 'assistant') return '';
-  return (event.message?.content ?? [])
-    .filter((b: any) => b.type === 'text')
-    .map((b: any) => b.text)
-    .join('');
-}
+import { extractText } from '@/lib/stream-types';
 
 export function IdeationScanner() {
   const [sessionId, setSessionId] = useState<string | null>(null);

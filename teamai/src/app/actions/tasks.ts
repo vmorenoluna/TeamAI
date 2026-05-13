@@ -4,6 +4,7 @@ import { TaskStore } from '@/lib/task-store';
 import { getOrchestrator } from '@/lib/orchestrator';
 import { getActiveProjectPath } from './projects';
 import { revalidatePath } from 'next/cache';
+import type { PlanData, QAReportData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
@@ -132,15 +133,13 @@ export async function getTaskFull(taskId: string) {
   const spec = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
 
   const planPath = join(dir, 'plan.json');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let plan: any = null;
+  let plan: PlanData | null = null;
   if (existsSync(planPath)) {
     try { plan = JSON.parse(readFileSync(planPath, 'utf-8')); } catch { /* skip */ }
   }
 
   const qaPath = join(dir, 'qa_report.json');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let qaReport: any = null;
+  let qaReport: QAReportData | null = null;
   if (existsSync(qaPath)) {
     try { qaReport = JSON.parse(readFileSync(qaPath, 'utf-8')); } catch { /* skip */ }
   }

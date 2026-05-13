@@ -1,0 +1,21 @@
+{
+  "subtasks": [
+    {
+      "id": 1,
+      "description": "Read orchestrator runSpec, runPlan, runImplement, runQaReview, runQaFix, runMerge methods to understand session creation patterns",
+      "files": ["src/lib/orchestrator.ts"]
+    },
+    {
+      "id": 2,
+      "description": "Write orchestrator-integration.test.ts with pipeline flow, QA loop, recovery, and rate limit tests",
+      "files": ["tests/unit/orchestrator-integration.test.ts"],
+      "depends_on": [1]
+    },
+    {
+      "id": 3,
+      "description": "Run new integration tests and fix any issues",
+      "files": [],
+      "depends_on": [2]
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
 import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock, deleteTask } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
+import type { PlanData, PlanSubtask, QAReportData, QACriterion } from '@/lib/stream-types';
 import type { RoleDefinition } from '@/app/actions/roles';
 
 const PHASE_BADGE: Record<string, string> = {
@@ -22,28 +23,6 @@ const PHASE_BADGE: Record<string, string> = {
   failed:            'bg-red-900/40 text-red-300',
   done:              'bg-green-900/40 text-green-300',
 };
-
-interface PlanSubtask {
-  id: string;
-  title: string;
-  description?: string;
-  files?: string[];
-}
-
-export interface PlanData {
-  subtasks?: PlanSubtask[];
-}
-
-interface QACriterion {
-  name: string;
-  status: 'PASS' | 'FAIL';
-  notes?: string;
-}
-
-export interface QAReportData {
-  overall: 'PASS' | 'FAIL';
-  criteria?: QACriterion[];
-}
 
 type Tab = 'overview' | 'terminal' | 'spec' | 'plan' | 'qa';
 

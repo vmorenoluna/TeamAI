@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { getOrCreateInsightsSession, sendInsightsMessage } from '@/app/actions/insights';
 import { useSessionStream } from '@/hooks/use-session-stream';
+import { extractText } from '@/lib/stream-types';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -10,14 +11,6 @@ interface Message {
   streaming?: boolean;
 }
 
-function extractText(event: any): string {
-  if (event.type !== 'assistant') return '';
-  const blocks: any[] = event.message?.content ?? [];
-  return blocks
-    .filter(b => b.type === 'text')
-    .map(b => b.text)
-    .join('');
-}
 
 export function InsightsChat() {
   const [sessionId, setSessionId] = useState<string | null>(null);

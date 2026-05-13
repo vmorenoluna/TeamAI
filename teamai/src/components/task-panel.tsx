@@ -52,7 +52,7 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
         if (msg.type === 'phase-change' && msg.taskId === taskId) {
           refresh(true);
         }
-      } catch { /* ignore */ }
+      } catch (err) { console.error('[task-panel] Failed to parse WebSocket message', err instanceof Error ? err.message : err); }
     };
     return () => {
       if (ws.readyState === WebSocket.CONNECTING) ws.addEventListener('open', () => ws.close());

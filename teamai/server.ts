@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { processManager } from './src/lib/process-manager';
 import { containerManager } from './src/lib/container-manager';
 import { startupCleanup } from './src/lib/recovery';
+import { error as logError } from './src/lib/logger';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
 const handle = app.getRequestHandler();
@@ -40,7 +41,7 @@ app.prepare().then(() => {
         } else if (parsed.type === 'terminal-resize') {
           processManager.resizeTerminal(parsed.sessionId, parsed.cols, parsed.rows);
         }
-      } catch { /* ignore malformed */ }
+      } catch (err) { logError('ws', 'Failed to parse client message', err); }
     });
 
     ws.on('close', () => {
@@ -77,6 +78,16 @@ app.prepare().then(() => {
   });
 
   const host = process.env.HOST || '0.0.0.0';
+  // ── Global error handlers so unhandled rejections don't crash the server ──
+  process.on('unhandledRejection', (reason: unknown) => {
+    logError('server', 'Unhandled rejection', reason instanceof Error ? reason : String(reason));
+  });
+
+  process.on('uncaughtException', (err: Error) => {
+    logError('server', 'Uncaught exception', err);
+    // Don't exit — log and continue
+  });
+
   server.listen(3000, host, () => {
     console.log(`> Ready on http://${host}:3000`);
 

@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache';
 import { readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
+import { error as logError } from '@/lib/logger';
 
 export interface BrowseResult {
   path: string;
@@ -21,8 +22,9 @@ export async function browseDirectory(dirPath?: string): Promise<BrowseResult> {
       .filter(e => e.isDirectory() && e.name !== 'node_modules')
       .map(e => ({ name: e.name, path: join(target, e.name) }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  } catch {
+  } catch (err) {
     // Permission denied or invalid path
+    logError('projects', 'Failed to read directory', err);
   }
   const parent = dirname(target) !== target ? dirname(target) : null;
   return { path: target, parent, entries };

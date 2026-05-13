@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'fs';
 import path from 'path';
+import { error as logError, warn as logWarn } from './logger';
 import { processManager, type AgentSession } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
 import { TaskStore } from './task-store';
@@ -71,7 +72,7 @@ export class Orchestrator {
   private getPipelineConfig(): { phases: string[]; maxQaAttempts: number; parallelSubtasks: boolean } {
     const cfgPath = path.join(this.projectRoot, '.teamai', 'pipeline.json');
     if (existsSync(cfgPath)) {
-      try { return JSON.parse(readFileSync(cfgPath, 'utf-8')); } catch { /* use defaults */ }
+      try { return JSON.parse(readFileSync(cfgPath, 'utf-8')); } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
     }
     return { phases: ['spec', 'plan', 'implement', 'qa-review', 'merge'], maxQaAttempts: 3, parallelSubtasks: true };
   }
@@ -369,9 +370,9 @@ export class Orchestrator {
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 
-    // Platform info stored for future UI display (Task interface to be extended)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (this.taskStore as any).update(pipeline.taskId, { platform: platform !== 'unknown' ? platform : undefined });
+
+
+    this.taskStore.update(pipeline.taskId, { platform: platform !== 'unknown' ? platform : undefined });
 
     this.advancePhase(pipeline, 'done');
   }
@@ -512,7 +513,7 @@ export class Orchestrator {
   private _phaseHeader(logFile: string, phase: string): void {
     try {
       appendFileSync(logFile, `\n${'─'.repeat(40)}\n▶ ${phase.toUpperCase()}\n${'─'.repeat(40)}\n`);
-    } catch { /* best-effort */ }
+    } catch (err) { logWarn('orchestrator', 'Failed to write phase header to log file', err); }
   }
 }
 
@@ -525,7 +526,7 @@ function detectGitPlatform(projectRoot: string): 'github' | 'gitlab' | 'bitbucke
     if (url.includes('github.com') || url.includes('github.')) return 'github';
     if (url.includes('gitlab.com') || url.includes('gitlab.')) return 'gitlab';
     if (url.includes('bitbucket.org') || url.includes('bitbucket.')) return 'bitbucket';
-  } catch { /* no remote or not a git repo */ }
+  } catch (err) { logWarn('orchestrator', 'Failed to detect git remote platform', err); }
   return 'unknown';
 }
 
@@ -538,7 +539,8 @@ function detectDefaultBranch(projectRoot: string): string {
     // Extract branch name from refs/remotes/origin/main → main
     const parts = ref.split('/');
     return parts[parts.length - 1] || 'main';
-  } catch {
+  } catch (err) {
+    logWarn('orchestrator', 'Failed to detect default branch, falling back to main', err);
     return 'main';
   }
 }

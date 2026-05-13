@@ -13,6 +13,7 @@ export interface Task {
   rateLimitedUntil?: string;   // ISO timestamp — set when pipeline is paused by API rate limit
   source?: string;             // 'ideation' | 'competitor-analysis' — source of roadmap item
   competitiveContext?: string; // competitor context from roadmap item
+  platform?: string;            // platform info from PR creation
   createdAt: string;
   updatedAt: string;
 }
