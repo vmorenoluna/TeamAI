@@ -56,13 +56,13 @@ function parseTime(ts: string | undefined | null): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
-/** Get ISO week start (Monday) for a given date */
+/** Get ISO week start (Monday) for a given date. Uses UTC to avoid timezone shifts. */
 function getWeekStart(date: Date): string {
   const d = new Date(date);
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
-  d.setDate(diff);
-  d.setHours(0, 0, 0, 0);
+  const day = d.getUTCDay();
+  const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1); // Monday
+  d.setUTCDate(diff);
+  d.setUTCHours(0, 0, 0, 0);
   return d.toISOString().slice(0, 10);
 }
 
@@ -82,7 +82,12 @@ export async function getAnalytics(): Promise<AnalyticsData> {
   // Phase timings from events.jsonl
   const phaseDurations = new Map<string, number[]>();
   for (const t of tasks) {
-    const events = taskStore.getEvents(t.id);
+    let events: Array<{ phase: string; timestamp: string }> = [];
+    try {
+      events = taskStore.getEvents(t.id);
+    } catch {
+      continue; // skip tasks with malformed events.jsonl
+    }
     if (events.length < 2) continue; // need at least 2 events for a duration
 
     for (let i = 0; i < events.length - 1; i++) {

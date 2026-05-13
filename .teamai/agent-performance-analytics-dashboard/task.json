@@ -2,7 +2,7 @@
   "id": "b6619eb6-ea6c-41cf-8fb7-10d92513dc6a",
   "title": "Agent performance analytics dashboard",
   "description": "Track agent success rates, cost per phase, time per phase, and QA pass/fail rates over time. Show trends and identify pipeline bottlenecks.",
-  "phase": "implement",
+  "phase": "done",
   "source": "competitor-analysis",
   "createdAt": "2026-05-13T14:02:53.579Z",
   "updatedAt": "2026-05-13T14:02:53.579Z"
