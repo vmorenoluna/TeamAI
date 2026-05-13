@@ -1,0 +1,9 @@
+{
+  "id": "f0bfbad6-8d5b-4cb2-b8c3-186d4be0e1f7",
+  "title": "Fix empty catch blocks - add error reporting",
+  "description": "Audit all ~60 empty catch blocks. Add structured error logging to each one. Create an ErrorBoundary component for React error handling. Add a global unhandled rejection handler in server.ts.",
+  "phase": "backlog",
+  "source": "ideation",
+  "createdAt": "2026-05-13T13:58:31.634Z",
+  "updatedAt": "2026-05-13T13:58:31.634Z"
+}
