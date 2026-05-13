@@ -2,8 +2,11 @@
 
 import { processManager } from '@/lib/process-manager';
 import { getActiveProjectPath } from './projects';
-import { readdirSync, existsSync, readFileSync, mkdirSync } from 'fs';
+import { readdirSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { TaskStore } from '@/lib/task-store';
+import { randomUUID } from 'crypto';
+import { revalidatePath } from 'next/cache';
 
 // ── Global session tracking (shared across Next.js module contexts) ──────────
 declare global {
@@ -30,6 +33,7 @@ export interface RoadmapItem {
   affected_files: string[];
   source: 'ideation' | 'competitor-analysis';
   competitive_context?: string;
+  linkedTaskId?: string;  // set when user converts this item to a kanban ticket
 }
 
 export interface RoadmapReport {
@@ -227,4 +231,139 @@ export async function getActiveRoadmapSession(type: 'roadmap' | 'changelog'): Pr
   // Session is gone — clean up the stale entry
   sessions.delete(key);
   return null;
+}
+
+// ── Convert roadmap item to kanban ticket ────────────────────────────────────
+
+const VALID_PHASES = ['now', 'next', 'later', 'icebox'] as const;
+
+export async function convertToTask(
+  filename: string,
+  itemIndex: number,
+  phaseKey: string,
+): Promise<{ taskId: string }> {
+  const projectPath = await getActiveProjectPath();
+  if (!VALID_PHASES.includes(phaseKey as any)) throw new Error(`Invalid phase: ${phaseKey}`);
+  if (!/^roadmap-\d{4}-\d{2}-\d{2}\.json$/.test(filename)) {
+    throw new Error(`Invalid roadmap filename: ${filename}`);
+  }
+
+  const dir = join(projectPath, '.teamai', 'roadmap');
+  const filePath = join(dir, filename);
+  let report: RoadmapReport;
+  try {
+    report = JSON.parse(readFileSync(filePath, 'utf-8'));
+  } catch {
+    throw new Error(`Cannot read roadmap file: ${filename}`);
+  }
+
+  const items = report.phases?.[phaseKey as keyof typeof report.phases];
+  if (!items || !Array.isArray(items) || itemIndex >= items.length) {
+    throw new Error(`Item not found at index ${itemIndex} in phase ${phaseKey}`);
+  }
+
+  const item = items[itemIndex];
+  if (item.linkedTaskId) {
+    // Already converted — just return the existing task ID
+    return { taskId: item.linkedTaskId };
+  }
+
+  // Create a task in the kanban board
+  const taskStore = new TaskStore(projectPath);
+  const taskId = randomUUID();
+  taskStore.create(taskId, item.title, item.description, item.source, item.competitive_context);
+
+  // Write linkedTaskId back to the roadmap JSON
+  item.linkedTaskId = taskId;
+  writeFileSync(filePath, JSON.stringify(report, null, 2));
+
+  revalidatePath('/');
+  revalidatePath('/roadmap');
+
+  return { taskId };
+}
+
+// ── Clear linked task ID from a roadmap item ───────────────────────────────
+
+export async function clearLinkedTaskId(
+  filename: string,
+  itemIndex: number,
+  phaseKey: string,
+): Promise<void> {
+  const projectPath = await getActiveProjectPath();
+  if (!VALID_PHASES.includes(phaseKey as any)) throw new Error(`Invalid phase: ${phaseKey}`);
+  if (!/^roadmap-\d{4}-\d{2}-\d{2}\.json$/.test(filename)) {
+    throw new Error(`Invalid roadmap filename: ${filename}`);
+  }
+
+  const dir = join(projectPath, '.teamai', 'roadmap');
+  const filePath = join(dir, filename);
+  let report: RoadmapReport;
+  try {
+    report = JSON.parse(readFileSync(filePath, 'utf-8')) as RoadmapReport;
+  } catch {
+    throw new Error(`Cannot read roadmap file: ${filename}`);
+  }
+
+  const items = report.phases?.[phaseKey as keyof typeof report.phases];
+  if (!items || !Array.isArray(items) || itemIndex >= items.length) {
+    throw new Error(`Item not found at index ${itemIndex} in phase ${phaseKey}`);
+  }
+
+  // Clear the linkedTaskId
+  if (items[itemIndex].linkedTaskId) {
+    items[itemIndex].linkedTaskId = undefined;
+    writeFileSync(filePath, JSON.stringify(report, null, 2));
+    revalidatePath('/');
+    revalidatePath('/roadmap');
+  }
+}
+
+// ── Delete a roadmap item ────────────────────────────────────────────────────
+
+export async function deleteRoadmapItem(
+  filename: string,
+  itemIndex: number,
+  phaseKey: string,
+): Promise<void> {
+  const projectPath = await getActiveProjectPath();
+  if (!VALID_PHASES.includes(phaseKey as any)) throw new Error(`Invalid phase: ${phaseKey}`);
+  if (!/^roadmap-\d{4}-\d{2}-\d{2}\.json$/.test(filename)) {
+    throw new Error(`Invalid roadmap filename: ${filename}`);
+  }
+
+  const dir = join(projectPath, '.teamai', 'roadmap');
+  const filePath = join(dir, filename);
+  let report: any;
+  try {
+    report = JSON.parse(readFileSync(filePath, 'utf-8'));
+  } catch {
+    throw new Error(`Cannot read roadmap file: ${filename}`);
+  }
+
+  const items = report.phases?.[phaseKey];
+  if (!items || !Array.isArray(items) || itemIndex >= items.length) {
+    throw new Error(`Item not found at index ${itemIndex} in phase ${phaseKey}`);
+  }
+
+  items.splice(itemIndex, 1);
+  writeFileSync(filePath, JSON.stringify(report, null, 2));
+
+  revalidatePath('/');
+  revalidatePath('/roadmap');
+}
+
+// ── Get statuses of linked kanban tickets ────────────────────────────────────
+
+export async function getLinkedTaskStatuses(
+  linkedTaskIds: string[],
+): Promise<Record<string, { phase: string; title: string } | null>> {
+  const projectPath = await getActiveProjectPath();
+  const taskStore = new TaskStore(projectPath);
+  const result: Record<string, { phase: string; title: string } | null> = {};
+  for (const id of linkedTaskIds) {
+    const task = taskStore.getById(id);
+    result[id] = task ? { phase: task.phase, title: task.title } : null;
+  }
+  return result;
 }

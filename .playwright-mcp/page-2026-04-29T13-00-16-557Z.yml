@@ -1,0 +1,155 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: TeamAI
+      - button "←" [ref=e5]
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: Projects
+        - button "+ Add" [ref=e10]
+      - list [ref=e11]:
+        - listitem [ref=e12]:
+          - button "Sample-project" [ref=e13]
+          - button "×" [ref=e14]
+        - listitem [ref=e15]:
+          - button "TeamAI" [ref=e16]
+          - button "×" [ref=e17]
+    - navigation [ref=e18]:
+      - button "☀ Light mode" [ref=e36]:
+        - generic [ref=e20]: ☀
+        - text: Light mode
+      - link "▦ Kanban" [ref=e21] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e22]: ▦
+        - text: Kanban
+      - link "◎ Insights" [ref=e23] [cursor=pointer]:
+        - /url: /insights
+        - generic [ref=e24]: ◎
+        - text: Insights
+      - link "◈ Ideation" [ref=e25] [cursor=pointer]:
+        - /url: /ideation
+        - generic [ref=e26]: ◈
+        - text: Ideation
+      - link "▶ Terminals" [ref=e27] [cursor=pointer]:
+        - /url: /terminals
+        - generic [ref=e28]: ▶
+        - text: Terminals
+      - link "◉ Roadmap" [ref=e29] [cursor=pointer]:
+        - /url: /roadmap
+        - generic [ref=e30]: ◉
+        - text: Roadmap
+      - link "⚙ Settings" [ref=e31] [cursor=pointer]:
+        - /url: /settings
+        - generic [ref=e32]: ⚙
+        - text: Settings
+  - main [ref=e33]:
+    - generic [ref=e56]:
+      - generic [ref=e57]:
+        - heading "Board" [level=1] [ref=e58]
+        - button "+ New Task" [ref=e59]
+      - generic [ref=e60]:
+        - generic [ref=e63]:
+          - generic [ref=e65]:
+            - generic [ref=e66]: Backlog
+            - generic [ref=e67]: "0"
+          - generic [ref=e70]:
+            - generic [ref=e71]: Spec
+            - generic [ref=e72]: "0"
+          - generic [ref=e74]:
+            - generic [ref=e75]:
+              - generic [ref=e76]: Planning
+              - generic [ref=e77]: "1"
+            - generic [ref=e79] [cursor=pointer]:
+              - button "▶" [ref=e80]
+              - paragraph [ref=e81]: Streaming test
+              - paragraph [ref=e82]: Streaming test after global fix.
+              - generic [ref=e83]:
+                - generic [ref=e84]: plan
+                - generic [ref=e85]: 4d ago
+          - generic [ref=e86]:
+            - generic [ref=e87]:
+              - generic [ref=e88]: In Progress
+              - generic [ref=e89]: "2"
+            - generic [ref=e90]:
+              - generic [ref=e91] [cursor=pointer]:
+                - button "▶" [ref=e92]
+                - paragraph [ref=e93]: Say hello
+                - paragraph [ref=e94]: Say hello and tell me a fun fact.
+                - generic [ref=e95]:
+                  - generic [ref=e96]: implement
+                  - generic [ref=e97]: 4d ago
+              - generic [ref=e98] [cursor=pointer]:
+                - button "▶" [ref=e99]
+                - paragraph [ref=e100]: Test streaming output
+                - paragraph [ref=e101]: Testing the agent panel and xterm.js streaming.
+                - generic [ref=e102]:
+                  - generic [ref=e103]: implement
+                  - generic [ref=e104]: 4d ago
+          - generic [ref=e106]:
+            - generic [ref=e107]: QA
+            - generic [ref=e108]: "0"
+          - generic [ref=e110]:
+            - generic [ref=e111]:
+              - generic [ref=e112]: Review
+              - generic [ref=e113]: "1"
+            - generic [ref=e115] [cursor=pointer]:
+              - paragraph [ref=e116]: Stream fix test
+              - paragraph [ref=e117]: Verifying streaming events render in xterm after global fix.
+              - generic [ref=e118]:
+                - generic [ref=e119]: awaiting-review
+                - generic [ref=e120]: 4d ago
+          - generic [ref=e122]:
+            - generic [ref=e123]: Merging
+            - generic [ref=e124]: "0"
+          - generic [ref=e127]:
+            - generic [ref=e128]: Failed
+            - generic [ref=e129]: "0"
+          - generic [ref=e132]:
+            - generic [ref=e133]: Done
+            - generic [ref=e134]: "0"
+        - generic [ref=e137]:
+          - button "×" [ref=e139]
+          - generic [ref=e141]:
+            - generic [ref=e142]:
+              - generic [ref=e143]:
+                - generic [ref=e144]:
+                  - link "← Board" [ref=e145] [cursor=pointer]:
+                    - /url: /
+                  - heading "Streaming test" [level=1] [ref=e146]
+                  - paragraph [ref=e147]: Streaming test after global fix.
+                - generic [ref=e149]: plan
+              - generic [ref=e150]:
+                - paragraph [ref=e151]: Created 4/25/2026, 1:15:06 PM · Updated 4/26/2026, 7:00:56 PM
+                - generic [ref=e152]:
+                  - generic [ref=e153]: "Agent:"
+                  - combobox [ref=e154]:
+                    - option "Auto (pipeline default)" [selected]
+                    - option "Product Analyst"
+                    - option "Senior Developer"
+                    - option "Git Integration Specialist"
+                    - option "Implementation Planner"
+                    - option "Bug Fix Specialist"
+                    - option "QA Reviewer"
+              - generic [ref=e155]:
+                - button "Overview" [ref=e156]
+                - button "Terminal" [ref=e157]
+                - button "Spec1" [ref=e158]
+                - button "Plan" [ref=e159]
+                - button "QA" [ref=e160]
+            - generic [ref=e163]:
+              - generic [ref=e164]:
+                - button "+ Depends on" [ref=e166]
+                - button "+ Blocks" [ref=e168]
+              - paragraph [ref=e169]: No dependencies set.
+  - generic [ref=e41] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e42]:
+      - img [ref=e43]
+    - generic [ref=e46]:
+      - button "Open issues overlay" [ref=e47]:
+        - generic [ref=e48]:
+          - generic [ref=e49]: "0"
+          - generic [ref=e50]: "1"
+        - generic [ref=e51]: Issue
+      - button "Collapse issues badge" [ref=e52]:
+        - img [ref=e53]
+  - alert [ref=e55]

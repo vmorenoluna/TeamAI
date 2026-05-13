@@ -104,7 +104,7 @@ export function TerminalPanel({ sessionId, role, onClose }: Props) {
 
   return (
     <div className={`flex flex-col rounded-lg overflow-hidden border-2 ${borderColor} bg-slate-950 h-full`}>
-      <div className="flex items-center justify-between px-3 py-1.5 bg-slate-900 shrink-0">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-[#1a1f2e] shrink-0">
         <span className="text-xs font-medium text-slate-300">
           {role.replace('.md', '')} {!connected && <span className="text-slate-500">(connecting…)</span>}
         </span>

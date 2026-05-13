@@ -30,7 +30,7 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">Active phases</p>
+        <p className="text-xs font-medium text-slate-400 mb-2">Active phases</p>
         <div className="flex flex-wrap gap-2">
           {ALL_PHASES.map(phase => (
             <label key={phase} className="flex items-center gap-1.5 cursor-pointer">
@@ -38,9 +38,9 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
                 type="checkbox"
                 checked={phases.includes(phase)}
                 onChange={() => togglePhase(phase)}
-                className="rounded border-slate-300 dark:border-slate-600"
+                className="rounded border-[#334155] bg-[#11131b]"
               />
-              <span className="text-sm text-slate-700 dark:text-slate-300 capitalize">
+              <span className="text-sm text-slate-300 capitalize">
                 {phase.replace('-', ' ')}
               </span>
             </label>
@@ -50,7 +50,7 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
 
       <div className="flex items-center gap-4">
         <div>
-          <label className="text-xs font-medium text-slate-600 dark:text-slate-400 block mb-1">
+          <label className="text-xs font-medium text-slate-400 block mb-1">
             Max QA attempts
           </label>
           <input
@@ -59,7 +59,7 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
             max={10}
             value={maxQa}
             onChange={e => setMaxQa(Number(e.target.value))}
-            className="w-20 px-2 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-500"
+            className="w-20 px-2 py-1 text-sm border border-[#334155] rounded bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb]"
           />
         </div>
         <label className="flex items-center gap-2 cursor-pointer mt-4">
@@ -67,16 +67,16 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
             type="checkbox"
             checked={parallel}
             onChange={e => setParallel(e.target.checked)}
-            className="rounded border-slate-300 dark:border-slate-600"
+            className="rounded border-[#334155] bg-[#11131b]"
           />
-          <span className="text-sm text-slate-700 dark:text-slate-300">Parallel subtasks</span>
+          <span className="text-sm text-slate-300">Parallel subtasks</span>
         </label>
       </div>
 
       <button
         onClick={handleSave}
         disabled={isPending}
-        className="px-4 py-1.5 text-sm font-medium bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-md hover:bg-slate-700 disabled:opacity-40 transition-colors"
+        className="px-4 py-1.5 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
       >
         {saved ? 'Saved!' : isPending ? 'Saving…' : 'Save Pipeline Config'}
       </button>

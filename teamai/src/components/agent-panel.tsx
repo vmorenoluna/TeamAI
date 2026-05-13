@@ -75,10 +75,10 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
 
       terminal = new Terminal({
         theme: {
-          background: '#0f172a',
-          foreground: '#e2e8f0',
-          cursor: '#94a3b8',
-          selectionBackground: '#334155',
+          background: '#000000',
+          foreground: '#34d399',
+          cursor: '#34d399',
+          selectionBackground: '#064e3b',
         },
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
         fontSize: 13,
@@ -149,8 +149,8 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
   }, [events, termReady, initialOutput]);
 
   return (
-    <div className="flex flex-col h-full rounded-lg overflow-hidden border border-slate-700 bg-slate-950">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700 bg-slate-900 shrink-0">
+    <div className="flex flex-col h-full rounded-lg overflow-hidden border border-[#1e293b] bg-black">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-[#1e293b] bg-[#0f172a] shrink-0">
         <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           Agent Output
         </span>

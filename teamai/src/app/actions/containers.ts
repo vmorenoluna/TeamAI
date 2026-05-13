@@ -4,19 +4,19 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
-import { containerManager, type ContainerState } from '@/lib/container-manager';
+import { containerManager, dockerAvailable, type ContainerState } from '@/lib/container-manager';
 
 export interface ContainerConfig {
   enabled: boolean;
 }
 
-const DEFAULT: ContainerConfig = { enabled: false };
-
-export async function getContainerConfig(): Promise<ContainerConfig> {
+export async function getContainerConfig(): Promise<ContainerConfig & { dockerAvailable: boolean }> {
   const projectPath = await getActiveProjectPath();
   const cfgPath = join(projectPath, '.teamai', 'container.json');
-  if (!existsSync(cfgPath)) return DEFAULT;
-  try { return { ...DEFAULT, ...JSON.parse(readFileSync(cfgPath, 'utf-8')) }; } catch { return DEFAULT; }
+  if (existsSync(cfgPath)) {
+    try { return { ...JSON.parse(readFileSync(cfgPath, 'utf-8')), dockerAvailable: dockerAvailable() }; } catch { /* fall through */ }
+  }
+  return { enabled: dockerAvailable(), dockerAvailable: dockerAvailable() };
 }
 
 export async function saveContainerConfig(config: ContainerConfig): Promise<void> {
@@ -30,4 +30,8 @@ export async function saveContainerConfig(config: ContainerConfig): Promise<void
 export async function getContainerState(): Promise<ContainerState> {
   const projectPath = await getActiveProjectPath();
   return containerManager.getState(projectPath);
+}
+
+export async function isDockerAvailable(): Promise<boolean> {
+  return dockerAvailable();
 }

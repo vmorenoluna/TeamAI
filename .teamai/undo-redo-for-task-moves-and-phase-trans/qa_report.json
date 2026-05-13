@@ -1,0 +1,35 @@
+{
+  "status": "passed",
+  "timestamp": "2026-05-10T09:00:00.000Z",
+  "summary": "Undo/redo for task moves and phase transitions passed QA review.",
+  "checks": [
+    {
+      "name": "Undo stack on drag-drop",
+      "status": "passed",
+      "details": "Each drag-drop move pushes the previous phase to undoStackRef. Stack capped at 20 entries."
+    },
+    {
+      "name": "Toast notification",
+      "status": "passed",
+      "details": "Toast appears with undo button after a move. Auto-dismisses after 5 seconds. Toast shows task title and target phase."
+    },
+    {
+      "name": "Ctrl+Z undo",
+      "status": "passed",
+      "details": "Ctrl+Z triggers handleUndo which pops from undo stack and calls moveTask back to previous phase. Only active when toast is visible."
+    },
+    {
+      "name": "Undo button in toast",
+      "status": "passed",
+      "details": "Clicking 'Undo' in toast calls handleUndo. Both Ctrl+Z and button click use the same handler."
+    },
+    {
+      "name": "Stale closure fix",
+      "status": "passed",
+      "details": "handleUndo uses useCallback with stable deps. Ctrl+Z useEffect uses toastUndoRef pattern to avoid stale toast state. Effect has correct dependency array."
+    }
+  ],
+  "typecheck": "clean",
+  "lint": "clean",
+  "unit_tests": "106 passed, 0 failed"
+}

@@ -1,0 +1,34 @@
+{
+  "complexity": 2,
+  "estimated_subtasks": 3,
+  "parallel_safe": false,
+  "subtasks": [
+    {
+      "id": 1,
+      "title": "Install husky and lint-staged, add npm scripts",
+      "description": "Add husky@9 and lint-staged@15 as devDependencies via npm install. Add 'prepare' script for husky init, 'typecheck' script for tsc --noEmit, and lint-staged config to package.json. Run npx husky init to create .husky directory.",
+      "files": ["teamai/package.json"],
+      "depends_on": [],
+      "acceptance_criteria": ["npm run typecheck runs tsc --noEmit on the full project"],
+      "parallel_group": "A"
+    },
+    {
+      "id": 2,
+      "title": "Create pre-commit hook for lint-staged",
+      "description": "Create .husky/pre-commit hook that runs npx lint-staged. The hook should exit with the same code as lint-staged so that failures block the commit.",
+      "files": ["teamai/.husky/pre-commit"],
+      "depends_on": [1],
+      "acceptance_criteria": ["A staged TS file with a type error blocks the commit"],
+      "parallel_group": "A"
+    },
+    {
+      "id": 3,
+      "title": "Verify and test the hook end-to-end",
+      "description": "Run tsc --noEmit to verify the project typechecks cleanly. Run npm run lint to verify lint passes. Test the pre-commit hook by staging a file and committing.",
+      "files": [],
+      "depends_on": [1, 2],
+      "acceptance_criteria": ["git commit succeeds when all checks pass"],
+      "parallel_group": "A"
+    }
+  ]
+}

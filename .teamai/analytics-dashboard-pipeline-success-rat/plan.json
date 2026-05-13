@@ -1,0 +1,22 @@
+{
+  "subtasks": [
+    {
+      "id": "1",
+      "title": "Fetch task data on insights page",
+      "description": "Call getTasks() server action and compute stats: total, by-phase counts, completed count, completion rate.",
+      "files": ["src/app/insights/page.tsx"]
+    },
+    {
+      "id": "2",
+      "title": "Build stats cards",
+      "description": "Four stat cards in a grid: Total Tasks, Completed, In Progress, Completion Rate %. Styled to match dark theme.",
+      "files": ["src/app/insights/page.tsx"]
+    },
+    {
+      "id": "3",
+      "title": "Build phase distribution bar",
+      "description": "Horizontal stacked bar showing % of tasks in each phase. Uses COLUMNS colors.",
+      "files": ["src/app/insights/page.tsx"]
+    }
+  ]
+}

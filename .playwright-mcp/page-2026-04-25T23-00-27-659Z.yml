@@ -1,0 +1,164 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: TeamAI
+      - button "←" [ref=e5]
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: Projects
+        - button "+ Add" [ref=e10]
+      - list [ref=e11]:
+        - listitem [ref=e12]:
+          - button "Sample-project" [ref=e13]
+          - button "×" [ref=e14]
+        - listitem [ref=e15]:
+          - button "TeamAI" [ref=e16]
+          - button "×" [ref=e17]
+    - navigation [ref=e18]:
+      - link "▦ Kanban" [ref=e19] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e20]: ▦
+        - text: Kanban
+      - link "◎ Insights" [ref=e21] [cursor=pointer]:
+        - /url: /insights
+        - generic [ref=e22]: ◎
+        - text: Insights
+      - link "◈ Ideation" [ref=e23] [cursor=pointer]:
+        - /url: /ideation
+        - generic [ref=e24]: ◈
+        - text: Ideation
+      - link "◉ Roadmap" [ref=e25] [cursor=pointer]:
+        - /url: /roadmap
+        - generic [ref=e26]: ◉
+        - text: Roadmap
+      - link "⚙ Settings" [ref=e27] [cursor=pointer]:
+        - /url: /settings
+        - generic [ref=e28]: ⚙
+        - text: Settings
+  - main [ref=e29]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - heading "Settings" [level=1] [ref=e32]
+        - paragraph [ref=e33]: C:\Users\dev\IdeaProjects\TeamAI
+      - generic [ref=e34]:
+        - generic [ref=e35]:
+          - heading "Pipeline Configuration" [level=2] [ref=e36]
+          - paragraph [ref=e37]: Choose which phases run and configure QA behaviour.
+          - generic [ref=e38]:
+            - generic [ref=e39]:
+              - paragraph [ref=e40]: Active phases
+              - generic [ref=e41]:
+                - generic [ref=e42] [cursor=pointer]:
+                  - checkbox "spec" [checked] [ref=e43]
+                  - generic [ref=e44]: spec
+                - generic [ref=e45] [cursor=pointer]:
+                  - checkbox "plan" [checked] [ref=e46]
+                  - generic [ref=e47]: plan
+                - generic [ref=e48] [cursor=pointer]:
+                  - checkbox "implement" [checked] [ref=e49]
+                  - generic [ref=e50]: implement
+                - generic [ref=e51] [cursor=pointer]:
+                  - checkbox "qa review" [checked] [ref=e52]
+                  - generic [ref=e53]: qa review
+                - generic [ref=e54] [cursor=pointer]:
+                  - checkbox "merge" [checked] [ref=e55]
+                  - generic [ref=e56]: merge
+            - generic [ref=e57]:
+              - generic [ref=e58]:
+                - generic [ref=e59]: Max QA attempts
+                - spinbutton [ref=e60]: "3"
+              - generic [ref=e61] [cursor=pointer]:
+                - checkbox "Parallel subtasks" [checked] [ref=e62]
+                - generic [ref=e63]: Parallel subtasks
+            - button "Save Pipeline Config" [ref=e64]
+        - generic [ref=e65]:
+          - heading "Providers" [level=2] [ref=e66]
+          - paragraph [ref=e67]: Configure which model and backend each agent role uses. Leave role fields blank to inherit the default.
+          - generic [ref=e68]:
+            - generic [ref=e69]:
+              - paragraph [ref=e70]: Default (all roles)
+              - generic [ref=e71]:
+                - generic [ref=e72]: Default
+                - textbox "claude-sonnet-4-6" [ref=e73]
+                - combobox [ref=e74]:
+                  - option "anthropic" [selected]
+                  - option "bedrock"
+                  - option "vertex"
+                  - option "ollama"
+            - generic [ref=e75]:
+              - paragraph [ref=e76]: Role overrides
+              - generic [ref=e77]:
+                - generic [ref=e78]: planner
+                - textbox "claude-sonnet-4-6" [ref=e79]
+                - combobox [ref=e80]:
+                  - option "anthropic" [selected]
+                  - option "bedrock"
+                  - option "vertex"
+                  - option "ollama"
+              - generic [ref=e81]:
+                - generic [ref=e82]: coder
+                - textbox "claude-sonnet-4-6" [ref=e83]
+                - combobox [ref=e84]:
+                  - option "anthropic" [selected]
+                  - option "bedrock"
+                  - option "vertex"
+                  - option "ollama"
+              - generic [ref=e85]:
+                - generic [ref=e86]: qa-reviewer
+                - textbox "claude-sonnet-4-6" [ref=e87]
+                - combobox [ref=e88]:
+                  - option "anthropic" [selected]
+                  - option "bedrock"
+                  - option "vertex"
+                  - option "ollama"
+              - generic [ref=e89]:
+                - generic [ref=e90]: qa-fixer
+                - textbox "claude-sonnet-4-6" [ref=e91]
+                - combobox [ref=e92]:
+                  - option "anthropic" [selected]
+                  - option "bedrock"
+                  - option "vertex"
+                  - option "ollama"
+              - generic [ref=e93]:
+                - generic [ref=e94]: merger
+                - textbox "claude-sonnet-4-6" [ref=e95]
+                - combobox [ref=e96]:
+                  - option "anthropic" [selected]
+                  - option "bedrock"
+                  - option "vertex"
+                  - option "ollama"
+            - button "Save Provider Config" [ref=e97]
+        - generic [ref=e98]:
+          - heading "Agent Roles" [level=2] [ref=e99]
+          - paragraph [ref=e100]: Edit agent personas to tailor behaviour to your project. Changes take effect on the next pipeline run.
+          - generic [ref=e101]:
+            - button "Product Analyst analyst.md ▼" [ref=e103]:
+              - generic [ref=e104]:
+                - text: Product Analyst
+                - generic [ref=e105]: analyst.md
+              - generic [ref=e106]: ▼
+            - button "Senior Developer coder.md ▼" [ref=e108]:
+              - generic [ref=e109]:
+                - text: Senior Developer
+                - generic [ref=e110]: coder.md
+              - generic [ref=e111]: ▼
+            - button "Git Integration Specialist merger.md ▼" [ref=e113]:
+              - generic [ref=e114]:
+                - text: Git Integration Specialist
+                - generic [ref=e115]: merger.md
+              - generic [ref=e116]: ▼
+            - button "Implementation Planner planner.md ▼" [ref=e118]:
+              - generic [ref=e119]:
+                - text: Implementation Planner
+                - generic [ref=e120]: planner.md
+              - generic [ref=e121]: ▼
+            - button "Bug Fix Specialist qa-fixer.md ▼" [ref=e123]:
+              - generic [ref=e124]:
+                - text: Bug Fix Specialist
+                - generic [ref=e125]: qa-fixer.md
+              - generic [ref=e126]: ▼
+            - button "QA Reviewer qa-reviewer.md ▼" [ref=e128]:
+              - generic [ref=e129]:
+                - text: QA Reviewer
+                - generic [ref=e130]: qa-reviewer.md
+              - generic [ref=e131]: ▼

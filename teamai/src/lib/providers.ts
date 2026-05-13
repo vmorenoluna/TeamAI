@@ -3,7 +3,7 @@ import { join } from 'path';
 
 export interface ProviderConfig {
   model?: string;
-  provider?: 'anthropic' | 'bedrock' | 'vertex' | 'ollama';
+  provider?: 'anthropic' | 'bedrock' | 'vertex' | 'openai' | 'gemini' | 'ollama';
   env?: Record<string, string>;
 }
 
@@ -36,6 +36,8 @@ export function providerToSessionOpts(cfg: ProviderConfig): {
 
   if (cfg.provider === 'bedrock') env['CLAUDE_CODE_USE_BEDROCK'] = '1';
   if (cfg.provider === 'vertex') env['CLAUDE_CODE_USE_VERTEX'] = '1';
+  if (cfg.provider === 'openai') env['OPENAI_API_KEY'] = env['OPENAI_API_KEY'] ?? '';
+  if (cfg.provider === 'gemini') env['GOOGLE_API_KEY'] = env['GOOGLE_API_KEY'] ?? '';
   if (cfg.provider === 'ollama') env['ANTHROPIC_BASE_URL'] = env['ANTHROPIC_BASE_URL'] ?? 'http://localhost:11434';
 
   return {

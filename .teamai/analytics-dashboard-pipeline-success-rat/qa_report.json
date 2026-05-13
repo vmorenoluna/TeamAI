@@ -1,0 +1,35 @@
+{
+  "status": "passed",
+  "timestamp": "2026-05-10T09:00:00.000Z",
+  "summary": "Analytics dashboard on Insights page passed QA review.",
+  "checks": [
+    {
+      "name": "Stat cards",
+      "status": "passed",
+      "details": "Four stat cards: Total Tasks, Completed, In Progress, Failed. Color-coded with appropriate text colors."
+    },
+    {
+      "name": "Completion rate bar",
+      "status": "passed",
+      "details": "Gradient bar from blue to green showing completion percentage. Rounded full width bar."
+    },
+    {
+      "name": "Phase distribution",
+      "status": "passed",
+      "details": "Segmented bar showing phase distribution by count. Legend below with color dots and labels. Uses PHASE_COLORS map for consistent coloring."
+    },
+    {
+      "name": "Empty state",
+      "status": "passed",
+      "details": "When no tasks exist, shows 'No tasks yet' message instead of broken stats."
+    },
+    {
+      "name": "Dark mode",
+      "status": "passed",
+      "details": "All components use dark theme colors matching the existing app design."
+    }
+  ],
+  "typecheck": "clean",
+  "lint": "clean",
+  "unit_tests": "106 passed, 0 failed"
+}

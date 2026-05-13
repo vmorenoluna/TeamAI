@@ -7,7 +7,7 @@ import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 async function getStores() {
   const projectPath = await getActiveProjectPath();
@@ -37,6 +37,14 @@ export async function moveTask(taskId: string, targetPhase: string) {
 export async function deleteTask(taskId: string) {
   const { taskStore } = await getStores();
   taskStore.delete(taskId);
+  revalidatePath('/');
+}
+
+export async function bulkDeleteTasks(taskIds: string[]) {
+  const { taskStore } = await getStores();
+  for (const id of taskIds) {
+    try { taskStore.delete(id); } catch { /* skip missing */ }
+  }
   revalidatePath('/');
 }
 
@@ -95,7 +103,7 @@ export async function getTaskArtifacts(taskId: string) {
   let diff: string | null = null;
   if (task.branch) {
     try {
-      diff = execSync(`git diff main...${task.branch}`, {
+      diff = execFileSync('git', ['diff', `main...${task.branch}`], {
         cwd: projectPath,
         encoding: 'utf-8',
       });
@@ -124,12 +132,14 @@ export async function getTaskFull(taskId: string) {
   const spec = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
 
   const planPath = join(dir, 'plan.json');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let plan: any = null;
   if (existsSync(planPath)) {
     try { plan = JSON.parse(readFileSync(planPath, 'utf-8')); } catch { /* skip */ }
   }
 
   const qaPath = join(dir, 'qa_report.json');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let qaReport: any = null;
   if (existsSync(qaPath)) {
     try { qaReport = JSON.parse(readFileSync(qaPath, 'utf-8')); } catch { /* skip */ }
@@ -138,7 +148,7 @@ export async function getTaskFull(taskId: string) {
   let diff: string | null = null;
   if (task.branch) {
     try {
-      diff = execSync(`git diff main...${task.branch}`, { cwd: projectPath, encoding: 'utf-8' });
+      diff = execFileSync('git', ['diff', `main...${task.branch}`], { cwd: projectPath, encoding: 'utf-8' });
     } catch { /* no diff yet */ }
   }
 

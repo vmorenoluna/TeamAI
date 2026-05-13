@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useTransition, useCallback } from 'react';
+import { useState, useEffect, useTransition, useCallback, useMemo, useRef } from 'react';
 import {
   startRoadmapGeneration,
   startChangelogGeneration,
@@ -9,10 +9,17 @@ import {
   getChangelogReports,
   getLatestChangelog,
   getActiveRoadmapSession,
+  convertToTask,
+  clearLinkedTaskId,
+  deleteRoadmapItem,
+  getLinkedTaskStatuses,
   type RoadmapItem,
   type RoadmapReport,
 } from '@/app/actions/roadmap';
 import { useSessionStream } from '@/hooks/use-session-stream';
+import { usePhaseSync } from '@/hooks/use-phase-sync';
+import { TaskPanel, type FullData } from './task-panel';
+import type { RoleDefinition } from '@/app/actions/roles';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,19 +39,20 @@ const PHASE_LABELS: Record<keyof RoadmapReport['phases'], string> = {
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
-  P0: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-  P1: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
-  P2: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  P3: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+  P0: 'bg-red-900/30 text-red-400',
+  P1: 'bg-orange-900/30 text-orange-400',
+  P2: 'bg-amber-900/30 text-amber-400',
+  P3: 'bg-slate-800 text-slate-400',
 };
 
 function ComplexityDots({ value }: { value: number }) {
   return (
-    <span className="inline-flex gap-0.5">
+    <span className="inline-flex gap-0.5" role="img" aria-label={`Complexity ${value} out of 5`}>
       {[1, 2, 3, 4, 5].map(n => (
         <span
           key={n}
-          className={`text-xs ${n <= value ? 'text-blue-500 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`}
+          aria-hidden
+          className={`text-xs ${n <= value ? 'text-blue-400' : 'text-slate-600'}`}
         >
           ●
         </span>
@@ -57,123 +65,371 @@ function ComplexityDots({ value }: { value: number }) {
 
 function StreamingBlock({ text }: { text: string }) {
   return (
-    <div className="bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 p-4 max-h-80 overflow-y-auto">
-      <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+    <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-80 overflow-y-auto">
+      <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
         {text}
       </pre>
     </div>
   );
 }
 
+const LINKED_PHASE_BADGE: Record<string, string> = {
+  backlog: 'bg-slate-700 text-slate-200',
+  spec: 'bg-blue-900/30 text-blue-300',
+  plan: 'bg-indigo-900/30 text-indigo-300',
+  implement: 'bg-amber-900/30 text-amber-300',
+  'qa-review': 'bg-orange-900/30 text-orange-300',
+  'qa-fix': 'bg-orange-900/30 text-orange-300',
+  'awaiting-review': 'bg-purple-900/30 text-purple-300',
+  merge: 'bg-teal-900/30 text-teal-300',
+  'create-pr': 'bg-teal-900/30 text-teal-300',
+  failed: 'bg-red-900/30 text-red-300',
+  done: 'bg-green-900/30 text-green-300',
+};
+
 // ── Roadmap item card ────────────────────────────────────────────────────────
 
-function RoadmapCard({ item }: { item: RoadmapItem }) {
+interface RoadmapCardProps {
+  item: RoadmapItem;
+  linkedStatus: { phase: string; title: string } | null | undefined;
+  onConvert: () => void;
+  onDelete: () => void;
+  isConverting: boolean;
+  isDeleting: boolean;
+  hasError: boolean;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onSelectTask: (taskId: string) => void;
+  onOpenDetail: (item: RoadmapItem) => void;
+}
+
+function RoadmapCard({
+  item,
+  linkedStatus,
+  onConvert,
+  onDelete,
+  isConverting,
+  isDeleting,
+  hasError,
+  isExpanded,
+  onToggle,
+  onSelectTask,
+  onOpenDetail,
+}: RoadmapCardProps) {
+  const isLinked = !!item.linkedTaskId;
+  const statusBadge = linkedStatus
+    ? (LINKED_PHASE_BADGE[linkedStatus.phase] ?? LINKED_PHASE_BADGE.backlog)
+    : null;
+
+  function handleConvertClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    onConvert();
+  }
+
+  function handleDeleteClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    onDelete();
+  }
+
+  function handleCardClick() {
+    if (isLinked) {
+      onSelectTask(item.linkedTaskId!);
+    } else {
+      onOpenDetail(item);
+    }
+  }
+
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 flex flex-col gap-2">
+    <div
+      onClick={handleCardClick}
+      className={`bg-[#1e2333] rounded-lg border p-3 flex flex-col gap-2 group/card transition-all cursor-pointer ${
+        hasError
+          ? 'border-red-800 bg-red-950/20'
+          : isExpanded
+            ? 'border-[#2563eb] bg-blue-950/10 hover:border-blue-400'
+            : 'border-[#1e293b] hover:border-[#334155]'
+      } hover:shadow-md`}
+    >
+      {/* Header: priority + title + category */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded ${PRIORITY_COLORS[item.priority]}`}>
             {item.priority}
           </span>
-          <span className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+          <span className="text-sm font-semibold text-white truncate">
             {item.title}
           </span>
-        </div>
-        <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">
+        </div>          <span className="shrink-0 text-[10px] text-slate-500">
+            {item.category}
           {item.category}
         </span>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+      {/* Complexity */}
+      <div className="flex items-center gap-2 text-xs text-slate-400">
         <span>Complexity:</span>
         <ComplexityDots value={item.complexity} />
         <span className="tabular-nums">({item.complexity}/5)</span>
       </div>
 
-      <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+      {/* Description — truncated when collapsed, full when expanded */}
+      <p className={`text-xs text-slate-400 leading-relaxed ${isExpanded ? '' : 'line-clamp-3'}`}>
         {item.description}
       </p>
 
-      <div className="flex items-center gap-3 text-xs text-slate-400 dark:text-slate-500">
+      {/* Affected files — only shown when expanded */}
+      {isExpanded && item.affected_files && item.affected_files.length > 0 && (
+        <div className="border-t border-[#1e293b] pt-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            Affected Files
+          </span>
+          <ul className="mt-1 space-y-0.5">
+            {item.affected_files.map((f, i) => (
+              <li key={i} className="text-[10px] text-slate-400 font-mono truncate">
+                {f}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Source */}
+      <div className="flex items-center gap-3 text-[11px] text-slate-400">
         <span className="italic">Source: {item.source}</span>
         {item.competitive_context && (
-          <span className="italic text-amber-600 dark:text-amber-400">
+          <span className="italic text-amber-400">
             {item.competitive_context}
           </span>
         )}
       </div>
-    </div>
-  );
-}
 
-// ── Phase section (collapsible) ──────────────────────────────────────────────
-
-function PhaseSection({
-  label,
-  items,
-  defaultOpen = true,
-}: {
-  label: string;
-  items: RoadmapItem[];
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  return (
-    <div>
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2 py-2 text-left group"
-      >
-        <span className="text-xs text-slate-400 transition-transform group-hover:text-slate-500">
-          {open ? '▾' : '▸'}
-        </span>
-        <span className="flex-1 text-sm font-medium text-slate-700 dark:text-slate-300">
-          {label}
-        </span>
-        <span className="text-xs text-slate-400">({items.length} items)</span>
-      </button>
-      {open && (
-        <div className="space-y-2 pl-5 pb-2">
-          {items.length === 0 ? (
-            <p className="text-xs text-slate-400 italic py-2">No items</p>
-          ) : (
-            items.map((item, i) => <RoadmapCard key={i} item={item} />)
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Phased card view ─────────────────────────────────────────────────────────
-
-function PhasedView({ report }: { report: RoadmapReport }) {
-  const phases = report.phases;
-
-  return (
-    <div className="space-y-2">
-      {report.executive_summary && (
-        <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed mb-4">
-          {report.executive_summary}
+      {/* Error message */}
+      {hasError && (
+        <p className="text-[10px] text-red-400">
+          Action failed — please try again.
         </p>
       )}
 
+      {/* Hint — on unlinked cards */}
+      {!isLinked && !hasError && (
+        <p className="text-[10px] text-slate-500 italic">
+          Click to view details
+        </p>
+      )}
+
+      {/* Actions row */}
+      <div className="flex items-center justify-between gap-2 pt-1 border-t border-[#1e293b]">
+        {/* Left: linked status badge or convert button */}
+        {isLinked ? (
+          statusBadge ? (
+            <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${statusBadge}`}>
+              {linkedStatus?.phase ?? '…'}
+            </span>
+          ) : (
+            <span className="text-[10px] text-slate-400">…</span>
+          )
+        ) : (
+          <button
+            onClick={handleConvertClick}
+            disabled={isConverting || hasError}
+            className="text-[11px] font-medium text-blue-400 hover:text-blue-300 disabled:opacity-40 transition-colors"
+          >
+            {isConverting ? 'Converting…' : '+ Convert to ticket'}
+          </button>
+        )}
+
+        {/* Right: delete button (subtle, visible on hover) */}
+        <button
+          onClick={handleDeleteClick}
+          disabled={isDeleting}
+          title="Delete from roadmap"
+          className="text-[11px] text-slate-600 hover:text-red-400 disabled:opacity-40 opacity-40 group-hover/card:opacity-100 focus-visible:opacity-100 transition-all"
+        >
+          {isDeleting ? '…' : '✕'}
+        </button>
+      </div>
+
+
+    </div>
+  );
+}
+
+// ── Phased kanban view ───────────────────────────────────────────────────────
+
+function PhasedKanban({
+  report,
+  filename,
+  onRefresh,
+  onSelectTask,
+  onOpenRoadmapItem,
+}: {
+  report: RoadmapReport;
+  filename: string;
+  onRefresh: () => void;
+  onSelectTask: (taskId: string) => void;
+  onOpenRoadmapItem: (item: RoadmapItem, phaseKey: string, itemIndex: number) => void;
+}) {
+  const phases = report.phases;
+  const [linkedStatuses, setLinkedStatuses] = useState<
+    Record<string, { phase: string; title: string } | null>
+  >({});
+  const [convertingKey, setConvertingKey] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [errorKey, setErrorKey] = useState<string | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+
+  // Collect all linked task IDs
+  const allLinkedIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const pk of ['now', 'next', 'later', 'icebox'] as const) {
+      for (const item of phases[pk]) {
+        if (item.linkedTaskId) ids.push(item.linkedTaskId);
+      }
+    }
+    return ids;
+  }, [phases.now, phases.next, phases.later, phases.icebox]);
+
+  // Fetch statuses for all linked items on mount / when report changes
+  useEffect(() => {
+    if (allLinkedIds.length === 0) return;
+    let cancelled = false;
+    getLinkedTaskStatuses(allLinkedIds)
+      .then(result => {
+        if (!cancelled) setLinkedStatuses(prev => ({ ...prev, ...result }));
+      })
+      .catch(() => { /* network error — statuses will load on next render */ });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allLinkedIds.join(',')]);
+
+  // Real-time sync: update linked status when a kanban task phase changes
+  usePhaseSync({
+    onPhaseChange: (taskId, phase) => {
+      if (allLinkedIds.includes(taskId)) {
+        setLinkedStatuses(prev => {
+          const existing = prev[taskId];
+          if (!existing) return prev;
+          return { ...prev, [taskId]: { ...existing, phase } };
+        });
+      }
+    },
+  });
+
+  async function handleConvert(phaseKey: string, itemIndex: number) {
+    const key = `${phaseKey}:${itemIndex}`;
+    setExpandedKey(null);
+    setErrorKey(null);
+    setConvertingKey(key);
+    try {
+      await convertToTask(filename, itemIndex, phaseKey);
+      onRefresh();
+    } catch {
+      setErrorKey(key);
+    } finally {
+      setConvertingKey(null);
+    }
+  }
+
+  async function handleDelete(phaseKey: string, itemIndex: number) {
+    if (!window.confirm('Remove this item from the roadmap?')) return;
+    const key = `${phaseKey}:${itemIndex}`;
+    setExpandedKey(null);
+    setErrorKey(null);
+    setDeletingKey(key);
+    try {
+      await deleteRoadmapItem(filename, itemIndex, phaseKey);
+      onRefresh();
+    } catch {
+      setErrorKey(key);
+    } finally {
+      setDeletingKey(null);
+    }
+  }
+
+  async function handleConvertAndSelect(phaseKey: string, itemIndex: number) {
+    const key = `${phaseKey}:${itemIndex}`;
+    setErrorKey(null);
+    setConvertingKey(key);
+    try {
+      const result = await convertToTask(filename, itemIndex, phaseKey);
+      onRefresh();
+      onSelectTask(result.taskId);
+    } catch {
+      setErrorKey(key);
+    } finally {
+      setConvertingKey(null);
+    }
+  }
+
+  // Clear error after 5s
+  useEffect(() => {
+    if (!errorKey) return;
+    const t = setTimeout(() => setErrorKey(null), 5000);
+    return () => clearTimeout(t);
+  }, [errorKey]);
+
+  return (
+    <div className="space-y-2">
+      {report.executive_summary && (          <p className="text-sm text-slate-400 leading-relaxed">
+            {report.executive_summary}
+          </p>
+      )}
+
       {report.competitor_analysis_run && (
-        <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
+        <p className="text-xs text-amber-400">
           Competitor analysis was run for this roadmap.
         </p>
       )}
 
-      <div className="divide-y divide-slate-200 dark:divide-slate-700 border-y border-slate-200 dark:border-slate-700">
-        {(['now', 'next', 'later', 'icebox'] as const).map(phaseKey => (
-          <PhaseSection
-            key={phaseKey}
-            label={PHASE_LABELS[phaseKey]}
-            items={phases[phaseKey]}
-            defaultOpen={phaseKey === 'now'}
-          />
-        ))}
+      {/* Horizontal kanban columns */}
+      <div className="overflow-x-auto">
+        <div className="flex gap-3 pt-3" style={{ minWidth: 'max-content' }}>
+          {(['now', 'next', 'later', 'icebox'] as const).map(phaseKey => (
+            <div
+              key={phaseKey}
+              className="flex flex-col w-72 shrink-0 rounded-lg bg-[#1a1f2e] overflow-hidden"
+            >
+              {/* Column header */}
+              <div className="flex items-center justify-between px-3 py-2.5 border-b border-[#1e293b]">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                  {PHASE_LABELS[phaseKey]}
+                </span>
+                <span className="text-xs font-medium px-1.5 py-0.5 rounded-full bg-[#1e293b] text-slate-500">
+                  {phases[phaseKey].length}
+                </span>
+              </div>
+
+              {/* Column cards */}
+              <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[120px]">
+                {phases[phaseKey].length === 0 ? (
+                  <p className="text-xs text-slate-400 italic text-center py-4">
+                    No items
+                  </p>
+                ) : (
+                  phases[phaseKey].map((item, i) => {
+                    const cardKey = `${phaseKey}:${i}`;
+                    return (
+                      <RoadmapCard
+                        key={cardKey}
+                        item={item}
+                        linkedStatus={item.linkedTaskId ? linkedStatuses[item.linkedTaskId] : undefined}
+                        onConvert={() => handleConvert(phaseKey, i)}
+                        onDelete={() => handleDelete(phaseKey, i)}
+                        isConverting={convertingKey === cardKey}
+                        isDeleting={deletingKey === cardKey}
+                        hasError={errorKey === cardKey}
+                        isExpanded={expandedKey === cardKey}
+                        onToggle={() => setExpandedKey(prev => prev === cardKey ? null : cardKey)}
+                        onSelectTask={onSelectTask}
+                        onOpenDetail={(item) => onOpenRoadmapItem(item, phaseKey, i)}
+                      />
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -196,12 +452,24 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
   const [rmRunning, setRmRunning] = useState(false);
   const [rmReport, setRmReport] = useState<RoadmapReport | null>(null);
   const [rmHistory, setRmHistory] = useState<{ filename: string; date: string }[]>([]);
+  const [rmFilename, setRmFilename] = useState<string | null>(null);
 
   // Changelog state
   const [clSessionId, setClSessionId] = useState<string | null>(null);
   const [clRunning, setClRunning] = useState(false);
   const [clMarkdown, setClMarkdown] = useState<string | null>(null);
   const [clHistory, setClHistory] = useState<{ filename: string; date: string }[]>([]);
+
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedRoadmapItem, setSelectedRoadmapItem] = useState<{
+    item: RoadmapItem;
+    phaseKey: string;
+    itemIndex: number;
+    filename: string;
+  } | null>(null);
+
+  // Cache task data so reopening a task is instant (no re-fetch / loading flash)
+  const taskCacheRef = useRef<Map<string, { data: FullData; roles: RoleDefinition[] }>>(new Map());
 
   const rmStream = useSessionStream(rmSessionId);
   const clStream = useSessionStream(clSessionId);
@@ -266,6 +534,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
         try {
           const report = await getRoadmapReport(rpts[0].filename);
           setRmReport(report);
+          setRmFilename(rpts[0].filename);
         } catch { /* ignore stale files */ }
       }
 
@@ -295,6 +564,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
         try {
           const report = await getRoadmapReport(rpts[0].filename);
           setRmReport(report);
+          setRmFilename(rpts[0].filename);
         } catch { /* ignore */ }
       }
     })();
@@ -319,7 +589,49 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     try { sessionStorage.setItem('changelog-session', clSessionId); } catch { /* noop */ }
   }, [clDone, clSessionId]);
 
+  // Close the task window on Escape key
+  useEffect(() => {
+    if (!selectedTaskId) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setSelectedTaskId(null);
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [selectedTaskId]);
+
   // ── Handlers ─────────────────────────────────────────────────────────────
+
+  const handleSelectTask = useCallback((taskId: string) => {
+    setSelectedTaskId(taskId);
+    setSelectedRoadmapItem(null);
+  }, []);
+
+  const handleLinkedTaskNotFound = useCallback((item: RoadmapItem, phaseKey: string, itemIndex: number) => {
+    // When linked task doesn't exist, open the roadmap item detail instead
+    if (!rmFilename) return;
+    setSelectedRoadmapItem({ item, phaseKey, itemIndex, filename: rmFilename });
+  }, [rmFilename]);
+
+  const handleOpenRoadmapItem = useCallback((item: RoadmapItem, phaseKey: string, itemIndex: number) => {
+    if (!rmFilename) return;
+    setSelectedTaskId(null); // Close task panel if open
+    setSelectedRoadmapItem({ item, phaseKey, itemIndex, filename: rmFilename });
+  }, [rmFilename]);
+
+  const handleConvertRoadmapItem = useCallback(async () => {
+    if (!selectedRoadmapItem) return;
+    const { phaseKey, itemIndex, filename } = selectedRoadmapItem;
+    startTransition(async () => {
+      try {
+        const result = await convertToTask(filename, itemIndex, phaseKey);
+        setSelectedRoadmapItem(null);
+        setSelectedTaskId(result.taskId);
+        await refreshRoadmapReport();
+      } catch (e) {
+        console.error('Failed to convert roadmap item:', e);
+      }
+    });
+  }, [selectedRoadmapItem]);
 
   function handleGenerateRoadmap() {
     setRmRunning(true);
@@ -346,6 +658,15 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     setRmRunning(false);
     const report = await getRoadmapReport(filename);
     setRmReport(report);
+    setRmFilename(filename);
+  }
+
+  async function refreshRoadmapReport() {
+    if (!rmFilename) return;
+    try {
+      const report = await getRoadmapReport(rmFilename);
+      setRmReport(report);
+    } catch { /* ignore */ }
   }
 
   async function handleSelectChangelogHistory(filename: string) {
@@ -359,15 +680,15 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
   if (noProject) {
     return (
-      <div className="flex flex-col h-full p-6 bg-white dark:bg-slate-900">
+      <div className="flex flex-col h-full p-6 bg-[#11131b]">
         {/* Tabs */}
-        <div className="flex gap-0 border-b border-slate-200 dark:border-slate-700 mb-4">
+        <div className="flex gap-0 border-b border-[#1e293b] mb-4">
           <button
             onClick={() => persistTab('roadmap')}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'roadmap'
-                ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white'
-                : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                ? 'border-[#2563eb] text-white'
+                : 'border-transparent text-slate-400 hover:text-slate-300'
             }`}
           >
             Roadmap
@@ -376,8 +697,8 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
             onClick={() => persistTab('changelog')}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'changelog'
-                ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white'
-                : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                ? 'border-[#2563eb] text-white'
+                : 'border-transparent text-slate-400 hover:text-slate-300'
             }`}
           >
             Changelog
@@ -391,38 +712,37 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full p-6 bg-white dark:bg-slate-900">
+    <div className={`flex flex-col h-full p-6 bg-[#11131b] relative ${selectedTaskId ? 'overflow-hidden' : ''}`}>
       {/* Tab bar */}
-      <div className="flex gap-0 border-b border-slate-200 dark:border-slate-700 mb-4 shrink-0">
+      <div className="flex gap-0 border-b border-[#1e293b] mb-4 shrink-0">
         <button
           onClick={() => persistTab('roadmap')}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'roadmap'
-              ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+              ? 'border-[#2563eb] text-white'
+              : 'border-transparent text-slate-400 hover:text-slate-300'
           }`}
         >
           Roadmap
         </button>
         <button
           onClick={() => persistTab('changelog')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'changelog'
-              ? 'border-slate-900 dark:border-white text-slate-900 dark:text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
-          }`}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${            activeTab === 'changelog'
+                ? 'border-[#2563eb] text-white'
+                : 'border-transparent text-slate-400 hover:text-slate-300'
+            }`}
         >
           Changelog
         </button>
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className={`flex-1 overflow-y-auto min-h-0 ${selectedTaskId ? 'pointer-events-none select-none' : ''}`}>
         {activeTab === 'roadmap' && (
           <div className="flex flex-col gap-4">
             {/* Controls */}
             <div className="flex items-center gap-4 flex-wrap">
-              <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 cursor-pointer select-none">
+              <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={skipCompetitors}
@@ -435,18 +755,18 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
               <button
                 onClick={handleGenerateRoadmap}
                 disabled={isPending || (rmRunning && !rmDone)}
-                className="px-4 py-2 text-sm font-medium bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-md hover:bg-slate-700 dark:hover:bg-slate-200 disabled:opacity-40 transition-colors"
+                className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
               >
                 {rmRunning && !rmDone ? 'Generating…' : 'Generate Roadmap'}
               </button>
 
               {rmHistory.length > 0 && (
-                <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+                <div className="flex items-center gap-2 text-sm text-slate-400">
                   <span>History:</span>
                   <select
                     onChange={e => { if (e.target.value) handleSelectRoadmapHistory(e.target.value); }}
                     defaultValue=""
-                    className="text-sm border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    className="text-sm border border-[#334155] rounded px-2 py-1 bg-[#1a1f2e] text-slate-200"
                   >
                     <option value="" disabled>Select a previous run</option>
                     {rmHistory.map(r => (
@@ -460,8 +780,16 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
             {/* Streaming output */}
             {rmRunning && rmLatestText && <StreamingBlock text={rmLatestText} />}
 
-            {/* Phased card view */}
-            {rmReport && <PhasedView report={rmReport} />}
+            {/* Phased kanban view */}
+            {rmReport && rmFilename && (
+              <PhasedKanban
+                report={rmReport}
+                filename={rmFilename}
+                onRefresh={refreshRoadmapReport}
+                onSelectTask={handleSelectTask}
+                onOpenRoadmapItem={handleOpenRoadmapItem}
+              />
+            )}
 
             {/* Empty state */}
             {!rmRunning && !rmReport && !rmLatestText && (
@@ -479,26 +807,29 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
               <button
                 onClick={handleGenerateChangelog}
                 disabled={isPending || (clRunning && !clDone)}
-                className="px-4 py-2 text-sm font-medium bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-md hover:bg-slate-700 dark:hover:bg-slate-200 disabled:opacity-40 transition-colors"
+                className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
               >
                 {clRunning && !clDone ? 'Generating…' : 'Generate Changelog'}
               </button>
 
-              {clHistory.length > 0 && (
-                <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
-                  <span>Previous changelogs:</span>
-                  <select
-                    onChange={e => { if (e.target.value) handleSelectChangelogHistory(e.target.value); }}
-                    defaultValue=""
-                    className="text-sm border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value="" disabled>Select</option>
-                    {clHistory.map(c => (
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span>Previous changelogs:</span>
+                <select
+                  onChange={e => { if (e.target.value) handleSelectChangelogHistory(e.target.value); }}
+                  defaultValue=""
+                  disabled={clHistory.length === 0}
+                  className="text-sm border border-[#334155] rounded px-2 py-1 bg-[#1a1f2e] text-slate-200 disabled:opacity-40"
+                >
+                  {clHistory.length === 0 ? (
+                    <option value="" disabled>None generated yet</option>
+                  ) : [
+                    <option key="placeholder" value="" disabled>Select</option>,
+                    ...clHistory.map(c => (
                       <option key={c.filename} value={c.filename}>{c.date}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
+                    ))
+                  ]}
+                </select>
+              </div>
             </div>
 
             {/* Streaming output */}
@@ -506,8 +837,8 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
             {/* Changelog result */}
             {clMarkdown && (
-              <div className="bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 p-4 max-h-[60vh] overflow-y-auto">
-                <pre className="whitespace-pre-wrap font-mono text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+              <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-[60vh] overflow-y-auto">
+                <pre className="whitespace-pre-wrap font-mono text-xs text-slate-300 leading-relaxed">
                   {clMarkdown}
                 </pre>
               </div>
@@ -522,6 +853,166 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
           </div>
         )}
       </div>
+
+      {/* Floating task window overlay */}
+      {selectedTaskId && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center p-6">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setSelectedTaskId(null)}
+          />
+          {/* Window */}
+          <div
+            className="relative w-[800px] h-[650px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
+            onClick={e => e.stopPropagation()}
+          >
+            <TaskPanel
+              taskId={selectedTaskId}
+              onClose={() => setSelectedTaskId(null)}
+              readonly
+              cachedData={taskCacheRef.current.get(selectedTaskId)?.data ?? undefined}
+              cachedRoles={taskCacheRef.current.get(selectedTaskId)?.roles}
+              onDataLoaded={(data, roles, tid) => {
+                taskCacheRef.current.set(tid, { data, roles });
+              }}
+              onError={(errorMsg) => {
+                // Only handle "not found" errors - other errors (network, etc.) should not redirect
+                if (!errorMsg.includes('not found')) return;
+                // Task was deleted - auto-clear the stale linkedTaskId and show roadmap item detail
+                setSelectedTaskId(null);
+                if (rmReport && rmFilename) {
+                  for (const phaseKey of ['now', 'next', 'later', 'icebox'] as const) {
+                    const items = rmReport.phases[phaseKey];
+                    const idx = items.findIndex(item => item.linkedTaskId === selectedTaskId);
+                    if (idx !== -1) {
+                      // Clear the stale link automatically
+                      clearLinkedTaskId(rmFilename, idx, phaseKey);
+                      setSelectedRoadmapItem({
+                        item: items[idx],
+                        phaseKey,
+                        itemIndex: idx,
+                        filename: rmFilename,
+                      });
+                      return;
+                    }
+                  }
+                }
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Roadmap item detail overlay */}
+      {selectedRoadmapItem && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center p-6">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setSelectedRoadmapItem(null)}
+          />
+          {/* Window */}
+          <div
+            className="relative w-[700px] h-[550px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Title bar */}
+            <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-[#1e293b] bg-[#1a1f2e]">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded ${PRIORITY_COLORS[selectedRoadmapItem.item.priority]}`}>
+                  {selectedRoadmapItem.item.priority}
+                </span>
+                <h2 className="text-base font-semibold text-white truncate">
+                  {selectedRoadmapItem.item.title}
+                </h2>
+                <span className="shrink-0 text-[10px] text-slate-500">
+                  {selectedRoadmapItem.item.category}
+                </span>
+              </div>
+              <button
+                onClick={() => setSelectedRoadmapItem(null)}
+                title="Close"
+                className="shrink-0 ml-3 w-7 h-7 flex items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-[#1e293b] transition-colors text-lg leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+              {/* Source info */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500">Source:</span>
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                  selectedRoadmapItem.item.source === 'competitor-analysis'
+                    ? 'bg-amber-900/30 text-amber-400'
+                    : 'bg-blue-900/30 text-blue-400'
+                }`}>
+                  {selectedRoadmapItem.item.source === 'competitor-analysis' ? 'Competitor Analysis' : 'Ideation'}
+                </span>
+                {selectedRoadmapItem.item.competitive_context && (
+                  <span className="text-xs text-amber-400 italic">{selectedRoadmapItem.item.competitive_context}</span>
+                )}
+              </div>
+
+              {/* Complexity */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500">Complexity:</span>
+                <ComplexityDots value={selectedRoadmapItem.item.complexity} />
+                <span className="text-xs text-slate-400 tabular-nums">({selectedRoadmapItem.item.complexity}/5)</span>
+              </div>
+
+              {/* Description */}
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Description</h3>
+                <p className="text-sm text-slate-300 leading-relaxed">
+                  {selectedRoadmapItem.item.description}
+                </p>
+              </div>
+
+              {/* Affected files */}
+              {selectedRoadmapItem.item.affected_files && selectedRoadmapItem.item.affected_files.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Affected Files</h3>
+                  <ul className="space-y-1">
+                    {selectedRoadmapItem.item.affected_files.map((f, i) => (
+                      <li key={i} className="text-xs text-slate-400 font-mono bg-[#1a1f2e] px-2 py-1 rounded">
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Phase info */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500">Phase:</span>
+                <span className="text-xs text-slate-300">
+                  {PHASE_LABELS[selectedRoadmapItem.phaseKey as keyof typeof PHASE_LABELS] ?? selectedRoadmapItem.phaseKey}
+                </span>
+              </div>
+            </div>
+
+            {/* Action bar */}
+            <div className="shrink-0 flex items-center justify-end gap-3 px-5 py-3 border-t border-[#1e293b] bg-[#1a1f2e]">
+              <button
+                onClick={() => setSelectedRoadmapItem(null)}
+                className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
+              >
+                Close
+              </button>
+              <button
+                onClick={handleConvertRoadmapItem}
+                disabled={isPending}
+                className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
+              >
+                {isPending ? 'Converting…' : 'Convert to Ticket'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
