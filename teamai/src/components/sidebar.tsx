@@ -39,6 +39,7 @@ export function Sidebar({ projects, activeProjectPath }: Props) {
           { href: '/terminals', label: 'Terminals', icon: '▶' },
           { href: '/analytics', label: 'Analytics', icon: '⬡' },
           { href: '/roadmap', label: 'Roadmap', icon: '◉' },
+          { href: '/github', label: 'GitHub', icon: '⌂' },
           { href: '/settings', label: 'Settings', icon: '⚙' },
         ].map(({ href, label, icon, match }) => {
           const isActive = match ? match(pathname) : pathname === href;
