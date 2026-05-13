@@ -1,0 +1,10 @@
+{
+  "id": "abb143d7-4241-4dc9-b27b-87eb685fccd2",
+  "title": "Analytics dashboard — pipeline success rates, agent costs, throughput metrics",
+  "description": "Add an analytics page or dashboard cards showing: pipeline success/failure rates per phase, average time per phase, total Claude API costs, tasks completed per week, and QA pass rates. This helps teams measure the ROI of their AI pipeline.",
+  "phase": "done",
+  "source": "competitor-analysis",
+  "competitiveContext": "Devin shows productivity metrics and cost tracking in their dashboard.",
+  "createdAt": "2026-05-12T10:20:10.432Z",
+  "updatedAt": "2026-05-12T15:30:00.000Z"
+}

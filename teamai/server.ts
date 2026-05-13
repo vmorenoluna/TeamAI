@@ -4,7 +4,7 @@ import next from 'next';
 import { WebSocketServer, WebSocket } from 'ws';
 import { processManager } from './src/lib/process-manager';
 import { containerManager } from './src/lib/container-manager';
-import { findInterruptedTasks } from './src/lib/recovery';
+import { startupCleanup } from './src/lib/recovery';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
 const handle = app.getRequestHandler();
@@ -18,7 +18,7 @@ app.prepare().then(() => {
   const wss = new WebSocketServer({ noServer: true });
   wss.on('connection', (ws) => {
     // Agent event streaming
-    const agentHandler = ({ sessionId, event }: any) => {
+    const agentHandler = ({ sessionId, event }: { sessionId: string; event: Record<string, unknown> }) => {
       const taskId = processManager.getSession(sessionId)?.taskId;
       ws.send(JSON.stringify({ sessionId, taskId, event }));
     };
@@ -26,7 +26,7 @@ app.prepare().then(() => {
     processManager.on('error', agentHandler);
 
     // PTY terminal data streaming
-    const terminalHandler = ({ sessionId, data }: any) => {
+    const terminalHandler = ({ sessionId, data }: { sessionId: string; data: string }) => {
       ws.send(JSON.stringify({ type: 'terminal', sessionId, data }));
     };
     processManager.on('terminal-data', terminalHandler);
@@ -51,7 +51,7 @@ app.prepare().then(() => {
   });
 
   // Broadcast phase-change events from the Orchestrator to all connected clients
-  processManager.on('phase-change', (data: any) => {
+  processManager.on('phase-change', (data: { taskId: string; phase: string }) => {
     const msg = JSON.stringify({ type: 'phase-change', taskId: data.taskId, phase: data.phase });
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) client.send(msg);
@@ -79,13 +79,36 @@ app.prepare().then(() => {
   const host = process.env.HOST || '0.0.0.0';
   server.listen(3000, host, () => {
     console.log(`> Ready on http://${host}:3000`);
-    // Detect tasks interrupted by previous server shutdown
-    const interrupted = findInterruptedTasks();
-    if (interrupted.length > 0) {
-      console.log(`[recovery] ${interrupted.length} interrupted task(s) detected:`);
-      for (const t of interrupted) {
-        console.log(`  • ${t.title} (${t.phase}) in ${t.projectName}`);
+
+    // ── Startup crash recovery scan ─────────────────────────────────────
+    const staleSessions = processManager.getStaleSessions();
+    const report = startupCleanup(staleSessions.length);
+
+    const parts: string[] = [];
+    if (report.interruptedTasks.length > 0) {
+      parts.push(`${report.interruptedTasks.length} interrupted task(s)`);
+    }
+    if (report.staleSessions > 0) {
+      parts.push(`${report.staleSessions} stale session(s)`);
+    }
+    if (report.orphanedWorktrees.length > 0) {
+      parts.push(`${report.orphanedWorktrees.length} orphaned worktree(s)`);
+    }
+
+    if (parts.length > 0) {
+      console.log(`[recovery] ${parts.join(', ')} detected:`);
+      for (const t of report.interruptedTasks) {
+        console.log(`  • interrupted: ${t.title} (${t.phase}) in ${t.projectName}`);
       }
+      for (const s of staleSessions) {
+        console.log(`  • stale session: ${s.id.substring(0, 8)}… task=${s.taskId} role=${s.role}`);
+        processManager.removeStaleSession(s.id);
+      }
+      for (const w of report.orphanedWorktrees) {
+        console.log(`  • orphaned worktree: ${w.path}`);
+      }
+    } else {
+      console.log('[recovery] clean — no stale state detected');
     }
   });
 });

@@ -1,0 +1,242 @@
+- generic [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]: TeamAI
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: Projects
+        - button "+ Add" [ref=e8]
+      - list [ref=e9]:
+        - listitem [ref=e10]:
+          - button "Formell" [ref=e11]
+      - generic [ref=e118]:
+        - heading "Add Project" [level=2] [ref=e119]
+        - generic [ref=e120]:
+          - generic [ref=e121]:
+            - generic [ref=e122]: Path (absolute path to git repo)
+            - generic [ref=e123]:
+              - textbox "/home/user/my-project" [ref=e124]
+              - button "Browse" [active] [ref=e125]
+          - generic [ref=e126]:
+            - generic [ref=e127]: Name (optional)
+            - textbox "My Project" [ref=e128]
+          - generic [ref=e129]:
+            - button "Cancel" [ref=e130]
+            - button "Add Project" [ref=e131]
+      - generic [ref=e134]:
+        - generic [ref=e135]:
+          - generic [ref=e136]: Select folder
+          - button "×" [ref=e137]
+        - generic [ref=e138]:
+          - button "← Up" [ref=e139]
+          - generic [ref=e140]: C:\Users\vince
+        - generic [ref=e141]:
+          - button ".ai" [ref=e142]:
+            - img [ref=e143]
+            - text: .ai
+          - button ".bun" [ref=e145]:
+            - img [ref=e146]
+            - text: .bun
+          - button ".cache" [ref=e148]:
+            - img [ref=e149]
+            - text: .cache
+          - button ".claude" [ref=e151]:
+            - img [ref=e152]
+            - text: .claude
+          - button ".claude-profiles" [ref=e154]:
+            - img [ref=e155]
+            - text: .claude-profiles
+          - button ".codex" [ref=e157]:
+            - img [ref=e158]
+            - text: .codex
+          - button ".config" [ref=e160]:
+            - img [ref=e161]
+            - text: .config
+          - button ".dotnet" [ref=e163]:
+            - img [ref=e164]
+            - text: .dotnet
+          - button ".gemini" [ref=e166]:
+            - img [ref=e167]
+            - text: .gemini
+          - button ".gnupg" [ref=e169]:
+            - img [ref=e170]
+            - text: .gnupg
+          - button ".ivy2" [ref=e172]:
+            - img [ref=e173]
+            - text: .ivy2
+          - button ".jdks" [ref=e175]:
+            - img [ref=e176]
+            - text: .jdks
+          - button ".kiro" [ref=e178]:
+            - img [ref=e179]
+            - text: .kiro
+          - button ".local" [ref=e181]:
+            - img [ref=e182]
+            - text: .local
+          - button ".m2" [ref=e184]:
+            - img [ref=e185]
+            - text: .m2
+          - button ".matplotlib" [ref=e187]:
+            - img [ref=e188]
+            - text: .matplotlib
+          - button ".ms-ad" [ref=e190]:
+            - img [ref=e191]
+            - text: .ms-ad
+          - button ".ollama" [ref=e193]:
+            - img [ref=e194]
+            - text: .ollama
+          - button ".openjfx" [ref=e196]:
+            - img [ref=e197]
+            - text: .openjfx
+          - button ".Origin" [ref=e199]:
+            - img [ref=e200]
+            - text: .Origin
+          - button ".pencil" [ref=e202]:
+            - img [ref=e203]
+            - text: .pencil
+          - button ".qmc2" [ref=e205]:
+            - img [ref=e206]
+            - text: .qmc2
+          - button ".QtWebEngineProcess" [ref=e208]:
+            - img [ref=e209]
+            - text: .QtWebEngineProcess
+          - button ".rssowl2" [ref=e211]:
+            - img [ref=e212]
+            - text: .rssowl2
+          - button ".sbt" [ref=e214]:
+            - img [ref=e215]
+            - text: .sbt
+          - button ".ssh" [ref=e217]:
+            - img [ref=e218]
+            - text: .ssh
+          - button ".teamai" [ref=e220]:
+            - img [ref=e221]
+            - text: .teamai
+          - button ".thumbnails" [ref=e223]:
+            - img [ref=e224]
+            - text: .thumbnails
+          - button ".VirtualBox" [ref=e226]:
+            - img [ref=e227]
+            - text: .VirtualBox
+          - button ".weasis" [ref=e229]:
+            - img [ref=e230]
+            - text: .weasis
+          - button "3D Objects" [ref=e232]:
+            - img [ref=e233]
+            - text: 3D Objects
+          - button "ansel" [ref=e235]:
+            - img [ref=e236]
+            - text: ansel
+          - button "AppData" [ref=e238]:
+            - img [ref=e239]
+            - text: AppData
+          - button "Calibre Library" [ref=e241]:
+            - img [ref=e242]
+            - text: Calibre Library
+          - button "Contacts" [ref=e244]:
+            - img [ref=e245]
+            - text: Contacts
+          - button "Desktop" [ref=e247]:
+            - img [ref=e248]
+            - text: Desktop
+          - button "Documents" [ref=e250]:
+            - img [ref=e251]
+            - text: Documents
+          - button "Downloads" [ref=e253]:
+            - img [ref=e254]
+            - text: Downloads
+          - button "Dropbox" [ref=e256]:
+            - img [ref=e257]
+            - text: Dropbox
+          - button "Favorites" [ref=e259]:
+            - img [ref=e260]
+            - text: Favorites
+          - button "IdeaProjects" [ref=e262]:
+            - img [ref=e263]
+            - text: IdeaProjects
+          - button "IdeaSnapshots" [ref=e265]:
+            - img [ref=e266]
+            - text: IdeaSnapshots
+          - button "IntelGraphicsProfiles" [ref=e268]:
+            - img [ref=e269]
+            - text: IntelGraphicsProfiles
+          - button "Links" [ref=e271]:
+            - img [ref=e272]
+            - text: Links
+          - button "Muse Hub" [ref=e274]:
+            - img [ref=e275]
+            - text: Muse Hub
+          - button "Music" [ref=e277]:
+            - img [ref=e278]
+            - text: Music
+          - button "OneDrive" [ref=e280]:
+            - img [ref=e281]
+            - text: OneDrive
+          - button "Saved Games" [ref=e283]:
+            - img [ref=e284]
+            - text: Saved Games
+          - button "Searches" [ref=e286]:
+            - img [ref=e287]
+            - text: Searches
+          - button "Tracing" [ref=e289]:
+            - img [ref=e290]
+            - text: Tracing
+          - button "Videos" [ref=e292]:
+            - img [ref=e293]
+            - text: Videos
+          - button "VirtualBox VMs" [ref=e295]:
+            - img [ref=e296]
+            - text: VirtualBox VMs
+        - generic [ref=e298]:
+          - button "Cancel" [ref=e299]
+          - button "Select this folder" [ref=e300]
+    - navigation [ref=e12]:
+      - link "Kanban" [ref=e13] [cursor=pointer]:
+        - /url: /
+      - link "Insights" [ref=e14] [cursor=pointer]:
+        - /url: /insights
+      - link "Roadmap" [ref=e15] [cursor=pointer]:
+        - /url: /roadmap
+      - link "Settings" [ref=e16] [cursor=pointer]:
+        - /url: /settings
+  - main [ref=e17]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - heading "Board" [level=1] [ref=e32]
+        - button "+ New Task" [ref=e33]
+      - generic [ref=e35]:
+        - generic [ref=e36]:
+          - generic [ref=e37]:
+            - generic [ref=e38]: Backlog
+            - generic [ref=e39]: "1"
+          - generic [ref=e111] [cursor=pointer]:
+            - paragraph [ref=e112]: Add user authentication
+            - generic [ref=e113]:
+              - generic [ref=e114]: backlog
+              - generic [ref=e115]: just now
+        - generic [ref=e42]:
+          - generic [ref=e43]: Spec
+          - generic [ref=e44]: "0"
+        - generic [ref=e47]:
+          - generic [ref=e48]: Planning
+          - generic [ref=e49]: "0"
+        - generic [ref=e52]:
+          - generic [ref=e53]: In Progress
+          - generic [ref=e54]: "0"
+        - generic [ref=e57]:
+          - generic [ref=e58]: QA
+          - generic [ref=e59]: "0"
+        - generic [ref=e62]:
+          - generic [ref=e63]: Review
+          - generic [ref=e64]: "0"
+        - generic [ref=e67]:
+          - generic [ref=e68]: Merging
+          - generic [ref=e69]: "0"
+        - generic [ref=e72]:
+          - generic [ref=e73]: Failed
+          - generic [ref=e74]: "0"
+        - generic [ref=e77]:
+          - generic [ref=e78]: Done
+          - generic [ref=e79]: "0"
+  - button "Open Next.js Dev Tools" [ref=e25] [cursor=pointer]:
+    - img [ref=e26]
+  - alert [ref=e29]

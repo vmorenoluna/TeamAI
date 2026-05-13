@@ -1,0 +1,34 @@
+{
+  "subtasks": [
+    {
+      "id": "1",
+      "title": "Add search state and input UI to KanbanBoard",
+      "description": "Add searchQuery state, a search input with magnifying glass icon and clear button above the board columns, and wire up client-side filtering against task.title and task.description.",
+      "files": ["src/components/kanban-board.tsx"]
+    },
+    {
+      "id": "2",
+      "title": "Add phase filter dropdown",
+      "description": "Add a multi-select dropdown to filter tasks by phase. Show a badge with active filter count. Filter stacks with search.",
+      "files": ["src/components/kanban-board.tsx"]
+    },
+    {
+      "id": "3",
+      "title": "Add source filter dropdown",
+      "description": "Add a dropdown to filter by task source (ideation, competitor-analysis, or all). Only show when tasks have source metadata.",
+      "files": ["src/components/kanban-board.tsx"]
+    },
+    {
+      "id": "4",
+      "title": "Add sort dropdown",
+      "description": "Add a sort dropdown with options: Newest first (default), Oldest first, A-Z, Z-A. Apply sorting after search/filter.",
+      "files": ["src/components/kanban-board.tsx"]
+    },
+    {
+      "id": "5",
+      "title": "Style and polish",
+      "description": "Match existing dark theme. Add proper icons, hover states, transitions. Ensure responsive layout of the filter bar.",
+      "files": ["src/components/kanban-board.tsx"]
+    }
+  ]
+}

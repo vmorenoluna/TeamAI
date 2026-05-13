@@ -1,0 +1,50 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]: TeamAI
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: Projects
+        - button "+ Add" [ref=e8]
+      - list [ref=e9]:
+        - listitem [ref=e10]:
+          - button "Formell" [ref=e11]
+          - button "×" [ref=e12]
+        - listitem [ref=e13]:
+          - button "TeamAI" [ref=e14]
+          - button "×" [ref=e15]
+    - navigation [ref=e16]:
+      - link "Kanban" [ref=e17] [cursor=pointer]:
+        - /url: /
+      - link "Insights" [ref=e18] [cursor=pointer]:
+        - /url: /insights
+      - link "Roadmap" [ref=e19] [cursor=pointer]:
+        - /url: /roadmap
+      - link "Settings" [ref=e20] [cursor=pointer]:
+        - /url: /settings
+  - main [ref=e21]:
+    - generic [ref=e113]:
+      - generic [ref=e114]:
+        - generic [ref=e115]:
+          - generic [ref=e116]:
+            - link "← Board" [ref=e118] [cursor=pointer]:
+              - /url: /
+            - heading "Streaming test" [level=1] [ref=e119]
+            - paragraph [ref=e120]: Streaming test after global fix.
+          - generic [ref=e121]:
+            - button "Run Pipeline" [ref=e122]
+            - generic [ref=e123]: backlog
+        - paragraph [ref=e124]: Created 4/25/2026, 1:15:06 PM
+      - generic [ref=e126]:
+        - generic [ref=e127]:
+          - generic [ref=e128]: Agent Output
+          - generic [ref=e129]: 0 events
+        - generic [ref=e130]:
+          - generic [ref=e133]:
+            - generic:
+              - textbox "Terminal input"
+          - generic [ref=e136]:
+            - generic:
+              - textbox "Terminal input"
+  - button "Open Next.js Dev Tools" [ref=e88] [cursor=pointer]:
+    - img [ref=e89]
+  - alert [ref=e92]

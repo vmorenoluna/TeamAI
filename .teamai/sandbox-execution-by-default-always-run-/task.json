@@ -1,0 +1,10 @@
+{
+  "id": "475c4f99-ba12-45b3-a9b5-08c725bb0f80",
+  "title": "Sandbox execution by default — always run agents in isolated environment",
+  "description": "Container isolation via devcontainer is optional and off by default. Make agent sandboxing the default behavior: auto-create a lightweight Docker container per project (or use the existing devcontainer) and run all agent sessions inside it. This prevents agents from accidentally modifying host files outside the project.",
+  "phase": "done",
+  "source": "competitor-analysis",
+  "competitiveContext": "OpenHands runs all agents in Docker sandboxes by default. Devin has managed sandboxes. TeamAI's current opt-in devcontainer is a weaker security posture.",
+  "createdAt": "2026-05-12T10:18:00.215Z",
+  "updatedAt": "2026-05-12T10:18:00.215Z"
+}

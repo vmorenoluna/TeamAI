@@ -1,0 +1,94 @@
+- generic [ref=e1]:
+  - generic [active]:
+    - generic [ref=e139]:
+      - generic [ref=e140]:
+        - generic [ref=e141]:
+          - navigation [ref=e142]:
+            - button "previous" [disabled] [ref=e143]:
+              - img "previous" [ref=e144]
+            - generic [ref=e146]:
+              - generic [ref=e147]: 1/
+              - text: "1"
+            - button "next" [disabled] [ref=e148]:
+              - img "next" [ref=e149]
+          - img
+        - generic [ref=e151]:
+          - generic [ref=e152]:
+            - img [ref=e153]
+            - generic "Latest available version is detected (16.2.4)." [ref=e155]: Next.js 16.2.4
+            - generic [ref=e156]: Turbopack
+          - img
+      - dialog "Runtime TypeError" [ref=e158]:
+        - generic [ref=e161]:
+          - generic [ref=e162]:
+            - generic [ref=e163]:
+              - generic [ref=e165]: Runtime TypeError
+              - generic [ref=e166]:
+                - button "Copy Error Info" [ref=e167] [cursor=pointer]:
+                  - img [ref=e168]
+                - button "No related documentation found" [disabled] [ref=e170]:
+                  - img [ref=e171]
+                - button "Attach Node.js inspector" [ref=e173] [cursor=pointer]:
+                  - img [ref=e174]
+            - generic [ref=e183]: Cannot read properties of undefined (reading 'type')
+          - generic [ref=e184]:
+            - generic [ref=e185]:
+              - paragraph [ref=e187]:
+                - img [ref=e189]
+                - generic [ref=e192]: src/components/agent-panel.tsx (7:17) @ formatEvent
+                - button "Open in editor" [ref=e193] [cursor=pointer]:
+                  - img [ref=e195]
+              - generic [ref=e198]:
+                - generic [ref=e199]: 5 |
+                - generic [ref=e200]: "6 | function formatEvent(event: any): string | null {"
+                - generic [ref=e201]: "> 7 | switch (event.type) {"
+                - generic [ref=e202]: "| ^"
+                - generic [ref=e203]: "8 | case 'system':"
+                - generic [ref=e204]: "9 | if (event.subtype === 'init') {"
+                - generic [ref=e205]: "10 | return `\\x1b[36m◆ Session started — ${event.model}\\x1b[0m\\r\\n`;"
+            - generic [ref=e206]:
+              - generic [ref=e207]:
+                - paragraph [ref=e208]:
+                  - text: Call Stack
+                  - generic [ref=e209]: "51"
+                - button "Show 48 ignore-listed frame(s)" [ref=e210] [cursor=pointer]:
+                  - text: Show 48 ignore-listed frame(s)
+                  - img [ref=e211]
+              - generic [ref=e213]:
+                - generic [ref=e214]:
+                  - text: formatEvent
+                  - button "Open formatEvent in editor" [ref=e215] [cursor=pointer]:
+                    - img [ref=e216]
+                - text: src/components/agent-panel.tsx (7:17)
+              - generic [ref=e218]:
+                - generic [ref=e219]:
+                  - text: AgentPanel.useEffect
+                  - button "Open AgentPanel.useEffect in editor" [ref=e220] [cursor=pointer]:
+                    - img [ref=e221]
+                - text: src/components/agent-panel.tsx (107:20)
+              - generic [ref=e223]:
+                - generic [ref=e224]:
+                  - text: TaskPage
+                  - button "Open TaskPage in editor" [ref=e225] [cursor=pointer]:
+                    - img [ref=e226]
+                - text: src\app\task\[id]\page.tsx (77:9)
+        - generic [ref=e228]: "1"
+        - generic [ref=e229]: "2"
+    - generic [ref=e87] [cursor=pointer]:
+      - button "Open Next.js Dev Tools" [ref=e88]:
+        - img [ref=e89]
+      - generic [ref=e230]:
+        - button "Open issues overlay" [ref=e231]:
+          - generic [ref=e232]:
+            - generic [ref=e233]: "0"
+            - generic [ref=e234]: "1"
+          - generic [ref=e235]: Issue
+        - button "Collapse issues badge" [ref=e236]:
+          - img [ref=e237]
+  - generic [ref=e240]:
+    - img [ref=e241]
+    - heading "This page couldn’t load" [level=1] [ref=e243]
+    - paragraph [ref=e244]: Reload to try again, or go back.
+    - generic [ref=e245]:
+      - button "Reload" [ref=e247] [cursor=pointer]
+      - button "Back" [ref=e248] [cursor=pointer]

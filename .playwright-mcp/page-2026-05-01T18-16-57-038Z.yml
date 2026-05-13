@@ -1,0 +1,174 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: TeamAI
+      - button "←" [ref=e5]
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: Projects
+        - button "+ Add" [ref=e10]
+      - list [ref=e11]:
+        - listitem [ref=e12]:
+          - button "Formell" [ref=e13]
+          - button "×" [ref=e14]
+        - listitem [ref=e15]:
+          - button "TeamAI" [ref=e16]
+          - button "×" [ref=e17]
+    - navigation [ref=e18]:
+      - button "☀ Light mode" [ref=e128]:
+        - generic [ref=e20]: ☀
+        - text: Light mode
+      - link "▦ Kanban" [ref=e21] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e22]: ▦
+        - text: Kanban
+      - link "◎ Insights" [ref=e23] [cursor=pointer]:
+        - /url: /insights
+        - generic [ref=e24]: ◎
+        - text: Insights
+      - link "◈ Ideation" [ref=e25] [cursor=pointer]:
+        - /url: /ideation
+        - generic [ref=e26]: ◈
+        - text: Ideation
+      - link "▶ Terminals" [ref=e27] [cursor=pointer]:
+        - /url: /terminals
+        - generic [ref=e28]: ▶
+        - text: Terminals
+      - link "◉ Roadmap" [ref=e29] [cursor=pointer]:
+        - /url: /roadmap
+        - generic [ref=e30]: ◉
+        - text: Roadmap
+      - link "⚙ Settings" [ref=e31] [cursor=pointer]:
+        - /url: /settings
+        - generic [ref=e32]: ⚙
+        - text: Settings
+  - main [ref=e33]:
+    - generic [ref=e34]:
+      - generic [ref=e35]:
+        - heading "Board" [level=1] [ref=e36]
+        - button "+ New Task" [ref=e37]
+      - generic [ref=e38]:
+        - generic [ref=e41]:
+          - generic [ref=e43]:
+            - generic [ref=e44]: Backlog
+            - generic [ref=e45]: "0"
+          - generic [ref=e54]:
+            - generic [ref=e55]:
+              - generic [ref=e56]: Spec
+              - generic [ref=e57]: "1"
+            - generic [ref=e184] [cursor=pointer]:
+              - button "▶" [ref=e185]
+              - paragraph [ref=e186]: Implement Roadmap UI
+              - paragraph [ref=e187]:
+                - text: "The roadmap page renders streaming agent output for the `/roadmap` command and a…"
+                - button "more" [ref=e188]
+              - generic [ref=e189]:
+                - generic [ref=e190]: spec
+                - generic [ref=e191]: 12m ago
+          - generic [ref=e60]:
+            - generic [ref=e61]: Planning
+            - generic [ref=e62]: "0"
+          - generic [ref=e65]:
+            - generic [ref=e66]: In Progress
+            - generic [ref=e67]: "0"
+          - generic [ref=e70]:
+            - generic [ref=e71]: QA
+            - generic [ref=e72]: "0"
+          - generic [ref=e74]:
+            - generic [ref=e75]:
+              - generic [ref=e76]: Review
+              - generic [ref=e77]: "1"
+            - generic [ref=e79] [cursor=pointer]:
+              - paragraph [ref=e80]: Stream fix test
+              - paragraph [ref=e81]: Verifying streaming events render in xterm after global fix.
+              - generic [ref=e82]:
+                - generic [ref=e83]: awaiting-review
+                - generic [ref=e84]: 6d ago
+          - generic [ref=e86]:
+            - generic [ref=e87]: Merging
+            - generic [ref=e88]: "0"
+          - generic [ref=e90]:
+            - generic [ref=e91]:
+              - generic [ref=e92]: Failed
+              - generic [ref=e93]: "5"
+            - generic [ref=e94]:
+              - generic [ref=e95] [cursor=pointer]:
+                - paragraph [ref=e96]: Container build test
+                - generic [ref=e97]:
+                  - generic [ref=e98]: failed
+                  - generic [ref=e99]: 21h ago
+              - generic [ref=e100] [cursor=pointer]:
+                - paragraph [ref=e101]: Container isolation test
+                - generic [ref=e102]:
+                  - generic [ref=e103]: failed
+                  - generic [ref=e104]: 1d ago
+              - generic [ref=e105] [cursor=pointer]:
+                - paragraph [ref=e106]: Streaming test
+                - paragraph [ref=e107]: Streaming test after global fix.
+                - generic [ref=e108]:
+                  - generic [ref=e109]: failed
+                  - generic [ref=e110]: 6d ago
+              - generic [ref=e111] [cursor=pointer]:
+                - paragraph [ref=e112]: Say hello
+                - paragraph [ref=e113]: Say hello and tell me a fun fact.
+                - generic [ref=e114]:
+                  - generic [ref=e115]: failed
+                  - generic [ref=e116]: 6d ago
+              - generic [ref=e117] [cursor=pointer]:
+                - paragraph [ref=e118]: Test streaming output
+                - paragraph [ref=e119]: Testing the agent panel and xterm.js streaming.
+                - generic [ref=e120]:
+                  - generic [ref=e121]: failed
+                  - generic [ref=e122]: 6d ago
+          - generic [ref=e124]:
+            - generic [ref=e125]: Done
+            - generic [ref=e126]: "0"
+        - generic [ref=e149]:
+          - button "×" [ref=e151]
+          - generic [ref=e153]:
+            - generic [ref=e154]:
+              - generic [ref=e155]:
+                - generic [ref=e156]:
+                  - link "← Board" [ref=e157] [cursor=pointer]:
+                    - /url: /
+                  - heading "Implement Roadmap UI" [level=1] [ref=e158]
+                  - paragraph [ref=e159]: "The roadmap page renders streaming agent output for the `/roadmap` command and a phased view of results. Changelog generates release notes from git history. The page should be equivalent to the roadmap page Aperant has. More details about how the roadmap works in the teamai-implementation-plan.md file. Update the UI doc teamai-ui-spec.md at the end."
+                - generic [ref=e160]:
+                  - button "Run Pipeline" [ref=e161]
+                  - generic [ref=e162]: backlog
+                  - button "🗑" [ref=e163]
+              - generic [ref=e164]:
+                - paragraph [ref=e165]: Created 5/1/2026, 7:04:52 PM · Updated 5/1/2026, 7:04:52 PM
+                - generic [ref=e166]:
+                  - generic [ref=e167]: "Agent:"
+                  - combobox [ref=e168]:
+                    - option "Auto (pipeline default)" [selected]
+                    - option "Product Analyst"
+                    - option "Senior Developer"
+                    - option "Git Integration Specialist"
+                    - option "Implementation Planner"
+                    - option "Bug Fix Specialist"
+                    - option "QA Reviewer"
+              - generic [ref=e169]:
+                - button "Overview" [ref=e170]
+                - button "Terminal" [ref=e171]
+                - button "Spec" [ref=e172]
+                - button "Plan" [ref=e173]
+                - button "QA" [ref=e174]
+            - generic [ref=e177]:
+              - generic [ref=e178]:
+                - button "+ Depends on" [ref=e180]
+                - button "+ Blocks" [ref=e182]
+              - paragraph [ref=e183]: No dependencies set.
+  - generic [ref=e133] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e134]:
+      - img [ref=e135]
+    - generic [ref=e138]:
+      - button "Open issues overlay" [ref=e139]:
+        - generic [ref=e140]:
+          - generic [ref=e141]: "0"
+          - generic [ref=e142]: "1"
+        - generic [ref=e143]: Issue
+      - button "Collapse issues badge" [ref=e144]:
+        - img [ref=e145]
+  - alert [ref=e147]

@@ -1,0 +1,8 @@
+{
+  "steps": [
+    {
+      "description": "Add activeTasks Set to Orchestrator, acquire lock in runTask(), release in finally block and cancelPipeline()",
+      "files": ["src/lib/orchestrator.ts"]
+    }
+  ]
+}

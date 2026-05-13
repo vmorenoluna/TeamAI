@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { slugify } from './utils';
 
 export interface Task {
   id: string;
@@ -10,12 +11,10 @@ export interface Task {
   dependencies?: string[];     // IDs of tasks this task depends on
   roleOverride?: string;       // role filename (e.g. 'coder.md') for implement phase
   rateLimitedUntil?: string;   // ISO timestamp — set when pipeline is paused by API rate limit
+  source?: string;             // 'ideation' | 'competitor-analysis' — source of roadmap item
+  competitiveContext?: string; // competitor context from roadmap item
   createdAt: string;
   updatedAt: string;
-}
-
-function slugify(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
 }
 
 /**
@@ -30,7 +29,7 @@ export class TaskStore {
     mkdirSync(this.specsDir, { recursive: true });
   }
 
-  create(id: string, title: string, description: string): Task {
+  create(id: string, title: string, description: string, source?: string, competitiveContext?: string): Task {
     const slug = slugify(title);
     const dir = join(this.specsDir, slug);
     mkdirSync(dir, { recursive: true });
@@ -40,6 +39,8 @@ export class TaskStore {
       title,
       description,
       phase: 'backlog',
+      source,
+      competitiveContext,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

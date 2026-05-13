@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -14,21 +14,24 @@ export interface InterruptedTask {
   projectName: string;
 }
 
+export interface OrphanedWorktree {
+  path: string;
+  projectPath: string;
+  projectName: string;
+}
+
+export interface StartupRecoveryReport {
+  interruptedTasks: InterruptedTask[];
+  staleSessions: number;
+  orphanedWorktrees: OrphanedWorktree[];
+}
+
 /**
  * Scan all registered projects for tasks that were interrupted mid-pipeline.
  * Called once on server startup.
  */
 export function findInterruptedTasks(): InterruptedTask[] {
-  const projectsFile = join(homedir(), '.teamai', 'projects.json');
-  if (!existsSync(projectsFile)) return [];
-
-  let projects: { name: string; path: string }[] = [];
-  try {
-    projects = JSON.parse(readFileSync(projectsFile, 'utf-8'));
-  } catch {
-    return [];
-  }
-
+  const projects = _loadProjects();
   const interrupted: InterruptedTask[] = [];
 
   for (const project of projects) {
@@ -63,4 +66,104 @@ export function findInterruptedTasks(): InterruptedTask[] {
   }
 
   return interrupted;
+}
+
+/**
+ * Find git worktrees in a project that are no longer associated with an active
+ * task (i.e. the task directory under .teamai/ is missing or the task is done).
+ */
+export function findOrphanedWorktrees(): OrphanedWorktree[] {
+  const projects = _loadProjects();
+  const orphaned: OrphanedWorktree[] = [];
+
+  for (const project of projects) {
+    const worktreesDir = join(project.path, '.teamai', 'worktrees');
+    if (!existsSync(worktreesDir)) continue;
+
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(worktreesDir);
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const wtPath = join(worktreesDir, entry);
+
+      // Skip files, only consider directories
+      try {
+        if (!statSync(wtPath).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+
+      // Extract task ID from worktree directory name (format: task-<uuid>)
+      const taskIdMatch = entry.match(/^task-(.+)$/);
+      if (!taskIdMatch) continue;
+      const taskId = taskIdMatch[1];
+
+      // Look up the task in the teamai directory
+      const teamaiDir = join(project.path, '.teamai');
+      let taskFound = false;
+      let taskActive = false;
+
+      try {
+        for (const taskDir of readdirSync(teamaiDir)) {
+          const taskFile = join(teamaiDir, taskDir, 'task.json');
+          if (!existsSync(taskFile)) continue;
+          try {
+            const task = JSON.parse(readFileSync(taskFile, 'utf-8'));
+            if (task.id === taskId) {
+              taskFound = true;
+              taskActive = IN_PROGRESS_PHASES.has(task.phase);
+              break;
+            }
+          } catch {
+            // skip
+          }
+        }
+      } catch {
+        // skip
+      }
+
+      // Orphaned if task not found OR task is no longer active
+      if (!taskFound || !taskActive) {
+        orphaned.push({
+          path: wtPath,
+          projectPath: project.path,
+          projectName: project.name,
+        });
+      }
+    }
+  }
+
+  return orphaned;
+}
+
+/**
+ * Run full startup recovery scan across all projects.
+ * Returns a unified report for logging and UI display.
+ * Call this once on server startup.
+ */
+export function startupCleanup(staleSessionCount: number): StartupRecoveryReport {
+  const interruptedTasks = findInterruptedTasks();
+  const orphanedWorktrees = findOrphanedWorktrees();
+
+  return {
+    interruptedTasks,
+    staleSessions: staleSessionCount,
+    orphanedWorktrees,
+  };
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function _loadProjects(): { name: string; path: string }[] {
+  const projectsFile = join(homedir(), '.teamai', 'projects.json');
+  if (!existsSync(projectsFile)) return [];
+  try {
+    return JSON.parse(readFileSync(projectsFile, 'utf-8'));
+  } catch {
+    return [];
+  }
 }

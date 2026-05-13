@@ -1,0 +1,167 @@
+[     468ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[     809ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[     847ms] [ERROR] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+%s%s https://react.dev/link/hydration-mismatch 
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/" notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head>
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.tsx">
+                      <SegmentTrieNode>
+                      <link>
+                      <script>
+                      <script>
+                      <script>
+                      <RootLayout>
+                        <html
+                          lang="en"
++                         className="geist_a71539c9-module__T19VSG__variable geist_mono_8d43a2aa-module__8Li5zG__varia..."
+-                         className="geist_a71539c9-module__T19VSG__variable geist_mono_8d43a2aa-module__8Li5zG__varia..."
+                        >
+                  ...
+ @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:3272
+[   26877ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[   26976ms] [LOG] [Fast Refresh] done in 207ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[   27176ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[   27193ms] [LOG] [Fast Refresh] done in 118ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  124258ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  124293ms] [LOG] [Fast Refresh] done in 135ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  219600ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  219895ms] [LOG] [Fast Refresh] done in 411ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  462832ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  462842ms] [LOG] [Fast Refresh] done in 112ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  463757ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  463825ms] [LOG] [Fast Refresh] done in 174ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  464512ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  464546ms] [LOG] [Fast Refresh] done in 135ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  469933ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  469997ms] [LOG] [Fast Refresh] done in 166ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  470112ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[  470183ms] [LOG] [Fast Refresh] done in 178ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[ 3526962ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[ 3527385ms] [LOG] [Fast Refresh] done in 527ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[18375329ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[18375533ms] [LOG] [Fast Refresh] done in 307ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[18377060ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[18377480ms] [LOG] [Fast Refresh] done in 524ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19491755ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19492052ms] [LOG] [Fast Refresh] done in 408ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19507770ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19511280ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=Rns63hmu5o35AZB5VGNpk' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[19514631ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=Rns63hmu5o35AZB5VGNpk' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[19517984ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=Rns63hmu5o35AZB5VGNpk' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[19521329ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=Rns63hmu5o35AZB5VGNpk' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[19524684ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=Rns63hmu5o35AZB5VGNpk' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[19531407ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=Rns63hmu5o35AZB5VGNpk' failed: Error during WebSocket handshake: net::ERR_CONNECTION_RESET @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[19538774ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=Rns63hmu5o35AZB5VGNpk' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[19607774ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=Rns63hmu5o35AZB5VGNpk' failed: Error during WebSocket handshake: net::ERR_CONNECTION_RESET @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[19615159ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=Rns63hmu5o35AZB5VGNpk' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[19623999ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=Rns63hmu5o35AZB5VGNpk' failed: Error during WebSocket handshake: net::ERR_CONNECTION_RESET @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[19631362ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=Rns63hmu5o35AZB5VGNpk' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[19638738ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=Rns63hmu5o35AZB5VGNpk' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[19641812ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19642171ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19642311ms] [ERROR] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+%s%s https://react.dev/link/hydration-mismatch 
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/" notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head>
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.tsx">
+                      <SegmentTrieNode>
+                      <link>
+                      <script>
+                      <script>
+                      <script>
+                      <RootLayout>
+                        <html
+                          lang="en"
++                         className="geist_a71539c9-module__T19VSG__variable geist_mono_8d43a2aa-module__8Li5zG__varia..."
+-                         className="geist_a71539c9-module__T19VSG__variable geist_mono_8d43a2aa-module__8Li5zG__varia..."
+                        >
+                  ...
+ @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:3272
+[19642326ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19642343ms] [LOG] [Fast Refresh] done in 131ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19656949ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19657608ms] [LOG] [Fast Refresh] done in 725ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19669832ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19671273ms] [LOG] [Fast Refresh] done in 1525ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19671385ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19672406ms] [LOG] [Fast Refresh] done in 1126ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19681811ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19685681ms] [LOG] [Fast Refresh] done in 3972ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19685795ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19686636ms] [LOG] [Fast Refresh] done in 946ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19686781ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19686824ms] [LOG] [Fast Refresh] done in 145ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19686960ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19686998ms] [LOG] [Fast Refresh] done in 143ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19697164ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19702821ms] [LOG] [Fast Refresh] done in 5747ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19702935ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19703893ms] [LOG] [Fast Refresh] done in 1059ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19704118ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19704205ms] [LOG] [Fast Refresh] done in 188ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19704350ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19704426ms] [LOG] [Fast Refresh] done in 181ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19704612ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19704688ms] [LOG] [Fast Refresh] done in 178ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19704826ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19704870ms] [LOG] [Fast Refresh] done in 150ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19944765ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19948830ms] [LOG] [Fast Refresh] done in 4158ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19948951ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19950551ms] [LOG] [Fast Refresh] done in 1701ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19950708ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19950815ms] [LOG] [Fast Refresh] done in 210ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19950993ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19951104ms] [LOG] [Fast Refresh] done in 216ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19959241ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19962811ms] [LOG] [Fast Refresh] done in 3676ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19962924ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19963999ms] [LOG] [Fast Refresh] done in 1178ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19964176ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19964222ms] [LOG] [Fast Refresh] done in 150ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19964359ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[19964409ms] [LOG] [Fast Refresh] done in 155ms @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[20004808ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_0fs.020._.js:2431
+[20008252ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=SE8eMEres5FIMjGCFllQt' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[20011635ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=SE8eMEres5FIMjGCFllQt' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[20015011ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=SE8eMEres5FIMjGCFllQt' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[20018382ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=SE8eMEres5FIMjGCFllQt' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299
+[20021774ms] [ERROR] WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=SE8eMEres5FIMjGCFllQt' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3000/_next/static/chunks/0.i0_next_dist_client_0djagrb._.js:13299

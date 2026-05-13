@@ -1,10 +1,25 @@
-import { execSync, execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, appendFileSync, rmSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'fs';
 import path from 'path';
 import { processManager, type AgentSession } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
 import { TaskStore } from './task-store';
 import { resolveProvider, providerToSessionOpts } from './providers';
+import { slugify } from './utils';
+
+interface PlanSubtask {
+  id: number;
+  title: string;
+  description: string;
+  files: string[];
+  acceptance_criteria: string[];
+  parallel_group?: string;
+}
+
+interface RateLimitInfo {
+  status: string;
+  resetsAt?: number;
+}
 
 class RateLimitError extends Error {
   constructor(public resetsAt: number) {
@@ -41,10 +56,16 @@ interface TaskPipeline {
 
 export class Orchestrator {
   private pipelines: Map<string, TaskPipeline> = new Map();
+  private activeTasks: Set<string> = new Set();
   private taskStore: TaskStore;
 
   constructor(private projectRoot: string) {
     this.taskStore = new TaskStore(projectRoot);
+  }
+
+  /** Whether a pipeline is currently executing for the given task. */
+  isTaskActive(taskId: string): boolean {
+    return this.activeTasks.has(taskId);
   }
 
   private getPipelineConfig(): { phases: string[]; maxQaAttempts: number; parallelSubtasks: boolean } {
@@ -63,6 +84,7 @@ export class Orchestrator {
       processManager.killSession(pipeline.sessionId);
     }
     this.pipelines.delete(taskId);
+    this.activeTasks.delete(taskId);
   }
 
   // Move a task to a target phase, smart-detecting which earlier phase to start from
@@ -108,7 +130,7 @@ export class Orchestrator {
       // Merge/PR requires the worktree and branch to exist. If missing,
       // restart from the earliest phase needed to recreate them.
       const worktreeBase = this.getWorktreeBase();
-      const worktreePath = path.join(worktreeBase, this.slugify(task.description));
+      const worktreePath = path.join(worktreeBase, slugify(task.description));
       const worktreeExists = existsSync(worktreePath);
       const branchExists = !!task.branch;
 
@@ -130,11 +152,17 @@ export class Orchestrator {
   }
 
   async runTask(taskId: string, description: string, startPhase?: PipelinePhase): Promise<void> {
+    // Prevent concurrent runs of the same task
+    if (this.activeTasks.has(taskId)) {
+      throw new Error(`Task ${taskId} is already running — wait for the current pipeline to finish.`);
+    }
+
     // Cancel any currently running pipeline for this task before starting a new one
     this.cancelPipeline(taskId);
+    this.activeTasks.add(taskId);
 
     const config = this.getPipelineConfig();
-    const slug = this.slugify(description);
+    const slug = slugify(description);
     const branch = `feat/${slug}`;
     const worktreePath = path.join(this.getWorktreeBase(), slug);
     const specPath = this.taskStore.getDirById(taskId);
@@ -166,6 +194,11 @@ export class Orchestrator {
         console.error(`[orchestrator] Task ${taskId} failed:`, e);
         this.advancePhase(pipeline, 'failed');
       }
+    } finally {
+      // Release lock after pipeline completes or fails.
+      // For rate-limited tasks the lock is re-acquired in handleRateLimit.
+      this.pipelines.delete(taskId);
+      this.activeTasks.delete(taskId);
     }
   }
 
@@ -244,7 +277,7 @@ export class Orchestrator {
     const task = this.taskStore.getById(pipeline.taskId);
     const coderRole = (task?.roleOverride ?? 'coder.md').replace('.md', '') as AgentSession['role'];
 
-    const groups = new Map<string, any[]>();
+    const groups = new Map<string, PlanSubtask[]>();
     for (const subtask of plan.subtasks) {
       const group = subtask.parallel_group || String(subtask.id);
       if (!groups.has(group)) groups.set(group, []);
@@ -254,7 +287,7 @@ export class Orchestrator {
     const logFile = path.join(pipeline.specPath, 'output.log');
     for (const [, subtasks] of groups) {
       await Promise.allSettled(
-        subtasks.map(async (subtask: any) => {
+        subtasks.map(async (subtask: PlanSubtask) => {
           this._phaseHeader(logFile, `implement — subtask ${subtask.id}: ${subtask.title}`);
           const sessionId = await processManager.createSession(this.sessionOpts(coderRole, pipeline.worktreePath, pipeline.taskId, logFile));
           const prompt =
@@ -330,16 +363,15 @@ export class Orchestrator {
     pipeline.sessionId = sessionId;
 
     const specContent = readFileSync(path.join(pipeline.specPath, 'spec.md'), 'utf-8');
-    processManager.sendMessage(
-      sessionId,
-      `Create a Pull Request for branch "${pipeline.branch}" targeting the main branch.\n\n` +
-      `Use the GitHub MCP server's create_pull_request tool.\n\n` +
-      `Title: ${pipeline.description}\n\n` +
-      `Body: Generate a clear PR description from this spec:\n\n${specContent}\n\n` +
-      `Include a summary of changes, testing done (QA passed), and any notes for reviewers.`
-    );
+    const platform = detectGitPlatform(this.projectRoot);
+    const platformMsg = buildPlatformPrompt(platform, pipeline.branch, pipeline.description, specContent, this.projectRoot);
+    processManager.sendMessage(sessionId, platformMsg);
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
+
+    // Platform info stored for future UI display (Task interface to be extended)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.taskStore as any).update(pipeline.taskId, { platform: platform !== 'unknown' ? platform : undefined });
 
     this.advancePhase(pipeline, 'done');
   }
@@ -354,12 +386,12 @@ export class Orchestrator {
     return new Promise((resolve, reject) => {
       let rateLimitResetsAt: number | null = null;
 
-      const onEvent = ({ sessionId: sid, event }: any) => {
+      const onEvent = ({ sessionId: sid, event }: { sessionId: string; event: Record<string, unknown> }) => {
         if (sid !== sessionId) return;
 
         // Capture rate-limit reset time if the limit is hit
         if (event.type === 'rate_limit_event' && event.rate_limit_info) {
-          const info = event.rate_limit_info;
+          const info = event.rate_limit_info as RateLimitInfo;
           if (info.status !== 'allowed' && info.resetsAt) {
             rateLimitResetsAt = info.resetsAt as number;
           }
@@ -375,7 +407,7 @@ export class Orchestrator {
           }
         }
       };
-      const onExit = ({ sessionId: sid, code }: any) => {
+      const onExit = ({ sessionId: sid, code }: { sessionId: string; code: number | null }) => {
         if (sid !== sessionId) return;
         processManager.off('event', onEvent);
         processManager.off('exit', onExit);
@@ -395,6 +427,11 @@ export class Orchestrator {
 
     this.taskStore.update(pipeline.taskId, { rateLimitedUntil: resetsAtISO });
 
+    // Re-acquire the lock that was released in runTask's finally block
+    // so no other caller can start this task while we wait for the rate limit.
+    this.activeTasks.add(pipeline.taskId);
+    this.pipelines.set(pipeline.taskId, pipeline);
+
     // Broadcast so the UI can show the countdown
     processManager.emit('phase-change', {
       taskId: pipeline.taskId,
@@ -408,17 +445,26 @@ export class Orchestrator {
     setTimeout(async () => {
       console.log(`[rate-limit] Resuming task ${pipeline.taskId}`);
       this.taskStore.update(pipeline.taskId, { rateLimitedUntil: undefined });
+      let wasRateLimited = false;
       try {
         await this.executePhase(pipeline);
       } catch (e) {
-        if (e instanceof RateLimitError) this.handleRateLimit(pipeline, e.resetsAt);
-        else console.error(`[orchestrator] Task ${pipeline.taskId} failed after rate-limit retry:`, e);
+        if (e instanceof RateLimitError) {
+          wasRateLimited = true;
+          this.handleRateLimit(pipeline, e.resetsAt);
+        } else {
+          console.error(`[orchestrator] Task ${pipeline.taskId} failed after rate-limit retry:`, e);
+          this.advancePhase(pipeline, 'failed');
+        }
+      } finally {
+        // Clean up after rate-limit retry completes or fails permanently.
+        // When rate-limited again, handleRateLimit re-acquires the lock.
+        if (!wasRateLimited) {
+          this.pipelines.delete(pipeline.taskId);
+          this.activeTasks.delete(pipeline.taskId);
+        }
       }
     }, waitMs);
-  }
-
-  private slugify(text: string): string {
-    return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
   }
 
   // Run a git command either directly on the host or via docker exec inside the container.
@@ -470,9 +516,70 @@ export class Orchestrator {
   }
 }
 
+// Detect the Git hosting platform from the remote origin URL
+function detectGitPlatform(projectRoot: string): 'github' | 'gitlab' | 'bitbucket' | 'unknown' {
+  try {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      cwd: projectRoot, encoding: 'utf-8', timeout: 5000,
+    }).trim().toLowerCase();
+    if (url.includes('github.com') || url.includes('github.')) return 'github';
+    if (url.includes('gitlab.com') || url.includes('gitlab.')) return 'gitlab';
+    if (url.includes('bitbucket.org') || url.includes('bitbucket.')) return 'bitbucket';
+  } catch { /* no remote or not a git repo */ }
+  return 'unknown';
+}
+
+// Detect the default branch name from the remote
+function detectDefaultBranch(projectRoot: string): string {
+  try {
+    const ref = execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+      cwd: projectRoot, encoding: 'utf-8', timeout: 3000,
+    }).trim();
+    // Extract branch name from refs/remotes/origin/main → main
+    const parts = ref.split('/');
+    return parts[parts.length - 1] || 'main';
+  } catch {
+    return 'main';
+  }
+}
+
+// Build a platform-specific agent prompt for PR/MR creation
+function buildPlatformPrompt(
+  platform: 'github' | 'gitlab' | 'bitbucket' | 'unknown',
+  branch: string,
+  description: string,
+  specContent: string,
+  projectRoot: string,
+): string {
+  const defaultBranch = detectDefaultBranch(projectRoot);
+  const base = `Create a Pull Request for branch "${branch}" targeting the ${defaultBranch} branch.\n\n`;
+  const meta = `Title: ${description}\n\n` +
+    `Body: Generate a clear PR description from this spec:\n\n${specContent}\n\n` +
+    `Include a summary of changes, testing done (QA passed), and any notes for reviewers.`;
+
+  switch (platform) {
+    case 'github':
+      return base + `Use the GitHub MCP server's create_pull_request tool.\n\n` + meta;
+    case 'gitlab':
+      return base +
+        `Platform: GitLab. Create a Merge Request (not a PR).\n` +
+        `If the "glab" CLI is available, run: glab mr create --title "..." --description "..."` +
+        ` --target-branch ${defaultBranch} --source-branch ${branch}\n` +
+        `Otherwise, use the GitLab API (project is from remote origin URL).\n\n` + meta;
+    case 'bitbucket':
+      return base +
+        `Platform: Bitbucket Cloud. Create a Pull Request.\n` +
+        `Use the Bitbucket REST API v2 (https://api.bitbucket.org/2.0) if credentials are available.\n` +
+        `The repository slug can be parsed from the remote origin URL.\n\n` + meta;
+    default:
+      return base +
+        `Platform: Unknown (could not auto-detect from remote origin).\n` +
+        `Create a Pull Request using whatever tools are available for this repository.\n\n` + meta;
+  }
+}
+
 // Store on global for the same reason as processManager — shared across module contexts
 declare global {
-  // eslint-disable-next-line no-var
   var __orchestrators: Map<string, Orchestrator> | undefined;
 }
 

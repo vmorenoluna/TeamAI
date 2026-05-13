@@ -32,15 +32,15 @@ function DiffLine({ line }: { line: string }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+    <div className="border border-[#1e293b] rounded-lg overflow-hidden">
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-800 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 bg-[#1a1f2e] text-sm font-medium text-slate-200 hover:bg-[#1e293b] transition-colors"
       >
         {title}
         <span className="text-slate-400">{open ? '▲' : '▼'}</span>
       </button>
-      {open && <div className="p-4 bg-white dark:bg-slate-900">{children}</div>}
+      {open && <div className="p-4 bg-[#11131b]">{children}</div>}
     </div>
   );
 }
@@ -76,21 +76,21 @@ export function ReviewPanel({ taskId, spec, qaReport, diff }: Props) {
           <div className="space-y-2">
             <div className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${
               qaReport.overall === 'PASS'
-                ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-                : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
+                ? 'bg-green-900/40 text-green-300'
+                : 'bg-red-900/40 text-red-300'
             }`}>
               {qaReport.overall}
             </div>
             {qaReport.criteria?.map((c, i) => (
               <div key={i} className="flex items-start gap-2 text-sm">
                 <span className={`shrink-0 font-semibold ${
-                  c.status === 'PASS' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                  c.status === 'PASS' ? 'text-green-400' : 'text-red-400'
                 }`}>
                   {c.status === 'PASS' ? '✓' : '✗'}
                 </span>
                 <div>
-                  <span className="text-slate-700 dark:text-slate-300">{c.name}</span>
-                  {c.notes && <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">{c.notes}</p>}
+                  <span className="text-slate-300">{c.name}</span>
+                  {c.notes && <p className="text-slate-400 text-xs mt-0.5">{c.notes}</p>}
                 </div>
               </div>
             ))}
@@ -101,7 +101,7 @@ export function ReviewPanel({ taskId, spec, qaReport, diff }: Props) {
       {/* Spec */}
       {spec && (
         <Section title="Spec">
-          <pre className="text-xs text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono overflow-auto max-h-64">
+          <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono overflow-auto max-h-64">
             {spec}
           </pre>
         </Section>
@@ -110,7 +110,7 @@ export function ReviewPanel({ taskId, spec, qaReport, diff }: Props) {
       {/* Diff */}
       {diff && (
         <Section title="Git Diff">
-          <pre className="text-xs font-mono overflow-auto max-h-96">
+          <pre className="text-xs font-mono overflow-auto max-h-96 bg-black rounded p-2">
             {diff.split('\n').map((line, i) => (
               <DiffLine key={i} line={line} />
             ))}
@@ -138,7 +138,7 @@ export function ReviewPanel({ taskId, spec, qaReport, diff }: Props) {
           <button
             onClick={() => setShowReject(r => !r)}
             disabled={isPending}
-            className="flex-1 px-4 py-2 text-sm font-medium bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-md transition-colors"
+            className="flex-1 px-4 py-2 text-sm font-medium bg-[#1a1f2e] hover:bg-[#1e293b] text-slate-200 rounded-md transition-colors"
           >
             Reject with Feedback
           </button>
@@ -151,12 +151,12 @@ export function ReviewPanel({ taskId, spec, qaReport, diff }: Props) {
               onChange={e => setFeedback(e.target.value)}
               rows={4}
               placeholder="Describe what needs to change..."
-              className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
+              className="w-full px-3 py-2 text-sm border border-[#334155] rounded-lg bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] resize-none placeholder-slate-500"
             />
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowReject(false)}
-                className="px-3 py-1.5 text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900"
+                className="px-3 py-1.5 text-sm text-slate-400 hover:text-white transition-colors"
               >
                 Cancel
               </button>

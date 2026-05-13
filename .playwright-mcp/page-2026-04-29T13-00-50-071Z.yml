@@ -1,0 +1,151 @@
+- generic [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: TeamAI
+      - button "←" [ref=e5]
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: Projects
+        - button "+ Add" [ref=e10]
+      - list [ref=e11]:
+        - listitem [ref=e12]:
+          - button "Formell" [ref=e13]
+          - button "×" [ref=e14]
+        - listitem [ref=e15]:
+          - button "TeamAI" [ref=e16]
+          - button "×" [ref=e17]
+    - navigation [ref=e18]:
+      - button "☾ Dark mode" [ref=e170]:
+        - generic [ref=e20]: ☾
+        - text: Dark mode
+      - link "▦ Kanban" [ref=e21] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e22]: ▦
+        - text: Kanban
+      - link "◎ Insights" [ref=e23] [cursor=pointer]:
+        - /url: /insights
+        - generic [ref=e24]: ◎
+        - text: Insights
+      - link "◈ Ideation" [ref=e25] [cursor=pointer]:
+        - /url: /ideation
+        - generic [ref=e26]: ◈
+        - text: Ideation
+      - link "▶ Terminals" [ref=e27] [cursor=pointer]:
+        - /url: /terminals
+        - generic [ref=e28]: ▶
+        - text: Terminals
+      - link "◉ Roadmap" [ref=e29] [cursor=pointer]:
+        - /url: /roadmap
+        - generic [ref=e30]: ◉
+        - text: Roadmap
+      - link "⚙ Settings" [ref=e31] [cursor=pointer]:
+        - /url: /settings
+        - generic [ref=e32]: ⚙
+        - text: Settings
+  - main [ref=e33]:
+    - generic [ref=e56]:
+      - generic [ref=e57]:
+        - heading "Board" [level=1] [ref=e58]
+        - button "+ New Task" [ref=e59]
+      - generic [ref=e60]:
+        - generic [ref=e63]:
+          - generic [ref=e65]:
+            - generic [ref=e66]: Backlog
+            - generic [ref=e67]: "0"
+          - generic [ref=e70]:
+            - generic [ref=e71]: Spec
+            - generic [ref=e72]: "0"
+          - generic [ref=e74]:
+            - generic [ref=e75]:
+              - generic [ref=e76]: Planning
+              - generic [ref=e77]: "1"
+            - generic [ref=e79] [cursor=pointer]:
+              - button "▶" [ref=e80]
+              - paragraph [ref=e81]: Streaming test
+              - paragraph [ref=e82]: Streaming test after global fix.
+              - generic [ref=e83]:
+                - generic [ref=e84]: plan
+                - generic [ref=e85]: 4d ago
+          - generic [ref=e86]:
+            - generic [ref=e87]:
+              - generic [ref=e88]: In Progress
+              - generic [ref=e89]: "2"
+            - generic [ref=e90]:
+              - generic [ref=e91] [cursor=pointer]:
+                - button "▶" [ref=e92]
+                - paragraph [ref=e93]: Say hello
+                - paragraph [ref=e94]: Say hello and tell me a fun fact.
+                - generic [ref=e95]:
+                  - generic [ref=e96]: implement
+                  - generic [ref=e97]: 4d ago
+              - generic [ref=e98] [cursor=pointer]:
+                - button "▶" [ref=e99]
+                - paragraph [ref=e100]: Test streaming output
+                - paragraph [ref=e101]: Testing the agent panel and xterm.js streaming.
+                - generic [ref=e102]:
+                  - generic [ref=e103]: implement
+                  - generic [ref=e104]: 4d ago
+          - generic [ref=e106]:
+            - generic [ref=e107]: QA
+            - generic [ref=e108]: "0"
+          - generic [ref=e110]:
+            - generic [ref=e111]:
+              - generic [ref=e112]: Review
+              - generic [ref=e113]: "1"
+            - generic [ref=e115] [cursor=pointer]:
+              - paragraph [ref=e116]: Stream fix test
+              - paragraph [ref=e117]: Verifying streaming events render in xterm after global fix.
+              - generic [ref=e118]:
+                - generic [ref=e119]: awaiting-review
+                - generic [ref=e120]: 4d ago
+          - generic [ref=e122]:
+            - generic [ref=e123]: Merging
+            - generic [ref=e124]: "0"
+          - generic [ref=e127]:
+            - generic [ref=e128]: Failed
+            - generic [ref=e129]: "0"
+          - generic [ref=e132]:
+            - generic [ref=e133]: Done
+            - generic [ref=e134]: "0"
+        - generic [ref=e137]:
+          - button "×" [ref=e139]
+          - generic [ref=e141]:
+            - generic [ref=e142]:
+              - generic [ref=e143]:
+                - generic [ref=e144]:
+                  - link "← Board" [ref=e145] [cursor=pointer]:
+                    - /url: /
+                  - heading "Streaming test" [level=1] [ref=e146]
+                  - paragraph [ref=e147]: Streaming test after global fix.
+                - generic [ref=e149]: plan
+              - generic [ref=e150]:
+                - paragraph [ref=e151]: Created 4/25/2026, 1:15:06 PM · Updated 4/26/2026, 7:00:56 PM
+                - generic [ref=e152]:
+                  - generic [ref=e153]: "Agent:"
+                  - combobox [ref=e154]:
+                    - option "Auto (pipeline default)" [selected]
+                    - option "Product Analyst"
+                    - option "Senior Developer"
+                    - option "Git Integration Specialist"
+                    - option "Implementation Planner"
+                    - option "Bug Fix Specialist"
+                    - option "QA Reviewer"
+              - generic [ref=e155]:
+                - button "Overview" [ref=e156]
+                - button "Terminal" [ref=e157]
+                - button "Spec1" [active] [ref=e158]
+                - button "Plan" [ref=e159]
+                - button "QA" [ref=e160]
+            - generic [ref=e172]: "# Spec: Streaming Test After Global Fix ## Overview Verifies that the WebSocket streaming pipeline works end-to-end after two fixes: (1) the `global.__processManager` singleton fix — previously, Next.js server actions and `server.ts` each loaded their own `ProcessManager` instance, so Orchestrator events never reached the WebSocket server; and (2) the `noServer: true` WebSocket fix — previously, registering `WebSocketServer` with `server` and `path: '/ws'` blocked Next.js HMR upgrades. Both fixes are in production. This test suite confirms agent events (xterm output in AgentPanel), phase-change events (kanban column updates), and HMR passthrough all work correctly under the current architecture. ## Requirements 1. When a task pipeline is started via `runTask()`, the ProcessManager instance used by the Orchestrator MUST be the same instance the WebSocket server (`server.ts`) is listening to. 2. Agent output events (`system`, `assistant`, `result`) emitted by a running pipeline MUST arrive at connected browser clients within 5 seconds of being emitted. 3. The AgentPanel xterm terminal MUST display the session init message (`◆ Session started — <model>`) once the first `system/init` event is received. 4. The AgentPanel MUST display at least one assistant text block or tool-use line while the agent is actively running. 5. Phase-change events MUST trigger a `router.refresh()` in `usePhaseSync`, causing the kanban board to re-render and move the task card to the new column. 6. The task card on the kanban board MUST advance from `backlog` → `spec` within 60 seconds of clicking Run. 7. The AgentPanel event counter (`{n} events`) MUST increment as the task runs — a count of 0 after 10 seconds with a running session is a failure. 8. Multiple open WebSocket connections (e.g. kanban + task detail panel open simultaneously) MUST both receive events without interference. 9. After the pipeline completes or is stopped, no further events MUST be delivered to that session's AgentPanel. 10. Reconnecting a WebSocket after disconnect MUST allow phase-change events to resume; no events already processed are re-delivered (events are not persisted in the WebSocket layer — this is by design). 11. All upgrade requests NOT at `/ws` (e.g. `/_next/webpack-hmr`) MUST NOT be intercepted by the `wss` — they must fall through so HMR continues to work in dev. 12. The React StrictMode double-mount of `useAgentStream` MUST NOT log a console error containing `\"WebSocket is closed before the connection is established\"`. ## Acceptance Criteria **AC-1: Agent events reach the browser** - Given: the TeamAI project is the active project, and there is a task in backlog - When: the user clicks Run Pipeline on the task card - Then: within 10 seconds, the AgentPanel terminal tab for that task displays `◆ Session started` **AC-2: Kanban board advances phase** - Given: a task card is visible in the Backlog column - When: Run Pipeline is clicked and the spec phase begins - Then: the task card disappears from Backlog and appears in the Spec column without a page reload **AC-3: Event counter increments** - Given: the task detail panel is open on the Terminal tab for a running task - When: 15 seconds have elapsed since the session started - Then: the \"N events\" counter in the AgentPanel header shows N > 0 **AC-4: No events before session start** - Given: a fresh task has never been run - When: the task detail panel is opened on the Terminal tab - Then: the AgentPanel xterm shows no content and the event counter reads \"0 events\" **AC-5: Phase-change causes board refresh** - Given: the kanban board is visible with a task in the Spec column - When: the pipeline advances to the Plan phase (emits a `phase-change` event) - Then: the task card moves from Spec → Planning column within 3 seconds **AC-6: Global singleton — no duplicate instances** - Given: the server is running and the TeamAI project is selected - When: `runTask` is called via a server action AND a WebSocket client is connected - Then: the WebSocket client receives events (proves the server action and WS server share the same ProcessManager instance) **AC-7: HMR upgrade passthrough** - Given: the dev server is running with `noServer: true` WebSocket configuration - When: Next.js HMR requests a WebSocket upgrade at `/_next/webpack-hmr` - Then: the HMR connection succeeds (no interruption to hot-module replacement) and the `/ws` endpoint remains functional simultaneously **AC-8: StrictMode no console error** - Given: React StrictMode is active (the default in Next.js dev) - When: a page with `useAgentStream` mounts and immediately unmounts (StrictMode double-invoke) - Then: the browser console contains no error or warning matching `\"WebSocket is closed before the connection is established\"` ## Files to Modify - `teamai/src/hooks/use-agent-stream.ts` — no changes expected; already correctly filters by `taskId` and checks `data.event !== undefined` - `teamai/src/hooks/use-phase-sync.ts` — no changes expected; correctly listens for `type === 'phase-change'` - `teamai/server.ts` — no changes expected; correctly wires `processManager` events to WebSocket broadcast ## New Files to Create - `teamai/e2e/streaming.spec.ts` — Playwright end-to-end test covering AC-1 through AC-8 - `teamai/playwright.config.ts` — Playwright config (baseURL: http://localhost:3000, webServer with `reuseExistingServer: true`) ## Dependencies & Risks - **Runtime dependency**: The test requires the TeamAI dev server to be running on port 3000 with the TeamAI project already imported as the active project. The Playwright config should use `webServer` with `reuseExistingServer: true` so it doesn't restart the server during testing. - **Agent availability**: AC-1, AC-2, AC-5 require a real Claude CLI subprocess to be spawned. If the API key is unavailable or rate-limited, these tests will fail. The test should assert xterm content appears within a generous timeout (30s) and skip cleanly if the session exits immediately with a non-zero code. - **xterm async init**: The AgentPanel lazy-imports xterm and mounts it asynchronously. Playwright must wait for the xterm canvas to appear in the DOM before asserting content, using `waitFor` or `locator.waitFor()`. - **No test isolation**: The streaming test modifies persistent state (creates tasks, spawns real agent sessions). Each run should create a uniquely-titled task so state from prior runs does not interfere; teardown should leave the task in a predictable terminal state. - **No historical events via WebSocket**: Events are not replayed on reconnect. If the browser connects after the session finishes, the AgentPanel will show 0 events. Tests must open the task panel *before* or *immediately after* clicking Run to observe events in flight."
+  - generic [ref=e41] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e42]:
+      - img [ref=e43]
+    - generic [ref=e46]:
+      - button "Open issues overlay" [ref=e47]:
+        - generic [ref=e48]:
+          - generic [ref=e49]: "0"
+          - generic [ref=e50]: "1"
+        - generic [ref=e51]: Issue
+      - button "Collapse issues badge" [ref=e52]:
+        - img [ref=e53]
+  - alert [ref=e55]
