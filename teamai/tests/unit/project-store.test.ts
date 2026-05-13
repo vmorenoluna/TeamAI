@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ProjectStore } from '@/lib/project-store';
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import { registerTestProject } from '../utils/test-project';
 
 // ProjectStore is a singleton that writes to ~/.teamai/projects.json.
 // Each test must use a unique project path and clean up after itself.
@@ -10,18 +11,17 @@ import { randomUUID } from 'crypto';
 describe('ProjectStore', () => {
   let store: ProjectStore;
   let projectDir: string;
+  let clean: () => void;
 
   beforeEach(() => {
-    projectDir = join(process.cwd(), '.teamai-test-project-' + randomUUID().slice(0, 8));
-    mkdirSync(projectDir, { recursive: true });
-    store = new ProjectStore();
+    const testProject = registerTestProject();
+    projectDir = testProject.root;
+    store = testProject.store;
+    clean = testProject.clean;
   });
 
   afterEach(() => {
-    // Clean up from the store (remove registration)
-    try { store.remove(projectDir); } catch { /* may not be registered */ }
-    // Clean up the temp directory
-    if (existsSync(projectDir)) rmSync(projectDir, { recursive: true, force: true });
+    clean();
   });
 
   it('getAll returns an array', () => {

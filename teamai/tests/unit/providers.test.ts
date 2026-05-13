@@ -1,8 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { resolveProvider, providerToSessionOpts } from '@/lib/providers';
-import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { randomUUID } from 'crypto';
+import { createTestProject } from '../utils/test-project';
+
+/** Helper: create a temp project with a .teamai/providers.json file */
+function setupProvidersTest(providersContent: unknown): { dir: string; clean: () => void } {
+  const { root, clean } = createTestProject();
+  mkdirSync(join(root, '.teamai'), { recursive: true });
+  writeFileSync(join(root, '.teamai', 'providers.json'), JSON.stringify(providersContent));
+  return { dir: root, clean };
+}
 
 describe('resolveProvider', () => {
   it('returns empty object when no providers file exists', () => {
@@ -11,85 +19,57 @@ describe('resolveProvider', () => {
   });
 
   it('returns empty object when providers file is invalid JSON', () => {
-    // Create a temp dir with an invalid providers.json
-    const testDir = join(process.cwd(), '.teamai-prov-test-' + randomUUID().slice(0, 8));
-    mkdirSync(testDir, { recursive: true });
-    mkdirSync(join(testDir, '.teamai'), { recursive: true });
-    writeFileSync(join(testDir, '.teamai', 'providers.json'), 'not-valid-json');
-
-    const result = resolveProvider(testDir, 'any-role');
+    const { dir, clean } = setupProvidersTest('not-valid-json');
+    const result = resolveProvider(dir, 'any-role');
     expect(result).toEqual({});
-
-    rmSync(testDir, { recursive: true, force: true });
+    clean();
   });
 
   it('returns default config when no role override', () => {
-    const testDir = join(process.cwd(), '.teamai-prov-test-' + randomUUID().slice(0, 8));
-    mkdirSync(testDir, { recursive: true });
-    mkdirSync(join(testDir, '.teamai'), { recursive: true });
-    writeFileSync(join(testDir, '.teamai', 'providers.json'), JSON.stringify({
+    const { dir, clean } = setupProvidersTest({
       default: { provider: 'bedrock', model: 'claude-sonnet' },
-    }));
+    });
 
-    const result = resolveProvider(testDir, 'coder');
+    const result = resolveProvider(dir, 'coder');
     expect(result.provider).toBe('bedrock');
     expect(result.model).toBe('claude-sonnet');
-
-    rmSync(testDir, { recursive: true, force: true });
+    clean();
   });
 
   it('merges role override with default', () => {
-    const testDir = join(process.cwd(), '.teamai-prov-test-' + randomUUID().slice(0, 8));
-    mkdirSync(testDir, { recursive: true });
-    mkdirSync(join(testDir, '.teamai'), { recursive: true });
-    writeFileSync(join(testDir, '.teamai', 'providers.json'), JSON.stringify({
+    const { dir, clean } = setupProvidersTest({
       default: { provider: 'anthropic', model: 'claude-sonnet' },
-      roles: {
-        coder: { provider: 'bedrock' },
-      },
-    }));
+      roles: { coder: { provider: 'bedrock' } },
+    });
 
-    const result = resolveProvider(testDir, 'coder');
+    const result = resolveProvider(dir, 'coder');
     // Role override: provider changes to bedrock, model inherited from default
     expect(result.provider).toBe('bedrock');
     expect(result.model).toBe('claude-sonnet');
-
-    rmSync(testDir, { recursive: true, force: true });
+    clean();
   });
 
   it('role override can set env vars', () => {
-    const testDir = join(process.cwd(), '.teamai-prov-test-' + randomUUID().slice(0, 8));
-    mkdirSync(testDir, { recursive: true });
-    mkdirSync(join(testDir, '.teamai'), { recursive: true });
-    writeFileSync(join(testDir, '.teamai', 'providers.json'), JSON.stringify({
+    const { dir, clean } = setupProvidersTest({
       default: { provider: 'anthropic' },
-      roles: {
-        planner: { provider: 'openai', env: { OPENAI_API_KEY: 'sk-planner' } },
-      },
-    }));
+      roles: { planner: { provider: 'openai', env: { OPENAI_API_KEY: 'sk-planner' } } },
+    });
 
-    const result = resolveProvider(testDir, 'planner');
+    const result = resolveProvider(dir, 'planner');
     expect(result.provider).toBe('openai');
     expect(result.env).toEqual({ OPENAI_API_KEY: 'sk-planner' });
-
-    rmSync(testDir, { recursive: true, force: true });
+    clean();
   });
 
   it('role override overrides env vars from default', () => {
-    const testDir = join(process.cwd(), '.teamai-prov-test-' + randomUUID().slice(0, 8));
-    mkdirSync(testDir, { recursive: true });
-    mkdirSync(join(testDir, '.teamai'), { recursive: true });
-    writeFileSync(join(testDir, '.teamai', 'providers.json'), JSON.stringify({
+    const { dir, clean } = setupProvidersTest({
       default: { provider: 'openai', env: { OPENAI_API_KEY: 'sk-default' } },
-      roles: {
-        coder: { env: { OPENAI_API_KEY: 'sk-coder' } },
-      },
-    }));
+      roles: { coder: { env: { OPENAI_API_KEY: 'sk-coder' } } },
+    });
 
-    const result = resolveProvider(testDir, 'coder');
+    const result = resolveProvider(dir, 'coder');
     expect(result.env).toEqual({ OPENAI_API_KEY: 'sk-coder' });
-
-    rmSync(testDir, { recursive: true, force: true });
+    clean();
   });
 });
 
