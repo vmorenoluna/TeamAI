@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { resolveProvider, providerToSessionOpts } from '@/lib/providers';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -13,6 +13,14 @@ function setupProvidersTest(providersContent: unknown): { dir: string; clean: ()
 }
 
 describe('resolveProvider', () => {
+  // Track dirs created in each test so afterEach always cleans up, even on failure
+  let _cleanDir: (() => void) | null = null;
+
+  afterEach(() => {
+    _cleanDir?.();
+    _cleanDir = null;
+  });
+
   it('returns empty object when no providers file exists', () => {
     const result = resolveProvider('/tmp/nonexistent-dir-12345', 'coder');
     expect(result).toEqual({});
@@ -20,20 +28,20 @@ describe('resolveProvider', () => {
 
   it('returns empty object when providers file is invalid JSON', () => {
     const { dir, clean } = setupProvidersTest('not-valid-json');
+    _cleanDir = clean;
     const result = resolveProvider(dir, 'any-role');
     expect(result).toEqual({});
-    clean();
   });
 
   it('returns default config when no role override', () => {
     const { dir, clean } = setupProvidersTest({
       default: { provider: 'bedrock', model: 'claude-sonnet' },
     });
+    _cleanDir = clean;
 
     const result = resolveProvider(dir, 'coder');
     expect(result.provider).toBe('bedrock');
     expect(result.model).toBe('claude-sonnet');
-    clean();
   });
 
   it('merges role override with default', () => {
@@ -41,12 +49,12 @@ describe('resolveProvider', () => {
       default: { provider: 'anthropic', model: 'claude-sonnet' },
       roles: { coder: { provider: 'bedrock' } },
     });
+    _cleanDir = clean;
 
     const result = resolveProvider(dir, 'coder');
     // Role override: provider changes to bedrock, model inherited from default
     expect(result.provider).toBe('bedrock');
     expect(result.model).toBe('claude-sonnet');
-    clean();
   });
 
   it('role override can set env vars', () => {
@@ -54,11 +62,11 @@ describe('resolveProvider', () => {
       default: { provider: 'anthropic' },
       roles: { planner: { provider: 'openai', env: { OPENAI_API_KEY: 'sk-planner' } } },
     });
+    _cleanDir = clean;
 
     const result = resolveProvider(dir, 'planner');
     expect(result.provider).toBe('openai');
     expect(result.env).toEqual({ OPENAI_API_KEY: 'sk-planner' });
-    clean();
   });
 
   it('role override overrides env vars from default', () => {
@@ -66,10 +74,10 @@ describe('resolveProvider', () => {
       default: { provider: 'openai', env: { OPENAI_API_KEY: 'sk-default' } },
       roles: { coder: { env: { OPENAI_API_KEY: 'sk-coder' } } },
     });
+    _cleanDir = clean;
 
     const result = resolveProvider(dir, 'coder');
     expect(result.env).toEqual({ OPENAI_API_KEY: 'sk-coder' });
-    clean();
   });
 });
 
