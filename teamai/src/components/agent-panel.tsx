@@ -2,8 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useAgentStream } from '@/hooks/use-agent-stream';
+import type { Terminal } from '@xterm/xterm';
+import type { FitAddon } from '@xterm/addon-fit';
+import { type StreamEvent } from '@/lib/stream-types';
 
-function formatEvent(event: any): string | null {
+function formatEvent(event: StreamEvent): string | null {
   switch (event.type) {
     case 'system':
       if (event.subtype === 'init') {
@@ -12,7 +15,7 @@ function formatEvent(event: any): string | null {
       return null;
 
     case 'assistant': {
-      const blocks: any[] = event.message?.content ?? [];
+      const blocks = event.message?.content ?? [];
       const parts: string[] = [];
       for (const block of blocks) {
         if (block.type === 'text' && block.text) {
@@ -48,7 +51,7 @@ const termWriteMap = new WeakMap<object, number>();
 
 export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialOutput?: string | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<{ terminal: any; fitAddon: any } | null>(null);
+  const termRef = useRef<{ terminal: Terminal; fitAddon: FitAddon } | null>(null);
   const writtenRef = useRef(0);           // index into live events array
   const initialOutputRef = useRef(initialOutput); // always holds the latest value for the init callback
   initialOutputRef.current = initialOutput;
@@ -60,8 +63,8 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
     const container = containerRef.current;
     if (!container) return;
 
-    let terminal: any;
-    let fitAddon: any;
+    let terminal: Terminal;
+    let fitAddon: FitAddon;
     let observer: ResizeObserver;
 
     // Reset live-event counter whenever xterm re-initialises

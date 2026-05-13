@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
+import type { StreamEvent } from '@/lib/stream-types';
 
 export interface AgentEvent {
   sessionId: string;
   taskId: string;
-  event: any;
+  event: StreamEvent;
 }
 
 export function useAgentStream(taskId: string): AgentEvent[] {

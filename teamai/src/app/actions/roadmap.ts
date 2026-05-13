@@ -45,7 +45,9 @@ export interface RoadmapReport {
     next: RoadmapItem[];
     later: RoadmapItem[];
     icebox: RoadmapItem[];
+    [phase: string]: RoadmapItem[] | undefined;
   };
+  items?: RoadmapItem[];
 }
 
 // ── Roadmap generation ───────────────────────────────────────────────────────
@@ -140,7 +142,7 @@ export async function getRoadmapReport(filename: string): Promise<RoadmapReport>
     throw new Error(`Invalid roadmap filename: ${filename}`);
   }
   const dir = join(projectPath, '.teamai', 'roadmap');
-  let raw: any;
+  let raw: RoadmapReport;
   try {
     raw = JSON.parse(readFileSync(join(dir, filename), 'utf-8'));
   } catch {
@@ -163,11 +165,12 @@ export async function getRoadmapReport(filename: string): Promise<RoadmapReport>
   }
 
   // Normalize: flat items with phase field
-  if (Array.isArray(raw.items) && raw.items.length > 0 && 'phase' in raw.items[0]) {
+  const rawItems = raw.items ?? [];
+  if (Array.isArray(rawItems) && rawItems.length > 0 && 'phase' in rawItems[0]) {
     const phases: RoadmapReport['phases'] = { now: [], next: [], later: [], icebox: [] };
-    for (const item of raw.items as (RoadmapItem & { phase: string })[]) {
+    for (const item of rawItems as (RoadmapItem & { phase: string })[]) {
       const p = (item.phase ?? 'later').toLowerCase() as keyof RoadmapReport['phases'];
-      if (p in phases) phases[p].push(item);
+      if (p in phases) phases[p]!.push(item);
     }
     return {
       generated_at: raw.generated_at ?? '',
@@ -235,7 +238,7 @@ export async function getActiveRoadmapSession(type: 'roadmap' | 'changelog'): Pr
 
 // ── Convert roadmap item to kanban ticket ────────────────────────────────────
 
-const VALID_PHASES = ['now', 'next', 'later', 'icebox'] as const;
+const VALID_PHASES: readonly string[] = ['now', 'next', 'later', 'icebox'];
 
 export async function convertToTask(
   filename: string,
@@ -243,7 +246,7 @@ export async function convertToTask(
   phaseKey: string,
 ): Promise<{ taskId: string }> {
   const projectPath = await getActiveProjectPath();
-  if (!VALID_PHASES.includes(phaseKey as any)) throw new Error(`Invalid phase: ${phaseKey}`);
+  if (!VALID_PHASES.includes(phaseKey)) throw new Error(`Invalid phase: ${phaseKey}`);
   if (!/^roadmap-\d{4}-\d{2}-\d{2}\.json$/.test(filename)) {
     throw new Error(`Invalid roadmap filename: ${filename}`);
   }
@@ -291,7 +294,7 @@ export async function clearLinkedTaskId(
   phaseKey: string,
 ): Promise<void> {
   const projectPath = await getActiveProjectPath();
-  if (!VALID_PHASES.includes(phaseKey as any)) throw new Error(`Invalid phase: ${phaseKey}`);
+  if (!VALID_PHASES.includes(phaseKey)) throw new Error(`Invalid phase: ${phaseKey}`);
   if (!/^roadmap-\d{4}-\d{2}-\d{2}\.json$/.test(filename)) {
     throw new Error(`Invalid roadmap filename: ${filename}`);
   }
@@ -327,14 +330,14 @@ export async function deleteRoadmapItem(
   phaseKey: string,
 ): Promise<void> {
   const projectPath = await getActiveProjectPath();
-  if (!VALID_PHASES.includes(phaseKey as any)) throw new Error(`Invalid phase: ${phaseKey}`);
+  if (!VALID_PHASES.includes(phaseKey)) throw new Error(`Invalid phase: ${phaseKey}`);
   if (!/^roadmap-\d{4}-\d{2}-\d{2}\.json$/.test(filename)) {
     throw new Error(`Invalid roadmap filename: ${filename}`);
   }
 
   const dir = join(projectPath, '.teamai', 'roadmap');
   const filePath = join(dir, filename);
-  let report: any;
+  let report: RoadmapReport;
   try {
     report = JSON.parse(readFileSync(filePath, 'utf-8'));
   } catch {

@@ -17,19 +17,13 @@ import {
   type RoadmapReport,
 } from '@/app/actions/roadmap';
 import { useSessionStream } from '@/hooks/use-session-stream';
+import { extractText } from '@/lib/stream-types';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskPanel, type FullData } from './task-panel';
 import type { RoleDefinition } from '@/app/actions/roles';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function extractText(event: any): string {
-  if (event.type !== 'assistant') return '';
-  return (event.message?.content ?? [])
-    .filter((b: any) => b.type === 'text')
-    .map((b: any) => b.text)
-    .join('');
-}
 
 const PHASE_LABELS: Record<keyof RoadmapReport['phases'], string> = {
   now: 'Phase 1 — Now',

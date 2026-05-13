@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { closeTerminalSession } from '@/app/actions/terminals';
+import type { Terminal } from '@xterm/xterm';
+import type { FitAddon } from '@xterm/addon-fit';
 
 interface Props {
   sessionId: string;
@@ -20,7 +22,7 @@ const ROLE_COLORS: Record<string, string> = {
 
 export function TerminalPanel({ sessionId, role, onClose }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<any>(null);
+  const termRef = useRef<{ terminal: Terminal; fitAddon: FitAddon } | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
 
@@ -28,8 +30,8 @@ export function TerminalPanel({ sessionId, role, onClose }: Props) {
     const container = containerRef.current;
     if (!container) return;
 
-    let terminal: any;
-    let fitAddon: any;
+    let terminal: Terminal;
+    let fitAddon: FitAddon;
     let observer: ResizeObserver;
 
     Promise.all([

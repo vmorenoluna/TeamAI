@@ -2,6 +2,7 @@ import { spawn, execFileSync, ChildProcess } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { EventEmitter } from 'events';
 import path from 'path';
+import { error as logError, warn as logWarn } from './logger';
 
 export type ContainerState = 'stopped' | 'starting' | 'running' | 'restarting';
 
@@ -32,8 +33,9 @@ export function dockerAvailable(): boolean {
   try {
     execFileSync('docker', ['info'], { stdio: 'ignore', timeout: 2000 });
     _dockerAvailable = true;
-  } catch {
+  } catch (err) {
     _dockerAvailable = false;
+    logError('container', 'docker info check failed', err);
   }
   return _dockerAvailable;
 }
@@ -41,7 +43,7 @@ export function dockerAvailable(): boolean {
 export function readContainerConfig(projectRoot: string): { enabled: boolean } {
   const cfgPath = path.join(projectRoot, '.teamai', 'container.json');
   if (existsSync(cfgPath)) {
-    try { return JSON.parse(readFileSync(cfgPath, 'utf-8')); } catch { /* fall through */ }
+    try { return JSON.parse(readFileSync(cfgPath, 'utf-8')); } catch (err) { logWarn('container', 'Failed to parse container config, using defaults', err); }
   }
   // Default: auto-enable when Docker is available, opt-out otherwise
   return { enabled: dockerAvailable() };
@@ -107,7 +109,7 @@ export class ContainerManager extends EventEmitter {
       if (out.includes('Up')) return 'running';   // container is up
       // Any other output (Exited, Created, etc.) means it's not running — treat as stoppable
       if (out) return 'stopped';
-    } catch { /* docker not available or no container */ }
+    } catch (err) { logWarn('container', 'Docker status check failed', err); }
     return 'stopped';
   }
 

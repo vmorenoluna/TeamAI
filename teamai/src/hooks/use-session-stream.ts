@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
+import type { StreamEvent } from '@/lib/stream-types';
 
 export interface SessionEvent {
   sessionId: string;
-  event: any;
+  event: StreamEvent;
 }
 
 export function useSessionStream(sessionId: string | null): SessionEvent[] {
