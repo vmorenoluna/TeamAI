@@ -28,6 +28,12 @@ function devcontainerBin(): string {
 
 // Check if Docker is available and running (cached per process lifetime)
 let _dockerAvailable: boolean | null = null;
+
+/** @internal Reset the docker-available cache (used in tests) */
+export function _resetDockerAvailableCache(): void {
+  _dockerAvailable = null;
+}
+
 export function dockerAvailable(): boolean {
   if (_dockerAvailable !== null) return _dockerAvailable;
   try {
