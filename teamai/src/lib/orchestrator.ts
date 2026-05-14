@@ -101,6 +101,10 @@ export class Orchestrator {
     // Phases that require no pipeline action
     const noRunPhases = ['backlog', 'awaiting-review', 'failed', 'done'];
     if (noRunPhases.includes(targetPhase)) {
+      // Auto-delete the git worktree when moving to 'done'
+      if (targetPhase === 'done') {
+        this.removeWorktree(taskId);
+      }
       this.taskStore.updatePhase(taskId, targetPhase);
       processManager.emit('phase-change', { taskId, phase: targetPhase });
       return;
@@ -502,6 +506,26 @@ export class Orchestrator {
     return readContainerConfig(this.projectRoot).enabled
       ? path.join(this.projectRoot, '.worktrees')
       : path.join(this.projectRoot, '..', 'worktrees');
+  }
+
+  /** Get the filesystem path to this task's git worktree, or null if the task has no branch. */
+  public getWorktreePath(taskId: string): string | null {
+    const task = this.taskStore.getById(taskId);
+    if (!task || !task.branch) return null;
+    const slug = slugify(task.description);
+    return path.join(this.getWorktreeBase(), slug);
+  }
+
+  /** Remove the git worktree for this task if it exists on disk. Silently no-ops if not found. */
+  private removeWorktree(taskId: string): void {
+    const wtPath = this.getWorktreePath(taskId);
+    if (!wtPath || !existsSync(wtPath)) return;
+    try {
+      this._execGit(['worktree', 'remove', wtPath], this.projectRoot);
+      this.taskStore.update(taskId, { branch: undefined });
+    } catch {
+      // Worktree removal can fail if there are uncommitted changes; ignore silently
+    }
   }
 
   private sessionOpts(role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) {
