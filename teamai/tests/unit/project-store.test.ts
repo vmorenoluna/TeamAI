@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ProjectStore } from '@/lib/project-store';
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, rmSync } from 'fs';
+import { homedir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { registerTestProject } from '../utils/test-project';
@@ -106,6 +107,21 @@ describe('ProjectStore', () => {
     expect(project.path).toBe(projectDir);
   });
 
+  // ── Coverage: line 45 — || projectPath fallback when split().pop() returns '' ──
+
+  it('falls back to full path when last segment is empty (path ends in separator)', () => {
+    // Using store.add directly with path ending in \ so split().pop() returns ''
+    const trailingPath = projectDir.replace(/[\\/]+$/, '') + '\\';
+    const project = store.add(trailingPath);
+
+    // name not provided → projectPath.split().pop() returns '' → '' is falsy → full path
+    expect(project.name).toBe(trailingPath);
+    expect(project.path).toBe(trailingPath);
+
+    // Cleanup: remove the trailing-path entry
+    store.remove(trailingPath);
+  });
+
   // ── Coverage: lines 20-21 — initial empty projects.json ──
 
   it('scaffold prepends IMPORT_LINE to existing CLAUDE.md without it', () => {
@@ -144,5 +160,27 @@ describe('ProjectStore', () => {
 
     const claudeMd = readFileSync(join(projectDir, 'CLAUDE.md'), 'utf-8');
     expect(claudeMd).toContain('@.claude/teamai-workflow.md');
+  });
+
+  // ── Coverage: lines 20-21 — constructor init when projects.json missing ──
+
+  it('initializes projects.json when it does not exist on construction', () => {
+    const projectsFile = join(homedir(), '.teamai', 'projects.json');
+
+    // Backup current file, delete, create new store, verify init, restore
+    const backup = existsSync(projectsFile) ? readFileSync(projectsFile, 'utf-8') : null;
+    if (existsSync(projectsFile)) {
+      rmSync(projectsFile);
+    }
+
+    try {
+      const freshStore = new ProjectStore();
+      expect(freshStore.getAll()).toEqual([]);
+    } finally {
+      // Restore the backup so subsequent tests are unaffected
+      if (backup !== null) {
+        writeFileSync(projectsFile, backup);
+      }
+    }
   });
 });

@@ -517,8 +517,11 @@ export class Orchestrator {
   }
 }
 
-// Detect the Git hosting platform from the remote origin URL
-function detectGitPlatform(projectRoot: string): 'github' | 'gitlab' | 'bitbucket' | 'unknown' {
+/**
+ * Detect the Git hosting platform from the remote origin URL.
+ * @returns 'github', 'gitlab', 'bitbucket', or 'unknown'
+ */
+export function detectGitPlatform(projectRoot: string): 'github' | 'gitlab' | 'bitbucket' | 'unknown' {
   try {
     const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
       cwd: projectRoot, encoding: 'utf-8', timeout: 5000,
@@ -530,8 +533,11 @@ function detectGitPlatform(projectRoot: string): 'github' | 'gitlab' | 'bitbucke
   return 'unknown';
 }
 
-// Detect the default branch name from the remote
-function detectDefaultBranch(projectRoot: string): string {
+/**
+ * Detect the default branch name from the remote HEAD reference.
+ * Falls back to 'main' if detection fails.
+ */
+export function detectDefaultBranch(projectRoot: string): string {
   try {
     const ref = execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
       cwd: projectRoot, encoding: 'utf-8', timeout: 3000,
@@ -545,8 +551,12 @@ function detectDefaultBranch(projectRoot: string): string {
   }
 }
 
-// Build a platform-specific agent prompt for PR/MR creation
-function buildPlatformPrompt(
+/**
+ * Build a platform-specific agent prompt for PR/MR creation.
+ * Generates instructions tailored to GitHub, GitLab, Bitbucket,
+ * or a generic fallback for unknown platforms.
+ */
+export function buildPlatformPrompt(
   platform: 'github' | 'gitlab' | 'bitbucket' | 'unknown',
   branch: string,
   description: string,

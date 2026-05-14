@@ -27,9 +27,11 @@ describe('resolveProvider', () => {
   });
 
   it('returns empty object when providers file is invalid JSON', () => {
-    const { dir, clean } = setupProvidersTest('not-valid-json');
+    const { root, clean } = createTestProject();
     _cleanDir = clean;
-    const result = resolveProvider(dir, 'any-role');
+    mkdirSync(join(root, '.teamai'), { recursive: true });
+    writeFileSync(join(root, '.teamai', 'providers.json'), '{invalid json}');
+    const result = resolveProvider(root, 'any-role');
     expect(result).toEqual({});
   });
 
