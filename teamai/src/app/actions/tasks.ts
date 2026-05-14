@@ -205,3 +205,46 @@ export async function removeBlock(thisTaskId: string, blockedTaskId: string): Pr
   revalidatePath(`/task/${blockedTaskId}`);
   revalidatePath('/');
 }
+
+export async function checkBulkTaskWorktrees(taskIds: string[]): Promise<Record<string, boolean>> {
+  const { taskStore } = await getStores();
+  const result: Record<string, boolean> = {};
+  for (const id of taskIds) {
+    const task = taskStore.getById(id);
+    if (!task || !task.branch) {
+      result[id] = false;
+      continue;
+    }
+    const { orchestrator } = await getStores();
+    const wtPath = orchestrator.getWorktreePath(id);
+    result[id] = wtPath ? existsSync(wtPath) : false;
+  }
+  return result;
+}
+
+export async function checkTaskWorktree(taskId: string): Promise<{ exists: boolean; path: string | null }> {
+  const { taskStore, orchestrator } = await getStores();
+  const task = taskStore.getById(taskId);
+  if (!task || !task.branch) return { exists: false, path: null };
+  const wtPath = orchestrator.getWorktreePath(taskId);
+  if (!wtPath) return { exists: false, path: null };
+  return { exists: existsSync(wtPath), path: wtPath };
+}
+
+export async function deleteTaskWorktree(taskId: string): Promise<{ success: boolean; error?: string }> {
+  const { taskStore, orchestrator } = await getStores();
+  const projectPath = await getActiveProjectPath();
+  const task = taskStore.getById(taskId);
+  if (!task || !task.branch) return { success: false, error: 'No branch found for this task' };
+  const wtPath = orchestrator.getWorktreePath(taskId);
+  if (!wtPath || !existsSync(wtPath)) return { success: false, error: 'Worktree directory not found on disk' };
+  try {
+    execFileSync('git', ['worktree', 'remove', wtPath], { cwd: projectPath, encoding: 'utf-8' });
+    taskStore.update(taskId, { branch: undefined });
+    revalidatePath('/');
+    revalidatePath(`/task/${taskId}`);
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e.stderr || e.message };
+  }
+}
