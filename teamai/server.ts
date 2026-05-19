@@ -105,6 +105,9 @@ app.prepare().then(() => {
     if (report.orphanedWorktrees.length > 0) {
       parts.push(`${report.orphanedWorktrees.length} orphaned worktree(s)`);
     }
+    if (report.autoClearedRateLimits > 0) {
+      parts.push(`${report.autoClearedRateLimits} expired rate limit(s) auto-cleared`);
+    }
 
     if (parts.length > 0) {
       console.log(`[recovery] ${parts.join(', ')} detected:`);

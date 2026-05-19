@@ -56,6 +56,7 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
   const initialOutputRef = useRef(initialOutput); // always holds the latest value for the init callback
   const [termReady, setTermReady] = useState(false);
   const events = useAgentStream(taskId);
+  const userScrolledRef = useRef(false);
 
   // Initialise xterm once on mount
   useEffect(() => {
@@ -96,6 +97,12 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
       terminal.loadAddon(fitAddon);
       terminal.open(container);
       fitAddon.fit();
+
+      // Track user scroll position — pause auto-scroll when user scrolls up to read old output
+      terminal.onScroll(() => {
+        const atBottom = terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
+        userScrolledRef.current = !atBottom;
+      });
 
       // Write persisted log immediately — avoids race with termReady state updates
       const logContent = initialOutputRef.current;
@@ -143,16 +150,26 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
 
     // Append only new live events since last render
     const hadNewEvents = events.length > writtenRef.current;
+    let pendingWrites = 0;
     for (let i = writtenRef.current; i < events.length; i++) {
       const text = formatEvent(events[i].event);
-      if (text) terminal.write(text);
+      if (text) {
+        pendingWrites++;
+        terminal.write(text, () => {
+          pendingWrites--;
+          // Only auto-scroll after ALL writes render if the user hasn't manually scrolled up
+          if (pendingWrites === 0 && !userScrolledRef.current) terminal.scrollToBottom();
+        });
+      }
     }
     writtenRef.current = events.length;
-    if (hadNewEvents) terminal.scrollToBottom();
+    // If no text was written (all null events), still scroll to keep in sync
+    // Only auto-scroll if the user hasn't manually scrolled up
+    if (hadNewEvents && pendingWrites === 0 && !userScrolledRef.current) terminal.scrollToBottom();
   }, [events, termReady, initialOutput]);
 
   return (
-    <div className="flex flex-col h-full rounded-lg overflow-hidden border border-[#1e293b] bg-black">
+    <div className="flex flex-col h-full rounded-lg overflow-hidden border border-[#1e293b] bg-black relative">
       <div className="flex items-center justify-between px-4 py-2 border-b border-[#1e293b] bg-[#0f172a] shrink-0">
         <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           Agent Output

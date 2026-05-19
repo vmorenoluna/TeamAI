@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } from 'fs';
 import path from 'path';
 import { warn as logWarn } from './logger';
 import { processManager, type AgentSession } from './process-manager';
@@ -15,12 +15,15 @@ interface PlanSubtask {
   files: string[];
   acceptance_criteria: string[];
   parallel_group?: string;
+  completed?: boolean;
 }
 
 interface RateLimitInfo {
   status: string;
   resetsAt?: number;
 }
+
+const PIPELINE_TIMEOUT_MS = 600_000; // 10 minutes
 
 class RateLimitError extends Error {
   constructor(public resetsAt: number) {
@@ -33,7 +36,6 @@ type PipelinePhase =
   | 'plan'
   | 'implement'
   | 'qa-review'
-  | 'qa-fix'
   | 'awaiting-review'
   | 'merge'
   | 'create-pr'
@@ -236,7 +238,6 @@ export class Orchestrator {
       case 'plan':         return this.runPlan(pipeline);
       case 'implement':    return this.runImplement(pipeline);
       case 'qa-review':    return this.runQaReview(pipeline);
-      case 'qa-fix':       return this.runQaFix(pipeline);
       case 'awaiting-review': return; // Paused — waiting for human
       case 'merge':        return this.runMerge(pipeline);
       case 'create-pr':    return this.runCreatePR(pipeline);
@@ -282,6 +283,15 @@ export class Orchestrator {
     const task = this.taskStore.getById(pipeline.taskId);
     const coderRole = (task?.roleOverride ?? 'coder.md').replace('.md', '') as AgentSession['role'];
 
+    // Check for QA feedback if bouncing back from QA
+    const qaFeedbackPath = path.join(pipeline.specPath, 'qa_feedback.md');
+    const hasQaFeedback = existsSync(qaFeedbackPath);
+    let qaFeedbackContent = '';
+    if (hasQaFeedback) {
+      qaFeedbackContent = '\n\n## QA Feedback (fix these issues)\n\n' +
+        readFileSync(qaFeedbackPath, 'utf-8');
+    }
+
     const groups = new Map<string, PlanSubtask[]>();
     for (const subtask of plan.subtasks) {
       const group = subtask.parallel_group || String(subtask.id);
@@ -291,6 +301,9 @@ export class Orchestrator {
 
     const logFile = path.join(pipeline.specPath, 'output.log');
     for (const [, subtasks] of groups) {
+      // Track completed subtask IDs in memory to avoid race conditions
+      // when multiple subtasks complete near-simultaneously
+      const completedIds: number[] = [];
       await Promise.allSettled(
         subtasks.map(async (subtask: PlanSubtask) => {
           this._phaseHeader(logFile, `implement — subtask ${subtask.id}: ${subtask.title}`);
@@ -299,12 +312,35 @@ export class Orchestrator {
             `/implement Subtask ${subtask.id}: ${subtask.title}\n\n` +
             `${subtask.description}\n\n` +
             `Files: ${subtask.files.join(', ')}\n\n` +
-            `Acceptance criteria: ${subtask.acceptance_criteria.join('; ')}`;
+            `Acceptance criteria: ${subtask.acceptance_criteria.join('; ')}` +
+            qaFeedbackContent;
           processManager.sendMessage(sessionId, prompt);
           await this.waitForCompletion(sessionId);
           processManager.killSession(sessionId);
+
+          completedIds.push(subtask.id);
         })
       );
+      // Write all completions for this group at once to avoid read-modify-write races
+      if (completedIds.length > 0) {
+        const planPath = path.join(pipeline.specPath, 'plan.json');
+        try {
+          const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+          if (plan.subtasks) {
+            for (const s of plan.subtasks) {
+              if (completedIds.includes(s.id)) {
+                s.completed = true;
+              }
+            }
+          }
+          writeFileSync(planPath, JSON.stringify(plan, null, 2));
+        } catch { /* best-effort */ }
+      }
+    }
+
+    // Clean up QA feedback after implementing
+    if (hasQaFeedback && existsSync(qaFeedbackPath)) {
+      unlinkSync(qaFeedbackPath);
     }
 
     this.advancePhase(pipeline, 'qa-review');
@@ -327,23 +363,15 @@ export class Orchestrator {
     if (report.overall === 'PASS') {
       this.advancePhase(pipeline, 'awaiting-review');
     } else if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
+      // Write completion summary before marking as failed
+      this._writeCompletionSummary(pipeline);
       this.advancePhase(pipeline, 'failed');
     } else {
-      this.advancePhase(pipeline, 'qa-fix');
+      // Write QA feedback and bounce back to implement instead of auto-fixing
+      this._writeQaFeedback(pipeline, report);
+      this.advancePhase(pipeline, 'implement');
       await this.executePhase(pipeline);
     }
-  }
-
-  private async runQaFix(pipeline: TaskPipeline): Promise<void> {
-    const logFile = path.join(pipeline.specPath, 'output.log');
-    this._phaseHeader(logFile, 'qa-fix');
-    const sessionId = await processManager.createSession(this.sessionOpts('qa-fixer', pipeline.worktreePath, pipeline.taskId, logFile));
-    pipeline.sessionId = sessionId;
-    processManager.sendMessage(sessionId, `/qa-fix ${this._toAgentPath(pipeline.specPath)}/qa_report.json`);
-    await this.waitForCompletion(sessionId);
-    processManager.killSession(sessionId);
-    this.advancePhase(pipeline, 'qa-review');
-    await this.executePhase(pipeline);
   }
 
   private async runMerge(pipeline: TaskPipeline): Promise<void> {
@@ -387,9 +415,15 @@ export class Orchestrator {
     processManager.emit('phase-change', { taskId: pipeline.taskId, phase });
   }
 
-  private waitForCompletion(sessionId: string): Promise<void> {
+  private waitForCompletion(sessionId: string, timeoutMs: number = PIPELINE_TIMEOUT_MS): Promise<void> {
     return new Promise((resolve, reject) => {
       let rateLimitResetsAt: number | null = null;
+      let settled = false;
+
+      const cleanup = () => {
+        processManager.off('event', onEvent);
+        processManager.off('exit', onExit);
+      };
 
       const onEvent = ({ sessionId: sid, event }: { sessionId: string; event: Record<string, unknown> }) => {
         if (sid !== sessionId) return;
@@ -403,8 +437,9 @@ export class Orchestrator {
         }
 
         if (event.type === 'result') {
-          processManager.off('event', onEvent);
-          processManager.off('exit', onExit);
+          settled = true;
+          cleanup();
+          clearTimeout(timeout);
           if (event.is_error && rateLimitResetsAt) {
             reject(new RateLimitError(rateLimitResetsAt));
           } else {
@@ -414,14 +449,24 @@ export class Orchestrator {
       };
       const onExit = ({ sessionId: sid, code }: { sessionId: string; code: number | null }) => {
         if (sid !== sessionId) return;
-        processManager.off('event', onEvent);
-        processManager.off('exit', onExit);
+        settled = true;
+        cleanup();
+        clearTimeout(timeout);
         if (code === 0 || code === null) resolve();
         else if (rateLimitResetsAt) reject(new RateLimitError(rateLimitResetsAt));
         else reject(new Error(`Session exited with code ${code}`));
       };
+
       processManager.on('event', onEvent);
       processManager.on('exit', onExit);
+
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        processManager.killSession(sessionId);
+        reject(new Error(`Pipeline timed out after ${timeoutMs / 60000} minutes`));
+      }, timeoutMs);
     });
   }
 
@@ -532,6 +577,80 @@ export class Orchestrator {
     const providerCfg = resolveProvider(this.projectRoot, role);
     const providerOpts = providerToSessionOpts(providerCfg);
     return { taskId, role, cwd, projectRoot: this.projectRoot, permissionMode: 'bypassPermissions', logFile, ...providerOpts };
+  }
+
+  /** Write QA feedback for bouncing back to implement */
+  private _writeQaFeedback(pipeline: TaskPipeline, report: any): void {
+    const feedbackPath = path.join(pipeline.specPath, 'qa_feedback.md');
+    let content = `# QA Feedback\n\nThe QA review found issues that need to be fixed.\n\n`;
+    content += `## Overall: ${report.overall}\n\n`;
+    if (report.criteria) {
+      content += `## Failed Criteria\n\n`;
+      for (const c of report.criteria) {
+        if (c.status === 'FAIL') {
+          content += `- **${c.name}**: ${c.notes || 'No details provided'}\n`;
+        }
+      }
+    }
+    if (report.issues) {
+      content += `\n## Issues\n\n`;
+      for (const issue of report.issues) {
+        content += `- [${issue.severity || 'error'}] ${issue.message || issue.description || JSON.stringify(issue)}\n`;
+      }
+    }
+    writeFileSync(feedbackPath, content);
+  }
+
+  /** Write a completion summary when the task fails (max QA attempts reached) */
+  private _writeCompletionSummary(pipeline: TaskPipeline): void {
+    const summaryPath = path.join(pipeline.specPath, 'completion_summary.md');
+    let content = `# Completion Summary\n\n`;
+    content += `Task failed after ${pipeline.qaAttempt} QA attempts.\n\n`;
+
+    // Read plan.json for subtask status
+    const planPath = path.join(pipeline.specPath, 'plan.json');
+    if (existsSync(planPath)) {
+      try {
+        const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+        if (plan.subtasks) {
+          content += `## Plan Subtasks\n\n`;
+          for (const s of plan.subtasks) {
+            const done = s.completed ? 'COMPLETED' : 'NOT COMPLETED';
+            content += `- [${s.completed ? 'x' : ' '}] **${s.title}** — ${done}\n`;
+          }
+        }
+      } catch { /* skip */ }
+    }
+
+    // Read last QA report
+    const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+    if (existsSync(reportPath)) {
+      try {
+        const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+        content += `\n## Last QA Report\n\n`;
+        content += `Overall: **${report.overall}**\n\n`;
+        if (report.criteria) {
+          content += `| Criterion | Status | Notes |\n`;
+          content += `|-----------|--------|-------|\n`;
+          for (const c of report.criteria) {
+            content += `| ${c.name} | ${c.status} | ${c.notes || '-'} |\n`;
+          }
+        }
+        if (report.issues) {
+          content += `\n### Issues\n\n`;
+          for (const issue of report.issues) {
+            content += `- ${issue.severity ? `[${issue.severity}] ` : ''}${issue.message || issue.description || JSON.stringify(issue)}\n`;
+          }
+        }
+      } catch { /* skip */ }
+    }
+
+    content += `\n---\n*Generated automatically on ${new Date().toISOString()}*\n`;
+
+    writeFileSync(summaryPath, content);
+
+    // Store summary on the task
+    this.taskStore.update(pipeline.taskId, { completionSummary: content });
   }
 
   private _phaseHeader(logFile: string, phase: string): void {

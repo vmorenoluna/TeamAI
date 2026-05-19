@@ -1,0 +1,46 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: TeamAI
+      - button "←" [ref=e5]
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: Projects
+        - button "+ Add" [ref=e10]
+      - list [ref=e11]:
+        - listitem [ref=e12]:
+          - button "Formell" [ref=e13]
+          - button "×" [ref=e14]
+        - listitem [ref=e15]:
+          - button "TeamAI" [ref=e16]
+          - button "×" [ref=e17]
+    - navigation [ref=e18]:
+      - button "☾ Dark mode" [ref=e19]:
+        - generic [ref=e20]: ☾
+        - text: Dark mode
+      - link "▦ Kanban" [ref=e21] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e22]: ▦
+        - text: Kanban
+      - link "◎ Insights" [ref=e23] [cursor=pointer]:
+        - /url: /insights
+        - generic [ref=e24]: ◎
+        - text: Insights
+      - link "◈ Ideation" [ref=e25] [cursor=pointer]:
+        - /url: /ideation
+        - generic [ref=e26]: ◈
+        - text: Ideation
+      - link "▶ Terminals" [ref=e27] [cursor=pointer]:
+        - /url: /terminals
+        - generic [ref=e28]: ▶
+        - text: Terminals
+      - link "◉ Roadmap" [ref=e29] [cursor=pointer]:
+        - /url: /roadmap
+        - generic [ref=e30]: ◉
+        - text: Roadmap
+      - link "⚙ Settings" [ref=e31] [cursor=pointer]:
+        - /url: /settings
+        - generic [ref=e32]: ⚙
+        - text: Settings
+  - main [ref=e33]:
+    - paragraph [ref=e35]: Select or add a project from the sidebar to get started.

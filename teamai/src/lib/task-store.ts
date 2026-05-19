@@ -14,6 +14,8 @@ export interface Task {
   source?: string;             // 'ideation' | 'competitor-analysis' — source of roadmap item
   competitiveContext?: string; // competitor context from roadmap item
   platform?: string;            // platform info from PR creation
+  completionSummary?: string;   // summary of what was completed when task fails
+  subtaskProgress?: { completed: number; total: number } | null;  // computed at load time from plan.json
   createdAt: string;
   updatedAt: string;
 }
@@ -113,7 +115,7 @@ export class TaskStore {
     const files: Record<string, string[]> = {
       spec: ['spec.md', 'plan.json', 'qa_report.json'],
       plan: ['plan.json', 'qa_report.json'],
-      qa:   ['qa_report.json'],
+      qa:   ['qa_report.json', 'qa_feedback.md', 'completion_summary.md'],
     };
     for (const f of files[level]) {
       const p = join(dir, f);

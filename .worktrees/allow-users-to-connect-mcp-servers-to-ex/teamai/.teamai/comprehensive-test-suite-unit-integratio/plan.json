@@ -1,0 +1,52 @@
+{
+  "complexity": 4,
+  "estimated_subtasks": 5,
+  "parallel_safe": false,
+  "subtasks": [
+    {
+      "id": 1,
+      "title": "Install Vitest and create configuration",
+      "description": "Install vitest and @vitejs/plugin-react as dev dependencies. Create vitest.config.ts with jsdom environment, path aliases matching tsconfig. Add 'test' and 'test:watch' npm scripts.",
+      "files": ["teamai/package.json", "teamai/vitest.config.ts"],
+      "depends_on": [],
+      "acceptance_criteria": ["npm test runs vitest with no test files found (exit 0)"],
+      "parallel_group": "A"
+    },
+    {
+      "id": 2,
+      "title": "Write unit tests for utils.ts",
+      "description": "Test slugify() with: normal titles, special characters, leading/trailing whitespace, very long titles, empty strings. Create tests/unit/utils.test.ts.",
+      "files": ["teamai/tests/unit/utils.test.ts"],
+      "depends_on": [1],
+      "acceptance_criteria": ["All slugify tests pass"],
+      "parallel_group": "A"
+    },
+    {
+      "id": 3,
+      "title": "Write unit tests for TaskStore",
+      "description": "Test TaskStore: create task appears in getAll, phase defaults to backlog, update modifies fields, updatePhase changes phase and writes events.jsonl, getById finds by id, delete removes directory. Use temp directory for isolation.",
+      "files": ["teamai/tests/unit/task-store.test.ts"],
+      "depends_on": [1],
+      "acceptance_criteria": ["All TaskStore tests pass"],
+      "parallel_group": "B"
+    },
+    {
+      "id": 4,
+      "title": "Install Playwright and create E2E config",
+      "description": "Install @playwright/test as dev dependency. Create playwright.config.ts targeting localhost:3000. Add 'test:e2e' script.",
+      "files": ["teamai/package.json", "teamai/playwright.config.ts"],
+      "depends_on": [1],
+      "acceptance_criteria": ["npx playwright test --list shows the test file"],
+      "parallel_group": "B"
+    },
+    {
+      "id": 5,
+      "title": "Write E2E test for Kanban board",
+      "description": "Create tests/e2e/kanban.spec.ts: navigate to localhost:3000, verify page title/header, verify kanban columns are visible, click a task card and verify task detail panel opens.",
+      "files": ["teamai/tests/e2e/kanban.spec.ts"],
+      "depends_on": [4],
+      "acceptance_criteria": ["E2E test navigates to kanban page and verifies basic UI elements"],
+      "parallel_group": "A"
+    }
+  ]
+}

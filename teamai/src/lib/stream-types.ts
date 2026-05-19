@@ -71,6 +71,7 @@ export interface PlanSubtask {
   title: string;
   description?: string;
   files?: string[];
+  completed?: boolean;
 }
 
 export interface PlanData {

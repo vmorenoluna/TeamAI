@@ -1,0 +1,22 @@
+{
+  "subtasks": [
+    {
+      "id": "1",
+      "title": "Add undo stack and toast state to KanbanBoard",
+      "description": "Add undoStack array with { taskId, previousPhase, type } entries. Add toastMessage state. On move/delete, push to stack and show toast.",
+      "files": ["src/components/kanban-board.tsx"]
+    },
+    {
+      "id": "2",
+      "title": "Add Undo toast UI",
+      "description": "Fixed-position toast at bottom-center with action description and 'Undo' button. Auto-dismisses after 5 seconds.",
+      "files": ["src/components/kanban-board.tsx"]
+    },
+    {
+      "id": "3",
+      "title": "Add Ctrl+Z keyboard shortcut",
+      "description": "Global keydown listener for Ctrl+Z / Cmd+Z that pops and reverses the last undo action.",
+      "files": ["src/components/kanban-board.tsx"]
+    }
+  ]
+}

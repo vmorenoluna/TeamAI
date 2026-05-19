@@ -1,0 +1,71 @@
+- generic [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]: TeamAI
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: Projects
+        - button "+ Add" [ref=e8]
+      - list [ref=e9]:
+        - listitem [ref=e10]:
+          - button "Formell" [ref=e11]
+          - button "×" [ref=e12]
+        - listitem [ref=e13]:
+          - button "TeamAI" [ref=e14]
+          - button "×" [ref=e15]
+    - navigation [ref=e16]:
+      - link "Kanban" [ref=e17] [cursor=pointer]:
+        - /url: /
+      - link "Insights" [ref=e18] [cursor=pointer]:
+        - /url: /insights
+      - link "Roadmap" [ref=e19] [cursor=pointer]:
+        - /url: /roadmap
+      - link "Settings" [ref=e20] [cursor=pointer]:
+        - /url: /settings
+  - main [ref=e21]:
+    - generic [ref=e34]:
+      - generic [ref=e35]:
+        - heading "Board" [level=1] [ref=e36]
+        - button "+ New Task" [active] [ref=e37]
+      - generic [ref=e39]:
+        - generic [ref=e41]:
+          - generic [ref=e42]: Backlog
+          - generic [ref=e43]: "0"
+        - generic [ref=e46]:
+          - generic [ref=e47]: Spec
+          - generic [ref=e48]: "0"
+        - generic [ref=e51]:
+          - generic [ref=e52]: Planning
+          - generic [ref=e53]: "0"
+        - generic [ref=e56]:
+          - generic [ref=e57]: In Progress
+          - generic [ref=e58]: "0"
+        - generic [ref=e61]:
+          - generic [ref=e62]: QA
+          - generic [ref=e63]: "0"
+        - generic [ref=e66]:
+          - generic [ref=e67]: Review
+          - generic [ref=e68]: "0"
+        - generic [ref=e71]:
+          - generic [ref=e72]: Merging
+          - generic [ref=e73]: "0"
+        - generic [ref=e76]:
+          - generic [ref=e77]: Failed
+          - generic [ref=e78]: "0"
+        - generic [ref=e81]:
+          - generic [ref=e82]: Done
+          - generic [ref=e83]: "0"
+      - generic [ref=e87]:
+        - heading "New Task" [level=2] [ref=e88]
+        - generic [ref=e89]:
+          - generic [ref=e90]:
+            - generic [ref=e91]: Title
+            - textbox "Add dark mode toggle" [ref=e92]
+          - generic [ref=e93]:
+            - generic [ref=e94]: Description
+            - textbox "Describe what needs to be done..." [ref=e95]
+          - generic [ref=e96]:
+            - button "Cancel" [ref=e97]
+            - button "Create Task" [ref=e98]
+  - button "Open Next.js Dev Tools" [ref=e29] [cursor=pointer]:
+    - img [ref=e30]
+  - alert [ref=e33]

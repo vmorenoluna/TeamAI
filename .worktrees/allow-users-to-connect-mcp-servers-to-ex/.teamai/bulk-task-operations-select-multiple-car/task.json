@@ -1,0 +1,9 @@
+{
+  "id": "4572a5a7-8bcb-4597-a4b1-89f2d16fe583",
+  "title": "Bulk task operations — select multiple cards, move/delete/archive in batch",
+  "description": "Add multi-select to the Kanban board (shift+click, ctrl+click) with bulk actions: move selected to phase X, delete selected, archive selected. This is a quality-of-life improvement for managing many tasks.",
+  "phase": "done",
+  "source": "ideation",
+  "createdAt": "2026-05-12T10:20:46.653Z",
+  "updatedAt": "2026-05-12T15:30:00.000Z"
+}

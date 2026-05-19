@@ -1,0 +1,21 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]: TeamAI
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: Projects
+        - button "+ Add" [ref=e8]
+      - list [ref=e9]:
+        - listitem [ref=e10]:
+          - button "Formell" [ref=e11]
+    - navigation [ref=e12]:
+      - link "Kanban" [ref=e13] [cursor=pointer]:
+        - /url: /
+      - link "Insights" [ref=e14] [cursor=pointer]:
+        - /url: /insights
+      - link "Roadmap" [ref=e15] [cursor=pointer]:
+        - /url: /roadmap
+      - link "Settings" [ref=e16] [cursor=pointer]:
+        - /url: /settings
+  - main [ref=e17]:
+    - paragraph [ref=e19]: Select or add a project from the sidebar to get started.

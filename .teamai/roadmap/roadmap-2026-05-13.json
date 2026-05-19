@@ -383,7 +383,8 @@
           "src/lib/recovery.ts"
         ],
         "source": "ideation",
-        "competitiveContext": null
+        "competitiveContext": null,
+        "linkedTaskId": "c0a30b53-3a4c-4423-b41a-b7cd3c5f4165"
       },
       {
         "id": "ci-cd",
@@ -396,7 +397,8 @@
           ".github/workflows/deploy.yml (new)"
         ],
         "source": "ideation",
-        "competitiveContext": null
+        "competitiveContext": null,
+        "linkedTaskId": "216fb52b-408a-4193-b55c-d6fa4169f690"
       },
       {
         "id": "error-handling",
@@ -459,7 +461,8 @@
           "src/app/settings/page.tsx"
         ],
         "source": "competitor-analysis",
-        "competitiveContext": "Cline and Cursor have MCP support. Adding it keeps TeamAI competitive for power users."
+        "competitiveContext": "Cline and Cursor have MCP support. Adding it keeps TeamAI competitive for power users.",
+        "linkedTaskId": "78106f83-150d-4d3d-8af8-a81b418fbe91"
       },
       {
         "id": "integration-tests",

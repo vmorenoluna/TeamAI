@@ -1,0 +1,10 @@
+{
+  "id": "78106f83-150d-4d3d-8af8-a81b418fbe91",
+  "title": "Add MCP (Model Context Protocol) server support",
+  "description": "Allow users to connect MCP servers to extend agent capabilities. Support MCP tools (browser automation, database queries, API calls) within pipeline phases. Cline and Cursor both recently added MCP support.",
+  "phase": "implement",
+  "source": "competitor-analysis",
+  "createdAt": "2026-05-18T14:58:26.689Z",
+  "updatedAt": "2026-05-18T18:27:14.384Z",
+  "branch": "feat/allow-users-to-connect-mcp-servers-to-ex"
+}

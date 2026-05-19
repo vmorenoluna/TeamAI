@@ -1,0 +1,85 @@
+{
+  "complexity": 3,
+  "estimated_subtasks": 5,
+  "parallel_safe": false,
+  "subtasks": [
+    {
+      "id": 1,
+      "description": "Create src/lib/stream-types.ts with shared StreamEvent, ContentBlock, and ToolUseBlock interfaces",
+      "parallel_group": null,
+      "depends_on": [],
+      "files": ["src/lib/stream-types.ts"],
+      "acceptance_criteria": [
+        "StreamEvent type matches known Claude stream-json output format",
+        "ContentBlock type covers text, tool_use, tool_result shapes",
+        "File compiles without errors"
+      ]
+    },
+    {
+      "id": 2,
+      "description": "Update hooks (use-agent-stream.ts, use-session-stream.ts) and component event handlers (agent-panel, ideation-scanner, insights-chat, roadmap-view) to use StreamEvent instead of any",
+      "parallel_group": null,
+      "depends_on": [1],
+      "files": [
+        "src/hooks/use-agent-stream.ts",
+        "src/hooks/use-session-stream.ts",
+        "src/components/agent-panel.tsx",
+        "src/components/ideation-scanner.tsx",
+        "src/components/insights-chat.tsx",
+        "src/components/roadmap-view.tsx"
+      ],
+      "acceptance_criteria": [
+        "All six files import and use StreamEvent type",
+        "No 'any' remains in event-related type annotations",
+        "Extract text helpers use typed blocks parameter"
+      ]
+    },
+    {
+      "id": 3,
+      "description": "Add proper xterm.js types for terminal and FitAddon in terminal-panel.tsx and agent-panel.tsx",
+      "parallel_group": 1,
+      "depends_on": [],
+      "files": [
+        "src/components/terminal-panel.tsx",
+        "src/components/agent-panel.tsx"
+      ],
+      "acceptance_criteria": [
+        "Terminal instances typed as Terminal from @xterm/xterm",
+        "FitAddon instances typed as FitAddon from @xterm/addon-fit",
+        "No 'any' annotations remain for terminal/fitAddon refs"
+      ]
+    },
+    {
+      "id": 4,
+      "description": "Fix as any casts in orchestrator.ts (platform field) and roadmap.ts (phaseKey validation)",
+      "parallel_group": 1,
+      "depends_on": [],
+      "files": [
+        "src/lib/orchestrator.ts",
+        "src/app/actions/roadmap.ts"
+      ],
+      "acceptance_criteria": [
+        "orchestrator.ts: Add platform?: string to Task interface or use a typed update method",
+        "roadmap.ts: Use proper type assertion or type guard for phaseKey validation",
+        "Remove eslint-disable comments from orchestrator.ts"
+      ]
+    },
+    {
+      "id": 5,
+      "description": "Type plan/qaReport variables in tasks.ts and raw/report in roadmap.ts, remove remaining eslint-disable comments",
+      "parallel_group": null,
+      "depends_on": [1, 4],
+      "files": [
+        "src/app/actions/tasks.ts",
+        "src/app/actions/roadmap.ts",
+        "src/lib/orchestrator.ts"
+      ],
+      "acceptance_criteria": [
+        "No 'any' type annotations remain in production src/",
+        "No eslint-disable @typescript-eslint/no-explicit-any comments remain",
+        "TypeScript compiles with zero errors",
+        "All 106 existing tests pass"
+      ]
+    }
+  ]
+}

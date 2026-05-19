@@ -312,6 +312,43 @@ test.describe('Task Detail Full Page (/task/:id)', () => {
     await expect(breadcrumb).toHaveAttribute('href', '/');
   });
 
+  test('terminal tab renders agent panel', async ({ page }) => {
+    await page.goto('/');
+
+    const noProject = page.locator('text=Select or add a project from the sidebar');
+    if (await noProject.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      test.skip(true, 'No active project selected');
+      return;
+    }
+
+    const taskCards = page.locator('[data-testid="task-card"]');
+    if ((await taskCards.count()) === 0) {
+      test.skip(true, 'No tasks available to test terminal tab');
+      return;
+    }
+
+    await taskCards.first().click();
+    await expect(page.locator('text=← Board')).toBeVisible({ timeout: 5_000 });
+
+    // Get the task ID first
+    const taskIdText = page.locator('[data-testid="task-id"]');
+    await expect(taskIdText).toBeVisible({ timeout: 5_000 });
+    const taskId = await taskIdText.innerText();
+
+    await page.locator('button[title="Close window"]').click();
+    await page.goto(`/task/${taskId}`);
+
+    // Click the Terminal tab
+    await page.locator('button:has-text("Terminal")').first().click();
+
+    // Agent panel header should render
+    await expect(page.locator('text=Agent Output').first()).toBeVisible({ timeout: 5_000 });
+
+    // No floating scroll buttons should exist — native scrollbar is used instead
+    await expect(page.locator('[data-testid="scroll-to-bottom"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="scroll-to-top"]')).toHaveCount(0);
+  });
+
   test('full page shows delete button', async ({ page }) => {
     await page.goto('/');
 

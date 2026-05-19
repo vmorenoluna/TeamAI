@@ -1,0 +1,12 @@
+{
+  "overall": "PASS",
+  "criteria": [
+    { "name": "TEMPLATES constant with 4 predefined types", "status": "PASS", "notes": "Bug Fix, Feature Request, Refactor, Documentation with icon, titlePrefix, and descriptionTemplate." },
+    { "name": "Template selector grid in New Task dialog", "status": "PASS", "notes": "2x2 button grid above title input. Active state with blue highlight. All buttons have type='button'." },
+    { "name": "Selecting template pre-fills title and description", "status": "PASS", "notes": "Controlled inputs (value/onChange) update from selectTemplate(). User can edit pre-filled values." },
+    { "name": "Clear template resets fields", "status": "PASS", "notes": "clearTemplate() resets newTitle, newDesc, selectedTemplate. Triggered on Cancel, backdrop click, and 'Clear template' button." },
+    { "name": "Template state resets after task creation", "status": "PASS", "notes": "handleCreate calls clearTemplate() after successful submission." },
+    { "name": "TypeScript compiles cleanly", "status": "PASS", "notes": "tsc --noEmit passes." },
+    { "name": "All 106 unit tests still pass", "status": "PASS", "notes": "No regressions." }
+  ]
+}

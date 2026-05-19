@@ -188,6 +188,14 @@ export class ProcessManager extends EventEmitter {
     const session = this.sessions.get(sessionId);
     if (session) {
       session.process.kill('SIGTERM');
+      // SIGKILL fallback after a grace period if the process ignores SIGTERM
+      // Use exitCode instead of process.killed (killed is set synchronously by SIGTERM above)
+      setTimeout(() => {
+        const s = this.sessions.get(sessionId);
+        if (s && s.process.exitCode === null) {
+          s.process.kill('SIGKILL');
+        }
+      }, 5_000);
       session.status = 'done';
     }
   }

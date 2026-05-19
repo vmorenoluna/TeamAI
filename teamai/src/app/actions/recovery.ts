@@ -13,7 +13,18 @@ export async function resumeTask(task: InterruptedTask): Promise<void> {
   const taskStore = new TaskStore(task.projectPath);
   const t = taskStore.getById(task.taskId);
   if (!t) return;
+
+  // Clear any expired rate-limit flag so the task doesn't show hourglass forever
+  if (t.rateLimitedUntil) {
+    const expiresAt = new Date(t.rateLimitedUntil).getTime();
+    if (expiresAt <= Date.now()) {
+      taskStore.update(task.taskId, { rateLimitedUntil: undefined });
+    }
+  }
+
+  // Resume from the interrupted phase instead of restarting from 'spec'
+  const startPhase = t.phase as 'spec' | 'plan' | 'implement' | 'qa-review' | 'merge' | 'create-pr' | undefined;
   const orchestrator = getOrchestrator(task.projectPath);
-  orchestrator.runTask(task.taskId, t.description).catch(console.error);
+  orchestrator.runTask(task.taskId, t.description, startPhase).catch(console.error);
   revalidatePath('/');
 }

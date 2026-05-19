@@ -75,7 +75,6 @@ const LINKED_PHASE_BADGE: Record<string, string> = {
   plan: 'bg-indigo-900/30 text-indigo-300',
   implement: 'bg-amber-900/30 text-amber-300',
   'qa-review': 'bg-orange-900/30 text-orange-300',
-  'qa-fix': 'bg-orange-900/30 text-orange-300',
   'awaiting-review': 'bg-purple-900/30 text-purple-300',
   merge: 'bg-teal-900/30 text-teal-300',
   'create-pr': 'bg-teal-900/30 text-teal-300',

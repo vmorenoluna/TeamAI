@@ -7,6 +7,7 @@ import { revalidatePath } from 'next/cache';
 import type { PlanData, QAReportData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
+import { getResumePhaseForFailedTask } from '@/lib/task-utils';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 
@@ -49,6 +50,28 @@ export async function bulkDeleteTasks(taskIds: string[]) {
   revalidatePath('/');
 }
 
+export async function retryTask(taskId: string): Promise<{ success: boolean; error?: string }> {
+  const { taskStore, orchestrator } = await getStores();
+  const task = taskStore.getById(taskId);
+  if (!task) return { success: false, error: 'Task not found' };
+  if (task.phase !== 'failed') return { success: false, error: `Task is in phase "${task.phase}", not "failed"` };
+
+  // Determine the phase the task was in when it failed — read from events
+  let resumePhase = 'qa-review'; // default for failed tasks (most common failure point)
+  try {
+    const events = taskStore.getEvents(taskId);
+    resumePhase = getResumePhaseForFailedTask(events);
+  } catch { /* fall back to default */ }
+
+  // Clear completionSummary so the failure indicator disappears
+  taskStore.update(taskId, { completionSummary: undefined });
+
+  // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
+  orchestrator.moveTaskToPhase(taskId, resumePhase).catch(console.error);
+  revalidatePath('/');
+  return { success: true };
+}
+
 export async function runTask(taskId: string) {
   const { taskStore, orchestrator } = await getStores();
   const task = taskStore.getById(taskId);
@@ -72,7 +95,26 @@ export async function rejectTask(taskId: string, feedback: string) {
 
 export async function getTasks() {
   const { taskStore } = await getStores();
-  return taskStore.getAll();
+  const projectPath = await getActiveProjectPath();
+  const tasks = taskStore.getAll();
+
+  // Enrich each task with subtask progress from plan.json
+  for (const task of tasks) {
+    const dir = taskStore.getDirById(task.id);
+    const planPath = join(dir, 'plan.json');
+    if (existsSync(planPath)) {
+      try {
+        const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+        const subtasks = plan.subtasks ?? [];
+        const completed = subtasks.filter((s: any) => s.completed).length;
+        task.subtaskProgress = { completed, total: subtasks.length };
+      } catch {
+        // invalid plan.json — skip
+      }
+    }
+  }
+
+  return tasks;
 }
 
 export async function getTask(id: string) {

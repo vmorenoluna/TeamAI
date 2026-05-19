@@ -1,0 +1,9 @@
+{
+  "id": "4f095c24-1886-4c7f-9b2e-f15192d55724",
+  "title": "Task templates — pre-defined task types with default descriptions and agent assignments",
+  "description": "Allow users to save and reuse task templates: 'Bug Fix', 'Feature Request', 'Refactor', 'Documentation Update' — each with a default description structure, suggested agent role, and reference image placeholder.",
+  "phase": "done",
+  "source": "ideation",
+  "createdAt": "2026-05-12T10:21:12.923Z",
+  "updatedAt": "2026-05-12T15:20:00.000Z"
+}
