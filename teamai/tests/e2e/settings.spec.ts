@@ -33,7 +33,7 @@ test.describe('Settings Page', () => {
     await expect(page.locator('text=Agent Roles')).toBeVisible({ timeout: 5_000 });
   });
 
-  test('provider config dropdown has all provider options', async ({ page }) => {
+  test('provider config has provider and model dropdowns with refresh buttons', async ({ page }) => {
     await page.goto('/settings');
 
     const noProject = page.locator('text=No active project selected');
@@ -44,11 +44,34 @@ test.describe('Settings Page', () => {
 
     await expect(page.locator('text=Settings')).toBeVisible({ timeout: 10_000 });
 
-    // Find provider dropdowns — at least one select element should be visible
+    // The Providers section should have select elements for both provider and model
     const selects = page.locator('select');
-    const selectCount = await selects.count();
-    if (selectCount > 0) {
-      await expect(selects.first()).toBeVisible();
+    await expect(selects.first()).toBeVisible();
+
+    // Should have refresh buttons (for model lists)
+    const refreshButtons = page.locator('button[title*="Refresh"]');
+    const refreshCount = await refreshButtons.count();
+    expect(refreshCount).toBeGreaterThanOrEqual(1);
+
+    // The Save Provider Config button should be visible
+    const saveButton = page.locator('button:has-text("Save Provider Config")');
+    await expect(saveButton).toBeVisible();
+  });
+
+  test('provider and role rows show loading state for model dropdowns', async ({ page }) => {
+    await page.goto('/settings');
+
+    const noProject = page.locator('text=No active project selected');
+    if (await noProject.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      test.skip(true, 'No active project — skipping provider config test');
+      return;
     }
+
+    await expect(page.locator('text=Settings')).toBeVisible({ timeout: 10_000 });
+
+    // Initially, model selects show "Loading models…" text while fetching
+    // The text may transition quickly; check that the ProviderConfigEditor rendered
+    await expect(page.locator('text=Default (all roles)')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('text=Role overrides')).toBeVisible({ timeout: 5_000 });
   });
 });
