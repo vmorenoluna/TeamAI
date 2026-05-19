@@ -1,41 +1,130 @@
 'use client';
 
-import { useState, useTransition, useEffect, useRef } from 'react';
+import { useState, useTransition, useEffect, useRef, useCallback } from 'react';
 import { createTerminalSession, closeTerminalSession } from '@/app/actions/terminals';
+import { getAvailableModels, getProvidersConfig } from '@/app/actions/providers';
 import { TerminalPanel } from './terminal-panel';
 import type { RoleDefinition } from '@/app/actions/roles';
+import type { ProvidersConfig } from '@/app/actions/providers';
+
+const PROVIDERS = ['anthropic', 'bedrock', 'vertex', 'openai', 'gemini', 'ollama'] as const;
 
 interface ActiveTerminal {
   sessionId: string;
   role: string;
 }
 
+/** Deduplicate concurrent fetch requests for the same provider on the client. */
+const inflightFetches = new Map<string, Promise<{ models: string[]; error?: string }>>();
+
+async function fetchModels(provider: string): Promise<{ models: string[]; error?: string }> {
+  const existing = inflightFetches.get(provider);
+  if (existing) return existing;
+  const promise = getAvailableModels(provider);
+  inflightFetches.set(provider, promise);
+  promise.finally(() => inflightFetches.delete(provider));
+  return promise;
+}
+
+function RefreshIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 2v6h-6" />
+      <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+      <path d="M3 22v-6h6" />
+      <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+    </svg>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
 export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
   const [terminals, setTerminals] = useState<ActiveTerminal[]>([]);
   const [showDialog, setShowDialog] = useState(false);
   const [selectedRole, setSelectedRole] = useState(roles[0]?.filename ?? '');
+  const [provider, setProvider] = useState<string>('anthropic');
   const [model, setModel] = useState('');
+  const [showCustom, setShowCustom] = useState(false);
+  const [customValue, setCustomValue] = useState('');
+  const [models, setModels] = useState<string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const fetchVersion = useRef(0);
   const [isPending, startTransition] = useTransition();
+
+  // Load default provider from config on mount
+  useEffect(() => {
+    getProvidersConfig().then(cfg => {
+      if (cfg.default.provider) {
+        setProvider(cfg.default.provider);
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Fetch models when provider changes
+  const loadModels = useCallback(async (prov: string) => {
+    const version = ++fetchVersion.current;
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      const result = await fetchModels(prov);
+      if (fetchVersion.current !== version) return;
+      setModels(result.models);
+      if (result.error) setModelsError(result.error);
+    } catch {
+      if (fetchVersion.current === version) {
+        setModelsError('Failed to fetch models');
+      }
+    } finally {
+      if (fetchVersion.current === version) setModelsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadModels(provider);
+  }, [provider, loadModels]);
+
+  // When models are loaded, determine if current model value matches a known model
+  useEffect(() => {
+    if (models.length > 0) {
+      if (models.includes(model)) {
+        setShowCustom(false);
+        setCustomValue('');
+      } else if (model) {
+        setShowCustom(true);
+        setCustomValue(model);
+      } else {
+        setShowCustom(false);
+        setCustomValue('');
+      }
+    }
+  }, [models, model]);
 
   function handleOpen() {
     startTransition(async () => {
-      const sessionId = await createTerminalSession(selectedRole, model || undefined);
+      const finalModel = showCustom ? customValue : model;
+      const sessionId = await createTerminalSession(selectedRole, finalModel || undefined);
       setTerminals(prev => [...prev, { sessionId, role: selectedRole }]);
       setShowDialog(false);
+      setModel('');
+      setShowCustom(false);
+      setCustomValue('');
     });
   }
 
   function handleClose(sessionId: string) {
-    // Also kill the PTY server-side so resources are freed immediately
     closeTerminalSession(sessionId).catch(() => {});
     setTerminals(prev => prev.filter(t => t.sessionId !== sessionId));
   }
 
-  // Kill all terminal sessions when the component unmounts (user navigates away).
-  // Use a ref so the cleanup always sees the latest terminals without re-running
-  // on every state change (which would double-close on individual terminal removal).
   const terminalsRef = useRef(terminals);
-
   useEffect(() => {
     terminalsRef.current = terminals;
     return () => {
@@ -43,9 +132,78 @@ export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
         closeTerminalSession(t.sessionId).catch(() => {});
       }
     };
-    // Only run on mount/unmount; terminalsRef.current is always fresh
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleSelectChange(value: string) {
+    if (value === '__custom__') {
+      setShowCustom(true);
+      setCustomValue(model || '');
+    } else {
+      setShowCustom(false);
+      setCustomValue('');
+      setModel(value);
+    }
+  }
+
+  function handleCustomBlur() {
+    setModel(customValue);
+  }
+
+  function handleCustomKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter') {
+      setModel(customValue);
+    }
+  }
+
+  function renderModelControl() {
+    if (modelsLoading) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-500 border border-[#334155] rounded-lg bg-[#11131b]">
+          <Spinner />
+          Loading models…
+        </div>
+      );
+    }
+
+    if (models.length > 0) {
+      return (
+        <div className="flex items-center gap-2">
+          <select
+            value={showCustom ? '__custom__' : (models.includes(model) ? model : '__custom__')}
+            onChange={e => handleSelectChange(e.target.value)}
+            className="flex-1 px-3 py-2 text-sm border border-[#334155] rounded-lg bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb]"
+          >
+            {models.map(m => (
+              <option key={m} value={m} className="bg-[#11131b]">{m}</option>
+            ))}
+            <option value="__custom__" className="bg-[#11131b] border-t border-[#334155]">Custom…</option>
+          </select>
+          {showCustom && (
+            <input
+              value={customValue}
+              onChange={e => setCustomValue(e.target.value)}
+              onBlur={handleCustomBlur}
+              onKeyDown={handleCustomKeyDown}
+              placeholder="Type a model name…"
+              className="flex-1 px-3 py-2 text-sm border border-[#334155] rounded-lg bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] placeholder-slate-500"
+              autoFocus
+            />
+          )}
+        </div>
+      );
+    }
+
+    // No models loaded — show free text input
+    return (
+      <input
+        value={model}
+        onChange={e => setModel(e.target.value)}
+        placeholder={modelsError ? `${modelsError} — type a model name` : 'Type a model name…'}
+        className="w-full px-3 py-2 text-sm border border-[#334155] rounded-lg bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] placeholder-slate-500"
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -103,15 +261,37 @@ export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Model                <span className="font-normal text-slate-500">(optional override)</span>
-              </label>
-              <input
-                value={model}
-                onChange={e => setModel(e.target.value)}
-                placeholder="claude-sonnet-4-6"
-                className="w-full px-3 py-2 text-sm border border-[#334155] rounded-lg bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] placeholder-slate-500"
-              />
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Model
+                  <span className="font-normal text-slate-500 ml-1">(optional override)</span>
+                </label>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <select
+                    value={provider}
+                    onChange={e => { setProvider(e.target.value); setModel(''); setShowCustom(false); }}
+                    className="flex-1 px-3 py-2 text-sm border border-[#334155] rounded-lg bg-[#11131b] text-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2563eb]"
+                  >
+                    {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    {renderModelControl()}
+                  </div>
+                  <button
+                    onClick={() => loadModels(provider)}
+                    disabled={modelsLoading}
+                    title={`Refresh ${provider} models`}
+                    className="p-2 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors shrink-0"
+                  >
+                    {modelsLoading ? <Spinner /> : <RefreshIcon />}
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="flex justify-end gap-3 pt-1">
               <button onClick={() => setShowDialog(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">Cancel</button>
