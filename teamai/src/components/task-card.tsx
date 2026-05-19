@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkTaskWorktree, deleteTaskWorktree } from '@/app/actions/tasks';
+import { checkTaskWorktree, deleteTaskWorktree, retryTask } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 
 const DESCRIPTION_LIMIT = 80;
@@ -31,6 +31,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
   const [wtStatus, setWtStatus] = useState<{ exists: boolean; path: string | null }>({ exists: false, path: null });
   const [wtChecking, setWtChecking] = useState(true);
   const [wtDeleting, setWtDeleting] = useState(false);
+  const [isRetrying, startRetryTransition] = useTransition();
 
   useEffect(() => {
     if (!task.branch) {
@@ -58,10 +59,23 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
   }
 
   const showSpinner = !EXCLUDED_SPINNER_PHASES.has(task.phase);
+  const isRateLimited = !!task.rateLimitedUntil;
   const longDesc = task.description && task.description.length > DESCRIPTION_LIMIT;
   const displayDesc = task.description
     ? (longDesc && !expanded ? task.description.slice(0, DESCRIPTION_LIMIT) + '…' : task.description)
     : null;
+
+  async function handleRetry(e: React.MouseEvent) {
+    e.stopPropagation();
+    startRetryTransition(async () => {
+      const result = await retryTask(task.id);
+      if (result.success) {
+        router.refresh();
+      } else {
+        alert(`Failed to retry task: ${result.error}`);
+      }
+    });
+  }
 
   return (
     <div
@@ -81,9 +95,21 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
         </div>
       )}
       {/* Spinning circle indicator — shows for active phases */}
-      {showSpinner && !isMoving && (
-        <div className="absolute top-2 right-2" title="Task in progress">
+      {showSpinner && !isMoving && !isRateLimited && (
+        <div className="absolute top-2 right-2" title="Task in progress" data-testid="spinner-icon">
           <div className="w-3 h-3 rounded-full border-2 border-slate-500 border-t-transparent animate-spin" />
+        </div>
+      )}
+      {/* Hourglass indicator — replaces spinner when API rate-limited */}
+      {showSpinner && !isMoving && isRateLimited && (
+        <div className="absolute top-2 right-2" title="Rate limited — waiting for API quota" data-testid="hourglass-icon">
+          <span className="text-sm text-amber-400">⏳</span>
+        </div>
+      )}
+      {/* Failure indicator — shown when task has a completion summary (failed tasks) */}
+      {task.completionSummary && task.phase === 'failed' && (
+        <div className="absolute top-2 left-2 flex items-center gap-1" title="Task failed — click for details" data-testid="failure-indicator">
+          <span className="text-xs text-red-400">✕</span>
         </div>
       )}
 
@@ -106,9 +132,28 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
       )}
 
       <div className="mt-2 flex items-center justify-between">
-        <p className="text-[11px] text-slate-500">
-          {relativeTime(task.createdAt)}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-[11px] text-slate-500">
+            {relativeTime(task.createdAt)}
+          </p>
+          {/* Subtask progress indicator — shows when plan has subtasks */}
+          {task.subtaskProgress && task.subtaskProgress.total > 0 && (
+            <span
+              className="text-[10px] font-medium"
+              data-testid="subtask-progress-badge"
+              title={`${task.subtaskProgress.completed} / ${task.subtaskProgress.total} subtasks completed`}
+              style={{
+                color: task.subtaskProgress.completed === task.subtaskProgress.total
+                  ? '#22c55e'   // green-500 when all done
+                  : task.subtaskProgress.completed > 0
+                    ? '#eab308' // yellow-500 partially done
+                    : '#64748b' // slate-500 none completed
+              }}
+            >
+              {task.subtaskProgress.completed}/{task.subtaskProgress.total} ✓
+            </span>
+          )}
+        </div>
 
         {/* Worktree info + delete — shows only when a worktree exists for this task */}
         {!wtChecking && wtStatus.exists && wtStatus.path && (
@@ -127,6 +172,26 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
           </div>
         )}
       </div>
+
+      {/* Retry button — shown only for failed tasks */}
+      {task.phase === 'failed' && (
+        <div className="mt-2 flex justify-end">
+          <button
+            onClick={handleRetry}
+            disabled={isRetrying}
+            title="Retry task — restart pipeline from the phase it failed at"
+            data-testid="retry-button"
+            className="text-[11px] font-medium px-2 py-1 rounded-md bg-red-900/30 text-red-400 hover:bg-red-800/40 hover:text-red-300 transition-colors disabled:opacity-50 flex items-center gap-1"
+          >
+            {isRetrying ? (
+              <span className="w-3 h-3 rounded-full border border-red-400 border-t-transparent animate-spin" />
+            ) : (
+              <span>↻</span>
+            )}
+            Retry
+          </button>
+        </div>
+      )}
     </div>
   );
 }

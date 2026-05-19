@@ -72,7 +72,7 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
           </span>
           {data?.task && (
             <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-              ({ backlog: 'bg-slate-800 text-slate-300', spec: 'bg-blue-900/40 text-blue-300', plan: 'bg-indigo-900/40 text-indigo-300', implement: 'bg-amber-900/40 text-amber-300', 'qa-review': 'bg-orange-900/40 text-orange-300', 'qa-fix': 'bg-orange-900/40 text-orange-300', 'awaiting-review': 'bg-purple-900/40 text-purple-300', merge: 'bg-teal-900/40 text-teal-300', failed: 'bg-red-900/40 text-red-300', done: 'bg-green-900/40 text-green-300' })[data.task.phase] ?? 'bg-slate-800 text-slate-300'
+              ({ backlog: 'bg-slate-800 text-slate-300', spec: 'bg-blue-900/40 text-blue-300', plan: 'bg-indigo-900/40 text-indigo-300', implement: 'bg-amber-900/40 text-amber-300', 'qa-review': 'bg-orange-900/40 text-orange-300', 'awaiting-review': 'bg-purple-900/40 text-purple-300', merge: 'bg-teal-900/40 text-teal-300', failed: 'bg-red-900/40 text-red-300', done: 'bg-green-900/40 text-green-300' })[data.task.phase] ?? 'bg-slate-800 text-slate-300'
             }`}>
               {data.task.phase}
             </span>

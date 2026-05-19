@@ -1,0 +1,20 @@
+{
+  "steps": [
+    {
+      "description": "Add getStaleSessions() to ProcessManager — iterate sessions, check if child process is still alive via process.killed and exitCode",
+      "files": ["src/lib/process-manager.ts"]
+    },
+    {
+      "description": "Add findOrphanedWorktrees() to recovery.ts — scan .teamai/worktrees/ directory, cross-reference with active tasks",
+      "files": ["src/lib/recovery.ts"]
+    },
+    {
+      "description": "Add startupCleanup() to recovery.ts — orchestrate interrupted tasks + stale sessions + orphaned worktrees into unified report",
+      "files": ["src/lib/recovery.ts"]
+    },
+    {
+      "description": "Update server.ts to call startupCleanup() instead of just findInterruptedTasks()",
+      "files": ["server.ts"]
+    }
+  ]
+}

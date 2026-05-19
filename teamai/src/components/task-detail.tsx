@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { AgentPanel } from './agent-panel';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
-import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock, deleteTask } from '@/app/actions/tasks';
+import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, PlanSubtask, QAReportData, QACriterion } from '@/lib/stream-types';
 import type { RoleDefinition } from '@/app/actions/roles';
@@ -17,7 +17,6 @@ const PHASE_BADGE: Record<string, string> = {
   plan:              'bg-indigo-900/40 text-indigo-300',
   implement:         'bg-amber-900/40 text-amber-300',
   'qa-review':       'bg-orange-900/40 text-orange-300',
-  'qa-fix':          'bg-orange-900/40 text-orange-300',
   'awaiting-review': 'bg-purple-900/40 text-purple-300',
   merge:             'bg-teal-900/40 text-teal-300',
   failed:            'bg-red-900/40 text-red-300',
@@ -136,21 +135,50 @@ function DepPicker({
 
 function PlanSubtasks({ plan }: { plan: PlanData | null }) {
   if (!plan?.subtasks?.length) return <p className="text-sm text-slate-400">No plan generated yet.</p>;
+  const completed = plan.subtasks.filter((s: PlanSubtask) => s.completed).length;
+  const total = plan.subtasks.length;
   return (
     <div className="space-y-2">
+      <div className="flex items-center gap-2 mb-3">
+        <p className="text-xs text-slate-500">
+          {completed} / {total} subtasks completed
+        </p>
+        {completed > 0 && completed < total && (
+          <div className="flex-1 h-1.5 bg-[#1e293b] rounded-full overflow-hidden" data-testid="subtask-progress-track">
+            <div
+              className="h-full bg-[#2563eb] rounded-full transition-all duration-500"
+              style={{ width: `${(completed / total) * 100}%` }}
+              data-testid="subtask-progress-bar"
+            />
+          </div>
+        )}
+      </div>
       {plan.subtasks.map((s: PlanSubtask, i: number) => (
-        <div key={i} data-testid="plan-subtask" className="p-3 rounded-lg border border-[#1e293b] bg-[#11131b]">
-          <p className="text-sm font-medium text-white">
-            {s.id}. {s.title}
-          </p>
-          {s.description && (
-            <p className="mt-1 text-xs text-slate-400">{s.description}</p>
-          )}
-          {s.files && s.files.length > 0 && (
-            <p className="mt-1 text-xs text-slate-400 font-mono">
-              {s.files.join(', ')}
-            </p>
-          )}
+        <div key={i} data-testid="plan-subtask" className={`p-3 rounded-lg border transition-colors ${
+          s.completed
+            ? 'border-green-900/40 bg-green-950/20'
+            : 'border-[#1e293b] bg-[#11131b]'
+        }`}>
+          <div className="flex items-start gap-2.5">
+            {s.completed ? (
+              <span className="shrink-0 mt-0.5 text-green-500 text-sm font-bold">✓</span>
+            ) : (
+              <span className="shrink-0 mt-0.5 w-3.5 h-3.5 rounded-full border-2 border-slate-600" />
+            )}
+            <div className="flex-1 min-w-0">
+              <p className={`text-sm font-medium ${s.completed ? 'text-green-300 line-through decoration-green-700/50' : 'text-white'}`}>
+                {s.title}
+              </p>
+              {!s.completed && s.description && (
+                <p className="mt-1 text-xs text-slate-400">{s.description}</p>
+              )}
+              {!s.completed && s.files && s.files.length > 0 && (
+                <p className="mt-1 text-xs text-slate-400 font-mono">
+                  {s.files.join(', ')}
+                </p>
+              )}
+            </div>
+          </div>
         </div>
       ))}
     </div>
@@ -370,6 +398,43 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
         {/* OVERVIEW */}
         {activeTab === 'overview' && (
           <div className="p-6 space-y-6">
+
+            {/* Completion summary banner (failed tasks) */}
+            {task.phase === 'failed' && task.completionSummary && (
+              <div className="rounded-lg border border-red-900/40 bg-red-950/20 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-red-400 text-sm font-bold">✗</span>
+                  <h3 className="text-sm font-semibold text-red-300">Task Failed</h3>
+                  <div className="ml-auto flex items-center gap-2">
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        startTransition(async () => {
+                          const result = await retryTask(task.id);
+                          if (result.success) {
+                            router.refresh();
+                          }
+                        });
+                      }}
+                      disabled={isPending}
+                      data-testid="detail-retry-button"
+                      className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-red-900/30 text-red-400 hover:bg-red-800/40 hover:text-red-300 transition-colors disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {isPending ? (
+                        <span className="w-3 h-3 rounded-full border border-red-400 border-t-transparent animate-spin" />
+                      ) : (
+                        <span>↻</span>
+                      )}
+                      Retry
+                    </button>
+                    <span className="text-[10px] text-red-400/60">Max QA attempts reached</span>
+                  </div>
+                </div>
+                <pre className="text-xs text-slate-400 whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-y-auto">
+                  {task.completionSummary}
+                </pre>
+              </div>
+            )}
 
             {/* Review panel if awaiting */}
             {isAwaiting && (

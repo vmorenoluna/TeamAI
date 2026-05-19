@@ -10,10 +10,11 @@ vi.mock('fs', () => ({
   readFileSync: vi.fn(),
   readdirSync: vi.fn(),
   statSync: vi.fn(),
+  writeFileSync: vi.fn(),
 }));
 
-import { findInterruptedTasks, findOrphanedWorktrees, startupCleanup } from '../../src/lib/recovery';
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { findInterruptedTasks, findOrphanedWorktrees, startupCleanup, autoClearExpiredRateLimits } from '../../src/lib/recovery';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 // Helper: readdirSync and statSync have overloaded signatures that make
@@ -387,9 +388,142 @@ describe('startupCleanup', () => {
       interruptedTasks: [],
       staleSessions: 3,
       orphanedWorktrees: [],
+      autoClearedRateLimits: 0,
     });
   });
 });
+
+// ── autoClearExpiredRateLimits ──────────────────────────────────────
+
+describe('autoClearExpiredRateLimits', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  it('returns 0 when no projects exist', () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+    expect(autoClearExpiredRateLimits()).toBe(0);
+  });
+
+  it('returns 0 when no tasks have rateLimitedUntil', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'my-task', 'task.json');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (String(p) === taskFile)
+        return JSON.stringify({ id: 't1', title: 'Task', phase: 'implement' });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['my-task'];
+      return [];
+    });
+
+    expect(autoClearExpiredRateLimits()).toBe(0);
+  });
+
+  it('clears expired rateLimitedUntil and returns count', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'my-task', 'task.json');
+    const pastDate = new Date(Date.now() - 3600_000).toISOString(); // 1 hour ago
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (String(p) === taskFile)
+        return JSON.stringify({ id: 't1', title: 'Task', phase: 'implement', rateLimitedUntil: pastDate });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['my-task'];
+      return [];
+    });
+
+    const result = autoClearExpiredRateLimits();
+    expect(result).toBe(1);
+
+    // writeFileSync should have been called to clear the field
+    const writeCall = vi.mocked(writeFileSync).mock.calls[0];
+    expect(writeCall).toBeDefined();
+    expect(String(writeCall[0])).toBe(taskFile);
+    const written = JSON.parse(String(writeCall[1]));
+    expect(written.rateLimitedUntil).toBeUndefined();
+  });
+
+  it('does not clear future rateLimitedUntil', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'my-task', 'task.json');
+    const futureDate = new Date(Date.now() + 3600_000).toISOString(); // 1 hour from now
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (String(p) === taskFile)
+        return JSON.stringify({ id: 't1', title: 'Task', phase: 'implement', rateLimitedUntil: futureDate });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['my-task'];
+      return [];
+    });
+
+    // Future rate limit should NOT be cleared
+    expect(autoClearExpiredRateLimits()).toBe(0);
+    expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
+  });
+
+  it('skips malformed task.json gracefully', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'bad-task', 'task.json');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (String(p) === taskFile) return '{{{bad-json';
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['bad-task'];
+      return [];
+    });
+
+    expect(autoClearExpiredRateLimits()).toBe(0);
+  });
+});
+
 
 // ── Edge-case coverage: catch blocks ──
 

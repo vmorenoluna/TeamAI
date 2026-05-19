@@ -1,0 +1,9 @@
+{
+  "id": "eeb25b2e-f9a9-4eca-aeef-bab67dfa6118",
+  "title": "Comprehensive test suite — unit, integration, and E2E tests",
+  "description": "The project has zero test coverage. Add Vitest for unit/integration tests covering the ProcessManager, Orchestrator, and TaskStore. Add Playwright E2E tests for the Kanban board, task creation, drag-and-drop, and settings pages. This is a prerequisite for confident development of any other feature.",
+  "phase": "done",
+  "source": "ideation",
+  "createdAt": "2026-05-11T21:50:12.070Z",
+  "updatedAt": "2026-05-11T22:18:46.216Z"
+}

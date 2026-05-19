@@ -4,7 +4,7 @@
  * createSession, allowing the pipeline to chain through phases without timing hacks.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, writeFileSync, existsSync, rmSync, unlinkSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -204,7 +204,7 @@ describe('Orchestrator pipeline — full flow through implement phase', () => {
     expect(processManager.killSession).toHaveBeenCalled();
   });
 
-  it('runs implement → qa-review → qa-fix when QA fails and retries', async () => {
+  it('runs implement → qa-review → implement (with feedback) when QA fails and retries', async () => {
     (processManager.createSession as any).mockImplementation(async () => {
       const cnt = ++(globalThis as any).__pmSessionCount;
       const sid = `session-${cnt}`;
@@ -213,6 +213,68 @@ describe('Orchestrator pipeline — full flow through implement phase', () => {
       if (cnt === 2) {
         writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
           overall: 'FAIL',
+          criteria: [{ name: 'Error handling', status: 'FAIL', notes: 'Missing error handling for edge case' }],
+          issues: [{ severity: 'error', message: 'Missing error handling' }],
+        }));
+      }
+
+      // On 4th session (2nd qa-review), write passing QA report so pipeline completes
+      if (cnt === 4) {
+        writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+          overall: 'PASS',
+          criteria: [{ name: 'Error handling', status: 'PASS', notes: '' }],
+        }));
+      }
+
+      process.nextTick(() => {
+        const handlers = onHandlers.get('event') || [];
+        for (const h of handlers) {
+          h({ sessionId: sid, event: { type: 'result' } });
+        }
+      });
+      return sid;
+    });
+
+    await orch.moveTaskToPhase(project.taskId, 'implement');
+
+    // Pipeline should have gone: implement → qa-review → implement (with qa_feedback.md) → qa-review → awaiting-review
+    // (since maxQaAttempts is 3, QA fails on 1st attempt, bounces to implement, then passes on 2nd attempt)
+    // 4 sessions total: 1=implement, 2=qa-review(fail), 3=implement(bounce), 4=qa-review(pass), then awaiting-review (no session)
+    // Note: qa_feedback.md is created after session-2 but then deleted during the implement bounce (session-3)
+    // to clean up. By the time the pipeline completes, qa_feedback.md no longer exists.
+    expect((globalThis as any).__pmSessionCount).toBe(4);
+
+    // The implement prompt on the bounce (session-3) includes qa_feedback content.
+    // Since sendMessage was called for all 4 sessions, and sessions 2-4 used the
+    // mock that writes qa_report.json, the pipeline must have read the feedback.
+
+    // Verify sendMessage was called 4 times (implement, qa-review, implement, qa-review)
+    expect(processManager.sendMessage).toHaveBeenCalledTimes(4);
+    expect(processManager.killSession).toHaveBeenCalled();
+
+    // Verify the pipeline advanced to awaiting-review (QA passed on 2nd attempt)
+    const task = JSON.parse(readFileSync(join(project.taskDir, 'task.json'), 'utf-8'));
+    expect(task.phase).toBe('awaiting-review');
+  }, 10000);
+
+  it('marks task as failed when max QA attempts reached', async () => {
+    // Override maxQaAttempts to 2 for this test
+    writeFileSync(
+      join(project.root, '.teamai', 'pipeline.json'),
+      JSON.stringify({ phases: ['spec', 'plan', 'implement', 'qa-review', 'merge'], maxQaAttempts: 2, parallelSubtasks: true }),
+    );
+    // Re-create orchestrator to pick up new config
+    orch = new (Orchestrator as any)(project.root);
+
+    (processManager.createSession as any).mockImplementation(async () => {
+      const cnt = ++(globalThis as any).__pmSessionCount;
+      const sid = `session-${cnt}`;
+
+      // Always write failing QA report (every qa-review session)
+      if (cnt === 2 || cnt === 4) {
+        writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+          overall: 'FAIL',
+          criteria: [{ name: 'Error handling', status: 'FAIL', notes: 'Not fixed yet' }],
           issues: [{ severity: 'error', message: 'Missing error handling' }],
         }));
       }
@@ -228,10 +290,28 @@ describe('Orchestrator pipeline — full flow through implement phase', () => {
 
     await orch.moveTaskToPhase(project.taskId, 'implement');
 
-    // Pipeline should have gone: implement → qa-review → qa-fix → qa-review → awaiting-review
-    // (since maxQaAttempts is 3, and qa-fix completes, then qa-review runs again)
-    expect(processManager.sendMessage).toHaveBeenCalled();
-    expect(processManager.killSession).toHaveBeenCalled();
+    // Pipeline should have gone: implement → qa-review(fail) → implement(bounce) → qa-review(fail) → failed
+    // 4 sessions total: implement, qa-review, implement, qa-review
+    // Note: qa_feedback.md was created after session-2 but deleted during the implement
+    // bounce (session-3) cleanup. Only completion_summary.md persists.
+    expect((globalThis as any).__pmSessionCount).toBe(4);
+
+    // Verify sendMessage was called 4 times
+    expect(processManager.sendMessage).toHaveBeenCalledTimes(4);
+
+    // verify completion_summary.md was written (this persists, unlike qa_feedback.md)
+    const summaryPath = join(project.taskDir, 'completion_summary.md');
+    expect(existsSync(summaryPath)).toBe(true);
+    const summaryContent = readFileSync(summaryPath, 'utf-8');
+    expect(summaryContent).toContain('Completion Summary');
+    expect(summaryContent).toContain('2 QA attempts');
+    expect(summaryContent).toContain('Add feature');
+
+    // verify task is marked as failed
+    const task = JSON.parse(readFileSync(join(project.taskDir, 'task.json'), 'utf-8'));
+    expect(task.phase).toBe('failed');
+    expect(task.completionSummary).toBeDefined();
+    expect(task.completionSummary).toContain('2 QA attempts');
   }, 10000);
 
   it('handles moveTaskToPhase for backlog phase without sessions', async () => {

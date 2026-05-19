@@ -1,0 +1,9 @@
+{
+  "id": "c0a30b53-3a4c-4423-b41a-b7cd3c5f4165",
+  "title": "Replace console.log with structured logging",
+  "description": "Integrate pino for structured JSON logging. Add log levels (debug, info, warn, error). Route all existing console.log calls through the logger. Add request ID tracking for debugging multi-agent sessions.",
+  "phase": "backlog",
+  "source": "ideation",
+  "createdAt": "2026-05-18T14:57:31.799Z",
+  "updatedAt": "2026-05-18T14:57:31.799Z"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "46c5d66a-ea9e-437a-a45e-9247a96b7469",
+  "title": "Add pipeline integration tests",
+  "description": "Create integration tests that mock the Claude CLI and verify full pipeline flow: spec \u00e2\u2020\u2019 plan \u00e2\u2020\u2019 implement \u00e2\u2020\u2019 QA review \u00e2\u2020\u2019 merge. Test recovery scenarios (crash mid-pipeline, rate limiting).",
+  "phase": "done",
+  "source": "ideation",
+  "createdAt": "2026-05-13T13:59:44.349Z",
+  "updatedAt": "2026-05-13T13:59:44.349Z"
+}

@@ -1,0 +1,138 @@
+- generic [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: TeamAI
+      - button "←" [ref=e5]
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: Projects
+        - button "+ Add" [ref=e10]
+      - list [ref=e11]:
+        - listitem [ref=e12]:
+          - button "TeamAI" [ref=e13]
+          - button "×" [ref=e14]
+    - navigation [ref=e15]:
+      - button "☀ Light mode" [ref=e92]:
+        - generic [ref=e17]: ☀
+        - text: Light mode
+      - link "▦ Kanban" [ref=e18] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e19]: ▦
+        - text: Kanban
+      - link "◎ Insights" [ref=e20] [cursor=pointer]:
+        - /url: /insights
+        - generic [ref=e21]: ◎
+        - text: Insights
+      - link "◈ Ideation" [ref=e22] [cursor=pointer]:
+        - /url: /ideation
+        - generic [ref=e23]: ◈
+        - text: Ideation
+      - link "▶ Terminals" [ref=e24] [cursor=pointer]:
+        - /url: /terminals
+        - generic [ref=e25]: ▶
+        - text: Terminals
+      - link "◉ Roadmap" [ref=e26] [cursor=pointer]:
+        - /url: /roadmap
+        - generic [ref=e27]: ◉
+        - text: Roadmap
+      - link "⚙ Settings" [ref=e28] [cursor=pointer]:
+        - /url: /settings
+        - generic [ref=e29]: ⚙
+        - text: Settings
+  - main [ref=e30]:
+    - generic [ref=e31]:
+      - generic [ref=e32]:
+        - heading "Board" [level=1] [ref=e33]
+        - button "+ New Task" [ref=e34]
+      - generic [ref=e35]:
+        - generic [ref=e38]:
+          - generic [ref=e39]:
+            - generic [ref=e40]:
+              - generic [ref=e41]: Backlog
+              - generic [ref=e42]: "1"
+            - generic [ref=e45] [cursor=pointer]:
+              - paragraph [ref=e46]: Pipeline crash recovery — auto-detect stale sessions and orphaned worktrees
+              - paragraph [ref=e47]:
+                - text: When the server crashes or restarts mid-pipeline, stale session references and o…
+                - button "more" [ref=e48]
+              - generic [ref=e49]:
+                - generic [ref=e50]: backlog
+                - generic [ref=e51]: 1h ago
+          - generic [ref=e53]:
+            - generic [ref=e54]: Spec
+            - generic [ref=e55]: "0"
+          - generic [ref=e58]:
+            - generic [ref=e59]: Planning
+            - generic [ref=e60]: "0"
+          - generic [ref=e63]:
+            - generic [ref=e64]: In Progress
+            - generic [ref=e65]: "0"
+          - generic [ref=e68]:
+            - generic [ref=e69]: QA
+            - generic [ref=e70]: "0"
+          - generic [ref=e73]:
+            - generic [ref=e74]: Review
+            - generic [ref=e75]: "0"
+          - generic [ref=e78]:
+            - generic [ref=e79]: Merging
+            - generic [ref=e80]: "0"
+          - generic [ref=e83]:
+            - generic [ref=e84]: Failed
+            - generic [ref=e85]: "0"
+          - generic [ref=e88]:
+            - generic [ref=e89]: Done
+            - generic [ref=e90]: "0"
+        - generic [ref=e113]:
+          - button "×" [ref=e115]
+          - generic [ref=e117]:
+            - generic [ref=e118]:
+              - generic [ref=e119]:
+                - generic [ref=e120]:
+                  - link "← Board" [ref=e121] [cursor=pointer]:
+                    - /url: /
+                  - heading "Pipeline crash recovery — auto-detect stale sessions and orphaned worktrees" [level=1] [ref=e122]
+                  - paragraph [ref=e123]: When the server crashes or restarts mid-pipeline, stale session references and orphaned git worktrees can persist, causing errors on the next pipeline run. Implement startup recovery that scans for and cleans up stale sessions and worktrees.
+                - generic [ref=e124]:
+                  - button "Run Pipeline" [ref=e125]
+                  - generic [ref=e126]: backlog
+                  - button "🗑" [ref=e127]
+              - generic [ref=e128]:
+                - paragraph [ref=e129]: Created 5/10/2026, 8:43:03 AM
+                - generic [ref=e130]:
+                  - generic [ref=e131]: "Agent:"
+                  - combobox [ref=e132]:
+                    - option "Auto (pipeline default)" [selected]
+                    - option "Product Analyst"
+                    - option "Senior Developer"
+                    - option "Git Integration Specialist"
+                    - option "Implementation Planner"
+                    - option "Bug Fix Specialist"
+                    - option "QA Reviewer"
+              - generic [ref=e133]:
+                - button "Overview" [ref=e134]
+                - button "Terminal" [ref=e135]
+                - button "Spec" [ref=e136]
+                - button "Plan" [ref=e137]
+                - button "QA" [ref=e138]
+            - generic [ref=e141]:
+              - generic [ref=e142]:
+                - generic [ref=e143]:
+                  - button "+ Depends on" [ref=e144]
+                  - generic [ref=e148]:
+                    - textbox "Search tasks…" [active] [ref=e150]
+                    - list [ref=e151]:
+                      - listitem [ref=e152]: No tasks found.
+                - button "+ Blocks" [ref=e146]
+              - paragraph [ref=e147]: No dependencies set.
+  - generic [ref=e97] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e98]:
+      - img [ref=e99]
+    - generic [ref=e102]:
+      - button "Open issues overlay" [ref=e103]:
+        - generic [ref=e104]:
+          - generic [ref=e105]: "0"
+          - generic [ref=e106]: "1"
+        - generic [ref=e107]: Issue
+      - button "Collapse issues badge" [ref=e108]:
+        - img [ref=e109]
+  - alert [ref=e111]

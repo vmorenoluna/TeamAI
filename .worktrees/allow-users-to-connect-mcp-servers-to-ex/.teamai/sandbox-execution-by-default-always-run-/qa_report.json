@@ -1,0 +1,40 @@
+{
+  "status": "passed",
+  "timestamp": "2026-05-10T09:30:00.000Z",
+  "summary": "Sandbox execution by default passed QA review. Docker auto-detection now enables containers by default.",
+  "checks": [
+    {
+      "name": "Docker availability detection",
+      "status": "passed",
+      "details": "dockerAvailable() uses execFileSync('docker', ['info']) with 2s timeout. Result cached per process lifetime."
+    },
+    {
+      "name": "Default config auto-detection",
+      "status": "passed",
+      "details": "readContainerConfig() reads existing container.json, falls through to dockerAvailable() when no config exists. Existing opt-outs respected."
+    },
+    {
+      "name": "isDockerAvailable server action",
+      "status": "passed",
+      "details": "New server action available for frontend to query Docker status."
+    },
+    {
+      "name": "getContainerConfig returns docker status",
+      "status": "passed",
+      "details": "Response now includes dockerAvailable boolean alongside enabled flag."
+    },
+    {
+      "name": "Graceful fallback",
+      "status": "passed",
+      "details": "When Docker is unavailable, containers default to disabled. No crashing or hanging."
+    },
+    {
+      "name": "Consistent with existing code",
+      "status": "passed",
+      "details": "Uses execFileSync consistent with getState(). Removed unused DEFAULT constant. Removed stale eslint-disable directive."
+    }
+  ],
+  "typecheck": "clean",
+  "lint": "clean",
+  "unit_tests": "106 passed, 0 failed"
+}

@@ -340,6 +340,37 @@ describe('Orchestrator — Full Coverage', () => {
 
       await expect(promise).resolves.toBeUndefined();
     });
+
+    it('rejects with timeout error when no event arrives within timeout', async () => {
+      const promise = (orch as AnyOrch).waitForCompletion('sess-timeout', 10);
+
+      // Don't fire any events — the 10ms timeout should fire
+      await expect(promise).rejects.toThrow('Pipeline timed out');
+    });
+
+    it('cleans up listeners on timeout', async () => {
+      // Spy on processManager.off to verify cleanup
+      const offSpy = vi.spyOn(processManager, 'off');
+
+      try {
+        await (orch as AnyOrch).waitForCompletion('sess-cleanup', 10);
+      } catch {
+        // expected timeout
+      }
+
+      // Should have cleaned up both event listeners
+      expect(offSpy).toHaveBeenCalledWith('event', expect.any(Function));
+      expect(offSpy).toHaveBeenCalledWith('exit', expect.any(Function));
+      offSpy.mockRestore();
+    });
+
+    it('does not timeout if already resolved', async () => {
+      const promise = (orch as AnyOrch).waitForCompletion('sess-fast', 5_000);
+
+      fireEvent('event', { sessionId: 'sess-fast', event: { type: 'result' } });
+
+      await expect(promise).resolves.toBeUndefined();
+    });
   });
 
   // ── cancelPipeline ────────────────────────────────────────────────
@@ -512,7 +543,7 @@ describe('Orchestrator — Full Coverage', () => {
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'backlog' });
       mockEmit.mockClear();
 
-      const phases = ['spec', 'plan', 'implement', 'qa-review', 'qa-fix',
+      const phases = ['spec', 'plan', 'implement', 'qa-review',
         'awaiting-review', 'merge', 'create-pr', 'done', 'failed'];
 
       for (const phase of phases) {
@@ -575,6 +606,139 @@ describe('Orchestrator — Full Coverage', () => {
       const base = (orch as AnyOrch).getWorktreeBase();
       expect(base).toContain('worktrees');
       expect(base).not.toContain('.worktrees');
+    });
+  });
+
+  // ── _writeQaFeedback ──────────────────────────────────────────────
+
+  describe('_writeQaFeedback', () => {
+    it('writes qa_feedback.md with failed criteria when report has criteria', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const pipeline = makePipeline({ specPath: testData.taskDir });
+      const report = {
+        overall: 'FAIL',
+        criteria: [
+          { name: 'All endpoints documented', status: 'FAIL', notes: 'Missing DELETE' },
+          { name: 'Examples included', status: 'PASS', notes: '' },
+        ],
+        issues: [
+          { severity: 'error', message: 'DELETE endpoint not documented' },
+        ],
+      };
+
+      (orch as AnyOrch)._writeQaFeedback(pipeline, report);
+
+      const feedbackPath = join(testData.taskDir, 'qa_feedback.md');
+      expect(existsSync(feedbackPath)).toBe(true);
+      const content = readFileSync(feedbackPath, 'utf-8');
+      expect(content).toContain('## Overall: FAIL');
+      expect(content).toContain('**All endpoints documented**');
+      expect(content).toContain('Missing DELETE');
+      expect(content).not.toContain('Examples included'); // PASS criteria excluded
+      expect(content).toContain('[error] DELETE endpoint not documented');
+    });
+
+    it('handles report with no criteria or issues gracefully', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const pipeline = makePipeline({ specPath: testData.taskDir });
+      const report = { overall: 'FAIL' };
+
+      (orch as AnyOrch)._writeQaFeedback(pipeline, report);
+
+      const feedbackPath = join(testData.taskDir, 'qa_feedback.md');
+      expect(existsSync(feedbackPath)).toBe(true);
+      const content = readFileSync(feedbackPath, 'utf-8');
+      expect(content).toContain('## Overall: FAIL');
+    });
+  });
+
+  // ── _writeCompletionSummary ─────────────────────────────────────────
+
+  describe('_writeCompletionSummary', () => {
+    it('writes completion_summary.md with subtask status and QA report', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      // Write a plan.json with mixed completed status
+      const plan = {
+        subtasks: [
+          { id: 1, title: 'Fix CSS', description: '', files: [], acceptance_criteria: [], completed: true },
+          { id: 2, title: 'Add tests', description: '', files: [], acceptance_criteria: [] },
+        ],
+      };
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify(plan, null, 2));
+
+      // Write a QA report
+      const report = {
+        overall: 'FAIL',
+        criteria: [
+          { name: 'Mobile visibility', status: 'FAIL', notes: 'Button still hidden at 375px' },
+        ],
+        issues: [
+          { severity: 'error', message: 'CSS z-index too low' },
+        ],
+      };
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify(report, null, 2));
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        qaAttempt: 2,
+        maxQaAttempts: 3,
+      });
+
+      (orch as AnyOrch)._writeCompletionSummary(pipeline);
+
+      const summaryPath = join(testData.taskDir, 'completion_summary.md');
+      expect(existsSync(summaryPath)).toBe(true);
+      const content = readFileSync(summaryPath, 'utf-8');
+
+      expect(content).toContain('Task failed after 2 QA attempts');
+      expect(content).toContain('[x]');
+      expect(content).toContain('Fix CSS');
+      expect(content).toContain('[ ]');
+      expect(content).toContain('Add tests');
+      expect(content).toContain('Overall: **FAIL**');
+      expect(content).toContain('Mobile visibility');
+      expect(content).toContain('CSS z-index too low');
+    });
+
+    it('handles missing plan.json gracefully', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        qaAttempt: 1,
+      });
+
+      (orch as AnyOrch)._writeCompletionSummary(pipeline);
+
+      const summaryPath = join(testData.taskDir, 'completion_summary.md');
+      expect(existsSync(summaryPath)).toBe(true);
+      const content = readFileSync(summaryPath, 'utf-8');
+      expect(content).toContain('Task failed after 1 QA attempts');
+    });
+
+    it('stores completionSummary on the task via taskStore', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        qaAttempt: 3,
+      });
+
+      (orch as AnyOrch)._writeCompletionSummary(pipeline);
+
+      // Verify the task was updated with completionSummary
+      const taskStore = (orch as AnyOrch).taskStore;
+      const updated = taskStore.getById(testData.taskId);
+      expect(updated).not.toBeNull();
+      expect(updated!.completionSummary).toBeDefined();
+      expect(updated!.completionSummary).toContain('Task failed after 3 QA attempts');
     });
   });
 

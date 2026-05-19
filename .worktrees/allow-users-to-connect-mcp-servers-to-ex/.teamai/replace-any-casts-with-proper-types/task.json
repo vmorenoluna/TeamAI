@@ -1,0 +1,9 @@
+{
+  "id": "ace34306-7fc1-41f8-9476-6599a0ea2fc0",
+  "title": "Replace 'any' casts with proper types",
+  "description": "Replace all eslint-disabled 'any' type casts in production code with proper interfaces. Use 'unknown' + type guards instead of direct 'any' casts.",
+  "phase": "done",
+  "source": "ideation",
+  "createdAt": "2026-05-13T14:00:07.250Z",
+  "updatedAt": "2026-05-13T14:00:07.250Z"
+}

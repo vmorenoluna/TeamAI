@@ -1,0 +1,10 @@
+{
+  "id": "56c6100b-26a3-4619-aa64-5826f3b5c249",
+  "title": "Multi-LLM provider support — add OpenAI, Gemini, and local (Ollama) backends",
+  "description": "TeamAI currently only supports Claude via Anthropic, Bedrock, and Vertex. Every major competitor (Devin, CrewAI, OpenHands, Copilot Workspace) supports multiple LLM providers. Add provider adapters for OpenAI, Google Gemini, and local models via Ollama so users aren't locked into a single AI vendor.",
+  "phase": "done",
+  "source": "competitor-analysis",
+  "competitiveContext": "Devin supports Claude + GPT + custom models. CrewAI supports any LLM via LangChain. OpenHands supports multiple backends. Copilot Workspace uses GPT-4 + Copilot model.",
+  "createdAt": "2026-05-11T21:49:03.740Z",
+  "updatedAt": "2026-05-11T22:45:54.679Z"
+}
