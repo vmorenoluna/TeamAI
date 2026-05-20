@@ -1,24 +1,41 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { ProjectStore } from '@/lib/project-store';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, rmSync } from 'fs';
-import { homedir } from 'os';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, rmSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
-import { registerTestProject } from '../utils/test-project';
 
-// ProjectStore is a singleton that writes to ~/.teamai/projects.json.
-// Each test must use a unique project path and clean up after itself.
+// ── Mock homedir to a temp directory so tests NEVER touch the real ~/.teamai ──
+// vi.hoisted() runs before vi.mock factories, so TEST_HOME is initialized first.
+const TEST_HOME = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require('path');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const crypto = require('crypto');
+  return path.join(process.cwd(), '.teamai-test-home-' + crypto.randomUUID().slice(0, 8));
+});
+vi.mock('os', () => ({
+  homedir: () => TEST_HOME,
+}));
 
 describe('ProjectStore', () => {
   let store: ProjectStore;
   let projectDir: string;
   let clean: () => void;
 
+  // Cleanup the mock home directory after ALL tests
+  afterAll(() => {
+    if (existsSync(TEST_HOME)) {
+      rmSync(TEST_HOME, { recursive: true, force: true });
+    }
+  });
+
   beforeEach(() => {
-    const testProject = registerTestProject();
-    projectDir = testProject.root;
-    store = testProject.store;
-    clean = testProject.clean;
+    projectDir = join(process.cwd(), '.teamai-test-' + randomUUID().slice(0, 8));
+    mkdirSync(projectDir, { recursive: true });
+    store = new ProjectStore();
+    clean = () => {
+      if (existsSync(projectDir)) rmSync(projectDir, { recursive: true, force: true });
+    };
   });
 
   afterEach(() => {
@@ -165,22 +182,14 @@ describe('ProjectStore', () => {
   // ── Coverage: lines 20-21 — constructor init when projects.json missing ──
 
   it('initializes projects.json when it does not exist on construction', () => {
-    const projectsFile = join(homedir(), '.teamai', 'projects.json');
+    const projectsFile = join(TEST_HOME, '.teamai', 'projects.json');
 
-    // Backup current file, delete, create new store, verify init, restore
-    const backup = existsSync(projectsFile) ? readFileSync(projectsFile, 'utf-8') : null;
+    // Delete the mock file to simulate first-time setup
     if (existsSync(projectsFile)) {
       rmSync(projectsFile);
     }
 
-    try {
-      const freshStore = new ProjectStore();
-      expect(freshStore.getAll()).toEqual([]);
-    } finally {
-      // Restore the backup so subsequent tests are unaffected
-      if (backup !== null) {
-        writeFileSync(projectsFile, backup);
-      }
-    }
+    const freshStore = new ProjectStore();
+    expect(freshStore.getAll()).toEqual([]);
   });
 });

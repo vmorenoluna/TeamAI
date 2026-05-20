@@ -10,11 +10,12 @@
  * the orphaned artifacts.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
-const HOME_DIR = homedir();
+// Allow override via env var so CI/test runners can keep the real ~/.teamai untouched
+const HOME_DIR = process.env.TEAMAI_TEST_HOME || homedir();
 const PROJECTS_FILE = join(HOME_DIR, '.teamai', 'projects.json');
 const TEST_PREFIX = '.teamai-test-';
 
