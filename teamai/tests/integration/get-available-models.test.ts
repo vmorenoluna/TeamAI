@@ -120,9 +120,11 @@ describe('getAvailableModels Integration', () => {
       const { saveProvidersConfig, getProvidersConfig } = await import('@/app/actions/providers');
 
       // Save partial config (only role overrides, no default)
+      /* eslint-disable @typescript-eslint/no-explicit-any */
       await saveProvidersConfig({
         roles: { coder: { provider: 'bedrock' } },
       } as any);
+      /* eslint-enable @typescript-eslint/no-explicit-any */
 
       const readBack = await getProvidersConfig();
 
@@ -152,6 +154,7 @@ describe('getAvailableModels Integration', () => {
       });
 
       // Read the actual file from disk
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const onDisk = readProvidersConfig() as any;
       expect(onDisk.default.model).toBe('test-model');
       expect(onDisk.default.provider).toBe('ollama');
@@ -212,7 +215,7 @@ describe('getAvailableModels Integration', () => {
       expect(result.models).toEqual(['llama3.2:3b', 'mistral:7b']);
     });
 
-    it('falls back gracefully when API key is missing', async () => {
+    it('falls back gracefully when API key is missing (returns curated models)', async () => {
       writeProvidersConfig({
         default: { model: 'gpt-4o', provider: 'openai' },
         roles: {},
@@ -223,8 +226,10 @@ describe('getAvailableModels Integration', () => {
       const { getAvailableModels } = await import('@/app/actions/providers');
       const result = await getAvailableModels('openai');
 
-      expect(result.models).toEqual([]);
-      expect(result.error).toBe('OPENAI_API_KEY not set');
+      // Returns curated defaults instead of empty array
+      expect(result.models.length).toBeGreaterThan(0);
+      expect(result.models).toContain('gpt-4o');
+      expect(result.error).toBe('OPENAI_API_KEY not set — using curated model list');
     });
 
     it('handles unknown provider gracefully', async () => {
@@ -238,6 +243,65 @@ describe('getAvailableModels Integration', () => {
 
       expect(result.models).toEqual([]);
       expect(result.error).toBe('Unknown provider: unknown-prov');
+    });
+
+    it('fetches Bedrock models via AWS CLI using project context', async () => {
+      writeProvidersConfig({
+        default: { model: 'claude-sonnet-4-20250514', provider: 'bedrock' },
+        roles: {},
+      });
+
+      const { execFile } = await import('child_process');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (vi.mocked(execFile) as any).mockImplementation(
+        (_cmd: string, _args: readonly string[] | null | undefined, _opts: any, callback: any) => {
+          callback(null, {
+            stdout: JSON.stringify([
+              'anthropic.claude-sonnet-4-20250514',
+              'anthropic.claude-3-5-sonnet-20241022-v2:0',
+              'meta.llama3-70b-instruct-v1:0',
+            ]),
+          });
+        },
+      );
+
+      const { getAvailableModels } = await import('@/app/actions/providers');
+      const result = await getAvailableModels('bedrock');
+
+      expect(result.error).toBeUndefined();
+      expect(result.models).toEqual([
+        'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        'anthropic.claude-sonnet-4-20250514',
+      ]);
+    });
+
+    it('fetches Vertex models via gcloud CLI using project context', async () => {
+      writeProvidersConfig({
+        default: { model: 'claude-sonnet-4-20250514', provider: 'vertex' },
+        roles: {},
+      });
+
+      const { execFile } = await import('child_process');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (vi.mocked(execFile) as any).mockImplementation(
+        (_cmd: string, _args: readonly string[] | null | undefined, _opts: any, callback: any) => {
+          callback(null, {
+            stdout: JSON.stringify([
+              { name: 'projects/test/locations/us-central1/publishers/anthropic/models/claude-sonnet-4-20250514' },
+              { name: 'projects/test/locations/us-central1/publishers/google/models/gemini-2.0-flash-001' },
+            ]),
+          });
+        },
+      );
+
+      const { getAvailableModels } = await import('@/app/actions/providers');
+      const result = await getAvailableModels('vertex');
+
+      expect(result.error).toBeUndefined();
+      expect(result.models).toEqual([
+        'claude-sonnet-4-20250514',
+        'gemini-2.0-flash-001',
+      ]);
     });
   });
 
@@ -254,6 +318,7 @@ describe('getAvailableModels Integration', () => {
       });
 
       // Verify it was persisted
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const config = readProvidersConfig() as any;
       expect(config.default.provider).toBe('ollama');
 
@@ -269,7 +334,7 @@ describe('getAvailableModels Integration', () => {
       expect(result.models).toEqual(['codellama', 'llama3.2']);
     });
 
-    it('saves config with OpenAI, then fails gracefully without API key', async () => {
+    it('saves config with OpenAI, then falls back to curated models without API key', async () => {
       const { saveProvidersConfig, getAvailableModels } = await import('@/app/actions/providers');
 
       vi.stubEnv('OPENAI_API_KEY', '');
@@ -280,14 +345,98 @@ describe('getAvailableModels Integration', () => {
       });
 
       // Verify on disk
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const config = readProvidersConfig() as any;
       expect(config.default.provider).toBe('openai');
       expect(config.roles.coder.provider).toBe('openai');
 
-      // Fetch fails gracefully
+      // Falls back to curated models gracefully
       const result = await getAvailableModels('openai');
-      expect(result.models).toEqual([]);
-      expect(result.error).toBe('OPENAI_API_KEY not set');
+      expect(result.models.length).toBeGreaterThan(0);
+      expect(result.models).toContain('gpt-4o');
+      expect(result.error).toBe('OPENAI_API_KEY not set — using curated model list');
+    });
+  });
+
+  // ── Cache Behavior ───────────────────────────────────────────────────
+
+  describe('cache behavior', () => {
+    it('caches fetched models and returns them on subsequent calls', async () => {
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-anthropic');
+
+      const { getAvailableModels } = await import('@/app/actions/providers');
+
+      // First call: fetch from API, should write to cache
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            { id: 'claude-sonnet-4-6', type: 'model' },
+            { id: 'claude-3-5-sonnet-20241022', type: 'model' },
+          ],
+        }),
+      });
+
+      const first = await getAvailableModels('anthropic');
+      expect(first.models).toEqual(['claude-3-5-sonnet-20241022', 'claude-sonnet-4-6']);
+
+      // Verify cache was written to disk
+      const cachePath = join(projectDir, '.teamai', 'models-cache.json');
+      expect(existsSync(cachePath)).toBe(true);
+      const cache = JSON.parse(readFileSync(cachePath, 'utf-8'));
+      expect(cache.anthropic.models).toEqual(['claude-3-5-sonnet-20241022', 'claude-sonnet-4-6']);
+
+      // Second call: should use cache, not fetch
+      const second = await getAvailableModels('anthropic');
+      expect(second.models).toEqual(['claude-3-5-sonnet-20241022', 'claude-sonnet-4-6']);
+      // fetch should only have been called once (from the first call)
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('handles corrupted cache file gracefully', async () => {
+      vi.stubEnv('ANTHROPIC_API_KEY', '');
+
+      // Write corrupted cache file
+      const cachePath = join(projectDir, '.teamai', 'models-cache.json');
+      writeFileSync(cachePath, '{malformed json');
+
+      const { getAvailableModels } = await import('@/app/actions/providers');
+      const result = await getAvailableModels('anthropic');
+
+      // Should ignore corrupted cache and fall through to curated defaults
+      expect(result.models.length).toBeGreaterThan(0);
+      expect(result.error).toContain('ANTHROPIC_API_KEY not set');
+    });
+
+    it('bypasses cache when refresh flag is set', async () => {
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-anthropic');
+
+      const { getAvailableModels } = await import('@/app/actions/providers');
+
+      // Seed a cache entry
+      const cachePath = join(projectDir, '.teamai', 'models-cache.json');
+      writeFileSync(
+        cachePath,
+        JSON.stringify({
+          anthropic: { models: ['old-cached-model'], fetchedAt: new Date().toISOString() },
+        }),
+      );
+
+      // Call with refresh=true — should bypass cache
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [{ id: 'fresh-model', type: 'model' }],
+        }),
+      });
+
+      const result = await getAvailableModels('anthropic', true);
+      expect(result.models).toEqual(['fresh-model']);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // Verify cache was updated with fresh data
+      const cache = JSON.parse(readFileSync(cachePath, 'utf-8'));
+      expect(cache.anthropic.models).toEqual(['fresh-model']);
     });
   });
 });

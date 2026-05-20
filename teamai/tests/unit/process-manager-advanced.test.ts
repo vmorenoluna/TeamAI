@@ -6,15 +6,11 @@ import type { AgentSession } from '@/lib/process-manager';
 
 type AnySession = { sessions: Map<string, AgentSession>; terminalSessions: Map<string, any> };
 
-function mockProcess(overrides: Partial<{
-  exitCode: number | null;
-  killed: boolean;
-  stdin: { writable: boolean } | null;
-  stdout: { on: ReturnType<typeof vi.fn> } | null;
-  stderr: { on: ReturnType<typeof vi.fn> } | null;
-  on: ReturnType<typeof vi.fn>;
-  kill: ReturnType<typeof vi.fn>;
-}> = {}) {
+function mockProcess(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  overrides: Record<string, any> = {},
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
   return {
     kill: overrides.kill ?? vi.fn(),
     exitCode: overrides.exitCode ?? null,
@@ -175,6 +171,71 @@ describe('ProcessManager — killSession', () => {
 
     const session = pm.getSession('sess-1');
     expect(session?.status).toBe('done');
+  });
+
+  // Coverage: lines 194-197 — SIGKILL fallback when process ignores SIGTERM
+  it('sends SIGKILL after grace period when process ignores SIGTERM', () => {
+    vi.useFakeTimers();
+
+    const killSpy = vi.fn();
+    // exitCode stays null after SIGTERM (process ignored it)
+    const proc = mockProcess({ kill: killSpy, exitCode: null });
+    addMockSession(pm, 'sess-sigkill', { process: proc, status: 'running' });
+
+    pm.killSession('sess-sigkill');
+
+    // Immediately should have sent SIGTERM
+    expect(killSpy).toHaveBeenCalledWith('SIGTERM');
+    expect(killSpy).toHaveBeenCalledTimes(1);
+
+    // Advance time past the 5 second grace period
+    vi.advanceTimersByTime(5_001);
+
+    // SIGKILL should have been sent because exitCode is still null
+    expect(killSpy).toHaveBeenCalledWith('SIGKILL');
+    expect(killSpy).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
+  it('does not send SIGKILL when process exits before grace period', () => {
+    vi.useFakeTimers();
+
+    const killSpy = vi.fn();
+    const proc = mockProcess({ kill: killSpy, exitCode: 0 });
+    addMockSession(pm, 'sess-no-sigkill', { process: proc, status: 'running' });
+
+    pm.killSession('sess-no-sigkill');
+
+    expect(killSpy).toHaveBeenCalledWith('SIGTERM');
+    expect(killSpy).toHaveBeenCalledTimes(1);
+
+    // Advance time — SIGKILL should NOT fire because exitCode is 0
+    vi.advanceTimersByTime(5_001);
+    expect(killSpy).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
+  });
+
+  it('handles session removed before SIGKILL fallback fires', () => {
+    vi.useFakeTimers();
+
+    const killSpy = vi.fn();
+    const proc = mockProcess({ kill: killSpy, exitCode: null });
+    addMockSession(pm, 'sess-removed', { process: proc, status: 'running' });
+
+    pm.killSession('sess-removed');
+    expect(killSpy).toHaveBeenCalledWith('SIGTERM');
+
+    // Remove session from map before timeout fires
+    (pm as unknown as AnySession).sessions.delete('sess-removed');
+
+    vi.advanceTimersByTime(5_001);
+
+    // Should NOT have sent SIGKILL because session was removed from map
+    expect(killSpy).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
   });
 });
 

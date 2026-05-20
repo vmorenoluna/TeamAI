@@ -7,8 +7,9 @@ import { EventEmitter } from 'events';
 
 // ── Hoisted mocks ──
 
-const { mockReadContainerConfig, mockEnsureContainer, mockHostToContainerPath } = vi.hoisted(() => ({
+const { mockReadContainerConfig, mockReadContainerRemoteUser, mockEnsureContainer, mockHostToContainerPath } = vi.hoisted(() => ({
   mockReadContainerConfig: vi.fn(),
+  mockReadContainerRemoteUser: vi.fn(() => 'node'),
   mockEnsureContainer: vi.fn(),
   mockHostToContainerPath: vi.fn(),
 }));
@@ -23,6 +24,7 @@ const { mockRandomUUID } = vi.hoisted(() => ({
 
 vi.mock('../../src/lib/container-manager', () => ({
   readContainerConfig: mockReadContainerConfig,
+  readContainerRemoteUser: mockReadContainerRemoteUser,
   containerManager: { ensureContainer: mockEnsureContainer },
   hostToContainerPath: mockHostToContainerPath,
 }));
@@ -85,7 +87,7 @@ describe('ProcessManager createSession — Docker container mode', () => {
 
     expect(sessionId).toBe('test-session-id-123');
     expect(mockReadContainerConfig).toHaveBeenCalledWith('/host/project');
-    expect(mockEnsureContainer).toHaveBeenCalledWith('/host/project');
+    expect(mockEnsureContainer).toHaveBeenCalledWith('/host/project', undefined);
     expect(mockHostToContainerPath).toHaveBeenCalledWith(
       '/host/project/src', '/host/project', '/workspace'
     );

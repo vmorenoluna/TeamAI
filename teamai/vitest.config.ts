@@ -20,6 +20,7 @@ export default defineConfig({
         inline: ['@/lib/utils', '@/lib/task-store'],
       },
     },
+    // jsdom environment used for component tests via @vitest-environment jsdom pragma
   },
   resolve: {
     alias: {

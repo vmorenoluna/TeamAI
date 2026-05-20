@@ -46,11 +46,14 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
   // Skip in readonly mode — no tabs to update
   useEffect(() => {
     if (readonly) return;
-    const ws = new WebSocket(`ws://${window.location.host}/ws`);
-    ws.onmessage = (e) => {
+    const ws = new WebSocket(`ws://${window.location.host}/ws`);      ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === 'phase-change' && msg.taskId === taskId) {
+          refresh(true);
+        }
+        // Silently refresh on container-log to show devcontainer startup progress in real-time
+        if (msg.type === 'container-log') {
           refresh(true);
         }
       } catch (err) { console.error('[task-panel] Failed to parse WebSocket message', err instanceof Error ? err.message : err); }

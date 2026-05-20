@@ -67,6 +67,14 @@ app.prepare().then(() => {
     }
   });
 
+  // Broadcast container startup log messages to all connected clients
+  containerManager.on('container-log', (data: { projectRoot: string; message: string }) => {
+    const msg = JSON.stringify({ type: 'container-log', projectRoot: data.projectRoot, message: data.message });
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) client.send(msg);
+    }
+  });
+
   server.on('upgrade', (request, socket, head) => {
     const { pathname } = parse(request.url!, true);
     if (pathname === '/ws') {
