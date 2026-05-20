@@ -41,7 +41,7 @@ vi.mock('../../src/lib/logger', () => ({
 
 // ── Imports ──
 
-import { ContainerManager, _resetDockerAvailableCache, containerManager } from '../../src/lib/container-manager';
+import { ContainerManager, _resetDockerAvailableCache, containerManager, dockerAvailable } from '../../src/lib/container-manager';
 
 // ── Helpers ──
 
@@ -66,6 +66,84 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
     vi.spyOn(console, 'log').mockImplementation(() => {});
     cm = new ContainerManager();
     (cm as any).records.clear();
+  });
+
+  describe('devcontainerBin (tested via _spawnDevcontainerUp)', () => {
+    it('uses local node_modules/.bin/devcontainer when it exists', async () => {
+      mockExecFileSync.mockReturnValue(''); // dockerAvailable = true
+
+      // Mock existsSync to return true for local devcontainer path
+      mockExistsSync.mockImplementation((p: any) => {
+        const pathStr = String(p);
+        if (pathStr.includes('node_modules') && pathStr.includes('devcontainer')) return true;
+        return false;
+      });
+
+      const mockProc = createMockSpawnProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const promise = cm.ensureContainer('/test/project-local');
+
+      // reject so the test doesn't hang
+      mockProc.emit('error', new Error('ENOENT'));
+      await expect(promise).rejects.toThrow();
+
+      // Should have been called with the local path (not just 'devcontainer')
+      expect(mockSpawn).toHaveBeenCalledWith(
+        expect.stringContaining('node_modules'),
+        expect.any(Array),
+        expect.any(Object),
+      );
+    });
+
+    it('uses default devcontainer when local path does not exist', async () => {
+      mockExecFileSync.mockReturnValue('');
+      mockExistsSync.mockReturnValue(false);
+
+      const mockProc = createMockSpawnProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const promise = cm.ensureContainer('/test/project-default');
+
+      mockProc.emit('error', new Error('ENOENT'));
+      await expect(promise).rejects.toThrow();
+
+      // Should have been called with devcontainer (may have .cmd on Windows)
+      const callArg = mockSpawn.mock.calls[0][0];
+      expect(callArg).toMatch(/^devcontainer(\.cmd)?$/);
+    });
+  });
+
+  describe('dockerAvailable cache', () => {
+    beforeEach(() => {
+      _resetDockerAvailableCache();
+    });
+
+    it('returns cached value on second call', () => {
+      mockExecFileSync.mockReturnValue('');
+
+      // First call should execFileSync
+      const first = dockerAvailable();
+      expect(first).toBe(true);
+      expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+
+      // Second call should use cache, no additional execFileSync
+      const second = dockerAvailable();
+      expect(second).toBe(true);
+      expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns cached false value', () => {
+      mockExecFileSync.mockImplementation(() => { throw new Error('Docker not available'); });
+
+      const first = dockerAvailable();
+      expect(first).toBe(false);
+      expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+
+      const second = dockerAvailable();
+      expect(second).toBe(false);
+      expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('_spawnDevcontainerUp (via ensureContainer)', () => {
@@ -342,6 +420,55 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
 
       // Should NOT have spawned an additional devcontainer process
       expect(mockSpawn).toHaveBeenCalledTimes(2); // only the initial calls
+    });
+
+    // Coverage: line 212 — _doStart failure during restart
+    it('handles _doStart failure during restart gracefully (catch branch)', async () => {
+      mockExecFileSync.mockReturnValue('');
+      const devProc = createMockSpawnProcess();
+      const watcherProc = createMockSpawnProcess();
+
+      mockSpawn.mockReturnValueOnce(devProc);
+      mockSpawn.mockReturnValueOnce(watcherProc);
+
+      const ndJsonLine = JSON.stringify({
+        outcome: 'success',
+        containerId: 'cont-abc',
+        remoteWorkspaceFolder: '/workspace',
+      });
+      const startPromise = cm.ensureContainer('/test/project');
+
+      devProc.stdout.emit('data', Buffer.from(ndJsonLine + '\n'));
+      devProc.emit('exit', 0);
+
+      await startPromise;
+
+      // Make the restart spawn emit an error (simulates devcontainer binary failure)
+      const failingProc = createMockSpawnProcess();
+      mockSpawn.mockReturnValueOnce(failingProc);
+
+      // Trigger _onContainerDied via watcher
+      watcherProc.stdout.emit('data', Buffer.from('die\n'));
+
+      // Small delay to let microtasks process
+      await new Promise(r => setTimeout(r, 10));
+
+      // Should have spawned a 3rd devcontainer process for the restart
+      expect(mockSpawn).toHaveBeenCalledTimes(3);
+
+      // Now fail the restart by emitting error on the failing proc
+      // Wait for the startPromise to reject, which exercises the .catch(() => {}) line
+      // _doStart will reject → catch handler runs → state set to 'stopped'
+      // The eventWatcher should have been killed during the attempt
+      failingProc.emit('error', new Error('devcontainer restart failed'));
+
+      await new Promise(r => setTimeout(r, 10));
+
+      // After failure, state should be 'stopped'
+      const record = (cm as any).records.get('/test/project');
+      expect(record.state).toBe('stopped');
+      expect(record.containerId).toBeNull();
+      expect(record.remoteWorkspaceFolder).toBeNull();
     });
   });
 });

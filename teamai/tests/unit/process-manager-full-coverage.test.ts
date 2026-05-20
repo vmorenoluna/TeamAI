@@ -38,6 +38,7 @@ vi.mock('fs', () => ({
 
 vi.mock('../../src/lib/container-manager', () => ({
   readContainerConfig: vi.fn(() => ({ enabled: false })),
+  readContainerRemoteUser: vi.fn(() => 'node'),
   containerManager: {
     ensureContainer: vi.fn(),
     getRunningContainer: vi.fn(() => null),
@@ -58,14 +59,15 @@ type AnyPM = {
 };
 
 /** Create a mock child process with controllable stdout/stderr/exit */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 interface MockProcess {
   kill: ReturnType<typeof vi.fn>;
   exitCode: number | null;
   killed: boolean;
   stdin: { writable: boolean; write: ReturnType<typeof vi.fn> };
-  stdout: { on: ReturnType<typeof vi.fn> };
-  stderr: { on: ReturnType<typeof vi.fn> };
-  on: ReturnType<typeof vi.fn>;
+  stdout: { on: (...args: any[]) => void };
+  stderr: { on: (...args: any[]) => void };
+  on: (...args: any[]) => void;
   _emitStdout: (chunk: string) => void;
   _emitStderr: (chunk: string) => void;
   _emitExit: (code: number | null) => void;

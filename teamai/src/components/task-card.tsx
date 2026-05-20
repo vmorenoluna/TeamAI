@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkTaskWorktree, deleteTaskWorktree, retryTask } from '@/app/actions/tasks';
+import { checkTaskWorktree, deleteTaskWorktree, retryTask, stopTask, playTask } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 
 const DESCRIPTION_LIMIT = 80;
@@ -32,6 +32,8 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
   const [wtChecking, setWtChecking] = useState(true);
   const [wtDeleting, setWtDeleting] = useState(false);
   const [isRetrying, startRetryTransition] = useTransition();
+  const [isStopping, startStopTransition] = useTransition();
+  const [isStarting, startStartTransition] = useTransition();
 
   useEffect(() => {
     if (!task.branch) {
@@ -73,6 +75,30 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
         router.refresh();
       } else {
         alert(`Failed to retry task: ${result.error}`);
+      }
+    });
+  }
+
+  async function handleStop(e: React.MouseEvent) {
+    e.stopPropagation();
+    startStopTransition(async () => {
+      const result = await stopTask(task.id);
+      if (result.success) {
+        router.refresh();
+      } else {
+        alert(`Failed to stop task: ${result.error}`);
+      }
+    });
+  }
+
+  async function handlePlay(e: React.MouseEvent) {
+    e.stopPropagation();
+    startStartTransition(async () => {
+      const result = await playTask(task.id);
+      if (result.success) {
+        router.refresh();
+      } else {
+        alert(`Failed to start task: ${result.error}`);
       }
     });
   }
@@ -173,9 +199,44 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
         )}
       </div>
 
-      {/* Retry button — shown only for failed tasks */}
-      {task.phase === 'failed' && (
-        <div className="mt-2 flex justify-end">
+      {/* Action buttons row */}
+      <div className="mt-2 flex items-center gap-1.5 justify-end">
+        {/* Play button — shown only for backlog tasks */}
+        {task.phase === 'backlog' && (
+          <button
+            onClick={handlePlay}
+            disabled={isStarting}
+            title="Start task — move to Spec phase"
+            className="text-[11px] font-medium px-2 py-1 rounded-md bg-emerald-900/30 text-emerald-400 hover:bg-emerald-800/40 hover:text-emerald-300 transition-colors disabled:opacity-50 flex items-center gap-1"
+          >
+            {isStarting ? (
+              <span className="w-3 h-3 rounded-full border border-emerald-400 border-t-transparent animate-spin" />
+            ) : (
+              <span>▶</span>
+            )}
+            Start
+          </button>
+        )}
+
+        {/* Stop button — shown for active phases (not backlog, failed, done) */}
+        {!['backlog', 'failed', 'done'].includes(task.phase) && (
+          <button
+            onClick={handleStop}
+            disabled={isStopping}
+            title="Stop task — cancel and move back to Backlog"
+            className="text-[11px] font-medium px-2 py-1 rounded-md bg-slate-700/50 text-slate-400 hover:bg-red-900/40 hover:text-red-400 transition-colors disabled:opacity-50 flex items-center gap-1"
+          >
+            {isStopping ? (
+              <span className="w-3 h-3 rounded-full border border-red-400 border-t-transparent animate-spin" />
+            ) : (
+              <span>■</span>
+            )}
+            Stop
+          </button>
+        )}
+
+        {/* Retry button — shown only for failed tasks */}
+        {task.phase === 'failed' && (
           <button
             onClick={handleRetry}
             disabled={isRetrying}
@@ -190,8 +251,8 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
             )}
             Retry
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

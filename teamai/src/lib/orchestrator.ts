@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } f
 import path from 'path';
 import { warn as logWarn } from './logger';
 import { processManager, type AgentSession } from './process-manager';
-import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
+import { readContainerConfig, readContainerRemoteUser, containerManager, hostToContainerPath } from './container-manager';
 import { TaskStore } from './task-store';
 import { resolveProvider, providerToSessionOpts } from './providers';
 import { slugify } from './utils';
@@ -540,7 +540,8 @@ export class Orchestrator {
             ? hostToContainerPath(a, this.projectRoot, info.remoteWorkspaceFolder)
             : a
         );
-        execFileSync('docker', ['exec', '-u', 'node', '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
+        const remoteUser = readContainerRemoteUser(this.projectRoot);
+        execFileSync('docker', ['exec', '-u', remoteUser, '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
         return;
       }
     }
@@ -551,6 +552,103 @@ export class Orchestrator {
     return readContainerConfig(this.projectRoot).enabled
       ? path.join(this.projectRoot, '.worktrees')
       : path.join(this.projectRoot, '..', 'worktrees');
+  }
+
+  /**
+   * Clean up artifacts from the given phase and beyond (inclusive).
+   * Artifacts from phases BEFORE the given phase are kept as-is.
+   * Called by stopTask before moving the task to backlog.
+   */
+  cleanupTaskArtifacts(taskId: string, currentPhase: string): void {
+    const dir = this.taskStore.getDirById(taskId);
+    const pipelineOrder = this.getPipelineConfig().phases;
+    const startIndex = pipelineOrder.indexOf(currentPhase);
+    if (startIndex < 0) return;
+
+    // Remove output.log — stale terminal output should not persist
+    const outputPath = path.join(dir, 'output.log');
+    try { if (existsSync(outputPath)) unlinkSync(outputPath); } catch { /* best-effort */ }
+
+    // Files to delete by phase (each list covers that phase's artifacts)
+    const phaseFiles: Record<string, string[]> = {
+      spec: ['spec.md', 'plan.json'],
+      plan: ['plan.json'],
+      implement: [],
+      'qa-review': ['qa_report.json', 'qa_feedback.md', 'completion_summary.md'],
+      merge: [],
+    };
+
+    // Delete artifacts for the in-progress phase and all subsequent phases
+    for (let i = startIndex; i < pipelineOrder.length; i++) {
+      const files = phaseFiles[pipelineOrder[i]];
+      if (files) {
+        for (const f of files) {
+          const p = path.join(dir, f);
+          try { if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
+        }
+      }
+    }
+
+    // Reset subtask completions if stopping during/after implement so they re-run from scratch
+    if (startIndex >= pipelineOrder.indexOf('implement')) {
+      const planPath = path.join(dir, 'plan.json');
+      if (existsSync(planPath)) {
+        try {
+          const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+          if (plan.subtasks) {
+            for (const s of plan.subtasks) s.completed = false;
+          }
+          writeFileSync(planPath, JSON.stringify(plan, null, 2));
+        } catch { /* best-effort */ }
+      }
+    }
+
+    // Clean the worktree for plan/implement phases so the next run starts with a clean slate
+    if (currentPhase === 'plan') {
+      // Worktree was created during plan — remove it so it gets recreated fresh
+      this._removeWorktreeForce(taskId);
+    } else if (currentPhase === 'implement') {
+      // Worktree has partial changes — discard them
+      this._cleanWorktree(taskId);
+    }
+  }
+
+  /**
+   * Resume a stopped/backlog task — detect which phases have completed artifacts
+   * and start from the next unfinished phase. Does NOT clear artifacts so completed
+   * phases are fast-forwarded automatically.
+   */
+  async resumeTask(taskId: string): Promise<void> {
+    const task = this.taskStore.getById(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+
+    const dir = this.taskStore.getDirById(taskId);
+    const hasSpec = existsSync(path.join(dir, 'spec.md'));
+    const hasPlan = existsSync(path.join(dir, 'plan.json'));
+
+    let startPhase: PipelinePhase;
+    if (hasPlan) {
+      startPhase = 'implement';
+      // Reset subtask completions so implement phases re-do all work from scratch
+      const planPath = path.join(dir, 'plan.json');
+      try {
+        const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+        if (plan.subtasks) {
+          for (const s of plan.subtasks) s.completed = false;
+        }
+        writeFileSync(planPath, JSON.stringify(plan, null, 2));
+      } catch { /* best-effort */ }
+    } else if (hasSpec) {
+      startPhase = 'plan';
+    } else {
+      startPhase = 'spec';
+    }
+
+    // Clear output.log for a fresh terminal view
+    const outputPath = path.join(dir, 'output.log');
+    try { if (existsSync(outputPath)) unlinkSync(outputPath); } catch { /* best-effort */ }
+
+    await this.runTask(taskId, task.description, startPhase);
   }
 
   /** Get the filesystem path to this task's git worktree, or null if the task has no branch. */
@@ -571,6 +669,25 @@ export class Orchestrator {
     } catch {
       // Worktree removal can fail if there are uncommitted changes; ignore silently
     }
+  }
+
+  /** Force-remove the git worktree (discards uncommitted changes). Used during cleanup. */
+  private _removeWorktreeForce(taskId: string): void {
+    const wtPath = this.getWorktreePath(taskId);
+    if (!wtPath || !existsSync(wtPath)) return;
+    try {
+      this._execGit(['worktree', 'remove', '--force', wtPath], this.projectRoot);
+    } catch { /* best-effort */ }
+    this.taskStore.update(taskId, { branch: undefined });
+  }
+
+  /** Discard all uncommitted changes in the worktree. Works on both host and container. */
+  private _cleanWorktree(taskId: string): void {
+    const wtPath = this.getWorktreePath(taskId);
+    if (!wtPath || !existsSync(wtPath)) return;
+    try {
+      this._execGit(['checkout', 'HEAD', '--', '.'], wtPath);
+    } catch { /* best-effort */ }
   }
 
   private sessionOpts(role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) {

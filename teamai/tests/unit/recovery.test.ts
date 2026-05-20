@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // vi.mock is hoisted by Vitest — factory must use inline vi.fn(), not top-level variables
 vi.mock('os', () => ({
@@ -518,6 +518,47 @@ describe('autoClearExpiredRateLimits', () => {
     mockReaddir((p) => {
       if (String(p) === teamaiDir) return ['bad-task'];
       return [];
+    });
+
+    expect(autoClearExpiredRateLimits()).toBe(0);
+  });
+
+  // Coverage: line 157 — continue when project has no .teamai directory
+  it('skips project with no .teamai directory', () => {
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: '/test' }]);
+      return '';
+    });
+
+    // .teamai dir does NOT exist → continue to next project
+    expect(autoClearExpiredRateLimits()).toBe(0);
+  });
+
+  // Coverage: lines 163-164 — readdirSync throws for teamaiDir in autoClearExpiredRateLimits
+  it('skips project when readdirSync throws for teamaiDir', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      return '';
+    });
+    // readdirSync throws for teamaiDir — the catch at lines 163-164 continues
+    mockReaddir(() => {
+      throw new Error('cannot read directory');
     });
 
     expect(autoClearExpiredRateLimits()).toBe(0);

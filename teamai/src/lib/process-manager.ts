@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import { join } from 'path';
 import * as pty from 'node-pty';
 import { readFileSync, existsSync, appendFileSync } from 'fs';
-import { containerManager, readContainerConfig, hostToContainerPath } from './container-manager';
+import { containerManager, readContainerConfig, readContainerRemoteUser, hostToContainerPath } from './container-manager';
 
 function findExecutable(name: string): string {
   // On Windows, where.exe locates commands in PATH.
@@ -71,7 +71,7 @@ export class ProcessManager extends EventEmitter {
 
     if (opts.projectRoot && readContainerConfig(opts.projectRoot).enabled) {
       const { containerId, remoteWorkspaceFolder } =
-        await containerManager.ensureContainer(opts.projectRoot);
+        await containerManager.ensureContainer(opts.projectRoot, opts.logFile);
 
       const containerCwd = hostToContainerPath(opts.cwd, opts.projectRoot, remoteWorkspaceFolder);
       const envFlags = Object.entries(opts.env ?? {}).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
@@ -79,9 +79,10 @@ export class ProcessManager extends EventEmitter {
       // In container mode use --dangerously-skip-permissions (safe inside isolated container)
       claudeArgs.push('--dangerously-skip-permissions');
 
+      const remoteUser = readContainerRemoteUser(opts.projectRoot);
       proc = spawn('docker', [
         'exec', '-i',
-        '-u', 'node',            // run as the devcontainer remote user
+        '-u', remoteUser,            // use the devcontainer's remoteUser from devcontainer.json
         '-w', containerCwd,
         ...envFlags,
         containerId,
@@ -164,6 +165,8 @@ export class ProcessManager extends EventEmitter {
         text = event.subtype === 'success'
           ? `\n✓ Done${cost} (${event.duration_ms}ms)\n`
           : `\n✗ Failed: ${event.result ?? 'unknown error'}\n`;
+      } else if (event.type === 'error') {
+        text = `\n⚠ ${event.error}\n`;
       }
       if (text) appendFileSync(logFile, text);
     } catch { /* best-effort */ }

@@ -37,6 +37,7 @@ vi.mock('../../src/lib/logger', () => ({ warn: mockWarn, error: vi.fn() }));
 
 vi.mock('../../src/lib/container-manager', () => ({
   readContainerConfig: vi.fn(() => ({ enabled: false })),
+  readContainerRemoteUser: vi.fn(() => 'node'),
   containerManager: {
     ensureContainer: vi.fn(),
     getRunningContainer: vi.fn(() => null),
