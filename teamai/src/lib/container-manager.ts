@@ -1,5 +1,5 @@
 import { spawn, execFileSync, ChildProcess } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, appendFileSync } from 'fs';
 import { EventEmitter } from 'events';
 import path from 'path';
 import { error as logError, warn as logWarn } from './logger';
@@ -41,7 +41,7 @@ export function dockerAvailable(): boolean {
     _dockerAvailable = true;
   } catch (err) {
     _dockerAvailable = false;
-    logError('container', 'docker info check failed', err);
+    logWarn('container', 'docker info check failed', err);
   }
   return _dockerAvailable;
 }
@@ -53,6 +53,21 @@ export function readContainerConfig(projectRoot: string): { enabled: boolean } {
   }
   // Default: auto-enable when Docker is available, opt-out otherwise
   return { enabled: dockerAvailable() };
+}
+
+/**
+ * Read the remoteUser from a project's .devcontainer/devcontainer.json.
+ * Falls back to 'node' if the file doesn't exist or parsing fails.
+ */
+export function readContainerRemoteUser(projectRoot: string): string {
+  const devCfgPath = path.join(projectRoot, '.devcontainer', 'devcontainer.json');
+  if (existsSync(devCfgPath)) {
+    try {
+      const cfg = JSON.parse(readFileSync(devCfgPath, 'utf-8'));
+      if (cfg.remoteUser) return cfg.remoteUser;
+    } catch (err) { logWarn('container', 'Failed to parse devcontainer.json', err); }
+  }
+  return 'node';
 }
 
 // Translate a host absolute path into the equivalent path inside the container.
@@ -69,7 +84,7 @@ export function hostToContainerPath(
 export class ContainerManager extends EventEmitter {
   private records = new Map<string, ContainerRecord>();
 
-  async ensureContainer(projectRoot: string): Promise<ContainerInfo> {
+  async ensureContainer(projectRoot: string, logFile?: string): Promise<ContainerInfo> {
     let record = this.records.get(projectRoot);
 
     if (!record || record.state === 'stopped') {
@@ -83,7 +98,7 @@ export class ContainerManager extends EventEmitter {
       };
       this.records.set(projectRoot, record);
       this._emit(record, 'starting');
-      record.startPromise = this._doStart(record);
+      record.startPromise = this._doStart(record, logFile);
     }
 
     if (record.state === 'starting' || record.state === 'restarting') {
@@ -129,7 +144,7 @@ export class ContainerManager extends EventEmitter {
     return null;
   }
 
-  private async _doStart(record: ContainerRecord): Promise<void> {
+  private async _doStart(record: ContainerRecord, logFile?: string): Promise<void> {
     // Credential mounts (claude, gitconfig, ssh) are declared in devcontainer.json.
     // postCreateCommand installs claude, playwright-mcp, and gh CLI.
     const args = [
@@ -139,7 +154,7 @@ export class ContainerManager extends EventEmitter {
     ];
 
     try {
-      const { containerId, remoteWorkspaceFolder } = await this._spawnDevcontainerUp(args);
+      const { containerId, remoteWorkspaceFolder } = await this._spawnDevcontainerUp(args, record.projectRoot, logFile);
       record.containerId = containerId;
       record.remoteWorkspaceFolder = remoteWorkspaceFolder;
       record.state = 'running';
@@ -157,13 +172,49 @@ export class ContainerManager extends EventEmitter {
     }
   }
 
-  private _spawnDevcontainerUp(args: string[]): Promise<ContainerInfo> {
+  private _spawnDevcontainerUp(args: string[], projectRoot: string, logFile?: string): Promise<ContainerInfo> {
     return new Promise((resolve, reject) => {
       const proc = spawn(devcontainerBin(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '';
       let stderr = '';
-      proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
-      proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+
+      // Parse devcontainer JSON log lines in real-time to stream progress
+      const writeToLog = (msg: string) => {
+        if (!logFile) return;
+        try { appendFileSync(logFile, msg); } catch { /* best-effort */ }
+      };
+
+      proc.stdout?.on('data', (d: Buffer) => {
+        const chunk = d.toString();
+        stdout += chunk;
+        // Each line is a JSON log entry — extract meaningful progress
+        for (const line of chunk.split('\n').filter(Boolean)) {
+          try {
+            const entry = JSON.parse(line);
+            if (entry.message) {
+              const formatted = `◆ ${entry.message}\n`.replace(/\n/g, '\r\n');
+              writeToLog(formatted);
+              this.emit('container-log', { projectRoot, message: entry.message });
+            }
+          } catch {
+            // Not JSON — skip
+          }
+        }
+      });
+
+      proc.stderr?.on('data', (d: Buffer) => {
+        const chunk = d.toString();
+        stderr += chunk;
+        // Forward docker pull/progress lines to the log and WebSocket in real-time
+        for (const line of chunk.split('\n').filter(Boolean)) {
+          const message = line.replace(/\r/g, '').trim();
+          if (message) {
+            const formatted = `  ${message}\n`.replace(/\n/g, '\r\n');
+            writeToLog(formatted);
+            this.emit('container-log', { projectRoot, message });
+          }
+        }
+      });
       proc.on('error', err => reject(new Error(`devcontainer not found: ${err.message}`)));
       proc.on('exit', code => {
         if (code !== 0) return reject(new Error(`devcontainer up failed (exit ${code}):\n${stderr}`));
@@ -175,6 +226,8 @@ export class ContainerManager extends EventEmitter {
         if (resultLine.outcome !== 'success') {
           return reject(new Error(`devcontainer up outcome: ${resultLine.outcome}\n${stderr}`));
         }
+        writeToLog('✓ Devcontainer ready\r\n');
+        this.emit('container-log', { projectRoot, message: 'Devcontainer ready' });
         resolve({ containerId: resultLine.containerId, remoteWorkspaceFolder: resultLine.remoteWorkspaceFolder });
       });
     });

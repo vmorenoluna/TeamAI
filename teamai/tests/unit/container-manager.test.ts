@@ -48,10 +48,10 @@ describe('dockerAvailable', () => {
     _resetDockerAvailableCache();
   });
 
-  it('returns false when docker info fails and logs error', () => {
+  it('returns false when docker info fails and logs warning', () => {
     mockExecFileSync.mockImplementationOnce(() => { throw new Error('Docker not found'); });
     expect(dockerAvailable()).toBe(false);
-    expect(mockLogError).toHaveBeenCalledWith('container', 'docker info check failed', expect.any(Error));
+    expect(mockLogWarn).toHaveBeenCalledWith('container', 'docker info check failed', expect.any(Error));
   });
 
   it('returns true when docker info succeeds', () => {
