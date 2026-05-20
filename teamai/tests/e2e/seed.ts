@@ -15,7 +15,7 @@
  * ~/.teamai/projects.json.
  */
 
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { homedir } from 'os';
@@ -23,8 +23,9 @@ import { homedir } from 'os';
 // ── Config ─────────────────────────────────────────────────────────────
 
 const PROJECT_NAME = 'E2E Test Project';
-const PROJECT_SLUG = 'e2e-test-project';
 const SEED_DIR = join(process.cwd(), '.teamai-e2e-seed');
+const HOME_DIR = homedir();
+const TEAMAI_CONFIG = join(HOME_DIR, '.teamai', 'projects.json');
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -213,32 +214,87 @@ function writeCompletionSummary(dir: string, seed: SeedTask): void {
   }
 }
 
+async function confirmOrSkip(): Promise<boolean> {
+  // Skip confirmation in CI or when --yes flag is passed
+  if (process.env.CI || process.argv.includes('--yes') || process.argv.includes('-y')) {
+    return true;
+  }
+
+  console.log(`\n⚠️  This will modify your TeamAI project registry at:`);
+  console.log(`   ${TEAMAI_CONFIG}`);
+
+  // Read current projects for display
+  const existing = existsSync(TEAMAI_CONFIG)
+    ? JSON.parse(readFileSync(TEAMAI_CONFIG, 'utf-8')) as Array<{ name: string; path: string }>
+    : [];
+  if (existing.length > 0) {
+    console.log(`   Currently has ${existing.length} project(s):`);
+    for (const p of existing) {
+      console.log(`     - ${p.name} (${p.path})`);
+    }
+  }
+
+  console.log(`   Will add: "${PROJECT_NAME}" at ${SEED_DIR}`);
+  console.log('');
+  return await confirm('Proceed with seeding?');
+}
+
 function registerProject(root: string): void {
-  const projectsFile = join(homedir(), '.teamai', 'projects.json');
-  const projects: Array<{ name: string; path: string }> = existsSync(projectsFile)
-    ? JSON.parse(readFileSync(projectsFile, 'utf-8'))
+  const projects: Array<{ name: string; path: string }> = existsSync(TEAMAI_CONFIG)
+    ? JSON.parse(readFileSync(TEAMAI_CONFIG, 'utf-8'))
     : [];
 
   // Remove existing entry with same path, if any
   const filtered = projects.filter(p => p.path !== root);
 
   filtered.push({ name: PROJECT_NAME, path: root });
-  mkdirSync(join(homedir(), '.teamai'), { recursive: true });
-  writeFileSync(projectsFile, JSON.stringify(filtered, null, 2));
+  mkdirSync(join(HOME_DIR, '.teamai'), { recursive: true });
+  writeFileSync(TEAMAI_CONFIG, JSON.stringify(filtered, null, 2));
 
   console.log(`  Registered project "${PROJECT_NAME}" at ${root}`);
 }
 
+function readlineSync(question: string): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const rl = require('readline').createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise(resolve => {
+    rl.question(question, (answer: string) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase());
+    });
+  });
+}
+
+async function confirm(prompt: string): Promise<boolean> {
+  try {
+    const answer = await readlineSync(`${prompt} [y/N] `);
+    return answer === 'y' || answer === 'yes';
+  } catch {
+    // If stdin is not a TTY (e.g., piped), default to skip
+    console.log('  (non-interactive, skipping registration — use --yes to force)');
+    return false;
+  }
+}
+
 // ── Main ───────────────────────────────────────────────────────────────
 
-function main(): void {
+async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  if (!(await confirmOrSkip())) {
+    console.log('\n❌ Seeding cancelled. Use --yes to skip confirmation.');
+    process.exit(1);
+  }
   const withPlans = args.includes('--with-plans');
   const withQaReports = args.includes('--with-qa-report');
   const serve = args.includes('--serve');
 
   // Clean previous seed if exists
   if (existsSync(SEED_DIR)) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { rmSync } = require('fs');
     rmSync(SEED_DIR, { recursive: true, force: true });
   }
@@ -248,6 +304,7 @@ function main(): void {
 
   // Initialize as git repo
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { execFileSync } = require('child_process');
     execFileSync('git', ['init'], { cwd: SEED_DIR, stdio: 'ignore' });
     execFileSync('git', ['config', 'user.email', 'e2e@teamai.dev'], { cwd: SEED_DIR, stdio: 'ignore' });
@@ -260,8 +317,20 @@ function main(): void {
     console.log('  (git not available, skipping git init)');
   }
 
-  // Create .teamai directory and seed tasks
+  // Create .teamai and .claude directories for full page compatibility
   mkdirSync(join(SEED_DIR, '.teamai'), { recursive: true });
+  mkdirSync(join(SEED_DIR, '.claude', 'roles'), { recursive: true });
+
+  // Copy default role files so pages that call getRoles() don't crash
+  const defaultRolesDir = join(process.cwd(), 'defaults', 'roles');
+  if (existsSync(defaultRolesDir)) {
+    const roles = readdirSync(defaultRolesDir).filter(f => f.endsWith('.md'));
+    for (const role of roles) {
+      const content = readFileSync(join(defaultRolesDir, role), 'utf-8');
+      writeFileSync(join(SEED_DIR, '.claude', 'roles', role), content);
+    }
+    console.log(`  Copied ${roles.length} role files to .claude/roles/`);
+  }
 
   // Write default pipeline config
   writeFileSync(
@@ -298,7 +367,7 @@ function main(): void {
     console.log(`  ✓ ${seed.title} → ${seed.phase}`);
   }
 
-  // Register the project
+  // Register the project (writes to ~/.teamai/projects.json)
   registerProject(SEED_DIR);
 
   console.log(`\n✅ Seeded ${createdTasks.length} tasks in "${PROJECT_NAME}"`);
@@ -308,6 +377,7 @@ function main(): void {
   // Optionally start dev server
   if (serve) {
     console.log(`\nStarting dev server...`);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { spawn } = require('child_process');
     const child = spawn('npm', ['run', 'dev'], {
       cwd: process.cwd(),
@@ -321,4 +391,7 @@ function main(): void {
   }
 }
 
-main();
+main().catch(err => {
+  console.error('\n❌ Seeding failed:', err);
+  process.exit(1);
+});
