@@ -3,6 +3,7 @@
 import { TaskStore } from '@/lib/task-store';
 import { getOrchestrator } from '@/lib/orchestrator';
 import { getActiveProjectPath } from './projects';
+import { processManager } from '@/lib/process-manager';
 import { revalidatePath } from 'next/cache';
 import type { PlanData, QAReportData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
@@ -68,6 +69,41 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
 
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
   orchestrator.moveTaskToPhase(taskId, resumePhase).catch(console.error);
+  revalidatePath('/');
+  return { success: true };
+}
+
+export async function stopTask(taskId: string): Promise<{ success: boolean; error?: string }> {
+  const { taskStore, orchestrator } = await getStores();
+  const task = taskStore.getById(taskId);
+  if (!task) return { success: false, error: 'Task not found' };
+
+  const noStopPhases = new Set(['backlog', 'done', 'failed']);
+  if (noStopPhases.has(task.phase)) return { success: false, error: `Cannot stop task in "${task.phase}" phase` };
+
+  // Cancel the running pipeline
+  orchestrator.cancelPipeline(taskId);
+
+  // Clean up artifacts: keep completed phase artifacts, remove in-progress ones
+  orchestrator.cleanupTaskArtifacts(taskId, task.phase);
+
+  // Move to backlog
+  taskStore.updatePhase(taskId, 'backlog');
+  processManager.emit('phase-change', { taskId, phase: 'backlog' });
+  revalidatePath('/');
+  revalidatePath(`/task/${taskId}`);
+  return { success: true };
+}
+
+export async function playTask(taskId: string): Promise<{ success: boolean; error?: string }> {
+  const { taskStore, orchestrator } = await getStores();
+  const task = taskStore.getById(taskId);
+  if (!task) return { success: false, error: 'Task not found' };
+
+  if (task.phase !== 'backlog') return { success: false, error: `Task is in "${task.phase}" phase, not "backlog"` };
+
+  // Resume the task — detects completed artifacts and fast-forwards to the next phase
+  orchestrator.resumeTask(taskId).catch(console.error);
   revalidatePath('/');
   return { success: true };
 }

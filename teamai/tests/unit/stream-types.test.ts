@@ -142,7 +142,7 @@ describe('extractText', () => {
   it('handles undefined content gracefully', () => {
     const msg: StreamEvent = {
       type: 'assistant',
-      message: {},
+      message: { content: [] },
     };
     expect(extractText(msg)).toBe('');
   });

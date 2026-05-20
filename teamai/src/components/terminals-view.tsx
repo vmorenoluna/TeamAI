@@ -17,12 +17,16 @@ interface ActiveTerminal {
 /** Deduplicate concurrent fetch requests for the same provider on the client. */
 const inflightFetches = new Map<string, Promise<{ models: string[]; error?: string }>>();
 
-async function fetchModels(provider: string): Promise<{ models: string[]; error?: string }> {
-  const existing = inflightFetches.get(provider);
-  if (existing) return existing;
-  const promise = getAvailableModels(provider);
-  inflightFetches.set(provider, promise);
-  promise.finally(() => inflightFetches.delete(provider));
+async function fetchModels(provider: string, refresh = false): Promise<{ models: string[]; error?: string }> {
+  const key = `${provider}:${refresh}`;
+  // Only dedup non-refresh calls — refresh calls always hit the server
+  if (!refresh) {
+    const existing = inflightFetches.get(key);
+    if (existing) return existing;
+  }
+  const promise = getAvailableModels(provider, refresh);
+  inflightFetches.set(key, promise);
+  promise.finally(() => inflightFetches.delete(key));
   return promise;
 }
 
@@ -69,12 +73,12 @@ export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
   }, []);
 
   // Fetch models when provider changes
-  const loadModels = useCallback(async (prov: string) => {
+  const loadModels = useCallback(async (prov: string, refresh = false) => {
     const version = ++fetchVersion.current;
     setModelsLoading(true);
     setModelsError(null);
     try {
-      const result = await fetchModels(prov);
+      const result = await fetchModels(prov, refresh);
       if (fetchVersion.current !== version) return;
       setModels(result.models);
       if (result.error) setModelsError(result.error);
@@ -283,7 +287,7 @@ export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
                     {renderModelControl()}
                   </div>
                   <button
-                    onClick={() => loadModels(provider)}
+                    onClick={() => loadModels(provider, true)}
                     disabled={modelsLoading}
                     title={`Refresh ${provider} models`}
                     className="p-2 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors shrink-0"

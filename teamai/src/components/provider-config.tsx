@@ -10,12 +10,16 @@ const PROVIDERS = ['anthropic', 'bedrock', 'vertex', 'openai', 'gemini', 'ollama
 /** Deduplicate concurrent fetch requests for the same provider on the client. */
 const inflightFetches = new Map<string, Promise<{ models: string[]; error?: string }>>();
 
-async function fetchModels(provider: string): Promise<{ models: string[]; error?: string }> {
-  const existing = inflightFetches.get(provider);
-  if (existing) return existing;
-  const promise = getAvailableModels(provider);
-  inflightFetches.set(provider, promise);
-  promise.finally(() => inflightFetches.delete(provider));
+async function fetchModels(provider: string, refresh = false): Promise<{ models: string[]; error?: string }> {
+  const key = `${provider}:${refresh}`;
+  // Only dedup non-refresh calls — refresh calls always hit the server
+  if (!refresh) {
+    const existing = inflightFetches.get(key);
+    if (existing) return existing;
+  }
+  const promise = getAvailableModels(provider, refresh);
+  inflightFetches.set(key, promise);
+  promise.finally(() => inflightFetches.delete(key));
   return promise;
 }
 
@@ -58,12 +62,12 @@ function ModelRow({
   const [customValue, setCustomValue] = useState('');
   const fetchVersion = useRef(0); // increment to discard stale responses
 
-  const loadModels = useCallback(async (prov: string) => {
+  const loadModels = useCallback(async (prov: string, refresh = false) => {
     const version = ++fetchVersion.current;
     setLoading(true);
     setFetchError(null);
     try {
-      const result = await fetchModels(prov);
+      const result = await fetchModels(prov, refresh);
       if (fetchVersion.current !== version) return; // stale response
       setModels(result.models);
       if (result.error) {
@@ -121,7 +125,7 @@ function ModelRow({
   }
 
   function handleRefresh() {
-    loadModels(provider);
+    loadModels(provider, true);
   }
 
   // Determine what to show in the model area

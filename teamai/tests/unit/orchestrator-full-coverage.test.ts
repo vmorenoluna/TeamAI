@@ -15,7 +15,7 @@
  *   - advancePhase all phase transitions
  *   - cancelPipeline, isTaskActive edge cases
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -77,6 +77,7 @@ vi.mock('../../src/lib/process-manager', () => ({
 
 vi.mock('../../src/lib/container-manager', () => ({
   readContainerConfig: vi.fn(() => ({ enabled: false })),
+  readContainerRemoteUser: vi.fn(() => 'node'),
   containerManager: {
     ensureContainer: vi.fn(),
     getRunningContainer: vi.fn(() => null),
@@ -567,6 +568,94 @@ describe('Orchestrator — Full Coverage', () => {
 
       expect(mockExecFileSync).toHaveBeenCalledWith('git', ['status'], { cwd: testData.root });
     });
+
+    it('calls docker exec when container is enabled and running', () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+        containerId: 'cont-abc',
+        remoteWorkspaceFolder: '/workspace',
+      } as any);
+      vi.mocked(hostToContainerPath).mockImplementation((hp: string, _root: string, _ws: string) => {
+        return '/workspace' + (hp === testData.root ? '' : '/cwd');
+      });
+
+      const orch = makeOrch(testData.root);
+
+      mockExecFileSync.mockReturnValue('');
+      (orch as AnyOrch)._execGit(['status'], testData.root);
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'docker',
+        expect.arrayContaining(['exec', '-u', 'node', 'cont-abc', 'git', 'status']),
+      );
+    });
+
+    // Coverage: line 540 — absolute project path mapped through hostToContainerPath
+    it('maps absolute project paths via hostToContainerPath in container mode', () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+        containerId: 'cont-xyz',
+        remoteWorkspaceFolder: '/workspace',
+      } as any);
+      const mapSpy = vi.mocked(hostToContainerPath).mockReturnValue('/workspace/some/file');
+
+      const orch = makeOrch(testData.root);
+
+      mockExecFileSync.mockReturnValue('');
+      // Pass an absolute path starting with projectRoot — should be mapped
+      const absolutePath = join(testData.root, 'some', 'file');
+      (orch as AnyOrch)._execGit(['add', absolutePath], testData.root);
+
+      expect(mapSpy).toHaveBeenCalledWith(
+        absolutePath,
+        testData.root,
+        '/workspace',
+      );
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'docker',
+        expect.arrayContaining(['git', 'add', '/workspace/some/file']),
+      );
+    });
+
+    it('leaves non-project absolute paths unchanged in container mode', () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+        containerId: 'cont-xyz',
+        remoteWorkspaceFolder: '/workspace',
+      } as any);
+      vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
+
+      const orch = makeOrch(testData.root);
+
+      mockExecFileSync.mockReturnValue('');
+      // Path outside project root — should NOT be mapped
+      (orch as AnyOrch)._execGit(['add', '/tmp/external-file'], testData.root);
+
+      // hostToContainerPath should not have been called with this path
+      // The path won't startWith projectRoot, so it passes through as-is
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'docker',
+        expect.arrayContaining(['git', 'add', '/tmp/external-file']),
+      );
+    });
+
+    it('falls back to host git when container is enabled but not running', () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      // No running container
+      vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+
+      const orch = makeOrch(testData.root);
+
+      mockExecFileSync.mockReturnValue('');
+      (orch as AnyOrch)._execGit(['status'], testData.root);
+
+      // Falls back to host git
+      expect(mockExecFileSync).toHaveBeenCalledWith('git', ['status'], { cwd: testData.root });
+    });
   });
 
   // ── _toAgentPath ───────────────────────────────────────────────────
@@ -606,6 +695,127 @@ describe('Orchestrator — Full Coverage', () => {
       const base = (orch as AnyOrch).getWorktreeBase();
       expect(base).toContain('worktrees');
       expect(base).not.toContain('.worktrees');
+    });
+
+    it('returns .worktrees when container is enabled', () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      const orch = makeOrch(testData.root);
+
+      const base = (orch as AnyOrch).getWorktreeBase();
+      expect(base).toContain('.worktrees');
+    });
+  });
+
+  // ── getWorktreePath ────────────────────────────────────────────────
+
+  describe('getWorktreePath', () => {
+    it('returns null when task has no branch', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      // Task has no branch field
+      expect(orch.getWorktreePath(testData.taskId)).toBeNull();
+    });
+
+    it('returns the worktree path when task has a branch', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      // Set a branch on the task
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { branch: 'feat/test-task' });
+
+      const result = orch.getWorktreePath(testData.taskId);
+      expect(result).not.toBeNull();
+      expect(result).toContain('worktrees');
+      expect(result).toContain('test-task');
+    });
+  });
+
+  // ── removeWorktree ────────────────────────────────────────────────
+
+  describe('removeWorktree (private, via public getWorktreePath)', () => {
+    it('does not throw when worktree path does not exist on disk', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      // No branch → getWorktreePath returns null → removeWorktree returns early
+      expect(() => (orch as AnyOrch).removeWorktree(testData.taskId)).not.toThrow();
+    });
+
+    // Coverage: lines 568-573 — _execGit throws, catch block handles gracefully
+    it('handles _execGit failure gracefully in catch block', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      // Give the task a branch so getWorktreePath returns a path
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { branch: 'feat/test-branch' });
+
+      // Create the worktree directory on disk so existsSync returns true
+      // and removeWorktree proceeds past the early-return guard at line 567
+      const wtPath = (orch as AnyOrch).getWorktreePath(testData.taskId);
+      if (wtPath) mkdirSync(wtPath, { recursive: true });
+
+      // Make _execGit throw (via underlying execFileSync mock)
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error('git worktree remove failed');
+      });
+
+      // Should not throw — the catch block at 571-573 handles it silently
+      expect(() => (orch as AnyOrch).removeWorktree(testData.taskId)).not.toThrow();
+
+      // Verify _execGit was actually called (the git worktree remove command)
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['worktree', 'remove']),
+        expect.any(Object),
+      );
+    });
+  });
+
+  // ── moveTaskToPhase — hasSpec/hasPlan branching ────────────────────
+
+  describe('moveTaskToPhase — hasSpec/hasPlan branching', () => {
+    it('starts from plan when hasSpec is true and target is plan', async () => {
+      testData = setupTestProject();
+      // Write a spec.md so hasSpec is true
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec content');
+      const orch = makeOrch(testData.root);
+
+      // Make createSession reject so pipeline stops at first phase
+      // This lets us verify the branching logic ran without needing
+      // to fire events for the cascading phase chain.
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.moveTaskToPhase(testData.taskId, 'plan').catch(() => {});
+
+      // createSession was called — proving moveTaskToPhase reached executePhase
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+
+    // Coverage: line 116 — hasPlan = true when plan.json exists
+    it('starts from implement when hasSpec and hasPlan are true and target is implement', async () => {
+      testData = setupTestProject();
+      // Write both spec.md and plan.json so hasSpec=true and hasPlan=true
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [] }));
+      const orch = makeOrch(testData.root);
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.moveTaskToPhase(testData.taskId, 'implement').catch(() => {});
+
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+
+    it('starts from spec when neither hasSpec nor hasPlan exist', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.moveTaskToPhase(testData.taskId, 'implement').catch(() => {});
+
+      expect(mockCreateSession).toHaveBeenCalled();
     });
   });
 
@@ -758,6 +968,155 @@ describe('Orchestrator — Full Coverage', () => {
         taskId: testData.taskId,
         rateLimitedUntil: expect.any(String),
       }));
+    });
+
+    // Coverage: handleRateLimit retry callback — non-RateLimitError branch (lines 505-507)
+    it('advances to failed when retry encounters non-rate-limit error', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+
+      // Pipeline must be registered so handleRateLimit can re-acquire the lock
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      // Mock createSession to reject with a regular Error (not a RateLimitError)
+      // This makes executePhase fail fast when it reaches runSpec
+      mockCreateSession.mockRejectedValue(new Error('simulated createSession failure'));
+
+      // Use a promise that resolves when advancePhase is called with 'failed'
+      const promise = new Promise<void>(resolve => {
+        const origAdvance = (orch as AnyOrch).advancePhase.bind(orch);
+        (orch as AnyOrch).advancePhase = (p: any, phase: string) => {
+          origAdvance(p, phase);
+          if (phase === 'failed') resolve();
+        };
+      });
+
+      // resetsAt = 0 → resetsAtMs = 0 → waitMs = 0 → setTimeout fires on next tick
+      (orch as AnyOrch).handleRateLimit(pipeline, 0);
+
+      // Wait for the setTimeout callback to fire and advancePhase('failed') to be called
+      await promise;
+
+      // Clean up the patched method
+      delete (orch as AnyOrch).advancePhase;
+
+      // The finally block should have cleaned up pipelines/activeTasks
+      // (wasRateLimited is false since it's not a RateLimitError)
+      expect((orch as AnyOrch).pipelines.has(testData.taskId)).toBe(false);
+      expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(false);
+    });
+
+    // Coverage: handleRateLimit retry callback — RateLimitError branch (lines 501-504)
+    it('re-enters handleRateLimit when retry is also rate limited', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      // Use a pipeline with phase='spec' so executePhase → runSpec → createSession → waitForCompletion
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      // Make createSession succeed so executePhase reaches waitForCompletion
+      mockCreateSession.mockResolvedValue('retry-sess');
+
+      // Track how many times handleRateLimit is called
+      let rateLimitCalls = 0;
+      const origHandle = (orch as AnyOrch).handleRateLimit.bind(orch);
+      (orch as AnyOrch).handleRateLimit = (p: any, r: number) => {
+        rateLimitCalls++;
+        return origHandle(p, r);
+      };
+
+      // Also track advancePhase with 'failed' — should NOT be called
+      let failedCalled = false;
+      const origAdvance = (orch as AnyOrch).advancePhase.bind(orch);
+      (orch as AnyOrch).advancePhase = (p: any, phase: string) => {
+        if (phase === 'failed') failedCalled = true;
+        origAdvance(p, phase);
+      };
+
+      // resetsAt = 0 → waitMs = 0 → fires immediately
+      (orch as AnyOrch).handleRateLimit(pipeline, 0);
+
+      // Wait for setTimeout to fire and executePhase to run 
+      // which calls runSpec → waitForCompletion
+      await new Promise(r => setTimeout(r, 30));
+
+      // Now waitForCompletion should be listening — fire rate limit events
+      // This makes waitForCompletion reject with RateLimitError
+      fireEvent('event', {
+        sessionId: 'retry-sess',
+        event: { type: 'rate_limit_event', rate_limit_info: { status: 'limited', resetsAt: 9999999999 } },
+      });
+      fireEvent('event', {
+        sessionId: 'retry-sess',
+        event: { type: 'result', is_error: true },
+      });
+
+      // Give microtasks time to process the rejection chain
+      await new Promise(r => setTimeout(r, 30));
+
+      // Restore original methods
+      delete (orch as AnyOrch).handleRateLimit;
+      delete (orch as AnyOrch).advancePhase;
+
+      // handleRateLimit should have been called twice:
+      // 1. Our initial call
+      // 2. Nested call from the catch block (line 504)
+      expect(rateLimitCalls).toBe(2);
+
+      // Should NOT have advanced to 'failed' (RateLimitError is handled, not failed)
+      expect(failedCalled).toBe(false);
+
+      // wasRateLimited was true → finally block did NOT clean up
+      expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(true);
+    });
+  });
+
+  // ── Pipeline phase methods ────────────────────────────────────────
+
+  describe('pipeline phase methods', () => {
+    // Coverage: runSpec (lines 247-261) — creates session, sends message, waits, advances
+    it('runSpec creates session, sends message, and advances to plan on completion', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+      });
+
+      // First createSession call succeeds, subsequent ones reject
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve('spec-sess-1');
+        return Promise.reject(new Error('simulated abort'));
+      });
+
+      // Start runSpec
+      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => {});
+
+      // Give microtasks time: runSpec awaits createSession → resolves → 
+      // sends message → awaits waitForCompletion
+      await new Promise(r => setTimeout(r, 20));
+
+      // Should have called createSession (spec phase)
+      expect(mockCreateSession).toHaveBeenCalled();
+      // Should have sent the /spec command
+      expect(mockSendMessage).toHaveBeenCalledWith('spec-sess-1', expect.stringContaining('/spec'));
+
+      // Fire result event to resolve waitForCompletion
+      fireEvent('event', { sessionId: 'spec-sess-1', event: { type: 'result' } });
+
+      // Let the promise chain complete (spec finishes, advances to plan, plan fails)
+      await new Promise(r => setTimeout(r, 50));
+      await promise;
+
+      // Spec phase should have killed the session
+      expect(mockKillSession).toHaveBeenCalledWith('spec-sess-1');
+
+      // Phase should have advanced to 'plan' before the cascade failed
+      expect(pipeline.phase).toBe('plan');
     });
   });
 

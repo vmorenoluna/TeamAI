@@ -1,12 +1,13 @@
 'use server';
 
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
 import { error as logError } from '@/lib/logger';
+import { CURATED_MODELS } from '@/defaults/models';
 
 const execFileAsync = promisify(execFile);
 
@@ -19,6 +20,53 @@ const DEFAULT: ProvidersConfig = {
   default: { model: 'claude-sonnet-4-6', provider: 'anthropic' },
   roles: {},
 };
+
+// ── Cache helpers ──────────────────────────────────────────────────────
+
+interface ModelsCacheEntry {
+  models: string[];
+  fetchedAt: string; // ISO timestamp
+}
+
+type ModelsCache = Record<string, ModelsCacheEntry>;
+
+function cachePath(projectRoot: string): string {
+  return join(projectRoot, '.teamai', 'models-cache.json');
+}
+
+function readModelsCache(projectRoot: string): ModelsCache {
+  const path = cachePath(projectRoot);
+  if (!existsSync(path)) return {};
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeModelsCache(projectRoot: string, cache: ModelsCache): void {
+  const dir = join(projectRoot, '.teamai');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(cachePath(projectRoot), JSON.stringify(cache, null, 2));
+}
+
+/** Return models from the file cache if it was fetched within the last hour. */
+function getCachedModels(projectRoot: string, provider: string): string[] | null {
+  const cache = readModelsCache(projectRoot);
+  const entry = cache[provider];
+  if (!entry) return null;
+  const age = Date.now() - new Date(entry.fetchedAt).getTime();
+  if (age > 3_600_000) return null; // stale after 1 hour
+  return entry.models;
+}
+
+function setCachedModels(projectRoot: string, provider: string, models: string[]): void {
+  const cache = readModelsCache(projectRoot);
+  cache[provider] = { models, fetchedAt: new Date().toISOString() };
+  writeModelsCache(projectRoot, cache);
+}
+
+// ── Config read/write ──────────────────────────────────────────────────
 
 export async function getProvidersConfig(): Promise<ProvidersConfig> {
   const projectPath = await getActiveProjectPath();
@@ -38,16 +86,72 @@ export async function saveProvidersConfig(config: ProvidersConfig): Promise<void
   revalidatePath('/settings');
 }
 
+// ── Model listing ──────────────────────────────────────────────────────
+
 /**
- * Fetch available models for a given provider by calling its API.
- * Returns a list of model IDs/names, or an empty array with an error message.
+ * Get available models for a given provider.
+ *
+ * Resolution order:
+ * 1. File cache (`.teamai/models-cache.json`) — returned if fresh (< 1 hour)
+ * 2. Curated defaults (`CURATED_MODELS`) — always available fallback
+ * 3. On explicit refresh: tries API/CLI, updates cache
+ *
+ * @param provider - Provider name
+ * @param refresh  - If true, bypass cache and fetch fresh from the provider
  */
-export async function getAvailableModels(provider: string): Promise<{ models: string[]; error?: string }> {
+export async function getAvailableModels(
+  provider: string,
+  refresh = false,
+): Promise<{ models: string[]; error?: string }> {
+  const projectPath = await getActiveProjectPath().catch(() => null);
+
+  // If not refreshing, check file cache first
+  if (!refresh && projectPath) {
+    const cached = getCachedModels(projectPath, provider);
+    if (cached) return { models: cached };
+  }
+
+  // Try to fetch fresh (refresh or no cache available)
+  const result = await fetchModelsFromProvider(provider);
+
+  // If we got models and have a project path, cache them
+  if (result.models.length > 0 && projectPath) {
+    try {
+      setCachedModels(projectPath, provider, result.models);
+    } catch {
+      // non-fatal: cache write failure
+    }
+  }
+
+  // If fetch yielded no models, fall back to curated defaults
+  if (result.models.length === 0 && result.error) {
+    const curated = CURATED_MODELS[provider];
+    if (curated && curated.length > 0) {
+      return { models: curated, error: result.error };
+    }
+  }
+
+  // If fetch yielded no models AND no curated defaults, return curated (may be empty too)
+  if (result.models.length === 0 && !result.error) {
+    const curated = CURATED_MODELS[provider];
+    if (curated) {
+      return { models: curated };
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Internal: actually call the provider's API/CLI to fetch models.
+ * Does NOT use cache.
+ */
+async function fetchModelsFromProvider(provider: string): Promise<{ models: string[]; error?: string }> {
   switch (provider) {
     case 'anthropic': {
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) {
-        return { models: [], error: 'ANTHROPIC_API_KEY not set' };
+        return { models: [], error: 'ANTHROPIC_API_KEY not set — using curated model list' };
       }
       try {
         const res = await fetch('https://api.anthropic.com/v1/models', {
@@ -75,7 +179,7 @@ export async function getAvailableModels(provider: string): Promise<{ models: st
     case 'openai': {
       const apiKey = process.env.OPENAI_API_KEY;
       if (!apiKey) {
-        return { models: [], error: 'OPENAI_API_KEY not set' };
+        return { models: [], error: 'OPENAI_API_KEY not set — using curated model list' };
       }
       try {
         const res = await fetch('https://api.openai.com/v1/models', {
@@ -100,7 +204,7 @@ export async function getAvailableModels(provider: string): Promise<{ models: st
     case 'gemini': {
       const apiKey = process.env.GOOGLE_API_KEY;
       if (!apiKey) {
-        return { models: [], error: 'GOOGLE_API_KEY not set' };
+        return { models: [], error: 'GOOGLE_API_KEY not set — using curated model list' };
       }
       try {
         const res = await fetch(`https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`);
@@ -132,7 +236,7 @@ export async function getAvailableModels(provider: string): Promise<{ models: st
         return { models: claudeModels.length > 0 ? claudeModels : models };
       } catch (err) {
         logError('providers', 'Failed to list Bedrock models', err);
-        return { models: [], error: 'AWS CLI not available or not configured for Bedrock' };
+        return { models: [], error: 'AWS CLI not available' };
       }
     }
 
@@ -149,7 +253,7 @@ export async function getAvailableModels(provider: string): Promise<{ models: st
         return { models: names };
       } catch (err) {
         logError('providers', 'Failed to list Vertex models', err);
-        return { models: [], error: 'gcloud CLI not available or not configured for Vertex AI' };
+        return { models: [], error: 'gcloud CLI not available' };
       }
     }
 
