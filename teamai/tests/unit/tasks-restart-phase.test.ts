@@ -12,9 +12,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockRevalidatePath = vi.fn();
 
-const { mockMoveTaskToPhase, mockCancelPipeline } = vi.hoisted(() => ({
+const { mockMoveTaskToPhase, mockCancelPipeline, mockRunTask } = vi.hoisted(() => ({
   mockMoveTaskToPhase: vi.fn().mockResolvedValue(undefined),
   mockCancelPipeline: vi.fn(),
+  mockRunTask: vi.fn().mockResolvedValue(undefined),
 }));
 
 let mockProjectPath = '/test/project';
@@ -59,10 +60,10 @@ vi.mock('@/lib/orchestrator', () => ({
   getOrchestrator: vi.fn(() => ({
     moveTaskToPhase: mockMoveTaskToPhase,
     cancelPipeline: mockCancelPipeline,
+    runTask: mockRunTask,
     // Stub out other methods used by other actions
     resumeTask: vi.fn(),
     cleanupTaskArtifacts: vi.fn(),
-    runTask: vi.fn(),
     approveTask: vi.fn(),
     rejectTask: vi.fn(),
     getWorktreePath: vi.fn(),
@@ -109,7 +110,7 @@ function seedTask(
 
 // ── Tests ──
 
-describe('restartCurrentPhase — valid phases', () => {
+describe('restartCurrentPhase — valid phases (spec / plan / implement)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockProjectPath = TEST_DIR;
@@ -120,9 +121,9 @@ describe('restartCurrentPhase — valid phases', () => {
     vi.resetModules();
   });
 
-  const validPhases = ['spec', 'plan', 'implement', 'qa-review'] as const;
+  const moveToPhasePhases = ['spec', 'plan', 'implement'] as const;
 
-  for (const phase of validPhases) {
+  for (const phase of moveToPhasePhases) {
     it(`succeeds for "${phase}" phase and calls moveTaskToPhase`, async () => {
       const slug = `restart-${phase}`;
       const task = seedTask(TEST_DIR, slug, { phase, id: slug });
@@ -133,15 +134,56 @@ describe('restartCurrentPhase — valid phases', () => {
       expect(result.success).toBe(true);
       expect(result.error).toBeUndefined();
 
-      // Verify moveTaskToPhase was called with the task ID and current phase
+      // spec/plan/implement use moveTaskToPhase for correct start-phase detection
       expect(mockMoveTaskToPhase).toHaveBeenCalledTimes(1);
       expect(mockMoveTaskToPhase).toHaveBeenCalledWith(task.id, phase);
+      expect(mockRunTask).not.toHaveBeenCalled();
 
       // Verify revalidatePath was called
       expect(mockRevalidatePath).toHaveBeenCalledWith('/');
       expect(mockRevalidatePath).toHaveBeenCalledWith(`/task/${task.id}`);
     });
   }
+});
+
+describe('restartCurrentPhase — qa-review (uses runTask directly)', () => {
+  let clearArtifactsSpy: any;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockProjectPath = TEST_DIR;
+    // Lazy-import TaskStore and spy on clearArtifacts so we can verify it's called
+    const { TaskStore } = await import('@/lib/task-store');
+    clearArtifactsSpy = vi.spyOn(TaskStore.prototype, 'clearArtifacts').mockImplementation(vi.fn());
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it('succeeds for qa-review, clears QA artifacts, and calls runTask (not moveTaskToPhase)', async () => {
+    const slug = 'restart-qa-review';
+    const task = seedTask(TEST_DIR, slug, { phase: 'qa-review', id: slug });
+
+    const { restartCurrentPhase } = await import('@/app/actions/tasks');
+    const result = await restartCurrentPhase(task.id);
+
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+
+    // qa-review uses runTask with startPhase='qa-review', NOT moveTaskToPhase
+    expect(mockMoveTaskToPhase).not.toHaveBeenCalled();
+    expect(mockRunTask).toHaveBeenCalledTimes(1);
+    expect(mockRunTask).toHaveBeenCalledWith(task.id, task.description, 'qa-review');
+
+    // QA artifacts must be cleared before re-running QA
+    expect(clearArtifactsSpy).toHaveBeenCalledWith(task.id, 'qa');
+
+    // Verify revalidatePath was called
+    expect(mockRevalidatePath).toHaveBeenCalledWith('/');
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/task/${task.id}`);
+  });
 });
 
 describe('restartCurrentPhase — invalid phases rejected', () => {
@@ -213,19 +255,25 @@ describe('restartCurrentPhase — edge cases', () => {
     expect(mockMoveTaskToPhase).not.toHaveBeenCalled();
   });
 
-  it('verifies moveTaskToPhase is called with the correct taskId even when multiple tasks exist', async () => {
-    // Create two tasks in the same project
+  it('verifies correct method is used for each phase when multiple tasks exist', async () => {
+    // Create mixed tasks
     seedTask(TEST_DIR, 'task-a', { phase: 'implement', id: 'id-a' });
-    seedTask(TEST_DIR, 'task-b', { phase: 'spec', id: 'id-b' });
+    seedTask(TEST_DIR, 'task-b', { phase: 'qa-review', id: 'id-b' });
+    seedTask(TEST_DIR, 'task-c', { phase: 'spec', id: 'id-c' });
 
     const { restartCurrentPhase } = await import('@/app/actions/tasks');
 
-    // Restart task A
+    // Restart task A (implement) — uses moveTaskToPhase
     await restartCurrentPhase('id-a');
     expect(mockMoveTaskToPhase).toHaveBeenLastCalledWith('id-a', 'implement');
+    expect(mockRunTask).not.toHaveBeenCalled();
 
-    // Restart task B
+    // Restart task B (qa-review) — uses runTask with startPhase='qa-review'
     await restartCurrentPhase('id-b');
-    expect(mockMoveTaskToPhase).toHaveBeenLastCalledWith('id-b', 'spec');
+    expect(mockRunTask).toHaveBeenLastCalledWith('id-b', expect.any(String), 'qa-review');
+
+    // Restart task C (spec) — uses moveTaskToPhase
+    await restartCurrentPhase('id-c');
+    expect(mockMoveTaskToPhase).toHaveBeenLastCalledWith('id-c', 'spec');
   });
 });

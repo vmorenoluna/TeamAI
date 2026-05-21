@@ -118,9 +118,19 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
     return { success: false, error: `Cannot restart task in "${task.phase}" phase` };
   }
 
-  // moveTaskToPhase cancels any running pipeline internally, clears stale
-  // artifacts for the target phase, then re-runs from the appropriate starting phase.
-  orchestrator.moveTaskToPhase(taskId, task.phase).catch(console.error);
+  if (task.phase === 'qa-review') {
+    // For qa-review: just re-run QA without re-implementing.
+    // moveTaskToPhase would set startPhase='implement' (since plan exists),
+    // but the user asked to restart _this_ phase from scratch — not the pipeline.
+    taskStore.clearArtifacts(taskId, 'qa');
+    orchestrator.runTask(taskId, task.description, 'qa-review').catch(console.error);
+  } else {
+    // spec / plan / implement: moveTaskToPhase handles clearing stale artifacts
+    // and setting the correct startPhase (e.g. spec redoes everything,
+    // plan redoes plan→implement→qa, implement just re-implements).
+    orchestrator.moveTaskToPhase(taskId, task.phase).catch(console.error);
+  }
+
   revalidatePath('/');
   revalidatePath(`/task/${taskId}`);
   return { success: true };
