@@ -1,7 +1,7 @@
 'use server';
 
 import { TaskStore } from '@/lib/task-store';
-import { getOrchestrator } from '@/lib/orchestrator';
+import { getOrchestrator, detectDefaultBranch } from '@/lib/orchestrator';
 import { getActiveProjectPath } from './projects';
 import { processManager } from '@/lib/process-manager';
 import { revalidatePath } from 'next/cache';
@@ -182,7 +182,8 @@ export async function getTaskArtifacts(taskId: string) {
   let diff: string | null = null;
   if (task.branch) {
     try {
-      diff = execFileSync('git', ['diff', `main...${task.branch}`], {
+      const base = detectDefaultBranch(projectPath);
+      diff = execFileSync('git', ['diff', `${base}...${task.branch}`], {
         cwd: projectPath,
         encoding: 'utf-8',
       });
@@ -225,7 +226,8 @@ export async function getTaskFull(taskId: string) {
   let diff: string | null = null;
   if (task.branch) {
     try {
-      diff = execFileSync('git', ['diff', `main...${task.branch}`], { cwd: projectPath, encoding: 'utf-8' });
+      const base = detectDefaultBranch(projectPath);
+      diff = execFileSync('git', ['diff', `${base}...${task.branch}`], { cwd: projectPath, encoding: 'utf-8' });
     } catch { /* no diff yet */ }
   }
 
