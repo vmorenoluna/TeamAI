@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useRef, useEffect } from 'react';
+import { useState, useTransition, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AgentPanel } from './agent-panel';
@@ -133,16 +133,36 @@ function DepPicker({
   );
 }
 
+function CopyButton({ text, label }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(async () => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [text]);
+  return (
+    <button
+      onClick={handleCopy}
+      className="text-xs px-2 py-1 rounded border border-[#334155] text-slate-400 hover:text-white hover:border-[#475569] transition-colors"
+      title={`Copy ${label || 'content'} to clipboard`}
+    >
+      {copied ? '✓ Copied' : '📋 Copy'}
+    </button>
+  );
+}
+
 function PlanSubtasks({ plan }: { plan: PlanData | null }) {
   if (!plan?.subtasks?.length) return <p className="text-sm text-slate-400">No plan generated yet.</p>;
   const completed = plan.subtasks.filter((s: PlanSubtask) => s.completed).length;
   const total = plan.subtasks.length;
+  const planText = JSON.stringify(plan, null, 2);
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 mb-3">
         <p className="text-xs text-slate-500">
           {completed} / {total} subtasks completed
         </p>
+        <CopyButton text={planText} label="plan" />
         {completed > 0 && completed < total && (
           <div className="flex-1 h-1.5 bg-[#1e293b] rounded-full overflow-hidden" data-testid="subtask-progress-track">
             <div
@@ -187,14 +207,18 @@ function PlanSubtasks({ plan }: { plan: PlanData | null }) {
 
 function QAReportView({ qaReport }: { qaReport: QAReportData | null }) {
   if (!qaReport) return <p className="text-sm text-slate-400">No QA report generated yet.</p>;
+  const qaText = JSON.stringify(qaReport, null, 2);
   return (
     <div className="space-y-3">
-      <div className={`inline-flex items-center px-2.5 py-1 rounded text-sm font-bold ${
-        qaReport.overall === 'PASS'
-          ? 'bg-green-900/40 text-green-300'
-          : 'bg-red-900/40 text-red-300'
-      }`}>
-        {qaReport.overall}
+      <div className="flex items-center justify-between">
+        <div className={`inline-flex items-center px-2.5 py-1 rounded text-sm font-bold ${
+          qaReport.overall === 'PASS'
+            ? 'bg-green-900/40 text-green-300'
+            : 'bg-red-900/40 text-red-300'
+        }`}>
+          {qaReport.overall}
+        </div>
+        <CopyButton text={qaText} label="QA report" />
       </div>
       {qaReport.criteria?.map((c: QACriterion, i: number) => (
         <div key={i} className="flex items-start gap-2 text-sm">
@@ -202,7 +226,7 @@ function QAReportView({ qaReport }: { qaReport: QAReportData | null }) {
             {c.status === 'PASS' ? '✓' : '✗'}
           </span>
           <div>
-            <p className="text-slate-300">{c.name}</p>
+            <p className="text-slate-300">{c.criterion || c.name}</p>
             {c.notes && <p className="text-xs text-slate-400 mt-0.5">{c.notes}</p>}
           </div>
         </div>
@@ -409,6 +433,16 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
                     <button
                       onClick={async (e) => {
                         e.stopPropagation();
+                        await navigator.clipboard.writeText(task.completionSummary || '');
+                      }}
+                      className="text-[10px] px-2 py-0.5 rounded border border-red-900/50 text-red-400 hover:text-red-300 hover:border-red-700 transition-colors"
+                      title="Copy summary to clipboard"
+                    >
+                      📋 Copy
+                    </button>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
                         startTransition(async () => {
                           const result = await retryTask(task.id);
                           if (result.success) {
@@ -527,9 +561,15 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
         {activeTab === 'spec' && (
           <div className="p-6">
             {spec ? (
-              <pre className="text-sm text-emerald-400 whitespace-pre-wrap font-mono leading-relaxed">
-                {spec}
-              </pre>
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs text-slate-500">Specification</span>
+                  <CopyButton text={spec} />
+                </div>
+                <pre className="text-sm text-emerald-400 whitespace-pre-wrap font-mono leading-relaxed">
+                  {spec}
+                </pre>
+              </>
             ) : (
               <p className="text-sm text-slate-400">No spec generated yet. Run the pipeline to create one.</p>
             )}
@@ -551,6 +591,8 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
         )}
       </div>
       )}
+
+      {/* Copy button helper */}
     </div>
   );
 }
