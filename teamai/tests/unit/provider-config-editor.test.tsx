@@ -56,6 +56,7 @@ describe('ProviderConfigEditor', () => {
   it('renders label for each role', () => {
     render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
     expect(screen.getByText('Default')).toBeInTheDocument();
+    expect(screen.getByText('analyst')).toBeInTheDocument();
     expect(screen.getByText('planner')).toBeInTheDocument();
     expect(screen.getByText('coder')).toBeInTheDocument();
     expect(screen.getByText('qa-reviewer')).toBeInTheDocument();
@@ -272,7 +273,7 @@ describe('ProviderConfigEditor', () => {
     render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
 
     const indicators = screen.getAllByText('Loading models…');
-    expect(indicators).toHaveLength(6);
+    expect(indicators).toHaveLength(7);
 
     // Resolve the loading so inflightFetches cleans up
     resolveLoading({ models: CURATED_MODELS_ANTHROPIC, error: undefined });
