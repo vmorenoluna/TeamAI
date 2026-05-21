@@ -108,6 +108,24 @@ export async function playTask(taskId: string): Promise<{ success: boolean; erro
   return { success: true };
 }
 
+export async function restartCurrentPhase(taskId: string): Promise<{ success: boolean; error?: string }> {
+  const { taskStore, orchestrator } = await getStores();
+  const task = taskStore.getById(taskId);
+  if (!task) return { success: false, error: 'Task not found' };
+
+  const restartablePhases = new Set(['spec', 'plan', 'implement', 'qa-review']);
+  if (!restartablePhases.has(task.phase)) {
+    return { success: false, error: `Cannot restart task in "${task.phase}" phase` };
+  }
+
+  // moveTaskToPhase cancels any running pipeline internally, clears stale
+  // artifacts for the target phase, then re-runs from the appropriate starting phase.
+  orchestrator.moveTaskToPhase(taskId, task.phase).catch(console.error);
+  revalidatePath('/');
+  revalidatePath(`/task/${taskId}`);
+  return { success: true };
+}
+
 export async function runTask(taskId: string) {
   const { taskStore, orchestrator } = await getStores();
   const task = taskStore.getById(taskId);
