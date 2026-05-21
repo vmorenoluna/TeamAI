@@ -73,7 +73,7 @@ vi.mock('@/lib/orchestrator', () => ({
 
 // ── Real imports ──
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 const TEST_DIR = join(
@@ -110,7 +110,7 @@ function seedTask(
 
 // ── Tests ──
 
-describe('restartCurrentPhase — valid phases (spec / plan / implement)', () => {
+describe('restartCurrentPhase — valid phases (spec / plan)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockProjectPath = TEST_DIR;
@@ -121,7 +121,7 @@ describe('restartCurrentPhase — valid phases (spec / plan / implement)', () =>
     vi.resetModules();
   });
 
-  const moveToPhasePhases = ['spec', 'plan', 'implement'] as const;
+  const moveToPhasePhases = ['spec', 'plan'] as const;
 
   for (const phase of moveToPhasePhases) {
     it(`succeeds for "${phase}" phase and calls moveTaskToPhase`, async () => {
@@ -134,7 +134,7 @@ describe('restartCurrentPhase — valid phases (spec / plan / implement)', () =>
       expect(result.success).toBe(true);
       expect(result.error).toBeUndefined();
 
-      // spec/plan/implement use moveTaskToPhase for correct start-phase detection
+      // spec/plan use moveTaskToPhase for correct start-phase detection
       expect(mockMoveTaskToPhase).toHaveBeenCalledTimes(1);
       expect(mockMoveTaskToPhase).toHaveBeenCalledWith(task.id, phase);
       expect(mockRunTask).not.toHaveBeenCalled();
@@ -183,6 +183,67 @@ describe('restartCurrentPhase — qa-review (uses runTask directly)', () => {
     // Verify revalidatePath was called
     expect(mockRevalidatePath).toHaveBeenCalledWith('/');
     expect(mockRevalidatePath).toHaveBeenCalledWith(`/task/${task.id}`);
+  });
+});
+
+describe('restartCurrentPhase — implement (uses moveTaskToPhase + resets subtask completions)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockProjectPath = TEST_DIR;
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it('succeeds for implement, calls moveTaskToPhase, and resets subtask completions in plan.json', async () => {
+    const slug = 'restart-implement';
+    seedTask(TEST_DIR, slug, { phase: 'implement', id: slug });
+
+    // Create a plan.json with completed subtasks to verify reset
+    const planPath = join(TEST_DIR, '.teamai', slug, 'plan.json');
+    writeFileSync(planPath, JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Subtask 1', description: 'desc', files: ['a.ts'], acceptance_criteria: [], completed: true },
+        { id: 2, title: 'Subtask 2', description: 'desc', files: ['b.ts'], acceptance_criteria: [], completed: true },
+        { id: 3, title: 'Subtask 3', description: 'desc', files: ['c.ts'], acceptance_criteria: [], completed: false },
+      ],
+    }, null, 2));
+
+    const { restartCurrentPhase } = await import('@/app/actions/tasks');
+    const result = await restartCurrentPhase(slug);
+
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+
+    // implement uses moveTaskToPhase
+    expect(mockMoveTaskToPhase).toHaveBeenCalledTimes(1);
+    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(slug, 'implement');
+
+    // Verify all subtask completions were reset to false
+    const updatedPlan = JSON.parse(readFileSync(planPath, 'utf-8'));
+    expect(updatedPlan.subtasks).toHaveLength(3);
+    for (const s of updatedPlan.subtasks) {
+      expect(s.completed).toBe(false);
+    }
+
+    // Verify revalidatePath was called
+    expect(mockRevalidatePath).toHaveBeenCalledWith('/');
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/task/${slug}`);
+  });
+
+  it('handles missing plan.json gracefully on implement restart', async () => {
+    const slug = 'restart-impl-no-plan';
+    seedTask(TEST_DIR, slug, { phase: 'implement', id: slug });
+
+    const { restartCurrentPhase } = await import('@/app/actions/tasks');
+    const result = await restartCurrentPhase(slug);
+
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(mockMoveTaskToPhase).toHaveBeenCalledTimes(1);
+    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(slug, 'implement');
   });
 });
 
@@ -256,17 +317,24 @@ describe('restartCurrentPhase — edge cases', () => {
   });
 
   it('verifies correct method is used for each phase when multiple tasks exist', async () => {
-    // Create mixed tasks
+    // Create mixed tasks — implement task needs a plan.json for subtask reset to exercise that code path
     seedTask(TEST_DIR, 'task-a', { phase: 'implement', id: 'id-a' });
+    writeFileSync(join(TEST_DIR, '.teamai', 'task-a', 'plan.json'), JSON.stringify({
+      subtasks: [{ id: 1, title: 'S1', description: 'd', files: ['a.ts'], acceptance_criteria: [], completed: true }],
+    }, null, 2));
+
     seedTask(TEST_DIR, 'task-b', { phase: 'qa-review', id: 'id-b' });
     seedTask(TEST_DIR, 'task-c', { phase: 'spec', id: 'id-c' });
 
     const { restartCurrentPhase } = await import('@/app/actions/tasks');
 
-    // Restart task A (implement) — uses moveTaskToPhase
+    // Restart task A (implement) — uses moveTaskToPhase + subtask reset
     await restartCurrentPhase('id-a');
     expect(mockMoveTaskToPhase).toHaveBeenLastCalledWith('id-a', 'implement');
     expect(mockRunTask).not.toHaveBeenCalled();
+    // Verify subtasks were reset
+    const plan = JSON.parse(readFileSync(join(TEST_DIR, '.teamai', 'task-a', 'plan.json'), 'utf-8'));
+    expect(plan.subtasks[0].completed).toBe(false);
 
     // Restart task B (qa-review) — uses runTask with startPhase='qa-review'
     await restartCurrentPhase('id-b');

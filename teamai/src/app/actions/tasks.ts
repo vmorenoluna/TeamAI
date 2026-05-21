@@ -7,7 +7,7 @@ import { processManager } from '@/lib/process-manager';
 import { revalidatePath } from 'next/cache';
 import type { PlanData, QAReportData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { getResumePhaseForFailedTask } from '@/lib/task-utils';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
@@ -124,10 +124,26 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
     // but the user asked to restart _this_ phase from scratch — not the pipeline.
     taskStore.clearArtifacts(taskId, 'qa');
     orchestrator.runTask(taskId, task.description, 'qa-review').catch(console.error);
+  } else if (task.phase === 'implement') {
+    // For implement: reset subtask completions in plan.json so the UI shows a fresh
+    // slate. moveTaskToPhase clears QA artifacts but doesn't touch plan.json subtask
+    // flags — unlike stopTask which does via cleanupTaskArtifacts.
+    const dir = taskStore.getDirById(taskId);
+    const planPath = join(dir, 'plan.json');
+    if (existsSync(planPath)) {
+      try {
+        const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+        if (plan.subtasks) {
+          for (const s of plan.subtasks) s.completed = false;
+        }
+        writeFileSync(planPath, JSON.stringify(plan, null, 2));
+      } catch { /* best-effort */ }
+    }
+    orchestrator.moveTaskToPhase(taskId, task.phase).catch(console.error);
   } else {
-    // spec / plan / implement: moveTaskToPhase handles clearing stale artifacts
+    // spec / plan: moveTaskToPhase handles clearing stale artifacts
     // and setting the correct startPhase (e.g. spec redoes everything,
-    // plan redoes plan→implement→qa, implement just re-implements).
+    // plan redoes plan→implement→qa).
     orchestrator.moveTaskToPhase(taskId, task.phase).catch(console.error);
   }
 
