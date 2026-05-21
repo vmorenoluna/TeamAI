@@ -5,6 +5,19 @@ You are implementing a single subtask from an implementation plan.
 
 $ARGUMENTS
 
+## QA Rework Mode
+
+If the prompt includes "⚠️ QA FEEDBACK" at the top, you are in QA rework mode:
+
+1. Read the QA feedback FIRST. It takes priority over the acceptance criteria below.
+2. For each issue in the QA feedback:
+   - Address it even if the current code already satisfies the plan's acceptance criteria.
+   - If the issue requires a different approach than the plan, follow the QA feedback.
+   - The plan may be outdated — trust the QA report over the plan.
+3. Do NOT skip an issue because the code "already matches the plan."
+4. Do NOT mark the subtask as complete unless ALL QA issues are addressed.
+5. Focus on the specific issues listed — don't refactor unrelated code.
+
 ## Instructions
 1. Read the subtask description and acceptance criteria carefully.
 2. Read ALL files listed in the subtask before making any changes.

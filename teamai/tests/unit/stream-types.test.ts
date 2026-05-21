@@ -13,6 +13,7 @@ import {
   type PlanSubtask,
   type PlanData,
   type QACriterion,
+  type QAIssue,
   type QAReportData,
 } from '@/lib/stream-types';
 
@@ -266,19 +267,59 @@ describe('PlanData types', () => {
 
 describe('QAReportData types', () => {
   it('QACriterion with PASS status', () => {
-    const c: QACriterion = { name: 'Type safety', status: 'PASS' };
+    const c: QACriterion = { criterion: 'Type safety', status: 'PASS' };
     expect(c.status).toBe('PASS');
     expect(c.notes).toBeUndefined();
   });
 
   it('QACriterion with FAIL status and notes', () => {
     const c: QACriterion = {
-      name: 'Error handling',
+      criterion: 'Error handling',
       status: 'FAIL',
       notes: 'Missing try/catch in processData()',
     };
     expect(c.status).toBe('FAIL');
     expect(c.notes).toBe('Missing try/catch in processData()');
+  });
+
+  it('QACriterion with criterion field only (no name)', () => {
+    const c: QACriterion = { criterion: 'Modern format', status: 'PASS' };
+    expect(c.criterion).toBe('Modern format');
+    expect(c.name).toBeUndefined();
+  });
+
+  it('QACriterion with name field as fallback for older reports', () => {
+    const c: QACriterion = { name: 'Legacy format', status: 'FAIL', notes: 'Old style' };
+    expect(c.name).toBe('Legacy format');
+    expect(c.criterion).toBeUndefined();
+  });
+
+  it('QACriterion with both criterion and name', () => {
+    const c: QACriterion = {
+      criterion: 'Primary',
+      name: 'Fallback',
+      status: 'PASS',
+    };
+    expect(c.criterion).toBe('Primary');
+    expect(c.name).toBe('Fallback');
+  });
+
+  it('QACriterion with fix_needed field', () => {
+    const c: QACriterion = {
+      criterion: 'Security',
+      status: 'FAIL',
+      fix_needed: 'Add input validation',
+    };
+    expect(c.fix_needed).toBe('Add input validation');
+  });
+
+  it('QACriterion with evidence field', () => {
+    const c: QACriterion = {
+      criterion: 'Coverage',
+      status: 'FAIL',
+      evidence: 'Line 42 throws unhandled exception',
+    };
+    expect(c.evidence).toBe('Line 42 throws unhandled exception');
   });
 
   it('QAReportData with PASS overall', () => {
@@ -291,11 +332,57 @@ describe('QAReportData types', () => {
     const report: QAReportData = {
       overall: 'FAIL',
       criteria: [
-        { name: 'Tests', status: 'PASS' },
-        { name: 'Lint', status: 'FAIL', notes: '3 errors' },
+        { criterion: 'Tests', status: 'PASS' },
+        { criterion: 'Lint', status: 'FAIL', notes: '3 errors' },
       ],
     };
     expect(report.overall).toBe('FAIL');
     expect(report.criteria).toHaveLength(2);
+  });
+
+  it('QAReportData with additional_issues field', () => {
+    const report: QAReportData = {
+      overall: 'FAIL',
+      additional_issues: [
+        { severity: 'critical', description: 'Memory leak in render loop', file: 'src/renderer.ts' },
+        { severity: 'warning', description: 'Deprecated hook usage', fix_needed: 'Switch to useEffect' },
+      ],
+    };
+    expect(report.additional_issues).toHaveLength(2);
+    expect(report.additional_issues![0].severity).toBe('critical');
+    expect(report.additional_issues![0].description).toBe('Memory leak in render loop');
+    expect(report.additional_issues![0].file).toBe('src/renderer.ts');
+  });
+
+  it('QAIssue with all fields', () => {
+    const issue: QAIssue = {
+      severity: 'critical',
+      description: 'SQL injection in query builder',
+      file: 'src/db/query.ts',
+      fix_needed: 'Use parameterized queries',
+    };
+    expect(issue.severity).toBe('critical');
+    expect(issue.description).toBe('SQL injection in query builder');
+    expect(issue.file).toBe('src/db/query.ts');
+    expect(issue.fix_needed).toBe('Use parameterized queries');
+  });
+
+  it('QAIssue with message field (legacy format fallback)', () => {
+    const issue: QAIssue = {
+      severity: 'suggestion',
+      description: 'Consider adding retries',
+      message: 'Consider adding retries',
+    };
+    expect(issue.message).toBe('Consider adding retries');
+  });
+
+  it('QAIssue without optional fields', () => {
+    const issue: QAIssue = {
+      severity: 'warning',
+      description: 'Documentation missing',
+    };
+    expect(issue.file).toBeUndefined();
+    expect(issue.fix_needed).toBeUndefined();
+    expect(issue.message).toBeUndefined();
   });
 });

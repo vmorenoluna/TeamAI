@@ -80,14 +80,26 @@ export interface PlanData {
 
 /** QA report data from qa_report.json */
 export interface QACriterion {
-  name: string;
+  criterion?: string;
+  name?: string;
   status: 'PASS' | 'FAIL';
   notes?: string;
+  evidence?: string;
+  fix_needed?: string;
+}
+
+export interface QAIssue {
+  severity: 'critical' | 'warning' | 'suggestion';
+  description: string;
+  file?: string;
+  fix_needed?: string;
+  message?: string;
 }
 
 export interface QAReportData {
   overall: 'PASS' | 'FAIL';
   criteria?: QACriterion[];
+  additional_issues?: QAIssue[];
 }
 
 export function extractText(event: StreamEvent): string {
