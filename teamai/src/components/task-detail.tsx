@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { AgentPanel } from './agent-panel';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
-import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask } from '@/app/actions/tasks';
+import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, restartCurrentPhase } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, PlanSubtask, QAReportData, QACriterion } from '@/lib/stream-types';
 import type { RoleDefinition } from '@/app/actions/roles';
@@ -242,6 +242,8 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
 
   const badge = PHASE_BADGE[task.phase] ?? PHASE_BADGE.backlog;
   const isAwaiting = task.phase === 'awaiting-review';
+  const restartablePhases = new Set<string>(['spec', 'plan', 'implement', 'qa-review']);
+  const canRestart = restartablePhases.has(task.phase);
 
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview' },
@@ -288,6 +290,18 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
     });
   }
 
+  function handleRestart() {
+    if (!confirm(`Restart "${task.title}" from scratch? This will clear the current phase's work and re-run it.`)) return;
+    startTransition(async () => {
+      const result = await restartCurrentPhase(task.id);
+      if (result.success) {
+        router.refresh();
+      } else {
+        alert(`Failed to restart task: ${result.error}`);
+      }
+    });
+  }
+
   const otherTasks = allTasks.filter(t => t.id !== task.id);
   const dependencyIds = dependencies.map(t => t.id);
   const dependentIds = dependents.map(t => t.id);
@@ -307,6 +321,22 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
             <span className={`text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded ${badge}`}>
               {task.phase}
             </span>
+            {!readonly && canRestart && (
+              <button
+                onClick={handleRestart}
+                disabled={isPending}
+                title={`Restart ${task.phase} from scratch — clear current work and re-run`}
+                data-testid="restart-phase-button"
+                className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-amber-900/30 text-amber-400 hover:bg-amber-800/40 hover:text-amber-300 transition-colors disabled:opacity-50 flex items-center gap-1"
+              >
+                {isPending ? (
+                  <span className="w-3 h-3 rounded-full border border-amber-400 border-t-transparent animate-spin" />
+                ) : (
+                  <span>↺</span>
+                )}
+                Restart
+              </button>
+            )}
             {!readonly && (
               <button
                 onClick={handleDelete}
