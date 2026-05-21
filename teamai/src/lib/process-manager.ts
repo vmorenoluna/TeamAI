@@ -32,7 +32,7 @@ export interface AgentSession {
   id: string;
   process: ChildProcess;
   taskId: string;
-  role: 'planner' | 'coder' | 'qa-reviewer' | 'qa-fixer' | 'merger' | 'general';
+  role: 'analyst' | 'planner' | 'coder' | 'qa-reviewer' | 'qa-fixer' | 'merger' | 'general';
   cwd: string;
   status: 'running' | 'idle' | 'done' | 'error';
 }
