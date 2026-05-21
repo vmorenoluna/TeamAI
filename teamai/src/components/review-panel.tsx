@@ -6,7 +6,7 @@ import { approveTask, rejectTask } from '@/app/actions/tasks';
 
 interface QaReport {
   overall: 'PASS' | 'FAIL';
-  criteria?: { name: string; status: 'PASS' | 'FAIL'; notes?: string }[];
+  criteria?: { criterion?: string; name?: string; status: 'PASS' | 'FAIL'; notes?: string }[];
 }
 
 interface Props {
@@ -89,7 +89,7 @@ export function ReviewPanel({ taskId, spec, qaReport, diff }: Props) {
                   {c.status === 'PASS' ? '✓' : '✗'}
                 </span>
                 <div>
-                  <span className="text-slate-300">{c.name}</span>
+                  <span className="text-slate-300">{c.criterion || c.name}</span>
                   {c.notes && <p className="text-slate-400 text-xs mt-0.5">{c.notes}</p>}
                 </div>
               </div>

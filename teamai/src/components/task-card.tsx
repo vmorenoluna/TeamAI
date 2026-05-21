@@ -132,12 +132,6 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
           <span className="text-sm text-amber-400">⏳</span>
         </div>
       )}
-      {/* Failure indicator — shown when task has a completion summary (failed tasks) */}
-      {task.completionSummary && task.phase === 'failed' && (
-        <div className="absolute top-2 left-2 flex items-center gap-1" title="Task failed — click for details" data-testid="failure-indicator">
-          <span className="text-xs text-red-400">✕</span>
-        </div>
-      )}
 
       <p className="text-sm font-medium text-white leading-snug pr-8">
         {task.title}

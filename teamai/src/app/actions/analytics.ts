@@ -133,10 +133,11 @@ export async function getAnalytics(): Promise<AnalyticsData> {
 
       if (qa.criteria) {
         for (const c of qa.criteria) {
-          const entry = criteriaMap.get(c.name) ?? { pass: 0, total: 0 };
+          const critName = c.criterion || c.name || 'Unknown';
+          const entry = criteriaMap.get(critName) ?? { pass: 0, total: 0 };
           entry.total++;
           if (c.status === 'PASS') entry.pass++;
-          criteriaMap.set(c.name, entry);
+          criteriaMap.set(critName, entry);
         }
       }
     } catch {
