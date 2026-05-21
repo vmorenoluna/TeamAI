@@ -247,7 +247,7 @@ export class Orchestrator {
   private async runSpec(pipeline: TaskPipeline): Promise<void> {
     const logFile = path.join(pipeline.specPath, 'output.log');
     this._phaseHeader(logFile, 'spec');
-    const sessionId = await processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId, logFile));
+    const sessionId = await processManager.createSession(this.sessionOpts('analyst', this.projectRoot, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
     // Pass the explicit output path so the agent writes spec.md to the task's directory,
     // not a new directory derived from the description slug.
