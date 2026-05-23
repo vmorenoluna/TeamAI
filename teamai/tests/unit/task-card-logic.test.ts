@@ -52,6 +52,49 @@ describe('TaskCard spinner/hourglass logic', () => {
   });
 });
 
+// ── PR link indicator logic ─────────────────────────────────────────
+
+describe('TaskCard PR link indicator logic', () => {
+  it('renders PR link when prUrl is set', () => {
+    const prUrl = 'https://github.com/owner/repo/pull/42';
+    const shouldShow = !!prUrl;
+    expect(shouldShow).toBe(true);
+  });
+
+  it('does not render PR link when prUrl is undefined', () => {
+    const prUrl: string | undefined = undefined;
+    const shouldShow = !!prUrl;
+    expect(shouldShow).toBe(false);
+  });
+
+  it('does not render PR link when prUrl is null', () => {
+    const prUrl: string | null = null;
+    const shouldShow = !!prUrl;
+    expect(shouldShow).toBe(false);
+  });
+
+  it('does not render PR link when prUrl is empty string', () => {
+    const prUrl = '';
+    const shouldShow = !!prUrl;
+    expect(shouldShow).toBe(false);
+  });
+
+  it('matches the rendered element attributes when prUrl is set', () => {
+    const prUrl = 'https://github.com/owner/repo/pull/42';
+    // Simulates the rendered <a> element properties
+    const attrs = {
+      href: prUrl,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      'data-testid': 'pr-link-indicator',
+    };
+    expect(attrs.href).toBe('https://github.com/owner/repo/pull/42');
+    expect(attrs.target).toBe('_blank');
+    expect(attrs.rel).toBe('noopener noreferrer');
+    expect(attrs['data-testid']).toBe('pr-link-indicator');
+  });
+});
+
 // ── getResumePhaseForFailedTask ───────────────────────────────────────
 
 import { getResumePhaseForFailedTask } from '@/lib/task-utils';

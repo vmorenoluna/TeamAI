@@ -431,7 +431,7 @@ describe('Orchestrator — Full Coverage', () => {
     it('throws when not awaiting review', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
-      await expect(orch.approveTask(testData.taskId, 'local-merge')).rejects.toThrow('not awaiting review');
+      await expect(orch.approveTask(testData.taskId, 'local-merge')).rejects.toThrow('is not awaiting-review');
     });
   });
 
@@ -439,7 +439,7 @@ describe('Orchestrator — Full Coverage', () => {
     it('throws when not awaiting review', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
-      await expect(orch.rejectTask(testData.taskId, 'bad')).rejects.toThrow('not awaiting review');
+      await expect(orch.rejectTask(testData.taskId, 'bad')).rejects.toThrow('is not awaiting-review');
     });
 
     it('writes feedback and resets qaAttempt when awaiting review', async () => {
@@ -494,6 +494,96 @@ describe('Orchestrator — Full Coverage', () => {
 
       const opts = (orch as AnyOrch).sessionOpts('planner', '/cwd', 'task-2');
       expect(opts.logFile).toBeUndefined();
+    });
+  });
+
+  // ── _extractPrUrl ────────────────────────────────────────────────
+
+  describe('_extractPrUrl', () => {
+    it('extracts a GitHub PR URL from the log file', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const logFile = join(testData.taskDir, 'output.log');
+
+      writeFileSync(logFile, 'Created PR: https://github.com/owner/repo/pull/42\nDone!');
+
+      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      expect(result).toBe('https://github.com/owner/repo/pull/42');
+    });
+
+    it('extracts a GitLab MR URL from the log file', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const logFile = join(testData.taskDir, 'output.log');
+
+      writeFileSync(logFile, 'MR created: https://gitlab.com/group/project/-/merge_requests/99');
+
+      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      expect(result).toBe('https://gitlab.com/group/project/-/merge_requests/99');
+    });
+
+    it('extracts a Bitbucket PR URL from the log file', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const logFile = join(testData.taskDir, 'output.log');
+
+      writeFileSync(logFile, 'https://bitbucket.org/team/repo/pull-requests/7 created');
+
+      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      expect(result).toBe('https://bitbucket.org/team/repo/pull-requests/7');
+    });
+
+    it('returns null when no PR URL is found', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const logFile = join(testData.taskDir, 'output.log');
+
+      writeFileSync(logFile, 'Task completed successfully. No URLs here.');
+
+      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      expect(result).toBeNull();
+    });
+
+    it('returns null when the log file does not exist', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const logFile = join(testData.taskDir, 'nonexistent.log');
+
+      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      expect(result).toBeNull();
+    });
+
+    it('returns the first match when multiple PR URLs exist', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const logFile = join(testData.taskDir, 'output.log');
+
+      writeFileSync(logFile, 'First: https://github.com/owner/repo/pull/1\nSecond: https://github.com/other/repo/pull/2');
+
+      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      expect(result).toBe('https://github.com/owner/repo/pull/1');
+    });
+
+    it('handles http URLs (not just https)', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const logFile = join(testData.taskDir, 'output.log');
+
+      writeFileSync(logFile, 'http://github.com/owner/repo/pull/99');
+
+      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      expect(result).toBe('http://github.com/owner/repo/pull/99');
+    });
+
+    it('returns null for an empty log file', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const logFile = join(testData.taskDir, 'output.log');
+
+      writeFileSync(logFile, '');
+
+      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      expect(result).toBeNull();
     });
   });
 

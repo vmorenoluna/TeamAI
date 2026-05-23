@@ -20,10 +20,10 @@ const PHASE_LABELS: Record<string, string> = {
   spec: 'Spec',
   plan: 'Plan',
   implement: 'Implement',
-  'qa-review': 'QA',
-  'awaiting-review': 'Review',
+  'qa-review': 'QA Review',
+  'awaiting-review': 'Awaiting Review',
   merge: 'Merge',
-  'create-pr': 'Create PR',
+  'create-pr': 'PR Created',
   failed: 'Failed',
   done: 'Done',
 };
