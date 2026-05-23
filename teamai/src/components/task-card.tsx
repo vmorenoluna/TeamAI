@@ -29,7 +29,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const [wtStatus, setWtStatus] = useState<{ exists: boolean; path: string | null }>({ exists: false, path: null });
-  const [wtChecking, setWtChecking] = useState(true);
+  const [wtChecking, setWtChecking] = useState(!!task.branch);
   const [wtDeleting, setWtDeleting] = useState(false);
   const [isRetrying, startRetryTransition] = useTransition();
   const [isStopping, startStopTransition] = useTransition();
@@ -37,7 +37,6 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
 
   useEffect(() => {
     if (!task.branch) {
-      setWtChecking(false);
       return;
     }
     checkTaskWorktree(task.id).then(status => {
@@ -172,6 +171,23 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
             >
               {task.subtaskProgress.completed}/{task.subtaskProgress.total} ✓
             </span>
+          )}
+          {/* PR link indicator — shows when task has a created PR/MR */}
+          {task.prUrl && (
+            <a
+              href={task.prUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              title={`Open PR: ${task.prUrl}`}
+              data-testid="pr-link-indicator"
+              className="text-[10px] font-medium text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 no-underline"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              PR
+            </a>
           )}
         </div>
 

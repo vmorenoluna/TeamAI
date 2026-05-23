@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } f
 import path from 'path';
 import { warn as logWarn } from './logger';
 import { processManager, type AgentSession } from './process-manager';
-import { readContainerConfig, readContainerRemoteUser, containerManager, hostToContainerPath } from './container-manager';
+import { readContainerConfig, readContainerRemoteUser, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache } from './container-manager';
 import { TaskStore } from './task-store';
 import { resolveProvider, providerToSessionOpts } from './providers';
 import { slugify } from './utils';
@@ -21,6 +21,30 @@ interface PlanSubtask {
 interface RateLimitInfo {
   status: string;
   resetsAt?: number;
+}
+
+interface QaCriterion {
+  status?: string;
+  criterion?: string;
+  name?: string;
+  fix_needed?: string;
+  notes?: string;
+  evidence?: string;
+}
+
+interface QaIssue {
+  description?: string;
+  message?: string;
+  file?: string;
+  fix_needed?: string;
+  severity?: string;
+}
+
+interface QaReport {
+  overall?: string;
+  criteria?: QaCriterion[];
+  additional_issues?: QaIssue[];
+  issues?: QaIssue[];
 }
 
 const PIPELINE_TIMEOUT_MS = 600_000; // 10 minutes
@@ -210,10 +234,7 @@ export class Orchestrator {
   }
 
   async approveTask(taskId: string, strategy: MergeStrategy): Promise<void> {
-    const pipeline = this.pipelines.get(taskId);
-    if (!pipeline || pipeline.phase !== 'awaiting-review') {
-      throw new Error(`Task ${taskId} is not awaiting review`);
-    }
+    const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, 'awaiting-review');
     pipeline.mergeStrategy = strategy;
     const next = strategy === 'local-merge' ? 'merge' : 'create-pr';
     this.advancePhase(pipeline, next);
@@ -221,10 +242,7 @@ export class Orchestrator {
   }
 
   async rejectTask(taskId: string, feedback: string): Promise<void> {
-    const pipeline = this.pipelines.get(taskId);
-    if (!pipeline || pipeline.phase !== 'awaiting-review') {
-      throw new Error(`Task ${taskId} is not awaiting review`);
-    }
+    const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, 'awaiting-review');
     const feedbackPath = path.join(pipeline.specPath, 'human_feedback.md');
     writeFileSync(feedbackPath, `# Human Review Feedback\n\n${feedback}\n`);
     pipeline.qaAttempt = 0;
@@ -269,13 +287,36 @@ export class Orchestrator {
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 
-    this._execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], this.projectRoot);
+    try {
+      this._execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], this.projectRoot);
+    } catch {
+      // Branch already exists (e.g. from a previous failed attempt) — reuse it
+      this._execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], this.projectRoot);
+    }
 
     this.advancePhase(pipeline, 'implement');
     await this.executePhase(pipeline);
   }
 
   private async runImplement(pipeline: TaskPipeline): Promise<void> {
+    // Fail fast if Docker is not available — prevents silent no-op runs where all sessions exit
+    // immediately and QA marks the task failed on an empty diff.
+    if (readContainerConfig(this.projectRoot).enabled) {
+      _resetDockerAvailableCache(); // fresh check every pipeline start (don't use stale cached result)
+      if (!dockerAvailable()) {
+        throw new Error('Docker is not running. Start Docker Desktop and move the task back to In Progress to retry.');
+      }
+    }
+
+    // Ensure worktree exists — may be absent when resuming directly to implement
+    if (!existsSync(pipeline.worktreePath)) {
+      try {
+        this._execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], this.projectRoot);
+      } catch {
+        this._execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], this.projectRoot);
+      }
+    }
+
     const planPath = path.join(pipeline.specPath, 'plan.json');
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
 
@@ -399,7 +440,8 @@ export class Orchestrator {
   private async runCreatePR(pipeline: TaskPipeline): Promise<void> {
     this._execGit(['push', '-u', 'origin', pipeline.branch], pipeline.worktreePath);
 
-    const sessionId = await processManager.createSession(this.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId));
+    const logFile = path.join(pipeline.specPath, 'output.log');
+    const sessionId = await processManager.createSession(this.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
 
     const specContent = readFileSync(path.join(pipeline.specPath, 'spec.md'), 'utf-8');
@@ -409,11 +451,34 @@ export class Orchestrator {
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 
+    // Extract PR URL from the agent's output
+    const prUrl = this._extractPrUrl(logFile);
 
-
-    this.taskStore.update(pipeline.taskId, { platform: platform !== 'unknown' ? platform : undefined });
+    this.taskStore.update(pipeline.taskId, {
+      platform: platform !== 'unknown' ? platform : undefined,
+      ...(prUrl ? { prUrl } : {}),
+    });
 
     this.advancePhase(pipeline, 'done');
+  }
+
+  /** Scan the output log for a PR/MR URL created by the agent. */
+  private _extractPrUrl(logFile: string): string | null {
+    try {
+      if (!existsSync(logFile)) return null;
+      const content = readFileSync(logFile, 'utf-8');
+      // Match GitHub PR, GitLab MR, or Bitbucket PR URLs
+      const patterns = [
+        /https?:\/\/github\.com\/[^\s<>"')\]]+\/pull\/\d+/gi,
+        /https?:\/\/gitlab\.com\/[^\s<>"')\]]+\/-\/merge_requests\/\d+/gi,
+        /https?:\/\/bitbucket\.org\/[^\s<>"')\]]+\/pull-requests\/\d+/gi,
+      ];
+      for (const pattern of patterns) {
+        const match = content.match(pattern);
+        if (match) return match[0];
+      }
+    } catch { /* best-effort */ }
+    return null;
   }
 
   private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase): void {
@@ -553,6 +618,27 @@ export class Orchestrator {
       }
     }
     execFileSync('git', args, { cwd: hostCwd });
+  }
+
+  private restorePipeline(taskId: string, requiredPhase: PipelinePhase): TaskPipeline {
+    const task = this.taskStore.getById(taskId);
+    if (!task || task.phase !== requiredPhase) {
+      throw new Error(`Task ${taskId} is not ${requiredPhase}`);
+    }
+    const branch = task.branch ?? `feat/${slugify(task.description)}`;
+    const slug = branch.replace(/^feat\//, '');
+    const pipeline: TaskPipeline = {
+      taskId,
+      description: task.description,
+      phase: requiredPhase,
+      specPath: this.taskStore.getDirById(taskId),
+      worktreePath: path.join(this.getWorktreeBase(), slug),
+      branch,
+      qaAttempt: 0,
+      maxQaAttempts: this.getPipelineConfig().maxQaAttempts,
+    };
+    this.pipelines.set(taskId, pipeline);
+    return pipeline;
   }
 
   private getWorktreeBase(): string {
@@ -704,7 +790,7 @@ export class Orchestrator {
   }
 
   /** Write QA feedback for bouncing back to implement */
-  private _writeQaFeedback(pipeline: TaskPipeline, report: any): void {
+  private _writeQaFeedback(pipeline: TaskPipeline, report: QaReport): void {
     const feedbackPath = path.join(pipeline.specPath, 'qa_feedback.md');
     let content = `# QA Feedback\n\n`;
     content += `## ⚠️ IMPORTANT: QA Feedback OVERRIDES the plan\n\n`;
@@ -723,7 +809,7 @@ export class Orchestrator {
       }
     }
     if (report.additional_issues || report.issues) {
-      const issues = report.additional_issues || report.issues;
+      const issues = (report.additional_issues ?? report.issues)!;
       content += `\n## Additional Issues\n\n`;
       for (const issue of issues) {
         const desc = issue.description || issue.message || JSON.stringify(issue);

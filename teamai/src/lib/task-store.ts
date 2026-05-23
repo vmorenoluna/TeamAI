@@ -14,6 +14,7 @@ export interface Task {
   source?: string;             // 'ideation' | 'competitor-analysis' — source of roadmap item
   competitiveContext?: string; // competitor context from roadmap item
   platform?: string;            // platform info from PR creation
+  prUrl?: string;               // URL of the created Pull Request
   completionSummary?: string;   // summary of what was completed when task fails
   subtaskProgress?: { completed: number; total: number } | null;  // computed at load time from plan.json
   createdAt: string;

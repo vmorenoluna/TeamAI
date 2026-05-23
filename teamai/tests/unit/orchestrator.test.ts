@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, existsSync, writeFileSync } from 'fs';
+import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { createTestProject } from '../utils/test-project';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type AnyOrch = any; // Access private members for test setup
 
 // We mock the process-manager module before importing orchestrator
@@ -162,13 +162,13 @@ describe('Orchestrator', () => {
 
   describe('approveTask', () => {
     it('throws when task is not awaiting review', async () => {
-      await expect(orch.approveTask(testData.taskId, 'local-merge')).rejects.toThrow('not awaiting review');
+      await expect(orch.approveTask(testData.taskId, 'local-merge')).rejects.toThrow('is not awaiting-review');
     });
   });
 
   describe('rejectTask', () => {
     it('throws when task is not awaiting review', async () => {
-      await expect(orch.rejectTask(testData.taskId, 'Needs more work')).rejects.toThrow('not awaiting review');
+      await expect(orch.rejectTask(testData.taskId, 'Needs more work')).rejects.toThrow('is not awaiting-review');
     });
   });
 

@@ -2,7 +2,7 @@ import { spawn, execFileSync, ChildProcess } from 'child_process';
 import { existsSync, readFileSync, appendFileSync } from 'fs';
 import { EventEmitter } from 'events';
 import path from 'path';
-import { error as logError, warn as logWarn } from './logger';
+import { warn as logWarn } from './logger';
 
 export type ContainerState = 'stopped' | 'starting' | 'running' | 'restarting';
 
@@ -88,6 +88,21 @@ export class ContainerManager extends EventEmitter {
     let record = this.records.get(projectRoot);
 
     if (!record || record.state === 'stopped') {
+      // Before running devcontainer up, check if the container is already running
+      // (e.g. after a server restart that cleared the in-memory record)
+      const existing = this._findRunningContainerSync(projectRoot);
+      if (existing) {
+        record = {
+          projectRoot, state: 'running',
+          containerId: existing.containerId,
+          remoteWorkspaceFolder: existing.remoteWorkspaceFolder,
+          startPromise: null, eventWatcher: null,
+        };
+        this.records.set(projectRoot, record);
+        this._watchEvents(record);
+        return existing;
+      }
+
       record = {
         projectRoot,
         state: 'starting',
@@ -134,14 +149,50 @@ export class ContainerManager extends EventEmitter {
     return 'stopped';
   }
 
+  // Synchronously find a running devcontainer via Docker labels — used as fallback
+  // when the in-memory record was lost (e.g. after a server restart).
+  private _findRunningContainerSync(projectRoot: string): ContainerInfo | null {
+    try {
+      const normalized = projectRoot.replace(/^([A-Z]):/, (_, d) => `${d.toLowerCase()}:`);
+      const label = `devcontainer.local_folder=${normalized}`;
+      const containerId = execFileSync('docker', [
+        'ps', '--filter', `label=${label}`, '--format', '{{.ID}}',
+      ], { encoding: 'utf-8', timeout: 5000 }).trim();
+      if (!containerId) return null;
+
+      const mountsJson = execFileSync('docker', [
+        'inspect', containerId, '--format', '{{json .Mounts}}',
+      ], { encoding: 'utf-8', timeout: 5000 }).trim();
+      const mounts: Array<{ Source: string; Destination: string }> = JSON.parse(mountsJson);
+
+      const normalizedRoot = projectRoot.replace(/\\/g, '/').toLowerCase();
+      const workspaceMount = mounts.find(m =>
+        m.Source.replace(/\\/g, '/').toLowerCase() === normalizedRoot
+      );
+      if (!workspaceMount) return null;
+
+      return { containerId, remoteWorkspaceFolder: workspaceMount.Destination };
+    } catch { return null; }
+  }
+
   // Returns the running container info synchronously — for use in orchestrator git commands.
-  // Returns null if the container is not currently running.
+  // Falls back to a Docker label scan when the in-memory record is absent (e.g. server restart).
   getRunningContainer(projectRoot: string): ContainerInfo | null {
     const r = this.records.get(projectRoot);
     if (r?.state === 'running' && r.containerId && r.remoteWorkspaceFolder) {
       return { containerId: r.containerId, remoteWorkspaceFolder: r.remoteWorkspaceFolder };
     }
-    return null;
+    const info = this._findRunningContainerSync(projectRoot);
+    if (info) {
+      // Populate the record so subsequent calls skip the Docker scan
+      this.records.set(projectRoot, {
+        projectRoot, state: 'running',
+        containerId: info.containerId,
+        remoteWorkspaceFolder: info.remoteWorkspaceFolder,
+        startPromise: null, eventWatcher: null,
+      });
+    }
+    return info;
   }
 
   private async _doStart(record: ContainerRecord, logFile?: string): Promise<void> {
