@@ -16,7 +16,6 @@ const COLUMNS = [
   { phase: 'qa-review', label: 'QA Review' },
   { phase: 'awaiting-review', label: 'Awaiting Review' },
   { phase: 'merge', label: 'Merging' },
-  { phase: 'pr-open', label: 'PR Open' },
   { phase: 'failed', label: 'Failed' },
   { phase: 'done', label: 'Done' },
 ] as const;
@@ -25,6 +24,7 @@ const COLUMNS = [
 function normalizePhase(phase: string): string {
   if (phase === 'qa-fix') return 'qa-review';
   if (phase === 'create-pr') return 'merge';
+  if (phase === 'pr-open') return 'merge';
   return phase;
 }
 
