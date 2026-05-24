@@ -456,7 +456,9 @@ export class Orchestrator {
   }
 
   private async runCreatePR(pipeline: TaskPipeline): Promise<void> {
-    this._execGit(['push', '-u', 'origin', pipeline.branch], pipeline.worktreePath);
+    // Always push from the host — container git push credentials are unreliable even
+    // with gh auth setup-git; host credentials (Windows Credential Manager / gh CLI) work.
+    execFileSync('git', ['push', '-u', 'origin', pipeline.branch], { cwd: pipeline.worktreePath });
 
     const logFile = path.join(pipeline.specPath, 'output.log');
     const sessionId = await processManager.createSession(this.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, logFile));
