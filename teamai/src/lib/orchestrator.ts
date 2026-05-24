@@ -345,10 +345,17 @@ export class Orchestrator {
       // Track completed subtask IDs in memory to avoid race conditions
       // when multiple subtasks complete near-simultaneously
       const completedIds: number[] = [];
-      await Promise.allSettled(
+      const results = await Promise.allSettled(
         subtasks.map(async (subtask: PlanSubtask) => {
           this._phaseHeader(logFile, `implement — subtask ${subtask.id}: ${subtask.title}`);
-          const sessionId = await processManager.createSession(this.sessionOpts(coderRole, pipeline.worktreePath, pipeline.taskId, logFile));
+          let sessionId: string;
+          try {
+            sessionId = await processManager.createSession(this.sessionOpts(coderRole, pipeline.worktreePath, pipeline.taskId, logFile));
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            appendFileSync(logFile, `\n[ERROR] Session creation failed: ${msg}\n`);
+            throw err;
+          }
           // QA feedback is prepended at the top so the coder reads it first.
           // Plan.json acceptance criteria have already been patched with QA corrections.
 
@@ -369,6 +376,12 @@ export class Orchestrator {
           completedIds.push(subtask.id);
         })
       );
+      // If every session in the group failed (e.g. container unavailable), surface the first
+      // error rather than silently advancing to QA on an empty diff.
+      if (results.every(r => r.status === 'rejected')) {
+        const firstReason = (results[0] as PromiseRejectedResult).reason;
+        throw firstReason instanceof Error ? firstReason : new Error(String(firstReason));
+      }
       // Write all completions for this group at once to avoid read-modify-write races
       if (completedIds.length > 0) {
         const planPath = path.join(pipeline.specPath, 'plan.json');
