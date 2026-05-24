@@ -167,6 +167,12 @@ export async function approveTask(taskId: string, strategy: 'local-merge' | 'pul
   revalidatePath('/');
 }
 
+export async function markTaskDone(taskId: string) {
+  const { orchestrator } = await getStores();
+  await orchestrator.markTaskDone(taskId);
+  revalidatePath('/');
+}
+
 export async function rejectTask(taskId: string, feedback: string) {
   const { orchestrator } = await getStores();
   await orchestrator.rejectTask(taskId, feedback);
@@ -175,7 +181,7 @@ export async function rejectTask(taskId: string, feedback: string) {
 
 export async function getTasks() {
   const { taskStore } = await getStores();
-  const projectPath = await getActiveProjectPath();
+  await getActiveProjectPath();
   const tasks = taskStore.getAll();
 
   // Enrich each task with subtask progress from plan.json
@@ -186,7 +192,7 @@ export async function getTasks() {
       try {
         const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
         const subtasks = plan.subtasks ?? [];
-        const completed = subtasks.filter((s: any) => s.completed).length;
+        const completed = subtasks.filter((s: { completed: boolean }) => s.completed).length;
         task.subtaskProgress = { completed, total: subtasks.length };
       } catch {
         // invalid plan.json — skip
@@ -368,7 +374,8 @@ export async function deleteTaskWorktree(taskId: string): Promise<{ success: boo
     revalidatePath('/');
     revalidatePath(`/task/${taskId}`);
     return { success: true };
-  } catch (e: any) {
-    return { success: false, error: e.stderr || e.message };
+  } catch (e) {
+    const err = e as { stderr?: string; message?: string };
+    return { success: false, error: err.stderr || err.message };
   }
 }

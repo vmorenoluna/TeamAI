@@ -63,6 +63,7 @@ type PipelinePhase =
   | 'awaiting-review'
   | 'merge'
   | 'create-pr'
+  | 'pr-open'
   | 'done'
   | 'failed';
 
@@ -125,7 +126,7 @@ export class Orchestrator {
     const dir = this.taskStore.getDirById(taskId);
 
     // Phases that require no pipeline action
-    const noRunPhases = ['backlog', 'awaiting-review', 'failed', 'done'];
+    const noRunPhases = ['backlog', 'awaiting-review', 'pr-open', 'failed', 'done'];
     if (noRunPhases.includes(targetPhase)) {
       // Auto-delete the git worktree when moving to 'done'
       if (targetPhase === 'done') {
@@ -262,6 +263,7 @@ export class Orchestrator {
       case 'implement':    return this.runImplement(pipeline);
       case 'qa-review':    return this.runQaReview(pipeline);
       case 'awaiting-review': return; // Paused — waiting for human
+      case 'pr-open':         return; // Paused — PR created, waiting for human to merge + mark done
       case 'merge':        return this.runMerge(pipeline);
       case 'create-pr':    return this.runCreatePR(pipeline);
     }
@@ -484,7 +486,13 @@ export class Orchestrator {
       ...(prUrl ? { prUrl } : {}),
     });
 
-    this.advancePhase(pipeline, 'done');
+    this.advancePhase(pipeline, 'pr-open');
+  }
+
+  async markTaskDone(taskId: string): Promise<void> {
+    this.removeWorktree(taskId);
+    this.taskStore.updatePhase(taskId, 'done');
+    processManager.emit('phase-change', { taskId, phase: 'done' });
   }
 
   /** Scan the output log for a PR/MR URL created by the agent. */
