@@ -238,7 +238,12 @@ export class Orchestrator {
     pipeline.mergeStrategy = strategy;
     const next = strategy === 'local-merge' ? 'merge' : 'create-pr';
     this.advancePhase(pipeline, next);
-    await this.executePhase(pipeline);
+    try {
+      await this.executePhase(pipeline);
+    } catch (err) {
+      this.advancePhase(pipeline, 'awaiting-review');
+      throw err;
+    }
   }
 
   async rejectTask(taskId: string, feedback: string): Promise<void> {
