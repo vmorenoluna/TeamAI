@@ -16,6 +16,7 @@ const COLUMNS = [
   { phase: 'qa-review', label: 'QA Review' },
   { phase: 'awaiting-review', label: 'Awaiting Review' },
   { phase: 'merge', label: 'Merging' },
+  { phase: 'pr-open', label: 'PR Open' },
   { phase: 'failed', label: 'Failed' },
   { phase: 'done', label: 'Done' },
 ] as const;
