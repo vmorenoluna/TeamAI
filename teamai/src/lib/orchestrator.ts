@@ -461,7 +461,12 @@ export class Orchestrator {
     execFileSync('git', ['push', '-u', 'origin', pipeline.branch], { cwd: pipeline.worktreePath });
 
     const logFile = path.join(pipeline.specPath, 'output.log');
-    const sessionId = await processManager.createSession(this.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, logFile));
+    // Run merger on the host — gh CLI needs host credentials (gh auth login); inside the
+    // container only git HTTPS is wired (gh auth setup-git), not the full gh API token.
+    const sessionId = await processManager.createSession({
+      ...this.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, logFile),
+      projectRoot: undefined,
+    });
     pipeline.sessionId = sessionId;
 
     const specContent = readFileSync(path.join(pipeline.specPath, 'spec.md'), 'utf-8');
