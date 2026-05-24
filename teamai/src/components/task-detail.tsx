@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { AgentPanel } from './agent-panel';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
-import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, restartCurrentPhase } from '@/app/actions/tasks';
+import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, restartCurrentPhase, markTaskDone } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, PlanSubtask, QAReportData, QACriterion } from '@/lib/stream-types';
 import type { RoleDefinition } from '@/app/actions/roles';
@@ -20,21 +20,23 @@ const PHASE_BADGE: Record<string, string> = {
   'awaiting-review': 'bg-purple-900/40 text-purple-300',
   merge:             'bg-teal-900/40 text-teal-300',
   'create-pr':       'bg-teal-900/40 text-teal-300',
+  'pr-open':         'bg-sky-900/40 text-sky-300',
   failed:            'bg-red-900/40 text-red-300',
   done:              'bg-green-900/40 text-green-300',
 };
 
 const PHASE_LABELS: Record<string, string> = {
-  backlog: 'Backlog',
-  spec: 'Spec',
-  plan: 'Plan',
-  implement: 'In Progress',
-  'qa-review': 'QA Review',
+  backlog:           'Backlog',
+  spec:              'Spec',
+  plan:              'Plan',
+  implement:         'In Progress',
+  'qa-review':       'QA Review',
   'awaiting-review': 'Awaiting Review',
-  merge: 'Merging',
-  'create-pr': 'PR Created',
-  failed: 'Failed',
-  done: 'Done',
+  merge:             'Merging',
+  'create-pr':       'Creating PR',
+  'pr-open':         'PR Open',
+  failed:            'Failed',
+  done:              'Done',
 };
 
 type Tab = 'overview' | 'terminal' | 'spec' | 'plan' | 'qa';
@@ -256,6 +258,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
 
   const badge = PHASE_BADGE[task.phase] ?? PHASE_BADGE.backlog;
   const isAwaiting = task.phase === 'awaiting-review';
+  const isPrOpen = task.phase === 'pr-open';
   const restartablePhases = new Set<string>(['spec', 'plan', 'implement', 'qa-review']);
   const canRestart = restartablePhases.has(task.phase);
 
@@ -533,6 +536,22 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
                 qaReport={qaReport}
                 diff={diff}
               />
+            )}
+
+            {/* PR open — waiting for human to review and merge */}
+            {isPrOpen && (
+              <div className="rounded-lg border border-sky-800/50 bg-sky-950/20 p-4">
+                <p className="text-sm text-sky-300 mb-3">
+                  The PR is open for review. Merge it on GitHub, then mark this task as done.
+                </p>
+                <button
+                  onClick={() => startTransition(async () => { await markTaskDone(task.id); router.refresh(); })}
+                  disabled={isPending}
+                  className="px-4 py-2 rounded-md bg-green-700/60 text-green-200 hover:bg-green-600/70 transition-colors text-sm font-medium disabled:opacity-50"
+                >
+                  {isPending ? 'Marking done…' : 'Mark as Done'}
+                </button>
+              </div>
             )}
 
             {/* PR link */}
