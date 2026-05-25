@@ -477,13 +477,29 @@ export class Orchestrator {
   }
 
   private async runCreatePR(pipeline: TaskPipeline): Promise<void> {
+    // Rebase the feature branch onto the latest master before pushing so the PR is
+    // created without conflicts. This handles the common case where master advanced
+    // while the implement/QA phases were running.
+    const logFile = path.join(pipeline.specPath, 'output.log');
+    try {
+      execFileSync('git', ['fetch', 'origin', 'master'], { cwd: this.projectRoot, stdio: 'pipe' });
+      this._execGit(['rebase', 'origin/master'], pipeline.worktreePath);
+      appendFileSync(logFile, '\n[INFO] Feature branch rebased onto latest master — PR will be conflict-free\n');
+    } catch {
+      // Rebase has conflicts — abort cleanly and continue; gh pr update-branch will
+      // attempt an automatic merge on GitHub's side after the PR is created.
+      try { this._execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* ignore */ }
+      appendFileSync(logFile, '\n[WARN] Rebase onto master had conflicts — PR may require manual conflict resolution\n');
+    }
+
     // Always push from the host — container git push credentials are unreliable even
     // with gh auth setup-git; host credentials (Windows Credential Manager / gh CLI) work.
     // Push from the main repo root — pipeline.worktreePath is the container-side path and
     // doesn't exist on the host filesystem. Branch name is enough; no worktree cwd needed.
-    execFileSync('git', ['push', '-u', 'origin', pipeline.branch], { cwd: this.projectRoot });
+    // Use --force-with-lease to handle the case where the branch was already pushed
+    // (e.g. from a previous failed create-pr attempt) or the rebase rewrote history.
+    execFileSync('git', ['push', '-u', '--force-with-lease', 'origin', pipeline.branch], { cwd: this.projectRoot });
 
-    const logFile = path.join(pipeline.specPath, 'output.log');
     // Run merger on the host — gh CLI needs host credentials (gh auth login); inside the
     // container only git HTTPS is wired (gh auth setup-git), not the full gh API token.
     const sessionId = await processManager.createSession({
