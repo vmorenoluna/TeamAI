@@ -294,6 +294,12 @@ export class Orchestrator {
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 
+    // Pull latest master from remote before branching so the feature branch starts
+    // from up-to-date code, minimising conflicts at PR time.
+    try {
+      execFileSync('git', ['pull', '--ff-only', 'origin', 'master'], { cwd: this.projectRoot, stdio: 'pipe' });
+    } catch { /* non-fast-forward or offline — proceed with local master */ }
+
     try {
       this._execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], this.projectRoot);
     } catch {
