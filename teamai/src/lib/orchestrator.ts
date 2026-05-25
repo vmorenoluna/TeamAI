@@ -460,13 +460,15 @@ export class Orchestrator {
   private async runCreatePR(pipeline: TaskPipeline): Promise<void> {
     // Always push from the host — container git push credentials are unreliable even
     // with gh auth setup-git; host credentials (Windows Credential Manager / gh CLI) work.
-    execFileSync('git', ['push', '-u', 'origin', pipeline.branch], { cwd: pipeline.worktreePath });
+    // Push from the main repo root — pipeline.worktreePath is the container-side path and
+    // doesn't exist on the host filesystem. Branch name is enough; no worktree cwd needed.
+    execFileSync('git', ['push', '-u', 'origin', pipeline.branch], { cwd: this.projectRoot });
 
     const logFile = path.join(pipeline.specPath, 'output.log');
     // Run merger on the host — gh CLI needs host credentials (gh auth login); inside the
     // container only git HTTPS is wired (gh auth setup-git), not the full gh API token.
     const sessionId = await processManager.createSession({
-      ...this.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, logFile),
+      ...this.sessionOpts('merger', this.projectRoot, pipeline.taskId, logFile),
       projectRoot: undefined,
     });
     pipeline.sessionId = sessionId;
@@ -480,6 +482,17 @@ export class Orchestrator {
 
     // Extract PR URL from the agent's output
     const prUrl = this._extractPrUrl(logFile);
+
+    // Bring the PR branch up-to-date with master so the PR has no conflicts.
+    // gh pr update-branch merges the base branch into the head branch on the remote.
+    if (prUrl) {
+      try {
+        execFileSync('gh', ['pr', 'update-branch', prUrl], { cwd: this.projectRoot, stdio: 'pipe' });
+        appendFileSync(logFile, '\n[INFO] Branch synced with master — PR is conflict-free\n');
+      } catch {
+        appendFileSync(logFile, '\n[WARN] Auto-sync with master failed — PR may have conflicts requiring manual resolution\n');
+      }
+    }
 
     this.taskStore.update(pipeline.taskId, {
       platform: platform !== 'unknown' ? platform : undefined,
