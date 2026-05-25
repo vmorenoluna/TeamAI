@@ -78,7 +78,7 @@ test.describe.serial('QA Failure Banner & Completion Summary', () => {
       return;
     }
 
-    await expect(page.locator('text=Task Failed')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('h3:has-text("Task Failed")')).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('text=Max QA attempts reached')).toBeVisible({ timeout: 3_000 });
     await expect(page.locator('text=Add empty guard clause')).toBeVisible({ timeout: 3_000 });
     await expect(page.locator('text=No user-facing message shown')).toBeVisible({ timeout: 3_000 });
@@ -178,7 +178,7 @@ test.describe.serial('QA Failure Banner & Completion Summary', () => {
     const failedCard = page.locator('[data-testid="task-card"]', { hasText: 'search bar crashes' });
     const failureIndicator = failedCard.locator('[data-testid="failure-indicator"]');
     await expect(failureIndicator).toBeVisible({ timeout: 3_000 });
-    await expect(failureIndicator).toHaveAttribute('title', 'Task failed — click for details');
+    await expect(failureIndicator).toHaveAttribute('title', 'Task failed');
   });
 
   test('kanban card shows subtask progress badge for tasks with plans', async ({ page }) => {

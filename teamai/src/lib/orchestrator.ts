@@ -223,6 +223,9 @@ export class Orchestrator {
       if (e instanceof RateLimitError) {
         this.handleRateLimit(pipeline, e.resetsAt);
       } else {
+        const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
+        const logFile = path.join(pipeline.specPath, 'output.log');
+        appendFileSync(logFile, `\n[ERROR] Task failed: ${errMsg}\n`);
         console.error(`[orchestrator] Task ${taskId} failed:`, e);
         this.advancePhase(pipeline, 'failed');
       }
@@ -328,6 +331,16 @@ export class Orchestrator {
       } catch {
         this._execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], this.projectRoot);
       }
+    }
+
+    // When container mode is enabled, ensure the worktree .git file uses a container-relative
+    // gitdir path. If the worktree was created while the container was not running (host git
+    // was used), the .git file contains a Windows path the container can't resolve — causing
+    // Claude to exit immediately with no output. This is idempotent: no-op if already correct.
+    if (readContainerConfig(this.projectRoot).enabled) {
+      const earlyLog = path.join(pipeline.specPath, 'output.log');
+      const containerInfo = await containerManager.ensureContainer(this.projectRoot, earlyLog);
+      this._patchWorktreeGitFile(pipeline.worktreePath, containerInfo.remoteWorkspaceFolder);
     }
 
     const planPath = path.join(pipeline.specPath, 'plan.json');
@@ -627,6 +640,8 @@ export class Orchestrator {
           wasRateLimited = true;
           this.handleRateLimit(pipeline, e.resetsAt);
         } else {
+          const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
+          appendFileSync(path.join(pipeline.specPath, 'output.log'), `\n[ERROR] Task failed after rate-limit retry: ${errMsg}\n`);
           console.error(`[orchestrator] Task ${pipeline.taskId} failed after rate-limit retry:`, e);
           this.advancePhase(pipeline, 'failed');
         }
@@ -652,6 +667,35 @@ export class Orchestrator {
       if (info) return hostToContainerPath(hostPath, this.projectRoot, info.remoteWorkspaceFolder);
     }
     return hostPath;
+  }
+
+  /**
+   * Rewrite the worktree's .git file and its back-reference so both point to
+   * container-relative paths. Needed when the worktree was created by host git
+   * (container not yet running during plan phase), which leaves Windows-style
+   * gitdir paths that the Linux container cannot resolve.
+   */
+  private _patchWorktreeGitFile(hostWorktreePath: string, containerWorkspace: string): void {
+    const gitFile = path.join(hostWorktreePath, '.git');
+    if (!existsSync(gitFile)) return;
+    try {
+      const content = readFileSync(gitFile, 'utf-8').trim();
+      if (!content.startsWith('gitdir:')) return;
+      const currentGitdir = content.slice('gitdir:'.length).trim();
+      // Extract worktree name — the segment after /worktrees/ in the gitdir path.
+      const m = currentGitdir.replace(/\\/g, '/').match(/\/worktrees\/([^/]+)$/);
+      if (!m) return;
+      const worktreeName = m[1];
+      const correctGitdir = `${containerWorkspace}/.git/worktrees/${worktreeName}`;
+      if (currentGitdir.replace(/\\/g, '/') === correctGitdir) return; // already correct
+      writeFileSync(gitFile, `gitdir: ${correctGitdir}\n`);
+      // Patch the back-reference so git worktree commands from inside the container work.
+      const backRefFile = path.join(this.projectRoot, '.git', 'worktrees', worktreeName, 'gitdir');
+      if (existsSync(backRefFile)) {
+        const containerWorktreePath = hostToContainerPath(hostWorktreePath, this.projectRoot, containerWorkspace);
+        writeFileSync(backRefFile, `${containerWorktreePath}/.git\n`);
+      }
+    } catch { /* best-effort — don't break the pipeline on a patch failure */ }
   }
 
   private _execGit(args: string[], hostCwd: string): void {

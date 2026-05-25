@@ -83,13 +83,15 @@ vi.mock('../../src/lib/container-manager', () => ({
     getRunningContainer: vi.fn(() => null),
   },
   hostToContainerPath: vi.fn((p: string) => p),
+  dockerAvailable: vi.fn(() => true),
+  _resetDockerAvailableCache: vi.fn(),
 }));
 
 // ── Imports after mocks ──
 
 import { Orchestrator, getOrchestrator } from '../../src/lib/orchestrator';
 import { processManager } from '../../src/lib/process-manager';
-import { readContainerConfig, containerManager, hostToContainerPath } from '../../src/lib/container-manager';
+import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache } from '../../src/lib/container-manager';
 
 type AnyOrch = any;
 
@@ -105,21 +107,27 @@ function fireEvent(event: string, data: any) {
 
 // ── Helpers ──
 
-function setupTestProject(): { root: string; taskId: string; taskDir: string; clean: () => void } {
+function setupTestProject(options?: { initGit?: boolean; containerEnabled?: boolean }): { root: string; taskId: string; taskDir: string; clean: () => void } {
   const root = join(tmpdir(), `teamai-ocrh-${randomUUID().slice(0, 8)}`);
   mkdirSync(root, { recursive: true });
 
   // Init git repo (needed for worktree operations)
-  try {
-    execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['config', 'user.email', 'test@teamai.dev'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['config', 'user.name', 'TeamAI Test'], { cwd: root, stdio: 'ignore' });
-    writeFileSync(join(root, '.gitkeep'), '');
-    execFileSync('git', ['add', '.gitkeep'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['commit', '-m', 'initial'], { cwd: root, stdio: 'ignore' });
-  } catch { /* git might not be available in test env */ }
+  if (options?.initGit !== false) {
+    try {
+      execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['config', 'user.email', 'test@teamai.dev'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['config', 'user.name', 'TeamAI Test'], { cwd: root, stdio: 'ignore' });
+      writeFileSync(join(root, '.gitkeep'), '');
+      execFileSync('git', ['add', '.gitkeep'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['commit', '-m', 'initial'], { cwd: root, stdio: 'ignore' });
+    } catch { /* git might not be available in test env */ }
+  }
 
   mkdirSync(join(root, '.teamai'), { recursive: true });
+
+  if (options?.containerEnabled) {
+    writeFileSync(join(root, '.teamai', 'container.json'), JSON.stringify({ enabled: true }));
+  }
 
   const taskId = randomUUID();
   const taskDir = join(root, '.teamai', taskId);
@@ -666,7 +674,7 @@ describe('Orchestrator — Full Coverage', () => {
         containerId: 'cont-abc',
         remoteWorkspaceFolder: '/workspace',
       } as any);
-      vi.mocked(hostToContainerPath).mockImplementation((hp: string, _root: string, _ws: string) => {
+      vi.mocked(hostToContainerPath).mockImplementation((hp: string, _root: string, _ws: string) => { // eslint-disable-line @typescript-eslint/no-unused-vars
         return '/workspace' + (hp === testData.root ? '' : '/cwd');
       });
 
@@ -1226,10 +1234,790 @@ describe('Orchestrator — Full Coverage', () => {
     });
   });
 
+  // ── runMerge ──────────────────────────────────────────────────────
+
+  describe('runMerge', () => {
+    it('creates session, sends /merge command, waits, kills, cleans up', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const slug = 'test-task';
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+      mockCreateSession.mockResolvedValue('sess-merge');
+      mockExecFileSync.mockReturnValue('');
+
+      const promise = (orch as AnyOrch).runMerge(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+
+      expect(mockCreateSession).toHaveBeenCalled();
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', expect.stringContaining('/merge'));
+
+      fireEvent('event', { sessionId: 'sess-merge', event: { type: 'result' } });
+      await promise;
+
+      expect(mockKillSession).toHaveBeenCalledWith('sess-merge');
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['worktree', 'remove']),
+        expect.any(Object),
+      );
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['branch', '-d']),
+        expect.any(Object),
+      );
+      expect(pipeline.phase).toBe('done');
+
+      // Clean up the created worktree dir
+      if (existsSync(pipeline.worktreePath)) {
+        rmSync(pipeline.worktreePath, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // ── runCreatePR ───────────────────────────────────────────────────
+
+  describe('runCreatePR', () => {
+    it('pushes branch, creates session, sends prompt, extracts PR URL', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature\n\nImplement this feature.');
+
+      const slug = 'test-task';
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      mockCreateSession.mockResolvedValue('sess-pr');
+      mockExecFileSync
+        .mockReturnValueOnce('')
+        .mockReturnValueOnce('https://github.com/owner/repo.git')
+        .mockReturnValueOnce('refs/remotes/origin/main');
+
+      const promise = (orch as AnyOrch).runCreatePR(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['push', '-u', 'origin', `feat/${slug}`]),
+        expect.any(Object),
+      );
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-pr', expect.stringContaining('Pull Request'));
+
+      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
+      await promise;
+
+      expect(mockKillSession).toHaveBeenCalledWith('sess-pr');
+      expect(pipeline.phase).toBe('pr-open');
+    });
+
+    it('extracts PR URL from log and runs gh pr update-branch', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'output.log'), 'Created: https://github.com/owner/repo/pull/42\n');
+
+      const slug = 'test-task';
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      mockCreateSession.mockResolvedValue('sess-pr');
+      mockExecFileSync
+        .mockReturnValueOnce('')
+        .mockReturnValueOnce('https://github.com/owner/repo.git')
+        .mockReturnValueOnce('refs/remotes/origin/main');
+
+      const promise = (orch as AnyOrch).runCreatePR(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
+      await promise;
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'gh',
+        expect.arrayContaining(['pr', 'update-branch']),
+        expect.any(Object),
+      );
+    });
+
+    it('handles gh pr update-branch failure gracefully', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'output.log'), 'Created: https://github.com/owner/repo/pull/42\n');
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: 'feat/test-task',
+      });
+
+      mockCreateSession.mockResolvedValue('sess-pr');
+      let callCount = 0;
+      mockExecFileSync.mockImplementation(() => {
+        callCount++;
+        if (callCount >= 4) throw new Error('gh command not found');
+        return '';
+      });
+
+      const promise = (orch as AnyOrch).runCreatePR(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
+      await promise;
+
+      expect(pipeline.phase).toBe('pr-open');
+    });
+
+    it('sets platform to undefined when remote is unknown', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: 'feat/test-task',
+      });
+
+      mockCreateSession.mockResolvedValue('sess-pr');
+      mockExecFileSync
+        .mockReturnValueOnce('')
+        .mockReturnValueOnce('https://unknown.example.com/repo.git')
+        .mockReturnValueOnce('refs/remotes/origin/main');
+
+      const promise = (orch as AnyOrch).runCreatePR(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
+      await promise;
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      const updated = taskStore.getById(testData.taskId);
+      expect(updated?.platform).toBeUndefined();
+    });
+  });
+
+  // ── markTaskDone ──────────────────────────────────────────────────
+
+  describe('markTaskDone', () => {
+    it('removes worktree, updates phase to done, emits phase-change', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      await orch.markTaskDone(testData.taskId);
+
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', {
+        taskId: testData.taskId,
+        phase: 'done',
+      });
+    });
+  });
+
+  // ── approveTask with pull-request strategy ───────────────────────
+
+  describe('approveTask — pull-request strategy', () => {
+    it('executes create-pr when strategy is pull-request', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const slug = 'test-task';
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        phase: 'awaiting-review',
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      mockCreateSession.mockResolvedValue('sess-pr-approve');
+      mockExecFileSync.mockReturnValue('');
+
+      const promise = orch.approveTask(testData.taskId, 'pull-request');
+      await new Promise(r => setTimeout(r, 10));
+
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-pr-approve', expect.stringContaining('Pull Request'));
+
+      fireEvent('event', { sessionId: 'sess-pr-approve', event: { type: 'result' } });
+      await promise;
+
+      expect(pipeline.phase).toBe('pr-open');
+    });
+
+    it('throws rollback to awaiting-review on error', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        phase: 'awaiting-review',
+        specPath: testData.taskDir,
+        branch: 'feat/test-task',
+      });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      await expect(orch.approveTask(testData.taskId, 'pull-request')).rejects.toThrow();
+      expect(pipeline.phase).toBe('awaiting-review');
+    });
+  });
+
+  // ── moveTaskToPhase merge/create-pr branching ─────────────────────
+
+  describe('moveTaskToPhase — merge/create-pr branching', () => {
+    it('starts from create-pr when worktree, branch, and plan exist', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [] }));
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { branch: 'feat/test-task' });
+
+      const slug = 'test-task';
+      const worktreePath = join(testData.root, '..', 'worktrees', slug);
+      mkdirSync(worktreePath, { recursive: true });
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.moveTaskToPhase(testData.taskId, 'create-pr').catch(() => {});
+
+      expect(mockCreateSession).toHaveBeenCalled();
+
+      if (existsSync(worktreePath)) rmSync(worktreePath, { recursive: true, force: true });
+    });
+
+    it('starts from implement when plan exists but worktree missing for merge', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [] }],
+      }));
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.moveTaskToPhase(testData.taskId, 'merge').catch(() => {});
+
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+
+    it('starts from plan when only spec exists for merge target', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.moveTaskToPhase(testData.taskId, 'merge').catch(() => {});
+
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+
+    it('starts from spec when no artifacts exist for merge target', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.moveTaskToPhase(testData.taskId, 'merge').catch(() => {});
+
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+  });
+
+  // ── cleanupTaskArtifacts ──────────────────────────────────────────
+
+  describe('cleanupTaskArtifacts', () => {
+    it('clears spec-phase artifacts (spec.md, plan.json, output.log)', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
+      writeFileSync(join(testData.taskDir, 'output.log'), 'output');
+
+      orch.cleanupTaskArtifacts(testData.taskId, 'spec');
+
+      expect(existsSync(join(testData.taskDir, 'spec.md'))).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'output.log'))).toBe(false);
+    });
+
+    it('clears plan artifacts but preserves spec.md', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
+      writeFileSync(join(testData.taskDir, 'output.log'), 'output');
+
+      orch.cleanupTaskArtifacts(testData.taskId, 'plan');
+
+      expect(existsSync(join(testData.taskDir, 'spec.md'))).toBe(true);
+      expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(false);
+    });
+
+    it('clears QA artifacts and resets subtask completions for implement phase', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: '', files: [], acceptance_criteria: [], completed: true }],
+      }));
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), '{}');
+      writeFileSync(join(testData.taskDir, 'qa_feedback.md'), 'feedback');
+      writeFileSync(join(testData.taskDir, 'completion_summary.md'), 'summary');
+      writeFileSync(join(testData.taskDir, 'output.log'), 'output');
+
+      orch.cleanupTaskArtifacts(testData.taskId, 'implement');
+
+      expect(existsSync(join(testData.taskDir, 'qa_report.json'))).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'completion_summary.md'))).toBe(false);
+
+      const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks[0].completed).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'spec.md'))).toBe(true);
+      expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(true);
+    });
+
+    it('no-ops when phase is not in pipeline order', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'output.log'), 'output');
+      orch.cleanupTaskArtifacts(testData.taskId, 'nonexistent-phase');
+
+      expect(existsSync(join(testData.taskDir, 'output.log'))).toBe(true);
+    });
+
+    it('handles missing artifacts gracefully (does not throw)', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      expect(() => orch.cleanupTaskArtifacts(testData.taskId, 'qa-review')).not.toThrow();
+    });
+  });
+
+  // ── resumeTask ────────────────────────────────────────────────────
+
+  describe('resumeTask', () => {
+    it('resumes from implement when plan.json exists and resets completions', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [], completed: true }],
+      }));
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.resumeTask(testData.taskId).catch(() => {});
+
+      expect(mockCreateSession).toHaveBeenCalled();
+
+      const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks[0].completed).toBe(false);
+    });
+
+    it('resumes from plan when only spec.md exists', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.resumeTask(testData.taskId).catch(() => {});
+
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+
+    it('resumes from spec when no artifacts exist', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.resumeTask(testData.taskId).catch(() => {});
+
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+
+    it('throws when task does not exist', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      await expect(orch.resumeTask('nonexistent')).rejects.toThrow('not found');
+    });
+  });
+
+  // ── restorePipeline ───────────────────────────────────────────────
+
+  describe('restorePipeline', () => {
+    it('restores pipeline from task data with correct branch', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review', branch: 'feat/some-feature' });
+
+      const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
+
+      expect(pipeline).toBeDefined();
+      expect(pipeline.taskId).toBe(testData.taskId);
+      expect(pipeline.phase).toBe('awaiting-review');
+      expect(pipeline.branch).toBe('feat/some-feature');
+      expect(pipeline.qaAttempt).toBe(0);
+    });
+
+    it('derives branch from description when task has no branch', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review', branch: undefined });
+
+      const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
+
+      expect(pipeline.branch).toBeDefined();
+      expect(pipeline.branch).toContain('feat/');
+    });
+
+    it('throws when task is not in the required phase', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      expect(() => (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review')).toThrow(
+        'is not awaiting-review'
+      );
+    });
+  });
+
+  // ── _removeWorktreeForce ──────────────────────────────────────────
+
+  describe('_removeWorktreeForce', () => {
+    it('force-removes the git worktree', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { branch: 'feat/test-task' });
+
+      const wtPath = orch.getWorktreePath(testData.taskId);
+      if (wtPath) mkdirSync(wtPath, { recursive: true });
+
+      mockExecFileSync.mockReturnValue('');
+      (orch as AnyOrch)._removeWorktreeForce(testData.taskId);
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['worktree', 'remove', '--force']),
+        expect.any(Object),
+      );
+    });
+
+    it('no-ops when worktree does not exist', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      expect(() => (orch as AnyOrch)._removeWorktreeForce('nonexistent')).not.toThrow();
+    });
+
+    it('handles git failure gracefully', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { branch: 'feat/test-task' });
+
+      const wtPath = orch.getWorktreePath(testData.taskId);
+      if (wtPath) mkdirSync(wtPath, { recursive: true });
+
+      mockExecFileSync.mockImplementation(() => { throw new Error('git error'); });
+      expect(() => (orch as AnyOrch)._removeWorktreeForce(testData.taskId)).not.toThrow();
+    });
+  });
+
+  // ── _cleanWorktree ────────────────────────────────────────────────
+
+  describe('_cleanWorktree', () => {
+    it('runs git checkout HEAD to discard changes', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { branch: 'feat/test-task' });
+
+      const wtPath = orch.getWorktreePath(testData.taskId);
+      if (wtPath) mkdirSync(wtPath, { recursive: true });
+
+      mockExecFileSync.mockReturnValue('');
+      (orch as AnyOrch)._cleanWorktree(testData.taskId);
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['checkout', 'HEAD', '--', '.']),
+        expect.any(Object),
+      );
+    });
+
+    it('no-ops when worktree does not exist', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      expect(() => (orch as AnyOrch)._cleanWorktree('nonexistent')).not.toThrow();
+    });
+
+    it('handles git failure gracefully', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { branch: 'feat/test-task' });
+
+      const wtPath = orch.getWorktreePath(testData.taskId);
+      if (wtPath) mkdirSync(wtPath, { recursive: true });
+
+      mockExecFileSync.mockImplementation(() => { throw new Error('git error'); });
+      expect(() => (orch as AnyOrch)._cleanWorktree(testData.taskId)).not.toThrow();
+    });
+  });
+
+  // ── runImplement Docker availability check ───────────────────────
+
+  describe('runImplement — Docker availability', () => {
+    it('throws when container is enabled but Docker is not available', async () => {
+      testData = setupTestProject({ containerEnabled: true });
+      const orch = makeOrch(testData.root);
+
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(dockerAvailable).mockReturnValue(false);
+
+      const slug = 'test-task';
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [] }],
+      }));
+
+      await expect((orch as AnyOrch).runImplement(pipeline)).rejects.toThrow('Docker is not running');
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+
+    it('proceeds when container enabled and Docker is available', async () => {
+      testData = setupTestProject({ containerEnabled: true });
+      const orch = makeOrch(testData.root);
+
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(dockerAvailable).mockReturnValue(true);
+      vi.mocked(containerManager.ensureContainer).mockResolvedValue({
+        remoteWorkspaceFolder: '/workspace',
+        containerName: 'test-container',
+        status: 'running',
+      } as any);
+
+      const slug = 'test-task';
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [] }],
+      }));
+
+      let sessionCounter = 0;
+      mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
+      vi.mocked(_resetDockerAvailableCache).mockImplementation(() => {});
+
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+      expect(mockCreateSession).toHaveBeenCalled();
+      expect(_resetDockerAvailableCache).toHaveBeenCalled();
+
+      fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 10));
+
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [],
+      }));
+      fireEvent('event', { sessionId: 'sess-2', event: { type: 'result' } });
+      await promise;
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+  });
+
+  // ── runImplement worktree creation ────────────────────────────────
+
+  describe('runImplement — worktree creation', () => {
+    it('creates worktree when it does not exist', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [] }],
+      }));
+
+      const slug = 'test-task';
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++callCount}`));
+
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+      const gitCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'git' && (call[1] as string[]).includes('worktree')
+      );
+      expect(gitCalls.length).toBeGreaterThanOrEqual(1);
+
+      fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 10));
+
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [],
+      }));
+      fireEvent('event', { sessionId: 'sess-2', event: { type: 'result' } });
+      await promise;
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+
+    it('uses branch checkout fallback when worktree add with -b fails', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [] }],
+      }));
+
+      const slug = 'test-task';
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+
+      let gitWorktreeAttemptCount = 0;
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args.includes('worktree') && args.includes('add')) {
+          gitWorktreeAttemptCount++;
+          if (args.includes('-b')) throw new Error('Branch already exists');
+        }
+        return '';
+      });
+
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++callCount}`));
+
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+      expect(gitWorktreeAttemptCount).toBe(2);
+
+      fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 10));
+
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [],
+      }));
+      fireEvent('event', { sessionId: 'sess-2', event: { type: 'result' } });
+      await promise;
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+  });
+
+  // ── runQaReview PASS/Failure paths ────────────────────────────────
+
+  describe('runQaReview', () => {
+    it('advances to awaiting-review when QA passes', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+      });
+
+      mockCreateSession.mockResolvedValue('sess-qa');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [],
+      }));
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-qa', event: { type: 'result' } });
+      await promise;
+
+      expect(pipeline.phase).toBe('awaiting-review');
+      expect(pipeline.qaAttempt).toBe(1);
+    });
+
+    it('writes completion summary and fails when max QA attempts reached', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        qaAttempt: 2,
+        maxQaAttempts: 3,
+      });
+
+      mockCreateSession.mockResolvedValue('sess-qa');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [],
+      }));
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-qa', event: { type: 'result' } });
+      await promise;
+
+      expect(pipeline.phase).toBe('failed');
+      expect(existsSync(join(testData.taskDir, 'completion_summary.md'))).toBe(true);
+    });
+  });
+
   // ── Clean up global orchestrators after tests ─────────────────────
 
   afterAll(() => {
-    // Clean up the global orchestrators map to prevent test pollution
     const g = global as any;
     if (g.__orchestrators) {
       g.__orchestrators.clear();

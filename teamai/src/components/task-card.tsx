@@ -245,6 +245,17 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
           </button>
         )}
 
+        {/* Failure indicator — shown only for failed tasks */}
+        {task.phase === 'failed' && (
+          <span
+            data-testid="failure-indicator"
+            title="Task failed"
+            className="text-[10px] font-medium text-red-400/70"
+          >
+            ✕
+          </span>
+        )}
+
         {/* Retry button — shown only for failed tasks */}
         {task.phase === 'failed' && (
           <button

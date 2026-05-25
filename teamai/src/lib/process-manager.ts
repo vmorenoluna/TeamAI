@@ -120,7 +120,9 @@ export class ProcessManager extends EventEmitter {
     });
 
     proc.stderr!.on('data', (chunk: Buffer) => {
-      this.emit('error', { sessionId: id, error: chunk.toString() });
+      const text = chunk.toString();
+      if (logFile) appendFileSync(logFile, `[STDERR] ${text}`);
+      this.emit('error', { sessionId: id, error: text });
     });
 
     proc.on('exit', (code) => {
