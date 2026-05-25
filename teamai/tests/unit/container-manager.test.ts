@@ -9,14 +9,16 @@
  *   - Global singleton
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EventEmitter } from 'events';
 
 // ── Hoisted mocks ──
 
-const { mockExecFileSync, mockSpawn, mockExistsSync, mockReadFileSync, mockLogError, mockLogWarn } = vi.hoisted(() => ({
+const { mockExecFileSync, mockSpawn, mockExistsSync, mockReadFileSync, mockAppendFileSync, mockLogError, mockLogWarn } = vi.hoisted(() => ({
   mockExecFileSync: vi.fn(),
   mockSpawn: vi.fn(),
   mockExistsSync: vi.fn(),
   mockReadFileSync: vi.fn(),
+  mockAppendFileSync: vi.fn(),
   mockLogError: vi.fn(),
   mockLogWarn: vi.fn(),
 }));
@@ -30,6 +32,7 @@ vi.mock('child_process', () => ({
 vi.mock('fs', () => ({
   existsSync: mockExistsSync,
   readFileSync: mockReadFileSync,
+  appendFileSync: mockAppendFileSync,
 }));
 
 vi.mock('../../src/lib/logger', () => ({
@@ -39,7 +42,7 @@ vi.mock('../../src/lib/logger', () => ({
 
 // ── Imports ──
 
-import { ContainerManager, readContainerConfig, hostToContainerPath, containerManager, dockerAvailable, _resetDockerAvailableCache } from '../../src/lib/container-manager';
+import { ContainerManager, readContainerConfig, readContainerRemoteUser, hostToContainerPath, containerManager, dockerAvailable, _resetDockerAvailableCache } from '../../src/lib/container-manager';
 
 // ── Tests ──
 
@@ -256,5 +259,227 @@ describe('containerManager singleton', () => {
   it('exports a ContainerManager instance', () => {
     expect(containerManager).toBeDefined();
     expect(containerManager).toBeInstanceOf(ContainerManager);
+  });
+});
+
+// ── Additional coverage: _findRunningContainerSync ───────────────
+
+describe('ContainerManager — _findRunningContainerSync', () => {
+  let cm: ContainerManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    cm = new ContainerManager();
+    (cm as any).records.clear();
+  });
+
+  it('returns null when no container is running', () => {
+    mockExecFileSync.mockReturnValue('');
+    const result = (cm as any)._findRunningContainerSync('/test/project');
+    expect(result).toBeNull();
+  });
+
+  it('returns null when docker ps fails', () => {
+    mockExecFileSync.mockImplementation(() => { throw new Error('Docker not running'); });
+    const result = (cm as any)._findRunningContainerSync('/test/project');
+    expect(result).toBeNull();
+  });
+
+  it('returns null when no workspace mount matches', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('container-abc')
+      .mockReturnValueOnce(JSON.stringify([
+        { Source: '/other/project', Destination: '/workspaces/other' },
+      ]));
+
+    const result = (cm as any)._findRunningContainerSync('/test/project');
+    expect(result).toBeNull();
+  });
+
+  it('returns ContainerInfo when mount matches', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('container-abc')
+      .mockReturnValueOnce(JSON.stringify([
+        { Source: '/test/project', Destination: '/workspaces/test-project' },
+      ]));
+
+    const result = (cm as any)._findRunningContainerSync('/test/project');
+    expect(result).toEqual({
+      containerId: 'container-abc',
+      remoteWorkspaceFolder: '/workspaces/test-project',
+    });
+  });
+
+  it('returns null when docker inspect fails', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('container-abc')
+      .mockImplementationOnce(() => { throw new Error('Docker inspect failed'); });
+
+    const result = (cm as any)._findRunningContainerSync('/test/project');
+    expect(result).toBeNull();
+  });
+
+  it('normalizes project root path when comparing mounts', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('container-xyz')
+      .mockReturnValueOnce(JSON.stringify([
+        { Source: 'C:\\Users\\test\\project', Destination: '/workspaces/project' },
+      ]));
+
+    const result = (cm as any)._findRunningContainerSync('c:\\users\\test\\project');
+    expect(result).toEqual({
+      containerId: 'container-xyz',
+      remoteWorkspaceFolder: '/workspaces/project',
+    });
+  });
+});
+
+// ── Additional coverage: getRunningContainer fallback ────────────
+
+describe('ContainerManager — getRunningContainer fallback scan', () => {
+  let cm: ContainerManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cm = new ContainerManager();
+    (cm as any).records.clear();
+  });
+
+  it('falls back to Docker label scan when no in-memory record', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('container-found')
+      .mockReturnValueOnce(JSON.stringify([
+        { Source: '/test/project', Destination: '/workspaces/test' },
+      ]));
+
+    const info = cm.getRunningContainer('/test/project');
+    expect(info).toEqual({
+      containerId: 'container-found',
+      remoteWorkspaceFolder: '/workspaces/test',
+    });
+
+    const record = (cm as any).records.get('/test/project');
+    expect(record).not.toBeNull();
+    expect(record.containerId).toBe('container-found');
+  });
+
+  it('returns null when Docker scan also fails', () => {
+    mockExecFileSync.mockImplementation(() => { throw new Error('Docker unavailable'); });
+    const info = cm.getRunningContainer('/test/project');
+    expect(info).toBeNull();
+  });
+});
+
+// ── Additional coverage: ensureContainer existing scan ───────────
+
+describe('ContainerManager — ensureContainer existing via scan', () => {
+  let cm: ContainerManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cm = new ContainerManager();
+    (cm as any).records.clear();
+  });
+
+  it('finds existing running container when in-memory record is missing', async () => {
+    mockExecFileSync
+      .mockReturnValueOnce('existing-container')
+      .mockReturnValueOnce(JSON.stringify([
+        { Source: '/test/project', Destination: '/workspaces/test' },
+      ]));
+
+    const proc = new EventEmitter() as any;
+    proc.stdout = new EventEmitter() as any;
+    proc.stderr = new EventEmitter() as any;
+    proc.pid = 99999;
+    proc.kill = vi.fn();
+    mockSpawn.mockReturnValue(proc);
+
+    const info = await cm.ensureContainer('/test/project');
+
+    expect(info).toEqual({
+      containerId: 'existing-container',
+      remoteWorkspaceFolder: '/workspaces/test',
+    });
+  });
+});
+
+// ── Additional coverage: readContainerRemoteUser ─────────────────
+
+describe('readContainerRemoteUser', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns remoteUser from devcontainer.json when present', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ remoteUser: 'developer' }));
+
+    const result = readContainerRemoteUser('/test/project');
+    expect(result).toBe('developer');
+  });
+
+  it('falls back to node when devcontainer.json has no remoteUser', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ image: 'node:20' }));
+
+    const result = readContainerRemoteUser('/test/project');
+    expect(result).toBe('node');
+  });
+
+  it('falls back to node when devcontainer.json does not exist', () => {
+    mockExistsSync.mockReturnValue(false);
+
+    const result = readContainerRemoteUser('/test/project');
+    expect(result).toBe('node');
+  });
+
+  it('falls back to node when devcontainer.json is invalid JSON', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue('{invalid json');
+
+    const result = readContainerRemoteUser('/test/project');
+    expect(result).toBe('node');
+    expect(mockLogWarn).toHaveBeenCalled();
+  });
+});
+
+// ── Additional coverage: getState edge cases ─────────────────────
+
+describe('ContainerManager — getState edge cases', () => {
+  let cm: ContainerManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cm = new ContainerManager();
+    (cm as any).records.clear();
+  });
+
+  it('handles state lookup with no Docker and no record', () => {
+    mockExecFileSync.mockImplementation(() => { throw new Error('No Docker'); });
+
+    const state = cm.getState('/test/project');
+    expect(state).toBe('stopped');
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'docker',
+      expect.arrayContaining(['ps', '-a']),
+      expect.any(Object),
+    );
+  });
+
+  it('returns state from in-memory record without calling Docker', () => {
+    (cm as any).records.set('/test/project', {
+      projectRoot: '/test/project',
+      state: 'starting',
+      containerId: null,
+      remoteWorkspaceFolder: null,
+      startPromise: null,
+      eventWatcher: null,
+    });
+
+    const state = cm.getState('/test/project');
+    expect(state).toBe('starting');
+    expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProcessManager } from '../../src/lib/process-manager';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type AnySession = any; // We are testing internal private state — use any cast sparingly
 
 // Minimal mock process object that satisfies the shape ProcessManager expects
@@ -9,9 +9,10 @@ function mockProcess(overrides: Partial<{
   exitCode: number | null;
   killed: boolean;
   stdin: { writable: boolean };
+  kill?: ReturnType<typeof vi.fn>;
 }> = {}) {
   return {
-    kill: vi.fn(),
+    kill: overrides.kill ?? vi.fn(),
     exitCode: overrides.exitCode ?? null,
     killed: overrides.killed ?? false,
     stdin: overrides.stdin ?? { writable: true },
@@ -181,6 +182,123 @@ describe('ProcessManager', () => {
 
     it('does not throw for nonexistent terminal session', () => {
       expect(() => pm.killTerminalSession('does-not-exist')).not.toThrow();
+    });
+  });
+
+  // ── killSession SIGKILL fallback ────────────────────────────────
+
+  describe('killSession — SIGKILL fallback', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('schedules SIGKILL after grace period if process has not exited', async () => {
+      const killFn = vi.fn();
+      const session = {
+        id: 'session-1',
+        process: mockProcess({ exitCode: null, killed: false, kill: killFn }),
+        taskId: 'task-1',
+        role: 'coder' as const,
+        cwd: '/test',
+        status: 'running' as const,
+      };
+      (pm as AnySession).sessions.set('session-1', session);
+
+      pm.killSession('session-1');
+
+      expect(killFn).toHaveBeenCalledWith('SIGTERM');
+      expect(killFn).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(5500);
+
+      expect(killFn).toHaveBeenCalledWith('SIGKILL');
+      expect(killFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not send SIGKILL if process already exited before grace period', async () => {
+      const killFn = vi.fn();
+      const proc = mockProcess({ exitCode: null, killed: false, kill: killFn });
+      const session = {
+        id: 'session-1',
+        process: proc,
+        taskId: 'task-1',
+        role: 'coder' as const,
+        cwd: '/test',
+        status: 'running' as const,
+      };
+      (pm as AnySession).sessions.set('session-1', session);
+
+      pm.killSession('session-1');
+      expect(killFn).toHaveBeenCalledWith('SIGTERM');
+
+      // Simulate process exiting during grace period
+      proc.exitCode = 0;
+
+      await vi.advanceTimersByTimeAsync(5500);
+
+      // SIGKILL should NOT have been called
+      const sigKillCalls = killFn.mock.calls.filter(
+        (call: any) => call[0] === 'SIGKILL'
+      );
+      expect(sigKillCalls.length).toBe(0);
+    });
+
+    it('does not schedule SIGKILL if session does not exist', () => {
+      expect(() => pm.killSession('nonexistent')).not.toThrow();
+    });
+
+    it('sets status to done after kill', () => {
+      const session = {
+        id: 'session-1',
+        process: mockProcess(),
+        taskId: 'task-1',
+        role: 'coder' as const,
+        cwd: '/test',
+        status: 'running' as const,
+      };
+      (pm as AnySession).sessions.set('session-1', session);
+
+      pm.killSession('session-1');
+
+      expect(session.status).toBe('done');
+    });
+  });
+
+  // ── sendMessage edge cases ─────────────────────────────────────
+
+  describe('sendMessage — edge cases', () => {
+    it('throws when session does not exist', () => {
+      expect(() => pm.sendMessage('nonexistent', 'hello')).toThrow('not available');
+    });
+
+    it('throws when stdin is not writable', () => {
+      const session = {
+        id: 'session-1',
+        process: mockProcess({ stdin: { writable: false } }),
+        taskId: 'task-1',
+        role: 'coder' as const,
+        cwd: '/test',
+        status: 'running' as const,
+      };
+      (pm as AnySession).sessions.set('session-1', session);
+
+      expect(() => pm.sendMessage('session-1', 'hello')).toThrow('not available');
+    });
+  });
+
+  // ── PTY terminal edge cases ────────────────────────────────────
+
+  describe('PTY terminal edge cases', () => {
+    it('writeToTerminal no-ops when session does not exist', () => {
+      expect(() => pm.writeToTerminal('nonexistent', 'echo hello')).not.toThrow();
+    });
+
+    it('resizeTerminal no-ops when session does not exist', () => {
+      expect(() => pm.resizeTerminal('nonexistent', 120, 40)).not.toThrow();
     });
   });
 
