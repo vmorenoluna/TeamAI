@@ -8,6 +8,7 @@ interface UsePhaseSyncOptions {
 export function usePhaseSync(opts?: UsePhaseSyncOptions) {
   const router = useRouter();
   const onPhaseChangeRef = useRef(opts?.onPhaseChange);
+  // eslint-disable-next-line react-hooks/refs
   onPhaseChangeRef.current = opts?.onPhaseChange;
 
   useEffect(() => {
