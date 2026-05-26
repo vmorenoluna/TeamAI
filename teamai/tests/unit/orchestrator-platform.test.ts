@@ -5,6 +5,9 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { randomUUID } from 'crypto';
 
 // ── Hoisted mocks ──
 
@@ -179,7 +182,7 @@ describe('Orchestrator — remaining edge cases', () => {
     vi.spyOn(processManager, 'sendMessage' as any).mockImplementation(() => {});
     vi.spyOn(processManager, 'killSession' as any).mockImplementation(() => {});
 
-    orch = new Orchestrator('/test/project');
+    orch = new Orchestrator(join(tmpdir(), `teamai-plat-${randomUUID().slice(0, 8)}`));
   });
 
   afterEach(() => {
@@ -200,14 +203,17 @@ describe('Orchestrator — remaining edge cases', () => {
 
 describe('getOrchestrator singleton', () => {
   it('returns the same instance for the same project path', () => {
-    const o1 = getOrchestrator('/test/project');
-    const o2 = getOrchestrator('/test/project');
+    const p = join(tmpdir(), `teamai-sing-${randomUUID().slice(0, 8)}`);
+    const o1 = getOrchestrator(p);
+    const o2 = getOrchestrator(p);
     expect(o1).toBe(o2);
   });
 
   it('returns different instances for different project paths', () => {
-    const o1 = getOrchestrator('/project/a');
-    const o2 = getOrchestrator('/project/b');
+    const p1 = join(tmpdir(), `teamai-sing-${randomUUID().slice(0, 8)}`);
+    const p2 = join(tmpdir(), `teamai-sing-${randomUUID().slice(0, 8)}`);
+    const o1 = getOrchestrator(p1);
+    const o2 = getOrchestrator(p2);
     expect(o1).not.toBe(o2);
   });
 });

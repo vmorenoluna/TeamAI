@@ -1222,14 +1222,17 @@ describe('Orchestrator — Full Coverage', () => {
 
   describe('getOrchestrator singleton', () => {
     it('returns same instance for same path', () => {
-      const orch1 = getOrchestrator('/test/path');
-      const orch2 = getOrchestrator('/test/path');
+      const p = join(tmpdir(), `teamai-sing-${randomUUID().slice(0, 8)}`);
+      const orch1 = getOrchestrator(p);
+      const orch2 = getOrchestrator(p);
       expect(orch1).toBe(orch2);
     });
 
     it('returns different instance for different path', () => {
-      const orch1 = getOrchestrator('/test/path-a');
-      const orch2 = getOrchestrator('/test/path-b');
+      const p1 = join(tmpdir(), `teamai-sing-${randomUUID().slice(0, 8)}`);
+      const p2 = join(tmpdir(), `teamai-sing-${randomUUID().slice(0, 8)}`);
+      const orch1 = getOrchestrator(p1);
+      const orch2 = getOrchestrator(p2);
       expect(orch1).not.toBe(orch2);
     });
   });
