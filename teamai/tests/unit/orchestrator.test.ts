@@ -69,15 +69,22 @@ function setupTestProject(): { root: string; taskId: string; clean: () => void }
 
 describe('getOrchestrator', () => {
   it('returns the same instance for the same project path (singleton)', () => {
-    const orch1 = getOrchestrator('/test/project');
-    const orch2 = getOrchestrator('/test/project');
-    expect(orch1).toBe(orch2);
+    const { root: p, clean } = createTestProject();
+    try {
+      const orch1 = getOrchestrator(p);
+      const orch2 = getOrchestrator(p);
+      expect(orch1).toBe(orch2);
+    } finally { clean(); }
   });
 
   it('returns different instances for different project paths', () => {
-    const orch1 = getOrchestrator('/test/project-a');
-    const orch2 = getOrchestrator('/test/project-b');
-    expect(orch1).not.toBe(orch2);
+    const { root: p1, clean: c1 } = createTestProject();
+    const { root: p2, clean: c2 } = createTestProject();
+    try {
+      const orch1 = getOrchestrator(p1);
+      const orch2 = getOrchestrator(p2);
+      expect(orch1).not.toBe(orch2);
+    } finally { c1(); c2(); }
   });
 });
 

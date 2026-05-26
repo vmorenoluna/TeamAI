@@ -568,14 +568,46 @@ export class Orchestrator {
     processManager.emit('phase-change', { taskId: pipeline.taskId, phase });
   }
 
+  // Parse "resets 4:30pm (UTC)" from Claude Code's session-limit message.
+  // Returns a Unix timestamp (seconds) for the reset time, or null if unparseable.
+  private _parseSessionLimitReset(line: string): number | null {
+    const m = line.match(/resets\s+(\d+):(\d+)\s*(am|pm)\s*(?:\(UTC\))?/i);
+    if (!m) return null;
+    let hours = parseInt(m[1], 10);
+    const minutes = parseInt(m[2], 10);
+    const ampm = m[3].toLowerCase();
+    if (ampm === 'pm' && hours !== 12) hours += 12;
+    if (ampm === 'am' && hours === 12) hours = 0;
+    const now = new Date();
+    const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hours, minutes, 0));
+    // If the reset time is already in the past today, it must be tomorrow
+    if (reset.getTime() <= Date.now()) reset.setUTCDate(reset.getUTCDate() + 1);
+    return Math.floor(reset.getTime() / 1000);
+  }
+
   private waitForCompletion(sessionId: string, timeoutMs: number = PIPELINE_TIMEOUT_MS): Promise<void> {
     return new Promise((resolve, reject) => {
       let rateLimitResetsAt: number | null = null;
+      // Tracks Claude Code's per-session usage limit (distinct from API rate limits).
+      // When hit, the session exits cleanly with code 0 and result.is_error=false, so
+      // the orchestrator would incorrectly treat it as success. Detecting it here lets
+      // handleRateLimit pause and retry the task after the usage window resets.
+      let sessionLimitResetsAt: number | null = null;
       let settled = false;
 
       const cleanup = () => {
         processManager.off('event', onEvent);
         processManager.off('exit', onExit);
+        processManager.off('raw', onRaw);
+      };
+
+      // Claude Code prints "You've hit your session limit · resets H:MMam (UTC)" as
+      // plain text (not JSON) before emitting a clean result event. Capture it here.
+      const onRaw = ({ sessionId: sid, data }: { sessionId: string; data: string }) => {
+        if (sid !== sessionId) return;
+        if (/session.?limit/i.test(data)) {
+          sessionLimitResetsAt = this._parseSessionLimitReset(data) ?? Math.floor(Date.now() / 1000) + 3600;
+        }
       };
 
       const onEvent = ({ sessionId: sid, event }: { sessionId: string; event: Record<string, unknown> }) => {
@@ -593,7 +625,10 @@ export class Orchestrator {
           settled = true;
           cleanup();
           clearTimeout(timeout);
-          if (event.is_error && rateLimitResetsAt) {
+          // Session limit takes priority: exit is clean (is_error=false) but no work was done
+          if (sessionLimitResetsAt) {
+            reject(new RateLimitError(sessionLimitResetsAt));
+          } else if (event.is_error && rateLimitResetsAt) {
             reject(new RateLimitError(rateLimitResetsAt));
           } else {
             resolve();
@@ -605,13 +640,15 @@ export class Orchestrator {
         settled = true;
         cleanup();
         clearTimeout(timeout);
-        if (code === 0 || code === null) resolve();
+        if (sessionLimitResetsAt) reject(new RateLimitError(sessionLimitResetsAt));
+        else if (code === 0 || code === null) resolve();
         else if (rateLimitResetsAt) reject(new RateLimitError(rateLimitResetsAt));
         else reject(new Error(`Session exited with code ${code}`));
       };
 
       processManager.on('event', onEvent);
       processManager.on('exit', onExit);
+      processManager.on('raw', onRaw);
 
       const timeout = setTimeout(() => {
         if (settled) return;

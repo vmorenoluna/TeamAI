@@ -77,7 +77,9 @@ export function hostToContainerPath(
   hostProjectRoot: string,
   containerWorkspace: string,
 ): string {
-  const rel = path.relative(hostProjectRoot, hostPath).replace(/\\/g, '/');
+  // Normalize Windows paths to POSIX before computing relative path
+  const normalize = (p: string) => p.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
+  const rel = path.posix.relative(normalize(hostProjectRoot), normalize(hostPath));
   return `${containerWorkspace}/${rel}`;
 }
 
