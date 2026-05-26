@@ -303,11 +303,13 @@ export class Orchestrator {
       execFileSync('git', ['pull', '--ff-only', 'origin', 'master'], { cwd: this.projectRoot, stdio: 'pipe' });
     } catch { /* non-fast-forward or offline — proceed with local master */ }
 
-    try {
-      this._execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], this.projectRoot);
-    } catch {
-      // Branch already exists (e.g. from a previous failed attempt) — reuse it
-      this._execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], this.projectRoot);
+    if (!existsSync(pipeline.worktreePath)) {
+      try {
+        this._execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], this.projectRoot);
+      } catch {
+        // Branch already exists (e.g. from a previous failed attempt) — reuse it
+        this._execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], this.projectRoot);
+      }
     }
 
     this.advancePhase(pipeline, 'implement');
