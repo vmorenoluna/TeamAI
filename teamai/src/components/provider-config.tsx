@@ -84,6 +84,7 @@ function ModelRow({
 
   // On mount and when provider changes, reload models
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadModels(provider);
   }, [provider, loadModels]);
 
@@ -91,6 +92,7 @@ function ModelRow({
   useEffect(() => {
     if (models.length > 0) {
       if (models.includes(model)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setShowCustom(false);
         setCustomValue('');
       } else if (model) {
