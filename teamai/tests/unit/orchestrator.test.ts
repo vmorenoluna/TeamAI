@@ -1,22 +1,8 @@
 /**
- * Full coverage tests for Orchestrator.
- *
- * Covers remaining uncovered lines:
- *   - getPipelineConfig (valid, missing, invalid)
- *   - moveTaskToPhase branching (hasSpec/hasPlan combinations)
- *   - runTask full pipeline with session events
- *   - waitForCompletion (event, exit, rate limit paths)
- *   - handleRateLimit
- *   - _execGit (host and container modes)
- *   - _toAgentPath (with container enabled)
- *   - sessionOpts (with various options)
- *   - _phaseHeader (failure case)
- *   - approveTask, rejectTask (path building)
- *   - advancePhase all phase transitions
- *   - cancelPipeline, isTaskActive edge cases
+ * Tests for Orchestrator.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
-import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -176,7 +162,7 @@ function makePipeline(overrides: Record<string, any> = {}): any {
 
 // ── Tests ──
 
-describe('Orchestrator — Full Coverage', () => {
+describe('Orchestrator', () => {
   let testData: ReturnType<typeof setupTestProject>;
 
   beforeEach(() => {
@@ -657,6 +643,252 @@ describe('Orchestrator — Full Coverage', () => {
     });
   });
 
+  // ── _rotateOutputLog ──────────────────────────────────────────────
+
+  describe('_rotateOutputLog', () => {
+    it('does nothing when the log file does not exist', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      expect(() => {
+        (orch as AnyOrch)._rotateOutputLog('/nonexistent/log/file.log');
+      }).not.toThrow();
+    });
+
+    it('does nothing when log file is under the size threshold', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const logFile = join(testData.root, '.teamai', 'small-log.log');
+      writeFileSync(logFile, 'a'.repeat(1000));
+      const before = readFileSync(logFile, 'utf-8');
+      (orch as AnyOrch)._rotateOutputLog(logFile);
+      const after = readFileSync(logFile, 'utf-8');
+      expect(after).toBe(before);
+    });
+
+    it('truncates to last ~50KB when the log exceeds 100KB', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const logFile = join(testData.root, '.teamai', 'large-log.log');
+      const PAD = 'x'.repeat(102400);
+      const SUFFIX = 'Y'.repeat(51200);
+      writeFileSync(logFile, PAD + SUFFIX);
+      (orch as AnyOrch)._rotateOutputLog(logFile);
+      const after = readFileSync(logFile, 'utf-8');
+      expect(after.length).toBeGreaterThan(49000);
+      expect(after.length).toBeLessThan(52000);
+      expect(after).toContain('LOG TRUNCATED');
+      expect(after).toContain('Y'.repeat(49000));
+      expect(after).not.toContain('x'.repeat(100));
+    });
+
+    it('does not throw on permission errors (best-effort)', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      expect(() => {
+        (orch as AnyOrch)._rotateOutputLog('/root/forbidden/log.log');
+      }).not.toThrow();
+    });
+  });
+
+  // ── _persistAndEmitPhase ──────────────────────────────────────────
+
+  describe('_persistAndEmitPhase', () => {
+    it('persists the current pipeline phase to disk and emits phase-change', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const pipeline = {
+        taskId: testData.taskId,
+        description: 'test',
+        phase: 'implement' as const,
+        specPath: testData.taskDir,
+        worktreePath: '/test/wt',
+        branch: 'feat/test',
+        qaAttempt: 0,
+        maxQaAttempts: 3,
+      };
+
+      mockEmit.mockClear();
+      (orch as AnyOrch)._persistAndEmitPhase(pipeline);
+
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', {
+        taskId: testData.taskId,
+        phase: 'implement',
+      });
+
+      const taskJson = JSON.parse(readFileSync(join(pipeline.specPath, 'task.json'), 'utf-8'));
+      expect(taskJson.phase).toBe('implement');
+    });
+
+    it('persists different phases correctly', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const pipeline = {
+        taskId: testData.taskId,
+        description: 'test',
+        phase: 'merge' as const,
+        specPath: testData.taskDir,
+        worktreePath: '/test/wt',
+        branch: 'feat/test',
+        qaAttempt: 0,
+        maxQaAttempts: 3,
+      };
+
+      mockEmit.mockClear();
+      (orch as AnyOrch)._persistAndEmitPhase(pipeline);
+
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', {
+        taskId: testData.taskId,
+        phase: 'merge',
+      });
+
+      const taskJson = JSON.parse(readFileSync(join(pipeline.specPath, 'task.json'), 'utf-8'));
+      expect(taskJson.phase).toBe('merge');
+    });
+  });
+
+  // ── _savePipelineState ────────────────────────────────────────────
+
+  describe('_savePipelineState', () => {
+    it('writes pipeline state to .pipeline_state.json atomically', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const statePath = join(testData.taskDir, '.pipeline_state.json');
+      const tmpPath = statePath + '.tmp';
+
+      const pipeline = {
+        taskId: testData.taskId,
+        description: 'test',
+        phase: 'implement' as const,
+        specPath: testData.taskDir,
+        worktreePath: '/test/wt',
+        branch: 'feat/test',
+        qaAttempt: 2,
+        maxQaAttempts: 3,
+        mergeStrategy: 'pull-request' as const,
+        sessionId: 'sess-123',
+      };
+
+      (orch as AnyOrch)._savePipelineState(pipeline);
+
+      expect(existsSync(tmpPath)).toBe(false);
+      expect(existsSync(statePath)).toBe(true);
+
+      const saved = JSON.parse(readFileSync(statePath, 'utf-8'));
+      expect(saved.taskId).toBe(testData.taskId);
+      expect(saved.phase).toBe('implement');
+      expect(saved.sessionId).toBe('sess-123');
+      expect(saved.mergeStrategy).toBe('pull-request');
+      expect(saved.qaAttempt).toBe(2);
+      expect(saved.branch).toBe('feat/test');
+      expect(saved.worktreePath).toBe('/test/wt');
+      expect(saved.updatedAt).toBeDefined();
+    });
+
+    it('writes pipeline state with undefined sessionId gracefully', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const statePath = join(testData.taskDir, '.pipeline_state.json');
+
+      const pipeline = {
+        taskId: testData.taskId,
+        description: 'test',
+        phase: 'spec' as const,
+        specPath: testData.taskDir,
+        worktreePath: '/test/wt',
+        branch: 'feat/test',
+        qaAttempt: 0,
+        maxQaAttempts: 3,
+      };
+
+      (orch as AnyOrch)._savePipelineState(pipeline);
+
+      const saved = JSON.parse(readFileSync(statePath, 'utf-8'));
+      expect(saved.sessionId).toBeUndefined();
+      expect(saved.mergeStrategy).toBeUndefined();
+      expect(saved.qaAttempt).toBe(0);
+    });
+
+    it('does not throw on permission errors (best-effort)', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const pipeline = {
+        taskId: testData.taskId,
+        description: 'test',
+        phase: 'spec' as const,
+        specPath: '/root/forbidden',
+        worktreePath: '/test/wt',
+        branch: 'feat/test',
+        qaAttempt: 0,
+        maxQaAttempts: 3,
+      };
+
+      expect(() => {
+        (orch as AnyOrch)._savePipelineState(pipeline);
+      }).not.toThrow();
+    });
+  });
+
+  // ── _restorePipelineState ─────────────────────────────────────────
+
+  describe('_restorePipelineState', () => {
+    let specPath: string;
+    let statePath: string;
+
+    beforeEach(() => {
+      testData = setupTestProject();
+      specPath = testData.taskDir;
+      statePath = join(specPath, '.pipeline_state.json');
+      try { if (existsSync(statePath)) unlinkSync(statePath); } catch {}
+    });
+
+    it('returns null when no state file exists', () => {
+      const orch = makeOrch(testData.root);
+      expect(existsSync(statePath)).toBe(false);
+      const result = (orch as AnyOrch)._restorePipelineState(testData.taskId, specPath);
+      expect(result).toBeNull();
+    });
+
+    it('returns parsed state and cleans up the file after reading', () => {
+      const orch = makeOrch(testData.root);
+      const state = {
+        taskId: testData.taskId,
+        phase: 'implement',
+        sessionId: 'sess-abc',
+        mergeStrategy: 'local-merge',
+        qaAttempt: 1,
+        branch: 'feat/test',
+        worktreePath: '/test/wt',
+        updatedAt: new Date().toISOString(),
+      };
+      writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+      const result = (orch as AnyOrch)._restorePipelineState(testData.taskId, specPath);
+
+      expect(result).not.toBeNull();
+      expect(result!.sessionId).toBe('sess-abc');
+      expect(result!.mergeStrategy).toBe('local-merge');
+      expect(result!.qaAttempt).toBe(1);
+      expect(result!.phase).toBe('implement');
+
+      expect(existsSync(statePath)).toBe(false);
+    });
+
+    it('returns null for corrupt JSON (file stays on disk for debugging)', () => {
+      const orch = makeOrch(testData.root);
+      writeFileSync(statePath, 'not valid json {{{');
+      const result = (orch as AnyOrch)._restorePipelineState(testData.taskId, specPath);
+      expect(result).toBeNull();
+      expect(existsSync(statePath)).toBe(true);
+    });
+
+    it('returns null for empty state file', () => {
+      const orch = makeOrch(testData.root);
+      writeFileSync(statePath, '');
+      const result = (orch as AnyOrch)._restorePipelineState(testData.taskId, specPath);
+      expect(result).toBeNull();
+    });
+  });
+
   // ── _execGit ───────────────────────────────────────────────────────
 
   describe('_execGit', () => {
@@ -831,6 +1063,47 @@ describe('Orchestrator — Full Coverage', () => {
       expect(result).not.toBeNull();
       expect(result).toContain('worktrees');
       expect(result).toContain('test-task');
+    });
+  });
+
+  // ── _isWorktreeHealthy ────────────────────────────────────────────
+
+  describe('_isWorktreeHealthy', () => {
+    it('returns false when .git file does not exist', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const wtPath = join(testData.root, 'no-git');
+      mkdirSync(wtPath, { recursive: true });
+      expect((orch as AnyOrch)._isWorktreeHealthy(wtPath)).toBe(false);
+    });
+
+    it('returns false when .git is not a worktree file (no gitdir: prefix)', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const wtPath = join(testData.root, 'bad-git-format');
+      mkdirSync(wtPath, { recursive: true });
+      writeFileSync(join(wtPath, '.git'), 'not a worktree file');
+      expect((orch as AnyOrch)._isWorktreeHealthy(wtPath)).toBe(false);
+    });
+
+    it('returns false when gitdir points to a nonexistent path', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const wtPath = join(testData.root, 'broken-gitdir');
+      mkdirSync(wtPath, { recursive: true });
+      writeFileSync(join(wtPath, '.git'), 'gitdir: /nonexistent/git/worktrees/test');
+      expect((orch as AnyOrch)._isWorktreeHealthy(wtPath)).toBe(false);
+    });
+
+    it('returns true for a valid worktree with an existing gitdir', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const wtPath = join(testData.root, 'healthy-worktree');
+      mkdirSync(wtPath, { recursive: true });
+      const gitdirPath = join(testData.root, 'fake-gitdir');
+      mkdirSync(gitdirPath, { recursive: true });
+      writeFileSync(join(wtPath, '.git'), `gitdir: ${gitdirPath}`);
+      expect((orch as AnyOrch)._isWorktreeHealthy(wtPath)).toBe(true);
     });
   });
 
