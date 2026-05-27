@@ -75,14 +75,14 @@ describe('readContainerConfig', () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(JSON.stringify({ enabled: true }));
     const result = readContainerConfig('/test/project');
-    expect(result).toEqual({ enabled: true });
+    expect(result).toEqual({ enabled: true, explicit: true });
   });
 
   it('returns enabled: false when container.json says disabled', () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(JSON.stringify({ enabled: false }));
     const result = readContainerConfig('/test/project');
-    expect(result).toEqual({ enabled: false });
+    expect(result).toEqual({ enabled: false, explicit: true });
   });
 
   it('logs warning on invalid JSON and falls back to dockerAvailable', () => {
@@ -90,7 +90,7 @@ describe('readContainerConfig', () => {
     mockReadFileSync.mockReturnValue('{invalid}');
     mockExecFileSync.mockReturnValue(''); // docker available
     const result = readContainerConfig('/test/project');
-    expect(result).toEqual({ enabled: true });
+    expect(result).toEqual({ enabled: true, explicit: false });
     expect(mockLogWarn).toHaveBeenCalledWith('container', 'Failed to parse container config, using defaults', expect.any(Error));
   });
 
@@ -98,14 +98,14 @@ describe('readContainerConfig', () => {
     mockExistsSync.mockReturnValue(false);
     mockExecFileSync.mockReturnValue(''); // docker available
     const result = readContainerConfig('/test/project');
-    expect(result).toEqual({ enabled: true });
+    expect(result).toEqual({ enabled: true, explicit: false });
   });
 
   it('returns disabled when container.json missing and docker unavailable', () => {
     mockExistsSync.mockReturnValue(false);
     mockExecFileSync.mockImplementation(() => { throw new Error('no docker'); });
     const result = readContainerConfig('/test/project');
-    expect(result).toEqual({ enabled: false });
+    expect(result).toEqual({ enabled: false, explicit: false });
   });
 });
 
