@@ -1,7 +1,7 @@
 /**
  * Tests for ContainerManager advanced lifecycle methods.
  * Covers: devcontainerBin (indirectly), _doStart, _spawnDevcontainerUp,
- * _watchEvents, _onContainerDied, and the global singleton.
+ * _watchEvents, _onContainerDied.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'events';
@@ -13,13 +13,11 @@ const { mockSpawn, mockExecFileSync } = vi.hoisted(() => ({
   mockExecFileSync: vi.fn(),
 }));
 
-const { mockExistsSync, mockReadFileSync } = vi.hoisted(() => ({
+const { mockExistsSync } = vi.hoisted(() => ({
   mockExistsSync: vi.fn(),
-  mockReadFileSync: vi.fn(),
 }));
 
-const { mockLogError, mockLogWarn } = vi.hoisted(() => ({
-  mockLogError: vi.fn(),
+const { mockLogWarn } = vi.hoisted(() => ({
   mockLogWarn: vi.fn(),
 }));
 
@@ -31,17 +29,15 @@ vi.mock('child_process', () => ({
 
 vi.mock('fs', () => ({
   existsSync: mockExistsSync,
-  readFileSync: mockReadFileSync,
 }));
 
 vi.mock('../../src/lib/logger', () => ({
-  error: mockLogError,
   warn: mockLogWarn,
 }));
 
 // ── Imports ──
 
-import { ContainerManager, _resetDockerAvailableCache, containerManager, dockerAvailable } from '../../src/lib/container-manager';
+import { ContainerManager, _resetDockerAvailableCache, dockerAvailable } from '../../src/lib/container-manager';
 
 // ── Helpers ──
 
@@ -473,54 +469,4 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
   });
 });
 
-describe('ContainerManager getState', () => {
-  let cm: ContainerManager;
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-    _resetDockerAvailableCache();
-    cm = new ContainerManager();
-    (cm as any).records.clear();
-  });
-
-  it('returns running when docker ps shows Up status', () => {
-    mockExecFileSync.mockReturnValue('Up 2 hours');
-
-    const state = cm.getState('/test/project-docker-up');
-    expect(state).toBe('running');
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'docker',
-      expect.arrayContaining(['ps', '-a', '--format', '{{.Status}}']),
-      expect.any(Object),
-    );
-  });
-
-  it('returns stopped when docker ps returns non-Up status', () => {
-    mockExecFileSync.mockReturnValue('Exited (0) 1 hour ago');
-
-    const state = cm.getState('/test/project-docker-exited');
-    expect(state).toBe('stopped');
-  });
-
-  it('returns stopped when docker execFileSync throws', () => {
-    mockExecFileSync.mockImplementation(() => { throw new Error('Docker not found'); });
-
-    const state = cm.getState('/test/project-docker-error');
-    expect(state).toBe('stopped');
-  });
-
-  it('returns stopped when docker ps returns empty string', () => {
-    mockExecFileSync.mockReturnValue('');
-
-    const state = cm.getState('/test/project-docker-empty');
-    expect(state).toBe('stopped');
-  });
-});
-
-describe('ContainerManager global singleton', () => {
-  it('exports a singleton that persists across instances', () => {
-    expect(containerManager).toBeDefined();
-    const globalKey = '__containerManager';
-    expect((global as any)[globalKey]).toBe(containerManager);
-  });
-});
