@@ -874,6 +874,151 @@ describe('Orchestrator — Full Coverage', () => {
         expect.any(Object),
       );
     });
+
+    // ── container mode ───────────────────────────────────────────
+
+    describe('container mode', () => {
+      it('removes worktree via docker exec, then cleans up branch on host', () => {
+        testData = setupTestProject();
+        vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+        vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+          containerId: 'cont-abc',
+          remoteWorkspaceFolder: '/workspace',
+        } as any);
+        vi.mocked(hostToContainerPath).mockImplementation((hp: string, root: string, _ws: string) => {
+          if (hp === root) return '/workspace';
+          if (hp.startsWith(root)) return '/workspace' + hp.slice(root.length).replace(/\\/g, '/');
+          return hp;
+        });
+
+        const orch = makeOrch(testData.root);
+        const taskStore = (orch as AnyOrch).taskStore;
+        taskStore.update(testData.taskId, { description: 'test-task', branch: 'feat/test-task' });
+
+        // In container mode, getWorktreeBase returns .worktrees inside projectRoot
+        const wtPath = orch.getWorktreePath(testData.taskId)!;
+        mkdirSync(wtPath, { recursive: true });
+
+        mockExecFileSync.mockReturnValue('');
+        (orch as AnyOrch).removeWorktree(testData.taskId);
+
+        // Tier 1: normal remove via docker exec
+        expect(mockExecFileSync).toHaveBeenCalledWith(
+          'docker',
+          expect.arrayContaining(['exec', '-u', 'node', 'cont-abc', 'git', 'worktree', 'remove']),
+        );
+        // Branch cleanup runs on host (not through _execGit)
+        expect(mockExecFileSync).toHaveBeenCalledWith(
+          'git',
+          expect.arrayContaining(['branch', '-D', 'feat/test-task']),
+          expect.objectContaining({ cwd: testData.root }),
+        );
+        // taskStore updated to clear branch
+        const updated = taskStore.getById(testData.taskId);
+        expect(updated?.branch).toBeUndefined();
+      });
+
+      it('falls back to --force via docker exec when normal remove fails', () => {
+        testData = setupTestProject();
+        vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+        vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+          containerId: 'cont-abc',
+          remoteWorkspaceFolder: '/workspace',
+        } as any);
+        vi.mocked(hostToContainerPath).mockImplementation((hp: string, root: string, _ws: string) => {
+          if (hp === root) return '/workspace';
+          if (hp.startsWith(root)) return '/workspace' + hp.slice(root.length).replace(/\\/g, '/');
+          return hp;
+        });
+
+        const orch = makeOrch(testData.root);
+        const taskStore = (orch as AnyOrch).taskStore;
+        taskStore.update(testData.taskId, { description: 'test-task', branch: 'feat/test-task' });
+
+        const wtPath = orch.getWorktreePath(testData.taskId)!;
+        mkdirSync(wtPath, { recursive: true });
+
+        // Normal remove (docker exec) throws — simulate uncommitted changes
+        mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+          if (cmd === 'docker' && args.includes('remove') && !args.includes('--force')) {
+            throw new Error('worktree has uncommitted changes');
+          }
+          return '';
+        });
+
+        (orch as AnyOrch).removeWorktree(testData.taskId);
+
+        // Both tiers were attempted via docker exec
+        expect(mockExecFileSync).toHaveBeenCalledWith(
+          'docker',
+          expect.arrayContaining(['exec', '-u', 'node', 'cont-abc', 'git', 'worktree', 'remove']),
+        );
+        expect(mockExecFileSync).toHaveBeenCalledWith(
+          'docker',
+          expect.arrayContaining(['exec', '-u', 'node', 'cont-abc', 'git', 'worktree', 'remove', '--force']),
+        );
+        // Branch cleanup still runs on host
+        expect(mockExecFileSync).toHaveBeenCalledWith(
+          'git',
+          expect.arrayContaining(['branch', '-D', 'feat/test-task']),
+          expect.objectContaining({ cwd: testData.root }),
+        );
+        // taskStore updated to clear branch
+        const updated = taskStore.getById(testData.taskId);
+        expect(updated?.branch).toBeUndefined();
+      });
+
+      it('falls back to rmSync + prune when docker exec remove and --force both fail', () => {
+        testData = setupTestProject();
+        vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+        vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+          containerId: 'cont-abc',
+          remoteWorkspaceFolder: '/workspace',
+        } as any);
+        vi.mocked(hostToContainerPath).mockImplementation((hp: string, root: string, _ws: string) => {
+          if (hp === root) return '/workspace';
+          if (hp.startsWith(root)) return '/workspace' + hp.slice(root.length).replace(/\\/g, '/');
+          return hp;
+        });
+
+        const orch = makeOrch(testData.root);
+        const taskStore = (orch as AnyOrch).taskStore;
+        taskStore.update(testData.taskId, { description: 'test-task', branch: 'feat/test-task' });
+
+        const wtPath = orch.getWorktreePath(testData.taskId)!;
+        mkdirSync(wtPath, { recursive: true });
+        // Create a file inside the worktree to verify rmSync truly removes content
+        writeFileSync(join(wtPath, 'locked-file.txt'), 'this file should be deleted by rmSync');
+
+        // Both docker exec attempts throw — simulate locked files
+        mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+          if (cmd === 'docker' && args.includes('remove')) {
+            throw new Error('worktree is locked');
+          }
+          return '';
+        });
+
+        (orch as AnyOrch).removeWorktree(testData.taskId);
+
+        // rmSync was called — the worktree directory should be gone
+        expect(existsSync(wtPath)).toBe(false);
+        // git worktree prune was called on host (raw execFileSync)
+        expect(mockExecFileSync).toHaveBeenCalledWith(
+          'git',
+          expect.arrayContaining(['worktree', 'prune']),
+          expect.objectContaining({ cwd: testData.root }),
+        );
+        // Branch cleanup still runs
+        expect(mockExecFileSync).toHaveBeenCalledWith(
+          'git',
+          expect.arrayContaining(['branch', '-D', 'feat/test-task']),
+          expect.objectContaining({ cwd: testData.root }),
+        );
+        // taskStore updated to clear branch even in last-resort path
+        const updated = taskStore.getById(testData.taskId);
+        expect(updated?.branch).toBeUndefined();
+      });
+    });
   });
 
   // ── moveTaskToPhase — hasSpec/hasPlan branching ────────────────────
@@ -1255,9 +1400,11 @@ describe('Orchestrator — Full Coverage', () => {
       });
 
       mkdirSync(pipeline.worktreePath, { recursive: true });
-      // Set branch on the task so getWorktreePath returns the path
+      // Set branch AND description on the task so getWorktreePath returns the correct path.
+      // getWorktreePath derives the path from slugify(task.description), which must match
+      // the worktree directory we created above.
       const taskStore = (orch as AnyOrch).taskStore;
-      taskStore.update(testData.taskId, { branch: `feat/${slug}` });
+      taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
       mockCreateSession.mockResolvedValue('sess-merge');
       mockExecFileSync.mockReturnValue('');
 
