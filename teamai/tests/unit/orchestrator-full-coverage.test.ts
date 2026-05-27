@@ -91,7 +91,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 
 import { Orchestrator, getOrchestrator } from '../../src/lib/orchestrator';
 import { processManager } from '../../src/lib/process-manager';
-import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache } from '../../src/lib/container-manager';
+import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache, readContainerRemoteUser } from '../../src/lib/container-manager';
 
 type AnyOrch = any;
 
@@ -180,13 +180,16 @@ describe('Orchestrator — Full Coverage', () => {
   let testData: ReturnType<typeof setupTestProject>;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     onHandlers.clear();
+    // Default: container not enabled
     vi.mocked(readContainerConfig).mockReturnValue({ enabled: false });
     vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
     vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
-    vi.mocked(mockCreateSession).mockReset();
-    vi.mocked(mockKillSession).mockReset();
+    // Re-establish defaults that vi.resetAllMocks clears from module-level vi.mock()
+    vi.mocked(readContainerRemoteUser).mockReturnValue('node');
+    vi.mocked(dockerAvailable).mockReturnValue(true);
+    vi.mocked(_resetDockerAvailableCache).mockReturnValue(undefined);
   });
 
   afterEach(() => {

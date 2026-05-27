@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, truncateSync, openSync, closeSync, statSync } from 'fs';
 import path from 'path';
 import { warn as logWarn } from './logger';
 import { processManager, type AgentSession } from './process-manager';
@@ -210,13 +210,23 @@ export class Orchestrator {
       maxQaAttempts: config.maxQaAttempts,
     };
 
-    // Use provided startPhase, else first phase in config
+    // Use provided startPhase, else first phase in config.
+    // Set in-memory only — _persistAndEmitPhase commits to disk once work starts (#5).
     const firstPhase = startPhase ?? (config.phases[0] ?? 'spec') as PipelinePhase;
     pipeline.phase = firstPhase;
 
     this.pipelines.set(taskId, pipeline);
     this.taskStore.update(taskId, { branch });
-    this.advancePhase(pipeline, firstPhase);
+
+    // Restore pipeline state from a previous crash if available (#7)
+    const savedState = this._restorePipelineState(taskId, specPath);
+    if (savedState) {
+      if (savedState.mergeStrategy) pipeline.mergeStrategy = savedState.mergeStrategy;
+      if (savedState.qaAttempt !== undefined) pipeline.qaAttempt = savedState.qaAttempt;
+      if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;
+    }
+
+    this._savePipelineState(pipeline);
     try {
       await this.executePhase(pipeline);
     } catch (e) {
@@ -240,6 +250,8 @@ export class Orchestrator {
   async approveTask(taskId: string, strategy: MergeStrategy): Promise<void> {
     const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, 'awaiting-review');
     pipeline.mergeStrategy = strategy;
+    // Persist the chosen strategy so recovery can restore it after a crash
+    this.taskStore.update(taskId, { mergeStrategy: strategy });
     const next = strategy === 'local-merge' ? 'merge' : 'create-pr';
     this.advancePhase(pipeline, next);
     try {
@@ -274,9 +286,13 @@ export class Orchestrator {
 
   private async runSpec(pipeline: TaskPipeline): Promise<void> {
     const logFile = path.join(pipeline.specPath, 'output.log');
+    this._rotateOutputLog(logFile);
     this._phaseHeader(logFile, 'spec');
+    // Phase committed only AFTER execution actually starts
+    this._persistAndEmitPhase(pipeline);
     const sessionId = await processManager.createSession(this.sessionOpts('analyst', this.projectRoot, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
+    this._savePipelineState(pipeline);
     // Pass the explicit output path so the agent writes spec.md to the task's directory,
     // not a new directory derived from the description slug.
     const agentSpecPath = this._toAgentPath(pipeline.specPath);
@@ -290,9 +306,13 @@ export class Orchestrator {
 
   private async runPlan(pipeline: TaskPipeline): Promise<void> {
     const logFile = path.join(pipeline.specPath, 'output.log');
+    this._rotateOutputLog(logFile);
     this._phaseHeader(logFile, 'plan');
+    // Phase committed only AFTER execution actually starts
+    this._persistAndEmitPhase(pipeline);
     const sessionId = await processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
+    this._savePipelineState(pipeline);
     processManager.sendMessage(sessionId, `/plan ${this._toAgentPath(pipeline.specPath)}/spec.md`);
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
@@ -317,6 +337,8 @@ export class Orchestrator {
   }
 
   private async runImplement(pipeline: TaskPipeline): Promise<void> {
+    // Persist phase on disk now that work is actually starting (#5)
+    this._persistAndEmitPhase(pipeline);
     // Fail fast if Docker is not available — prevents silent no-op runs where all sessions exit
     // immediately and QA marks the task failed on an empty diff.
     if (readContainerConfig(this.projectRoot).enabled) {
@@ -333,8 +355,14 @@ export class Orchestrator {
       execFileSync('git', ['pull', '--ff-only', 'origin', 'master'], { cwd: this.projectRoot, stdio: 'pipe' });
     } catch { /* non-fast-forward or offline — proceed with local master */ }
 
-    // Ensure worktree exists — may be absent when resuming directly to implement
-    if (!existsSync(pipeline.worktreePath)) {
+    // Ensure worktree exists and is healthy — may be absent/corrupt when resuming (#4)
+    if (!existsSync(pipeline.worktreePath) || !this._isWorktreeHealthy(pipeline.worktreePath)) {
+      // Remove broken worktree first if it exists but is unhealthy
+      if (existsSync(pipeline.worktreePath)) {
+        try {
+          this._execGit(['worktree', 'remove', '--force', pipeline.worktreePath], this.projectRoot);
+        } catch { /* best-effort — proceed to recreate */ }
+      }
       try {
         this._execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], this.projectRoot);
       } catch {
@@ -408,7 +436,27 @@ export class Orchestrator {
           await this.waitForCompletion(sessionId);
           processManager.killSession(sessionId);
 
+          // Checkpoint: write plan.json immediately so completed subtasks
+          // survive a crash mid-group (#2). Uses a serialized promise chain
+          // to prevent concurrent write races from parallel subtasks.
           completedIds.push(subtask.id);
+          this._planWriteLock = this._planWriteLock.then(() => {
+            try {
+              const cpPlanPath = path.join(pipeline.specPath, 'plan.json');
+              if (!existsSync(cpPlanPath)) return;
+              const cpPlan = JSON.parse(readFileSync(cpPlanPath, 'utf-8'));
+              if (cpPlan.subtasks) {
+                for (const s of cpPlan.subtasks) {
+                  if (completedIds.includes(s.id)) {
+                    s.completed = true;
+                  }
+                }
+              }
+              const tmpPath = cpPlanPath + '.tmp';
+              writeFileSync(tmpPath, JSON.stringify(cpPlan, null, 2));
+              renameSync(tmpPath, cpPlanPath);
+            } catch { /* best-effort checkpoint */ }
+          });
         })
       );
       // If every session in the group failed (e.g. container unavailable), surface the first
@@ -417,20 +465,23 @@ export class Orchestrator {
         const firstReason = (results[0] as PromiseRejectedResult).reason;
         throw firstReason instanceof Error ? firstReason : new Error(String(firstReason));
       }
-      // Write all completions for this group at once to avoid read-modify-write races
+      // Write all completions for this group at once to avoid read-modify-write races.
+      // Must go through _planWriteLock to avoid racing with per-subtask checkpoint writes.
       if (completedIds.length > 0) {
-        const planPath = path.join(pipeline.specPath, 'plan.json');
-        try {
-          const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
-          if (plan.subtasks) {
-            for (const s of plan.subtasks) {
-              if (completedIds.includes(s.id)) {
-                s.completed = true;
+        this._planWriteLock = this._planWriteLock.then(() => {
+          const planPath = path.join(pipeline.specPath, 'plan.json');
+          try {
+            const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+            if (plan.subtasks) {
+              for (const s of plan.subtasks) {
+                if (completedIds.includes(s.id)) {
+                  s.completed = true;
+                }
               }
             }
-          }
-          writeFileSync(planPath, JSON.stringify(plan, null, 2));
-        } catch { /* best-effort */ }
+            writeFileSync(planPath, JSON.stringify(plan, null, 2));
+          } catch { /* best-effort */ }
+        });
       }
     }
 
@@ -444,6 +495,8 @@ export class Orchestrator {
   }
 
   private async runQaReview(pipeline: TaskPipeline): Promise<void> {
+    // Persist phase on disk now that work is actually starting (#5)
+    this._persistAndEmitPhase(pipeline);
     pipeline.qaAttempt++;
     const logFile = path.join(pipeline.specPath, 'output.log');
     this._phaseHeader(logFile, `qa-review (attempt ${pipeline.qaAttempt})`);
@@ -478,6 +531,8 @@ export class Orchestrator {
   }
 
   private async runMerge(pipeline: TaskPipeline): Promise<void> {
+    // Persist phase on disk now that work is actually starting (#5)
+    this._persistAndEmitPhase(pipeline);
     const logFile = path.join(pipeline.specPath, 'output.log');
     this._phaseHeader(logFile, 'merge');
     const sessionId = await processManager.createSession(this.sessionOpts('merger', this.projectRoot, pipeline.taskId, logFile));
@@ -493,6 +548,8 @@ export class Orchestrator {
   }
 
   private async runCreatePR(pipeline: TaskPipeline): Promise<void> {
+    // Persist phase on disk now that work is actually starting (#5)
+    this._persistAndEmitPhase(pipeline);
     // Rebase the feature branch onto the latest master before pushing so the PR is
     // created without conflicts. This handles the common case where master advanced
     // while the implement/QA phases were running.
@@ -576,6 +633,94 @@ export class Orchestrator {
       }
     } catch { /* best-effort */ }
     return null;
+  }
+
+  // Serializes writes to plan.json to prevent race conditions during
+  // per-subtask checkpointing in runImplement (#2).
+  private _planWriteLock: Promise<void> = Promise.resolve();
+
+  /** Rotate output log: keep last ~50KB when log exceeds ~100KB (#6) */
+  private _rotateOutputLog(logFile: string): void {
+    try {
+      if (!existsSync(logFile)) return;
+      const MAX_SIZE = 100_000;
+      const KEEP_SIZE = 50_000;
+      const stat = statSync(logFile);
+      if (stat.size > MAX_SIZE) {
+        const content = readFileSync(logFile, 'utf-8');
+        const truncated = content.slice(-KEEP_SIZE);
+        writeFileSync(logFile, truncated);
+        appendFileSync(logFile, `\n── LOG TRUNCATED (${stat.size} → ${KEEP_SIZE} bytes) ──\n`);
+      }
+    } catch { /* best-effort */ }
+  }
+
+  /**
+   * Persist phase to disk atomically and emit phase-change event.
+   * Called when phase work actually starts — NOT before (#5).
+   * This ensures a crash before work starts leaves the task at the previous phase.
+   */
+  private _persistAndEmitPhase(pipeline: TaskPipeline): void {
+    this.taskStore.updatePhase(pipeline.taskId, pipeline.phase);
+    processManager.emit('phase-change', { taskId: pipeline.taskId, phase: pipeline.phase });
+  }
+
+  /**
+   * Save pipeline state to disk for crash recovery (#7).
+   * On resume, _restorePipelineState reads this to recover sessionId, mergeStrategy, etc.
+   */
+  private _savePipelineState(pipeline: TaskPipeline): void {
+    try {
+      const statePath = path.join(pipeline.specPath, '.pipeline_state.json');
+      const state = {
+        taskId: pipeline.taskId,
+        phase: pipeline.phase,
+        sessionId: pipeline.sessionId,
+        mergeStrategy: pipeline.mergeStrategy,
+        qaAttempt: pipeline.qaAttempt,
+        branch: pipeline.branch,
+        worktreePath: pipeline.worktreePath,
+        updatedAt: new Date().toISOString(),
+      };
+      const tmpPath = statePath + '.tmp';
+      writeFileSync(tmpPath, JSON.stringify(state, null, 2));
+      renameSync(tmpPath, statePath);
+    } catch { /* best-effort */ }
+  }
+
+  /**
+   * Restore pipeline state from disk after a crash.
+   * Returns null if no saved state exists.
+   */
+  private _restorePipelineState(taskId: string, specPath: string): Partial<TaskPipeline> | null {
+    try {
+      const statePath = path.join(specPath, '.pipeline_state.json');
+      if (!existsSync(statePath)) return null;
+      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+      unlinkSync(statePath); // clean up after reading
+      return state;
+    } catch { return null; }
+  }
+
+  /**
+   * Verify the worktree is a valid git worktree (#4).
+   * Checks that .git file exists inside the worktree and points to a valid gitdir.
+   * Returns true if the worktree is healthy, false if it needs to be recreated.
+   */
+  private _isWorktreeHealthy(worktreePath: string): boolean {
+    try {
+      const gitFile = path.join(worktreePath, '.git');
+      if (!existsSync(gitFile)) return false;
+      const content = readFileSync(gitFile, 'utf-8').trim();
+      if (!content.startsWith('gitdir:')) return false;
+      const gitdir = content.slice('gitdir:'.length).trim();
+      // If the gitdir points back to the main repo's .git/worktrees/<name>
+      // Verify the referenced directory exists
+      if (!existsSync(gitdir)) return false;
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase): void {

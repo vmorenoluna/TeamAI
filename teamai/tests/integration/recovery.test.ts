@@ -397,6 +397,7 @@ describe('Recovery Integration', () => {
       expect(result.orphanedWorktrees).toHaveLength(1);
       expect(result.orphanedWorktrees[0].path).toContain('task-orphan-123');
       expect(result.staleSessions).toBe(5);
+      expect(result.artifactInconsistencies).toEqual([]);
     });
 
     it('returns empty report when nothing is wrong', async () => {
@@ -409,6 +410,7 @@ describe('Recovery Integration', () => {
       expect(result.interruptedTasks).toEqual([]);
       expect(result.orphanedWorktrees).toEqual([]);
       expect(result.staleSessions).toBe(0);
+      expect(result.artifactInconsistencies).toEqual([]);
     });
   });
 

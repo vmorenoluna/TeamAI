@@ -1,6 +1,18 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, rmSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, rmSync, unlinkSync, renameSync } from 'fs';
 import { join } from 'path';
 import { slugify } from './utils';
+
+type MergeStrategy = 'local-merge' | 'pull-request';
+
+/**
+ * Atomically write JSON to a file: write to a .tmp file, then rename.
+ * Prevents corruption if the process crashes mid-write.
+ */
+function atomicWriteJson(filePath: string, data: unknown): void {
+  const tmpPath = filePath + '.tmp';
+  writeFileSync(tmpPath, JSON.stringify(data, null, 2));
+  renameSync(tmpPath, filePath);
+}
 
 export interface Task {
   id: string;
@@ -15,6 +27,7 @@ export interface Task {
   competitiveContext?: string; // competitor context from roadmap item
   platform?: string;            // platform info from PR creation
   prUrl?: string;               // URL of the created Pull Request
+  mergeStrategy?: MergeStrategy; // chosen merge strategy for awaiting-review tasks
   completionSummary?: string;   // summary of what was completed when task fails
   subtaskProgress?: { completed: number; total: number } | null;  // computed at load time from plan.json
   createdAt: string;
@@ -49,7 +62,7 @@ export class TaskStore {
       updatedAt: new Date().toISOString(),
     };
 
-    writeFileSync(join(dir, 'task.json'), JSON.stringify(task, null, 2));
+    atomicWriteJson(join(dir, 'task.json'), task);
     return task;
   }
 
@@ -58,7 +71,7 @@ export class TaskStore {
     if (!task) throw new Error(`Task ${id} not found`);
     const updated = { ...task, ...fields, updatedAt: new Date().toISOString() };
     const dir = this.getDirById(id);
-    writeFileSync(join(dir, 'task.json'), JSON.stringify(updated, null, 2));
+    atomicWriteJson(join(dir, 'task.json'), updated);
   }
 
   updatePhase(id: string, phase: string): void {
@@ -69,7 +82,7 @@ export class TaskStore {
     task.updatedAt = new Date().toISOString();
 
     const dir = this.getDirById(id);
-    writeFileSync(join(dir, 'task.json'), JSON.stringify(task, null, 2));
+    atomicWriteJson(join(dir, 'task.json'), task);
 
     const event = { phase, timestamp: new Date().toISOString() };
     appendFileSync(join(dir, 'events.jsonl'), JSON.stringify(event) + '\n');
@@ -106,6 +119,8 @@ export class TaskStore {
 
   delete(id: string): void {
     const dir = this.getDirById(id);
+    // Clean up any stale .tmp file that might remain from a failed atomic write
+    try { const tmpPath = join(dir, 'task.json.tmp'); if (existsSync(tmpPath)) unlinkSync(tmpPath); } catch { /* best-effort */ }
     rmSync(dir, { recursive: true, force: true });
   }
 
@@ -126,6 +141,22 @@ export class TaskStore {
 
   getDirBySlug(slug: string): string {
     return join(this.specsDir, slug);
+  }
+
+  /**
+   * Read the raw task.json file for the given task without parsing.
+   * Returns the raw file content or null if not found. Used for
+   * atomic writes that need to read-back before modifying.
+   */
+  readRawTaskJson(id: string): string | null {
+    try {
+      const dir = this.getDirById(id);
+      const path = join(dir, 'task.json');
+      if (!existsSync(path)) return null;
+      return readFileSync(path, 'utf-8');
+    } catch {
+      return null;
+    }
   }
 
   getEvents(taskId: string): Array<{ phase: string; timestamp: string }> {

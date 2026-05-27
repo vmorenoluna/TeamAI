@@ -116,6 +116,9 @@ app.prepare().then(() => {
     if (report.autoClearedRateLimits > 0) {
       parts.push(`${report.autoClearedRateLimits} expired rate limit(s) auto-cleared`);
     }
+    if (report.artifactInconsistencies.length > 0) {
+      parts.push(`${report.artifactInconsistencies.length} artifact inconsistency(s)`);
+    }
 
     if (parts.length > 0) {
       console.log(`[recovery] ${parts.join(', ')} detected:`);
@@ -128,6 +131,9 @@ app.prepare().then(() => {
       }
       for (const w of report.orphanedWorktrees) {
         console.log(`  • orphaned worktree: ${w.path}`);
+      }
+      for (const a of report.artifactInconsistencies) {
+        console.log(`  • artifact inconsistency: ${a.title} (${a.phase}) in ${a.projectName} — ${a.issue}`);
       }
     } else {
       console.log('[recovery] clean — no stale state detected');
