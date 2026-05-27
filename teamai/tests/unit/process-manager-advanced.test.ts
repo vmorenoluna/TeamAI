@@ -7,9 +7,9 @@ import type { AgentSession } from '@/lib/process-manager';
 type AnySession = { sessions: Map<string, AgentSession>; terminalSessions: Map<string, any> };
 
 function mockProcess(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   overrides: Record<string, any> = {},
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
 ): any {
   return {
     kill: overrides.kill ?? vi.fn(),
@@ -34,6 +34,7 @@ function addMockSession(
     role: overrides.role ?? 'coder',
     cwd: overrides.cwd ?? '/test',
     status: overrides.status ?? 'running',
+    lastOutputAt: overrides.lastOutputAt ?? Date.now(),
   };
   (pm as unknown as AnySession).sessions.set(id, session);
   return session;

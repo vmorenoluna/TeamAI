@@ -35,6 +35,8 @@ export interface AgentSession {
   role: 'analyst' | 'planner' | 'coder' | 'qa-reviewer' | 'qa-fixer' | 'merger' | 'general';
   cwd: string;
   status: 'running' | 'idle' | 'done' | 'error';
+  /** Last time (epoch ms) the session produced stdout output. Used for stall detection (#8). */
+  lastOutputAt: number;
 }
 
 export class ProcessManager extends EventEmitter {
@@ -102,6 +104,7 @@ export class ProcessManager extends EventEmitter {
     // Parse NDJSON from stdout line by line
     const { logFile } = opts;
     let buffer = '';
+    const now = Date.now();
     proc.stdout!.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
       const lines = buffer.split('\n');
@@ -117,6 +120,9 @@ export class ProcessManager extends EventEmitter {
           }
         }
       }
+      // Update heartbeat on output
+      const session = this.sessions.get(id);
+      if (session) session.lastOutputAt = Date.now();
     });
 
     proc.stderr!.on('data', (chunk: Buffer) => {
@@ -146,6 +152,7 @@ export class ProcessManager extends EventEmitter {
       role: opts.role,
       cwd: opts.cwd,
       status: 'running',
+      lastOutputAt: now,
     });
 
     return id;
@@ -234,6 +241,22 @@ export class ProcessManager extends EventEmitter {
    */
   removeStaleSession(sessionId: string): void {
     this.sessions.delete(sessionId);
+  }
+
+  /**
+   * Return sessions that have produced no output for longer than `timeoutMs`.
+   * These sessions may be stalled/hung and need intervention (#8).
+   */
+  getStalledSessions(timeoutMs: number = 120_000): AgentSession[] {
+    const now = Date.now();
+    const stalled: AgentSession[] = [];
+    for (const session of this.sessions.values()) {
+      if (session.status !== 'running') continue;
+      if (now - session.lastOutputAt > timeoutMs) {
+        stalled.push(session);
+      }
+    }
+    return stalled;
   }
 
   // ── PTY terminal sessions ──────────────────────────────────────────────────

@@ -20,11 +20,21 @@ export interface OrphanedWorktree {
   projectName: string;
 }
 
+export interface ArtifactInconsistency {
+  taskId: string;
+  title: string;
+  phase: string;
+  projectPath: string;
+  projectName: string;
+  issue: string;
+}
+
 export interface StartupRecoveryReport {
   interruptedTasks: InterruptedTask[];
   staleSessions: number;
   orphanedWorktrees: OrphanedWorktree[];
   autoClearedRateLimits: number;
+  artifactInconsistencies: ArtifactInconsistency[];
 }
 
 /**
@@ -189,16 +199,77 @@ export function autoClearExpiredRateLimits(): number {
  * Returns a unified report for logging and UI display.
  * Call this once on server startup.
  */
+/**
+ * Reconcile task phase against expected artifacts on disk (#9).
+ * Catches cases where a task is in a phase but the corresponding artifact
+ * is missing (e.g. spec.md deleted while task is in 'plan' phase).
+ */
+export function reconcileTaskArtifacts(): ArtifactInconsistency[] {
+  const projects = _loadProjects();
+  const inconsistencies: ArtifactInconsistency[] = [];
+
+  // Phases and their required artifacts
+  const phaseRequirements: Record<string, string[]> = {
+    plan: ['spec.md'],
+    implement: ['spec.md', 'plan.json'],
+    'qa-review': ['spec.md', 'plan.json'],
+    merge: ['spec.md', 'plan.json'],
+    'create-pr': ['spec.md', 'plan.json'],
+  };
+
+  for (const project of projects) {
+    const teamaiDir = join(project.path, '.teamai');
+    if (!existsSync(teamaiDir)) continue;
+
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(teamaiDir);
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const taskFile = join(teamaiDir, entry, 'task.json');
+      if (!existsSync(taskFile)) continue;
+      try {
+        const task = JSON.parse(readFileSync(taskFile, 'utf-8'));
+        const required = phaseRequirements[task.phase];
+        if (!required) continue;
+
+        for (const artifact of required) {
+          const artifactPath = join(teamaiDir, entry, artifact);
+          if (!existsSync(artifactPath)) {
+            inconsistencies.push({
+              taskId: task.id,
+              title: task.title,
+              phase: task.phase,
+              projectPath: project.path,
+              projectName: project.name,
+              issue: `Missing required artifact '${artifact}' for phase '${task.phase}'`,
+            });
+          }
+        }
+      } catch {
+        // skip malformed task.json
+      }
+    }
+  }
+
+  return inconsistencies;
+}
+
 export function startupCleanup(staleSessionCount: number): StartupRecoveryReport {
   const interruptedTasks = findInterruptedTasks();
   const orphanedWorktrees = findOrphanedWorktrees();
   const autoClearedRateLimits = autoClearExpiredRateLimits();
+  const artifactInconsistencies = reconcileTaskArtifacts();
 
   return {
     interruptedTasks,
     staleSessions: staleSessionCount,
     orphanedWorktrees,
     autoClearedRateLimits,
+    artifactInconsistencies,
   };
 }
 

@@ -163,6 +163,79 @@ describe('ProcessManager', () => {
     });
   });
 
+  // ── getStalledSessions (#8 heartbeat/stall detection) ───────────
+
+  describe('getStalledSessions', () => {
+    it('returns empty when no sessions exist', () => {
+      expect(pm.getStalledSessions()).toEqual([]);
+    });
+
+    it('returns empty when all sessions have recent output', () => {
+      const session = {
+        id: 'session-1',
+        process: mockProcess({ exitCode: null, killed: false }),
+        taskId: 'task-1',
+        role: 'coder' as const,
+        cwd: '/test',
+        status: 'running' as const,
+        lastOutputAt: Date.now(),
+      };
+      (pm as AnySession).sessions.set('session-1', session);
+
+      expect(pm.getStalledSessions()).toEqual([]);
+    });
+
+    it('returns sessions with stale output (no output for > 120s)', () => {
+      const session = {
+        id: 'session-1',
+        process: mockProcess({ exitCode: null, killed: false }),
+        taskId: 'task-1',
+        role: 'coder' as const,
+        cwd: '/test',
+        status: 'running' as const,
+        lastOutputAt: Date.now() - 200_000, // 200s ago
+      };
+      (pm as AnySession).sessions.set('session-1', session);
+
+      const stalled = pm.getStalledSessions();
+      expect(stalled).toHaveLength(1);
+      expect(stalled[0].id).toBe('session-1');
+    });
+
+    it('ignores non-running sessions', () => {
+      const session = {
+        id: 'session-1',
+        process: mockProcess({ exitCode: 0, killed: false }),
+        taskId: 'task-1',
+        role: 'coder' as const,
+        cwd: '/test',
+        status: 'done' as const,
+        lastOutputAt: Date.now() - 200_000,
+      };
+      (pm as AnySession).sessions.set('session-1', session);
+
+      expect(pm.getStalledSessions()).toEqual([]);
+    });
+
+    it('respects custom timeout', () => {
+      const session = {
+        id: 'session-1',
+        process: mockProcess({ exitCode: null, killed: false }),
+        taskId: 'task-1',
+        role: 'coder' as const,
+        cwd: '/test',
+        status: 'running' as const,
+        lastOutputAt: Date.now() - 30_000, // 30s ago
+      };
+      (pm as AnySession).sessions.set('session-1', session);
+
+      // Default 120s timeout: not stalled (30s < 120s)
+      expect(pm.getStalledSessions()).toEqual([]);
+      // Custom 20s timeout: stalled (30s > 20s)
+      expect(pm.getStalledSessions(20_000)).toHaveLength(1);
+    });
+  });
+
   describe('killTerminalSession', () => {
     it('kills and removes a terminal session', () => {
       const killFn = vi.fn();

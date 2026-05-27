@@ -13,14 +13,14 @@ vi.mock('fs', () => ({
   writeFileSync: vi.fn(),
 }));
 
-import { findInterruptedTasks, findOrphanedWorktrees, startupCleanup, autoClearExpiredRateLimits } from '../../src/lib/recovery';
+import { findInterruptedTasks, findOrphanedWorktrees, startupCleanup, autoClearExpiredRateLimits, reconcileTaskArtifacts } from '../../src/lib/recovery';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 // Helper: readdirSync and statSync have overloaded signatures that make
 // mockImplementation require a type assertion. These wrappers contain the
 // narrow `as any` casts so each test doesn't need to repeat them.
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const mockReaddir = (impl: (path: unknown) => string[]) => {
   (vi.mocked(readdirSync) as any).mockImplementation(impl);
 };
@@ -28,7 +28,7 @@ const mockReaddir = (impl: (path: unknown) => string[]) => {
 const mockStatSync = (impl: () => { isDirectory: () => boolean }) => {
   (vi.mocked(statSync) as any).mockImplementation(impl);
 };
-/* eslint-enable @typescript-eslint/no-explicit-any */
+ 
 
 describe('findInterruptedTasks', () => {
   it('returns empty array when no projects file exists', () => {
@@ -389,7 +389,168 @@ describe('startupCleanup', () => {
       staleSessions: 3,
       orphanedWorktrees: [],
       autoClearedRateLimits: 0,
+      artifactInconsistencies: [],
     });
+  });
+});
+
+// ── reconcileTaskArtifacts (#9) ───────────────────────────────────
+
+describe('reconcileTaskArtifacts', () => {
+  it('returns empty when no projects exist', () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+    expect(reconcileTaskArtifacts()).toEqual([]);
+  });
+
+  it('returns empty when no tasks are in phases that require artifacts', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'backlog-task', 'task.json');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (String(p) === taskFile)
+        return JSON.stringify({ id: 'backlog-1', title: 'Backlog Task', phase: 'backlog' });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['backlog-task'];
+      return [];
+    });
+
+    expect(reconcileTaskArtifacts()).toEqual([]);
+  });
+
+  it('detects missing spec.md for plan phase task', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'plan-task', 'task.json');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      // spec.md does NOT exist
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (String(p) === taskFile)
+        return JSON.stringify({ id: 'plan-1', title: 'Plan Task', phase: 'plan' });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['plan-task'];
+      return [];
+    });
+
+    const result = reconcileTaskArtifacts();
+    expect(result).toHaveLength(1);
+    expect(result[0].taskId).toBe('plan-1');
+    expect(result[0].phase).toBe('plan');
+    expect(result[0].issue).toContain('spec.md');
+  });
+
+  it('detects missing plan.json for implement phase task', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'impl-task', 'task.json');
+    const specFile = join(teamaiDir, 'impl-task', 'spec.md');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      if (path === specFile) return true; // spec.md exists
+      // plan.json does NOT exist
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (String(p) === taskFile)
+        return JSON.stringify({ id: 'impl-1', title: 'Implement Task', phase: 'implement' });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['impl-task'];
+      return [];
+    });
+
+    const result = reconcileTaskArtifacts();
+    expect(result).toHaveLength(1);
+    expect(result[0].issue).toContain('plan.json');
+  });
+
+  it('reports no issues when all artifacts present', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'good-task', 'task.json');
+    const specFile = join(teamaiDir, 'good-task', 'spec.md');
+    const planFile = join(teamaiDir, 'good-task', 'plan.json');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      if (path === specFile) return true;
+      if (path === planFile) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (String(p) === taskFile)
+        return JSON.stringify({ id: 'good-1', title: 'Good Task', phase: 'implement' });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['good-task'];
+      return [];
+    });
+
+    expect(reconcileTaskArtifacts()).toEqual([]);
+  });
+
+  it('detects multiple missing artifacts for create-pr phase', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'pr-task', 'task.json');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      return false; // Neither spec.md nor plan.json exists
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (String(p) === taskFile)
+        return JSON.stringify({ id: 'pr-1', title: 'PR Task', phase: 'create-pr' });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['pr-task'];
+      return [];
+    });
+
+    const result = reconcileTaskArtifacts();
+    // create-pr requires both spec.md and plan.json
+    expect(result).toHaveLength(2);
   });
 });
 
