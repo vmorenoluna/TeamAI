@@ -502,6 +502,7 @@ export class Orchestrator {
     // Persist phase on disk now that work is actually starting (#5)
     this._persistAndEmitPhase(pipeline);
     pipeline.qaAttempt++;
+    this._savePipelineState(pipeline); // persist incremented qaAttempt so crash recovery doesn't lose it
     const logFile = path.join(pipeline.specPath, 'output.log');
     this._phaseHeader(logFile, `qa-review (attempt ${pipeline.qaAttempt})`);
 
@@ -530,6 +531,9 @@ export class Orchestrator {
       // Write QA feedback and bounce back to implement instead of auto-fixing
       this._writeQaFeedback(pipeline, report);
       this.advancePhase(pipeline, 'implement');
+      // Save state before bouncing back — if a crash happens during the implement cascade,
+      // the resumed pipeline will still have the correct qaAttempt and mergeStrategy.
+      this._savePipelineState(pipeline);
       await this.executePhase(pipeline);
     }
   }

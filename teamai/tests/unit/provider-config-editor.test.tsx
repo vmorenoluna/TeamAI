@@ -160,18 +160,24 @@ describe('ProviderConfigEditor', () => {
   it('updates model when custom input is blurred', async () => {
     render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
 
-    // Wait for select to render with current value
-    const select = await screen.findByDisplayValue('claude-sonnet-4-6');
-    expect(select.tagName).toBe('SELECT');
-
-    // Select "Custom…"  and wait for re-render
-    await act(async () => {
-      fireEvent.change(select, { target: { value: '__custom__' } });
+    // Wait for models to finish loading so the select renders with the current value
+    await waitFor(() => {
+      expect(screen.queryByText('Loading models…')).toBeNull();
     });
 
-    // Find custom input (use waitFor for robustness with React 19 async scheduling)
-    const customInput = await screen.findByPlaceholderText('Type a model name…');
+    // Find the default select whose current value is claude-sonnet-4-6
+    const defaultSelect = screen.getAllByRole('combobox').find(
+      el => (el as HTMLSelectElement).value === 'claude-sonnet-4-6'
+    ) as HTMLSelectElement | undefined;
+    expect(defaultSelect).toBeTruthy();
 
+    // Select "Custom…" and wait for re-render
+    await act(async () => {
+      fireEvent.change(defaultSelect!, { target: { value: '__custom__' } });
+    });
+
+    // Find custom input (use findByPlaceholderText for retry + timeout)
+    const customInput = await screen.findByPlaceholderText('Type a model name…');
     expect(customInput).toBeInTheDocument();
 
     // Type and blur
