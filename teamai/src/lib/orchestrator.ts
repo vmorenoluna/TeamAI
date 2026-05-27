@@ -341,7 +341,11 @@ export class Orchestrator {
     this._persistAndEmitPhase(pipeline);
     // Fail fast if Docker is not available — prevents silent no-op runs where all sessions exit
     // immediately and QA marks the task failed on an empty diff.
-    if (readContainerConfig(this.projectRoot).enabled) {
+    // When container.json explicitly opts in (explicit=true), skip this gate: the user has declared
+    // Docker is available. ensureContainer will detect the running container via docker ps label
+    // lookup and produce a clear error if Docker truly is not running.
+    const containerCfg = readContainerConfig(this.projectRoot);
+    if (containerCfg.enabled && !containerCfg.explicit) {
       _resetDockerAvailableCache(); // fresh check every pipeline start (don't use stale cached result)
       if (!dockerAvailable()) {
         throw new Error('Docker is not running. Start Docker Desktop and move the task back to In Progress to retry.');

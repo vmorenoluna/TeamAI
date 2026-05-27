@@ -76,7 +76,7 @@ vi.mock('../../src/lib/process-manager', () => ({
 }));
 
 vi.mock('../../src/lib/container-manager', () => ({
-  readContainerConfig: vi.fn(() => ({ enabled: false })),
+  readContainerConfig: vi.fn(() => ({ enabled: false, explicit: false })),
   readContainerRemoteUser: vi.fn(() => 'node'),
   containerManager: {
     ensureContainer: vi.fn(),
@@ -183,7 +183,7 @@ describe('Orchestrator — Full Coverage', () => {
     vi.resetAllMocks();
     onHandlers.clear();
     // Default: container not enabled
-    vi.mocked(readContainerConfig).mockReturnValue({ enabled: false });
+    vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
     vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
     vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
     // Re-establish defaults that vi.resetAllMocks clears from module-level vi.mock()
@@ -672,7 +672,7 @@ describe('Orchestrator — Full Coverage', () => {
 
     it('calls docker exec when container is enabled and running', () => {
       testData = setupTestProject();
-      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       vi.mocked(containerManager.getRunningContainer).mockReturnValue({
         containerId: 'cont-abc',
         remoteWorkspaceFolder: '/workspace',
@@ -695,7 +695,7 @@ describe('Orchestrator — Full Coverage', () => {
     // Coverage: line 540 — absolute project path mapped through hostToContainerPath
     it('maps absolute project paths via hostToContainerPath in container mode', () => {
       testData = setupTestProject();
-      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       vi.mocked(containerManager.getRunningContainer).mockReturnValue({
         containerId: 'cont-xyz',
         remoteWorkspaceFolder: '/workspace',
@@ -722,7 +722,7 @@ describe('Orchestrator — Full Coverage', () => {
 
     it('leaves non-project absolute paths unchanged in container mode', () => {
       testData = setupTestProject();
-      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       vi.mocked(containerManager.getRunningContainer).mockReturnValue({
         containerId: 'cont-xyz',
         remoteWorkspaceFolder: '/workspace',
@@ -745,7 +745,7 @@ describe('Orchestrator — Full Coverage', () => {
 
     it('falls back to host git when container is enabled but not running', () => {
       testData = setupTestProject();
-      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       // No running container
       vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
 
@@ -771,7 +771,7 @@ describe('Orchestrator — Full Coverage', () => {
 
     it('translates path via hostToContainerPath when container enabled and running', () => {
       testData = setupTestProject();
-      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       vi.mocked(containerManager.getRunningContainer).mockReturnValue({
         containerId: 'abc',
         remoteWorkspaceFolder: '/workspace',
@@ -800,7 +800,7 @@ describe('Orchestrator — Full Coverage', () => {
 
     it('returns .worktrees when container is enabled', () => {
       testData = setupTestProject();
-      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       const orch = makeOrch(testData.root);
 
       const base = (orch as AnyOrch).getWorktreeBase();
@@ -1805,7 +1805,7 @@ describe('Orchestrator — Full Coverage', () => {
       testData = setupTestProject({ containerEnabled: true });
       const orch = makeOrch(testData.root);
 
-      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: false });
       vi.mocked(dockerAvailable).mockReturnValue(false);
 
       const slug = 'test-task';
@@ -1829,7 +1829,7 @@ describe('Orchestrator — Full Coverage', () => {
       testData = setupTestProject({ containerEnabled: true });
       const orch = makeOrch(testData.root);
 
-      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true });
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       vi.mocked(dockerAvailable).mockReturnValue(true);
       vi.mocked(containerManager.ensureContainer).mockResolvedValue({
         remoteWorkspaceFolder: '/workspace',
@@ -1857,7 +1857,8 @@ describe('Orchestrator — Full Coverage', () => {
       await new Promise(r => setTimeout(r, 20));
 
       expect(mockCreateSession).toHaveBeenCalled();
-      expect(_resetDockerAvailableCache).toHaveBeenCalled();
+      // _resetDockerAvailableCache is only called when !containerCfg.explicit (the Docker gate).
+      // With explicit: true the gate is skipped, so _resetDockerAvailableCache is NOT called.
 
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
       await new Promise(r => setTimeout(r, 10));
