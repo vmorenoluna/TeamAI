@@ -1255,6 +1255,9 @@ describe('Orchestrator — Full Coverage', () => {
       });
 
       mkdirSync(pipeline.worktreePath, { recursive: true });
+      // Set branch on the task so getWorktreePath returns the path
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { branch: `feat/${slug}` });
       mockCreateSession.mockResolvedValue('sess-merge');
       mockExecFileSync.mockReturnValue('');
 
@@ -1268,6 +1271,7 @@ describe('Orchestrator — Full Coverage', () => {
       await promise;
 
       expect(mockKillSession).toHaveBeenCalledWith('sess-merge');
+      // removeWorktree tries normal remove first, then branch -D (force delete)
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
         expect.arrayContaining(['worktree', 'remove']),
@@ -1275,7 +1279,7 @@ describe('Orchestrator — Full Coverage', () => {
       );
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['branch', '-d']),
+        expect.arrayContaining(['branch', '-D']),
         expect.any(Object),
       );
       expect(pipeline.phase).toBe('done');
@@ -1724,9 +1728,16 @@ describe('Orchestrator — Full Coverage', () => {
       mockExecFileSync.mockReturnValue('');
       (orch as AnyOrch)._removeWorktreeForce(testData.taskId);
 
+      // Now delegates to removeWorktree which tries normal remove first,
+      // then git branch -D, then updates taskStore
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['worktree', 'remove', '--force']),
+        expect.arrayContaining(['worktree', 'remove']),
+        expect.any(Object),
+      );
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['branch', '-D']),
         expect.any(Object),
       );
     });

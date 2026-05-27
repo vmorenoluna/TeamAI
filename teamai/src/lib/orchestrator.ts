@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, truncateSync, openSync, closeSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, truncateSync, openSync, closeSync, statSync, rmSync } from 'fs';
 import path from 'path';
 import { warn as logWarn } from './logger';
 import { processManager, type AgentSession } from './process-manager';
@@ -549,8 +549,7 @@ export class Orchestrator {
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 
-    this._execGit(['worktree', 'remove', pipeline.worktreePath], this.projectRoot);
-    this._execGit(['branch', '-d', pipeline.branch], this.projectRoot);
+    this.removeWorktree(pipeline.taskId);
 
     this.advancePhase(pipeline, 'done');
   }
@@ -1070,26 +1069,39 @@ export class Orchestrator {
     return path.join(this.getWorktreeBase(), slug);
   }
 
-  /** Remove the git worktree for this task if it exists on disk. Silently no-ops if not found. */
+  /**
+   * Remove the git worktree for this task if it exists on disk.
+   * Tries a normal remove first; falls back to --force if there are uncommitted changes.
+   * Always cleans up the branch and updates the task record so no stale state lingers.
+   */
   private removeWorktree(taskId: string): void {
     const wtPath = this.getWorktreePath(taskId);
     if (!wtPath || !existsSync(wtPath)) return;
     try {
       this._execGit(['worktree', 'remove', wtPath], this.projectRoot);
-      this.taskStore.update(taskId, { branch: undefined });
     } catch {
-      // Worktree removal can fail if there are uncommitted changes; ignore silently
+      // Normal remove failed (e.g. uncommitted changes) — force it
+      try {
+        this._execGit(['worktree', 'remove', '--force', wtPath], this.projectRoot);
+      } catch {
+        // Worktree is stuck (e.g. files locked by another process).
+        // Delete the worktree directory manually, then prune the stale git metadata.
+        try { rmSync(wtPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+        try { execFileSync('git', ['worktree', 'prune'], { cwd: this.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+      }
     }
+    const task = this.taskStore.getById(taskId);
+    if (task?.branch) {
+      // Force-delete the branch — worktree removal prunes the worktree metadata but
+      // the branch may still linger if the worktree had uncommitted changes.
+      try { execFileSync('git', ['branch', '-D', task.branch], { cwd: this.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+    }
+    this.taskStore.update(taskId, { branch: undefined });
   }
 
-  /** Force-remove the git worktree (discards uncommitted changes). Used during cleanup. */
+  /** Force-remove the git worktree (discards uncommitted changes). Delegates to removeWorktree. */
   private _removeWorktreeForce(taskId: string): void {
-    const wtPath = this.getWorktreePath(taskId);
-    if (!wtPath || !existsSync(wtPath)) return;
-    try {
-      this._execGit(['worktree', 'remove', '--force', wtPath], this.projectRoot);
-    } catch { /* best-effort */ }
-    this.taskStore.update(taskId, { branch: undefined });
+    this.removeWorktree(taskId);
   }
 
   /** Discard all uncommitted changes in the worktree. Works on both host and container. */
