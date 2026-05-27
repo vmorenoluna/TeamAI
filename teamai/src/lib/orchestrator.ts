@@ -326,6 +326,13 @@ export class Orchestrator {
       }
     }
 
+    // Pull latest master before creating the worktree so the feature branch starts
+    // from up-to-date code, minimising conflicts at PR time.
+    // (runPlan does the same pull; this covers the resume-directly-to-implement path.)
+    try {
+      execFileSync('git', ['pull', '--ff-only', 'origin', 'master'], { cwd: this.projectRoot, stdio: 'pipe' });
+    } catch { /* non-fast-forward or offline — proceed with local master */ }
+
     // Ensure worktree exists — may be absent when resuming directly to implement
     if (!existsSync(pipeline.worktreePath)) {
       try {
@@ -440,6 +447,13 @@ export class Orchestrator {
     pipeline.qaAttempt++;
     const logFile = path.join(pipeline.specPath, 'output.log');
     this._phaseHeader(logFile, `qa-review (attempt ${pipeline.qaAttempt})`);
+
+    // Fetch latest origin/master so the QA agent's git diff is compared against the
+    // actual current remote baseline, not a stale local cache.
+    try {
+      execFileSync('git', ['fetch', 'origin', 'master'], { cwd: this.projectRoot, stdio: 'pipe' });
+    } catch { /* offline or unreachable — QA proceeds with cached refs */ }
+
     const sessionId = await processManager.createSession(this.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
     processManager.sendMessage(sessionId, `/qa-review ${this._toAgentPath(pipeline.specPath)}/spec.md`);
@@ -1144,7 +1158,12 @@ export function buildPlatformPrompt(
   projectRoot: string,
 ): string {
   const defaultBranch = detectDefaultBranch(projectRoot);
-  const base = `Create a Pull Request for branch "${branch}" targeting the ${defaultBranch} branch.\n\n`;
+  const base = `Create a Pull Request for branch "${branch}" targeting the ${defaultBranch} branch.\n\n` +
+    `IMPORTANT: First check whether an open PR already exists for branch "${branch}".\n` +
+    `- If an open PR exists: report its URL and stop — do not create a duplicate.\n` +
+    `- If a previously merged PR exists for this branch: ignore it and CREATE A NEW PR now.\n` +
+    `  A merged PR does not mean the current branch commits have been reviewed.\n` +
+    `  The branch has been re-pushed with new commits that need a fresh PR.\n\n`;
   const meta = `Title: ${description}\n\n` +
     `Body: Generate a clear PR description from this spec:\n\n${specContent}\n\n` +
     `Include a summary of changes, testing done (QA passed), and any notes for reviewers.`;

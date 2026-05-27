@@ -7,9 +7,12 @@ Read the spec at: $ARGUMENTS
 
 ## Review Process
 1. Read the spec's acceptance criteria.
-2. Read every file listed in the spec's "Files to Modify" section.
+2. Read every file listed in the spec's "Files to Modify" section. Read the current file content — not just the diff.
 3. Check the git diff to see what actually changed: `git diff origin/HEAD...HEAD`
-4. For each acceptance criterion, determine PASS or FAIL with evidence.
+4. For each acceptance criterion, determine PASS or FAIL with evidence from the actual file content:
+   - If a criterion says "no occurrences of X remain": grep the relevant files and paste the result.
+   - If a criterion says "Y is used instead of Z": read the file and confirm.
+   - Never infer a criterion is satisfied from the diff alone — verify against current code.
 5. Check for:
    - Correctness: Does the code do what the spec says?
    - Edge cases: Are error states handled?
