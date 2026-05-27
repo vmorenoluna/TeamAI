@@ -46,13 +46,13 @@ export function dockerAvailable(): boolean {
   return _dockerAvailable;
 }
 
-export function readContainerConfig(projectRoot: string): { enabled: boolean } {
+export function readContainerConfig(projectRoot: string): { enabled: boolean; explicit: boolean } {
   const cfgPath = path.join(projectRoot, '.teamai', 'container.json');
   if (existsSync(cfgPath)) {
-    try { return JSON.parse(readFileSync(cfgPath, 'utf-8')); } catch (err) { logWarn('container', 'Failed to parse container config, using defaults', err); }
+    try { return { ...JSON.parse(readFileSync(cfgPath, 'utf-8')), explicit: true }; } catch (err) { logWarn('container', 'Failed to parse container config, using defaults', err); }
   }
   // Default: auto-enable when Docker is available, opt-out otherwise
-  return { enabled: dockerAvailable() };
+  return { enabled: dockerAvailable(), explicit: false };
 }
 
 /**
