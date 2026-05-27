@@ -59,7 +59,7 @@ type AnyPM = {
 };
 
 /** Create a mock child process with controllable stdout/stderr/exit */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 interface MockProcess {
   kill: ReturnType<typeof vi.fn>;
   exitCode: number | null;

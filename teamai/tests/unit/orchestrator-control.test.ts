@@ -68,7 +68,7 @@ let testDir: string;
 let taskId: string;
 let orch: unknown;
 
-type AnyOrch = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+type AnyOrch = any;  
 
 /** Fire an exit event to signal session termination */
 function fireExitEvent(sessionId: string, code: number) {
