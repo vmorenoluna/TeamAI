@@ -559,3 +559,67 @@ describe('ProcessManager — getTerminalSessions with data', () => {
     expect(terminals).toHaveLength(2);
   });
 });
+
+// ── getStalledSessions (stall/heartbeat detection #8) ────────────────────────
+
+describe('ProcessManager — getStalledSessions', () => {
+  it('returns empty when no sessions exist', () => {
+    const pm = new ProcessManager();
+    (pm as unknown as AnySession).sessions.clear();
+    expect(pm.getStalledSessions()).toEqual([]);
+  });
+
+  it('returns empty when all sessions have recent output', () => {
+    const pm = new ProcessManager();
+    (pm as unknown as AnySession).sessions.clear();
+    addMockSession(pm, 'sess-1', { status: 'running', lastOutputAt: Date.now() });
+    expect(pm.getStalledSessions()).toEqual([]);
+  });
+
+  it('returns sessions with stale output (no output for > 120s)', () => {
+    const pm = new ProcessManager();
+    (pm as unknown as AnySession).sessions.clear();
+    addMockSession(pm, 'sess-1', { status: 'running', lastOutputAt: Date.now() - 200_000 });
+    const stalled = pm.getStalledSessions();
+    expect(stalled).toHaveLength(1);
+    expect(stalled[0].id).toBe('sess-1');
+  });
+
+  it('ignores non-running sessions', () => {
+    const pm = new ProcessManager();
+    (pm as unknown as AnySession).sessions.clear();
+    addMockSession(pm, 'sess-1', { status: 'done', lastOutputAt: Date.now() - 200_000 });
+    expect(pm.getStalledSessions()).toEqual([]);
+  });
+
+  it('respects custom timeout', () => {
+    const pm = new ProcessManager();
+    (pm as unknown as AnySession).sessions.clear();
+    addMockSession(pm, 'sess-1', { status: 'running', lastOutputAt: Date.now() - 30_000 });
+    // Default 120s timeout: not stalled (30s < 120s)
+    expect(pm.getStalledSessions()).toEqual([]);
+    // Custom 20s timeout: stalled (30s > 20s)
+    expect(pm.getStalledSessions(20_000)).toHaveLength(1);
+  });
+});
+
+// ── EventEmitter functionality ───────────────────────────────────────────────
+
+describe('ProcessManager — EventEmitter', () => {
+  it('emits and receives events', () => {
+    const pm = new ProcessManager();
+    const handler = vi.fn();
+    pm.on('test-event', handler);
+    pm.emit('test-event', { data: 'hello' });
+    expect(handler).toHaveBeenCalledWith({ data: 'hello' });
+  });
+
+  it('removes listener with off', () => {
+    const pm = new ProcessManager();
+    const handler = vi.fn();
+    pm.on('test-event', handler);
+    pm.off('test-event', handler);
+    pm.emit('test-event', { data: 'hello' });
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
