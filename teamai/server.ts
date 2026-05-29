@@ -52,8 +52,8 @@ app.prepare().then(() => {
   });
 
   // Broadcast phase-change events from the Orchestrator to all connected clients
-  processManager.on('phase-change', (data: { taskId: string; phase: string }) => {
-    const msg = JSON.stringify({ type: 'phase-change', taskId: data.taskId, phase: data.phase });
+  processManager.on('phase-change', (data: { taskId: string; phase: string; prUrl?: string; platform?: string }) => {
+    const msg = JSON.stringify({ type: 'phase-change', taskId: data.taskId, phase: data.phase, prUrl: data.prUrl, platform: data.platform });
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) client.send(msg);
     }

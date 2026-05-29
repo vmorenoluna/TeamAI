@@ -1,7 +1,7 @@
 /**
- * Tests that getTaskArtifacts and getTaskFull use detectDefaultBranch
- * to dynamically determine the base branch for git diff, rather than
- * hardcoding 'main'.
+ * Integration tests for server action functions (getTaskArtifacts, getTaskFull).
+ * Covers git diff (detectDefaultBranch), humanFeedback from human_feedback.md,
+ * and edge cases for header stripping, whitespace trimming, and null returns.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -278,5 +278,178 @@ describe('getTaskFull — git diff uses detectDefaultBranch', () => {
     const result = await getTaskFull(taskId);
 
     expect(result.diff).toBeNull();
+  });
+});
+
+describe('getTaskFull — includes humanFeedback from human_feedback.md', () => {
+  let taskId: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockProjectPath = TEST_DIR;
+    mkdirSync(join(TEST_DIR, '.teamai', 'feedback-task-slug'), { recursive: true });
+    taskId = 'task-feedback-test';
+
+    const task = {
+      id: taskId,
+      title: 'Test Feedback Task',
+      description: 'test task for human feedback',
+      phase: 'qa-review',
+      // no branch — skip git diff to keep test focused
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    writeFileSync(
+      join(TEST_DIR, '.teamai', 'feedback-task-slug', 'task.json'),
+      JSON.stringify(task, null, 2),
+    );
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it('returns stripped humanFeedback when human_feedback.md exists', async () => {
+    // Write the human_feedback.md file in the task's directory
+    writeFileSync(
+      join(TEST_DIR, '.teamai', 'feedback-task-slug', 'human_feedback.md'),
+      '# Human Review Feedback\n\nFix the header alignment on mobile\n',
+    );
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull(taskId);
+
+    expect(result.humanFeedback).toBe('Fix the header alignment on mobile');
+  });
+
+  it('returns humanFeedback=null when human_feedback.md does not exist', async () => {
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull(taskId);
+
+    expect(result.humanFeedback).toBeNull();
+  });
+
+  it('returns null when the file contains only the header (no actual feedback)', async () => {
+    writeFileSync(
+      join(TEST_DIR, '.teamai', 'feedback-task-slug', 'human_feedback.md'),
+      '# Human Review Feedback\n\n',
+    );
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull(taskId);
+
+    expect(result.humanFeedback).toBeNull();
+  });
+
+  it('returns null when the file is whitespace-only after stripping header', async () => {
+    writeFileSync(
+      join(TEST_DIR, '.teamai', 'feedback-task-slug', 'human_feedback.md'),
+      '# Human Review Feedback\n\n   \n',
+    );
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull(taskId);
+
+    expect(result.humanFeedback).toBeNull();
+  });
+
+  it('trims extra whitespace from around the feedback content', async () => {
+    writeFileSync(
+      join(TEST_DIR, '.teamai', 'feedback-task-slug', 'human_feedback.md'),
+      '# Human Review Feedback\n\n  Fix the button color  \n\n',
+    );
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull(taskId);
+
+    expect(result.humanFeedback).toBe('Fix the button color');
+  });
+});
+
+describe('getTaskArtifacts — includes humanFeedback from human_feedback.md', () => {
+  let taskId: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockProjectPath = TEST_DIR;
+    mkdirSync(join(TEST_DIR, '.teamai', 'artifacts-feedback-slug'), { recursive: true });
+    taskId = 'task-artifacts-feedback-test';
+
+    const task = {
+      id: taskId,
+      title: 'Test Artifacts Feedback Task',
+      description: 'test task for human feedback in getTaskArtifacts',
+      phase: 'qa-review',
+      // no branch — skip git diff to keep test focused
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    writeFileSync(
+      join(TEST_DIR, '.teamai', 'artifacts-feedback-slug', 'task.json'),
+      JSON.stringify(task, null, 2),
+    );
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it('returns stripped humanFeedback when human_feedback.md exists', async () => {
+    writeFileSync(
+      join(TEST_DIR, '.teamai', 'artifacts-feedback-slug', 'human_feedback.md'),
+      '# Human Review Feedback\n\nFix the header alignment on mobile\n',
+    );
+
+    const { getTaskArtifacts } = await import('@/app/actions/tasks');
+    const result = await getTaskArtifacts(taskId);
+
+    expect(result.humanFeedback).toBe('Fix the header alignment on mobile');
+  });
+
+  it('returns humanFeedback=null when human_feedback.md does not exist', async () => {
+    const { getTaskArtifacts } = await import('@/app/actions/tasks');
+    const result = await getTaskArtifacts(taskId);
+
+    expect(result.humanFeedback).toBeNull();
+  });
+
+  it('returns null when the file contains only the header (no actual feedback)', async () => {
+    writeFileSync(
+      join(TEST_DIR, '.teamai', 'artifacts-feedback-slug', 'human_feedback.md'),
+      '# Human Review Feedback\n\n',
+    );
+
+    const { getTaskArtifacts } = await import('@/app/actions/tasks');
+    const result = await getTaskArtifacts(taskId);
+
+    expect(result.humanFeedback).toBeNull();
+  });
+
+  it('returns null when the file is whitespace-only after stripping header', async () => {
+    writeFileSync(
+      join(TEST_DIR, '.teamai', 'artifacts-feedback-slug', 'human_feedback.md'),
+      '# Human Review Feedback\n\n   \n',
+    );
+
+    const { getTaskArtifacts } = await import('@/app/actions/tasks');
+    const result = await getTaskArtifacts(taskId);
+
+    expect(result.humanFeedback).toBeNull();
+  });
+
+  it('trims extra whitespace from around the feedback content', async () => {
+    writeFileSync(
+      join(TEST_DIR, '.teamai', 'artifacts-feedback-slug', 'human_feedback.md'),
+      '# Human Review Feedback\n\n  Fix the button color  \n\n',
+    );
+
+    const { getTaskArtifacts } = await import('@/app/actions/tasks');
+    const result = await getTaskArtifacts(taskId);
+
+    expect(result.humanFeedback).toBe('Fix the button color');
   });
 });

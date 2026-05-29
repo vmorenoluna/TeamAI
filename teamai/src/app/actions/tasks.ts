@@ -20,6 +20,13 @@ async function getStores() {
   };
 }
 
+export function readHumanFeedback(dir: string): string | null {
+  const path = join(dir, 'human_feedback.md');
+  if (!existsSync(path)) return null;
+  const raw = readFileSync(path, 'utf-8').replace(/^# Human Review Feedback\n\n/, '').trim();
+  return raw || null;
+}
+
 export async function createTask(formData: FormData) {
   const { taskStore } = await getStores();
   const id = randomUUID();
@@ -229,6 +236,8 @@ export async function getTaskArtifacts(taskId: string) {
     ? JSON.parse(readFileSync(qaPath, 'utf-8'))
     : null;
 
+  const humanFeedback = readHumanFeedback(dir);
+
   let diff: string | null = null;
   if (task.branch) {
     try {
@@ -242,7 +251,7 @@ export async function getTaskArtifacts(taskId: string) {
     }
   }
 
-  return { spec, qaReport, diff };
+  return { spec, qaReport, humanFeedback, diff };
 }
 
 export async function getTaskFull(taskId: string) {
@@ -281,10 +290,12 @@ export async function getTaskFull(taskId: string) {
     } catch { /* no diff yet */ }
   }
 
+  const humanFeedback = readHumanFeedback(dir);
+
   const outputPath = join(dir, 'output.log');
   const agentOutput = existsSync(outputPath) ? readFileSync(outputPath, 'utf-8') : null;
 
-  return { task, allTasks, dependencies, dependents, spec, plan, qaReport, diff, agentOutput };
+  return { task, allTasks, dependencies, dependents, spec, plan, qaReport, humanFeedback, diff, agentOutput };
 }
 
 export async function setTaskRoleOverride(taskId: string, role: string | null): Promise<void> {
