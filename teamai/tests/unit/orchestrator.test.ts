@@ -428,7 +428,7 @@ describe('Orchestrator', () => {
     it('throws when not awaiting review', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
-      await expect(orch.approveTask(testData.taskId, 'local-merge')).rejects.toThrow('is not awaiting-review');
+      await expect(orch.approveTask(testData.taskId, 'local-merge')).rejects.toThrow('cannot approve a task in backlog');
     });
   });
 
@@ -436,7 +436,7 @@ describe('Orchestrator', () => {
     it('throws when not awaiting review', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
-      await expect(orch.rejectTask(testData.taskId, 'bad')).rejects.toThrow('is not awaiting-review');
+      await expect(orch.rejectTask(testData.taskId, 'bad')).rejects.toThrow('cannot reject a task in backlog');
     });
 
     it('writes feedback and resets qaAttempt when awaiting review', async () => {
@@ -2384,6 +2384,161 @@ describe('Orchestrator', () => {
       await new Promise(r => setTimeout(r, 20));
 
       expect(gitWorktreeAttemptCount).toBe(2);
+
+      fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 10));
+
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [],
+      }));
+      fireEvent('event', { sessionId: 'sess-2', event: { type: 'result' } });
+      await promise;
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+  });
+
+  // ── runImplement QA/human feedback surfacing ───────────────────────
+
+  describe('runImplement — QA/human feedback surfacing', () => {
+    it('reads both qa_feedback.md and human_feedback.md and surfaces them to the coder prompt', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      // Write both feedback files
+      writeFileSync(join(testData.taskDir, 'qa_feedback.md'),
+        '# QA Feedback\\n\\nMobile layout is broken\\n');
+      writeFileSync(join(testData.taskDir, 'human_feedback.md'),
+        '# Human Review Feedback\\n\\nAlso fix the header alignment\\n');
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px'] }],
+      }));
+
+      const slug = 'test-task';
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+
+      let sessionCounter = 0;
+      mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
+
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+      // Verify the coder got both feedbacks
+      const sendCalls = mockSendMessage.mock.calls.filter(
+        (call: any[]) => call[0] === 'sess-1'
+      );
+      expect(sendCalls.length).toBeGreaterThanOrEqual(1);
+      const promptText = sendCalls[0][1];
+      expect(promptText).toContain('QA FEEDBACK');
+      expect(promptText).toContain('Mobile layout is broken');
+      expect(promptText).toContain('Also fix the header alignment');
+      expect(promptText).toContain('/implement Subtask 1');
+
+      // Fire events to complete implement -> QA -> done
+      fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 10));
+
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [],
+      }));
+      fireEvent('event', { sessionId: 'sess-2', event: { type: 'result' } });
+      await promise;
+
+      // Verify both feedback files were cleaned up
+      expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'human_feedback.md'))).toBe(false);
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+
+    it('surfaces only qa_feedback.md when human_feedback.md is absent', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'qa_feedback.md'),
+        '# QA Feedback\\n\\nMobile layout is broken\\n');
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px'] }],
+      }));
+
+      const slug = 'test-task';
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+
+      let sessionCounter = 0;
+      mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
+
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+      const sendCalls = mockSendMessage.mock.calls.filter(
+        (call: any[]) => call[0] === 'sess-1'
+      );
+      const promptText = sendCalls[0][1];
+      expect(promptText).toContain('QA FEEDBACK');
+      expect(promptText).toContain('Mobile layout is broken');
+      // Human feedback should NOT appear in the prompt
+      expect(promptText).not.toContain('Also fix the header alignment');
+
+      fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 10));
+
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [],
+      }));
+      fireEvent('event', { sessionId: 'sess-2', event: { type: 'result' } });
+      await promise;
+
+      expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+
+    it('does not include feedback header when neither feedback file exists', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px'] }],
+      }));
+
+      const slug = 'test-task';
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+
+      let sessionCounter = 0;
+      mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
+
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+      const sendCalls = mockSendMessage.mock.calls.filter(
+        (call: any[]) => call[0] === 'sess-1'
+      );
+      const promptText = sendCalls[0][1];
+      expect(promptText).not.toContain('QA FEEDBACK');
+      expect(promptText).toContain('/implement Subtask 1');
 
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
       await new Promise(r => setTimeout(r, 10));

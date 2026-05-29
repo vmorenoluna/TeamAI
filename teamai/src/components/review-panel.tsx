@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { approveTask, rejectTask } from '@/app/actions/tasks';
+import { approveTask, rejectTask, markTaskDone } from '@/app/actions/tasks';
 
 interface QaReport {
   overall: 'PASS' | 'FAIL';
@@ -13,7 +13,10 @@ interface Props {
   taskId: string;
   spec: string | null;
   qaReport: QaReport | null;
+  humanFeedback?: string | null;
   diff: string | null;
+  prUrl?: string | null;
+  phase: string;
 }
 
 function DiffLine({ line }: { line: string }) {
@@ -45,27 +48,46 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function ReviewPanel({ taskId, spec, qaReport, diff }: Props) {
+type PendingAction = 'approve-local' | 'approve-pr' | 'reject' | 'mark-done' | null;
+
+export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase }: Props) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [showReject, setShowReject] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const isPrOpen = phase === 'pr-open' || !!prUrl;
 
-  function handleApprove(strategy: 'local-merge' | 'pull-request') {
-    startTransition(async () => {
+  async function handleApprove(strategy: 'local-merge' | 'pull-request') {
+    setPendingAction(strategy === 'local-merge' ? 'approve-local' : 'approve-pr');
+    try {
       await approveTask(taskId, strategy);
       router.refresh();
-    });
+    } finally {
+      setPendingAction(null);
+    }
   }
 
-  function handleReject() {
+  async function handleReject() {
     if (!feedback.trim()) return;
-    startTransition(async () => {
+    setPendingAction('reject');
+    try {
       await rejectTask(taskId, feedback);
       setShowReject(false);
       setFeedback('');
       router.refresh();
-    });
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function handleMarkDone() {
+    setPendingAction('mark-done');
+    try {
+      await markTaskDone(taskId);
+      router.refresh();
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   return (
@@ -73,7 +95,7 @@ export function ReviewPanel({ taskId, spec, qaReport, diff }: Props) {
       {/* QA Report */}
       {qaReport && (
         <Section title={`QA Report — ${qaReport.overall === 'PASS' ? '✓ PASS' : '✗ FAIL'}`}>
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${
               qaReport.overall === 'PASS'
                 ? 'bg-green-900/40 text-green-300'
@@ -81,6 +103,20 @@ export function ReviewPanel({ taskId, spec, qaReport, diff }: Props) {
             }`}>
               {qaReport.overall}
             </div>
+
+            {/* Human feedback banner */}
+            {humanFeedback && (
+              <div className="rounded-md border border-amber-800/40 bg-amber-950/20 p-3">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <span className="text-amber-400 text-xs">👤</span>
+                  <span className="text-xs font-semibold text-amber-300">Human Reviewer Feedback</span>
+                </div>
+                <p className="text-xs text-amber-200/90 whitespace-pre-wrap leading-relaxed">
+                  {humanFeedback}
+                </p>
+              </div>
+            )}
+
             {qaReport.criteria?.map((c, i) => (
               <div key={i} className="flex items-start gap-2 text-sm">
                 <span className={`shrink-0 font-semibold ${
@@ -120,27 +156,58 @@ export function ReviewPanel({ taskId, spec, qaReport, diff }: Props) {
 
       {/* Action buttons */}
       <div className="flex flex-col gap-3 pt-2">
+        {/* PR open banner */}
+        {isPrOpen && prUrl && (
+          <a
+            href={prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-teal-800/50 bg-teal-950/30 text-teal-400 hover:bg-teal-900/40 hover:text-teal-300 transition-colors text-sm"
+          >
+            <span className="text-base">🔗</span>
+            <span className="font-medium">View Pull Request</span>
+            <svg className="w-3.5 h-3.5 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
+        )}
+
         <div className="flex gap-3">
-          <button
-            onClick={() => handleApprove('local-merge')}
-            disabled={isPending}
-            className="flex-1 px-4 py-2 text-sm font-medium bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-md transition-colors"
-          >
-            Merge Locally
-          </button>
-          <button
-            onClick={() => handleApprove('pull-request')}
-            disabled={isPending}
-            className="flex-1 px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-md transition-colors"
-          >
-            Open Pull Request
-          </button>
+          {!isPrOpen && (
+            <>
+              <button
+                onClick={() => handleApprove('local-merge')}
+                disabled={pendingAction !== null}
+                className="flex-1 px-4 py-2 text-sm font-medium bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-md transition-colors"
+              >
+                {pendingAction === 'approve-local' ? 'Merging…' : 'Merge Locally'}
+              </button>
+              <button
+                onClick={() => handleApprove('pull-request')}
+                disabled={pendingAction !== null}
+                className="flex-1 px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-md transition-colors"
+              >
+                {pendingAction === 'approve-pr' ? 'Creating PR…' : 'Open Pull Request'}
+              </button>
+            </>
+          )}
+
+          {isPrOpen && (
+            <button
+              onClick={handleMarkDone}
+              disabled={pendingAction !== null}
+              className="flex-1 px-4 py-2 text-sm font-medium bg-green-700/60 text-green-200 hover:bg-green-600/70 disabled:opacity-50 rounded-md transition-colors"
+            >
+              {pendingAction === 'mark-done' ? 'Marking done…' : 'Mark as Done'}
+            </button>
+          )}
+
           <button
             onClick={() => setShowReject(r => !r)}
-            disabled={isPending}
+            disabled={pendingAction !== null}
             className="flex-1 px-4 py-2 text-sm font-medium bg-[#1a1f2e] hover:bg-[#1e293b] text-slate-200 rounded-md transition-colors"
           >
-            Reject with Feedback
+            Request Changes
           </button>
         </div>
 
@@ -162,10 +229,10 @@ export function ReviewPanel({ taskId, spec, qaReport, diff }: Props) {
               </button>
               <button
                 onClick={handleReject}
-                disabled={isPending || !feedback.trim()}
+                disabled={pendingAction !== null || !feedback.trim()}
                 className="px-4 py-1.5 text-sm font-medium bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white rounded-md transition-colors"
               >
-                {isPending ? 'Sending…' : 'Send Back'}
+                {pendingAction === 'reject' ? 'Sending…' : 'Send Back'}
               </button>
             </div>
           </div>

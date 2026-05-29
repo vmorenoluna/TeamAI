@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { AgentPanel } from './agent-panel';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
-import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, restartCurrentPhase, markTaskDone } from '@/app/actions/tasks';
+import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, restartCurrentPhase } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, PlanSubtask, QAReportData, QACriterion } from '@/lib/stream-types';
 import type { RoleDefinition } from '@/app/actions/roles';
@@ -49,6 +49,7 @@ interface Props {
   spec: string | null;
   plan: PlanData | null;
   qaReport: QAReportData | null;
+  humanFeedback?: string | null;
   diff: string | null;
   agentOutput?: string | null;
   roles: RoleDefinition[];
@@ -221,37 +222,54 @@ function PlanSubtasks({ plan }: { plan: PlanData | null }) {
   );
 }
 
-function QAReportView({ qaReport }: { qaReport: QAReportData | null }) {
-  if (!qaReport) return <p className="text-sm text-slate-400">No QA report generated yet.</p>;
+export function QAReportView({ qaReport, humanFeedback }: { qaReport: QAReportData | null; humanFeedback?: string | null }) {
+  if (!qaReport && !humanFeedback) return <p className="text-sm text-slate-400">No QA report generated yet.</p>;
   const qaText = JSON.stringify(qaReport, null, 2);
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className={`inline-flex items-center px-2.5 py-1 rounded text-sm font-bold ${
-          qaReport.overall === 'PASS'
-            ? 'bg-green-900/40 text-green-300'
-            : 'bg-red-900/40 text-red-300'
-        }`}>
-          {qaReport.overall}
-        </div>
-        <CopyButton text={qaText} label="QA report" />
-      </div>
-      {qaReport.criteria?.map((c: QACriterion, i: number) => (
-        <div key={i} className="flex items-start gap-2 text-sm">
-          <span className={`shrink-0 font-bold ${c.status === 'PASS' ? 'text-green-600' : 'text-red-600'}`}>
-            {c.status === 'PASS' ? '✓' : '✗'}
-          </span>
-          <div>
-            <p className="text-slate-300">{c.criterion || c.name}</p>
-            {c.notes && <p className="text-xs text-slate-400 mt-0.5">{c.notes}</p>}
+    <div className="space-y-4">
+      {/* Human feedback banner */}
+      {humanFeedback && (
+        <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-amber-400 text-sm">👤</span>
+            <h3 className="text-sm font-semibold text-amber-300">Human Reviewer Feedback</h3>
           </div>
+          <pre className="text-sm text-amber-200/90 whitespace-pre-wrap font-sans leading-relaxed">
+            {humanFeedback}
+          </pre>
         </div>
-      ))}
+      )}
+
+      {qaReport && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className={`inline-flex items-center px-2.5 py-1 rounded text-sm font-bold ${
+              qaReport.overall === 'PASS'
+                ? 'bg-green-900/40 text-green-300'
+                : 'bg-red-900/40 text-red-300'
+            }`}>
+              {qaReport.overall}
+            </div>
+            <CopyButton text={qaText} label="QA report" />
+          </div>
+          {qaReport.criteria?.map((c: QACriterion, i: number) => (
+            <div key={i} className="flex items-start gap-2 text-sm">
+              <span className={`shrink-0 font-bold ${c.status === 'PASS' ? 'text-green-600' : 'text-red-600'}`}>
+                {c.status === 'PASS' ? '✓' : '✗'}
+              </span>
+              <div>
+                <p className="text-slate-300">{c.criterion || c.name}</p>
+                {c.notes && <p className="text-xs text-slate-400 mt-0.5">{c.notes}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, plan, qaReport, diff, agentOutput, roles, onClose, readonly = false }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, plan, qaReport, humanFeedback, diff, agentOutput, roles, onClose, readonly = false }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [isPending, startTransition] = useTransition();
@@ -528,34 +546,21 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
               </div>
             )}
 
-            {/* Review panel if awaiting */}
-            {isAwaiting && (
+            {/* Review panel for awaiting-review and pr-open phases */}
+            {(isAwaiting || isPrOpen) && (
               <ReviewPanel
                 taskId={task.id}
                 spec={spec}
                 qaReport={qaReport}
+                humanFeedback={humanFeedback}
                 diff={diff}
+                prUrl={task.prUrl}
+                phase={task.phase}
               />
             )}
 
-            {/* PR open — waiting for human to review and merge */}
-            {isPrOpen && (
-              <div className="rounded-lg border border-sky-800/50 bg-sky-950/20 p-4">
-                <p className="text-sm text-sky-300 mb-3">
-                  The PR is open for review. Merge it on GitHub, then mark this task as done.
-                </p>
-                <button
-                  onClick={() => startTransition(async () => { await markTaskDone(task.id); router.refresh(); })}
-                  disabled={isPending}
-                  className="px-4 py-2 rounded-md bg-green-700/60 text-green-200 hover:bg-green-600/70 transition-colors text-sm font-medium disabled:opacity-50"
-                >
-                  {isPending ? 'Marking done…' : 'Mark as Done'}
-                </button>
-              </div>
-            )}
-
-            {/* PR link */}
-            {task.prUrl && (
+            {/* PR link (shown for non-review phases that have a PR) */}
+            {!isAwaiting && !isPrOpen && task.prUrl && (
               <section>
                 <a
                   href={task.prUrl}
@@ -678,7 +683,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
         {/* QA */}
         {activeTab === 'qa' && (
           <div className="p-6">
-            <QAReportView qaReport={qaReport} />
+            <QAReportView qaReport={qaReport} humanFeedback={humanFeedback} />
           </div>
         )}
       </div>

@@ -248,6 +248,12 @@ export class Orchestrator {
   }
 
   async approveTask(taskId: string, strategy: MergeStrategy): Promise<void> {
+    const task = this.taskStore.getById(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+    const phase = task.phase;
+    if (phase !== 'awaiting-review') {
+      throw new Error(`cannot approve a task in ${phase} — must be awaiting-review`);
+    }
     const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, 'awaiting-review');
     pipeline.mergeStrategy = strategy;
     // Persist the chosen strategy so recovery can restore it after a crash
@@ -263,9 +269,33 @@ export class Orchestrator {
   }
 
   async rejectTask(taskId: string, feedback: string): Promise<void> {
-    const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, 'awaiting-review');
+    const task = this.taskStore.getById(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+    const phase = task.phase;
+    if (phase !== 'awaiting-review' && phase !== 'pr-open') {
+      throw new Error(`cannot reject a task in ${phase} — must be awaiting-review or pr-open`);
+    }
+
+    const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, phase);
     const feedbackPath = path.join(pipeline.specPath, 'human_feedback.md');
     writeFileSync(feedbackPath, `# Human Review Feedback\n\n${feedback}\n`);
+
+    // Update the QA report so the engineer can see what changes were requested
+    const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+    if (existsSync(reportPath)) {
+      try {
+        const report: QaReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
+        if (!report.criteria) report.criteria = [];
+        report.overall = 'FAIL';
+        report.criteria.push({
+          name: 'Change Request',
+          status: 'FAIL',
+          notes: feedback,
+        });
+        writeFileSync(reportPath, JSON.stringify(report, null, 2));
+      } catch { /* best-effort: if qa_report.json is malformed, don't block the rejection */ }
+    }
+
     pipeline.qaAttempt = 0;
     this.advancePhase(pipeline, 'implement');
     await this.executePhase(pipeline);
@@ -391,13 +421,19 @@ export class Orchestrator {
     const task = this.taskStore.getById(pipeline.taskId);
     const coderRole = (task?.roleOverride ?? 'coder.md').replace('.md', '') as AgentSession['role'];
 
-    // Check for QA feedback if bouncing back from QA
+    // Check for QA feedback if bouncing back from QA, and human feedback if bouncing from review
     const qaFeedbackPath = path.join(pipeline.specPath, 'qa_feedback.md');
+    const humanFeedbackPath = path.join(pipeline.specPath, 'human_feedback.md');
     const hasQaFeedback = existsSync(qaFeedbackPath);
+    const hasHumanFeedback = existsSync(humanFeedbackPath);
     let qaFeedbackContent = '';
     if (hasQaFeedback) {
       const fullFeedback = readFileSync(qaFeedbackPath, 'utf-8');
       qaFeedbackContent = fullFeedback;
+    }
+    if (hasHumanFeedback) {
+      const humanFeedback = readFileSync(humanFeedbackPath, 'utf-8');
+      qaFeedbackContent = (qaFeedbackContent ? qaFeedbackContent + '\n\n---\n\n' : '') + humanFeedback;
     }
 
     const groups = new Map<string, PlanSubtask[]>();
@@ -492,6 +528,9 @@ export class Orchestrator {
     // Clean up QA feedback after implementing
     if (hasQaFeedback && existsSync(qaFeedbackPath)) {
       unlinkSync(qaFeedbackPath);
+    }
+    if (hasHumanFeedback && existsSync(humanFeedbackPath)) {
+      unlinkSync(humanFeedbackPath);
     }
 
     this.advancePhase(pipeline, 'qa-review');
@@ -614,7 +653,10 @@ export class Orchestrator {
       ...(prUrl ? { prUrl } : {}),
     });
 
-    this.advancePhase(pipeline, 'pr-open');
+    this.advancePhase(pipeline, 'pr-open', {
+      ...(prUrl ? { prUrl } : {}),
+      ...(platform !== 'unknown' ? { platform } : {}),
+    });
   }
 
   async markTaskDone(taskId: string): Promise<void> {
@@ -730,10 +772,10 @@ export class Orchestrator {
     }
   }
 
-  private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase): void {
+  private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void {
     pipeline.phase = phase;
     this.taskStore.updatePhase(pipeline.taskId, phase);
-    processManager.emit('phase-change', { taskId: pipeline.taskId, phase });
+    processManager.emit('phase-change', { taskId: pipeline.taskId, phase, ...eventExtra });
   }
 
   // Parse "resets 4:30pm (UTC)" from Claude Code's session-limit message.
