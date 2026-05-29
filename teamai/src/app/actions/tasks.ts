@@ -20,7 +20,7 @@ async function getStores() {
   };
 }
 
-export function readHumanFeedback(dir: string): string | null {
+export async function readHumanFeedback(dir: string): Promise<string | null> {
   const path = join(dir, 'human_feedback.md');
   if (!existsSync(path)) return null;
   const raw = readFileSync(path, 'utf-8').replace(/^# Human Review Feedback\n\n/, '').trim();
@@ -236,7 +236,7 @@ export async function getTaskArtifacts(taskId: string) {
     ? JSON.parse(readFileSync(qaPath, 'utf-8'))
     : null;
 
-  const humanFeedback = readHumanFeedback(dir);
+  const humanFeedback = await readHumanFeedback(dir);
 
   let diff: string | null = null;
   if (task.branch) {
@@ -290,7 +290,7 @@ export async function getTaskFull(taskId: string) {
     } catch { /* no diff yet */ }
   }
 
-  const humanFeedback = readHumanFeedback(dir);
+  const humanFeedback = await readHumanFeedback(dir);
 
   const outputPath = join(dir, 'output.log');
   const agentOutput = existsSync(outputPath) ? readFileSync(outputPath, 'utf-8') : null;
