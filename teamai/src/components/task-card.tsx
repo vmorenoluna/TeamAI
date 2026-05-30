@@ -4,6 +4,7 @@ import { useState, useEffect, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkTaskWorktree, deleteTaskWorktree, retryTask, stopTask, playTask } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
+import { PHASE_BADGE, PHASE_LABELS } from '@/constants/phases';
 
 const DESCRIPTION_LIMIT = 80;
 
@@ -150,8 +151,8 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
         </p>
       )}
 
-      <div className="mt-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="mt-2.5 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
           <p className="text-[11px] text-slate-500">
             {relativeTime(task.createdAt)}
           </p>
@@ -193,7 +194,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
 
         {/* Worktree info + delete — shows only when a worktree exists for this task */}
         {!wtChecking && wtStatus.exists && wtStatus.path && (
-          <div className="flex items-center gap-1.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <span className="text-[10px] text-slate-600 truncate max-w-[120px]" title={wtStatus.path}>
               {wtStatus.path}
             </span>
@@ -210,69 +211,74 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
       </div>
 
       {/* Action buttons row */}
-      <div className="mt-2 flex items-center gap-1.5 justify-end">
-        {/* Play button — shown only for backlog tasks */}
-        {task.phase === 'backlog' && (
-          <button
-            onClick={handlePlay}
-            disabled={isStarting}
-            title="Start task — move to Spec phase"
-            className="text-[11px] font-medium px-2 py-1 rounded-md bg-emerald-900/30 text-emerald-400 hover:bg-emerald-800/40 hover:text-emerald-300 transition-colors disabled:opacity-50 flex items-center gap-1"
-          >
-            {isStarting ? (
-              <span className="w-3 h-3 rounded-full border border-emerald-400 border-t-transparent animate-spin" />
-            ) : (
-              <span>▶</span>
-            )}
-            Start
-          </button>
-        )}
+      <div className="mt-2 flex items-center justify-between">
+        <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${PHASE_BADGE[task.phase] ?? 'bg-slate-800 text-slate-300'}`}>
+          {PHASE_LABELS[task.phase] ?? task.phase}
+        </span>
+        <div className="flex items-center gap-1.5">
+          {/* Play button — shown only for backlog tasks */}
+          {task.phase === 'backlog' && (
+            <button
+              onClick={handlePlay}
+              disabled={isStarting}
+              title="Start task — move to Spec phase"
+              className="text-[11px] font-medium px-2 py-1 rounded-md bg-emerald-900/30 text-emerald-400 hover:bg-emerald-800/40 hover:text-emerald-300 transition-colors disabled:opacity-50 flex items-center gap-1"
+            >
+              {isStarting ? (
+                <span className="w-3 h-3 rounded-full border border-emerald-400 border-t-transparent animate-spin" />
+              ) : (
+                <span>▶</span>
+              )}
+              Start
+            </button>
+          )}
 
-        {/* Stop button — shown for active phases (not backlog, failed, done) */}
-        {!['backlog', 'failed', 'done'].includes(task.phase) && (
-          <button
-            onClick={handleStop}
-            disabled={isStopping}
-            title="Stop task — cancel and move back to Backlog"
-            className="text-[11px] font-medium px-2 py-1 rounded-md bg-slate-700/50 text-slate-400 hover:bg-red-900/40 hover:text-red-400 transition-colors disabled:opacity-50 flex items-center gap-1"
-          >
-            {isStopping ? (
-              <span className="w-3 h-3 rounded-full border border-red-400 border-t-transparent animate-spin" />
-            ) : (
-              <span>■</span>
-            )}
-            Stop
-          </button>
-        )}
+          {/* Stop button — shown for active phases (not backlog, failed, done) */}
+          {!['backlog', 'failed', 'done'].includes(task.phase) && (
+            <button
+              onClick={handleStop}
+              disabled={isStopping}
+              title="Stop task — cancel and move back to Backlog"
+              className="text-[11px] font-medium px-2 py-1 rounded-md bg-slate-700/50 text-slate-400 hover:bg-red-900/40 hover:text-red-400 transition-colors disabled:opacity-50 flex items-center gap-1"
+            >
+              {isStopping ? (
+                <span className="w-3 h-3 rounded-full border border-red-400 border-t-transparent animate-spin" />
+              ) : (
+                <span>■</span>
+              )}
+              Stop
+            </button>
+          )}
 
-        {/* Failure indicator — shown only for failed tasks */}
-        {task.phase === 'failed' && (
-          <span
-            data-testid="failure-indicator"
-            title="Task failed"
-            className="text-[10px] font-medium text-red-400/70"
-          >
-            ✕
-          </span>
-        )}
+          {/* Failure indicator — shown only for failed tasks */}
+          {task.phase === 'failed' && (
+            <span
+              data-testid="failure-indicator"
+              title="Task failed"
+              className="text-[10px] font-medium text-red-400/70"
+            >
+              ✕
+            </span>
+          )}
 
-        {/* Retry button — shown only for failed tasks */}
-        {task.phase === 'failed' && (
-          <button
-            onClick={handleRetry}
-            disabled={isRetrying}
-            title="Retry task — restart pipeline from the phase it failed at"
-            data-testid="retry-button"
-            className="text-[11px] font-medium px-2 py-1 rounded-md bg-red-900/30 text-red-400 hover:bg-red-800/40 hover:text-red-300 transition-colors disabled:opacity-50 flex items-center gap-1"
-          >
-            {isRetrying ? (
-              <span className="w-3 h-3 rounded-full border border-red-400 border-t-transparent animate-spin" />
-            ) : (
-              <span>↻</span>
-            )}
-            Retry
-          </button>
-        )}
+          {/* Retry button — shown only for failed tasks */}
+          {task.phase === 'failed' && (
+            <button
+              onClick={handleRetry}
+              disabled={isRetrying}
+              title="Retry task — restart pipeline from the phase it failed at"
+              data-testid="retry-button"
+              className="text-[11px] font-medium px-2 py-1 rounded-md bg-red-900/30 text-red-400 hover:bg-red-800/40 hover:text-red-300 transition-colors disabled:opacity-50 flex items-center gap-1"
+            >
+              {isRetrying ? (
+                <span className="w-3 h-3 rounded-full border border-red-400 border-t-transparent animate-spin" />
+              ) : (
+                <span>↻</span>
+              )}
+              Retry
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

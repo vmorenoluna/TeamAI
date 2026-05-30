@@ -53,7 +53,7 @@ test.describe('Kanban Board', () => {
     await expect(detailPanel).toBeVisible({ timeout: 5_000 });
   });
 
-  test('kanban columns are visible: Backlog, Spec, Plan, Implement, QA Review, Done', async ({ page }) => {
+  test('kanban columns are visible: Backlog, Analysis, Implement, Review, Done', async ({ page }) => {
     await page.goto('/');
 
     const noProject = page.locator('text=Select or add a project from the sidebar');
@@ -62,7 +62,7 @@ test.describe('Kanban Board', () => {
       return;
     }
 
-    const expectedColumns = ['Backlog', 'Spec', 'Plan', 'Implement', 'QA Review', 'Done'];
+    const expectedColumns = ['Backlog', 'Analysis', 'Implement', 'Review', 'Done'];
     for (const col of expectedColumns) {
       const colHeader = page.locator(`text=${col}`).first();
       await expect(colHeader).toBeVisible({ timeout: 10_000 });

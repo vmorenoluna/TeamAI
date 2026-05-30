@@ -23,6 +23,7 @@ import { extractText } from '@/lib/stream-types';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskPanel, type FullData } from './task-panel';
 import type { RoleDefinition } from '@/app/actions/roles';
+import { PHASE_BADGE, PHASE_LABELS as TASK_PHASE_LABELS } from '@/constants/phases';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -69,19 +70,6 @@ function StreamingBlock({ text }: { text: string }) {
   );
 }
 
-const LINKED_PHASE_BADGE: Record<string, string> = {
-  backlog: 'bg-slate-700 text-slate-200',
-  spec: 'bg-blue-900/30 text-blue-300',
-  plan: 'bg-indigo-900/30 text-indigo-300',
-  implement: 'bg-amber-900/30 text-amber-300',
-  'qa-review': 'bg-orange-900/30 text-orange-300',
-  'awaiting-review': 'bg-purple-900/30 text-purple-300',
-  merge: 'bg-teal-900/30 text-teal-300',
-  'create-pr': 'bg-teal-900/30 text-teal-300',
-  failed: 'bg-red-900/30 text-red-300',
-  done: 'bg-green-900/30 text-green-300',
-};
-
 // ── Roadmap item card ────────────────────────────────────────────────────────
 
 interface RoadmapCardProps {
@@ -117,7 +105,7 @@ function RoadmapCard({
 }: RoadmapCardProps) {
   const isLinked = !!item.linkedTaskId;
   const statusBadge = linkedStatus
-    ? (LINKED_PHASE_BADGE[linkedStatus.phase] ?? LINKED_PHASE_BADGE.backlog)
+    ? (PHASE_BADGE[linkedStatus.phase] ?? PHASE_BADGE.backlog)
     : null;
 
   function handleConvertClick(e: React.MouseEvent) {
@@ -235,7 +223,7 @@ function RoadmapCard({
         {isLinked ? (
           statusBadge ? (
             <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${statusBadge}`}>
-              {linkedStatus?.phase ?? '…'}
+              {linkedStatus ? (TASK_PHASE_LABELS[linkedStatus.phase] ?? linkedStatus.phase) : '…'}
             </span>
           ) : (
             <span className="text-[10px] text-slate-400">…</span>
@@ -1117,7 +1105,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
               <div className="flex items-center gap-3">
                 <span className="text-xs text-slate-500">Phase:</span>
                 <span className="text-xs text-slate-300">
-                  {PHASE_LABELS[selectedRoadmapItem.phaseKey as keyof typeof PHASE_LABELS] ?? selectedRoadmapItem.phaseKey}
+                  {(PHASE_LABELS as Record<string, string>)[selectedRoadmapItem.phaseKey] ?? selectedRoadmapItem.phaseKey}
                 </span>
               </div>
             </div>
