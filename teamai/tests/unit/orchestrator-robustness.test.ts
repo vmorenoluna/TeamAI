@@ -1313,6 +1313,177 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
     const finalReport = JSON.parse(readFileSync(join(project.taskDir, 'qa_report.json'), 'utf-8'));
     expect(finalReport.locked).toBe(true);
   });
+
+  // ── Test 6: Full targeted re-run — QA FAIL bounces → only flagged subtasks run → QA PASS → done ──
+
+  it('full cycle: QA FAIL → bounce → only flagged subtasks re-run → QA PASS', async () => {
+    // Setup: 5 subtasks. QA criteria match only subtasks 2, 3, and 5.
+    // After bounce, only those 3 should re-run. The other 2 should stay completed.
+    const planPath = join(project.taskDir, 'plan.json');
+    writeFileSync(planPath, JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Login page', description: 'Build login form', files: ['src/login.ts'], acceptance_criteria: ['Form submits correctly'], completed: true },
+        { id: 2, title: 'Error handling', description: 'Add error handling', files: ['src/errors.ts'], acceptance_criteria: ['Error handling for API failures'], completed: true },
+        { id: 3, title: 'Rate limiter', description: 'Add rate limiting', files: ['src/rate-limit.ts'], acceptance_criteria: ['Rate limiting prevents abuse'], completed: true },
+        { id: 4, title: 'Dashboard', description: 'Build dashboard', files: ['src/dashboard.ts'], acceptance_criteria: ['Charts render correctly'], completed: true },
+        { id: 5, title: 'File upload', description: 'Add upload', files: ['src/upload.ts'], acceptance_criteria: ['Error handling for large files'], completed: true },
+      ],
+    }));
+
+    // ── Phase 1: runQaReview — QA FAIL, _writeQaFeedback patches plan.json ──
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'fetch') return '';
+      if (args && args[0] === 'log') return ''; // no unpushed commits
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-e2e-qa-fail');
+
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'qa-review',
+      qaAttempt: 1,
+      maxQaAttempts: 3,
+      worktreePath: project.root,
+    });
+
+    try {
+      const qaPromise = (orch as AnyOrch).runQaReview(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      expect(mockCreateSession).toHaveBeenCalled();
+
+      // QA writes a FAIL report — criteria match subtasks 2 ("Error handling"),
+      // 3 ("Rate limiting"), and 5 ("Error handling for large files").
+      // Subtask 1 (login) and 4 (dashboard) should NOT be flagged.
+      const failReport = {
+        overall: 'FAIL',
+        criteria: [
+          { name: 'Error handling', status: 'FAIL', notes: 'No error handling found', fix_needed: 'Add try/catch in all API calls' },
+          { name: 'Rate limiting', status: 'FAIL', notes: 'Rate limiter not enforced', fix_needed: 'Add token bucket algorithm' },
+        ],
+      };
+      writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(failReport));
+
+      fireEvent('event', { sessionId: 'sess-e2e-qa-fail', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 30));
+
+      // Phase 1 assertions
+      expect(pipeline.phase).toBe('implement');
+      expect(existsSync(join(project.taskDir, 'qa_report_before_bounce.json'))).toBe(true);
+      expect(existsSync(join(project.taskDir, 'qa_feedback.md'))).toBe(true);
+
+      // _writeQaFeedback should have patched plan.json — subtasks 2, 3, 5 flagged
+      const patchedPlan = JSON.parse(readFileSync(planPath, 'utf-8'));
+      expect(patchedPlan.subtasks[0].qa_flagged).toBeUndefined(); // subtask 1: no match
+      expect(patchedPlan.subtasks[1].qa_flagged).toBe(true);       // subtask 2: "Error handling"
+      expect(patchedPlan.subtasks[2].qa_flagged).toBe(true);       // subtask 3: "Rate limiting"
+      expect(patchedPlan.subtasks[3].qa_flagged).toBeUndefined(); // subtask 4: no match
+      expect(patchedPlan.subtasks[4].qa_flagged).toBe(true);       // subtask 5: "Error handling for large files"
+
+      await qaPromise;
+      executeSpy.mockRestore();
+
+      // ── Phase 2: runImplement — only flagged subtasks (2, 3, 5) should run ──
+      mockExecFileSync.mockReset();
+      mockCreateSession.mockReset();
+      mockSendMessage.mockReset();
+      onHandlers.clear();
+      mockExecFileSync.mockReturnValue('abc123\n');
+      mockCreateSession
+        .mockResolvedValueOnce('sess-e2e-impl-2')
+        .mockResolvedValueOnce('sess-e2e-impl-3')
+        .mockResolvedValueOnce('sess-e2e-impl-5');
+
+      pipeline.phase = 'implement';
+      pipeline.qaAttempt = 1;
+      const executeSpy2 = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+      try {
+        const implPromise = (orch as AnyOrch).runImplement(pipeline);
+        await new Promise(r => setTimeout(r, 20));
+
+        // Resolve all 3 flagged subtasks sequentially (groups loop is sequential)
+        fireEvent('event', { sessionId: 'sess-e2e-impl-2', event: { type: 'result' } });
+        await new Promise(r => setTimeout(r, 20));
+        fireEvent('event', { sessionId: 'sess-e2e-impl-3', event: { type: 'result' } });
+        await new Promise(r => setTimeout(r, 20));
+        fireEvent('event', { sessionId: 'sess-e2e-impl-5', event: { type: 'result' } });
+        await new Promise(r => setTimeout(r, 30));
+
+        // Only 3 subtasks should be started (the flagged ones)
+        expect(mockCreateSession).toHaveBeenCalledTimes(3);
+
+        // Verify the right subtasks ran
+        const sendCalls = mockSendMessage.mock.calls;
+        expect(sendCalls).toHaveLength(3);
+        expect(sendCalls[0][1]).toContain('Subtask 2');
+        expect(sendCalls[1][1]).toContain('Subtask 3');
+        expect(sendCalls[2][1]).toContain('Subtask 5');
+
+        // QA feedback should be prepended to each prompt
+        expect(sendCalls[0][1]).toContain('QA FEEDBACK');
+        expect(sendCalls[0][1]).toContain('Add try/catch in all API calls');
+
+        // Non-flagged subtasks (1 and 4) should NOT have had sessions created
+        const allSessionCalls = mockCreateSession.mock.calls;
+        expect(allSessionCalls).toHaveLength(3);
+
+        await implPromise;
+      } finally {
+        executeSpy2.mockRestore();
+      }
+
+      // qa_flagged markers should be cleaned up
+      const planAfter = JSON.parse(readFileSync(planPath, 'utf-8'));
+      for (const s of planAfter.subtasks) {
+        expect(s.qa_flagged).toBeUndefined();
+      }
+      // qa_feedback.md should be deleted
+      expect(existsSync(join(project.taskDir, 'qa_feedback.md'))).toBe(false);
+
+      // Pipeline should have advanced to qa-review
+      expect(pipeline.phase).toBe('qa-review');
+
+      // ── Phase 3: runQaReview — QA PASS → awaiting-review → done ──
+      mockExecFileSync.mockReset();
+      mockCreateSession.mockReset();
+      onHandlers.clear();
+      mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+        if (args && args[0] === 'fetch') return '';
+        if (args && args[0] === 'log') return '';
+        return '';
+      });
+      mockCreateSession.mockResolvedValue('sess-e2e-qa-pass');
+
+      // Gap 3: no lock on the restored report
+      const currentReport = JSON.parse(readFileSync(join(project.taskDir, 'qa_report.json'), 'utf-8'));
+      expect(currentReport.locked).toBeUndefined();
+
+      const qa2Promise = (orch as AnyOrch).runQaReview(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      expect(mockCreateSession).toHaveBeenCalled(); // QA ran again
+
+      // QA passes this time
+      writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [
+          { name: 'Error handling', status: 'PASS', notes: 'Try/catch added correctly' },
+          { name: 'Rate limiting', status: 'PASS', notes: 'Token bucket works' },
+        ],
+      }));
+
+      fireEvent('event', { sessionId: 'sess-e2e-qa-pass', event: { type: 'result' } });
+      await qa2Promise;
+
+      // Final state: awaiting-review (task is done from the pipeline's perspective)
+      expect(pipeline.phase).toBe('awaiting-review');
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1487,5 +1658,362 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     expect(existsSync(reportPath)).toBe(true);
 
     await promise;
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Targeted re-run — only QA-flagged subtasks on bounce-back
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-back', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+
+    // Mock git operations to pass push verification
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+      }
+      return '';
+    });
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  it('only re-runs subtasks flagged with qa_flagged: true on bounce-back', async () => {
+    // Scenario: 3 subtasks, only subtask 2 was flagged by QA
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Add login', description: 'Build login page', files: ['src/login.ts'], acceptance_criteria: ['Works'], completed: true },
+        { id: 2, title: 'Fix auth', description: 'Fix auth module', files: ['src/auth.ts'], acceptance_criteria: ['No 401 errors [QA CORRECTION: Add token refresh]'], qa_flagged: true, completed: true },
+        { id: 3, title: 'Add dashboard', description: 'Build dashboard', files: ['src/dashboard.ts'], acceptance_criteria: ['Data loads'], completed: true },
+      ],
+    }));
+
+    // QA feedback exists (simulates bounce-back)
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nFix auth module');
+
+    mockCreateSession.mockResolvedValue('sess-targeted');
+
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 1,
+      maxQaAttempts: 3,
+      worktreePath: project.root,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      // Only ONE subtask should be run (subtask 2 — the flagged one)
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+
+      // Verify it was called for the right subtask
+      const sendCalls = mockSendMessage.mock.calls;
+      expect(sendCalls.length).toBe(1);
+      expect(sendCalls[0][1]).toContain('Subtask 2');
+      expect(sendCalls[0][1]).toContain('Fix auth');
+
+      // Resolve the subtask
+      fireEvent('event', { sessionId: 'sess-targeted', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 30));
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('runs ALL subtasks on first implement when no QA feedback exists', async () => {
+    // Scenario: 3 subtasks, NO qa_feedback.md — this is the first implement run
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Add login', description: 'Build login page', files: ['src/login.ts'], acceptance_criteria: ['Works'] },
+        { id: 2, title: 'Fix auth', description: 'Fix auth module', files: ['src/auth.ts'], acceptance_criteria: ['No 401 errors'] },
+        { id: 3, title: 'Add dashboard', description: 'Build dashboard', files: ['src/dashboard.ts'], acceptance_criteria: ['Data loads'] },
+      ],
+    }));
+
+    // NO qa_feedback.md — first run
+    expect(existsSync(join(project.taskDir, 'qa_feedback.md'))).toBe(false);
+
+    mockCreateSession
+      .mockResolvedValueOnce('sess-full-1')
+      .mockResolvedValueOnce('sess-full-2')
+      .mockResolvedValueOnce('sess-full-3');
+
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      maxQaAttempts: 3,
+      worktreePath: project.root,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      // Resolve subtask 1 so the loop can proceed to subtask 2
+      fireEvent('event', { sessionId: 'sess-full-1', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 20));
+
+      // Resolve subtask 2
+      fireEvent('event', { sessionId: 'sess-full-2', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 20));
+
+      // Resolve subtask 3
+      fireEvent('event', { sessionId: 'sess-full-3', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 30));
+
+      // ALL 3 subtasks should be started
+      expect(mockCreateSession).toHaveBeenCalledTimes(3);
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('falls back to running all subtasks when QA feedback exists but no subtasks are flagged', async () => {
+    // Scenario: QA feedback exists, but somehow no subtasks got qa_flagged.
+    // This is a safety fallback — better to re-run everything than skip QA feedback.
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Add login', description: 'Build login page', files: ['src/login.ts'], acceptance_criteria: ['Works'], completed: true },
+        { id: 2, title: 'Fix auth', description: 'Fix auth module', files: ['src/auth.ts'], acceptance_criteria: ['No 401 errors'], completed: true },
+      ],
+    }));
+
+    // QA feedback exists but no subtask has qa_flagged — safety fallback
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nAuth module broken');
+
+    mockCreateSession
+      .mockResolvedValueOnce('sess-fallback-1')
+      .mockResolvedValueOnce('sess-fallback-2');
+
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 1,
+      maxQaAttempts: 3,
+      worktreePath: project.root,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      // Resolve subtask 1
+      fireEvent('event', { sessionId: 'sess-fallback-1', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 20));
+
+      // Resolve subtask 2
+      fireEvent('event', { sessionId: 'sess-fallback-2', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 30));
+
+      // BOTH subtasks should be started (safety fallback)
+      expect(mockCreateSession).toHaveBeenCalledTimes(2);
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('cleans up qa_flagged markers from plan.json after bounce-back implement completes', async () => {
+    // Scenario: subtask was flagged, implement runs and completes — qa_flagged should be removed
+    const planPath = join(project.taskDir, 'plan.json');
+    writeFileSync(planPath, JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Fix bug', description: 'Fix the bug', files: ['src/bug.ts'], acceptance_criteria: ['Bug fixed [QA CORRECTION: Add tests]'], qa_flagged: true, completed: true },
+      ],
+    }));
+
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nFix the bug');
+
+    mockCreateSession.mockResolvedValue('sess-cleanup');
+
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 1,
+      maxQaAttempts: 3,
+      worktreePath: project.root,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      // Resolve the subtask
+      fireEvent('event', { sessionId: 'sess-cleanup', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 30));
+      await promise;
+
+      // qa_flagged should be removed from plan.json
+      const planAfter = JSON.parse(readFileSync(planPath, 'utf-8'));
+      expect(planAfter.subtasks[0].qa_flagged).toBeUndefined();
+
+      // qa_feedback.md should be deleted
+      expect(existsSync(join(project.taskDir, 'qa_feedback.md'))).toBe(false);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('resets completed only for subtasks that are re-run, not all subtasks', async () => {
+    // Scenario: 3 subtasks, 2 are qa_flagged. Only those 2 should have completed reset.
+    const planPath = join(project.taskDir, 'plan.json');
+    writeFileSync(planPath, JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Add login', description: 'Login', files: ['src/login.ts'], acceptance_criteria: ['Works'], completed: true },
+        { id: 2, title: 'Fix auth', description: 'Auth fix', files: ['src/auth.ts'], acceptance_criteria: ['No 401 [QA CORRECTION: Refresh token]'], qa_flagged: true, completed: true },
+        { id: 3, title: 'Add dashboard', description: 'Dashboard', files: ['src/dashboard.ts'], acceptance_criteria: ['Loads'], completed: true },
+        { id: 4, title: 'Fix API', description: 'API fix', files: ['src/api.ts'], acceptance_criteria: ['Returns 200 [QA CORRECTION: Handle errors]'], qa_flagged: true, completed: true },
+      ],
+    }));
+
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nFix auth and API');
+
+    mockCreateSession
+      .mockResolvedValueOnce('sess-multi-1')
+      .mockResolvedValueOnce('sess-multi-2');
+
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 1,
+      maxQaAttempts: 3,
+      worktreePath: project.root,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      // Resolve both subtasks so the groups loop can complete
+      fireEvent('event', { sessionId: 'sess-multi-1', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 20));
+      fireEvent('event', { sessionId: 'sess-multi-2', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 30));
+
+      // Only 2 subtasks should be started (the flagged ones)
+      expect(mockCreateSession).toHaveBeenCalledTimes(2);
+
+      const sendCalls = mockSendMessage.mock.calls;
+      expect(sendCalls[0][1]).toContain('Subtask 2');
+      expect(sendCalls[1][1]).toContain('Subtask 4');
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('_writeQaFeedback flags ALL subtasks whose acceptance criteria match a FAIL criterion', async () => {
+    // Scenario: QA criterion "Missing error handling" matches subtasks 1, 3, and 5.
+    // All three should get qa_flagged: true (not just the first one).
+    const planPath = join(project.taskDir, 'plan.json');
+    writeFileSync(planPath, JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Login form', description: 'Build login', files: ['src/login.ts'], acceptance_criteria: ['Error handling for failed logins'] },
+        { id: 2, title: 'Dashboard', description: 'Build dashboard', files: ['src/dashboard.ts'], acceptance_criteria: ['Data loads within 2s'] },
+        { id: 3, title: 'API client', description: 'Build API client', files: ['src/api.ts'], acceptance_criteria: ['Error handling on network failures', 'Retry with backoff'] },
+        { id: 4, title: 'Settings page', description: 'Build settings', files: ['src/settings.ts'], acceptance_criteria: ['Form validation works'] },
+        { id: 5, title: 'File upload', description: 'Build upload', files: ['src/upload.ts'], acceptance_criteria: ['Progress bar shows', 'Error handling for large files'] },
+      ],
+    }));
+
+    const pipeline = makePipeline(project.taskId, project.taskDir);
+    const report = {
+      overall: 'FAIL',
+      criteria: [
+        { name: 'Error handling', status: 'FAIL', notes: 'No error handling found', fix_needed: 'Add try/catch around all API calls' },
+      ],
+    };
+
+    (orch as AnyOrch)._writeQaFeedback(pipeline, report);
+
+    // Verify qa_feedback.md was written
+    expect(existsSync(join(project.taskDir, 'qa_feedback.md'))).toBe(true);
+
+    // Verify plan.json was patched — subtasks 1, 3, and 5 should be flagged
+    const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+    expect(plan.subtasks[0].qa_flagged).toBe(true); // subtask 1: "Error handling for failed logins"
+    expect(plan.subtasks[1].qa_flagged).toBeUndefined(); // subtask 2: no error handling mention
+    expect(plan.subtasks[2].qa_flagged).toBe(true); // subtask 3: "Error handling on network failures"
+    expect(plan.subtasks[3].qa_flagged).toBeUndefined(); // subtask 4: no error handling mention
+    expect(plan.subtasks[4].qa_flagged).toBe(true); // subtask 5: "Error handling for large files"
+
+    // Subtask 1's acceptance criteria should be patched with QA correction
+    expect(plan.subtasks[0].acceptance_criteria[0]).toContain('[QA CORRECTION: Add try/catch around all API calls]');
+  });
+
+  it('only runs flagged subtasks within a parallel_group, skipping non-flagged members', async () => {
+    // Scenario: 3 subtasks. SubTask 1 (flagged) and SubTask 2 (not flagged)
+    // share the same parallel_group "critical-fixes". SubTask 3 is in a
+    // different group and also not flagged.
+    // Only SubTask 1 should run — SubTask 2 stays skipped despite being
+    // in the same parallel group.
+    const planPath = join(project.taskDir, 'plan.json');
+    writeFileSync(planPath, JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Fix auth bug', description: 'Fix the auth null pointer', files: ['src/auth.ts'], acceptance_criteria: ['No crash on null session [QA CORRECTION: Add null guard]'], parallel_group: 'critical-fixes', qa_flagged: true, completed: true },
+        { id: 2, title: 'Refactor logger', description: 'Extract logger interface', files: ['src/logger.ts'], acceptance_criteria: ['Passes existing tests'], parallel_group: 'critical-fixes', completed: true },
+        { id: 3, title: 'Update docs', description: 'Update API docs', files: ['docs/api.md'], acceptance_criteria: ['All routes documented'], completed: true },
+      ],
+    }));
+
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nFix auth null pointer');
+
+    mockCreateSession.mockResolvedValue('sess-parallel-group');
+
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 1,
+      maxQaAttempts: 3,
+      worktreePath: project.root,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      // Only ONE subtask should run — the flagged one (subtask 1).
+      // SubTask 2 is in the same parallel_group but not flagged — skip it.
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+
+      const sendCalls = mockSendMessage.mock.calls;
+      expect(sendCalls.length).toBe(1);
+      expect(sendCalls[0][1]).toContain('Subtask 1');
+      expect(sendCalls[0][1]).toContain('Fix auth bug');
+      expect(sendCalls[0][1]).not.toContain('Subtask 2');
+      expect(sendCalls[0][1]).not.toContain('Refactor logger');
+
+      // Resolve the subtask
+      fireEvent('event', { sessionId: 'sess-parallel-group', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 30));
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
   });
 });

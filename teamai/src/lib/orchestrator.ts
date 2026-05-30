@@ -16,6 +16,7 @@ interface PlanSubtask {
   acceptance_criteria: string[];
   parallel_group?: string;
   completed?: boolean;
+  qa_flagged?: boolean;
 }
 
 interface RateLimitInfo {
@@ -439,8 +440,27 @@ export class Orchestrator {
       qaFeedbackContent = (qaFeedbackContent ? qaFeedbackContent + '\n\n---\n\n' : '') + humanFeedback;
     }
 
+    // When bouncing back from QA, only re-run subtasks flagged by the QA report.
+    // Non-flagged subtasks already passed QA — no need to redo them.
+    const subtasksToRun = hasQaFeedback
+      ? plan.subtasks.filter((s: PlanSubtask) => s.qa_flagged)
+      : plan.subtasks;
+
+    // Safety fallback: if QA feedback exists but no subtasks were flagged
+    // (e.g., QA report criteria didn't match any subtask), run all subtasks.
+    const effectiveSubtasks = hasQaFeedback && subtasksToRun.length === 0
+      ? plan.subtasks
+      : subtasksToRun;
+
+    // Reset completed only for subtasks we're about to re-run
+    if (hasQaFeedback) {
+      for (const s of effectiveSubtasks) {
+        s.completed = false;
+      }
+    }
+
     const groups = new Map<string, PlanSubtask[]>();
-    for (const subtask of plan.subtasks) {
+    for (const subtask of effectiveSubtasks) {
       const group = subtask.parallel_group || String(subtask.id);
       if (!groups.has(group)) groups.set(group, []);
       groups.get(group)!.push(subtask);
@@ -534,6 +554,22 @@ export class Orchestrator {
     }
     if (hasHumanFeedback && existsSync(humanFeedbackPath)) {
       unlinkSync(humanFeedbackPath);
+    }
+    // Clean up qa_flagged markers — they're only relevant during bounce-back
+    if (hasQaFeedback) {
+      try {
+        const planAfter = JSON.parse(readFileSync(planPath, 'utf-8'));
+        let cleaned = false;
+        if (planAfter.subtasks) {
+          for (const s of planAfter.subtasks) {
+            if (s.qa_flagged) {
+              delete s.qa_flagged;
+              cleaned = true;
+            }
+          }
+        }
+        if (cleaned) writeFileSync(planPath, JSON.stringify(planAfter, null, 2));
+      } catch { /* best-effort */ }
     }
 
     // ── Gap 2: Mandatory git push before advancing to QA ──
@@ -1365,6 +1401,7 @@ export class Orchestrator {
     writeFileSync(feedbackPath, content);
 
     // Patch plan.json subtask acceptance criteria from QA findings
+    // Marks subtasks with qa_flagged:true so runImplement only re-runs those
     const planPath = path.join(pipeline.specPath, 'plan.json');
     if (existsSync(planPath)) {
       try {
@@ -1391,7 +1428,9 @@ export class Orchestrator {
                   );
                   if (idx >= 0) {
                     subtask.acceptance_criteria[idx] += ` [QA CORRECTION: ${c.fix_needed}]`;
+                    subtask.qa_flagged = true;
                     modified = true;
+                    // Don't break — one criterion may apply to multiple subtasks
                   }
                 }
               }
@@ -1414,8 +1453,9 @@ export class Orchestrator {
           })) {
                   if (!subtask.acceptance_criteria) subtask.acceptance_criteria = [];
                   subtask.acceptance_criteria.push(`[QA ISSUE: ${desc}${fix ? ` → Fix: ${fix}` : ''}]`);
+                  subtask.qa_flagged = true;
                   modified = true;
-                  break;
+                  // Don't break — same file may appear in multiple subtasks
                 }
               }
             }

@@ -12,11 +12,13 @@
 
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 
-// Allow override via env var so CI/test runners can keep the real ~/.teamai untouched
-const HOME_DIR = process.env.TEAMAI_TEST_HOME || homedir();
-const PROJECTS_FILE = join(HOME_DIR, '.teamai', 'projects.json');
+// Safety: refuse to touch the real ~/.teamai/projects.json unless explicitly
+// opted in via TEAMAI_TEST_HOME. Operating on the real file can cause silent
+// data loss if a crash or filesystem hiccup occurs during the read-modify-write
+// cycle. Tests that need project persistence must mock homedir() or use a temp dir.
+const HOME_DIR = process.env.TEAMAI_TEST_HOME;
+const PROJECTS_FILE = HOME_DIR ? join(HOME_DIR, '.teamai', 'projects.json') : '';
 const TEST_PREFIX = '.teamai-test-';
 
 export function setup() {
@@ -25,6 +27,13 @@ export function setup() {
 }
 
 export function teardown() {
+  // Safety gate: refuse to touch the real ~/.teamai/projects.json.
+  // Set TEAMAI_TEST_HOME env var to a temp directory to enable cleanup.
+  if (!HOME_DIR) {
+    console.log('[test-teardown] Skipping — TEAMAI_TEST_HOME not set (refusing to touch real projects.json)');
+    return;
+  }
+
   let cleaned = 0;
 
   try {

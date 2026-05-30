@@ -16,7 +16,18 @@ export interface Project {
 export class ProjectStore {
   constructor() {
     mkdirSync(CONFIG_DIR, { recursive: true });
+    // Defensive init: only create projects.json if it truly doesn't exist.
+    // existsSync can return false temporarily (antivirus, cloud sync, etc.),
+    // so we double-check by attempting a read before writing an empty array.
     if (!existsSync(PROJECTS_FILE)) {
+      try {
+        // If the file actually has content but existsSync lied, this will succeed
+        // and we'll see the existing data — don't overwrite it.
+        const existing = readFileSync(PROJECTS_FILE, 'utf-8');
+        if (existing.trim()) return; // file exists and has content — keep it
+      } catch {
+        // File truly doesn't exist or is unreadable — create it fresh
+      }
       writeFileSync(PROJECTS_FILE, '[]');
     }
   }
