@@ -7,7 +7,7 @@ import { processManager } from '@/lib/process-manager';
 import { revalidatePath } from 'next/cache';
 import type { PlanData, QAReportData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { getResumePhaseForFailedTask } from '@/lib/task-utils';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
@@ -70,6 +70,35 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
     const events = taskStore.getEvents(taskId);
     resumePhase = getResumePhaseForFailedTask(events);
   } catch { /* fall back to default */ }
+
+  // ── Gap 4b: Restore qa_report.json from snapshot if deleted ──
+  // Belt-and-suspenders guard: if the report was deleted before the retry,
+  // restore it from any available snapshot so context is preserved.
+  const dir = taskStore.getDirById(taskId);
+  const reportPath = join(dir, 'qa_report.json');
+  if (!existsSync(reportPath)) {
+    for (const snapName of ['qa_report_before_failed.json', 'qa_report_before_bounce.json']) {
+      const snapshotPath = join(dir, snapName);
+      if (existsSync(snapshotPath)) {
+        try {
+          const snapshot = readFileSync(snapshotPath, 'utf-8');
+          writeFileSync(reportPath, snapshot);
+          const logFile = join(dir, 'output.log');
+          appendFileSync(logFile, `\n[RETRY] Restored qa_report.json from ${snapName} — file was deleted before retry\n`);
+        } catch { /* best-effort */ }
+        break; // use the first available snapshot
+      }
+    }
+  }
+
+  // ── Gap 5: Snapshot qa_report.json before re-running so context is preserved ──
+  if (existsSync(reportPath)) {
+    const snapshotPath = join(dir, 'qa_report_before_failed.json');
+    try {
+      const reportContent = readFileSync(reportPath, 'utf-8');
+      writeFileSync(snapshotPath, reportContent);
+    } catch { /* best-effort — don't block retry on snapshot failure */ }
+  }
 
   // Clear completionSummary so the failure indicator disappears
   taskStore.update(taskId, { completionSummary: undefined });

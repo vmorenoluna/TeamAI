@@ -33,4 +33,5 @@ If the prompt includes "⚠️ QA FEEDBACK" at the top, you are in QA rework mod
 - Do NOT modify files belonging to other subtasks.
 - Match existing code style exactly (indentation, naming, patterns).
 - Add or update tests for any new functionality.
+- **CRITICAL: Do NOT delete, stage, or commit qa_report.json, qa_feedback.md, or human_feedback.md.** These are task-tracking files managed by the QA agent and human reviewers. Treat them as read-only.
 ```
