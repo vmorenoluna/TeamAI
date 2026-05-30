@@ -382,6 +382,9 @@ export class Orchestrator {
       }
     }
 
+    // ── Gap 4b: Programmatic guard — restore qa_report.json from snapshot if deleted ──
+    this._restoreQaReportFromSnapshot(pipeline.specPath);
+
     // Pull latest master before creating the worktree so the feature branch starts
     // from up-to-date code, minimising conflicts at PR time.
     // (runPlan does the same pull; this covers the resume-directly-to-implement path.)
@@ -533,6 +536,54 @@ export class Orchestrator {
       unlinkSync(humanFeedbackPath);
     }
 
+    // ── Gap 2: Mandatory git push before advancing to QA ──
+    // The engineer must push commits so QA reviews the same code reviewers see.
+    // If push fails, the task must not advance to awaiting-review.
+    this._phaseHeader(logFile, 'implement — push to remote');
+    try {
+      // Use --force-with-lease like runCreatePR to handle recovery scenarios
+      // where the branch was already pushed (crash recovery, QA bounce-back, re-run)
+      execFileSync('git', ['push', '-u', '--force-with-lease', 'origin', pipeline.branch], { cwd: this.projectRoot, stdio: 'pipe' });
+      appendFileSync(logFile, `[PUSH] Successfully pushed ${pipeline.branch} to origin\n`);
+
+      // Verify remote HEAD matches local HEAD
+      try {
+        execFileSync('git', ['fetch', 'origin', pipeline.branch], { cwd: this.projectRoot, stdio: 'pipe' });
+        const localHead = execFileSync('git', ['rev-parse', pipeline.branch], {
+          cwd: this.projectRoot, encoding: 'utf-8', stdio: 'pipe',
+        }).trim();
+        const remoteHead = execFileSync('git', ['rev-parse', `origin/${pipeline.branch}`], {
+          cwd: this.projectRoot, encoding: 'utf-8', stdio: 'pipe',
+        }).trim();
+        if (localHead !== remoteHead) {
+          throw new Error(`Push succeeded but HEADs differ — local=${localHead} remote=${remoteHead}`);
+        }
+        appendFileSync(logFile, '[PUSH] Verified remote HEAD matches local HEAD\n');
+      } catch (verifyErr) {
+        const verifyMsg = verifyErr instanceof Error ? verifyErr.message : String(verifyErr);
+        appendFileSync(logFile, `[PUSH] Remote verification failed: ${verifyMsg}\n`);
+        throw verifyErr;
+      }
+    } catch (pushErr) {
+      const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+      appendFileSync(logFile, `[PUSH] Push failed: ${pushMsg}\n`);
+      appendFileSync(logFile, '[PUSH] Task cannot advance — engineer must be able to push before QA can verify\n');
+      // Write a failure report so the reason is visible
+      const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+      const failReport: QaReport = {
+        overall: 'FAIL',
+        criteria: [{
+          criterion: 'Git push verification',
+          name: 'Git push verification',
+          status: 'FAIL',
+          notes: `Git push failed: ${pushMsg}. The engineer must be able to push commits before QA can verify.`,
+        }],
+      };
+      writeFileSync(reportPath, JSON.stringify(failReport, null, 2));
+      this.advancePhase(pipeline, 'failed');
+      return;
+    }
+
     this.advancePhase(pipeline, 'qa-review');
     await this.executePhase(pipeline);
   }
@@ -544,6 +595,92 @@ export class Orchestrator {
     this._savePipelineState(pipeline); // persist incremented qaAttempt so crash recovery doesn't lose it
     const logFile = path.join(pipeline.specPath, 'output.log');
     this._phaseHeader(logFile, `qa-review (attempt ${pipeline.qaAttempt})`);
+
+    // ── Gap 3: Respect locked QA reports (manual human overrides) ──
+    const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+    if (existsSync(reportPath)) {
+      try {
+        const existingReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
+        if (existingReport.locked === true) {
+          appendFileSync(logFile, '\n[INFO] qa_report.json is locked — skipping QA review\n');
+          this.advancePhase(pipeline, 'awaiting-review');
+          return;
+        }
+        // Detect human override: "reviewedBy" text containing "manual override"
+        if (existingReport.reviewedBy && typeof existingReport.reviewedBy === 'string' &&
+            existingReport.reviewedBy.toLowerCase().includes('manual override')) {
+          appendFileSync(logFile, '\n[INFO] qa_report.json has manual override — skipping QA review\n');
+          this.advancePhase(pipeline, 'awaiting-review');
+          return;
+        }
+      } catch { /* malformed JSON — proceed with fresh QA review */ }
+    }
+
+    // ── Gap 1: Verify worktree state matches remote branch ──
+    // If there are unpushed commits, QA would review local state that differs
+    // from what reviewers see on the remote branch. Push them or fail early.
+    try {
+      execFileSync('git', ['fetch', 'origin', pipeline.branch], { cwd: this.projectRoot, stdio: 'pipe' });
+    } catch { /* branch doesn't exist on remote yet — that's ok */ }
+
+    let hasUnpushed = false;
+    try {
+      // Use the main repo with branch refs to check unpushed commits — worktree
+      // branch refs may not be fully synced with origin in container mode.
+      const unpushed = execFileSync('git', ['log', `origin/${pipeline.branch}..${pipeline.branch}`, '--oneline'], {
+        cwd: this.projectRoot, encoding: 'utf-8', stdio: 'pipe',
+      }).trim();
+      hasUnpushed = unpushed.length > 0;
+      if (hasUnpushed) {
+        appendFileSync(logFile, `\n[QA-PRECHECK] Unpushed commits detected on ${pipeline.branch}:\n${unpushed}\n`);
+        // Attempt to push them automatically
+        try {
+          execFileSync('git', ['push', 'origin', pipeline.branch], { cwd: this.projectRoot, stdio: 'pipe' });
+          appendFileSync(logFile, '[QA-PRECHECK] Pushed unpushed commits successfully — remote matches worktree\n');
+          hasUnpushed = false;
+        } catch (pushErr) {
+          const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+          appendFileSync(logFile, `[QA-PRECHECK] Auto-push failed: ${pushMsg}\n`);
+        }
+      }
+    } catch { /* branch doesn't exist on remote — no unpushed check needed */ }
+
+    if (hasUnpushed) {
+      // Write a FAIL report and bail out — engineer must push before QA can verify
+      const failReport: QaReport = {
+        overall: 'FAIL',
+        criteria: [{
+          criterion: 'Unpushed commits',
+          name: 'Unpushed commits',
+          status: 'FAIL',
+          notes: 'Unpushed commits detected — engineer must push before QA can verify. ' +
+            'The worktree has local commits not present on the remote branch, ' +
+            'so QA cannot verify the same code that reviewers will see.',
+        }],
+      };
+      writeFileSync(reportPath, JSON.stringify(failReport, null, 2));
+      appendFileSync(logFile, '[QA-PRECHECK] FAIL — unpushed commits detected, engineer must push first\n');
+
+      if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
+        this._writeCompletionSummary(pipeline);
+        this.advancePhase(pipeline, 'failed');
+      } else {
+        // ── Gap 5b: Snapshot qa_report.json before bouncing back ──
+        // Preserve the QA report context so it can be restored if deleted
+        // during the implement phase (engineer accidentally deletes it, etc.)
+        if (existsSync(reportPath)) {
+          try {
+            const bounceSnapshot = path.join(pipeline.specPath, 'qa_report_before_bounce.json');
+            writeFileSync(bounceSnapshot, readFileSync(reportPath, 'utf-8'));
+          } catch { /* best-effort */ }
+        }
+        this._writeQaFeedback(pipeline, failReport);
+        this.advancePhase(pipeline, 'implement');
+        this._savePipelineState(pipeline);
+        await this.executePhase(pipeline);
+      }
+      return;
+    }
 
     // Fetch latest origin/master so the QA agent's git diff is compared against the
     // actual current remote baseline, not a stale local cache.
@@ -557,7 +694,6 @@ export class Orchestrator {
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 
-    const reportPath = path.join(pipeline.specPath, 'qa_report.json');
     const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
 
     if (report.overall === 'PASS') {
@@ -567,6 +703,13 @@ export class Orchestrator {
       this._writeCompletionSummary(pipeline);
       this.advancePhase(pipeline, 'failed');
     } else {
+      // ── Gap 5b: Snapshot qa_report.json before bouncing back ──
+      // Preserve the QA report context so it can be restored if deleted
+      // during the implement phase (engineer accidentally deletes it, etc.)
+      try {
+        const bounceSnapshot = path.join(pipeline.specPath, 'qa_report_before_bounce.json');
+        writeFileSync(bounceSnapshot, readFileSync(reportPath, 'utf-8'));
+      } catch { /* best-effort */ }
       // Write QA feedback and bounce back to implement instead of auto-fixing
       this._writeQaFeedback(pipeline, report);
       this.advancePhase(pipeline, 'implement');
@@ -769,6 +912,29 @@ export class Orchestrator {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Restore qa_report.json from a snapshot if the report was deleted (Gap 4b).
+   * Checks both qa_report_before_failed.json (retryTask snapshot) and
+   * qa_report_before_bounce.json (mid-pipeline QA→implement bounce snapshot).
+   * Uses the first available snapshot. Best-effort — never blocks the pipeline.
+   */
+  private _restoreQaReportFromSnapshot(specPath: string): void {
+    const reportPath = path.join(specPath, 'qa_report.json');
+    if (existsSync(reportPath)) return;
+    for (const snapName of ['qa_report_before_failed.json', 'qa_report_before_bounce.json']) {
+      const snapshotPath = path.join(specPath, snapName);
+      if (existsSync(snapshotPath)) {
+        try {
+          const snapshot = readFileSync(snapshotPath, 'utf-8');
+          writeFileSync(reportPath, snapshot);
+          const logFile = path.join(specPath, 'output.log');
+          appendFileSync(logFile, `\n[GUARD] Restored qa_report.json from ${snapName} — file was deleted\n`);
+          break; // use the first available snapshot
+        } catch { /* best-effort — don't block the pipeline on snapshot restore failure */ }
+      }
     }
   }
 
@@ -1099,6 +1265,12 @@ export class Orchestrator {
     // Clear output.log for a fresh terminal view
     const outputPath = path.join(dir, 'output.log');
     try { if (existsSync(outputPath)) unlinkSync(outputPath); } catch { /* best-effort */ }
+
+    // ── Gap 4b: Restore qa_report.json if deleted (also done in runImplement) ──
+    // Belt-and-suspenders: restore here too so the report exists before the pipeline
+    // starts, not just when runImplement is reached. Covers scenarios where
+    // resumeTask skips directly to implement on a previously-failed task.
+    this._restoreQaReportFromSnapshot(dir);
 
     await this.runTask(taskId, task.description, startPhase);
   }

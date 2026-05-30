@@ -442,6 +442,9 @@ describe('Orchestrator', () => {
     it('writes feedback and resets qaAttempt when awaiting review', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
+      // Update the task phase since rejectTask checks taskStore, not the pipeline
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
       const pipeline = makePipeline({
         taskId: testData.taskId,
         phase: 'awaiting-review',
@@ -1318,7 +1321,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       // Write both spec.md and plan.json so hasSpec=true and hasPlan=true
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
-      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [] }));
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [{ id: 1, title: "Test", description: "Test", files: [], acceptance_criteria: [] }] }));
       const orch = makeOrch(testData.root);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
@@ -1860,6 +1863,9 @@ describe('Orchestrator', () => {
     it('executes create-pr when strategy is pull-request', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
+      // Update the task phase since approveTask checks taskStore, not the pipeline
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
 
       const slug = 'test-task';
       const pipeline = makePipeline({
@@ -1914,7 +1920,7 @@ describe('Orchestrator', () => {
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [] }));
 
       const taskStore = (orch as AnyOrch).taskStore;
-      taskStore.update(testData.taskId, { branch: 'feat/test-task' });
+      taskStore.update(testData.taskId, { description: 'test-task', branch: 'feat/test-task' });
 
       const slug = 'test-task';
       const worktreePath = join(testData.root, '..', 'worktrees', slug);
