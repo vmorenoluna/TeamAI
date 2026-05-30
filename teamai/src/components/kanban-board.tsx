@@ -10,22 +10,38 @@ import type { Task } from '@/lib/task-store';
 
 const COLUMNS = [
   { phase: 'backlog', label: 'Backlog' },
-  { phase: 'spec', label: 'Spec' },
-  { phase: 'plan', label: 'Planning' },
+  { phase: 'analysis', label: 'Analysis' },
   { phase: 'implement', label: 'In Progress' },
-  { phase: 'qa-review', label: 'QA Review' },
-  { phase: 'awaiting-review', label: 'Awaiting Review' },
-  { phase: 'merge', label: 'Merging' },
+  { phase: 'review', label: 'Review' },
   { phase: 'failed', label: 'Failed' },
   { phase: 'done', label: 'Done' },
 ] as const;
 
 // Normalize phases that share a column
 function normalizePhase(phase: string): string {
-  if (phase === 'qa-fix') return 'qa-review';
-  if (phase === 'create-pr') return 'merge';
-  if (phase === 'pr-open') return 'merge';
+  if (phase === 'spec') return 'analysis';
+  if (phase === 'plan') return 'analysis';
+  if (phase === 'qa-fix') return 'review';
+  if (phase === 'qa-review') return 'review';
+  if (phase === 'awaiting-review') return 'review';
+  if (phase === 'create-pr') return 'review';
+  if (phase === 'pr-open') return 'review';
+  if (phase === 'merge') return 'review';
   return phase;
+}
+
+// Resolve a column phase back to a real task phase for moveTask
+// For merged columns, default to the first sub-phase or preserve existing
+function resolveTargetPhase(colPhase: string, currentPhase?: string): string {
+  if (colPhase === 'analysis') {
+    if (currentPhase === 'spec' || currentPhase === 'plan') return currentPhase;
+    return 'spec';
+  }
+  if (colPhase === 'review') {
+    if (currentPhase === 'qa-review' || currentPhase === 'awaiting-review' || currentPhase === 'qa-fix' || currentPhase === 'create-pr' || currentPhase === 'pr-open' || currentPhase === 'merge') return currentPhase;
+    return 'qa-review';
+  }
+  return colPhase;
 }
 
 const TEMPLATES = [
@@ -213,7 +229,9 @@ export function KanbanBoard({ tasks }: Props) {
   function handleBulkMove(targetPhase: string) {
     startTransition(async () => {
       for (const id of selectedIds) {
-        await moveTask(id, targetPhase);
+        const task = tasks.find(t => t.id === id);
+        const actualPhase = resolveTargetPhase(targetPhase, task?.phase);
+        await moveTask(id, actualPhase);
       }
       clearSelection();
       router.refresh();
@@ -289,7 +307,8 @@ export function KanbanBoard({ tasks }: Props) {
       return;
     }
 
-    const previousPhase = normalizePhase(effectivePhase(task));
+    // Store the actual task phase for undo (not the normalized column phase)
+    const previousPhase = task.phase;
     // Push to undo stack
     undoStackRef.current.push({
       taskId: draggingTaskId,
@@ -320,8 +339,10 @@ export function KanbanBoard({ tasks }: Props) {
       });
     }, 10000));
 
+    // Resolve the actual phase for the moveTask call (e.g. analysis → spec)
+    const actualPhase = resolveTargetPhase(targetPhase, task.phase);
     startTransition(async () => {
-      await moveTask(draggingTaskId, targetPhase);
+      await moveTask(draggingTaskId, actualPhase);
     });
   }
 
