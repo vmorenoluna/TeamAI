@@ -60,7 +60,6 @@ describe('ProviderConfigEditor', () => {
     expect(screen.getByText('planner')).toBeInTheDocument();
     expect(screen.getByText('coder')).toBeInTheDocument();
     expect(screen.getByText('qa-reviewer')).toBeInTheDocument();
-    expect(screen.getByText('qa-fixer')).toBeInTheDocument();
     expect(screen.getByText('merger')).toBeInTheDocument();
   });
 
@@ -279,7 +278,7 @@ describe('ProviderConfigEditor', () => {
     render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
 
     const indicators = screen.getAllByText('Loading models…');
-    expect(indicators).toHaveLength(7);
+    expect(indicators).toHaveLength(6);
 
     // Resolve the loading so inflightFetches cleans up
     resolveLoading({ models: CURATED_MODELS_ANTHROPIC, error: undefined });
