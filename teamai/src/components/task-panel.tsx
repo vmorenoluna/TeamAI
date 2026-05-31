@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { getTaskFull } from '@/app/actions/tasks';
 import { getRoles } from '@/app/actions/roles';
 import { TaskDetail } from './task-detail';
+import { useWebSocket } from '@/hooks/use-websocket';
 import type { RoleDefinition } from '@/app/actions/roles';
 
 export type FullData = Awaited<ReturnType<typeof getTaskFull>>;
@@ -42,71 +43,19 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
-  // Re-fetch silently on phase-change so Spec/Plan/QA/Terminal update without close+reopen
-  // Skip in readonly mode — no tabs to update
-  useEffect(() => {
-    if (readonly) return;
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let reconnectAttempt = 0;
-    let closed = false;
-
-    const MAX_RECONNECT_ATTEMPTS = 10;
-
-    function scheduleReconnect() {
-      if (closed || reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) return;
-      reconnectAttempt++;
-      const delay = Math.min(500 * Math.pow(2, reconnectAttempt - 1) + Math.random() * 1000, 16000);
-      reconnectTimer = setTimeout(() => {
-        if (!closed) createConnection();
-      }, delay);
+  // Re-fetch silently on phase-change/container-log so tabs update without close+reopen
+  // Guarded by readonly at the message-handler level so the hook is always called at top level.
+  const onMessageRef = useRef<(data: Record<string, unknown>) => void>(undefined);
+  // eslint-disable-next-line react-hooks/refs
+  onMessageRef.current = (msg) => {
+    if (!readonly && ((msg.type === 'phase-change' && msg.taskId === taskId) || msg.type === 'container-log')) {
+      refresh(true);
     }
+  };
 
-    function createConnection() {
-      if (closed) return;
-      ws = new WebSocket(`ws://${window.location.host}/ws`);
-
-      ws.onopen = () => {
-        reconnectAttempt = 0;
-      };
-
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          if (msg.type === 'phase-change' && msg.taskId === taskId) {
-            refresh(true);
-          }
-          // Silently refresh on container-log to show devcontainer startup progress in real-time
-          if (msg.type === 'container-log') {
-            refresh(true);
-          }
-        } catch (err) { console.error('[task-panel] Failed to parse WebSocket message', err instanceof Error ? err.message : err); }
-      };
-
-      ws.onclose = () => {
-        ws = null;
-        scheduleReconnect();
-      };
-
-      ws.onerror = () => {
-        // onclose fires after onerror — let onclose handle reconnection
-      };
-    }
-
-    createConnection();
-
-    return () => {
-      closed = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (ws) {
-        const s = ws;
-        if (s.readyState === WebSocket.CONNECTING) s.addEventListener('open', () => s.close());
-        else s.close();
-        ws = null;
-      }
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, readonly]);
+  useWebSocket({
+    onMessage: (msg) => onMessageRef.current?.(msg),
+  });
 
   return (
     <>
