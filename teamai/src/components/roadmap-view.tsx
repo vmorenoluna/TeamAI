@@ -23,23 +23,15 @@ import { extractText } from '@/lib/stream-types';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskPanel, type FullData } from './task-panel';
 import type { RoleDefinition } from '@/app/actions/roles';
-import { PHASE_BADGE, PHASE_LABELS as TASK_PHASE_LABELS } from '@/constants/phases';
+import { PHASE_BADGE, PHASE_LABELS as TASK_PHASE_LABELS, PRIORITY_COLORS } from '@/constants/phases';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
 
 const PHASE_LABELS: Record<keyof RoadmapReport['phases'], string> = {
   now: 'Phase 1 — Now',
   next: 'Phase 2 — Next',
   later: 'Phase 3 — Later',
   icebox: 'Icebox',
-};
-
-const PRIORITY_COLORS: Record<string, string> = {
-  P0: 'bg-red-900/30 text-red-400',
-  P1: 'bg-orange-900/30 text-orange-400',
-  P2: 'bg-amber-900/30 text-amber-400',
-  P3: 'bg-slate-800 text-slate-400',
 };
 
 function ComplexityDots({ value }: { value: number }) {
@@ -159,8 +151,8 @@ function RoadmapCard({
           <span className="text-sm font-semibold text-white truncate">
             {item.title}
           </span>
-        </div>          <span className="shrink-0 text-[10px] text-slate-500">
-            {item.category}
+        </div>
+        <span className="shrink-0 text-[10px] text-slate-500">
           {item.category}
         </span>
       </div>

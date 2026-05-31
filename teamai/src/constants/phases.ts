@@ -1,3 +1,11 @@
+/** Tailwind CSS classes for roadmap priority badge styling */
+export const PRIORITY_COLORS: Record<string, string> = {
+  P0: 'bg-red-900/30 text-red-400',
+  P1: 'bg-orange-900/30 text-orange-400',
+  P2: 'bg-amber-900/30 text-amber-400',
+  P3: 'bg-slate-800 text-slate-400',
+};
+
 /** Tailwind CSS classes for phase badge styling */
 export const PHASE_BADGE: Record<string, string> = {
   backlog:           'bg-slate-800 text-slate-300',

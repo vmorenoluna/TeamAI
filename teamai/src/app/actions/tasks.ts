@@ -7,9 +7,9 @@ import { processManager } from '@/lib/process-manager';
 import { revalidatePath } from 'next/cache';
 import type { PlanData, QAReportData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { getResumePhaseForFailedTask } from '@/lib/task-utils';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { execFileSync } from 'child_process';
 
 async function getStores() {
@@ -89,6 +89,18 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
         break; // use the first available snapshot
       }
     }
+  }
+
+  // ── Gap 4b: Restore human_feedback.md from snapshot if deleted ──
+  const humanFeedbackPath = join(dir, 'human_feedback.md');
+  const humanFeedbackSnapshotPath = join(dir, 'human_feedback_before_bounce.md');
+  if (!existsSync(humanFeedbackPath) && existsSync(humanFeedbackSnapshotPath)) {
+    try {
+      const snapshot = readFileSync(humanFeedbackSnapshotPath, 'utf-8');
+      writeFileSync(humanFeedbackPath, snapshot);
+      const logFile = join(dir, 'output.log');
+      appendFileSync(logFile, '\n[RETRY] Restored human_feedback.md from human_feedback_before_bounce.md — file was deleted before retry\n');
+    } catch { /* best-effort */ }
   }
 
   // ── Gap 5: Snapshot qa_report.json before re-running so context is preserved ──
@@ -408,14 +420,39 @@ export async function deleteTaskWorktree(taskId: string): Promise<{ success: boo
   if (!task || !task.branch) return { success: false, error: 'No branch found for this task' };
   const wtPath = orchestrator.getWorktreePath(taskId);
   if (!wtPath || !existsSync(wtPath)) return { success: false, error: 'Worktree directory not found on disk' };
+  // ── Gap 5a: Safety guard — never rmSync the project root ──
+  const resolvedWt = resolve(wtPath);
+  const resolvedProject = resolve(projectPath);
+  if (resolvedWt === resolvedProject) {
+    return { success: false, error: 'Refusing to delete worktree at project root — this would destroy the repository' };
+  }
   try {
     execFileSync('git', ['worktree', 'remove', wtPath], { cwd: projectPath, encoding: 'utf-8' });
     taskStore.update(taskId, { branch: undefined });
     revalidatePath('/');
     revalidatePath(`/task/${taskId}`);
     return { success: true };
-  } catch (e) {
-    const err = e as { stderr?: string; message?: string };
-    return { success: false, error: err.stderr || err.message };
+  } catch {
+    // Normal remove failed (e.g. uncommitted changes) — try --force
+    try {
+      execFileSync('git', ['worktree', 'remove', '--force', wtPath], { cwd: projectPath, encoding: 'utf-8' });
+      taskStore.update(taskId, { branch: undefined });
+      revalidatePath('/');
+      revalidatePath(`/task/${taskId}`);
+      return { success: true };
+    } catch {
+      // --force also failed (e.g. files locked) — delete manually and prune
+      try {
+        rmSync(wtPath, { recursive: true, force: true });
+        execFileSync('git', ['worktree', 'prune'], { cwd: projectPath, stdio: 'pipe' });
+        taskStore.update(taskId, { branch: undefined });
+        revalidatePath('/');
+        revalidatePath(`/task/${taskId}`);
+        return { success: true };
+      } catch (e) {
+        const err = e as { stderr?: string; message?: string };
+        return { success: false, error: err.stderr || err.message || 'Failed to remove worktree' };
+      }
+    }
   }
 }

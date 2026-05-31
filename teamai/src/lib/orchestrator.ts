@@ -48,7 +48,6 @@ interface QaReport {
   issues?: QaIssue[];
 }
 
-const PIPELINE_TIMEOUT_MS = 600_000; // 10 minutes
 
 class RateLimitError extends Error {
   constructor(public resetsAt: number) {
@@ -281,6 +280,15 @@ export class Orchestrator {
     const feedbackPath = path.join(pipeline.specPath, 'human_feedback.md');
     writeFileSync(feedbackPath, `# Human Review Feedback\n\n${feedback}\n`);
 
+    // ── Snapshot: preserve human_feedback before bouncing back to implement ──
+    // The feedback file is deleted after implement completes (cleanup at end of runImplement).
+    // If the pipeline later bounces back again (e.g. QA → implement → review → implement),
+    // this snapshot ensures the feedback survives repeated bounce cycles.
+    try {
+      const snapshotPath = path.join(pipeline.specPath, 'human_feedback_before_bounce.md');
+      writeFileSync(snapshotPath, readFileSync(feedbackPath, 'utf-8'));
+    } catch { /* best-effort */ }
+
     // Update the QA report so the engineer can see what changes were requested
     const reportPath = path.join(pipeline.specPath, 'qa_report.json');
     if (existsSync(reportPath)) {
@@ -355,9 +363,20 @@ export class Orchestrator {
     } catch { /* non-fast-forward or offline — proceed with local master */ }
 
     if (!existsSync(pipeline.worktreePath)) {
+      // ── Gap 5a: Safety guard — never rmSync the project root ──
+      if (path.resolve(pipeline.worktreePath) === path.resolve(this.projectRoot)) {
+        throw new Error('Refusing to create worktree at project root — this would destroy the repository');
+      }
       try {
         this._execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], this.projectRoot);
       } catch {
+        // If the directory still exists after worktree remove (e.g. metadata was already
+        // pruned and git doesn't know about this path), delete it directly so the
+        // subsequent worktree add can succeed.
+        if (existsSync(pipeline.worktreePath)) {
+          try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+          try { execFileSync('git', ['worktree', 'prune'], { cwd: this.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+        }
         // Branch already exists (e.g. from a previous failed attempt) — reuse it
         this._execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], this.projectRoot);
       }
@@ -385,6 +404,10 @@ export class Orchestrator {
 
     // ── Gap 4b: Programmatic guard — restore qa_report.json from snapshot if deleted ──
     this._restoreQaReportFromSnapshot(pipeline.specPath);
+    // ── Gap 4b (human_feedback): restore human_feedback.md from snapshot if deleted ──
+    // Belt-and-suspenders: the file is deleted after a successful implement bounce-back
+    // but may be needed again if the pipeline bounces back a second time.
+    this._restoreHumanFeedbackFromSnapshot(pipeline.specPath);
 
     // Pull latest master before creating the worktree so the feature branch starts
     // from up-to-date code, minimising conflicts at PR time.
@@ -397,9 +420,20 @@ export class Orchestrator {
     if (!existsSync(pipeline.worktreePath) || !this._isWorktreeHealthy(pipeline.worktreePath)) {
       // Remove broken worktree first if it exists but is unhealthy
       if (existsSync(pipeline.worktreePath)) {
+        // ── Gap 5a: Safety guard — never rmSync the project root ──
+        if (path.resolve(pipeline.worktreePath) === path.resolve(this.projectRoot)) {
+          throw new Error('Refusing to remove worktree at project root — this would destroy the repository');
+        }
         try {
           this._execGit(['worktree', 'remove', '--force', pipeline.worktreePath], this.projectRoot);
         } catch { /* best-effort — proceed to recreate */ }
+        // If the directory still exists after worktree remove (e.g. metadata was already
+        // pruned and git doesn't know about this path), delete it directly so the
+        // subsequent worktree add can succeed.
+        if (existsSync(pipeline.worktreePath)) {
+          try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+          try { execFileSync('git', ['worktree', 'prune'], { cwd: this.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+        }
       }
       try {
         this._execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], this.projectRoot);
@@ -438,6 +472,13 @@ export class Orchestrator {
     if (hasHumanFeedback) {
       const humanFeedback = readFileSync(humanFeedbackPath, 'utf-8');
       qaFeedbackContent = (qaFeedbackContent ? qaFeedbackContent + '\n\n---\n\n' : '') + humanFeedback;
+      // ── Belt-and-suspenders: snapshot human_feedback if rejectTask didn't create it ──
+      const snapshotPath = path.join(pipeline.specPath, 'human_feedback_before_bounce.md');
+      if (!existsSync(snapshotPath)) {
+        try {
+          writeFileSync(snapshotPath, readFileSync(humanFeedbackPath, 'utf-8'));
+        } catch { /* best-effort */ }
+      }
     }
 
     // When bouncing back from QA, only re-run subtasks flagged by the QA report.
@@ -934,6 +975,12 @@ export class Orchestrator {
    * Verify the worktree is a valid git worktree (#4).
    * Checks that .git file exists inside the worktree and points to a valid gitdir.
    * Returns true if the worktree is healthy, false if it needs to be recreated.
+   *
+   * Container mode: the .git file may contain a Linux container path (e.g.
+   * /workspaces/…) that doesn't resolve on the Windows host. In that case we
+   * extract the worktree name from the path and check the host-side git metadata
+   * directory — if it exists the worktree is healthy and _patchWorktreeGitFile
+   * will update the pointer before the agent session starts.
    */
   private _isWorktreeHealthy(worktreePath: string): boolean {
     try {
@@ -942,10 +989,17 @@ export class Orchestrator {
       const content = readFileSync(gitFile, 'utf-8').trim();
       if (!content.startsWith('gitdir:')) return false;
       const gitdir = content.slice('gitdir:'.length).trim();
-      // If the gitdir points back to the main repo's .git/worktrees/<name>
-      // Verify the referenced directory exists
-      if (!existsSync(gitdir)) return false;
-      return true;
+      // Direct check: gitdir exists at the stated path (host mode or already-patched container path).
+      if (existsSync(gitdir)) return true;
+      // Container mode: gitdir is a Linux container path — translate to host and check.
+      if (readContainerConfig(this.projectRoot).enabled) {
+        const m = gitdir.replace(/\\/g, '/').match(/\/worktrees\/([^/]+)$/);
+        if (m) {
+          const hostGitdir = path.join(this.projectRoot, '.git', 'worktrees', m[1]);
+          if (existsSync(hostGitdir)) return true;
+        }
+      }
+      return false;
     } catch {
       return false;
     }
@@ -974,6 +1028,24 @@ export class Orchestrator {
     }
   }
 
+  /**
+   * Restore human_feedback.md from snapshot if the file was deleted (Gap 4b).
+   * Only checks human_feedback_before_bounce.md. Best-effort.
+   */
+  private _restoreHumanFeedbackFromSnapshot(specPath: string): void {
+    const feedbackPath = path.join(specPath, 'human_feedback.md');
+    if (existsSync(feedbackPath)) return;
+    const snapshotPath = path.join(specPath, 'human_feedback_before_bounce.md');
+    if (existsSync(snapshotPath)) {
+      try {
+        const snapshot = readFileSync(snapshotPath, 'utf-8');
+        writeFileSync(feedbackPath, snapshot);
+        const logFile = path.join(specPath, 'output.log');
+        appendFileSync(logFile, `\n[GUARD] Restored human_feedback.md from human_feedback_before_bounce.md — file was deleted\n`);
+      } catch { /* best-effort */ }
+    }
+  }
+
   private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void {
     pipeline.phase = phase;
     this.taskStore.updatePhase(pipeline.taskId, phase);
@@ -997,7 +1069,7 @@ export class Orchestrator {
     return Math.floor(reset.getTime() / 1000);
   }
 
-  private waitForCompletion(sessionId: string, timeoutMs: number = PIPELINE_TIMEOUT_MS): Promise<void> {
+  private waitForCompletion(sessionId: string): Promise<void> {
     return new Promise((resolve, reject) => {
       let rateLimitResetsAt: number | null = null;
       // Tracks Claude Code's per-session usage limit (distinct from API rate limits).
@@ -1036,7 +1108,6 @@ export class Orchestrator {
         if (event.type === 'result') {
           settled = true;
           cleanup();
-          clearTimeout(timeout);
           // Session limit takes priority: exit is clean (is_error=false) but no work was done
           if (sessionLimitResetsAt) {
             reject(new RateLimitError(sessionLimitResetsAt));
@@ -1051,7 +1122,6 @@ export class Orchestrator {
         if (sid !== sessionId) return;
         settled = true;
         cleanup();
-        clearTimeout(timeout);
         if (sessionLimitResetsAt) reject(new RateLimitError(sessionLimitResetsAt));
         else if (code === 0 || code === null) resolve();
         else if (rateLimitResetsAt) reject(new RateLimitError(rateLimitResetsAt));
@@ -1061,14 +1131,6 @@ export class Orchestrator {
       processManager.on('event', onEvent);
       processManager.on('exit', onExit);
       processManager.on('raw', onRaw);
-
-      const timeout = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        processManager.killSession(sessionId);
-        reject(new Error(`Pipeline timed out after ${timeoutMs / 60000} minutes`));
-      }, timeoutMs);
     });
   }
 
