@@ -44,7 +44,7 @@ export default async function SettingsPage() {
         <section>
           <h2 className="text-sm font-semibold text-slate-200 mb-1">Pipeline Configuration</h2>
           <p className="text-xs text-slate-400 mb-4">
-            Choose which phases run and configure QA behaviour.
+            Configure QA behaviour and parallel subtask execution.
           </p>
           <PipelineConfigEditor config={pipelineConfig} />
         </section>

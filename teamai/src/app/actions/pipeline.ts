@@ -6,13 +6,11 @@ import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
 
 export interface PipelineConfig {
-  phases: string[];
   maxQaAttempts: number;
   parallelSubtasks: boolean;
 }
 
 const DEFAULT_CONFIG: PipelineConfig = {
-  phases: ['spec', 'plan', 'implement', 'qa-review', 'merge'],
   maxQaAttempts: 3,
   parallelSubtasks: true,
 };
