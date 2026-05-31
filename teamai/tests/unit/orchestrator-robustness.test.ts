@@ -612,7 +612,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement',
       qaAttempt: 0,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
@@ -660,7 +660,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement',
       qaAttempt: 0,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
@@ -695,7 +695,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement',
       qaAttempt: 0,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
@@ -735,7 +735,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement',
       qaAttempt: 0,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
@@ -769,7 +769,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement',
       qaAttempt: 0,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
@@ -816,7 +816,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement',
       qaAttempt: 0,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
@@ -927,7 +927,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       phase: 'qa-review',
       qaAttempt: 1,
       maxQaAttempts: 3,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     try {
@@ -1045,7 +1045,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       phase: 'qa-review',
       qaAttempt: 1,
       maxQaAttempts: 3,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     try {
@@ -1124,7 +1124,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       phase: 'qa-review',
       qaAttempt: 1,
       maxQaAttempts: 3,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     try {
@@ -1260,7 +1260,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       phase: 'implement',
       qaAttempt: 0,
       maxQaAttempts: 3,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
@@ -1298,7 +1298,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       phase: 'qa-review',
       qaAttempt: 1,
       maxQaAttempts: 3,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     await (orch as AnyOrch).runQaReview(qaPipeline);
@@ -1345,7 +1345,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       phase: 'qa-review',
       qaAttempt: 1,
       maxQaAttempts: 3,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     try {
@@ -1535,7 +1535,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement',
       qaAttempt: 0,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     try {
@@ -1591,7 +1591,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement',
       qaAttempt: 0,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     const promise = (orch as AnyOrch).runImplement(pipeline);
@@ -1642,7 +1642,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement',
       qaAttempt: 0,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     const promise = (orch as AnyOrch).runImplement(pipeline);
@@ -1710,7 +1710,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       phase: 'implement',
       qaAttempt: 1,
       maxQaAttempts: 3,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     try {
@@ -1759,7 +1759,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       phase: 'implement',
       qaAttempt: 0,
       maxQaAttempts: 3,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     try {
@@ -1810,7 +1810,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       phase: 'implement',
       qaAttempt: 1,
       maxQaAttempts: 3,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     try {
@@ -1853,7 +1853,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       phase: 'implement',
       qaAttempt: 1,
       maxQaAttempts: 3,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     try {
@@ -1900,7 +1900,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       phase: 'implement',
       qaAttempt: 1,
       maxQaAttempts: 3,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     try {
@@ -1990,7 +1990,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       phase: 'implement',
       qaAttempt: 1,
       maxQaAttempts: 3,
-      worktreePath: project.root,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
     try {
