@@ -6,6 +6,7 @@ import { createTask, moveTask, bulkDeleteTasks } from '@/app/actions/tasks';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskCard } from './task-card';
 import { TaskPanel } from './task-panel';
+import { ConnectionIndicator } from './connection-indicator';
 import type { Task } from '@/lib/task-store';
 
 const COLUMNS = [
@@ -105,6 +106,9 @@ export function KanbanBoard({ tasks }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
 
+  // WS connection state — 'connecting' (initial), 'connected', 'disconnected' (after close)
+  const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+
   // Undo state
   interface UndoAction { taskId: string; previousPhase: string; taskTitle: string; }
   const undoStackRef = useRef<UndoAction[]>([]);
@@ -124,6 +128,7 @@ export function KanbanBoard({ tasks }: Props) {
 
   usePhaseSync({
     onPhaseChange: (taskId) => clearOptimistic(taskId),
+    onConnectionChange: (connected) => setWsStatus(connected ? 'connected' : 'disconnected'),
   });
 
   // Close the task window on Escape key
@@ -350,7 +355,10 @@ export function KanbanBoard({ tasks }: Props) {
   return (
     <div className="flex flex-col h-full bg-[#11131b]">
       <div className="flex items-center justify-between px-6 py-4 border-b bg-[#11131b] border-[#1e293b] shrink-0">
-        <h1 className="text-xl font-bold text-white">Board</h1>
+        <div className="flex items-center gap-2">
+          <ConnectionIndicator connected={wsStatus === 'connected'} />
+          <h1 className="text-xl font-bold text-white">Board</h1>
+        </div>
         <button
           onClick={() => setShowDialog(true)}
           className="px-3 py-1.5 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] transition-colors"
