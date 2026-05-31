@@ -96,12 +96,12 @@ export class Orchestrator {
     return this.activeTasks.has(taskId);
   }
 
-  private getPipelineConfig(): { phases: string[]; maxQaAttempts: number; parallelSubtasks: boolean } {
+  private getPipelineConfig(): { maxQaAttempts: number; parallelSubtasks: boolean } {
     const cfgPath = path.join(this.projectRoot, '.teamai', 'pipeline.json');
     if (existsSync(cfgPath)) {
       try { return JSON.parse(readFileSync(cfgPath, 'utf-8')); } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
     }
-    return { phases: ['spec', 'plan', 'implement', 'qa-review', 'merge'], maxQaAttempts: 3, parallelSubtasks: true };
+    return { maxQaAttempts: 3, parallelSubtasks: true };
   }
 
   // Cancel a running pipeline for a task — kills the active session and removes
@@ -212,7 +212,7 @@ export class Orchestrator {
 
     // Use provided startPhase, else first phase in config.
     // Set in-memory only — _persistAndEmitPhase commits to disk once work starts (#5).
-    const firstPhase = startPhase ?? (config.phases[0] ?? 'spec') as PipelinePhase;
+    const firstPhase = startPhase ?? 'spec';
     pipeline.phase = firstPhase;
 
     this.pipelines.set(taskId, pipeline);
@@ -1277,7 +1277,7 @@ export class Orchestrator {
    */
   cleanupTaskArtifacts(taskId: string, currentPhase: string): void {
     const dir = this.taskStore.getDirById(taskId);
-    const pipelineOrder = this.getPipelineConfig().phases;
+    const pipelineOrder = ['spec', 'plan', 'implement', 'qa-review', 'merge'];
     const startIndex = pipelineOrder.indexOf(currentPhase);
     if (startIndex < 0) return;
 

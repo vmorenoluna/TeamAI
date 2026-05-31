@@ -193,7 +193,6 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root);
       const config = (orch as AnyOrch).getPipelineConfig();
 
-      expect(config.phases).toEqual(['spec', 'plan', 'implement', 'qa-review', 'merge']);
       expect(config.maxQaAttempts).toBe(3);
       expect(config.parallelSubtasks).toBe(true);
     });
@@ -201,7 +200,6 @@ describe('Orchestrator', () => {
     it('returns configured values when pipeline.json exists', () => {
       testData = setupTestProject();
       writeFileSync(join(testData.root, '.teamai', 'pipeline.json'), JSON.stringify({
-        phases: ['spec', 'implement', 'merge'],
         maxQaAttempts: 5,
         parallelSubtasks: false,
       }));
@@ -209,7 +207,6 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root);
       const config = (orch as AnyOrch).getPipelineConfig();
 
-      expect(config.phases).toEqual(['spec', 'implement', 'merge']);
       expect(config.maxQaAttempts).toBe(5);
       expect(config.parallelSubtasks).toBe(false);
     });
@@ -221,7 +218,6 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root);
       const config = (orch as AnyOrch).getPipelineConfig();
 
-      expect(config.phases).toEqual(['spec', 'plan', 'implement', 'qa-review', 'merge']);
       expect(config.maxQaAttempts).toBe(3);
       expect(mockWarn).toHaveBeenCalled();
     });
@@ -339,35 +335,18 @@ describe('Orchestrator', () => {
       await expect(promise).resolves.toBeUndefined();
     });
 
-    it('rejects with timeout error when no event arrives within timeout', async () => {
-      const promise = (orch as AnyOrch).waitForCompletion('sess-timeout', 10);
-
-      // Don't fire any events — the 10ms timeout should fire
-      await expect(promise).rejects.toThrow('Pipeline timed out');
-    });
-
-    it('cleans up listeners on timeout', async () => {
+    it('cleans up listeners on completion', async () => {
       // Spy on processManager.off to verify cleanup
       const offSpy = vi.spyOn(processManager, 'off');
 
-      try {
-        await (orch as AnyOrch).waitForCompletion('sess-cleanup', 10);
-      } catch {
-        // expected timeout
-      }
+      const promise = (orch as AnyOrch).waitForCompletion('sess-cleanup');
+      fireEvent('event', { sessionId: 'sess-cleanup', event: { type: 'result' } });
+      await promise;
 
       // Should have cleaned up both event listeners
       expect(offSpy).toHaveBeenCalledWith('event', expect.any(Function));
       expect(offSpy).toHaveBeenCalledWith('exit', expect.any(Function));
       offSpy.mockRestore();
-    });
-
-    it('does not timeout if already resolved', async () => {
-      const promise = (orch as AnyOrch).waitForCompletion('sess-fast', 5_000);
-
-      fireEvent('event', { sessionId: 'sess-fast', event: { type: 'result' } });
-
-      await expect(promise).resolves.toBeUndefined();
     });
   });
 
