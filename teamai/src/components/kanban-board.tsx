@@ -343,6 +343,7 @@ export function KanbanBoard({ tasks }: Props) {
     const actualPhase = resolveTargetPhase(targetPhase, task.phase);
     startTransition(async () => {
       await moveTask(draggingTaskId, actualPhase);
+      router.refresh();
     });
   }
 

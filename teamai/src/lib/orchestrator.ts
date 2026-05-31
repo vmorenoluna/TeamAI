@@ -128,8 +128,8 @@ export class Orchestrator {
     // Phases that require no pipeline action
     const noRunPhases = ['backlog', 'awaiting-review', 'pr-open', 'failed', 'done'];
     if (noRunPhases.includes(targetPhase)) {
-      // Auto-delete the git worktree when moving to 'done'
-      if (targetPhase === 'done') {
+      // Auto-delete the git worktree when moving to 'done', 'backlog', or 'failed'
+      if (targetPhase === 'done' || targetPhase === 'backlog' || targetPhase === 'failed') {
         this.removeWorktree(taskId);
       }
       this.taskStore.updatePhase(taskId, targetPhase);

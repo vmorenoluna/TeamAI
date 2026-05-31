@@ -46,21 +46,64 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
   // Skip in readonly mode — no tabs to update
   useEffect(() => {
     if (readonly) return;
-    const ws = new WebSocket(`ws://${window.location.host}/ws`);      ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'phase-change' && msg.taskId === taskId) {
-          refresh(true);
-        }
-        // Silently refresh on container-log to show devcontainer startup progress in real-time
-        if (msg.type === 'container-log') {
-          refresh(true);
-        }
-      } catch (err) { console.error('[task-panel] Failed to parse WebSocket message', err instanceof Error ? err.message : err); }
-    };
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectAttempt = 0;
+    let closed = false;
+
+    const MAX_RECONNECT_ATTEMPTS = 10;
+
+    function scheduleReconnect() {
+      if (closed || reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) return;
+      reconnectAttempt++;
+      const delay = Math.min(500 * Math.pow(2, reconnectAttempt - 1) + Math.random() * 1000, 16000);
+      reconnectTimer = setTimeout(() => {
+        if (!closed) createConnection();
+      }, delay);
+    }
+
+    function createConnection() {
+      if (closed) return;
+      ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+      ws.onopen = () => {
+        reconnectAttempt = 0;
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'phase-change' && msg.taskId === taskId) {
+            refresh(true);
+          }
+          // Silently refresh on container-log to show devcontainer startup progress in real-time
+          if (msg.type === 'container-log') {
+            refresh(true);
+          }
+        } catch (err) { console.error('[task-panel] Failed to parse WebSocket message', err instanceof Error ? err.message : err); }
+      };
+
+      ws.onclose = () => {
+        ws = null;
+        scheduleReconnect();
+      };
+
+      ws.onerror = () => {
+        // onclose fires after onerror — let onclose handle reconnection
+      };
+    }
+
+    createConnection();
+
     return () => {
-      if (ws.readyState === WebSocket.CONNECTING) ws.addEventListener('open', () => ws.close());
-      else ws.close();
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) {
+        const s = ws;
+        if (s.readyState === WebSocket.CONNECTING) s.addEventListener('open', () => s.close());
+        else s.close();
+        ws = null;
+      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, readonly]);
