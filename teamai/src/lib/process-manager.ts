@@ -32,7 +32,7 @@ export interface AgentSession {
   id: string;
   process: ChildProcess;
   taskId: string;
-  role: 'analyst' | 'planner' | 'coder' | 'qa-reviewer' | 'qa-fixer' | 'merger' | 'general';
+  role: 'analyst' | 'planner' | 'coder' | 'qa-reviewer' | 'merger' | 'general';
   cwd: string;
   status: 'running' | 'idle' | 'done' | 'error';
   /** Last time (epoch ms) the session produced stdout output. Used for stall detection (#8). */

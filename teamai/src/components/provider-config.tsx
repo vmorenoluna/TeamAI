@@ -4,7 +4,7 @@ import { useState, useTransition, useEffect, useCallback, useRef } from 'react';
 import { saveProvidersConfig, getAvailableModels } from '@/app/actions/providers';
 import type { ProvidersConfig } from '@/app/actions/providers';
 
-const ROLES = ['analyst', 'planner', 'coder', 'qa-reviewer', 'qa-fixer', 'merger'] as const;
+const ROLES = ['analyst', 'planner', 'coder', 'qa-reviewer', 'merger'] as const;
 const PROVIDERS = ['anthropic', 'bedrock', 'vertex', 'openai', 'gemini', 'ollama'] as const;
 
 /** Deduplicate concurrent fetch requests for the same provider on the client. */

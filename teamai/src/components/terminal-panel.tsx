@@ -15,7 +15,6 @@ const ROLE_COLORS: Record<string, string> = {
   'planner.md':      'border-blue-500',
   'coder.md':        'border-amber-500',
   'qa-reviewer.md':  'border-orange-500',
-  'qa-fixer.md':     'border-red-500',
   'merger.md':       'border-teal-500',
   'analyst.md':      'border-indigo-500',
 };
