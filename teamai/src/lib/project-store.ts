@@ -1,9 +1,11 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, readdirSync, renameSync, rmSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
 const CONFIG_DIR = join(homedir(), '.teamai');
 const PROJECTS_FILE = join(CONFIG_DIR, 'projects.json');
+const BACKUP_FILE = PROJECTS_FILE + '.backup';
+const TMP_FILE = PROJECTS_FILE + '.tmp';
 // process.cwd() is the project root (teamai/) at runtime
 const DEFAULTS_DIR = join(process.cwd(), 'defaults');
 
@@ -16,6 +18,11 @@ export interface Project {
 export class ProjectStore {
   constructor() {
     mkdirSync(CONFIG_DIR, { recursive: true });
+
+    // ═══ Crash recovery: if a previous add/remove crashed mid-write, ═══
+    // the backup still exists. Restore it so the user's data is intact.
+    this._restoreFromBackup();
+
     // Defensive init: only create projects.json if it truly doesn't exist.
     // existsSync can return false temporarily (antivirus, cloud sync, etc.),
     // so we double-check by attempting a read before writing an empty array.
@@ -28,7 +35,7 @@ export class ProjectStore {
       } catch {
         // File truly doesn't exist or is unreadable — create it fresh
       }
-      writeFileSync(PROJECTS_FILE, '[]');
+      this._atomicWrite(() => []);
     }
   }
 
@@ -59,14 +66,52 @@ export class ProjectStore {
     };
 
     projects.push(project);
-    writeFileSync(PROJECTS_FILE, JSON.stringify(projects, null, 2));
+    this._atomicWrite(() => projects);
     return project;
   }
 
   remove(projectPath: string): void {
     const projects = this.getAll().filter(p => p.path !== projectPath);
-    writeFileSync(PROJECTS_FILE, JSON.stringify(projects, null, 2));
+    this._atomicWrite(() => projects);
     // Does NOT delete any files from the project directory
+  }
+
+  // ── Atomic write helpers ─────────────────────────────────────────
+
+  /**
+   * Write projects atomically: backup → temp file → rename → cleanup.
+   * If the process crashes mid-write, the real file is untouched and
+   * the next startup restores from the backup.
+   */
+  private _atomicWrite(compute: () => Project[]): void {
+    // 1. Back up current file before modifying
+    if (existsSync(PROJECTS_FILE)) {
+      writeFileSync(BACKUP_FILE, readFileSync(PROJECTS_FILE, 'utf-8'));
+    }
+
+    // 2. Write to temp file (if we crash here, real file is untouched)
+    writeFileSync(TMP_FILE, JSON.stringify(compute(), null, 2));
+
+    // 3. Atomically replace real file with temp
+    renameSync(TMP_FILE, PROJECTS_FILE);
+
+    // 4. Clean up backup on success
+    try { rmSync(BACKUP_FILE); } catch { /* best-effort */ }
+  }
+
+  /**
+   * Check for a leftover backup from a crashed write and restore it.
+   * Called once at startup so the user's project registry is never
+   * left in a corrupted or partially-modified state.
+   */
+  private _restoreFromBackup(): void {
+    if (!existsSync(BACKUP_FILE)) return;
+    try {
+      writeFileSync(PROJECTS_FILE, readFileSync(BACKUP_FILE, 'utf-8'));
+      rmSync(BACKUP_FILE);
+    } catch {
+      // If restore fails, leave backup in place for manual recovery
+    }
   }
 
   /**
