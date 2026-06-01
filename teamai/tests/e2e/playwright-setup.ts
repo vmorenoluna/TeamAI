@@ -8,18 +8,19 @@
  */
 
 import { execFileSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
 
 async function globalSetup() {
   const seedDir = join(__dirname, '..', '..', '.teamai-e2e-seed');
 
+  // Always clean and re-seed for a deterministic baseline.
+  // Stale seed directories from crashed/half-complete runs cause flaky tests.
   if (existsSync(seedDir)) {
-    console.log('[playwright-setup] Seed directory already exists, skipping.');
-    return;
+    try { rmSync(seedDir, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
 
-  console.log('[playwright-setup] Seeding E2E test project...');
+  console.log('[playwright-setup] Seeding E2E test project…');
   try {
     execFileSync('npx', ['tsx', 'tests/e2e/seed.ts', '--with-plans', '--with-qa-report', '--yes'], {
       cwd: join(__dirname, '..', '..'),

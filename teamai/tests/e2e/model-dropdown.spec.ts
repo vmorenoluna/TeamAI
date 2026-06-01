@@ -1,27 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-
-/**
- * Navigate to home page and ensure E2E Test Project is active.
- */
-async function ensureProjectSelected(page: Page): Promise<boolean> {
-  await page.goto('/');
-
-  const backlog = page.locator('text=Backlog').first();
-  try {
-    await expect(backlog).toBeVisible({ timeout: 5_000 });
-    return true;
-  } catch {
-    try {
-      const projectTab = page.locator('button:has-text("E2E Test Project")');
-      await expect(projectTab.first()).toBeVisible({ timeout: 5_000 });
-      await projectTab.first().click();
-      await expect(page.locator('text=Backlog').first()).toBeVisible({ timeout: 15_000 });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
+import { ensureProjectSelected } from './helpers';
 
 test.describe('Model Dropdown', () => {
   test.describe('Settings Page - Provider Config', () => {
@@ -153,7 +131,7 @@ test.describe('Model Dropdown', () => {
       test.skip(!dialogOpen, 'Terminals dialog did not open in this environment');
 
       await expect(page.locator('h2:has-text("New Terminal")')).toBeVisible({ timeout: 3_000 });
-      await expect(page.getByRole('button', { name: 'Open' })).toBeVisible({ timeout: 3_000 });
+      await expect(page.getByRole('button', { name: 'Open' }).first()).toBeVisible({ timeout: 3_000 });
       await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible({ timeout: 3_000 });
 
       await page.getByRole('button', { name: 'Cancel' }).click();
