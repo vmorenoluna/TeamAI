@@ -242,9 +242,30 @@ export function QAReportView({ qaReport, humanFeedback }: { qaReport: QAReportDa
   );
 }
 
+// Valid tab IDs for hash-based navigation (<URL>#plan, etc.) — defined
+// outside the component to avoid recreating on every render.
+const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
+
 export function TaskDetail({ task, allTasks, dependencies, dependents, spec, plan, qaReport, humanFeedback, diff, agentOutput, roles, onClose, readonly = false }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+
+  // Accept initial tab from URL hash (e.g. /task/:id#plan) so e2e tests
+  // can navigate directly to a specific tab without unreliable click simulation.
+  // Must use useEffect+hashchange to handle both the initial page load AND
+  // same-document hash navigations (Playwright's page.goto with a hash only
+  // changes the fragment, it doesn't remount the component).
+  useEffect(() => {
+    const syncFromHash = () => {
+      const hash = window.location.hash.replace(/^#/, '');
+      if (hash && VALID_TABS.includes(hash as Tab)) {
+        setActiveTab(hash as Tab);
+      }
+    };
+    syncFromHash();
+    window.addEventListener('hashchange', syncFromHash);
+    return () => window.removeEventListener('hashchange', syncFromHash);
+  }, []);
   const [isPending, startTransition] = useTransition();
 
   const badge = PHASE_BADGE[task.phase] ?? PHASE_BADGE.backlog;

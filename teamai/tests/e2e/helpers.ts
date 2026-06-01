@@ -75,3 +75,35 @@ export async function ensureProjectSelected(page: Page): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Read a seed task ID from the filesystem by slug, throwing if not found.
+ * Convenience wrapper around getSeedTaskId for tests that need a task ID.
+ */
+export function requireSeedTaskId(slug: string): string {
+  const id = getSeedTaskId(slug);
+  if (!id) throw new Error(`Seed task "${slug}" not found on disk — did the seed run?`);
+  return id;
+}
+
+/**
+ * Check if a task card with the given text exists on the kanban board.
+ * Used by tests that verify card-level content without opening the panel.
+ */
+export async function ensureTaskCardVisible(page: Page, text: string): Promise<boolean> {
+  const cardCount = await page.locator('[data-testid="task-card"]').count();
+  if (cardCount === 0) return false;
+  const card = page.locator('[data-testid="task-card"]', { hasText: text });
+  return await card.count() > 0;
+}
+
+/**
+ * Scroll the kanban board horizontally to the right so the rightmost
+ * columns (Failed, Done) are visible.
+ */
+export async function scrollKanbanRight(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const container = document.querySelector('.overflow-x-auto');
+    if (container) (container as HTMLElement).scrollLeft = (container as HTMLElement).scrollWidth;
+  });
+}

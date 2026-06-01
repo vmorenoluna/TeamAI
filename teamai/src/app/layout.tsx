@@ -24,7 +24,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <div className="flex-1 min-w-0 overflow-auto flex flex-col">
           {/* Project tabs row - moved above main content */}
           <ProjectSelector projects={projects} activeProjectPath={activeProject?.path ?? null} />
-          {children}
+          <div className="flex-1 min-h-0">{children}</div>
         </div>
       </body>
     </html>
