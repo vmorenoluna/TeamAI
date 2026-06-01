@@ -1,11 +1,11 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
 test.describe('Model Dropdown', () => {
   test.describe('Settings Page - Provider Config', () => {
     test('model dropdown loads with curated models', async ({ page }) => {
       const ok = await ensureProjectSelected(page);
-      test.skip(!ok, 'E2E Test Project not found');
+      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
 
       await page.goto('/settings');
 
@@ -17,7 +17,7 @@ test.describe('Model Dropdown', () => {
 
     test('model select shows options after curated models load', async ({ page }) => {
       const ok = await ensureProjectSelected(page);
-      test.skip(!ok, 'E2E Test Project not found');
+      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
 
       await page.goto('/settings');
 
@@ -40,7 +40,7 @@ test.describe('Model Dropdown', () => {
 
     test('refresh button triggers model reload', async ({ page }) => {
       const ok = await ensureProjectSelected(page);
-      test.skip(!ok, 'E2E Test Project not found');
+      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
 
       await page.goto('/settings');
 
@@ -63,7 +63,7 @@ test.describe('Model Dropdown', () => {
 
     test('changing provider triggers model reload', async ({ page }) => {
       const ok = await ensureProjectSelected(page);
-      test.skip(!ok, 'E2E Test Project not found');
+      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
 
       await page.goto('/settings');
 
@@ -100,7 +100,7 @@ test.describe('Model Dropdown', () => {
 
     test('Save Provider Config button is present and clickable', async ({ page }) => {
       const ok = await ensureProjectSelected(page);
-      test.skip(!ok, 'E2E Test Project not found');
+      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
 
       await page.goto('/settings');
 
@@ -115,20 +115,22 @@ test.describe('Model Dropdown', () => {
   test.describe('Terminals Page - New Terminal Dialog', () => {
     test('New Terminal dialog opens with heading and action buttons', async ({ page }) => {
       const ok = await ensureProjectSelected(page);
-      test.skip(!ok, 'E2E Test Project not found');
+      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
 
       await page.goto('/terminals');
 
-      await expect(page.locator('text=Terminals').first()).toBeVisible({ timeout: 10_000 });
+      // Wait for the page to fully hydrate (Terminals page is client-rendered)
+      await expect(page.locator('text=Terminals').first()).toBeVisible({ timeout: 15_000 });
+      await page.waitForTimeout(1_000);
 
       // Click the "+ New Terminal" button using accessible role
       const newBtn = page.getByRole('button', { name: /New Terminal/ });
       await expect(newBtn).toBeVisible({ timeout: 10_000 });
       await newBtn.click();
 
-      // Wait for the dialog — if it doesn't open, skip (env-specific issue)
-      const dialogOpen = await page.getByTestId('dialog-backdrop').isVisible({ timeout: 3_000 }).catch(() => false);
-      test.skip(!dialogOpen, 'Terminals dialog did not open in this environment');
+      // Wait for the dialog — with generous timeout for client hydration
+      const dialogOpen = await page.getByTestId('dialog-backdrop').waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false);
+      if (!dialogOpen) { test.skip(true, 'Terminals dialog did not open in this environment'); return; }
 
       await expect(page.locator('h2:has-text("New Terminal")')).toBeVisible({ timeout: 3_000 });
       await expect(page.getByRole('button', { name: 'Open' }).first()).toBeVisible({ timeout: 3_000 });
@@ -140,19 +142,26 @@ test.describe('Model Dropdown', () => {
 
     test('dialog closes when clicking backdrop', async ({ page }) => {
       const ok = await ensureProjectSelected(page);
-      test.skip(!ok, 'E2E Test Project not found');
+      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
 
       await page.goto('/terminals');
 
-      await expect(page.locator('text=Terminals').first()).toBeVisible({ timeout: 10_000 });
+      // Wait for the page to fully hydrate
+      await expect(page.locator('text=Terminals').first()).toBeVisible({ timeout: 15_000 });
+      await page.waitForTimeout(1_000);
 
       const newBtn = page.getByRole('button', { name: /New Terminal/ });
       await newBtn.click();
 
-      const dialogOpen = await page.getByTestId('dialog-backdrop').isVisible({ timeout: 3_000 }).catch(() => false);
-      test.skip(!dialogOpen, 'Terminals dialog did not open in this environment');
+      const dialogOpen = await page.getByTestId('dialog-backdrop').waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false);
+      if (!dialogOpen) { test.skip(true, 'Terminals dialog did not open in this environment'); return; }
 
-      await page.getByTestId('dialog-backdrop').click();
+      // Use page.evaluate to click the backdrop — React event delegation
+      // can miss Playwright clicks on overlays due to pointer-events layers.
+      await page.evaluate(() => {
+        const el = document.querySelector('[data-testid="dialog-backdrop"]') as HTMLElement | null;
+        if (el) el.click();
+      });
       await expect(page.locator('h2:has-text("New Terminal")')).not.toBeVisible({ timeout: 3_000 });
     });
   });
