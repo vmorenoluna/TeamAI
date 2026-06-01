@@ -30,6 +30,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
       qaReport={full.qaReport}
       humanFeedback={full.humanFeedback}
       diff={full.diff}
+      agentOutput={full.agentOutput}
       roles={roles}
     />
   );

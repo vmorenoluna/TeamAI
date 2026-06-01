@@ -17,20 +17,26 @@ async function globalTeardown() {
   try {
     if (existsSync(seedDir)) {
       rmSync(seedDir, { recursive: true, force: true });
+      console.log('[playwright-teardown] Removed seed directory');
     }
   } catch (err) {
     console.warn('[playwright-teardown] Failed to remove seed directory (non-fatal):', err);
   }
 
-  // Also clean up the ~/.teamai/projects.json entry so user projects aren't polluted
+  // Clean up ~/.teamai/projects.json
   try {
     const projectsFile = join(homedir(), '.teamai', 'projects.json');
     if (existsSync(projectsFile)) {
       const projects: Array<{ name: string; path: string }> = JSON.parse(readFileSync(projectsFile, 'utf-8'));
-      const filtered = projects.filter((p) => p.path !== seedDir);
+      // Remove ALL seed entries (belt + suspenders: catch both match and stale entries)
+      const filtered = projects.filter((p) =>
+        p.path !== seedDir && !p.path.includes('.teamai-e2e-seed')
+      );
       if (filtered.length < projects.length) {
         writeFileSync(projectsFile, JSON.stringify(filtered, null, 2));
-        console.log('[playwright-teardown] Removed E2E seed project from projects.json');
+        console.log(`[playwright-teardown] Removed ${projects.length - filtered.length} E2E seed project(s) from projects.json`);
+      } else {
+        console.log('[playwright-teardown] No E2E seed entries found in projects.json');
       }
     }
   } catch (err) {

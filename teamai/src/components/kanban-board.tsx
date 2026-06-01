@@ -356,7 +356,7 @@ export function KanbanBoard({ tasks }: Props) {
     <div className="flex flex-col h-full bg-[#11131b]">
       <div className="flex items-center justify-between px-6 py-4 border-b bg-[#11131b] border-[#1e293b] shrink-0">
         <div className="flex items-center gap-2">
-          <ConnectionIndicator connected={wsStatus === 'connected'} />
+          <ConnectionIndicator connected={wsStatus === 'connected'} initial={wsStatus === 'connecting'} />
           <h1 className="text-xl font-bold text-white">Board</h1>
         </div>
         <button
