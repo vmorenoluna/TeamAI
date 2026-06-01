@@ -47,6 +47,8 @@ The app has a two-column shell that fills the entire viewport:
 │  ◈ Ideation       │                                     │
 │  ▶ Terminals      │                                     │
 │  ◉ Roadmap        │                                     │
+│  📊 Analytics      │                                     │
+│  ⎇ GitHub         │                                     │
 │  ⚙ Settings       │                                     │
 │                   │                                     │
 └─────────────────────────────────────────────────────────┘
@@ -86,12 +88,15 @@ The app has a two-column shell that fills the entire viewport:
 
 | Route | Page | Description |
 |---|---|---|
-| `/` | Kanban Board | Main working view |
+| `/` | Kanban Board | Main working view with 6 columns, search, filter, bulk ops, drag-and-drop, undo |
+| `/task/[id]` | Task Detail | Full-page tabbed detail: Overview, Terminal, Spec, Plan, QA |
 | `/insights` | Insights | Chat with Claude about the active codebase |
 | `/ideation` | Ideation | AI brainstorming for new tasks |
 | `/terminals` | Terminals | Interactive PTY Claude sessions pre-loaded with a role persona |
 | `/roadmap` | Roadmap | Two-tab view: Roadmap (phased AI-generated items) + Changelog (release notes from git history) |
 | `/settings` | Settings | Project configuration: container isolation, pipeline phases, providers, agent roles |
+| `/analytics` | Analytics | Project metrics and pipeline insights dashboard |
+| `/github` | GitHub | Import GitHub issues as tasks, manage pull requests |
 
 ---
 
@@ -110,23 +115,42 @@ The app has a two-column shell that fills the entire viewport:
 - Empty column filler: `min-h-[120px]`
 
 ### Columns
-Nine fixed columns in order, each 240px wide, scrollable horizontally:
+Six fixed columns in order, each 240px wide, scrollable horizontally:
 
 | Column | Phase value(s) |
 |---|---|
 | Backlog | `backlog` |
-| Spec | `spec` |
-| Planning | `plan` |
+| Analysis | `spec`, `plan` |
 | In Progress | `implement` |
-| QA | `qa-review`, `qa-fix` |
-| Review | `awaiting-review` |
-| Merging | `merge`, `create-pr` |
+| Review | `qa-review`, `qa-fix`, `awaiting-review`, `merge`, `create-pr`, `pr-open` |
 | Failed | `failed` |
 | Done | `done` |
 
 Each column has:
 - Header: uppercase label + count badge
 - Scrollable card list
+
+### Board Header
+- Left: "Board" heading + **Connection Indicator** (green dot = connected, amber dot = connecting/disconnected)
+- Right: "+ New Task" button (royal blue pill)
+
+### Filter Toolbar (below board header)
+- **Search**: text input with magnifying glass icon, full-text search across task titles and descriptions
+- **Phase filter**: dropdown with checkbox multi-select for all 6 columns, badge shows active filter count
+- **Source filter**: dropdown to filter by origin (All / Ideation / Competitor Analysis)
+- **Sort**: dropdown to sort by Newest first, Oldest first, A→Z, Z→A
+- **Reset**: clears all active filters (only visible when filters applied)
+
+### Bulk Operations
+- **Ctrl+Click** toggles individual card selection
+- **Shift+Click** selects a range of cards
+- **Bulk action bar** appears above columns: shows count, Deselect, Move to (phase dropdown), Delete selected
+- Selected cards show blue ring + checkmark overlay
+
+### Undo
+- **Ctrl+Z** after a card move undoes the move
+- **Toast notification** appears at bottom-center: "Moved \"Task Name\" to {phase}" with Undo button (5-second auto-dismiss)
+- Undo stack holds up to 20 actions
 
 ### Task Card
 ```
@@ -152,12 +176,10 @@ Tasks can be dragged from any column to any other column. On drop, the orchestra
 
 | Drop target | Prerequisites checked | Behavior |
 |---|---|---|
-| Backlog / Review / Failed / Done | None | Phase updates immediately; no pipeline spawned |
-| Spec | None | Clears stale spec.md; runs spec from scratch |
-| Planning | spec.md exists? | Runs Planning if spec exists, else starts from Spec |
+| Backlog / Failed / Done | None | Phase updates immediately; no pipeline spawned |
+| Analysis | None | Clears stale spec.md; runs spec from scratch |
 | In Progress | plan.json exists? | Runs Implement if plan exists, else starts from Plan (or Spec) |
-| QA | plan.json exists? | Clears QA artifacts; runs Implement if plan exists, else falls back |
-| Merging | worktree + branch exist? | Merges if both exist; falls back to Implement → Plan → Spec as needed |
+| Review | plan.json exists? | Clears QA artifacts; runs Implement if plan exists, else falls back |
 
 **Pipeline cancellation**: If a task is already mid-pipeline when dropped again, the running session is killed before starting the new one — no duplicate agents.
 
@@ -382,7 +404,36 @@ Dark mode: `bg-[#11131b]` on root content area (always dark-first). No project m
 
 ---
 
-## 5d. Roadmap Page (`/roadmap`)
+## 5d. Analytics Page (`/analytics`)
+
+Header: "Analytics" title + "Project metrics and pipeline insights." subtitle.
+
+Dashboard layout showing:
+- Task counts by phase (summary cards or chart)
+- Pipeline run statistics
+- Agent session history
+- Recent activity timeline
+
+Dark mode: `bg-[#11131b]` on page root (always dark-first).
+
+---
+
+## 5e. GitHub Page (`/github`)
+
+Header: "GitHub" title + "Import issues and manage pull requests." subtitle.
+
+Content:
+- Connected repository status indicator
+- Issue list with import-to-task buttons
+- PR management interface
+
+Requires: GitHub MCP server configured, `GITHUB_TOKEN` env var.
+
+Dark mode: `bg-[#11131b]` on page root (always dark-first).
+
+---
+
+## 5f. Roadmap Page (`/roadmap`)
 
 Two-tab layout: **Roadmap** and **Changelog**.
 
@@ -783,7 +834,7 @@ Four sections, rendered top-to-bottom:
 4. In the input that appears, type the path to your project (e.g. `/Users/me/myproject`)
 5. Press Enter or click Add
 6. Project appears in the sidebar list
-7. Click the project name button → board loads, showing 9 empty columns
+7. Click the project name button → board loads, showing 6 empty columns
 
 ---
 
@@ -806,7 +857,7 @@ Four sections, rendered top-to-bottom:
 
 ### Journey 3 — Monitoring a Running Task
 
-1. A task moves from Backlog → Spec → Planning → In Progress automatically as the pipeline runs
+1. A task moves from Backlog → Analysis → In Progress automatically as the pipeline runs
 2. Click the task card to open the floating task window
 3. Click the **Terminal** tab
 4. Watch live agent output stream in the xterm.js terminal
@@ -943,21 +994,27 @@ Four sections, rendered top-to-bottom:
 
 | Component | Location | Description |
 |---|---|---|
-| Sidebar | Always visible | Header, project tabs row, nav links |
-| KanbanBoard | `/` | 9-column board with horizontal scroll |
-| TaskCard | Board columns | Card with play button, phase badge, timestamps |
-| TaskPanel | Window overlay | Floating window frame with title bar (task title + phase badge + × close), backdrop, Escape key handling. Receives `onClose` from KanbanBoard. WebSocket re-fetches data silently on phase-change events. Passes `onClose` through to TaskDetail for delete-window-close flow. |
-| TaskDetail | Inside panel or `/task/[id]` page | Tabbed content: Overview/Terminal/Spec/Plan/QA. Accepts optional `onClose` prop. When `onClose` is provided (panel mode): delete closes the panel via `onClose()`. When absent (page mode): delete navigates to `/` via `router.push()`. |
+| Sidebar | Always visible | Collapsible icon + label nav, project selector |
+| KanbanBoard | `/` | 6-column board with search, filter (phase/source), sort, bulk select (Ctrl/Shift+Click), bulk move/delete, undo, connection indicator, drag-and-drop |
+| TaskCard | Board columns | Card with play button (interrupted tasks), phase badge, description toggle (more/less), timestamps, moving indicator |
+| TaskPanel | Window overlay | Floating window frame with title bar, backdrop blur, Escape key handling. Receives `onClose` from KanbanBoard |
+| TaskDetail | Inside panel or `/task/[id]` page | Tabbed content: Overview/Terminal/Spec/Plan/QA. Accepts optional `onClose` prop |
 | DepPicker | Overview tab | Searchable task picker for dependencies |
-
-| NewTaskModal | Board header | Create task form with image upload |
+| NewTaskModal | Board header | Create task form with templates (Bug Fix, Feature, Refactor, Docs) + image upload |
 | ReviewPanel | Overview tab (awaiting-review only) | Merge/PR/Reject actions |
 | RateLimitBanner | Overview tab (when rate limited) | Amber warning with retry time |
 | TerminalPane | Terminal tab | xterm.js terminal with event replay |
 | ContainerConfigEditor | Settings — Container Isolation | Toggle + live status badge (stopped/starting/running/restarting) |
-| RoadmapView | `/roadmap` | Tabbed roadmap+changelog page: generate buttons, streaming output, history selectors (always visible), session reconnect. Changelog dropdown always shown (disabled when empty). Complexity dots have `role="img" aria-label="Complexity N out of 5"` for accessibility. Linked roadmap items open task detail in a floating window overlay matching the kanban board pattern. |
-| PhasedKanban | Inside RoadmapView | Horizontal 4-column kanban (Now/Next/Later/Icebox) with linked status badges, real-time WebSocket sync, convert/delete actions |
-| RoadmapCard | Inside PhasedKanban | Per-item card: expand/collapse (unlinked) or navigate (linked), priority badge, complexity dots, affected files, "+ Convert to ticket" button, phase badge, delete button, error state |
+| PipelineConfigEditor | Settings — Pipeline Config | Max QA attempts spinner, parallel subtasks checkbox, Save button |
+| ProviderConfigEdit | Settings — Providers | Default model + per-role provider/model overrides |
+| RoleEditor | Settings — Agent Roles | Expandable accordion per role with editable textarea |
+| RoadmapView | `/roadmap` | Tabbed roadmap+changelog page with phased kanban (Now/Next/Later/Icebox) |
+| PhasedKanban | Inside RoadmapView | Horizontal 4-column kanban with linked status badges, real-time WebSocket sync, convert/delete actions |
+| RoadmapCard | Inside PhasedKanban | Per-item card with priority badge, complexity dots, source info, convert/delete buttons |
+| IdeationScanner | `/ideation` | Run Scan button + streaming output |
+| InsightsChat | `/insights` | Streaming chat bubbles with message history |
+| TerminalsView | `/terminals` | Responsive grid of PTY terminal panels with color-coded borders |
+| ConnectionIndicator | Board header | Green/amber dot showing WebSocket connection status |
 
 ---
 
