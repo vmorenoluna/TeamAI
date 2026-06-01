@@ -10,34 +10,39 @@
 
 A web-based UI that replicates the full agentic workflow of [Aperant](https://github.com/AndyMik90/Aperant) (formerly Auto-Claude), an autonomous multi-agent coding framework. Aperant is an Electron app that wraps Claude Code in an orchestration layer. We're replacing the Electron shell with a Next.js web app that drives Claude Code CLI subprocesses.
 
-### 1.1 Target Feature Set (from Aperant)
+### 1.1 Feature Set
 
-| # | Feature | What It Does |
-|---|---|---|
-| 1 | **Kanban Board** | Visual task management: Backlog → Planning → In Progress → QA → Done |
-| 2 | **Multi-Agent Pipeline** | Spec → Plan → Implement → QA Review → QA Fix → **Human Review** → Merge or PR |
-| 3 | **Parallel Agent Terminals** | Up to 12 concurrent Claude sessions working on different subtasks |
-| 4 | **Git Worktree Isolation** | Every task gets its own worktree; main branch is never touched |
-| 5 | **Spec Creation Pipeline** | Gather requirements → Research codebase → Write spec → Self-critique |
-| 6 | **Complexity Assessment** | AI scores complexity to decide parallelism strategy |
-| 7 | **QA Validation Loop** | Review → Fix → Re-review cycle (max 3 iterations) |
-| 8 | **Merge or PR** | After human approval: semantic merge locally, or open a Pull Request on GitHub |
-| 9 | **Memory / Knowledge Graph** | Cross-session learning via Claude Code's built-in Auto Memory (+ Auto Dream when available) |
-| 10 | **GitHub Integration** | Import issues, PR review/creation via GitHub MCP server |
-| 11 | **Codebase Insights** | Chat interface for exploring and understanding the codebase |
-| 12 | **Roadmap Generation** | AI-assisted feature planning with code audit, optional competitor analysis, audience targeting, and phased prioritization |
-| 13 | **Changelog Generation** | Generate release notes from git history |
-| 14 | **Session Management** | Resume, fork, and track conversation history |
-| 15 | **Customizable Pipeline Phases** | Users can skip, reorder, or add phases to the build pipeline per project |
-| 16 | **Ideation / Vulnerability Discovery** | Dedicated scan for improvements, performance issues, and security vulnerabilities |
-| 17 | **Reference Images on Tasks** | Attach screenshots or design mockups to tasks for agents to reference during implementation |
-| 18 | **Session Recovery** | If the server restarts mid-pipeline, detect and resume in-progress tasks |
-| 19 | **Collapsible Sidebar** | Toggle sidebar visibility for more screen space |
-| 20 | **Expandable Task Descriptions** | Collapse/expand long descriptions in the Kanban view |
-| 21 | **Multi-Provider Support** | Route agents to different LLM backends (Anthropic, Bedrock, Vertex, Azure, Ollama) via CLI flags |
-| 22 | **Remote Access (Mobile)** | Access the full TeamAI UI from your phone via Tailscale; ad-hoc terminal via Claude Code Remote Control |
-| 23 | **Push Notifications** | Get notified on your phone when tasks need human review (Web Push or Telegram/Discord) |
-| 24 | **Agent Terminal Sessions** | Open an interactive terminal session pre-loaded with any user-defined role as the system prompt |
+| # | Feature | What It Does | Status |
+|---|---|---|---|
+| 1 | **Kanban Board** | Visual task management with 6 columns: Backlog → Analysis → In Progress → Review → Failed → Done | ✅ |
+| 2 | **Multi-Agent Pipeline** | Spec → Plan → Implement → QA Review → QA Fix → **Human Review** → Merge or PR | ✅ |
+| 3 | **Parallel Agent Terminals** | Up to 12 concurrent Claude sessions working on different subtasks | ✅ |
+| 4 | **Git Worktree Isolation** | Every task gets its own worktree; main branch is never touched | ✅ |
+| 5 | **Spec Creation Pipeline** | Gather requirements → Research codebase → Write spec → Self-critique | ✅ |
+| 6 | **Complexity Assessment** | AI scores complexity to decide parallelism strategy | ✅ |
+| 7 | **QA Validation Loop** | Review → Fix → Re-review cycle (max 3 iterations) | ✅ |
+| 8 | **Merge or PR** | After human approval: semantic merge locally, or open a Pull Request on GitHub | ✅ |
+| 9 | **Memory / Knowledge Graph** | Cross-session learning via Claude Code's built-in Auto Memory (+ Auto Dream when available) | ✅ |
+| 10 | **GitHub Integration** | GitHub import page, PR review/creation via GitHub MCP server | ✅ |
+| 11 | **Codebase Insights** | Chat interface for exploring and understanding the codebase | ✅ |
+| 12 | **Roadmap Generation** | AI-assisted feature planning with code audit, optional competitor analysis, audience targeting, and phased prioritization | ✅ |
+| 13 | **Changelog Generation** | Generate release notes from git history | ✅ |
+| 14 | **Session Management** | Resume, fork, and track conversation history | ✅ |
+| 15 | **Customizable Pipeline Phases** | Users can skip, reorder, or add phases to the build pipeline per project | ✅ |
+| 16 | **Ideation / Vulnerability Discovery** | Dedicated scan for improvements, performance issues, and security vulnerabilities | ✅ |
+| 17 | **Reference Images on Tasks** | Attach screenshots or design mockups to tasks for agents to reference during implementation | ✅ |
+| 18 | **Session Recovery** | If the server restarts mid-pipeline, detect and resume in-progress tasks | ✅ |
+| 19 | **Collapsible Sidebar** | Toggle sidebar visibility for more screen space | ✅ |
+| 20 | **Expandable Task Descriptions** | Collapse/expand long descriptions in the Kanban view | ✅ |
+| 21 | **Multi-Provider Support** | Route agents to different LLM backends (Anthropic, Bedrock, Vertex, Azure, Ollama) via CLI flags | ✅ |
+| 22 | **Search, Filter & Bulk Operations** | Search tasks, filter by phase/source, sort, bulk select/move/delete, undo | ✅ |
+| 23 | **Analytics Dashboard** | Project metrics and pipeline insights | ✅ |
+| 24 | **Agent Terminal Sessions** | Open an interactive terminal session pre-loaded with any user-defined role as the system prompt | ✅ |
+| 25 | **Container Isolation** | Run agents inside a devcontainer with host credential mounting | ✅ |
+| 26 | **Drag-and-Drop** | Drag tasks between columns with optimistic UI, WebSocket confirmation, and safety timeout | ✅ |
+| 27 | **Undo** | Ctrl+Z undo for task moves with 5-second toast | ✅ |
+| 28 | **Remote Access (Mobile)** | Access the full TeamAI UI from your phone via Tailscale; ad-hoc terminal via Claude Code Remote Control | ⏭ |
+| 29 | **Push Notifications** | Get notified on your phone when tasks need human review (Web Push or Telegram/Discord) | ⏭ |
 
 ---
 
@@ -1652,29 +1657,67 @@ No API routes. All mutations use **Next.js Server Actions** (direct server-side 
 
 The app has a **sidebar with a project selector**. All pages operate in the context of the currently selected project. Switching projects changes which `.teamai/` and `.claude/` directories are read.
 
+| Route | Page | Description |
+|---|---|---|
+| `/` | Kanban Board | Main working view with 6 columns, search, filter, bulk ops, drag-and-drop |
+| `/task/[id]` | Task Detail | Full-page tabs: Overview, Terminal, Spec, Plan, QA |
+| `/insights` | Insights | Streaming chat with Claude about the active codebase |
+| `/ideation` | Ideation | AI brainstorming for new tasks |
+| `/terminals` | Terminals | Interactive PTY Claude sessions pre-loaded with role personas |
+| `/roadmap` | Roadmap | Two-tab view: Roadmap (phased AI-generated items) + Changelog (release notes from git history) |
+| `/settings` | Settings | Container isolation, pipeline phases, providers, agent roles |
+| `/analytics` | Analytics | Project metrics and pipeline insights |
+| `/github` | GitHub | Import issues, manage PRs via GitHub MCP |
+
 ```
 app/
 ├── layout.tsx                  # Root layout with sidebar: project selector + nav
 ├── page.tsx                    # Kanban board (Server Component, reads tasks from selected project)
-├── task/[id]/page.tsx          # Task detail: spec, plan, agent output, QA report
-├── insights/page.tsx           # Codebase chat interface
-├── roadmap/page.tsx            # Roadmap generator + viewer
-├── settings/page.tsx           # Role editor + project management
+├── task/[id]/page.tsx          # Task detail: Overview, Terminal, Spec, Plan, QA tabs
+├── insights/page.tsx           # Streaming codebase chat interface
+├── ideation/page.tsx           # Codebase vulnerability scanner
+├── terminals/page.tsx          # Interactive PTY terminal sessions
+├── roadmap/page.tsx            # Roadmap generator + changelog viewer
+├── settings/page.tsx           # Container, pipeline, providers, roles config
+├── analytics/page.tsx          # Project metrics dashboard
+├── github/page.tsx             # GitHub issue import + PR management
 ├── actions/
 │   ├── tasks.ts                # Task + pipeline Server Actions
 │   ├── roles.ts                # Role CRUD Server Actions
+│   ├── pipeline.ts             # Pipeline config Server Actions
+│   ├── roadmap.ts              # Roadmap/changelog Server Actions
 │   └── projects.ts             # Project registration Server Actions
-└── components/
-    ├── project-selector.tsx     # Sidebar project list + "Add Project" button
-    ├── kanban-board.tsx         # Drag-and-drop columns (Client Component)
-    ├── task-card.tsx            # Card in kanban column
-    ├── agent-panel.tsx          # Shows streaming agent output (xterm.js)
-    ├── spec-viewer.tsx          # Renders spec.md
-    ├── plan-viewer.tsx          # Renders plan.json as visual graph
-    ├── qa-report.tsx            # Pass/fail badges per criterion
-    ├── review-panel.tsx         # Human review: diff viewer + approve/reject buttons
-    ├── role-editor.tsx          # Markdown editor for agent persona files
-    └── insights-chat.tsx        # Chat interface for codebase Q&A
+├── components/
+│   ├── ui/                     # shadcn/ui primitives
+│   ├── project-selector.tsx    # Sidebar project list + "Add Project" button
+│   ├── kanban-board.tsx        # 6-column drag-and-drop board with search, filter, bulk ops, undo
+│   ├── task-card.tsx           # Card with phase badge, description toggle, play button
+│   ├── task-panel.tsx          # Floating window overlay for task detail
+│   ├── task-detail.tsx         # Tabbed content: Overview/Terminal/Spec/Plan/QA
+│   ├── agent-panel.tsx         # Shows streaming agent output (xterm.js)
+│   ├── review-panel.tsx        # Human review: diff viewer + approve/reject buttons
+│   ├── role-editor.tsx         # Markdown editor for agent persona files
+│   ├── pipeline-config.tsx     # Pipeline phase config editor
+│   ├── provider-config.tsx     # Per-role model/provider assignment
+│   ├── container-config.tsx    # Devcontainer isolation toggle + status
+│   ├── roadmap-view.tsx        # Full roadmap/changelog page with phased kanban
+│   ├── ideation-scanner.tsx    # Run Scan button + streaming ideation output
+│   ├── insights-chat.tsx       # Chat interface for codebase Q&A
+│   ├── terminals-view.tsx      # Terminal grid with PTY sessions
+│   └── connection-indicator.tsx # WebSocket connection status dot
+├── hooks/
+│   ├── use-websocket.ts        # WebSocket client hook
+│   ├── use-phase-sync.ts       # Real-time phase change sync
+│   └── use-session-stream.ts   # Session event streaming hook
+├── lib/
+│   ├── process-manager.ts      # Spawns Claude CLI subprocesses
+│   ├── orchestrator.ts         # Pipeline state machine
+│   ├── task-store.ts           # File-based task storage
+│   ├── project-store.ts        # Multi-project management
+│   ├── container-manager.ts    # Devcontainer lifecycle
+│   └── stream-types.ts         # NDJSON/WebSocket event types
+└── constants/
+    └── phases.ts               # Phase badges, labels, priority colors
 ```
 
 ### 7.2 Server Actions (`app/actions/tasks.ts`)
@@ -1947,17 +1990,26 @@ function TaskCard({ task }) {
 
 ### 7.4 Kanban Board Columns
 
-| Column | Maps to Pipeline Phase | Human Action? |
-|---|---|---|
-| **Backlog** | `backlog` — task created, not started | Click "Run" to start |
-| **Spec** | `spec` — spec creation in progress | — |
-| **Planning** | `plan` — plan generation in progress | — |
-| **In Progress** | `implement` — coder agents working | — |
-| **QA** | `qa-review`, `qa-fix` — automated validation loop | — |
-| **Review** | `awaiting-review` — QA passed, waiting for human | **Yes:** review diff, then click "Merge Locally" or "Open PR" or "Reject with Feedback" |
-| **Merging** | `merge`, `create-pr` — integration in progress | — |
-| **Failed** | `failed` — QA loop exhausted (3 attempts) | Review and decide next steps |
-| **Done** | `done` — merged or PR opened successfully | — |
+The kanban board has been consolidated into 6 columns. Individual pipeline phases are normalized into these columns:
+
+| Column | Maps to Pipeline Phases |
+|---|---|
+| **Backlog** | `backlog` — task created, not started |
+| **Analysis** | `spec`, `plan` — spec creation and planning |
+| **In Progress** | `implement` — coder agents working |
+| **Review** | `qa-review`, `qa-fix`, `awaiting-review`, `merge`, `create-pr`, `pr-open` — QA, human review, and integration |
+| **Failed** | `failed` — QA loop exhausted or error |
+| **Done** | `done` — merged or PR opened successfully |
+
+Additional features:
+- **Search**: full-text search across task titles and descriptions
+- **Phase filter**: checkbox multi-select to filter by column
+- **Source filter**: filter tasks by origin (ideation / competitor-analysis)
+- **Sort**: sort by newest, oldest, A→Z, Z→A
+- **Bulk select**: Ctrl+Click, Shift+Click to select multiple cards; bulk move or delete
+- **Undo**: Ctrl+Z to undo last card move (5-second toast with manual Undo button)
+- **Connection indicator**: green/amber dot showing WebSocket status
+- **Optimistic drag-and-drop**: cards appear in target column immediately; WebSocket confirmation clears the moving indicator with 10-second safety timeout
 
 ### 7.5 Real-Time Updates
 
@@ -2002,7 +2054,10 @@ Auto Memory confirmed active. GitHub MCP server configured (needs `GITHUB_TOKEN`
 `TaskStore`, `ProjectStore`, and all server actions implemented. Projects scaffold defaults on registration.
 
 ### ✅ Step 6: Project Selector + Kanban Board UI
-Sidebar with project selector (add/remove/switch, directory browser). Kanban board with 9 columns, New Task dialog, live phase sync.
+Sidebar with project selector (add/remove/switch). Kanban board with 6 columns, New Task dialog with templates, search, filters, bulk ops, undo, drag-and-drop with optimistic UI.
+
+### ✅ Step 6b: Search, Filter, Bulk Operations & Undo
+Full-text search, phase/source filters, sort options, bulk select (Ctrl/Shift+Click), bulk move/delete. Undo with Ctrl+Z and 5-second toast. Connection indicator (green/amber WebSocket status dot).
 
 ### ✅ Step 7: Agent Panel with Streaming Output
 xterm.js agent panel on task detail page. `useAgentStream` WebSocket hook filters events by `taskId`. `PhaseSyncer` keeps badge live.
@@ -2016,14 +2071,14 @@ Full spec→plan→implement→qa→awaiting-review pipeline. Phase-change event
 ### ✅ Step 10: Insights Chat
 `/insights` page with streaming chat bubbles. Long-lived Claude session per project; messages sent via server action, responses stream via WebSocket.
 
-### ⏭ Step 11: Roadmap & Changelog
-Not yet implemented. Roadmap page renders streaming agent output for the `/roadmap` command and a phased view of results. Changelog generates release notes from git history.
+### ✅ Step 11: Roadmap & Changelog
+`/roadmap` page with Roadmap and Changelog tabs. Phased kanban view (Now/Next/Later/Icebox), competitor analysis toggle, history dropdown, convert-to-ticket, item detail overlay. Changelog generates release notes from git history.
 
 ### ✅ Step 12: Role Editor (Settings Page)
 `/settings` page lists all 6 roles as collapsible cards with editable textarea. Save writes to disk immediately. Reset to Default restores from `defaults/roles/`.
 
-### ⏭ Step 13: GitHub Integration
-Not yet implemented. Would list open GitHub issues and allow importing them as tasks.
+### ✅ Step 13: GitHub Integration
+`/github` page for importing GitHub issues as tasks and managing pull requests via GitHub MCP server.
 
 ### ✅ Step 14: Polish & Hardening
 Collapsible sidebar (icon-only strip when collapsed). Task cards show truncated description with more/less toggle.
@@ -2045,6 +2100,17 @@ Not yet implemented. Tailscale for remote access; Web Push / Telegram webhook fo
 
 ### ✅ Step 20: Agent Terminal Sessions
 `/terminals` page with interactive PTY sessions via `node-pty` + xterm.js. Role persona injected via `--append-system-prompt`. Multiple terminals open simultaneously with color-coded borders. Keyboard input and resize routed via WebSocket.
+
+### ✅ Step 21: Container Isolation
+Devcontainer toggle in Settings. Agents run inside a Docker container with host credential mounting. Live status badge via WebSocket (Stopped/Starting/Running/Restarting).
+
+
+
+### ✅ Step 23: Analytics Dashboard
+`/analytics` page with project metrics, pipeline insights, and task statistics.
+
+### ✅ Step 24: E2E Test Suite
+58 Playwright E2E tests with seed data, zero skips. 913 Vitest unit tests with zero skips or failures. TypeScript strict typecheck passes clean.
 ---
 
 ## 10. File Checklist
@@ -2080,36 +2146,57 @@ teamai/                            # THE UI APP (this repo)
 │   │   ├── orchestrator.ts
 │   │   ├── task-store.ts
 │   │   ├── project-store.ts
-│   │   └── notifications.ts        # Web Push + optional Telegram/Discord webhook
+│   │   ├── container-manager.ts
+│   │   └── stream-types.ts
 │   ├── app/
 │   │   ├── layout.tsx              # Root layout with collapsible sidebar
 │   │   ├── page.tsx                # Kanban board (Server Component)
-│   │   ├── task/[id]/page.tsx      # Task detail + agent panel + review panel
-│   │   ├── insights/page.tsx       # Codebase chat
+│   │   ├── task/[id]/page.tsx      # Task detail page
+│   │   ├── insights/page.tsx       # Streaming codebase chat
 │   │   ├── terminals/page.tsx      # Agent terminal sessions
-│   │   ├── ideation/page.tsx       # Vulnerability & improvement scanner
-│   │   ├── roadmap/page.tsx        # Roadmap generator + viewer
-│   │   ├── settings/page.tsx       # Roles, pipeline config, providers, project mgmt
+│   │   ├── ideation/page.tsx       # Vulnerability scanner
+│   │   ├── roadmap/page.tsx        # Roadmap + changelog
+│   │   ├── settings/page.tsx       # Container, pipeline, providers, roles
+│   │   ├── analytics/page.tsx      # Project metrics dashboard
+│   │   ├── github/page.tsx         # GitHub issue import
 │   │   └── actions/
 │   │       ├── tasks.ts            # Task + pipeline Server Actions
 │   │       ├── roles.ts            # Role CRUD Server Actions
+│   │       ├── pipeline.ts         # Pipeline config Server Actions
+│   │       ├── roadmap.ts          # Roadmap/changelog Server Actions
 │   │       └── projects.ts         # Project registration Server Actions
-│   └── components/
-│       ├── project-selector.tsx    # Sidebar project list + add project
-│       ├── kanban-board.tsx
-│       ├── task-card.tsx           # With expandable descriptions
-│       ├── agent-panel.tsx
-│       ├── spec-viewer.tsx
-│       ├── plan-viewer.tsx
-│       ├── qa-report.tsx
-│       ├── review-panel.tsx
-│       ├── role-editor.tsx
-│       ├── pipeline-config.tsx     # Drag-and-drop phase reorderer
-│       ├── provider-config.tsx     # Per-role model/provider assignment
-│       ├── image-upload.tsx        # Reference image attachment for tasks
-│       └── insights-chat.tsx
+│   ├── components/
+│   │   ├── ui/                     # shadcn/ui primitives (button, input, badge, etc.)
+│   │   ├── project-selector.tsx    # Sidebar project list + add project
+│   │   ├── kanban-board.tsx        # 6-column board with search/filter/bulk/undo
+│   │   ├── task-card.tsx           # Card with description toggle
+│   │   ├── task-panel.tsx          # Floating window overlay
+│   │   ├── task-detail.tsx         # Tabbed: Overview/Terminal/Spec/Plan/QA
+│   │   ├── agent-panel.tsx         # Streaming agent output (xterm.js)
+│   │   ├── review-panel.tsx        # Human review: merge/PR/reject
+│   │   ├── role-editor.tsx         # Agent persona editor
+│   │   ├── pipeline-config.tsx     # Pipeline phase config
+│   │   ├── provider-config.tsx     # Per-role model/provider
+│   │   ├── container-config.tsx    # Devcontainer toggle + status
+│   │   ├── roadmap-view.tsx        # Roadmap/changelog with phased kanban
+│   │   ├── ideation-scanner.tsx    # Run scan + streaming output
+│   │   ├── insights-chat.tsx       # Chat bubbles + input
+│   │   ├── terminals-view.tsx      # PTY terminal grid
+│   │   └── connection-indicator.tsx # WS status dot
+│   ├── hooks/
+│   │   ├── use-websocket.ts
+│   │   ├── use-phase-sync.ts
+│   │   └── use-session-stream.ts
+│   └── constants/
+│       └── phases.ts               # Phase badges, labels, priority colors
+├── tests/
+│   ├── unit/                       # 913 Vitest unit tests (0 skipped)
+│   ├── e2e/                        # 58 Playwright E2E tests (0 skipped)
+│   └── integration/                # Integration tests
 ├── CLAUDE.md
 ├── package.json
+├── playwright.config.ts
+├── vitest.config.ts
 └── next.config.ts
 
 ~/.teamai/                         # APP-LEVEL CONFIG (created at runtime)
@@ -2125,13 +2212,15 @@ teamai/                            # THE UI APP (this repo)
 ├── .teamai/                       # Per-project state (created at runtime)
 │   ├── pipeline.json               # Pipeline phase config (customizable)
 │   ├── providers.json              # Per-role model/provider assignments
+│   ├── container.json              # Container isolation config
 │   ├── {task-slug}/
 │   │   ├── task.json
 │   │   ├── spec.md
 │   │   ├── plan.json
 │   │   ├── qa_report.json
+│   │   ├── completion_summary.md
 │   │   ├── events.jsonl
-│   │   ├── pipeline-state.json     # For session recovery
+│   │   ├── output.log
 │   │   └── references/             # Attached screenshots/mockups
 │   ├── roadmap/
 │   │   └── roadmap-{date}.json
