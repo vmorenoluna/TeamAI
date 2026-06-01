@@ -15,7 +15,7 @@
  * ~/.teamai/projects.json.
  */
 
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, renameSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { homedir } from 'os';
@@ -240,16 +240,35 @@ async function confirmOrSkip(): Promise<boolean> {
 }
 
 function registerProject(root: string): void {
+  // ═══ Safety: back up projects.json before modifying it ═══
+  // If the write gets corrupted mid-flight (crash, disk full, etc.),
+  // the user's real project registry must be recoverable.
+  const backupPath = TEAMAI_CONFIG + '.e2e-backup';
+  if (existsSync(TEAMAI_CONFIG)) {
+    writeFileSync(backupPath, readFileSync(TEAMAI_CONFIG, 'utf-8'));
+  }
+
   const projects: Array<{ name: string; path: string }> = existsSync(TEAMAI_CONFIG)
     ? JSON.parse(readFileSync(TEAMAI_CONFIG, 'utf-8'))
     : [];
 
-  // Remove existing entry with same path, if any
-  const filtered = projects.filter(p => p.path !== root);
+  // Only touch entries that match our seed project (belt + suspenders).
+  // Never remove or modify user projects that happen to share the same path.
+  const filtered = projects.filter(p =>
+    p.path !== root && !p.path.includes('.teamai-e2e-seed')
+  );
 
   filtered.push({ name: PROJECT_NAME, path: root });
   mkdirSync(join(HOME_DIR, '.teamai'), { recursive: true });
-  writeFileSync(TEAMAI_CONFIG, JSON.stringify(filtered, null, 2));
+
+  // Atomic write: write to temp file first, then rename.
+  // If the process crashes mid-write, the real file is untouched.
+  const tmpPath = TEAMAI_CONFIG + '.tmp';
+  writeFileSync(tmpPath, JSON.stringify(filtered, null, 2));
+  renameSync(tmpPath, TEAMAI_CONFIG);
+
+  // Clean up backup on successful write
+  try { rmSync(backupPath); } catch { /* best-effort */ }
 
   console.log(`  Registered project "${PROJECT_NAME}" at ${root}`);
 }
@@ -283,6 +302,23 @@ async function confirm(prompt: string): Promise<boolean> {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  // ═══ Crash recovery: restore from backup if the previous run crashed ═══
+  // If an earlier test run crashed before teardown could clean up
+  // projects.json, the backup file still exists. Restore it so the user's
+  // real project registry isn't permanently modified.
+  const backupPath = TEAMAI_CONFIG + '.e2e-backup';
+  if (existsSync(backupPath)) {
+    console.warn('⚠️  Found leftover backup from a previous crashed test run.');
+    console.warn('   Restoring projects.json from backup before re-seeding…');
+    try {
+      writeFileSync(TEAMAI_CONFIG, readFileSync(backupPath, 'utf-8'));
+      rmSync(backupPath);
+      console.log('   ✓ Restored.');
+    } catch (err) {
+      console.warn('   ⚠ Failed to restore backup (non-fatal):', err);
+    }
+  }
 
   if (!(await confirmOrSkip())) {
     console.log('\n❌ Seeding cancelled. Use --yes to skip confirmation.');

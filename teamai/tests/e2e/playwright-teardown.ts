@@ -2,6 +2,9 @@
  * Playwright global teardown — removes the seeded E2E test project and cleans
  * up the entry from ~/.teamai/projects.json so user projects are not polluted.
  *
+ * Runs after every Playwright test suite (pass or fail). Also restores from
+ * backup if a previous run crashed before teardown could clean up.
+ *
  * Uses fs.rmSync for cross-platform compatibility (Windows, macOS, Linux).
  */
 
@@ -26,9 +29,29 @@ async function globalTeardown() {
   // Clean up ~/.teamai/projects.json
   try {
     const projectsFile = join(homedir(), '.teamai', 'projects.json');
+    const backupFile = projectsFile + '.e2e-backup';
+    const tmpFile = projectsFile + '.tmp';
+
+    // ═══ Crash recovery: restore from backup if a previous run crashed ═══
+    if (existsSync(backupFile)) {
+      console.log('[playwright-teardown] Found leftover backup — restoring projects.json…');
+      try {
+        writeFileSync(projectsFile, readFileSync(backupFile, 'utf-8'));
+        rmSync(backupFile);
+        console.log('[playwright-teardown] Restored projects.json from backup');
+      } catch (err) {
+        console.warn('[playwright-teardown] Failed to restore from backup (non-fatal):', err);
+      }
+    }
+
+    // Clean up any stale tmp file from a crashed seed
+    if (existsSync(tmpFile)) {
+      try { rmSync(tmpFile); } catch { /* best-effort */ }
+    }
+
     if (existsSync(projectsFile)) {
       const projects: Array<{ name: string; path: string }> = JSON.parse(readFileSync(projectsFile, 'utf-8'));
-      // Remove ALL seed entries (belt + suspenders: catch both match and stale entries)
+      // Remove ALL seed entries (belt + suspenders: catch both exact match and stale entries)
       const filtered = projects.filter((p) =>
         p.path !== seedDir && !p.path.includes('.teamai-e2e-seed')
       );
