@@ -1,32 +1,7 @@
 import { getTasks } from '@/app/actions/tasks';
 import { InsightsChat } from '@/components/insights-chat';
+import { PHASE_COLORS, PHASE_LABELS } from '@/constants/phases';
 import type { Task } from '@/lib/task-store';
-
-const PHASE_COLORS: Record<string, string> = {
-  backlog: '#475569',
-  spec: '#3b82f6',
-  plan: '#6366f1',
-  implement: '#f59e0b',
-  'qa-review': '#f97316',
-  'awaiting-review': '#a855f7',
-  merge: '#14b8a6',
-  'create-pr': '#14b8a6',
-  failed: '#ef4444',
-  done: '#22c55e',
-};
-
-const PHASE_LABELS: Record<string, string> = {
-  backlog: 'Backlog',
-  spec: 'Spec',
-  plan: 'Plan',
-  implement: 'Implement',
-  'qa-review': 'QA Review',
-  'awaiting-review': 'Awaiting Review',
-  merge: 'Merge',
-  'create-pr': 'PR Created',
-  failed: 'Failed',
-  done: 'Done',
-};
 
 export default async function InsightsPage() {
   let tasks: Task[] = [];
