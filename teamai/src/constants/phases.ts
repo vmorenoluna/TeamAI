@@ -35,3 +35,18 @@ export const PHASE_LABELS: Record<string, string> = {
   failed:            'Failed',
   done:              'Done',
 };
+
+/** Hex colors for each phase (used in stacked bar charts / phase distribution diagrams) */
+export const PHASE_COLORS: Record<string, string> = {
+  backlog:           '#475569',
+  spec:              '#3b82f6',
+  plan:              '#6366f1',
+  implement:         '#f59e0b',
+  'qa-review':       '#f97316',
+  'awaiting-review': '#a855f7',
+  merge:             '#14b8a6',
+  'create-pr':       '#14b8a6',
+  'pr-open':         '#38bdf8',
+  failed:            '#ef4444',
+  done:              '#22c55e',
+};
