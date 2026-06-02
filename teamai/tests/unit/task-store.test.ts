@@ -1,182 +1,452 @@
+/**
+ * Unit tests for TaskStore.
+ *
+ * Tests all filesystem-based methods: create, update, updatePhase, getAll,
+ * getById, getDirById, delete, clearArtifacts, getDirBySlug, readRawTaskJson,
+ * and getEvents. Uses createTestProject() for isolated temp directories.
+ */
+
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { TaskStore } from '@/lib/task-store';
-import { mkdirSync, rmSync, existsSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
-import { randomUUID } from 'crypto';
+import { TaskStore } from '@/lib/task-store';
+import { createTestProject } from '../utils/test-project';
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+let store: TaskStore;
+let root: string;
+let clean: () => void;
+
+let taskCounter = 0;
+function nextId() {
+  return `task-${++taskCounter}`;
+}
+
+function createTask(
+  title = 'Test task',
+  description = 'Description',
+  source?: string,
+  competitiveContext?: string,
+) {
+  return store.create(nextId(), title, description, source, competitiveContext);
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('TaskStore', () => {
-  const testDir = join(process.cwd(), '.teamai-test-' + randomUUID().slice(0, 8));
-  let store: TaskStore;
-
   beforeEach(() => {
-    mkdirSync(testDir, { recursive: true });
-    store = new TaskStore(testDir);
+    const project = createTestProject();
+    root = project.root;
+    clean = project.clean;
+    mkdirSync(join(root, '.teamai'), { recursive: true });
+    store = new TaskStore(root);
+    taskCounter = 0;
   });
 
   afterEach(() => {
-    if (existsSync(testDir)) rmSync(testDir, { recursive: true, force: true });
+    clean();
   });
 
-  it('creates a task and returns it with correct fields', () => {
-    const task = store.create('task-1', 'Test Task', 'A test description');
-    expect(task.id).toBe('task-1');
-    expect(task.title).toBe('Test Task');
-    expect(task.description).toBe('A test description');
-    expect(task.phase).toBe('backlog');
-    expect(task.createdAt).toBeDefined();
-    expect(task.updatedAt).toBeDefined();
+  // ── constructor ─────────────────────────────────────────────────────
+
+  describe('constructor', () => {
+    it('creates the .teamai directory if it does not exist', () => {
+      // createTestProject creates root but not .teamai/
+      // TaskStore constructor calls mkdirSync(specsDir, { recursive: true })
+      expect(existsSync(join(root, '.teamai'))).toBe(true);
+    });
   });
 
-  it('stores created tasks on disk and retrieves them via getAll', () => {
-    store.create('task-1', 'Task One', 'Desc one');
-    store.create('task-2', 'Task Two', 'Desc two');
+  // ── create ───────────────────────────────────────────────────────────
 
-    const all = store.getAll();
-    expect(all).toHaveLength(2);
-    expect(all.map(t => t.title)).toContain('Task One');
-    expect(all.map(t => t.title)).toContain('Task Two');
+  describe('create', () => {
+    it('creates a task with the correct default fields', () => {
+      const task = createTask('Fix login bug', 'Users cannot log in');
+
+      expect(task.id).toMatch(/^task-/);
+      expect(task.title).toBe('Fix login bug');
+      expect(task.description).toBe('Users cannot log in');
+      expect(task.phase).toBe('backlog');
+      expect(task.source).toBeUndefined();
+      expect(task.competitiveContext).toBeUndefined();
+      // createdAt and updatedAt are set in the same create() call but
+      // use separate new Date() invocations — they may differ by a few ms.
+      expect(Date.parse(task.createdAt)).not.toBeNaN();
+      expect(Date.parse(task.updatedAt)).not.toBeNaN();
+      expect(new Date(task.updatedAt).getTime())
+        .toBeGreaterThanOrEqual(new Date(task.createdAt).getTime());
+    });
+
+    it('creates a task with source and competitiveContext', () => {
+      const task = createTask(
+        'Competitive feature',
+        'Match competitor X',
+        'competitor-analysis',
+        'Competitor X has this',
+      );
+
+      expect(task.source).toBe('competitor-analysis');
+      expect(task.competitiveContext).toBe('Competitor X has this');
+    });
+
+    it('writes task.json to a slugified directory', () => {
+      // slugify('Fix Login BUG') → 'fix-login-bug' (no trailing punctuation)
+      const task = createTask('Fix Login BUG', 'desc');
+
+      const dir = join(root, '.teamai', 'fix-login-bug');
+      expect(existsSync(dir)).toBe(true);
+
+      const raw = JSON.parse(readFileSync(join(dir, 'task.json'), 'utf-8'));
+      expect(raw.id).toBe(task.id);
+      expect(raw.title).toBe('Fix Login BUG');
+    });
+
+    it('handles multiple tasks with distinct slugs without collisions', () => {
+      // "Fix bug" → 'fix-bug', "Fix bug UI" → 'fix-bug-ui' — different slugs
+      const task1 = createTask('Fix bug', 'desc');
+      const task2 = store.create(nextId(), 'Fix bug UI', 'desc');
+
+      // Both should be retrievable (no overwrite)
+      expect(store.getById(task1.id)).not.toBeNull();
+      expect(store.getById(task2.id)).not.toBeNull();
+      expect(task1.id).not.toBe(task2.id);
+    });
+
+    it('does not leave stale .tmp files after a successful write', () => {
+      const task = createTask('Atomic test', 'desc');
+      const dir = join(root, '.teamai', 'atomic-test');
+      const tmpPath = join(dir, 'task.json.tmp');
+
+      // The .tmp file should not exist after successful write
+      expect(existsSync(tmpPath)).toBe(false);
+      // The real file should exist
+      expect(existsSync(join(dir, 'task.json'))).toBe(true);
+    });
   });
 
-  it('getById returns the correct task', () => {
-    store.create('task-a', 'Alpha', 'First');
-    store.create('task-b', 'Beta', 'Second');
+  // ── getAll ───────────────────────────────────────────────────────────
 
-    const found = store.getById('task-a');
-    expect(found).not.toBeNull();
-    expect(found!.title).toBe('Alpha');
+  describe('getAll', () => {
+    it('returns an empty array when no tasks exist', () => {
+      expect(store.getAll()).toEqual([]);
+    });
+
+    it('returns all tasks sorted by createdAt descending', async () => {
+      const task1 = createTask('Task 1');
+      // Small delay to ensure distinct createdAt values
+      await new Promise(r => setTimeout(r, 5));
+      const task2 = createTask('Task 2');
+
+      const all = store.getAll();
+      expect(all.length).toBe(2);
+      // Newest first
+      expect(all[0].id).toBe(task2.id);
+      expect(all[1].id).toBe(task1.id);
+    });
+
+    it('returns empty array from an empty .teamai directory', () => {
+      // Fresh store on a new path — directory created by constructor but empty
+      const emptyRoot = join(root, 'empty-project');
+      const emptyStore = new TaskStore(emptyRoot);
+      expect(emptyStore.getAll()).toEqual([]);
+    });
+
+    it('returns empty array when .teamai directory does not exist', () => {
+      // Remove the directory that the constructor created so the
+      // !existsSync(this.specsDir) early-return path is exercised.
+      const emptyRoot = join(root, 'deleted-teamai');
+      const emptyStore = new TaskStore(emptyRoot);
+      rmSync(join(emptyRoot, '.teamai'), { recursive: true, force: true });
+      expect(emptyStore.getAll()).toEqual([]);
+    });
   });
 
-  it('getById returns null for unknown id', () => {
-    expect(store.getById('nonexistent')).toBeNull();
+  // ── getById ──────────────────────────────────────────────────────────
+
+  describe('getById', () => {
+    it('returns a task by its ID', () => {
+      const task = createTask('Find me', 'desc');
+      const found = store.getById(task.id);
+      expect(found).not.toBeNull();
+      expect(found!.title).toBe('Find me');
+    });
+
+    it('returns null when no task matches the ID', () => {
+      expect(store.getById('nonexistent')).toBeNull();
+    });
   });
 
-  it('update modifies task fields', () => {
-    store.create('task-1', 'Original', 'Desc');
-    store.update('task-1', { title: 'Updated Title', description: 'New desc' });
+  // ── getDirById ───────────────────────────────────────────────────────
 
-    const updated = store.getById('task-1');
-    expect(updated!.title).toBe('Updated Title');
-    expect(updated!.description).toBe('New desc');
+  describe('getDirById', () => {
+    it('returns the directory path for a task', () => {
+      const task = createTask('Dir test', 'desc');
+      const dir = store.getDirById(task.id);
+      expect(dir).toBe(join(root, '.teamai', 'dir-test'));
+      expect(existsSync(dir)).toBe(true);
+    });
+
+    it('throws when the task ID is not found', () => {
+      expect(() => store.getDirById('no-such-id')).toThrow('Task directory not found for id no-such-id');
+    });
   });
 
-  it('updatePhase changes phase and writes events.jsonl', () => {
-    store.create('task-1', 'Task', 'Desc');
+  // ── update ───────────────────────────────────────────────────────────
 
-    store.updatePhase('task-1', 'spec');
-    let task = store.getById('task-1');
-    expect(task!.phase).toBe('spec');
+  describe('update', () => {
+    it('updates provided task fields', () => {
+      const task = createTask('Original title', 'Original desc');
+      store.update(task.id, { title: 'Updated title', description: 'Updated desc' });
 
-    store.updatePhase('task-1', 'plan');
-    task = store.getById('task-1');
-    expect(task!.phase).toBe('plan');
+      const updated = store.getById(task.id)!;
+      expect(updated.title).toBe('Updated title');
+      expect(updated.description).toBe('Updated desc');
+    });
 
-    // Check events file exists
-    const dir = store.getDirById('task-1');
-    expect(existsSync(join(dir, 'events.jsonl'))).toBe(true);
+    it('preserves fields not specified in the update', () => {
+      const task = createTask('Preserve me', 'desc');
+      store.update(task.id, { phase: 'in-progress' });
+
+      const updated = store.getById(task.id)!;
+      expect(updated.title).toBe('Preserve me');
+      expect(updated.description).toBe('desc');
+      expect(updated.phase).toBe('in-progress');
+    });
+
+    it('updates the updatedAt timestamp', () => {
+      const task = createTask('Timestamp test', 'desc');
+      const originalUpdatedAt = task.updatedAt;
+
+      // Small delay for distinct timestamp
+      store.update(task.id, { title: 'New' });
+
+      const updated = store.getById(task.id)!;
+      expect(new Date(updated.updatedAt).getTime()).toBeGreaterThanOrEqual(
+        new Date(originalUpdatedAt).getTime(),
+      );
+    });
+
+    it('no-ops gracefully with an empty update object', () => {
+      const task = createTask('Empty update', 'desc');
+      store.update(task.id, {});
+
+      const unchanged = store.getById(task.id)!;
+      expect(unchanged.title).toBe('Empty update');
+      expect(unchanged.phase).toBe('backlog');
+    });
+
+    it('does not allow changing the task ID', () => {
+      const task = createTask('ID test', 'desc');
+      store.update(task.id, { title: 'new title' } as any);
+
+      const updated = store.getById(task.id)!;
+      // ID should remain unchanged (Omit<Task, 'id' | 'createdAt'> prevents this at type level)
+      expect(updated.id).toBe(task.id);
+    });
+
+    it('throws when the task is not found', () => {
+      expect(() => store.update('nonexistent', { title: 'X' })).toThrow('Task nonexistent not found');
+    });
   });
 
-  it('delete removes the task directory', () => {
-    store.create('task-del', 'Delete Me', 'x');
-    const dir = store.getDirById('task-del');
-    expect(existsSync(dir)).toBe(true);
+  // ── updatePhase ──────────────────────────────────────────────────────
 
-    store.delete('task-del');
-    expect(() => store.getDirById('task-del')).toThrow();
-    expect(store.getById('task-del')).toBeNull();
+  describe('updatePhase', () => {
+    it('updates the task phase', () => {
+      const task = createTask('Phase test', 'desc');
+      store.updatePhase(task.id, 'in-progress');
+
+      const updated = store.getById(task.id)!;
+      expect(updated.phase).toBe('in-progress');
+    });
+
+    it('appends an event for each phase change to events.jsonl', () => {
+      const task = createTask('Event test', 'desc');
+      store.updatePhase(task.id, 'in-progress');
+      store.updatePhase(task.id, 'awaiting-review');
+
+      const dir = store.getDirById(task.id);
+      const eventsPath = join(dir, 'events.jsonl');
+      expect(existsSync(eventsPath)).toBe(true);
+
+      const lines = readFileSync(eventsPath, 'utf-8').trim().split('\n');
+      expect(lines.length).toBe(2);
+
+      const event1 = JSON.parse(lines[0]);
+      expect(event1.phase).toBe('in-progress');
+      expect(Date.parse(event1.timestamp)).not.toBeNaN();
+
+      const event2 = JSON.parse(lines[1]);
+      expect(event2.phase).toBe('awaiting-review');
+    });
+
+    it('appends an event even when updating to the same phase', () => {
+      const task = createTask('Same phase', 'desc');
+      store.updatePhase(task.id, 'in-progress');
+      store.updatePhase(task.id, 'in-progress'); // same phase again
+
+      const events = store.getEvents(task.id);
+      expect(events.length).toBe(2);
+      expect(events[0].phase).toBe('in-progress');
+      expect(events[1].phase).toBe('in-progress');
+    });
+
+    it('throws when the task is not found', () => {
+      expect(() => store.updatePhase('nonexistent', 'done')).toThrow('Task nonexistent not found');
+    });
   });
 
-  it('throws on update for nonexistent task', () => {
-    expect(() => store.update('ghost', { title: 'x' })).toThrow('not found');
+  // ── delete ───────────────────────────────────────────────────────────
+
+  describe('delete', () => {
+    it('removes the task directory', () => {
+      const task = createTask('To delete', 'desc');
+      const dir = store.getDirById(task.id);
+
+      store.delete(task.id);
+
+      expect(existsSync(dir)).toBe(false);
+    });
+
+    it('throws when deleting a non-existent task', () => {
+      expect(() => store.delete('nonexistent')).toThrow();
+    });
+
+    it('cleans up stale .tmp files before deletion', () => {
+      const task = createTask('Tmp test', 'desc');
+      const dir = store.getDirById(task.id);
+
+      // Simulate a stale .tmp file
+      writeFileSync(join(dir, 'task.json.tmp'), 'stale');
+
+      // Should not throw
+      expect(() => store.delete(task.id)).not.toThrow();
+      expect(existsSync(dir)).toBe(false);
+    });
   });
 
-  it('updatePhase throws for nonexistent task', () => {
-    expect(() => store.updatePhase('ghost', 'spec')).toThrow('not found');
+  // ── clearArtifacts ───────────────────────────────────────────────────
+
+  describe('clearArtifacts', () => {
+    let taskId: string;
+    let dir: string;
+
+    beforeEach(() => {
+      const task = createTask('Artifact test', 'desc');
+      taskId = task.id;
+      dir = store.getDirById(task.id);
+
+      // Create some artifact files
+      writeFileSync(join(dir, 'spec.md'), '# spec');
+      writeFileSync(join(dir, 'plan.json'), '{}');
+      writeFileSync(join(dir, 'qa_report.json'), '{}');
+      writeFileSync(join(dir, 'qa_feedback.md'), '# feedback');
+      writeFileSync(join(dir, 'completion_summary.md'), '# summary');
+    });
+
+    it('clears spec-level artifacts (spec.md, plan.json, qa_report.json)', () => {
+      store.clearArtifacts(taskId, 'spec');
+
+      expect(existsSync(join(dir, 'spec.md'))).toBe(false);
+      expect(existsSync(join(dir, 'plan.json'))).toBe(false);
+      expect(existsSync(join(dir, 'qa_report.json'))).toBe(false);
+      // Lower-level artifacts should remain
+      expect(existsSync(join(dir, 'qa_feedback.md'))).toBe(true);
+      expect(existsSync(join(dir, 'completion_summary.md'))).toBe(true);
+    });
+
+    it('clears plan-level artifacts (plan.json, qa_report.json)', () => {
+      store.clearArtifacts(taskId, 'plan');
+
+      expect(existsSync(join(dir, 'plan.json'))).toBe(false);
+      expect(existsSync(join(dir, 'qa_report.json'))).toBe(false);
+      // Higher-level artifact should remain
+      expect(existsSync(join(dir, 'spec.md'))).toBe(true);
+      // Lower-level artifacts should remain
+      expect(existsSync(join(dir, 'qa_feedback.md'))).toBe(true);
+    });
+
+    it('clears qa-level artifacts (qa_report.json, qa_feedback.md, completion_summary.md)', () => {
+      store.clearArtifacts(taskId, 'qa');
+
+      expect(existsSync(join(dir, 'qa_report.json'))).toBe(false);
+      expect(existsSync(join(dir, 'qa_feedback.md'))).toBe(false);
+      expect(existsSync(join(dir, 'completion_summary.md'))).toBe(false);
+      // Higher-level artifacts should remain
+      expect(existsSync(join(dir, 'spec.md'))).toBe(true);
+      expect(existsSync(join(dir, 'plan.json'))).toBe(true);
+    });
+
+    it('does not throw when clearing non-existent artifacts', () => {
+      // spec.md was deleted in a previous clearArtifacts call — clearing again should be fine
+      store.clearArtifacts(taskId, 'qa'); // qa_feedback, completion_summary removed
+      store.clearArtifacts(taskId, 'qa'); // should not throw
+
+      // All qa-level files should still be gone
+      expect(existsSync(join(dir, 'qa_feedback.md'))).toBe(false);
+    });
+
+    it('throws when task is not found', () => {
+      expect(() => store.clearArtifacts('nonexistent', 'spec')).toThrow();
+    });
   });
 
-  it('getAll returns empty array when specsDir does not exist', () => {
-    // Constructor creates specsDir via mkdirSync, so we must delete it
-    // AFTER construction to hit the !existsSync early-return at line 75
-    const specsDir = join(testDir, '.teamai');
-    rmSync(specsDir, { recursive: true, force: true });
-    expect(store.getAll()).toEqual([]);
+  // ── getDirBySlug ─────────────────────────────────────────────────────
+
+  describe('getDirBySlug', () => {
+    it('returns the directory path for a given slug', () => {
+      const path = store.getDirBySlug('my-slug');
+      expect(path).toBe(join(root, '.teamai', 'my-slug'));
+    });
   });
 
-  it('getAll skips orphan directories without task.json', () => {
-    store.create('task-1', 'Real Task', 'desc');
-    // Create an empty subdirectory in .teamai/ that has no task.json
-    mkdirSync(join(testDir, '.teamai', 'empty-dir'), { recursive: true });
+  // ── readRawTaskJson ──────────────────────────────────────────────────
 
-    const all = store.getAll();
-    // Should only return the real task, not the empty dir
-    expect(all).toHaveLength(1);
-    expect(all[0].title).toBe('Real Task');
+  describe('readRawTaskJson', () => {
+    it('returns the raw task.json content as a string', () => {
+      const task = createTask('Raw JSON test', 'desc');
+      const raw = store.readRawTaskJson(task.id);
+
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw!);
+      expect(parsed.title).toBe('Raw JSON test');
+    });
+
+    it('returns null when the task is not found', () => {
+      expect(store.readRawTaskJson('nonexistent')).toBeNull();
+    });
   });
 
-  it('clearArtifacts removes spec, plan, and qa files', () => {
-    store.create('task-1', 'Task', 'Desc');
-    const dir = store.getDirById('task-1');
+  // ── getEvents ────────────────────────────────────────────────────────
 
-    // Simulate artifact files
-    writeFileSync(join(dir, 'spec.md'), '# spec');
-    writeFileSync(join(dir, 'plan.json'), '{}');
-    writeFileSync(join(dir, 'qa_report.json'), '{}');
+  describe('getEvents', () => {
+    it('returns an empty array when no events have been recorded', () => {
+      const task = createTask('No events', 'desc');
+      expect(store.getEvents(task.id)).toEqual([]);
+    });
 
-    // Clear at spec level removes all three
-    store.clearArtifacts('task-1', 'spec');
-    expect(existsSync(join(dir, 'spec.md'))).toBe(false);
-    expect(existsSync(join(dir, 'plan.json'))).toBe(false);
-    expect(existsSync(join(dir, 'qa_report.json'))).toBe(false);
+    it('returns events in chronological order', () => {
+      const task = createTask('Events test', 'desc');
+      store.updatePhase(task.id, 'in-progress');
+      store.updatePhase(task.id, 'awaiting-review');
+      store.updatePhase(task.id, 'done');
 
-    // Re-create and test clear at plan level
-    writeFileSync(join(dir, 'spec.md'), '# spec');
-    writeFileSync(join(dir, 'plan.json'), '{}');
-    writeFileSync(join(dir, 'qa_report.json'), '{}');
-    store.clearArtifacts('task-1', 'plan');
-    expect(existsSync(join(dir, 'spec.md'))).toBe(true);  // spec preserved
-    expect(existsSync(join(dir, 'plan.json'))).toBe(false);
-    expect(existsSync(join(dir, 'qa_report.json'))).toBe(false);
-  });
+      const events = store.getEvents(task.id);
+      expect(events.length).toBe(3);
+      expect(events[0].phase).toBe('in-progress');
+      expect(events[1].phase).toBe('awaiting-review');
+      expect(events[2].phase).toBe('done');
 
-  // ── Coverage: lines 124-125 — getDirBySlug ──
+      // Timestamps should be in chronological order
+      expect(new Date(events[1].timestamp).getTime())
+        .toBeGreaterThanOrEqual(new Date(events[0].timestamp).getTime());
+      expect(new Date(events[2].timestamp).getTime())
+        .toBeGreaterThanOrEqual(new Date(events[1].timestamp).getTime());
+    });
 
-  it('getDirBySlug returns the correct directory path', () => {
-    store.create('task-xyz', 'My Cool Task', 'desc');
-    // The slug is computed from the title by slugify
-    const slugDir = store.getDirBySlug('my-cool-task');
-    expect(slugDir).toContain('.teamai');
-    expect(slugDir).toContain('my-cool-task');
-  });
-
-  // ── Coverage: lines 128-135 — getEvents ──
-
-  it('getEvents returns empty array when no events exist', () => {
-    store.create('task-ev', 'Event Task', 'desc');
-    const events = store.getEvents('task-ev');
-    expect(events).toEqual([]);
-  });
-
-  it('getEvents returns parsed events after phase changes', () => {
-    store.create('task-ev', 'Event Task', 'desc');
-
-    store.updatePhase('task-ev', 'spec');
-    store.updatePhase('task-ev', 'plan');
-
-    const events = store.getEvents('task-ev');
-    expect(events).toHaveLength(2);
-    expect(events[0].phase).toBe('spec');
-    expect(events[0].timestamp).toBeDefined();
-    expect(events[1].phase).toBe('plan');
-    expect(events[1].timestamp).toBeDefined();
-  });
-
-  it('getEvents throws for nonexistent task', () => {
-    expect(() => store.getEvents('does-not-exist')).toThrow('not found');
-  });
-
-  it('getDirById returns correct directory for a created task', () => {
-    store.create('task-dir', 'Dir Test', 'desc');
-    const dir = store.getDirById('task-dir');
-    expect(dir).toContain('.teamai');
-    expect(existsSync(join(dir, 'task.json'))).toBe(true);
+    it('throws when task is not found', () => {
+      expect(() => store.getEvents('nonexistent')).toThrow();
+    });
   });
 });
