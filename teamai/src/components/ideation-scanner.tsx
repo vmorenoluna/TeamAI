@@ -9,6 +9,7 @@ export function IdeationScanner() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [output, setOutput] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const streamEvents = useSessionStream(sessionId);
 
@@ -26,9 +27,15 @@ export function IdeationScanner() {
   function handleScan() {
     setRunning(true);
     setOutput('');
+    setError(null);
     startTransition(async () => {
-      const id = await startIdeationScan();
-      setSessionId(id);
+      try {
+        const id = await startIdeationScan();
+        setSessionId(id);
+      } catch (err) {
+        setRunning(false);
+        setError(`Scan failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+      }
     });
   }
 
@@ -43,6 +50,7 @@ export function IdeationScanner() {
           {running && !done ? 'Scanning…' : 'Run Scan'}
         </button>
         {done && <span className="text-xs text-green-400">Scan complete</span>}
+        {error && <span className="text-xs text-red-400">{error}</span>}
       </div>
 
       {latestText && (
