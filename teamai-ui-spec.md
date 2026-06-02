@@ -406,30 +406,320 @@ Dark mode: `bg-[#11131b]` on root content area (always dark-first). No project m
 
 ## 5d. Analytics Page (`/analytics`)
 
-Header: "Analytics" title + "Project metrics and pipeline insights." subtitle.
-
-Dashboard layout showing:
-- Task counts by phase (summary cards or chart)
-- Pipeline run statistics
-- Agent session history
-- Recent activity timeline
+Header: "Analytics" title + "Agent performance, pipeline bottlenecks, and QA trends" subtitle.
 
 Dark mode: `bg-[#11131b]` on page root (always dark-first).
+
+### Page Layout
+
+The analytics page is a read-only dashboard computed entirely from the `.teamai/` task store on the active project's filesystem. No external database or API is required. All data comes from parsing `task.json`, `events.jsonl`, and `qa_report.json` files.
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  Analytics                                                 │
+│  Agent performance, pipeline bottlenecks, and QA trends    │
+│                                                            │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐     │
+│  │ Total    │ │ QA Pass  │ │ Bottleneck│ │Ideation- │     │
+│  │ Tasks  N │ │ Rate  X% │ │ Phase  Xh │ │ Driven N │     │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘     │
+│                                                            │
+│  ┌─────────────────────┐ ┌───────────────────────────┐    │
+│  │ Phase Distribution  │ │ Phase Timing (hours)      │    │
+│  │ ████████ backlog  8 │ │ ████████████ spec    2.5h │    │
+│  │ ██████ plan      6 │ │ ██████ plan        1.2h │    │
+│  │ ...                │ │ ...                      │    │
+│  └─────────────────────┘ └───────────────────────────┘    │
+│                                                            │
+│  QA Criteria Breakdown (if QA data exists)                 │
+│  ┌──────────────┬──────────────┬──────────────┐           │
+│  │ Criterion A  │ Criterion B  │ Criterion C  │           │
+│  │ ████████ 85% │ ████ 42%     │ ██ 25%       │           │
+│  └──────────────┴──────────────┴──────────────┘           │
+│                                                            │
+│  Weekly Trends (last 12 weeks, table)                      │
+│  ┌──────────┬─────────┬───────────┬──────────┐            │
+│  │ Week     │ Created │ Completed │ Velocity │            │
+│  │ 2026-05… │ 3       │ 2         │ 67%      │            │
+│  │ ...      │ ...     │ ...       │ ...      │            │
+│  └──────────┴─────────┴───────────┴──────────┘            │
+│                                                            │
+│                                          [Refresh Analytics]│
+└────────────────────────────────────────────────────────────┘
+```
+
+### States
+
+**Loading state:** Centered spinner (blue `animate-spin` ring) + "Computing analytics…" text. Shown while `getAnalytics()` server action is in-flight.
+
+**Error state:** Centered message "Failed to load analytics. Check that a project is selected." with a "Retry" button (blue pill) below. Shown when the server action throws, or when no active project is selected.
+
+**Empty project (no tasks):** Dashboard renders but shows zeros across all metrics. Phase distribution and timing sections are empty. QA Criteria Breakdown section is hidden (`qaStats` is null). Weekly Trends section is hidden (less than 2 data points).
+
+**Populated project:** All sections render with computed data.
+
+### Summary Cards (top row)
+
+Four summary cards in a `grid grid-cols-2 lg:grid-cols-4` layout, each with a colored left border accent. Card styling: `bg-[#1a1f2e] rounded-xl border border-[#1e293b] border-l-2 p-4`.
+
+| Card | Value | Color | Subtitle |
+|---|---|---|---|
+| **Total Tasks** | Total count across all phases | Blue (`#2563eb`) | "Across N phases" |
+| **QA Pass Rate** | Percentage (0–100%) or "—" if no QA data | Green (≥80%), Amber (<80%), Slate (no data) | "N/M runs" or "No QA data yet" |
+| **Bottleneck** | Phase name with highest average duration (excluding backlog/done/failed) or "—" | Red (>2h avg), Amber (≤2h), Slate (no data) | "N.Nh avg (N samples)" or "No data yet" |
+| **Ideation-Driven** | Count of tasks with `source: 'ideation'` | Purple | "N competitor-driven" (tasks from competitor analysis) |
+
+### Phase Distribution
+
+Left column in the two-column grid below summary cards. Card container: `bg-[#1a1f2e] rounded-xl border border-[#1e293b] p-5`.
+
+- **Heading:** "Phase Distribution" (`text-sm font-semibold text-slate-200`)
+- **Bars:** Horizontal stacked bar chart — phase label (capitalized, 80px wide), filled bar (`bg-[#0f1320]` track, blue gradient `from-[#2563eb] to-[#3b82f6]` fill), count (right-aligned monospace)
+- **Sorting:** Phases sorted by count descending (most tasks first)
+- **Width:** Proportional to the phase with the most tasks (`maxPhaseCount` = 100%)
+- **Animation:** `transition-all duration-500` on bar width
+
+### Phase Timing
+
+Right column in the two-column grid. Same card styling as Phase Distribution.
+
+- **Heading:** "Phase Timing (hours)"
+- **Empty state:** "Not enough event data to compute timings." (when `phaseTimings.length === 0`)
+- **Bars:** Same horizontal bar layout as Phase Distribution, but:
+  - Bar color: **red gradient** (`from-red-600 to-red-400`) if this phase is the bottleneck; **green gradient** (`from-emerald-600 to-emerald-400`) otherwise
+  - Value shows `N.Nh (N.N–N.N)` — average, min, and max hours
+  - Width proportional to the phase with the highest average duration (`maxTiming`)
+- **Data source:** Computed from `events.jsonl` phase-change events — measures time between consecutive phase transitions for each task
+
+### QA Criteria Breakdown
+
+Full-width section below the two-column grid. Only rendered when `qaStats` is not null (at least one `qa_report.json` exists).
+
+- **Heading:** "QA Criteria Breakdown"
+- **Empty state (no criteria):** "No criterion-level data available."
+- **Grid:** `grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3`
+- **Per-criterion card:** `bg-[#0f1320] border border-[#1e293b] rounded-lg p-3 flex items-center justify-between`
+  - Criterion name (truncated at 180px, `text-xs text-slate-300`)
+  - Mini progress bar (16px track, filled proportionally) + pass rate percentage (right-aligned monospace)
+  - Bar color: emerald (≥80%), amber (≥50%), red (<50%)
+- **Data source:** Aggregated from all `qa_report.json` files across all tasks — each criterion's pass rate is `(PASS count / total appearances) * 100`
+- **Sorting:** Sorted by pass rate ascending (worst-performing criteria first)
+
+### Weekly Trends
+
+Full-width section below QA Criteria Breakdown. Only rendered when at least 2 weeks of data exist (`weeklyTrends.length > 1`).
+
+- **Heading:** "Weekly Trends (last 12 weeks)"
+- **Format:** Scrollable table (`overflow-x-auto`) with 4 columns: Week (monospace, date), Created, Completed, Velocity (percentage)
+- **Rows:** Hover highlight (`hover:bg-[#1e2333]`), border separators
+- **Velocity color:** emerald (≥70%), amber (≥40%), red (<40%)
+- **Data source:** Tasks bucketed by `createdAt` week (ISO Monday) using UTC. Completed tasks counted by `updatedAt` week. Velocity = `completed / created * 100`.
+- **Max range:** Last 12 weeks (`.slice(-12)`) — older weeks are dropped
+
+### Refresh Button
+
+Right-aligned at the bottom: "Refresh Analytics" button (`bg-[#1e2333] text-slate-400 border border-[#1e293b] rounded-lg hover:bg-[#252d3d] hover:text-slate-300`). Re-runs `getAnalytics()` and replaces all dashboard data. Used after creating/completing tasks to see updated metrics without a full page reload.
+
+### Server Action (`src/app/actions/analytics.ts`)
+
+| Action | Returns | Description |
+|---|---|---|
+| `getAnalytics()` | `Promise<AnalyticsData>` | Computes full analytics from the active project's TaskStore. Reads all tasks, events, and QA reports from disk. No caching — always computes fresh. |
+
+**Type definitions:**
+
+```typescript
+interface AnalyticsData {
+  projectPath: string;
+  totalTasks: number;
+  phaseDistribution: Record<string, number>;
+  phaseTimings: PhaseTiming[];
+  qaStats: QAStats | null;
+  sourceBreakdown: SourceBreakdown;
+  weeklyTrends: WeeklyTrend[];
+  bottleneck: PhaseTiming | null;
+}
+
+interface PhaseTiming {
+  phase: string;
+  avgHours: number;
+  minHours: number;
+  maxHours: number;
+  count: number;
+}
+
+interface QAStats {
+  totalQaRuns: number;
+  passCount: number;
+  failCount: number;
+  passRate: number;
+  criteriaBreakdown: Array<{ name: string; passRate: number; total: number }>;
+}
+
+interface SourceBreakdown {
+  ideation: number;
+  competitorAnalysis: number;
+  unknown: number;
+}
+
+interface WeeklyTrend {
+  week: string;
+  created: number;
+  completed: number;
+}
+```
+
+### Component
+
+- `src/app/analytics/page.tsx` — thin wrapper, renders heading + subtitle + `<AnalyticsDashboard />` in a scrollable container (`h-full overflow-y-auto p-6`)
+- `src/components/analytics-dashboard.tsx` — `'use client'` — full dashboard with:
+  - **AnalyticsDashboard**: fetches data via `getAnalytics()` on mount, renders loading/error/empty/data states, Refresh button at bottom
+  - **SummaryCard**: colored left-accent card for the 4 top-level metrics (Total Tasks, QA Pass Rate, Bottleneck, Ideation-Driven)
 
 ---
 
 ## 5e. GitHub Page (`/github`)
 
-Header: "GitHub" title + "Import issues and manage pull requests." subtitle.
+Header: "GitHub Issues" title + "Import open GitHub issues as kanban tasks. Requires the GitHub MCP server to be configured." subtitle.
 
-Content:
-- Connected repository status indicator
-- Issue list with import-to-task buttons
-- PR management interface
+Dark mode: `bg-[#11131b]` on page root (always dark-first). Requires: GitHub MCP server configured (`claude mcp add github -- npx -y @modelcontextprotocol/server-github`), `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable.
 
-Requires: GitHub MCP server configured, `GITHUB_TOKEN` env var.
+### Page Layout
 
-Dark mode: `bg-[#11131b]` on page root (always dark-first).
+The GitHub page lets users list open issues from a connected GitHub repository and selectively import them as kanban tasks. It uses the GitHub MCP server via a Claude agent session — the agent queries GitHub, returns a JSON array of issues, and the UI renders them as selectable cards.
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  GitHub Issues                                             │
+│  Import open GitHub issues as kanban tasks. Requires the   │
+│  GitHub MCP server to be configured.                       │
+│                                                            │
+│  [List Open Issues]   |   [Select All] [Import Selected N] │
+│                                                            │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ ☑ #42  Fix login redirect loop                      │  │
+│  │     Users get stuck in an infinite redirect after…   │  │
+│  │     [bug] [high-priority]                        ↗  │  │
+│  ├──────────────────────────────────────────────────────┤  │
+│  │ ☐ #41  Add rate limiting to API                     │  │
+│  │     The API currently has no rate limiting, which…   │  │
+│  │     [enhancement]                                ↗  │  │
+│  ├──────────────────────────────────────────────────────┤  │
+│  │ ☐ #40  Update README with deployment instructions   │  │
+│  │     [documentation]                              ↗  │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                            │
+│  3 open issues found         5 issues imported ✓           │
+└────────────────────────────────────────────────────────────┘
+```
+
+### States
+
+**Initial empty state:** Centered database icon + "Click 'List Open Issues' to fetch GitHub issues." message. Shown before any action has been taken.
+
+**Loading state:** "List Open Issues" button changes to "Fetching…" (disabled, `opacity-40`). Spinner inside button. Agent session streams text output.
+
+**Streaming output:** While the Claude agent is fetching issues, a scrollable `<pre>` block (`bg-[#1a1f2e] border border-[#1e293b] rounded-lg p-4`) shows live agent text output. This provides transparency into what the agent is doing.
+
+**Done — issues found:** Issues render as a scrollable list of selectable cards. Action bar shows "Select All / Deselect All" button and "Import Selected (N)" button (green, `bg-green-700 hover:bg-green-600`).
+
+**Done — no issues / MCP not configured:** If the agent returned no issues (empty array) or the MCP server wasn't available, a help box appears with setup instructions:
+```
+No issues found. The GitHub MCP server may not be configured.
+
+Run claude mcp add github -- npx -y @modelcontextprotocol/server-github
+in your project directory and set the GITHUB_PERSONAL_ACCESS_TOKEN
+environment variable.
+```
+
+**Importing state:** "Import Selected (N)" button changes to "Importing…" (disabled). Server action `importIssues()` runs.
+
+**Import complete:** Green confirmation text appears: "N issues imported". Selected checkboxes clear. Board refreshes (`router.refresh()`) so new tasks appear in the kanban Backlog column.
+
+**Error state:** Red error text appears inline in the actions bar (e.g., "Failed to import issues"). The user can retry.
+
+### Actions Bar
+
+Horizontal bar below the header with left-to-right layout:
+
+1. **"List Open Issues" button** — blue pill (`bg-[#2563eb] text-white rounded-lg`), with database icon. Disabled while fetching or importing. Shows "Fetching…" while running.
+2. **Vertical divider** (`w-px h-5 bg-[#334155]`) — only visible after issues are loaded
+3. **"Select All / Deselect All" button** — secondary style (`border border-[#334155] bg-[#1a1f2e] text-slate-300 hover:text-white`), toggles between selecting all N issues and deselecting all
+4. **"Import Selected (N)" button** — green (`bg-green-700 text-white rounded-lg hover:bg-green-600`), disabled when 0 selected or importing, shows "Importing…" while server action runs
+5. **Import confirmation** — green text (`text-xs text-green-400`) showing count of imported issues
+6. **Error text** — red text (`text-xs text-red-400`) showing any error message
+
+### Issue Cards
+
+Each issue renders as a clickable card (`cursor-pointer`):
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ☑  #42  Fix login redirect loop                      ↗  │
+│        Users get stuck in an infinite redirect after…    │
+│        [bug]  [high-priority]                            │
+└──────────────────────────────────────────────────────────┘
+```
+
+- **Selection state:** Unselected cards: `bg-[#1e2333] border-[#1e293b]`. Selected cards: `bg-[#2563eb]/10 border-[#2563eb]/40` (blue tinted). Hover (unselected): `hover:border-[#334155]`.
+- **Checkbox:** Controlled `<input type="checkbox">` with `onClick={e => e.stopPropagation()}` to prevent double-toggle when clicking the checkbox directly. Styled with dark background (`bg-[#11131b]`).
+- **Issue number:** `#N` in monospace, `text-slate-500`, left column
+- **Title:** `text-white font-medium truncate`, next to issue number
+- **Body:** Up to 2 lines (`line-clamp-2`), `text-xs text-slate-400`
+- **Labels:** Flex-wrapped row of small label badges (`text-[10px] bg-[#1a1f2e] text-slate-400 rounded border border-[#334155] px-1.5 py-0.5`)
+- **GitHub link:** External link icon (GitHub octocat SVG, `w-4 h-4`) right-aligned. Opens issue on GitHub in a new tab. Stops click propagation (`e.stopPropagation()`) so clicking it doesn't toggle selection.
+- **Click behavior:** Clicking the card body toggles its selection via `toggleIssue(number)`. The checkbox itself also toggles (event propagation is stopped on the checkbox to prevent double-fire).
+
+### Import Flow
+
+1. User clicks "List Open Issues" → `startIssueList()` server action spawns a Claude agent session
+2. Claude uses the GitHub MCP server to query open issues, outputs a JSON array
+3. After the `result` event, the component parses the JSON via `parseIssuesFromText()` (regex `\[[\s\S]*\]` extraction)
+4. Issues are saved to `.teamai/github/issues-{sessionId}.json` for persistence
+5. User selects issues via checkboxes or Select All
+6. User clicks "Import Selected (N)" → `importIssues(issues)` server action creates kanban tasks
+7. Each issue becomes a task in the Backlog phase with title = issue title, description = markdown body + labels + URL
+8. Board path is revalidated, router refreshes, confirmation text shows import count
+
+### Session Reconnection
+
+On mount, the component checks for an active GitHub issue listing session via `getActiveIssueSession()`. If one exists (e.g., user navigated away and returned), it reconnects to the live session and resumes streaming output. After the session completes, it parses issues from the cached file if available.
+
+### Server Actions (`src/app/actions/github.ts`)
+
+| Action | Returns | Description |
+|---|---|---|
+| `startIssueList()` | `Promise<string>` | Spawns Claude session, sends prompt to list open issues via GitHub MCP, returns session ID. Stores session in `global.__githubSessions` for reconnection. |
+| `parseIssuesFromText(text)` | `GitHubIssue[]` | Parses a JSON array from agent text output (regex extraction). Validates and normalizes each issue object. Returns empty array on parse failure. |
+| `saveIssuesToFile(sessionId, issues)` | `Promise<void>` | Persists parsed issues to `.teamai/github/issues-{sessionId}.json` for post-reload recovery. |
+| `getIssuesFromFile(sessionId)` | `Promise<GitHubIssue[]>` | Reads cached issues from file. Returns empty array if file doesn't exist or is invalid. |
+| `importIssues(issues)` | `Promise<{ taskIds: string[] }>` | Creates a kanban task (Backlog phase) for each issue. Description includes issue body, labels, and GitHub URL. Revalidates `/` path. |
+| `getActiveIssueSession()` | `Promise<string \| null>` | Checks for an active GitHub listing session (used for reconnection on mount). Returns session ID if found and running, otherwise null. |
+
+**Type definition:**
+
+```typescript
+interface GitHubIssue {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  labels: string[];
+  html_url: string;
+  created_at: string;
+}
+```
+
+### Component
+
+- `src/app/github/page.tsx` — thin wrapper with `metadata: { title: 'GitHub Issues — TeamAI' }`, renders `<GitHubImport />`
+- `src/components/github-import.tsx` — `'use client'` — full GitHub import workflow with:
+  - **GitHubImport**: manages session lifecycle (start/reconnect/complete), streaming output display, issue selection state, import flow, error handling
+  - Uses `useSessionStream` hook for live agent output
+  - Uses `useTransition` for non-blocking server action calls
+  - Session reconnection on mount via `getActiveIssueSession()`
+  - Parse-safe: wraps JSON parsing in try/catch, validates array shape, normalizes individual fields
+  - File cache: saves issues to `.teamai/github/` for persistence across page reloads
 
 ---
 
@@ -1014,7 +1304,8 @@ Four sections, rendered top-to-bottom:
 | IdeationScanner | `/ideation` | Run Scan button + streaming output |
 | InsightsChat | `/insights` | Streaming chat bubbles with message history |
 | TerminalsView | `/terminals` | Responsive grid of PTY terminal panels with color-coded borders |
-| ConnectionIndicator | Board header | Green/amber dot showing WebSocket connection status |
+| AnalyticsDashboard | `/analytics` | Read-only compute dashboard: summary cards (Total Tasks, QA Pass Rate, Bottleneck, Ideation-Driven), phase distribution bar chart, phase timing bars, QA criteria breakdown grid, weekly trends table, refresh button. Data computed from `.teamai/` task store — no external DB. |
+| GitHubImport | `/github` | Claude-driven GitHub issue listing via MCP server with streaming agent output. Selectable issue cards with labels, checkboxes, Select All, and Import Selected (creates kanban tasks in Backlog). Session reconnection on mount, file cache for persistence. |
 
 ---
 
