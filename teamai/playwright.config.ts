@@ -4,6 +4,10 @@ export default defineConfig({
   testDir: './tests/e2e',
   timeout: 30_000,
   retries: 0,
+  workers: 1,
+  // ^ Serial execution — retry-button.spec.ts modifies shared seed state
+  //   (completionSummary, phase) and would race with completion-summary.spec.ts
+  //   and task-detail.spec.ts reading the same failed task in parallel.
   globalSetup: require.resolve('./tests/e2e/playwright-setup.ts'),
   globalTeardown: require.resolve('./tests/e2e/playwright-teardown.ts'),
   use: {
@@ -15,7 +19,7 @@ export default defineConfig({
     command: 'npm run dev',
     url: 'http://localhost:3000',
     reuseExistingServer: true,
-    timeout: 30_000,
+    timeout: 120_000,
     cwd: __dirname,
     env: {
       NODE_ENV: 'test',
