@@ -248,7 +248,7 @@ function RoadmapCard({
 
 // ── Phased kanban view ───────────────────────────────────────────────────────
 
-function PhasedKanban({
+export function PhasedKanban({
   report,
   filename,
   onRefresh,
