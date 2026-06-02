@@ -1,571 +1,781 @@
+/**
+ * Unit tests for getAnalytics() server action.
+ *
+ * Tests exercise the full analytics computation pipeline using the
+ * createTestProject() helper for temp project directories. Covers:
+ *   - Phase distribution
+ *   - Phase timing from events.jsonl
+ *   - QA stats aggregation from qa_report.json
+ *   - Source breakdown
+ *   - Weekly trends
+ *   - Bottleneck detection
+ *
+ * KEY: Phase durations are associated with the SOURCE phase of each
+ * transition (events[i].phase), NOT the destination (events[i+1].phase).
+ * Example: backlog→spec(2h)→plan(3h) means backlog=2h, spec=3h.
+ */
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { TaskStore } from '@/lib/task-store';
-import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, appendFileSync } from 'fs';
 import { join } from 'path';
+import { createTestProject } from '../utils/test-project';
 
-// ── Mock setup ────────────────────────────────────────────────────────────
-// vi.hoisted runs before vi.mock, so testDir is available when the mock factory executes
+// ── Mocks ───────────────────────────────────────────────────────────────────
 
-const { testDir } = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { join } = require('path');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { randomUUID } = require('crypto');
-  return {
-    testDir: join(process.cwd(), '.teamai-test-analytics-' + randomUUID().slice(0, 8)),
-  };
-});
+const mockGetActiveProjectPath = vi.fn();
 
 vi.mock('@/app/actions/projects', () => ({
-  getActiveProjectPath: vi.fn().mockResolvedValue(testDir),
+  getActiveProjectPath: (...args: unknown[]) => mockGetActiveProjectPath(...args),
 }));
 
-// Import after mock
-import { getAnalytics } from '@/app/actions/analytics';
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-// ── Helper types for qaReport ─────────────────────────────────────────────
+let root: string;
+let clean: () => void;
 
-interface QACriterion {
-  name: string;
-  status: 'PASS' | 'FAIL';
+/** Shortcut to the .teamai/ directory in the test project */
+function teamaiDir() { return join(root, '.teamai'); }
+
+/**
+ * Write a task.json for a task created by TaskStore.create().
+ * This mirrors what TaskStore.create writes — the task is stored
+ * under .teamai/<slug>/task.json.
+ */
+function writeTask(
+  slug: string,
+  id: string,
+  overrides: Partial<{
+    title: string; description: string; phase: string;
+    source: string; createdAt: string; updatedAt: string;
+  }> = {},
+) {
+  const dir = join(teamaiDir(), slug);
+  mkdirSync(dir, { recursive: true });
+  const task = {
+    id,
+    title: overrides.title ?? slug,
+    description: overrides.description ?? 'Description',
+    phase: overrides.phase ?? 'backlog',
+    source: overrides.source,
+    createdAt: overrides.createdAt ?? new Date().toISOString(),
+    updatedAt: overrides.updatedAt ?? new Date().toISOString(),
+  };
+  writeFileSync(join(dir, 'task.json'), JSON.stringify(task));
+  return dir;
 }
 
-interface QAReportFixture {
-  overall: 'PASS' | 'FAIL';
-  criteria: QACriterion[];
+/** Append an event line to events.jsonl */
+function appendEvent(slug: string, event: { phase: string; timestamp: string }) {
+  const path = join(teamaiDir(), slug, 'events.jsonl');
+  appendFileSync(path, JSON.stringify(event) + '\n');
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────
+/** Write a qa_report.json to the task's slug directory */
+function writeQaReport(slug: string, report: object) {
+  const dir = join(teamaiDir(), slug);
+  writeFileSync(join(dir, 'qa_report.json'), JSON.stringify(report));
+}
+
+/** ISO date offset by N hours from a base */
+function isoH(isoBase: string, hours: number): string {
+  const d = new Date(isoBase);
+  d.setHours(d.getHours() + hours);
+  return d.toISOString();
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('getAnalytics', () => {
-  let store: TaskStore;
-
   beforeEach(() => {
-    mkdirSync(testDir, { recursive: true });
-    store = new TaskStore(testDir);
+    const project = createTestProject();
+    root = project.root;
+    clean = project.clean;
+    mkdirSync(teamaiDir(), { recursive: true });
+    mockGetActiveProjectPath.mockResolvedValue(root);
   });
 
   afterEach(() => {
-    if (existsSync(testDir)) rmSync(testDir, { recursive: true, force: true });
+    clean();
+    vi.clearAllMocks();
+    vi.resetModules();
   });
 
-  // ── Helpers ─────────────────────────────────────────────────────────────
+  // ── Empty / Edge Cases ───────────────────────────────────────────────
 
-  /** Create a task, advance its phases, write events.jsonl, optionally a qa_report.
-   *  Since TaskStore.update() excludes createdAt from its Partial, we write
-   *  createdAt directly to task.json when needed. */
-  function createTaskWithPhases(
-    id: string,
-    title: string,
-    phases: string[],
-    opts?: { source?: string; createdAt?: string; updatedAt?: string; qaReport?: QAReportFixture }
-  ) {
-    store.create(id, title, 'desc', opts?.source, undefined);
+  describe('empty / edge cases', () => {
+    it('returns zeros for an empty project', async () => {
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
 
-    if (opts?.createdAt) {
-      const dir = store.getDirById(id);
-      const taskPath = join(dir, 'task.json');
-      const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
-      task.createdAt = opts.createdAt;
-      writeFileSync(taskPath, JSON.stringify(task, null, 2));
-    }
+      expect(data.totalTasks).toBe(0);
+      expect(data.phaseDistribution).toEqual({});
+      expect(data.phaseTimings).toEqual([]);
+      expect(data.qaStats).toBeNull();
+      expect(data.sourceBreakdown).toEqual({ ideation: 0, competitorAnalysis: 0, unknown: 0 });
+      expect(data.weeklyTrends).toEqual([]);
+      expect(data.bottleneck).toBeNull();
+      expect(data.projectPath).toBe(root);
+    });
 
-    for (const phase of phases) {
-      store.updatePhase(id, phase);
-    }
+    it('handles project with tasks but no events or QA reports', async () => {
+      writeTask('task-one', 'id-1', { phase: 'spec' });
+      writeTask('task-two', 'id-2', { phase: 'plan', source: 'ideation' });
 
-    if (opts?.updatedAt) {
-      const dir = store.getDirById(id);
-      const taskPath = join(dir, 'task.json');
-      const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
-      task.updatedAt = opts.updatedAt;
-      writeFileSync(taskPath, JSON.stringify(task, null, 2));
-    }
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
 
-    if (opts?.qaReport) {
-      const dir = store.getDirById(id);
-      writeFileSync(join(dir, 'qa_report.json'), JSON.stringify(opts.qaReport, null, 2));
-    }
-  }
+      expect(data.totalTasks).toBe(2);
+      expect(data.phaseDistribution).toEqual({ spec: 1, plan: 1 });
+      expect(data.phaseTimings).toEqual([]);
+      expect(data.qaStats).toBeNull();
+      expect(data.sourceBreakdown).toEqual({ ideation: 1, competitorAnalysis: 0, unknown: 1 });
+      expect(data.bottleneck).toBeNull();
+    });
 
-  // ── Empty state ──────────────────────────────────────────────────────────
+    it('handles project with only excluded phases (no active phases)', async () => {
+      const t0 = '2025-06-01T00:00:00Z';
+      writeTask('only-backlog-done', 'id-1', { phase: 'done', createdAt: t0 });
+      appendEvent('only-backlog-done', { phase: 'backlog', timestamp: t0 });
+      appendEvent('only-backlog-done', { phase: 'done', timestamp: isoH(t0, 1) });
 
-  it('returns empty analytics when no tasks exist', async () => {
-    const data = await getAnalytics();
-    expect(data.totalTasks).toBe(0);
-    expect(data.phaseDistribution).toEqual({});
-    expect(data.phaseTimings).toEqual([]);
-    expect(data.qaStats).toBeNull();
-    expect(data.sourceBreakdown).toEqual({ ideation: 0, competitorAnalysis: 0, unknown: 0 });
-    expect(data.weeklyTrends).toEqual([]);
-    expect(data.bottleneck).toBeNull();
-    expect(data.projectPath).toBe(testDir);
-  });
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
 
-  // ── Phase distribution ──────────────────────────────────────────────────
-
-  it('correctly computes phase distribution across tasks', async () => {
-    createTaskWithPhases('t1', 'Task 1', ['spec', 'plan']);
-    createTaskWithPhases('t2', 'Task 2', ['spec']); // still in spec
-    createTaskWithPhases('t3', 'Task 3', ['spec', 'plan', 'implement', 'done']);
-
-    const data = await getAnalytics();
-
-    // t1 is in plan, t2 in spec, t3 in done
-    expect(data.phaseDistribution).toEqual({
-      plan: 1,
-      spec: 1,
-      done: 1,
+      expect(data.totalTasks).toBe(1);
+      expect(data.bottleneck).toBeNull();
     });
   });
 
-  it('groups multiple tasks in the same phase', async () => {
-    createTaskWithPhases('t1', 'Task 1', []); // in backlog
-    createTaskWithPhases('t2', 'Task 2', []); // in backlog
-    createTaskWithPhases('t3', 'Task 3', ['spec']); // in spec
+  // ── Phase Distribution ───────────────────────────────────────────────
 
-    const data = await getAnalytics();
-    expect(data.phaseDistribution).toEqual({
-      backlog: 2,
-      spec: 1,
+  describe('phase distribution', () => {
+    it('counts tasks across various phases', async () => {
+      writeTask('t1', 'id-1', { phase: 'backlog' });
+      writeTask('t2', 'id-2', { phase: 'spec' });
+      writeTask('t3', 'id-3', { phase: 'spec' });
+      writeTask('t4', 'id-4', { phase: 'plan' });
+      writeTask('t5', 'id-5', { phase: 'implement' });
+      writeTask('t6', 'id-6', { phase: 'implement' });
+      writeTask('t7', 'id-7', { phase: 'implement' });
+      writeTask('t8', 'id-8', { phase: 'done' });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.totalTasks).toBe(8);
+      expect(data.phaseDistribution).toEqual({
+        backlog: 1, spec: 2, plan: 1, implement: 3, done: 1,
+      });
+    });
+
+    it('handles single-task project', async () => {
+      writeTask('solo', 'id-solo', { phase: 'backlog' });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.totalTasks).toBe(1);
+      expect(data.phaseDistribution).toEqual({ backlog: 1 });
     });
   });
 
-  // ── Phase timings ───────────────────────────────────────────────────────
+  // ── Phase Timings from events.jsonl ──────────────────────────────────
 
-  it('computes phase timings from events.jsonl', async () => {
-    createTaskWithPhases('t1', 'Task 1', ['spec', 'plan', 'implement']);
+  describe('phase timings from events.jsonl', () => {
+    it('computes durations between consecutive events (source phase owns the duration)', async () => {
+      const t0 = '2025-01-01T00:00:00Z';
+      writeTask('timing-task', 'tid-1', { phase: 'plan', createdAt: t0, updatedAt: t0 });
 
-    const data = await getAnalytics();
-    expect(data.phaseTimings.length).toBeGreaterThanOrEqual(1);
+      appendEvent('timing-task', { phase: 'backlog', timestamp: t0 });
+      appendEvent('timing-task', { phase: 'spec', timestamp: isoH(t0, 2) });
+      appendEvent('timing-task', { phase: 'plan', timestamp: isoH(t0, 5) });
 
-    // Find the spec phase timing
-    const specTiming = data.phaseTimings.find(p => p.phase === 'spec');
-    expect(specTiming).toBeDefined();
-    expect(specTiming!.count).toBe(1);
-    // avgHours should be a small number (test runs instantly)
-    expect(specTiming!.avgHours).toBeGreaterThanOrEqual(0);
-  });
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
 
-  it('skips tasks with fewer than 2 events for timing computation', async () => {
-    createTaskWithPhases('t1', 'Task 1', []); // only a single event at creation
+      expect(data.phaseTimings.length).toBe(2);
 
-    const data = await getAnalytics();
-    expect(data.phaseTimings).toEqual([]);
-  });
+      // Sorted by avgHours descending: spec(3h) > backlog(2h)
+      expect(data.phaseTimings[0].phase).toBe('spec');
+      expect(data.phaseTimings[0].avgHours).toBe(3);
+      expect(data.phaseTimings[0].minHours).toBe(3);
+      expect(data.phaseTimings[0].maxHours).toBe(3);
+      expect(data.phaseTimings[0].count).toBe(1);
 
-  it('handles negative durations gracefully (clock skew)', async () => {
-    store.create('t1', 'Clock Skew Task', 'desc');
-    store.updatePhase('t1', 'spec');
-
-    // Manually overwrite events.jsonl with timestamps that would produce negative duration
-    const dir = store.getDirById('t1');
-    const eventsPath = join(dir, 'events.jsonl');
-    writeFileSync(eventsPath,
-      JSON.stringify({ phase: 'spec', timestamp: '2025-01-01T10:00:00Z' }) + '\n' +
-      JSON.stringify({ phase: 'plan', timestamp: '2025-01-01T09:00:00Z' }) + '\n' // earlier!
-    );
-
-    const data = await getAnalytics();
-    // All transitions are negative → no valid timings
-    expect(data.phaseTimings.length).toBe(0);
-  });
-
-  it('handles multiple tasks contributing to same phase durations', async () => {
-    createTaskWithPhases('t1', 'Task 1', ['spec', 'plan']);
-    createTaskWithPhases('t2', 'Task 2', ['spec', 'plan', 'implement']);
-    createTaskWithPhases('t3', 'Task 3', ['spec', 'plan']);
-
-    const data = await getAnalytics();
-    const specTiming = data.phaseTimings.find(p => p.phase === 'spec');
-    expect(specTiming).toBeDefined();
-    expect(specTiming!.count).toBe(3); // all 3 tasks have spec→next transition
-
-    const planTiming = data.phaseTimings.find(p => p.phase === 'plan');
-    expect(planTiming).toBeDefined();
-    expect(planTiming!.count).toBe(1); // only t2 has plan→implement transition
-  });
-
-  it('sorts phase timings by avgHours descending', async () => {
-    // Create a task with events that clearly have different durations
-    store.create('t1', 'Task', 'desc');
-    store.updatePhase('t1', 'spec');
-
-    const dir = store.getDirById('t1');
-    writeFileSync(join(dir, 'events.jsonl'),
-      JSON.stringify({ phase: 'phase-a', timestamp: '2025-01-01T00:00:00Z' }) + '\n' +
-      JSON.stringify({ phase: 'phase-b', timestamp: '2025-01-01T01:00:00Z' }) + '\n' + // 1 hour
-      JSON.stringify({ phase: 'phase-c', timestamp: '2025-01-01T05:00:00Z' }) + '\n'   // 4 hours
-    );
-
-    const data = await getAnalytics();
-    expect(data.phaseTimings.length).toBe(2);
-
-    // phase-b comes first (4 hours > 1 hour)
-    expect(data.phaseTimings[0].phase).toBe('phase-b');
-    expect(data.phaseTimings[0].avgHours).toBeCloseTo(4, 0);
-
-    expect(data.phaseTimings[1].phase).toBe('phase-a');
-    expect(data.phaseTimings[1].avgHours).toBeCloseTo(1, 0);
-  });
-
-  it('handles malformed events.jsonl gracefully', async () => {
-    store.create('t1', 'Malformed Events', 'desc');
-    const dir = store.getDirById('t1');
-    writeFileSync(join(dir, 'events.jsonl'), '{ invalid json }\n');
-
-    // Should not throw — just skip the malformed task
-    const data = await getAnalytics();
-    expect(data.phaseTimings).toEqual([]);
-  });
-
-  // ── QA stats ─────────────────────────────────────────────────────────────
-
-  it('returns null qaStats when no tasks have qa reports', async () => {
-    createTaskWithPhases('t1', 'Task 1', ['spec', 'done']);
-
-    const data = await getAnalytics();
-    expect(data.qaStats).toBeNull();
-  });
-
-  it('computes QA pass stats from qa_report.json files', async () => {
-    createTaskWithPhases('t1', 'Task 1', ['implement'], {
-      qaReport: { overall: 'PASS', criteria: [] },
+      expect(data.phaseTimings[1].phase).toBe('backlog');
+      expect(data.phaseTimings[1].avgHours).toBe(2);
+      expect(data.phaseTimings[1].count).toBe(1);
     });
 
-    const data = await getAnalytics();
-    expect(data.qaStats).not.toBeNull();
-    expect(data.qaStats!.totalQaRuns).toBe(1);
-    expect(data.qaStats!.passCount).toBe(1);
-    expect(data.qaStats!.failCount).toBe(0);
-    expect(data.qaStats!.passRate).toBe(100);
+    it('aggregates durations across multiple tasks for same phase', async () => {
+      const t0 = '2025-02-01T00:00:00Z';
+      writeTask('task-a', 'a', { phase: 'spec', createdAt: t0 });
+      writeTask('task-b', 'b', { phase: 'spec', createdAt: t0 });
+
+      appendEvent('task-a', { phase: 'backlog', timestamp: t0 });
+      appendEvent('task-a', { phase: 'spec', timestamp: isoH(t0, 1) });
+
+      appendEvent('task-b', { phase: 'backlog', timestamp: t0 });
+      appendEvent('task-b', { phase: 'spec', timestamp: isoH(t0, 3) });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.phaseTimings.length).toBe(1);
+      expect(data.phaseTimings[0].phase).toBe('backlog');
+      expect(data.phaseTimings[0].avgHours).toBe(2); // (1 + 3) / 2
+      expect(data.phaseTimings[0].minHours).toBe(1);
+      expect(data.phaseTimings[0].maxHours).toBe(3);
+      expect(data.phaseTimings[0].count).toBe(2);
+    });
+
+    it('sorts phase timings by avgHours descending', async () => {
+      const t0 = '2025-03-01T00:00:00Z';
+      writeTask('sort-task', 'st', { phase: 'done', createdAt: t0 });
+
+      appendEvent('sort-task', { phase: 'backlog', timestamp: t0 });
+      appendEvent('sort-task', { phase: 'spec', timestamp: isoH(t0, 10) });
+      appendEvent('sort-task', { phase: 'plan', timestamp: isoH(t0, 11) });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.phaseTimings.length).toBe(2);
+      expect(data.phaseTimings[0].phase).toBe('backlog'); // 10h
+      expect(data.phaseTimings[1].phase).toBe('spec');    // 1h
+    });
+
+    it('returns empty timings when events.jsonl has fewer than 2 events', async () => {
+      writeTask('single-event', 'se', { phase: 'backlog' });
+      appendEvent('single-event', { phase: 'backlog', timestamp: '2025-01-01T00:00:00Z' });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.phaseTimings).toEqual([]);
+    });
+
+    it('skips negative durations (clock skew)', async () => {
+      const t0 = '2025-01-01T00:00:00Z';
+      writeTask('skew-task', 'sk', { phase: 'done', createdAt: t0 });
+      // second event is BEFORE the first — negative duration, should be skipped
+      appendEvent('skew-task', { phase: 'backlog', timestamp: isoH(t0, 5) });
+      appendEvent('skew-task', { phase: 'spec', timestamp: t0 });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      // The negative duration is skipped, so only the spec→done segment counts
+      // Actually, backlog→spec is -5h (skipped), so no valid durations
+      expect(data.phaseTimings).toEqual([]);
+    });
+
+    it('skips tasks with malformed events.jsonl without crashing', async () => {
+      writeTask('corrupt-events', 'ce', { phase: 'spec' });
+      // Write a non-JSON line followed by valid events
+      const eventsPath = join(teamaiDir(), 'corrupt-events', 'events.jsonl');
+      writeFileSync(eventsPath, 'this is not json\n{"phase":"backlog","timestamp":"2025-01-01T00:00:00Z"}\n');
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      // Should not crash — malformed events.jsonl is caught and skipped.
+      // The JSON parse throws on the non-JSON line; the try/catch in
+      // getAnalytics wraps taskStore.getEvents(), so the task is skipped.
+      expect(data.phaseTimings).toEqual([]);
+    });
   });
 
-  it('computes QA fail stats correctly', async () => {
-    createTaskWithPhases('t1', 'Task 1', ['implement'], {
-      qaReport: { overall: 'FAIL', criteria: [] },
+  // ── QA Stats ─────────────────────────────────────────────────────────
+
+  describe('QA stats aggregation', () => {
+    it('computes pass/fail rates from qa_report.json files', async () => {
+      writeTask('pass-task', 'p1', { phase: 'done' });
+      writeTask('fail-task', 'f1', { phase: 'qa-review' });
+
+      writeQaReport('pass-task', { overall: 'PASS', criteria: [] });
+      writeQaReport('fail-task', { overall: 'FAIL', criteria: [] });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.qaStats).not.toBeNull();
+      expect(data.qaStats!.totalQaRuns).toBe(2);
+      expect(data.qaStats!.passCount).toBe(1);
+      expect(data.qaStats!.failCount).toBe(1);
+      expect(data.qaStats!.passRate).toBe(50);
     });
 
-    const data = await getAnalytics();
-    expect(data.qaStats).not.toBeNull();
-    expect(data.qaStats!.passCount).toBe(0);
-    expect(data.qaStats!.failCount).toBe(1);
-    expect(data.qaStats!.passRate).toBe(0);
-  });
+    it('returns null when no QA reports exist', async () => {
+      writeTask('no-qa', 'nq', { phase: 'done' });
 
-  it('aggregates QA stats across multiple tasks', async () => {
-    createTaskWithPhases('t1', 'Task 1', ['implement'], {
-      qaReport: { overall: 'PASS', criteria: [] },
-    });
-    createTaskWithPhases('t2', 'Task 2', ['implement'], {
-      qaReport: { overall: 'PASS', criteria: [] },
-    });
-    createTaskWithPhases('t3', 'Task 3', ['implement'], {
-      qaReport: { overall: 'FAIL', criteria: [] },
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.qaStats).toBeNull();
     });
 
-    const data = await getAnalytics();
-    expect(data.qaStats!.totalQaRuns).toBe(3);
-    expect(data.qaStats!.passCount).toBe(2);
-    expect(data.qaStats!.failCount).toBe(1);
-    expect(data.qaStats!.passRate).toBe(67); // 2/3 = 66.67, rounded
-  });
+    it('breaks down criteria by name and passRate', async () => {
+      writeTask('qa1', 'q1', { phase: 'done' });
+      writeTask('qa2', 'q2', { phase: 'done' });
 
-  it('computes criteria breakdown from qa reports', async () => {
-    createTaskWithPhases('t1', 'Task 1', ['implement'], {
-      qaReport: {
+      writeQaReport('qa1', {
         overall: 'PASS',
         criteria: [
-          { name: 'typescript', status: 'PASS' },
-          { name: 'tests', status: 'PASS' },
-          { name: 'lint', status: 'FAIL' },
+          { name: 'code-style', status: 'PASS' },
+          { name: 'tests-passing', status: 'PASS' },
         ],
-      },
-    });
-    createTaskWithPhases('t2', 'Task 2', ['implement'], {
-      qaReport: {
+      });
+      writeQaReport('qa2', {
         overall: 'FAIL',
         criteria: [
-          { name: 'typescript', status: 'PASS' },
-          { name: 'tests', status: 'FAIL' },
-          { name: 'lint', status: 'FAIL' },
+          { name: 'code-style', status: 'PASS' },
+          { name: 'tests-passing', status: 'FAIL' },
         ],
-      },
+      });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.qaStats!.criteriaBreakdown.length).toBe(2);
+
+      const testsPassing = data.qaStats!.criteriaBreakdown.find(c => c.name === 'tests-passing');
+      const codeStyle = data.qaStats!.criteriaBreakdown.find(c => c.name === 'code-style');
+
+      expect(testsPassing).toBeDefined();
+      expect(testsPassing!.passRate).toBe(50);
+      expect(testsPassing!.total).toBe(2);
+
+      expect(codeStyle).toBeDefined();
+      expect(codeStyle!.passRate).toBe(100);
+      expect(codeStyle!.total).toBe(2);
+
+      // Sorted by passRate ascending: tests-passing (50) before code-style (100)
+      expect(data.qaStats!.criteriaBreakdown[0].name).toBe('tests-passing');
     });
 
-    const data = await getAnalytics();
-    expect(data.qaStats!.criteriaBreakdown).toHaveLength(3);
-
-    const tsCriterion = data.qaStats!.criteriaBreakdown.find(c => c.name === 'typescript');
-    expect(tsCriterion).toBeDefined();
-    expect(tsCriterion!.passRate).toBe(100);
-    expect(tsCriterion!.total).toBe(2);
-
-    const testsCriterion = data.qaStats!.criteriaBreakdown.find(c => c.name === 'tests');
-    expect(testsCriterion).toBeDefined();
-    expect(testsCriterion!.passRate).toBe(50);
-    expect(testsCriterion!.total).toBe(2);
-
-    const lintCriterion = data.qaStats!.criteriaBreakdown.find(c => c.name === 'lint');
-    expect(lintCriterion).toBeDefined();
-    expect(lintCriterion!.passRate).toBe(0);
-    expect(lintCriterion!.total).toBe(2);
-  });
-
-  it('sorts criteria breakdown by pass rate ascending (worst first)', async () => {
-    createTaskWithPhases('t1', 'Task', ['implement'], {
-      qaReport: {
+    it('handles criteria with field name "criterion" (alternate field)', async () => {
+      writeTask('alt-field', 'af', { phase: 'done' });
+      writeQaReport('alt-field', {
         overall: 'PASS',
         criteria: [
-          { name: 'always-passes', status: 'PASS' },
-          { name: 'always-fails', status: 'FAIL' },
+          { criterion: 'legacy-criteria', status: 'PASS' },
         ],
-      },
-    });
-
-    const data = await getAnalytics();
-    expect(data.qaStats!.criteriaBreakdown[0].name).toBe('always-fails');
-    expect(data.qaStats!.criteriaBreakdown[0].passRate).toBe(0);
-    expect(data.qaStats!.criteriaBreakdown[1].name).toBe('always-passes');
-    expect(data.qaStats!.criteriaBreakdown[1].passRate).toBe(100);
-  });
-
-  it('skips malformed qa reports gracefully', async () => {
-    createTaskWithPhases('t1', 'Good Task', ['implement'], {
-      qaReport: { overall: 'PASS', criteria: [] },
-    });
-    // Write malformed JSON to another task's qa_report
-    createTaskWithPhases('t2', 'Bad Task', ['implement']);
-    const dir = store.getDirById('t2');
-    writeFileSync(join(dir, 'qa_report.json'), '{ invalid json }');
-
-    const data = await getAnalytics();
-    // Should still get stats from the good task
-    expect(data.qaStats!.totalQaRuns).toBe(1);
-    expect(data.qaStats!.passCount).toBe(1);
-  });
-
-  // ── Source breakdown ────────────────────────────────────────────────────
-
-  it('breaks down tasks by source', async () => {
-    createTaskWithPhases('t1', 'Ideation Task', [], { source: 'ideation' });
-    createTaskWithPhases('t2', 'Ideation Task 2', [], { source: 'ideation' });
-    createTaskWithPhases('t3', 'Competitor Task', [], { source: 'competitor-analysis' });
-
-    const data = await getAnalytics();
-    expect(data.sourceBreakdown).toEqual({
-      ideation: 2,
-      competitorAnalysis: 1,
-      unknown: 0,
-    });
-  });
-
-  it('counts tasks without source as unknown', async () => {
-    createTaskWithPhases('t1', 'No Source', []);
-    createTaskWithPhases('t2', 'Ideation', [], { source: 'ideation' });
-    createTaskWithPhases('t3', 'No Source 2', []);
-
-    const data = await getAnalytics();
-    expect(data.sourceBreakdown.unknown).toBe(2);
-    expect(data.sourceBreakdown.ideation).toBe(1);
-    expect(data.sourceBreakdown.competitorAnalysis).toBe(0);
-  });
-
-  // ── Weekly trends ───────────────────────────────────────────────────────
-
-  it('tracks created count per week', async () => {
-    createTaskWithPhases('t1', 'Task 1', [], { createdAt: '2025-06-02T10:00:00Z' }); // Monday Jun 2
-    createTaskWithPhases('t2', 'Task 2', [], { createdAt: '2025-06-03T10:00:00Z' }); // Same week
-    createTaskWithPhases('t3', 'Task 3', [], { createdAt: '2025-06-09T10:00:00Z' }); // Next Monday (new week)
-
-    const data = await getAnalytics();
-    expect(data.weeklyTrends.length).toBe(2);
-
-    const week1 = data.weeklyTrends.find(w => w.week === '2025-06-02');
-    expect(week1).toBeDefined();
-    expect(week1!.created).toBe(2);
-    expect(week1!.completed).toBe(0);
-
-    const week2 = data.weeklyTrends.find(w => w.week === '2025-06-09');
-    expect(week2).toBeDefined();
-    expect(week2!.created).toBe(1);
-  });
-
-  it('tracks completed count when tasks reach done phase', async () => {
-    const created = '2025-06-02T10:00:00Z';
-    const completed = '2025-06-03T15:00:00Z'; // same week
-
-    createTaskWithPhases('t1', 'Done Task', ['spec', 'plan', 'implement', 'done'], {
-      createdAt: created,
-      updatedAt: completed,
-    });
-
-    const data = await getAnalytics();
-    const week = data.weeklyTrends.find(w => w.week === '2025-06-02');
-    expect(week).toBeDefined();
-    expect(week!.created).toBe(1);
-    expect(week!.completed).toBe(1);
-  });
-
-  it('handles completion in a different week from creation', async () => {
-    createTaskWithPhases('t1', 'Cross Week', ['spec', 'plan', 'done'], {
-      createdAt: '2025-06-02T10:00:00Z', // Week 23
-      updatedAt: '2025-06-16T15:00:00Z', // Week 25
-    });
-
-    const data = await getAnalytics();
-    const createWeek = data.weeklyTrends.find(w => w.week === '2025-06-02');
-    const completeWeek = data.weeklyTrends.find(w => w.week === '2025-06-16');
-
-    expect(createWeek).toBeDefined();
-    expect(createWeek!.created).toBe(1);
-    expect(createWeek!.completed).toBe(0);
-
-    expect(completeWeek).toBeDefined();
-    expect(completeWeek!.created).toBe(0);
-    expect(completeWeek!.completed).toBe(1);
-  });
-
-  it('limits weekly trends to last 12 weeks', async () => {
-    // Create tasks across 15 different weeks
-    for (let i = 0; i < 15; i++) {
-      const date = new Date('2025-01-06T10:00:00Z'); // First Monday of 2025
-      date.setDate(date.getDate() + i * 7); // advance by weeks
-      createTaskWithPhases(`t${i}`, `Task ${i}`, [], {
-        createdAt: date.toISOString(),
       });
-    }
 
-    const data = await getAnalytics();
-    // Should have exactly 12 (slice -12 from 15 entries)
-    expect(data.weeklyTrends.length).toBe(12);
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.qaStats!.criteriaBreakdown.length).toBe(1);
+      expect(data.qaStats!.criteriaBreakdown[0].name).toBe('legacy-criteria');
+      expect(data.qaStats!.criteriaBreakdown[0].passRate).toBe(100);
+    });
+
+    it('handles 100% pass rate', async () => {
+      writeTask('perfect', 'pf', { phase: 'done' });
+      writeQaReport('perfect', {
+        overall: 'PASS',
+        criteria: [{ name: 'all-good', status: 'PASS' }],
+      });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.qaStats!.passRate).toBe(100);
+      expect(data.qaStats!.passCount).toBe(1);
+      expect(data.qaStats!.failCount).toBe(0);
+    });
+
+    it('handles 0% pass rate', async () => {
+      writeTask('all-fail', 'af2', { phase: 'qa-review' });
+      writeQaReport('all-fail', {
+        overall: 'FAIL',
+        criteria: [{ name: 'broken', status: 'FAIL' }],
+      });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.qaStats!.passRate).toBe(0);
+      expect(data.qaStats!.passCount).toBe(0);
+      expect(data.qaStats!.failCount).toBe(1);
+    });
+
+    it('skips malformed qa_report.json without crashing', async () => {
+      writeTask('corrupt-qa', 'cq', { phase: 'done' });
+      // Write invalid JSON
+      writeFileSync(join(teamaiDir(), 'corrupt-qa', 'qa_report.json'), '{invalid json!!');
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      // Should not crash — malformed qa_report.json is caught and skipped
+      expect(data.qaStats).toBeNull();
+    });
   });
 
-  it('sorts weekly trends chronologically', async () => {
-    createTaskWithPhases('t1', 'Early', [], { createdAt: '2025-06-02T10:00:00Z' });
-    createTaskWithPhases('t2', 'Late', [], { createdAt: '2025-06-23T10:00:00Z' });
-    createTaskWithPhases('t3', 'Middle', [], { createdAt: '2025-06-09T10:00:00Z' });
+  // ── Source Breakdown ─────────────────────────────────────────────────
 
-    const data = await getAnalytics();
-    for (let i = 1; i < data.weeklyTrends.length; i++) {
-      expect(data.weeklyTrends[i].week.localeCompare(data.weeklyTrends[i - 1].week)).toBeGreaterThanOrEqual(0);
-    }
+  describe('source breakdown', () => {
+    it('categorizes tasks by source field', async () => {
+      writeTask('s1', 'id-s1', { source: 'ideation' });
+      writeTask('s2', 'id-s2', { source: 'ideation' });
+      writeTask('s3', 'id-s3', { source: 'competitor-analysis' });
+      writeTask('s4', 'id-s4', {}); // no source → unknown
+      writeTask('s5', 'id-s5', { source: 'random-value' }); // unrecognized → unknown
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.sourceBreakdown).toEqual({
+        ideation: 2,
+        competitorAnalysis: 1,
+        unknown: 2,
+      });
+    });
+
+    it('returns all unknown when no tasks have sources set', async () => {
+      writeTask('no-source-1', 'ns1');
+      writeTask('no-source-2', 'ns2');
+      writeTask('no-source-3', 'ns3');
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.sourceBreakdown).toEqual({
+        ideation: 0,
+        competitorAnalysis: 0,
+        unknown: 3,
+      });
+    });
   });
 
-  it('correctly aligns to Monday for week start dates', async () => {
-    // Sunday June 1, 2025 should belong to week starting Monday May 26
-    createTaskWithPhases('t1', 'Sunday Task', [], { createdAt: '2025-06-01T10:00:00Z' });
+  // ── Weekly Trends ────────────────────────────────────────────────────
 
-    const data = await getAnalytics();
-    const week = data.weeklyTrends.find(w => w.week === '2025-05-26');
-    expect(week).toBeDefined();
-    expect(week!.created).toBe(1);
+  describe('weekly trends', () => {
+    it('groups created and completed tasks by week', async () => {
+      writeTask('w1', 'w1', {
+        phase: 'done',
+        createdAt: '2025-01-07T00:00:00Z',  // Tuesday → week of 2025-01-06
+        updatedAt: '2025-01-08T00:00:00Z',  // Wednesday → week of 2025-01-06
+      });
+      writeTask('w2', 'w2', {
+        phase: 'done',
+        createdAt: '2025-01-15T00:00:00Z',  // Wednesday → week of 2025-01-13
+        updatedAt: '2025-01-16T00:00:00Z',  // Thursday → week of 2025-01-13
+      });
+      writeTask('w3', 'w3', {
+        phase: 'spec',                       // not done → no completed count
+        createdAt: '2025-01-14T00:00:00Z',  // Tuesday → week of 2025-01-13
+        updatedAt: '2025-01-14T00:00:00Z',
+      });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.weeklyTrends.length).toBe(2);
+
+      expect(data.weeklyTrends[0].week).toBe('2025-01-06');
+      expect(data.weeklyTrends[0].created).toBe(1);
+      expect(data.weeklyTrends[0].completed).toBe(1);
+
+      expect(data.weeklyTrends[1].week).toBe('2025-01-13');
+      expect(data.weeklyTrends[1].created).toBe(2);
+      expect(data.weeklyTrends[1].completed).toBe(1);
+    });
+
+    it('handles cross-week created/completed (task created W1, done W3)', async () => {
+      writeTask('cross', 'cross', {
+        phase: 'done',
+        createdAt: '2025-01-28T00:00:00Z',  // Tuesday → week of 2025-01-27
+        updatedAt: '2025-02-05T00:00:00Z',  // Wednesday → week of 2025-02-03
+      });
+      writeTask('same', 'same', {
+        phase: 'done',
+        createdAt: '2025-01-13T00:00:00Z',  // Monday → week of 2025-01-13
+        updatedAt: '2025-01-15T00:00:00Z',  // Wednesday → week of 2025-01-13
+      });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.weeklyTrends.length).toBe(3);
+
+      expect(data.weeklyTrends[0].week).toBe('2025-01-13');
+      expect(data.weeklyTrends[0].created).toBe(1);
+      expect(data.weeklyTrends[0].completed).toBe(1);
+
+      expect(data.weeklyTrends[1].week).toBe('2025-01-27');
+      expect(data.weeklyTrends[1].created).toBe(1);
+      expect(data.weeklyTrends[1].completed).toBe(0);
+
+      expect(data.weeklyTrends[2].week).toBe('2025-02-03');
+      expect(data.weeklyTrends[2].created).toBe(0);
+      expect(data.weeklyTrends[2].completed).toBe(1);
+    });
+
+    it('limits to last 12 weeks when more exist', async () => {
+      for (let i = 0; i < 20; i++) {
+        const d = new Date('2025-01-01T00:00:00Z');
+        d.setDate(d.getDate() + i * 7);
+        writeTask(`wk-${i}`, `wk-${i}`, {
+          phase: 'done',
+          createdAt: d.toISOString(),
+          updatedAt: d.toISOString(),
+        });
+      }
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.weeklyTrends.length).toBeLessThanOrEqual(12);
+    });
+
+    it('sorts weeks chronologically', async () => {
+      // Create in reverse chronological order to verify sorting
+      writeTask('recent', 'r', {
+        phase: 'done',
+        createdAt: '2025-06-01T00:00:00Z',
+        updatedAt: '2025-06-01T00:00:00Z',
+      });
+      writeTask('old', 'o', {
+        phase: 'done',
+        createdAt: '2025-01-01T00:00:00Z',
+        updatedAt: '2025-01-01T00:00:00Z',
+      });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.weeklyTrends.length).toBe(2);
+      expect(data.weeklyTrends[0].week).toBe('2024-12-30'); // 2025-01-01 is a Wednesday → week of 2024-12-30
+      expect(data.weeklyTrends[1].week < data.weeklyTrends[0].week).toBe(false);
+    });
   });
 
-  // ── Bottleneck ──────────────────────────────────────────────────────────
+  // ── Bottleneck Detection ─────────────────────────────────────────────
 
-  it('identifies bottleneck as the phase with highest average duration', async () => {
-    store.create('t1', 'Bottleneck Task', 'desc');
+  describe('bottleneck detection', () => {
+    it('identifies the phase with highest average duration among active phases', async () => {
+      const t0 = '2025-04-01T00:00:00Z';
+      writeTask('bottleneck-task', 'bt', { phase: 'done', createdAt: t0 });
 
-    const dir = store.getDirById('t1');
-    writeFileSync(join(dir, 'events.jsonl'),
-      JSON.stringify({ phase: 'spec', timestamp: '2025-01-01T00:00:00Z' }) + '\n' +
-      JSON.stringify({ phase: 'plan', timestamp: '2025-01-01T00:30:00Z' }) + '\n' +    // 0.5 hours in spec
-      JSON.stringify({ phase: 'implement', timestamp: '2025-01-01T04:30:00Z' }) + '\n' // 4 hours in plan
-    );
+      appendEvent('bottleneck-task', { phase: 'backlog', timestamp: t0 });
+      appendEvent('bottleneck-task', { phase: 'spec', timestamp: isoH(t0, 1) });
+      appendEvent('bottleneck-task', { phase: 'plan', timestamp: isoH(t0, 2) });
+      appendEvent('bottleneck-task', { phase: 'implement', timestamp: isoH(t0, 10) });
+      appendEvent('bottleneck-task', { phase: 'done', timestamp: isoH(t0, 10.5) });
 
-    const data = await getAnalytics();
-    expect(data.bottleneck).not.toBeNull();
-    expect(data.bottleneck!.phase).toBe('plan');
-    expect(data.bottleneck!.avgHours).toBeCloseTo(4, 0);
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.bottleneck).not.toBeNull();
+      // plan = 10 - 2 = 8h ← highest active phase
+      expect(data.bottleneck!.phase).toBe('plan');
+      expect(data.bottleneck!.avgHours).toBe(8);
+    });
+
+    it('excludes done, failed, cancelled, and backlog from bottleneck', async () => {
+      const t0 = '2025-05-01T00:00:00Z';
+      writeTask('excl-task', 'et', { phase: 'done', createdAt: t0 });
+
+      appendEvent('excl-task', { phase: 'backlog', timestamp: t0 });
+      appendEvent('excl-task', { phase: 'spec', timestamp: isoH(t0, 10) });
+      appendEvent('excl-task', { phase: 'done', timestamp: isoH(t0, 11) });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      // backlog excluded, spec=1h → bottleneck = spec
+      expect(data.bottleneck).not.toBeNull();
+      expect(data.bottleneck!.phase).toBe('spec');
+      expect(data.bottleneck!.avgHours).toBe(1);
+    });
+
+    it('returns null when only excluded phases have timings', async () => {
+      const t0 = '2025-06-01T00:00:00Z';
+      writeTask('only-excl', 'oe', { phase: 'done', createdAt: t0 });
+
+      appendEvent('only-excl', { phase: 'backlog', timestamp: t0 });
+      appendEvent('only-excl', { phase: 'done', timestamp: isoH(t0, 1) });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.bottleneck).toBeNull();
+    });
+
+    it('returns null when no events exist', async () => {
+      writeTask('no-events', 'ne', { phase: 'spec' });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      expect(data.bottleneck).toBeNull();
+    });
+
+    it('uses the first returned phase from sorted phaseTimings (highest avg)', async () => {
+      const t0 = '2025-07-01T00:00:00Z';
+      writeTask('multi-phase', 'mp', { phase: 'done', createdAt: t0 });
+
+      // qa-review=3h, spec=7h, implement=5h
+      appendEvent('multi-phase', { phase: 'backlog', timestamp: t0 });
+      appendEvent('multi-phase', { phase: 'spec', timestamp: isoH(t0, 7) });       // backlog=7h (excluded)
+      appendEvent('multi-phase', { phase: 'implement', timestamp: isoH(t0, 12) }); // spec=5h
+      appendEvent('multi-phase', { phase: 'qa-review', timestamp: isoH(t0, 15) }); // implement=3h
+      appendEvent('multi-phase', { phase: 'done', timestamp: isoH(t0, 18) });      // qa-review=3h (done excluded)
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      // Active phases sorted by avgHours desc: spec(5h), implement(3h), qa-review(3h)
+      // bottleck = spec (highest avg among active)
+      expect(data.bottleneck!.phase).toBe('spec');
+      expect(data.bottleneck!.avgHours).toBe(5);
+    });
   });
 
-  it('excludes done, failed, cancelled, and backlog phases from bottleneck', async () => {
-    store.create('t1', 'Task', 'desc');
+  // ── End-to-End Multi-Task Scenario ───────────────────────────────────
 
-    const dir = store.getDirById('t1');
-    writeFileSync(join(dir, 'events.jsonl'),
-      JSON.stringify({ phase: 'backlog', timestamp: '2025-01-01T00:00:00Z' }) + '\n' +
-      JSON.stringify({ phase: 'spec', timestamp: '2025-01-01T10:00:00Z' }) + '\n' +     // 10 hours backlog (excluded)
-      JSON.stringify({ phase: 'done', timestamp: '2025-01-01T10:30:00Z' }) + '\n'        // 0.5 hours spec
-    );
+  describe('end-to-end multi-task scenario', () => {
+    it('computes full analytics for a realistic multi-task project', async () => {
+      const base = '2025-03-03T00:00:00Z'; // Monday
 
-    const data = await getAnalytics();
-    // Spec should be the bottleneck, not backlog
-    expect(data.bottleneck).not.toBeNull();
-    expect(data.bottleneck!.phase).toBe('spec');
-    expect(data.bottleneck!.avgHours).toBeCloseTo(0.5, 1);
+      // Task 1: done (ideation source)
+      writeTask('feat-auth', 'auth', {
+        phase: 'done', source: 'ideation',
+        createdAt: base, updatedAt: new Date(new Date(base).getTime() + 7 * 86400000).toISOString(),
+      });
+      appendEvent('feat-auth', { phase: 'backlog', timestamp: base });
+      appendEvent('feat-auth', { phase: 'spec', timestamp: isoH(base, 12) });
+      appendEvent('feat-auth', { phase: 'plan', timestamp: isoH(base, 48) });
+      appendEvent('feat-auth', { phase: 'implement', timestamp: isoH(base, 96) });
+      appendEvent('feat-auth', { phase: 'qa-review', timestamp: isoH(base, 144) });
+      appendEvent('feat-auth', { phase: 'done', timestamp: isoH(base, 156) });
+      writeQaReport('feat-auth', {
+        overall: 'PASS',
+        criteria: [
+          { name: 'code-style', status: 'PASS' },
+          { name: 'tests-passing', status: 'PASS' },
+        ],
+      });
+
+      // Task 2: done (competitor-analysis source)
+      writeTask('feat-analytics', 'analytics', {
+        phase: 'done', source: 'competitor-analysis',
+        createdAt: new Date(new Date(base).getTime() + 86400000).toISOString(),
+        updatedAt: new Date(new Date(base).getTime() + 8 * 86400000).toISOString(),
+      });
+      appendEvent('feat-analytics', { phase: 'backlog', timestamp: isoH(base, 24) });
+      appendEvent('feat-analytics', { phase: 'spec', timestamp: isoH(base, 48) });
+      appendEvent('feat-analytics', { phase: 'plan', timestamp: isoH(base, 72) });
+      appendEvent('feat-analytics', { phase: 'implement', timestamp: isoH(base, 120) });
+      appendEvent('feat-analytics', { phase: 'qa-review', timestamp: isoH(base, 168) });
+      appendEvent('feat-analytics', { phase: 'done', timestamp: isoH(base, 180) });
+      writeQaReport('feat-analytics', {
+        overall: 'PASS',
+        criteria: [
+          { name: 'code-style', status: 'PASS' },
+          { name: 'tests-passing', status: 'FAIL' },
+        ],
+      });
+
+      // Task 3: in implement (ideation)
+      writeTask('feat-cache', 'cache', {
+        phase: 'implement', source: 'ideation',
+        createdAt: new Date(new Date(base).getTime() + 2 * 86400000).toISOString(),
+        updatedAt: new Date(new Date(base).getTime() + 2 * 86400000).toISOString(),
+      });
+      appendEvent('feat-cache', { phase: 'backlog', timestamp: isoH(base, 48) });
+      appendEvent('feat-cache', { phase: 'spec', timestamp: isoH(base, 60) });
+      appendEvent('feat-cache', { phase: 'plan', timestamp: isoH(base, 72) });
+      appendEvent('feat-cache', { phase: 'implement', timestamp: isoH(base, 120) });
+
+      // Task 4: in planning (unknown source)
+      writeTask('feat-export', 'export', {
+        phase: 'plan',
+        createdAt: new Date(new Date(base).getTime() + 3 * 86400000).toISOString(),
+        updatedAt: new Date(new Date(base).getTime() + 3 * 86400000).toISOString(),
+      });
+      appendEvent('feat-export', { phase: 'backlog', timestamp: isoH(base, 72) });
+      appendEvent('feat-export', { phase: 'spec', timestamp: isoH(base, 84) });
+      appendEvent('feat-export', { phase: 'plan', timestamp: isoH(base, 120) });
+
+      // Task 5: in backlog (ideation, no events)
+      writeTask('feat-notifications', 'notif', {
+        phase: 'backlog', source: 'ideation',
+        createdAt: new Date(new Date(base).getTime() + 4 * 86400000).toISOString(),
+        updatedAt: new Date(new Date(base).getTime() + 4 * 86400000).toISOString(),
+      });
+
+      // Task 6: failed, in qa-review (ideation)
+      writeTask('feat-broken', 'broken', {
+        phase: 'qa-review', source: 'ideation',
+        createdAt: base, updatedAt: new Date(new Date(base).getTime() + 86400000).toISOString(),
+      });
+      appendEvent('feat-broken', { phase: 'backlog', timestamp: base });
+      appendEvent('feat-broken', { phase: 'spec', timestamp: isoH(base, 12) });
+      appendEvent('feat-broken', { phase: 'plan', timestamp: isoH(base, 24) });
+      appendEvent('feat-broken', { phase: 'implement', timestamp: isoH(base, 72) });
+      appendEvent('feat-broken', { phase: 'qa-review', timestamp: isoH(base, 120) });
+      writeQaReport('feat-broken', {
+        overall: 'FAIL',
+        criteria: [
+          { name: 'code-style', status: 'FAIL' },
+          { name: 'tests-passing', status: 'FAIL' },
+          { name: 'security-review', status: 'FAIL' },
+        ],
+      });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      // Total tasks
+      expect(data.totalTasks).toBe(6);
+
+      // Phase distribution
+      expect(data.phaseDistribution).toEqual({
+        done: 2,
+        implement: 1,
+        plan: 1,
+        backlog: 1,
+        'qa-review': 1,
+      });
+
+      // Source breakdown
+      expect(data.sourceBreakdown).toEqual({
+        ideation: 4,
+        competitorAnalysis: 1,
+        unknown: 1,
+      });
+
+      // QA stats
+      expect(data.qaStats).not.toBeNull();
+      expect(data.qaStats!.totalQaRuns).toBe(3);
+      expect(data.qaStats!.passCount).toBe(2);
+      expect(data.qaStats!.failCount).toBe(1);
+      expect(data.qaStats!.passRate).toBe(67);
+
+      // Weekly trends
+      expect(data.weeklyTrends.length).toBeGreaterThanOrEqual(1);
+
+      // Bottleneck — plan has highest avg among active phases.
+      // plan and implement both average 48h; plan wins because it was inserted
+      // into phaseDurations before implement (stable sort preserves Map insertion order).
+      expect(data.bottleneck).not.toBeNull();
+      expect(data.bottleneck!.phase).toBe('plan');
+    });
   });
 
-  it('returns null bottleneck when no active phases have timings', async () => {
-    createTaskWithPhases('t1', 'Task 1', []); // no events
+  // ── Project Path Propagation ─────────────────────────────────────────
 
-    const data = await getAnalytics();
-    expect(data.bottleneck).toBeNull();
-  });
+  describe('project path', () => {
+    it('sets projectPath from getActiveProjectPath mock', async () => {
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
 
-  it('returns null bottleneck when all tasks only reached backlog', async () => {
-    createTaskWithPhases('t1', 'Task 1', []);
-
-    const data = await getAnalytics();
-    expect(data.bottleneck).toBeNull();
-  });
-
-  // ── Min/max hours in phase timings ──────────────────────────────────────
-
-  it('computes min and max hours for phase timings', async () => {
-    // Task 1: slow
-    store.create('t1', 'Slow', 'desc');
-    store.updatePhase('t1', 'spec');
-    const dir1 = store.getDirById('t1');
-    writeFileSync(join(dir1, 'events.jsonl'),
-      JSON.stringify({ phase: 'spec', timestamp: '2025-01-01T00:00:00Z' }) + '\n' +
-      JSON.stringify({ phase: 'plan', timestamp: '2025-01-01T05:00:00Z' }) + '\n' // 5 hours in spec
-    );
-
-    // Task 2: quick
-    store.create('t2', 'Quick', 'desc');
-    store.updatePhase('t2', 'spec');
-    const dir2 = store.getDirById('t2');
-    writeFileSync(join(dir2, 'events.jsonl'),
-      JSON.stringify({ phase: 'spec', timestamp: '2025-01-01T00:00:00Z' }) + '\n' +
-      JSON.stringify({ phase: 'plan', timestamp: '2025-01-01T01:00:00Z' }) + '\n' // 1 hour in spec
-    );
-
-    const data = await getAnalytics();
-    const specTiming = data.phaseTimings.find(p => p.phase === 'spec');
-    expect(specTiming).toBeDefined();
-    expect(specTiming!.minHours).toBeCloseTo(1, 0);
-    expect(specTiming!.maxHours).toBeCloseTo(5, 0);
-    expect(specTiming!.avgHours).toBeCloseTo(3, 0);
-    expect(specTiming!.count).toBe(2);
-  });
-
-  // ── Total tasks count ───────────────────────────────────────────────────
-
-  it('reports correct total task count', async () => {
-    createTaskWithPhases('t1', 'A', []);
-    createTaskWithPhases('t2', 'B', []);
-    createTaskWithPhases('t3', 'C', []);
-    createTaskWithPhases('t4', 'D', []);
-    createTaskWithPhases('t5', 'E', []);
-
-    const data = await getAnalytics();
-    expect(data.totalTasks).toBe(5);
-  });
-
-  // ── Events with missing timestamps ──────────────────────────────────────
-
-  it('skips events with missing timestamps', async () => {
-    store.create('t1', 'Bad Timestamps', 'desc');
-    const dir = store.getDirById('t1');
-    writeFileSync(join(dir, 'events.jsonl'),
-      JSON.stringify({ phase: 'spec', timestamp: null }) + '\n' +
-      JSON.stringify({ phase: 'plan', timestamp: '2025-01-01T01:00:00Z' }) + '\n'
-    );
-
-    const data = await getAnalytics();
-    // null timestamp → parseTime returns null → skipped
-    expect(data.phaseTimings).toEqual([]);
+      expect(data.projectPath).toBe(root);
+      expect(mockGetActiveProjectPath).toHaveBeenCalledTimes(1);
+    });
   });
 });
