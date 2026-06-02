@@ -367,25 +367,267 @@ Shown when Claude API rate limit was hit; app auto-retries at the displayed time
 
 Header: "Ideation" title + "Scan the codebase for improvements, vulnerabilities, and tech debt." subtitle.
 
-Below: `IdeationScanner` component:
-- **"Run Scan"** button — dark pill (`bg-[#2563eb] hover:bg-[#1d4ed8] text-white rounded-lg`), triggers a Claude agent scan of the active codebase
-- While scanning: button changes to "Scanning…" (disabled, `opacity-40`)
-- After scan: results appear in a scrollable monospace pre-formatted block (`bg-[#1a1f2e] border border-[#1e293b] rounded-lg`, monospace `text-xs`); "Scan complete" badge shown
-- Empty state: "Click 'Run Scan' to analyse the codebase."
-
 Dark mode: `bg-[#11131b]` on page root (always dark-first). No light mode variant.
+
+### Page Layout
+
+The ideation page spawns a Claude agent session that runs the `/ideation` command against the active project's codebase. Results stream live and can be reviewed after completion. Historical scan reports are stored on disk and available via a dropdown.
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  Ideation                                                  │
+│  Scan the codebase for improvements, vulnerabilities,      │
+│  and tech debt.                                            │
+│                                                            │
+│  [Run Scan]  ✓ Scan complete                              │
+│                                                            │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ ## Ideation Report — 2026-06-02                      │  │
+│  │                                                      │  │
+│  │ ### Performance Issues Found                         │  │
+│  │ 1. N+1 query in UserController#index                 │  │
+│  │    - File: src/controllers/user_controller.ts:42     │  │
+│  │    - Impact: High — loads all associations eagerly   │  │
+│  │    - Suggestion: Use .includes() for eager loading   │  │
+│  │                                                      │  │
+│  │ 2. Unindexed foreign key on orders.user_id           │  │
+│  │    - File: db/migrate/20250101_create_orders.ts       │  │
+│  │    - Impact: Medium — sequential scans on large tables│  │
+│  │                                                      │  │
+│  │ ### Security Vulnerabilities                         │  │
+│  │ 3. Unsanitized user input in search endpoint         │  │
+│  │    - File: src/routes/api/search.ts:18               │  │
+│  │    - Impact: Critical — potential SQL injection      │  │
+│  │                                                      │  │
+│  │ ### Tech Debt                                        │  │
+│  │ 4. Deprecated middleware pattern in auth pipeline     │  │
+│  │    - File: src/middleware/auth.ts                     │  │
+│  │    - Suggestion: Migrate to guard-based auth          │  │
+│  └──────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────┘
+```
+
+### States
+
+**Idle state (no scan run yet):** "Click 'Run Scan' to analyse the codebase." centered message in `text-slate-400`. No output block visible.
+
+**Note:** The `getIdeationReports()` server action exists (lists past scan reports from `.teamai/ideation/`) but the `IdeationScanner` component does not yet wire up a history browser — historical reports can only be accessed via the filesystem.
+
+**Scanning state:** "Run Scan" button changes to "Scanning…" (disabled, `opacity-40`). Streaming output block appears (`bg-[#1a1f2e] border border-[#1e293b] rounded-lg p-4`), showing live agent text via `useSessionStream` hook. The block scrolls automatically as new text arrives.
+
+**Complete state:** Button returns to "Run Scan" (enabled). "✓ Scan complete" badge appears in green (`text-xs text-green-400`) next to the button. The output block shows the full agent response (final accumulated text, not the streaming intermediate values). Scan report is saved to `.teamai/ideation/ideation-{date}.json`.
+
+**Error state:** If the server action fails (no project selected, processManager unavailable), the button becomes stuck on "Scanning…" (disabled) since `running` remains `true` and no `result` event ever arrives to set `done`. There is no try/catch in `handleScan()` — this is a known limitation. The user must navigate away and return, or refresh the page, to reset the button state.
+
+### Controls Bar
+
+Horizontal flex row at top of content area:
+- **"Run Scan"** button (`bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] px-4 py-2 text-sm font-medium`). Disabled while scanning (`opacity-40`). Shows "Scanning…" while running.
+- **"✓ Scan complete"** badge (`text-xs text-green-400`) — only visible when `done` is true (a `result` event was received)
+
+### Streaming Output Block
+
+When scanning, a scrollable container shows live agent text:
+- **Container:** `flex-1 overflow-y-auto bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4`
+- **Text:** `<pre>` block with `text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed`
+- **Content source:** `useSessionStream(sessionId)` — subscribes to WebSocket events for the session, extracts text from `assistant` type events via `extractText()`
+- **Text accumulation:** The component extracts the latest text from stream events (searches in reverse from newest event). On `result` event, the final text is preserved and `done` flag is set.
+- **Visibility:** Only shown when `latestText` is non-empty (hide during initial connection)
+
+### Server Actions (`src/app/actions/ideation.ts`)
+
+| Action | Returns | Description |
+|---|---|---|
+| `startIdeationScan()` | `Promise<string>` | Spawns a Claude agent session with `taskId: 'ideation::{projectPath}'`, sends the `/ideation` command, stores session in `global.__ideationSessions` for reconnection. Returns session ID. |
+| `getIdeationReports()` | `Promise<{ filename: string; date: string }[]>` | Lists `ideation-*.json` files from `.teamai/ideation/` newest-first. Returns empty array if directory doesn't exist. |
+
+### Component
+
+- `src/app/ideation/page.tsx` — server component wrapper, renders heading + subtitle + `<IdeationScanner />` in a flex column layout (`flex flex-col h-full`)
+- `src/components/ideation-scanner.tsx` — `'use client'` — manages scan lifecycle:
+  - **IdeationScanner**: handles scan initiation via `startTransition`, subscribes to session stream via `useSessionStream`, accumulates and renders output text. Button states: idle/scanning/complete. No separate reconnect logic (each click spawns a fresh session).
+
+### User Journey — Running an Ideation Scan
+
+1. Navigate to **Ideation** (`◈` in sidebar)
+2. Click **"Run Scan"**
+3. Button changes to "Scanning…" (disabled); streaming output block appears
+4. Watch live agent output as Claude scans the codebase
+5. Agent completes — "✓ Scan complete" badge appears, button returns to "Run Scan"
+6. Review the full report in the scrollable output block
+7. Report is saved to `.teamai/ideation/ideation-{date}.json` for future reference
+8. Click "Run Scan" again to re-run — a new session starts, previous output is cleared
+
+### User Journey — Re-running a Scan
+
+1. Navigate to **Ideation** with a previous scan visible
+2. Click **"Run Scan"**
+3. Previous output is cleared (`setOutput('')`), the new scan starts
+4. Agent runs a fresh analysis — the old report file remains on disk, a new one is created
 
 ---
 
 ## 5b. Insights Page (`/insights`)
 
-Header: "Insights" title + "Chat with Claude about the active project." subtitle.
+Header: "Insights" title + "Pipeline analytics and project chat." subtitle.
 
-Below: full-height chat interface (`InsightsChat` component):
-- **Message area**: scrollable list of chat bubbles on `bg-[#11131b]`. User messages are dark pill (`bg-[#2563eb] text-white`, right-aligned); assistant replies are card with border (`bg-[#1e2333] border border-[#1e293b]`, left-aligned). Streaming replies show an animated cursor.
-- **Input bar** (pinned bottom): multi-line textarea (`bg-[#1a1f2e] border border-[#1e293b] rounded-lg text-slate-200`) + "Send" button (`bg-[#2563eb]`). Press Enter to send (Shift+Enter for new line). Placeholder: "Ask about the codebase… (Enter to send)". Disabled while connecting or waiting for response.
+Dark mode: `bg-[#11131b]` on page root (always dark-first).
 
-Dark mode: `bg-[#11131b]` on root (always dark-first). Input area has a top border separator (`border-[#1e293b]`).
+### Page Layout
+
+The insights page combines two sections in a vertical split:
+1. **Top: Stats dashboard** — pipeline metrics computed from the active project's tasks (server-rendered on page load)
+2. **Bottom: Chat interface** — a long-lived Claude session where users can ask questions about the codebase (client-rendered)
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  Insights                                                  │
+│  Pipeline analytics and project chat.                      │
+│  ──────────────────────────────────────────────────────────│
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐     │
+│  │ Total  7 │ │Complet 2 │ │In Prog 3 │ │ Failed 2 │     │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘     │
+│  Completion Rate ████████████░░░░░░░░ 29%                  │
+│  Phase Distribution ████ ██ ████ ███ █  (stacked bar)     │
+│  backlog ██ spec ██ plan ██ implement ████ done ██         │
+│  ──────────────────────────────────────────────────────────│
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │                                      ┌─────────────┐ │  │
+│  │  What's the auth flow?              │ User bubble  │ │  │
+│  │                                      └─────────────┘ │  │
+│  │  ┌──────────────────────────────────────────────────┐│  │
+│  │  │ The auth flow starts in middleware/auth.ts       ││  │
+│  │  │ which checks the session cookie…                 ││  │
+│  │  └──────────────────────────────────────────────────┘│  │
+│  │                                                    ▐ │  ← blinking cursor
+│  └──────────────────────────────────────────────────────┘  │
+│  ──────────────────────────────────────────────────────────│
+│  ┌──────────────────────────────────────────────┐ [Send]  │
+│  │ Ask about the codebase… (Enter to send)      │         │
+│  └──────────────────────────────────────────────┘         │
+└────────────────────────────────────────────────────────────┘
+```
+
+### Stats Dashboard (Top Section)
+
+Server-rendered on page load from `getTasks()`. Hidden when no active project is selected (no tasks).
+
+**Summary cards** — 4 cards in a `grid grid-cols-4 gap-3`:
+
+| Card | Value | Color |
+|---|---|---|
+| Total Tasks | Total count across all phases | `text-slate-200` |
+| Completed | Count of `done` phase tasks | `text-green-400` |
+| In Progress | Count of non-backlog, non-done, non-failed tasks | `text-amber-400` |
+| Failed | Count of `failed` phase tasks | `text-red-400` |
+
+Each card: `bg-[#1e2333] border border-[#1e293b] rounded-lg p-3`. Label in `text-xs text-slate-400`, value in `text-2xl font-bold`.
+
+**Completion rate bar** — below the cards:
+- Label: "Completion Rate" (`text-xs text-slate-400`) + percentage (right-aligned, `text-xs font-medium text-slate-300`)
+- Bar: `h-2 bg-[#1a1f2e] rounded-full overflow-hidden`, fill: `bg-gradient-to-r from-[#2563eb] to-[#22c55e]` (blue → green gradient)
+- Width: equal to `completionRate%` (computed as `completed / total * 100`)
+
+**Phase distribution bar** — below completion rate:
+- Label: "Phase Distribution" (`text-xs text-slate-400`)
+- Stacked horizontal bar (`flex h-5 rounded-full overflow-hidden`): each phase gets a colored segment proportional to its count. Segments <1% width are hidden.
+- Color legend: flex-wrapped row of colored dots (`w-2.5 h-2.5 rounded-full`) + phase label + count. Uses `PHASE_COLORS` and `PHASE_LABELS` maps.
+- Phase colors: backlog=slate, spec=blue, plan=indigo, implement=amber, qa-review=orange, awaiting-review=purple, merge/PR=teal, failed=red, done=green
+
+**Empty state (no tasks):** "No tasks yet. Create tasks to see analytics." centered in `text-sm text-slate-400`.
+
+### Chat Interface (Bottom Section)
+
+The chat section fills remaining vertical space below the stats dashboard. It manages a long-lived Claude session — created once on mount, reused across messages — and streams responses via WebSocket.
+
+**Message area** — scrollable (`overflow-y-auto p-4 space-y-4`):
+- **Empty state:** "Ask anything about the codebase." centered in `text-sm text-slate-400 text-center mt-8`
+- **User messages:** Right-aligned, blue bubble (`bg-[#2563eb] text-white rounded-2xl rounded-br-sm`, max 75% width, `px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap`)
+- **Assistant messages:** Left-aligned, dark card bubble (`bg-[#1e2333] border border-[#1e293b] text-slate-200 rounded-2xl rounded-bl-sm`, same sizing)
+- **Streaming cursor:** When an assistant message is still streaming (`streaming: true`), a blinking block cursor appears at the end: `<span>` with `animate-pulse`, sized `w-1.5 h-3.5`
+- **Auto-scroll:** `bottomRef` scrolls into view on every new message or streaming update
+
+**Input bar** — pinned to bottom (`shrink-0 border-t border-[#1e293b] p-4`):
+- **Textarea:** multi-line (`rows={2}`), `flex-1 bg-[#11131b] border border-[#334155] rounded-lg text-white text-sm px-3 py-2`, focus ring `ring-2 ring-[#2563eb]`, resize disabled
+- **Placeholder:** "Ask about the codebase… (Enter to send)" when session is connected; "Connecting…" while session is being created
+- **Disabled state:** textarea + Send button disabled (`opacity-50` / `opacity-40`) when no session or input is empty or message is being sent
+- **Send button:** `bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] px-4 py-2 text-sm font-medium`, right-aligned, self-end
+- **Enter to send:** `onKeyDown` handler — Enter without Shift sends the message (calls `e.preventDefault()`), Shift+Enter inserts a newline
+
+### States
+
+**Loading / connecting:** Placeholder shows "Connecting…". Textarea and Send button are disabled while `getOrCreateInsightsSession()` resolves.
+
+**Idle (session ready, no messages):** "Ask anything about the codebase." empty state. Textarea shows "Ask about the codebase… (Enter to send)".
+
+**Sending a message:** User bubble appears immediately (optimistic). Input clears. Textarea re-enables for the next message while the assistant response streams.
+
+**Streaming response:** Assistant bubble appears with `streaming: true`. Content updates live as `assistant` events arrive via WebSocket. Blinking cursor at end of partial message.
+
+**Response complete:** `result` event finalizes the last assistant message (`streaming: false` set, cursor disappears). Input is ready for next message.
+
+**Session reconnection:** On mount, `getOrCreateInsightsSession()` checks `global.__insightsSessions` for an existing session. If found and still running, reconnects to it. Otherwise creates a new one. This means navigating away and back resumes the same conversation.
+
+**Error state:** If the server action fails (no project selected), the session never connects. Textarea remains disabled with "Connecting…" placeholder permanently — the user needs to select a project first.
+
+### Message Model
+
+```typescript
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  streaming?: boolean;  // true while assistant response is still arriving
+}
+```
+
+- User messages are added optimistically before the server action fires
+- Assistant messages are built incrementally: each `assistant` event updates the last message's `content`. On `result`, `streaming` is set to `false`.
+
+### Server Actions (`src/app/actions/insights.ts`)
+
+| Action | Returns | Description |
+|---|---|---|
+| `getOrCreateInsightsSession()` | `Promise<string>` | Returns existing session ID if one exists and is running; otherwise creates a new Claude session with `taskId: 'insights::{projectPath}'` and `role: 'general'`. Sessions are stored in `global.__insightsSessions` keyed by project path. |
+| `sendInsightsMessage(sessionId, message)` | `Promise<void>` | Sends the user's message text to the Claude process via `processManager.sendMessage()`. The agent responds via stdout, which is broadcast as WebSocket events. |
+
+### Components
+
+- `src/app/insights/page.tsx` — server component that pre-renders the stats dashboard from `getTasks()`. Wraps in a flex column layout with header (border-bottom separated) and content area (stats + chat).
+  - `StatCard` — internal component for the 4 summary cards
+- `src/components/insights-chat.tsx` — `'use client'` — full chat interface:
+  - **InsightsChat**: manages session lifecycle (create on mount via `useEffect`), message list state (user + assistant messages with streaming flags), input handling (Enter/Shift+Enter), scroll-to-bottom auto-scroll, session reconnection via `getOrCreateInsightsSession()`
+  - Uses `useSessionStream(sessionId)` hook — subscribes to WebSocket events filtered by session ID
+  - Uses `useTransition` for non-blocking `sendInsightsMessage` calls
+  - Message update logic: `assistant` events append/update the last streaming message; `result` event finalizes it
+
+### User Journey — Asking a Codebase Question
+
+1. Navigate to **Insights** (`◎` in sidebar)
+2. Stats dashboard loads (server-rendered) showing task counts, completion rate, phase distribution
+3. Chat session auto-connects on mount — placeholder changes from "Connecting…" to "Ask about the codebase… (Enter to send)"
+4. Type a question in the textarea: `"How does the authentication middleware work?"`
+5. Press **Enter** — user bubble appears right-aligned in blue; input clears; Send button briefly disables
+6. Assistant bubble appears left-aligned with streaming cursor — text streams in live as Claude reads the codebase
+7. Claude responds with relevant file paths and explanations
+8. Result event arrives — cursor disappears, response is complete
+9. Type another follow-up question: `"What would I need to change to add OAuth?"`
+10. Claude responds with code suggestions, referencing the existing auth flow from the previous turn
+11. Navigate away to another page, then return to Insights — the same session reconnects, previous messages still visible
+
+### User Journey — Continuing a Previous Conversation
+
+1. Start a chat conversation on the Insights page
+2. Navigate to the Kanban board to check a task
+3. Click **Insights** in the sidebar to return
+4. The chat reconnects to the existing session (`getOrCreateInsightsSession` finds the running session) — the Claude agent remembers prior conversation context
+5. **Note:** Client-side React state (`messages` array) is reset when the component remounts on navigation, so the previous chat history is not displayed in the UI. Only the agent's memory of the conversation survives.
+
+### User Journey — Starting Fresh
+
+1. If the previous session ended (process exited or was killed), `getOrCreateInsightsSession` creates a new one
+2. Previous messages remain in the client-side `messages` state (browser hasn't navigated away)
+3. The new session has no memory of the old conversation — it starts fresh
+4. User sees old messages as scrollable history plus the new session's empty state
 
 ---
 
@@ -1301,8 +1543,8 @@ Four sections, rendered top-to-bottom:
 | RoadmapView | `/roadmap` | Tabbed roadmap+changelog page with phased kanban (Now/Next/Later/Icebox) |
 | PhasedKanban | Inside RoadmapView | Horizontal 4-column kanban with linked status badges, real-time WebSocket sync, convert/delete actions |
 | RoadmapCard | Inside PhasedKanban | Per-item card with priority badge, complexity dots, source info, convert/delete buttons |
-| IdeationScanner | `/ideation` | Run Scan button + streaming output |
-| InsightsChat | `/insights` | Streaming chat bubbles with message history |
+| IdeationScanner | `/ideation` | Run Scan button with scanning/complete states, live streaming output via useSessionStream, accumulated text display in scrollable monospace block. Scan reports persist to `.teamai/ideation/ideation-{date}.json`. Start a new scan clears previous output and spawns a fresh Claude session. |
+| InsightsChat | `/insights` | Full-featured chat interface: long-lived Claude session (auto-created on mount, reused across messages), message bubbles (user: blue right-aligned, assistant: dark card left-aligned), live streaming with blinking cursor, auto-scroll to bottom, Enter-to-send with Shift+Enter newline, session reconnection on navigation. Stats dashboard above chat (server-rendered): summary cards, completion rate bar, phase distribution stacked bar with color legend. |
 | TerminalsView | `/terminals` | Responsive grid of PTY terminal panels with color-coded borders |
 | AnalyticsDashboard | `/analytics` | Read-only compute dashboard: summary cards (Total Tasks, QA Pass Rate, Bottleneck, Ideation-Driven), phase distribution bar chart, phase timing bars, QA criteria breakdown grid, weekly trends table, refresh button. Data computed from `.teamai/` task store — no external DB. |
 | GitHubImport | `/github` | Claude-driven GitHub issue listing via MCP server with streaming agent output. Selectable issue cards with labels, checkboxes, Select All, and Import Selected (creates kanban tasks in Backlog). Session reconnection on mount, file cache for persistence. |
