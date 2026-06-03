@@ -189,17 +189,33 @@ export class ProjectStore {
       const storedChecksum = storedManifest[relPath];
 
       if (!storedChecksum) {
-        // New file added in defaults — copy if project doesn't have it.
-        // Always record the checksum so future comparisons work even for
-        // files that already exist (e.g. in brand-new or old projects).
-        newManifest[relPath] = currentChecksum;
         const destFile = join(projectPath, '.claude', relPath);
         if (!existsSync(destFile)) {
+          // Brand-new default file, project never had it — copy it.
           if (!dryRun) {
             const srcFile = join(DEFAULTS_DIR, relPath);
             if (existsSync(srcFile)) cpSync(srcFile, destFile);
           }
+          newManifest[relPath] = currentChecksum;
           updated.push(relPath);
+        } else {
+          // File exists but has no stored baseline (manifest was absent or
+          // the file predates the manifest). Compare against current default.
+          const projectChecksum = this._computeChecksum(readFileSync(destFile, 'utf-8'));
+          if (projectChecksum === currentChecksum) {
+            // Already matches current default — just record it, nothing to do.
+            newManifest[relPath] = currentChecksum;
+          } else {
+            // Differs from current default and we have no history to tell
+            // whether it was customized. Treat as an uncustomized stale copy
+            // and update it — without a baseline we cannot protect it anyway.
+            if (!dryRun) {
+              const srcFile = join(DEFAULTS_DIR, relPath);
+              if (existsSync(srcFile)) cpSync(srcFile, destFile);
+            }
+            newManifest[relPath] = currentChecksum;
+            updated.push(relPath);
+          }
         }
         continue;
       }
