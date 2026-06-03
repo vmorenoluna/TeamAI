@@ -141,7 +141,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
   );
 }
 
-function PlanSubtasks({ plan }: { plan: PlanData | null }) {
+export function PlanSubtasks({ plan }: { plan: PlanData | null }) {
   if (!plan?.subtasks?.length) return <p className="text-sm text-slate-400">No plan generated yet.</p>;
   const completed = plan.subtasks.filter((s: PlanSubtask) => s.completed).length;
   const total = plan.subtasks.length;

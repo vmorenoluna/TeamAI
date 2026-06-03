@@ -1,0 +1,1032 @@
+// @vitest-environment happy-dom
+
+/**
+ * Unit tests for TaskPanel, TaskDetail, QAReportView, and PlanSubtasks components.
+ *
+ * Tests tab navigation (overview/terminal/spec/plan/qa), task detail rendering,
+ * QA report with PASS/FAIL criteria, human feedback banner, plan subtasks with
+ * progress, dependency management, loading/error/cached-data states,
+ * WebSocket phase-change refresh, readonly mode, and callbacks.
+ *
+ * React's useTransition is mocked (isPending=false, synchronous callback)
+ * following the project's established pattern.
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import type { Task } from '@/lib/task-store';
+import type { PlanData, QAReportData } from '@/lib/stream-types';
+import type { RoleDefinition } from '@/app/actions/roles';
+
+// ── Hoisted mocks ───────────────────────────────────────────────────────────
+
+const mockGetTaskFull = vi.hoisted(() => vi.fn());
+const mockGetRoles = vi.hoisted(() => vi.fn());
+
+vi.mock('@/app/actions/tasks', () => ({
+  getTaskFull: (...args: unknown[]) => mockGetTaskFull(...args),
+  setTaskRoleOverride: vi.fn(),
+  addDependency: vi.fn(),
+  removeDependency: vi.fn(),
+  addBlock: vi.fn(),
+  removeBlock: vi.fn(),
+  deleteTask: vi.fn(),
+  retryTask: vi.fn(),
+  restartCurrentPhase: vi.fn(),
+}));
+
+vi.mock('@/app/actions/roles', () => ({
+  getRoles: (...args: unknown[]) => mockGetRoles(...args),
+}));
+
+const mockRouterRefresh = vi.hoisted(() => vi.fn());
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: mockRouterRefresh }),
+}));
+
+// Mock Next.js Link to render <a> tags
+vi.mock('next/link', () => ({
+  default: ({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) => (
+    <a href={href} className={className}>{children}</a>
+  ),
+}));
+
+const gOnMessageCbs = vi.hoisted(() => [] as Array<(data: Record<string, unknown>) => void>);
+
+vi.mock('@/hooks/use-websocket', () => ({
+  useWebSocket: (opts?: { onMessage?: (data: Record<string, unknown>) => void }) => {
+    if (opts?.onMessage) gOnMessageCbs.push(opts.onMessage);
+    return { reconnect: vi.fn() };
+  },
+}));
+
+// AgentPanel mock
+vi.mock('@/components/agent-panel', () => ({
+  AgentPanel: ({ taskId, initialOutput }: { taskId: string; initialOutput?: string | null }) => (
+    <div data-testid="agent-panel" data-task-id={taskId}>
+      {initialOutput && <pre>{initialOutput}</pre>}
+    </div>
+  ),
+}));
+
+// ReviewPanel mock
+vi.mock('@/components/review-panel', () => ({
+  ReviewPanel: ({ taskId }: { taskId: string }) => (
+    <div data-testid="review-panel" data-task-id={taskId}>ReviewPanel</div>
+  ),
+}));
+
+const mockStartTransition = vi.hoisted(() =>
+  vi.fn((cb: () => void) => {
+    try {
+      const result = cb() as unknown;
+      if (result instanceof Promise) result.catch(() => {});
+    } catch { /* suppress */ }
+  })
+);
+
+vi.mock('react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react')>();
+  return {
+    ...actual,
+    useTransition: () => [false, mockStartTransition],
+  };
+});
+
+// ── Imports (after mocks) ───────────────────────────────────────────────────
+
+import { TaskPanel, type FullData } from '@/components/task-panel';
+import { TaskDetail, QAReportView, PlanSubtasks } from '@/components/task-detail';
+
+// ── Fixtures ────────────────────────────────────────────────────────────────
+
+function makeTask(overrides: Partial<Task> = {}): Task {
+  return {
+    id: 'task-1',
+    title: 'Test Task',
+    description: 'A test task for unit tests.',
+    phase: 'backlog',
+    createdAt: '2026-01-15T10:30:00.000Z',
+    updatedAt: '2026-01-15T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function makeFullData(overrides: Partial<{
+  task: Partial<Task>;
+  allTasks: Task[];
+  dependencies: Task[];
+  dependents: Task[];
+  spec: string | null;
+  plan: PlanData | null;
+  qaReport: QAReportData | null;
+  humanFeedback: string | null;
+  diff: string | null;
+  agentOutput: string | null;
+}> = {}): FullData {
+  const task = makeTask(overrides.task ?? {});
+  return {
+    task,
+    allTasks: overrides.allTasks ?? [task],
+    dependencies: overrides.dependencies ?? [],
+    dependents: overrides.dependents ?? [],
+    spec: overrides.spec ?? null,
+    plan: overrides.plan ?? null,
+    qaReport: overrides.qaReport ?? null,
+    humanFeedback: overrides.humanFeedback ?? null,
+    diff: overrides.diff ?? null,
+    agentOutput: overrides.agentOutput ?? null,
+  };
+}
+
+function makeRoles(): RoleDefinition[] {
+  return [
+    { filename: 'senior-dev', name: 'Senior Developer', content: '# Role: Senior Developer\n\nExpert coder.' },
+    { filename: 'qa-expert', name: 'QA Expert', content: '# Role: QA Expert\n\nTests everything.' },
+  ];
+}
+
+function qaPass(): QAReportData {
+  return {
+    overall: 'PASS',
+    criteria: [
+      { criterion: 'Tests pass', status: 'PASS', notes: 'All green' },
+      { criterion: 'Code follows style', status: 'PASS' },
+    ],
+  };
+}
+
+function qaFail(): QAReportData {
+  return {
+    overall: 'FAIL',
+    criteria: [
+      { criterion: 'Tests pass', status: 'FAIL', notes: '2 tests failing' },
+      { criterion: 'Code follows style', status: 'PASS' },
+    ],
+  };
+}
+
+function simplePlan(): PlanData {
+  return {
+    subtasks: [
+      { id: 's1', title: 'Add login form', completed: true },
+      { id: 's2', title: 'Add auth endpoint', completed: false, description: 'POST /api/auth' },
+      { id: 's3', title: 'Add session handling', completed: false, files: ['src/auth.ts', 'src/session.ts'] },
+    ],
+  };
+}
+
+// ── Shared helpers ──────────────────────────────────────────────────────────
+
+let closeCalls: number;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  gOnMessageCbs.length = 0;
+  closeCalls = 0;
+  mockGetTaskFull.mockReset();
+  mockGetRoles.mockReset();
+  mockGetTaskFull.mockResolvedValue(makeFullData());
+  mockGetRoles.mockResolvedValue(makeRoles());
+  // Mock navigator.clipboard
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    writable: true,
+    configurable: true,
+  });
+  // Mock window.confirm to return true by default
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  TaskPanel
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('TaskPanel', () => {
+  function renderPanel(overrides: {
+    taskId?: string;
+    readonly?: boolean;
+    onError?: (msg: string) => void;
+    cachedData?: FullData | null;
+    cachedRoles?: RoleDefinition[];
+    onDataLoaded?: (data: FullData, roles: RoleDefinition[], taskId: string) => void;
+  } = {}) {
+    const onClose = () => { closeCalls++; };
+    render(
+      <TaskPanel
+        taskId={overrides.taskId ?? 'task-1'}
+        onClose={onClose}
+        readonly={overrides.readonly}
+        onError={overrides.onError}
+        cachedData={overrides.cachedData}
+        cachedRoles={overrides.cachedRoles}
+        onDataLoaded={overrides.onDataLoaded}
+      />
+    );
+  }
+
+  // ── Loading state ────────────────────────────────────────────────────
+
+  describe('loading state', () => {
+    it('shows "Loading…" in the title bar while fetching', () => {
+      let resolve: (v: unknown) => void;
+      const promise = new Promise(r => { resolve = r; });
+      mockGetTaskFull.mockReturnValue(promise);
+      mockGetRoles.mockResolvedValue(makeRoles());
+
+      renderPanel();
+      // "Loading…" appears in both title bar and content area
+      const loadingTexts = screen.getAllByText('Loading…');
+      expect(loadingTexts.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('shows loading content area while fetching', () => {
+      let resolve: (v: unknown) => void;
+      const promise = new Promise(r => { resolve = r; });
+      mockGetTaskFull.mockReturnValue(promise);
+      mockGetRoles.mockResolvedValue(makeRoles());
+
+      renderPanel();
+      // The content area shows "Loading…" text; title bar also shows "Loading…"
+      const loadingDivs = screen.getAllByText('Loading…');
+      expect(loadingDivs.length).toBe(2); // title bar + content area
+    });
+  });
+
+  // ── Error state ──────────────────────────────────────────────────────
+
+  describe('error state', () => {
+    it('shows "Failed to load task." when fetch fails', async () => {
+      mockGetTaskFull.mockRejectedValue(new Error('Network error'));
+      mockGetRoles.mockResolvedValue(makeRoles());
+
+      renderPanel();
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to load task.')).toBeInTheDocument();
+      });
+    });
+
+    it('calls onError callback with the error message', async () => {
+      mockGetTaskFull.mockRejectedValue(new Error('Boom'));
+      mockGetRoles.mockResolvedValue(makeRoles());
+      const onError = vi.fn();
+
+      renderPanel({ onError });
+
+      await waitFor(() => {
+        expect(onError).toHaveBeenCalledWith('Boom');
+      });
+    });
+
+    it('calls onError with generic message for non-Error rejects', async () => {
+      mockGetTaskFull.mockRejectedValue('string error');
+      mockGetRoles.mockResolvedValue(makeRoles());
+      const onError = vi.fn();
+
+      renderPanel({ onError });
+
+      await waitFor(() => {
+        expect(onError).toHaveBeenCalledWith('Failed to load task');
+      });
+    });
+  });
+
+  // ── Cached data ──────────────────────────────────────────────────────
+
+  describe('cached data', () => {
+    it('does not re-fetch when cachedData is provided', async () => {
+      const data = makeFullData({ task: { id: 'task-1', title: 'Cached Title', phase: 'implement' } });
+
+      renderPanel({ cachedData: data });
+
+      expect(mockGetTaskFull).not.toHaveBeenCalled();
+    });
+
+    it('displays the cached task title immediately', async () => {
+      const data = makeFullData({ task: { id: 'task-1', title: 'Cached Title', phase: 'implement' } });
+
+      renderPanel({ cachedData: data });
+
+      // Title appears in title bar AND h1 heading in TaskDetail
+      await waitFor(() => {
+        const titles = screen.getAllByText('Cached Title');
+        expect(titles.length).toBeGreaterThanOrEqual(1);
+      });
+    });
+  });
+
+  // ── Title bar & close ────────────────────────────────────────────────
+
+  describe('title bar', () => {
+    it('shows "Task Details" title bar fallback while loading', () => {
+      let resolve: (v: unknown) => void;
+      const promise = new Promise(r => { resolve = r; });
+      mockGetTaskFull.mockReturnValue(promise);
+      mockGetRoles.mockResolvedValue(makeRoles());
+
+      renderPanel();
+
+      // Title bar shows "Loading…" (content area also shows it)
+      const loadingTexts = screen.getAllByText('Loading…');
+      expect(loadingTexts.length).toBe(2);
+    });
+
+    it('shows the task title after loading', async () => {
+      mockGetTaskFull.mockResolvedValue(makeFullData({ task: { title: 'Feature X' } }));
+
+      renderPanel();
+
+      // Title appears in both title bar AND h1
+      await waitFor(() => {
+        const titles = screen.getAllByText('Feature X');
+        expect(titles.length).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    it('close button calls onClose', async () => {
+      mockGetTaskFull.mockResolvedValue(makeFullData());
+
+      renderPanel();
+
+      await waitFor(() => {
+        expect(screen.getByTitle('Close window')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTitle('Close window'));
+      expect(closeCalls).toBe(1);
+    });
+  });
+
+  // ── WebSocket refresh ────────────────────────────────────────────────
+
+  describe('WebSocket refresh', () => {
+    it('re-fetches silently on phase-change for the same taskId', async () => {
+      mockGetTaskFull.mockResolvedValue(makeFullData({ task: { id: 'task-1', title: 'Phase Test' } }));
+
+      renderPanel();
+
+      await waitFor(() => {
+        expect(screen.getAllByText('Phase Test').length).toBeGreaterThanOrEqual(1);
+      });
+
+      // Reset call count after initial fetch
+      mockGetTaskFull.mockClear();
+
+      // Simulate phase-change for the SAME task
+      act(() => {
+        gOnMessageCbs.forEach(cb => cb({ type: 'phase-change', taskId: 'task-1', phase: 'implement' }));
+      });
+
+      await waitFor(() => {
+        expect(mockGetTaskFull).toHaveBeenCalledWith('task-1');
+      });
+    });
+
+    it('does NOT re-fetch on phase-change for a different taskId', async () => {
+      mockGetTaskFull.mockResolvedValue(makeFullData({ task: { id: 'task-1' } }));
+
+      renderPanel();
+
+      await waitFor(() => {
+        expect(screen.getAllByText('Test Task').length).toBeGreaterThanOrEqual(1);
+      });
+
+      mockGetTaskFull.mockClear();
+
+      act(() => {
+        gOnMessageCbs.forEach(cb => cb({ type: 'phase-change', taskId: 'task-2', phase: 'done' }));
+      });
+
+      // must not have been called with any taskId
+      expect(mockGetTaskFull).not.toHaveBeenCalled();
+    });
+
+    it('re-fetches silently on container-log', async () => {
+      mockGetTaskFull.mockResolvedValue(makeFullData());
+
+      renderPanel();
+
+      await waitFor(() => {
+        expect(screen.getAllByText('Test Task').length).toBeGreaterThanOrEqual(1);
+      });
+
+      mockGetTaskFull.mockClear();
+
+      act(() => {
+        gOnMessageCbs.forEach(cb => cb({ type: 'container-log', message: 'Container ready' }));
+      });
+
+      await waitFor(() => {
+        expect(mockGetTaskFull).toHaveBeenCalled();
+      });
+    });
+
+    it('does not re-fetch on phase-change when readonly', async () => {
+      const data = makeFullData();
+      renderPanel({ readonly: true, cachedData: data });
+      mockGetTaskFull.mockClear();
+
+      act(() => {
+        gOnMessageCbs.forEach(cb => cb({ type: 'phase-change', taskId: 'task-1', phase: 'implement' }));
+      });
+
+      await new Promise(r => setTimeout(r, 50));
+      expect(mockGetTaskFull).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── onDataLoaded callback ────────────────────────────────────────────
+
+  describe('onDataLoaded callback', () => {
+    it('calls onDataLoaded after successful fetch', async () => {
+      const data = makeFullData({ task: { id: 'task-1', title: 'Loaded' } });
+      mockGetTaskFull.mockResolvedValue(data);
+      const roles = makeRoles();
+      mockGetRoles.mockResolvedValue(roles);
+      const onDataLoaded = vi.fn();
+
+      renderPanel({ onDataLoaded });
+
+      await waitFor(() => {
+        expect(onDataLoaded).toHaveBeenCalledWith(
+          expect.objectContaining({ task: expect.objectContaining({ title: 'Loaded' }) }),
+          expect.arrayContaining([expect.objectContaining({ filename: 'senior-dev' })]),
+          'task-1',
+        );
+      });
+    });
+  });
+
+  // ── Readonly mode ────────────────────────────────────────────────────
+
+  describe('readonly mode', () => {
+    it('passes readonly=true to TaskDetail', async () => {
+      const data = makeFullData({ task: { id: 'task-1' } });
+
+      renderPanel({ readonly: true, cachedData: data });
+
+      await waitFor(() => {
+        // In readonly, there should be no tabs — the tab bar is hidden
+        expect(screen.queryByText('Overview')).not.toBeInTheDocument();
+      });
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  QAReportView
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('QAReportView', () => {
+  // ── Empty state ──────────────────────────────────────────────────────
+
+  describe('empty state', () => {
+    it('shows placeholder when no QA report and no human feedback', () => {
+      render(<QAReportView qaReport={null} humanFeedback={null} />);
+      expect(screen.getByText('No QA report generated yet.')).toBeInTheDocument();
+    });
+  });
+
+  // ── QA report rendering ─────────────────────────────────────────────
+
+  describe('QA report rendering', () => {
+    it('shows PASS badge with green styling', () => {
+      render(<QAReportView qaReport={qaPass()} />);
+
+      const passBadge = screen.getByText('PASS');
+      expect(passBadge).toBeInTheDocument();
+      expect(passBadge.className).toContain('bg-green-900/40');
+      expect(passBadge.className).toContain('text-green-300');
+    });
+
+    it('shows FAIL badge with red styling', () => {
+      render(<QAReportView qaReport={qaFail()} />);
+
+      const failBadge = screen.getByText('FAIL');
+      expect(failBadge).toBeInTheDocument();
+      expect(failBadge.className).toContain('bg-red-900/40');
+      expect(failBadge.className).toContain('text-red-300');
+    });
+
+    it('renders all criteria with PASS/FAIL indicators', () => {
+      render(<QAReportView qaReport={qaFail()} />);
+
+      // ✓ for PASS, ✗ for FAIL — these are inside criterion items
+      const passMark = screen.getByText('✓');
+      const failMark = screen.getByText('✗');
+      expect(passMark).toBeInTheDocument();
+      expect(failMark).toBeInTheDocument();
+    });
+
+    it('shows criterion text and notes', () => {
+      render(<QAReportView qaReport={qaFail()} />);
+
+      expect(screen.getByText('Tests pass')).toBeInTheDocument();
+      expect(screen.getByText('2 tests failing')).toBeInTheDocument();
+    });
+
+    it('handles criteria with name instead of criterion', () => {
+      const report: QAReportData = {
+        overall: 'PASS',
+        criteria: [{ name: 'Security check', status: 'PASS', notes: 'No issues' }],
+      };
+      render(<QAReportView qaReport={report} />);
+      expect(screen.getByText('Security check')).toBeInTheDocument();
+      expect(screen.getByText('No issues')).toBeInTheDocument();
+    });
+
+    it('handles criteria without notes gracefully', () => {
+      // When notes is undefined, no notes paragraph should render
+      const report: QAReportData = {
+        overall: 'PASS',
+        criteria: [{ criterion: 'Style', status: 'PASS' }],
+      };
+      render(<QAReportView qaReport={report} />);
+      expect(screen.getByText('Style')).toBeInTheDocument();
+      expect(screen.queryByText(/notes/i)).not.toBeInTheDocument();
+    });
+
+    it('renders Copy button in QA report', () => {
+      render(<QAReportView qaReport={qaPass()} />);
+      const copyBtns = screen.getAllByText('📋 Copy');
+      expect(copyBtns.length).toBe(1);
+    });
+  });
+
+  // ── Human feedback ───────────────────────────────────────────────────
+
+  describe('human feedback', () => {
+    it('shows human feedback banner when feedback is provided', () => {
+      render(<QAReportView qaReport={null} humanFeedback="This needs better error handling." />);
+
+      expect(screen.getByText('Human Reviewer Feedback')).toBeInTheDocument();
+      expect(screen.getByText('This needs better error handling.')).toBeInTheDocument();
+    });
+
+    it('feedback banner uses amber styling', () => {
+      render(<QAReportView qaReport={null} humanFeedback="Fix the login." />);
+
+      const banner = screen.getByText('Human Reviewer Feedback');
+      expect(banner.className).toContain('text-amber-300');
+    });
+
+    it('shows both QA report and feedback together', () => {
+      render(<QAReportView qaReport={qaPass()} humanFeedback="Looks great!" />);
+
+      expect(screen.getByText('Human Reviewer Feedback')).toBeInTheDocument();
+      expect(screen.getByText('PASS')).toBeInTheDocument();
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PlanSubtasks
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('PlanSubtasks', () => {
+  // ── Empty state ──────────────────────────────────────────────────────
+
+  describe('empty state', () => {
+    it('shows placeholder when plan is null', () => {
+      render(<PlanSubtasks plan={null} />);
+      expect(screen.getByText('No plan generated yet.')).toBeInTheDocument();
+    });
+
+    it('shows placeholder when plan has empty subtasks', () => {
+      render(<PlanSubtasks plan={{ subtasks: [] }} />);
+      expect(screen.getByText('No plan generated yet.')).toBeInTheDocument();
+    });
+  });
+
+  // ── Subtask rendering ────────────────────────────────────────────────
+
+  describe('subtask rendering', () => {
+    it('renders all subtasks', () => {
+      render(<PlanSubtasks plan={simplePlan()} />);
+      const subtasks = screen.getAllByTestId('plan-subtask');
+      expect(subtasks).toHaveLength(3);
+    });
+
+    it('shows completed subtask with green styling and checkmark', () => {
+      render(<PlanSubtasks plan={simplePlan()} />);
+      const checkmark = screen.getByText('✓');
+      expect(checkmark.className).toContain('text-green-500');
+    });
+
+    it('shows progress count (completed / total)', () => {
+      render(<PlanSubtasks plan={simplePlan()} />);
+      expect(screen.getByText('1 / 3 subtasks completed')).toBeInTheDocument();
+    });
+
+    it('shows progress bar when partially complete', () => {
+      render(<PlanSubtasks plan={simplePlan()} />);
+      const bar = screen.getByTestId('subtask-progress-bar');
+      expect(bar).toBeInTheDocument();
+      expect(bar.style.width).toMatch(/^33\.3/);
+    });
+
+    it('does not show progress bar when all complete', () => {
+      const plan: PlanData = {
+        subtasks: [
+          { id: 's1', title: 'A', completed: true },
+          { id: 's2', title: 'B', completed: true },
+        ],
+      };
+      render(<PlanSubtasks plan={plan} />);
+      expect(screen.queryByTestId('subtask-progress-bar')).not.toBeInTheDocument();
+    });
+
+    it('renders description for incomplete subtasks', () => {
+      render(<PlanSubtasks plan={simplePlan()} />);
+      expect(screen.getByText('POST /api/auth')).toBeInTheDocument();
+    });
+
+    it('renders file list for incomplete subtasks', () => {
+      render(<PlanSubtasks plan={simplePlan()} />);
+      expect(screen.getByText('src/auth.ts, src/session.ts')).toBeInTheDocument();
+    });
+
+    it('renders Copy button for plan JSON', () => {
+      render(<PlanSubtasks plan={simplePlan()} />);
+      const copyBtns = screen.getAllByText('📋 Copy');
+      expect(copyBtns.length).toBe(1);
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  TaskDetail
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('TaskDetail', () => {
+  function renderDetail(overrides: Partial<{
+    task: Partial<Task>;
+    allTasks: Task[];
+    dependencies: Task[];
+    dependents: Task[];
+    spec: string | null;
+    plan: PlanData | null;
+    qaReport: QAReportData | null;
+    humanFeedback: string | null;
+    diff: string | null;
+    agentOutput: string | null;
+    roles: RoleDefinition[];
+    readonly: boolean;
+    onClose: () => void;
+  }> = {}) {
+    const t = makeTask(overrides.task ?? {});
+    render(
+      <TaskDetail
+        task={t}
+        allTasks={overrides.allTasks ?? [t]}
+        dependencies={overrides.dependencies ?? []}
+        dependents={overrides.dependents ?? []}
+        spec={overrides.spec ?? null}
+        plan={overrides.plan ?? null}
+        qaReport={overrides.qaReport ?? null}
+        humanFeedback={overrides.humanFeedback ?? null}
+        diff={overrides.diff ?? null}
+        agentOutput={overrides.agentOutput ?? null}
+        roles={overrides.roles ?? makeRoles()}
+        readonly={overrides.readonly ?? false}
+        onClose={overrides.onClose}
+      />
+    );
+  }
+
+  // ── Tab navigation ───────────────────────────────────────────────────
+
+  describe('tab navigation', () => {
+    it('renders all five tabs', () => {
+      renderDetail();
+      expect(screen.getByText('Overview')).toBeInTheDocument();
+      expect(screen.getByText('Terminal')).toBeInTheDocument();
+      expect(screen.getByText('Spec')).toBeInTheDocument();
+      expect(screen.getByText('Plan')).toBeInTheDocument();
+      expect(screen.getByText('QA')).toBeInTheDocument();
+    });
+
+    it('Overview tab is active by default (blue border)', () => {
+      renderDetail();
+      const overviewTab = screen.getByText('Overview');
+      expect(overviewTab.className).toContain('border-[#2563eb]');
+    });
+
+    it('switches to Plan tab on click', () => {
+      renderDetail();
+      fireEvent.click(screen.getByText('Plan'));
+
+      const planTab = screen.getByText('Plan');
+      expect(planTab.className).toContain('border-[#2563eb]');
+    });
+
+    it('switches to QA tab on click', () => {
+      renderDetail();
+      fireEvent.click(screen.getByText('QA'));
+
+      const qaTab = screen.getByText('QA');
+      expect(qaTab.className).toContain('border-[#2563eb]');
+    });
+
+    it('shows badge count on Spec tab when spec exists', () => {
+      renderDetail({ spec: '# Specification' });
+      const specTab = screen.getByText('Spec').closest('button')!;
+      const badgeSpans = specTab.querySelectorAll('span');
+      const badgeTexts = Array.from(badgeSpans).map(b => b.textContent);
+      expect(badgeTexts).toContain('1');
+    });
+
+    it('shows subtask count badge on Plan tab', () => {
+      renderDetail({ plan: simplePlan() });
+      const planTab = screen.getByText('Plan').closest('button')!;
+      // The badge span contains just "3" — find it among the button's children
+      const badgeSpans = planTab.querySelectorAll('span');
+      const badgeTexts = Array.from(badgeSpans).map(b => b.textContent);
+      expect(badgeTexts).toContain('3');
+    });
+
+    it('shows badge on QA tab when qaReport exists', () => {
+      renderDetail({ qaReport: qaPass() });
+      const qaTab = screen.getByText('QA').closest('button')!;
+      const badgeSpans = qaTab.querySelectorAll('span');
+      const badgeTexts = Array.from(badgeSpans).map(b => b.textContent);
+      expect(badgeTexts).toContain('1');
+    });
+  });
+
+  // ── Task detail rendering ────────────────────────────────────────────
+
+  describe('task detail rendering', () => {
+    it('shows task title as h1', () => {
+      renderDetail({ task: { title: 'Build Login Page' } });
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Build Login Page');
+    });
+
+    it('shows task ID', () => {
+      renderDetail({ task: { id: 'abc-123' } });
+      expect(screen.getByTestId('task-id')).toHaveTextContent('abc-123');
+    });
+
+    it('shows task description', () => {
+      renderDetail({ task: { description: 'Build a login page with OAuth.' } });
+      expect(screen.getByText('Build a login page with OAuth.')).toBeInTheDocument();
+    });
+
+    it('shows phase badge', () => {
+      renderDetail({ task: { phase: 'implement' } });
+      expect(screen.getByText('In Progress')).toBeInTheDocument(); // PHASE_LABELS.implement
+    });
+
+    it('shows created/updated timestamps', () => {
+      renderDetail();
+      // "Created 1/15/2026, 10:30:00 AM · Updated 1/15/2026, 12:00:00 PM"
+      expect(screen.getByText(/Created/)).toBeInTheDocument();
+    });
+
+    it('shows source info for tasks converted from ideation', () => {
+      renderDetail({ task: { source: 'ideation' } });
+      expect(screen.getByText('Source:')).toBeInTheDocument();
+      expect(screen.getByText('Ideation')).toBeInTheDocument();
+    });
+
+    it('shows source info for competitor-analysis with context', () => {
+      renderDetail({ task: { source: 'competitor-analysis', competitiveContext: 'Competitor X' } });
+      expect(screen.getByText('Competitor Analysis')).toBeInTheDocument();
+      expect(screen.getByText('Competitor X')).toBeInTheDocument();
+    });
+
+    it('shows ← Board breadcrumb link', () => {
+      renderDetail();
+      expect(screen.getByText('← Board')).toBeInTheDocument();
+    });
+  });
+
+  // ── PR link ─────────────────────────────────────────────────────────
+
+  describe('PR link', () => {
+    it('shows PR link in header when prUrl exists', () => {
+      renderDetail({ task: { prUrl: 'https://github.com/test/pr/1' } });
+      const link = screen.getByTitle('View Pull Request');
+      expect(link).toBeInTheDocument();
+    });
+
+    it('does not show PR link when prUrl is undefined', () => {
+      renderDetail();
+      expect(screen.queryByTitle('View Pull Request')).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Readonly mode ────────────────────────────────────────────────────
+
+  describe('readonly mode', () => {
+    it('hides tabs when readonly=true', () => {
+      renderDetail({ readonly: true });
+      expect(screen.queryByText('Overview')).not.toBeInTheDocument();
+      expect(screen.queryByText('Terminal')).not.toBeInTheDocument();
+      expect(screen.queryByText('Spec')).not.toBeInTheDocument();
+      expect(screen.queryByText('Plan')).not.toBeInTheDocument();
+      expect(screen.queryByText('QA')).not.toBeInTheDocument();
+    });
+
+    it('hides delete button when readonly=true', () => {
+      renderDetail({ readonly: true });
+      expect(screen.queryByText('🗑')).not.toBeInTheDocument();
+    });
+
+    it('hides restart button when readonly=true', () => {
+      renderDetail({ readonly: true, task: { phase: 'implement' } });
+      expect(screen.queryByTestId('restart-phase-button')).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Terminal tab ─────────────────────────────────────────────────────
+
+  describe('terminal tab', () => {
+    it('renders AgentPanel when Terminal tab is active', () => {
+      renderDetail();
+      fireEvent.click(screen.getByText('Terminal'));
+
+      expect(screen.getByTestId('agent-panel')).toBeInTheDocument();
+    });
+
+    it('passes taskId to AgentPanel', () => {
+      renderDetail();
+      fireEvent.click(screen.getByText('Terminal'));
+
+      const panel = screen.getByTestId('agent-panel');
+      expect(panel.getAttribute('data-task-id')).toBe('task-1');
+    });
+  });
+
+  // ── Spec tab ─────────────────────────────────────────────────────────
+
+  describe('spec tab', () => {
+    it('shows spec content when spec is provided', () => {
+      renderDetail({ spec: '# Feature Spec\n\nThis is the specification.' });
+      fireEvent.click(screen.getByText('Spec'));
+
+      expect(screen.getByText('Specification')).toBeInTheDocument();
+      // spec text is rendered inside a <pre> — match the full content
+      const pre = document.querySelector('pre');
+      expect(pre?.textContent).toContain('# Feature Spec');
+      expect(pre?.textContent).toContain('This is the specification.');
+    });
+
+    it('shows empty message when no spec', () => {
+      renderDetail({ spec: null });
+      fireEvent.click(screen.getByText('Spec'));
+
+      expect(screen.getByText('No spec generated yet. Run the pipeline to create one.')).toBeInTheDocument();
+    });
+  });
+
+  // ── Plan tab ─────────────────────────────────────────────────────────
+
+  describe('plan tab', () => {
+    it('renders PlanSubtasks when Plan tab is active', () => {
+      renderDetail({ plan: simplePlan() });
+      fireEvent.click(screen.getByText('Plan'));
+
+      expect(screen.getByText('1 / 3 subtasks completed')).toBeInTheDocument();
+    });
+
+    it('shows empty plan message when no plan', () => {
+      renderDetail({ plan: null });
+      fireEvent.click(screen.getByText('Plan'));
+
+      expect(screen.getByText('No plan generated yet.')).toBeInTheDocument();
+    });
+  });
+
+  // ── QA tab ───────────────────────────────────────────────────────────
+
+  describe('QA tab', () => {
+    it('renders QAReportView when QA tab is active', () => {
+      renderDetail({ qaReport: qaPass() });
+      fireEvent.click(screen.getByText('QA'));
+
+      expect(screen.getByText('PASS')).toBeInTheDocument();
+    });
+
+    it('passes humanFeedback to QAReportView', () => {
+      renderDetail({ humanFeedback: 'Looks good overall.' });
+      fireEvent.click(screen.getByText('QA'));
+
+      expect(screen.getByText('Human Reviewer Feedback')).toBeInTheDocument();
+      expect(screen.getByText('Looks good overall.')).toBeInTheDocument();
+    });
+
+    it('shows empty QA message when no report', () => {
+      renderDetail({ qaReport: null, humanFeedback: null });
+      fireEvent.click(screen.getByText('QA'));
+
+      expect(screen.getByText('No QA report generated yet.')).toBeInTheDocument();
+    });
+  });
+
+  // ── Rate-limit banner ────────────────────────────────────────────────
+
+  describe('rate-limit banner', () => {
+    it('shows rate-limit banner when task is rate-limited', () => {
+      renderDetail({ task: { rateLimitedUntil: '2026-06-04T08:00:00.000Z' } });
+      expect(screen.getByText(/API token limit hit/)).toBeInTheDocument();
+    });
+
+    it('does not show banner in readonly mode', () => {
+      renderDetail({ task: { rateLimitedUntil: '2026-06-04T08:00:00.000Z' }, readonly: true });
+      expect(screen.queryByText(/API token limit hit/)).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Agent role override ──────────────────────────────────────────────
+
+  describe('agent role override', () => {
+    it('renders role override dropdown', () => {
+      renderDetail();
+      const select = screen.getByRole('combobox');
+      expect(select).toBeInTheDocument();
+      expect(screen.getByText('Auto (pipeline default)')).toBeInTheDocument();
+    });
+
+    it('shows role options from roles prop', () => {
+      renderDetail({
+        roles: [{ filename: 'senior-dev', name: 'Senior Developer', content: '# Role: Senior Developer' }],
+      });
+      expect(screen.getByText('Senior Developer')).toBeInTheDocument();
+    });
+  });
+
+  // ── Dependencies ─────────────────────────────────────────────────────
+
+  describe('dependencies', () => {
+    it('shows "Depends on" section with dependency tasks', () => {
+      const dep = makeTask({ id: 'dep-1', title: 'Dependency Task' });
+      renderDetail({ dependencies: [dep] });
+      // The section header label is "Depends on" (the button shows "+ Depends on")
+      expect(screen.getByText('Depends on')).toBeInTheDocument();
+      expect(screen.getByText('Dependency Task')).toBeInTheDocument();
+    });
+
+    it('shows "Blocks" section with dependent tasks', () => {
+      const dependent = makeTask({ id: 'dep-2', title: 'Blocked Task' });
+      renderDetail({ dependents: [dependent] });
+      expect(screen.getByText('Blocks')).toBeInTheDocument();
+      expect(screen.getByText('Blocked Task')).toBeInTheDocument();
+    });
+
+    it('shows "No dependencies set." when none exist', () => {
+      renderDetail({ dependencies: [], dependents: [] });
+      expect(screen.getByText('No dependencies set.')).toBeInTheDocument();
+    });
+  });
+
+  // ── Review panel ─────────────────────────────────────────────────────
+
+  describe('review panel', () => {
+    it('shows ReviewPanel for awaiting-review phase', () => {
+      renderDetail({ task: { phase: 'awaiting-review' } });
+      expect(screen.getByTestId('review-panel')).toBeInTheDocument();
+    });
+
+    it('shows ReviewPanel for pr-open phase', () => {
+      renderDetail({ task: { phase: 'pr-open' } });
+      expect(screen.getByTestId('review-panel')).toBeInTheDocument();
+    });
+
+    it('does not show ReviewPanel for non-review phases', () => {
+      renderDetail({ task: { phase: 'implement' } });
+      expect(screen.queryByTestId('review-panel')).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Hash-based tab navigation ────────────────────────────────────────
+
+  describe('hash-based tab navigation', () => {
+    it('opens Spec tab when URL hash is #spec', async () => {
+      window.location.hash = '#spec';
+      renderDetail();
+      await waitFor(() => {
+        const specTab = screen.getByText('Spec');
+        expect(specTab.className).toContain('border-[#2563eb]');
+      });
+      window.location.hash = '';
+    });
+
+    it('opens QA tab when URL hash is #qa', async () => {
+      window.location.hash = '#qa';
+      renderDetail();
+      await waitFor(() => {
+        const qaTab = screen.getByText('QA');
+        expect(qaTab.className).toContain('border-[#2563eb]');
+      });
+      window.location.hash = '';
+    });
+  });
+});
