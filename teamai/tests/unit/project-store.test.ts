@@ -488,25 +488,55 @@ describe('ProjectStore', () => {
     }
   });
 
-  it('syncDefaults does not overwrite an existing project file when a new default is added', () => {
+  it('syncDefaults updates an existing project file when a new default is added and no baseline exists', () => {
     store.add(projectDir, 'Test Project');
 
     // Create a temp default file
     const newDefaultPath = join(process.cwd(), 'defaults', 'commands', '.test-new-command-2.md');
     writeFileSync(newDefaultPath, '# New default version\n');
 
-    // Also create the same file in the project with different content (simulating
-    // a project that already has this file from an older version)
+    // Project already has the same file with different content and NO stored
+    // baseline (file predates this default entry in the manifest). Without a
+    // baseline we cannot tell whether it was customised, so we treat it as a
+    // stale copy and update it — identical to the behaviour for any other
+    // uncustomised default file.
     const destPath = join(projectDir, '.claude', 'commands', '.test-new-command-2.md');
-    writeFileSync(destPath, '# Project custom version\n');
+    writeFileSync(destPath, '# Stale project version\n');
 
     try {
       const updated = store.syncDefaults(projectDir);
-      // The file already exists, so it should NOT be in the updated list
-      expect(updated).not.toContain('commands/.test-new-command-2.md');
+      // File is outdated (no baseline, differs from current default) → reported as updated
+      expect(updated).toContain('commands/.test-new-command-2.md');
+      // Project file is updated to the current default
+      expect(readFileSync(destPath, 'utf-8')).toBe('# New default version\n');
+    } finally {
+      if (existsSync(newDefaultPath)) unlinkSync(newDefaultPath);
+      if (existsSync(destPath)) unlinkSync(destPath);
+    }
+  });
 
-      // The project file should be preserved
-      expect(readFileSync(destPath, 'utf-8')).toBe('# Project custom version\n');
+  it('syncDefaults preserves a customised project file even when the default is updated', () => {
+    // Register and establish a manifest baseline
+    store.add(projectDir, 'Test Project');
+
+    const newDefaultPath = join(process.cwd(), 'defaults', 'commands', '.test-new-command-2.md');
+    const destPath = join(projectDir, '.claude', 'commands', '.test-new-command-2.md');
+
+    // First: create the default and sync so the manifest records its checksum
+    writeFileSync(newDefaultPath, '# Original default\n');
+    store.syncDefaults(projectDir);
+
+    try {
+      // User customises the project file
+      writeFileSync(destPath, '# My custom version\n');
+
+      // Default is updated in TeamAI
+      writeFileSync(newDefaultPath, '# Updated default\n');
+
+      const updated = store.syncDefaults(projectDir);
+      // Customised file must NOT be updated
+      expect(updated).not.toContain('commands/.test-new-command-2.md');
+      expect(readFileSync(destPath, 'utf-8')).toBe('# My custom version\n');
     } finally {
       if (existsSync(newDefaultPath)) unlinkSync(newDefaultPath);
       if (existsSync(destPath)) unlinkSync(destPath);
