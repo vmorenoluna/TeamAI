@@ -235,8 +235,8 @@ describe('TaskPanel', () => {
 
   describe('loading state', () => {
     it('shows "Loading…" in the title bar while fetching', () => {
-      let resolve: (v: unknown) => void;
-      const promise = new Promise(r => { resolve = r; });
+      let _resolve: (v: unknown) => void;
+      const promise = new Promise(r => { _resolve = r; });
       mockGetTaskFull.mockReturnValue(promise);
       mockGetRoles.mockResolvedValue(makeRoles());
 
@@ -247,8 +247,8 @@ describe('TaskPanel', () => {
     });
 
     it('shows loading content area while fetching', () => {
-      let resolve: (v: unknown) => void;
-      const promise = new Promise(r => { resolve = r; });
+      let _resolve: (v: unknown) => void;
+      const promise = new Promise(r => { _resolve = r; });
       mockGetTaskFull.mockReturnValue(promise);
       mockGetRoles.mockResolvedValue(makeRoles());
 
@@ -326,8 +326,8 @@ describe('TaskPanel', () => {
 
   describe('title bar', () => {
     it('shows "Task Details" title bar fallback while loading', () => {
-      let resolve: (v: unknown) => void;
-      const promise = new Promise(r => { resolve = r; });
+      let _resolve: (v: unknown) => void;
+      const promise = new Promise(r => { _resolve = r; });
       mockGetTaskFull.mockReturnValue(promise);
       mockGetRoles.mockResolvedValue(makeRoles());
 

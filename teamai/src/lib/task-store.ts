@@ -1,4 +1,8 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, rmSync, unlinkSync, renameSync } from 'fs';
+
+function isRetryableError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === 'EPERM' || (err as { code: string }).code === 'EBUSY';
+}
 import { join } from 'path';
 import { slugify } from './utils';
 
@@ -8,10 +12,20 @@ type MergeStrategy = 'local-merge' | 'pull-request';
  * Atomically write JSON to a file: write to a .tmp file, then rename.
  * Prevents corruption if the process crashes mid-write.
  */
-function atomicWriteJson(filePath: string, data: unknown): void {
+function atomicWriteJson(filePath: string, data: unknown, retries = 3): void {
   const tmpPath = filePath + '.tmp';
   writeFileSync(tmpPath, JSON.stringify(data, null, 2));
-  renameSync(tmpPath, filePath);
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      renameSync(tmpPath, filePath);
+      return;
+    } catch (err) {
+      if (attempt === retries - 1 || !isRetryableError(err)) throw err;
+      // Windows may hold a file lock briefly — retry after a short delay
+      const waitUntil = Date.now() + 10 * (2 ** attempt);
+      while (Date.now() < waitUntil) { /* busy-wait */ }
+    }
+  }
 }
 
 export interface Task {

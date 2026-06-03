@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { Task } from '@/lib/task-store';
 
@@ -182,7 +182,6 @@ describe('KanbanBoard', () => {
       ]);
 
       // Both should appear in the Analysis column
-      const analysisColumn = screen.getByText('Analysis').closest('.flex.flex-col');
       const cards = screen.getAllByTestId('task-card');
       expect(cards).toHaveLength(2);
     });

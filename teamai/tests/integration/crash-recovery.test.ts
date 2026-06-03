@@ -1684,6 +1684,7 @@ describe('Crash Recovery Integration', () => {
   });
 
   describe('activeTasks guard', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     let specPath: string;
 
     beforeEach(async () => {

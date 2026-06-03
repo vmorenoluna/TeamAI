@@ -126,6 +126,7 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
       writtenRef.current = 0;
       setTermReady(false);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Append historical log incrementally per terminal instance, then stream live events.
