@@ -205,10 +205,10 @@ describe('ProjectStore', () => {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
     expect(manifest.version).toBe(1);
     expect(manifest.files).toBeDefined();
-    // Should have entries for commands, roles, and workflow
+    // Should have entries for commands and workflow — roles are user-customisable and excluded
     expect(manifest.files['commands/implement.md']).toBeDefined();
-    expect(manifest.files['roles/coder.md']).toBeDefined();
     expect(manifest.files['teamai-workflow.md']).toBeDefined();
+    expect(manifest.files['roles/coder.md']).toBeUndefined();
     // Checksums should be sha256:...
     for (const checksum of Object.values(manifest.files) as string[]) {
       expect(checksum).toMatch(/^sha256:[a-f0-9]{16}$/);
@@ -315,9 +315,8 @@ describe('ProjectStore', () => {
   it('syncDefaults handles projects without a manifest (older TeamAI projects)', () => {
     // Manually create project dirs without calling scaffold
     mkdirSync(join(projectDir, '.claude', 'commands'), { recursive: true });
-    mkdirSync(join(projectDir, '.claude', 'roles'), { recursive: true });
 
-    // Copy a default that exists but leave out another
+    // Copy one command default but leave another missing
     const defaultImplSrc = join(process.cwd(), 'defaults', 'commands', 'implement.md');
     cpSync(defaultImplSrc, join(projectDir, '.claude', 'commands', 'implement.md'));
 
@@ -325,16 +324,16 @@ describe('ProjectStore', () => {
     expect(existsSync(join(projectDir, '.claude', '.teamai-scaffold.json'))).toBe(false);
 
     // syncDefaults should create the manifest and not crash
-    const updated = store.syncDefaults(projectDir);
+    store.syncDefaults(projectDir);
 
     // Should have created the manifest
     const manifestPath = join(projectDir, '.claude', '.teamai-scaffold.json');
     expect(existsSync(manifestPath)).toBe(true);
 
-    // Should have copied missing defaults that project doesn't have
-    expect(existsSync(join(projectDir, '.claude', 'roles', 'coder.md'))).toBe(true);
+    // Missing commands should be copied (merge.md was not manually placed)
+    expect(existsSync(join(projectDir, '.claude', 'commands', 'merge.md'))).toBe(true);
 
-    // The already-existing implement.md should NOT be overwritten
+    // The already-existing implement.md should NOT be overwritten (no baseline — preserved)
     const implContent = readFileSync(join(projectDir, '.claude', 'commands', 'implement.md'), 'utf-8');
     const defaultContent = readFileSync(defaultImplSrc, 'utf-8');
     expect(implContent).toBe(defaultContent);
@@ -372,58 +371,58 @@ describe('ProjectStore', () => {
     }
   });
 
-  it('syncDefaults handles a deleted project file by restoring from defaults', () => {
+  it('syncDefaults handles a deleted project command file by restoring from defaults', () => {
     store.add(projectDir, 'Test Project');
 
-    const rolePath = join(projectDir, '.claude', 'roles', 'coder.md');
-    expect(existsSync(rolePath)).toBe(true);
+    const cmdPath = join(projectDir, '.claude', 'commands', 'merge.md');
+    expect(existsSync(cmdPath)).toBe(true);
 
-    // Delete the role file from the project
-    unlinkSync(rolePath);
-    expect(existsSync(rolePath)).toBe(false);
+    // Delete the command file from the project
+    unlinkSync(cmdPath);
+    expect(existsSync(cmdPath)).toBe(false);
 
     // Modify the default source to trigger a checksum mismatch — the deleted-file
     // check only runs when storedChecksum !== currentChecksum.
-    const defaultRoleSrc = join(process.cwd(), 'defaults', 'roles', 'coder.md');
-    const defaultRoleBackup = readFileSync(defaultRoleSrc, 'utf-8');
-    writeFileSync(defaultRoleSrc, defaultRoleBackup + '\n\n<!-- restore-deleted test -->\n');
+    const defaultCmdSrc = join(process.cwd(), 'defaults', 'commands', 'merge.md');
+    const defaultCmdBackup = readFileSync(defaultCmdSrc, 'utf-8');
+    writeFileSync(defaultCmdSrc, defaultCmdBackup + '\n\n<!-- restore-deleted test -->\n');
 
     try {
       // syncDefaults should detect the changed default, find the missing file, and restore it
       const updated = store.syncDefaults(projectDir);
-      expect(updated).toContain('roles/coder.md');
+      expect(updated).toContain('commands/merge.md');
 
       // The file should be restored with the NEW default content
-      expect(existsSync(rolePath)).toBe(true);
-      const restoredContent = readFileSync(rolePath, 'utf-8');
-      expect(restoredContent).toBe(defaultRoleBackup + '\n\n<!-- restore-deleted test -->\n');
+      expect(existsSync(cmdPath)).toBe(true);
+      const restoredContent = readFileSync(cmdPath, 'utf-8');
+      expect(restoredContent).toBe(defaultCmdBackup + '\n\n<!-- restore-deleted test -->\n');
     } finally {
-      writeFileSync(defaultRoleSrc, defaultRoleBackup);
+      writeFileSync(defaultCmdSrc, defaultCmdBackup);
     }
   });
 
-  it('syncDefaults dryRun reports a deleted file without restoring it', () => {
+  it('syncDefaults dryRun reports a deleted command file without restoring it', () => {
     store.add(projectDir, 'Test Project');
 
-    const rolePath = join(projectDir, '.claude', 'roles', 'qa-reviewer.md');
-    expect(existsSync(rolePath)).toBe(true);
+    const cmdPath = join(projectDir, '.claude', 'commands', 'merge.md');
+    expect(existsSync(cmdPath)).toBe(true);
 
-    // Delete the role file
-    unlinkSync(rolePath);
-    expect(existsSync(rolePath)).toBe(false);
+    // Delete the command file
+    unlinkSync(cmdPath);
+    expect(existsSync(cmdPath)).toBe(false);
 
     // Modify the default source to trigger a checksum mismatch
-    const defaultRoleSrc = join(process.cwd(), 'defaults', 'roles', 'qa-reviewer.md');
-    const defaultRoleBackup = readFileSync(defaultRoleSrc, 'utf-8');
-    writeFileSync(defaultRoleSrc, defaultRoleBackup + '\n\n<!-- dryRun-deleted test -->\n');
+    const defaultCmdSrc = join(process.cwd(), 'defaults', 'commands', 'merge.md');
+    const defaultCmdBackup = readFileSync(defaultCmdSrc, 'utf-8');
+    writeFileSync(defaultCmdSrc, defaultCmdBackup + '\n\n<!-- dryRun-deleted test -->\n');
 
     try {
       // dryRun should report it but not restore
       const updated = store.syncDefaults(projectDir, true);
-      expect(updated).toContain('roles/qa-reviewer.md');
-      expect(existsSync(rolePath)).toBe(false);
+      expect(updated).toContain('commands/merge.md');
+      expect(existsSync(cmdPath)).toBe(false);
     } finally {
-      writeFileSync(defaultRoleSrc, defaultRoleBackup);
+      writeFileSync(defaultCmdSrc, defaultCmdBackup);
     }
   });
 
@@ -437,18 +436,18 @@ describe('ProjectStore', () => {
     // Corrupt the manifest
     writeFileSync(manifestPath, '{ not valid json }');
 
-    // Delete one file so we can verify that missing files ARE copied even
+    // Delete one command file so we can verify missing files ARE copied even
     // when the manifest is malformed (treated as empty).
-    const rolePath = join(projectDir, '.claude', 'roles', 'qa-reviewer.md');
-    unlinkSync(rolePath);
-    expect(existsSync(rolePath)).toBe(false);
+    const cmdPath = join(projectDir, '.claude', 'commands', 'merge.md');
+    unlinkSync(cmdPath);
+    expect(existsSync(cmdPath)).toBe(false);
 
     // Should not throw — treats malformed as empty manifest
     const updated = store.syncDefaults(projectDir);
 
-    // Files that were deleted should be restored (reported in updated)
-    expect(updated).toContain('roles/qa-reviewer.md');
-    expect(existsSync(rolePath)).toBe(true);
+    // Missing command files should be copied (reported in updated)
+    expect(updated).toContain('commands/merge.md');
+    expect(existsSync(cmdPath)).toBe(true);
 
     // Existing files should NOT be in updated and NOT be overwritten
     expect(updated).not.toContain('commands/implement.md');
@@ -488,7 +487,7 @@ describe('ProjectStore', () => {
     }
   });
 
-  it('syncDefaults updates an existing project file when a new default is added and no baseline exists', () => {
+  it('syncDefaults does not overwrite an existing project file when no baseline exists', () => {
     store.add(projectDir, 'Test Project');
 
     // Create a temp default file
@@ -496,19 +495,17 @@ describe('ProjectStore', () => {
     writeFileSync(newDefaultPath, '# New default version\n');
 
     // Project already has the same file with different content and NO stored
-    // baseline (file predates this default entry in the manifest). Without a
-    // baseline we cannot tell whether it was customised, so we treat it as a
-    // stale copy and update it — identical to the behaviour for any other
-    // uncustomised default file.
+    // baseline — we cannot tell if it was customised, so we preserve it and
+    // record the current default checksum as the baseline for future tracking.
     const destPath = join(projectDir, '.claude', 'commands', '.test-new-command-2.md');
-    writeFileSync(destPath, '# Stale project version\n');
+    writeFileSync(destPath, '# Pre-existing project version\n');
 
     try {
       const updated = store.syncDefaults(projectDir);
-      // File is outdated (no baseline, differs from current default) → reported as updated
-      expect(updated).toContain('commands/.test-new-command-2.md');
-      // Project file is updated to the current default
-      expect(readFileSync(destPath, 'utf-8')).toBe('# New default version\n');
+      // Cannot auto-update without a baseline — not in the updated list
+      expect(updated).not.toContain('commands/.test-new-command-2.md');
+      // Project file is preserved
+      expect(readFileSync(destPath, 'utf-8')).toBe('# Pre-existing project version\n');
     } finally {
       if (existsSync(newDefaultPath)) unlinkSync(newDefaultPath);
       if (existsSync(destPath)) unlinkSync(destPath);

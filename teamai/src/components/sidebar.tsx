@@ -10,7 +10,7 @@ interface Props {
   activeProjectPath: string | null;
 }
 
-export function Sidebar({ projects, activeProjectPath }: Props) {
+export function Sidebar({ projects: _projects, activeProjectPath: _activeProjectPath }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
 

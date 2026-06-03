@@ -120,11 +120,11 @@ describe('getAvailableModels Integration', () => {
       const { saveProvidersConfig, getProvidersConfig } = await import('@/app/actions/providers');
 
       // Save partial config (only role overrides, no default)
-      /* eslint-disable @typescript-eslint/no-explicit-any */
+       
       await saveProvidersConfig({
         roles: { coder: { provider: 'bedrock' } },
       } as any);
-      /* eslint-enable @typescript-eslint/no-explicit-any */
+       
 
       const readBack = await getProvidersConfig();
 
@@ -154,7 +154,7 @@ describe('getAvailableModels Integration', () => {
       });
 
       // Read the actual file from disk
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const onDisk = readProvidersConfig() as any;
       expect(onDisk.default.model).toBe('test-model');
       expect(onDisk.default.provider).toBe('ollama');
@@ -252,7 +252,7 @@ describe('getAvailableModels Integration', () => {
       });
 
       const { execFile } = await import('child_process');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (vi.mocked(execFile) as any).mockImplementation(
         (_cmd: string, _args: readonly string[] | null | undefined, _opts: any, callback: any) => {
           callback(null, {
@@ -282,7 +282,7 @@ describe('getAvailableModels Integration', () => {
       });
 
       const { execFile } = await import('child_process');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (vi.mocked(execFile) as any).mockImplementation(
         (_cmd: string, _args: readonly string[] | null | undefined, _opts: any, callback: any) => {
           callback(null, {
@@ -318,7 +318,7 @@ describe('getAvailableModels Integration', () => {
       });
 
       // Verify it was persisted
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const config = readProvidersConfig() as any;
       expect(config.default.provider).toBe('ollama');
 
@@ -345,7 +345,7 @@ describe('getAvailableModels Integration', () => {
       });
 
       // Verify on disk
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const config = readProvidersConfig() as any;
       expect(config.default.provider).toBe('openai');
       expect(config.roles.coder.provider).toBe('openai');

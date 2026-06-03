@@ -141,9 +141,10 @@ export class ProjectStore {
    */
   private _getDefaultsManifest(): Record<string, string> {
     const manifest: Record<string, string> = {};
+    // roles/ are user-configurable from the UI (persona / tone / domain customisation)
+    // and must never be auto-synced — only commands/ and top-level files are managed.
     const scanDirs = [
       { src: join(DEFAULTS_DIR, 'commands'), prefix: 'commands' },
-      { src: join(DEFAULTS_DIR, 'roles'), prefix: 'roles' },
     ];
     for (const { src, prefix } of scanDirs) {
       if (!existsSync(src)) continue;
@@ -199,23 +200,12 @@ export class ProjectStore {
           newManifest[relPath] = currentChecksum;
           updated.push(relPath);
         } else {
-          // File exists but has no stored baseline (manifest was absent or
-          // the file predates the manifest). Compare against current default.
-          const projectChecksum = this._computeChecksum(readFileSync(destFile, 'utf-8'));
-          if (projectChecksum === currentChecksum) {
-            // Already matches current default — just record it, nothing to do.
-            newManifest[relPath] = currentChecksum;
-          } else {
-            // Differs from current default and we have no history to tell
-            // whether it was customized. Treat as an uncustomized stale copy
-            // and update it — without a baseline we cannot protect it anyway.
-            if (!dryRun) {
-              const srcFile = join(DEFAULTS_DIR, relPath);
-              if (existsSync(srcFile)) cpSync(srcFile, destFile);
-            }
-            newManifest[relPath] = currentChecksum;
-            updated.push(relPath);
-          }
+          // File exists but has no stored baseline (manifest was absent or the
+          // file predates the manifest). Record the current default checksum as
+          // the baseline so future default changes are tracked correctly.
+          // Do NOT copy — the file may be intentionally customised and we
+          // cannot distinguish a stale copy from a customisation without history.
+          newManifest[relPath] = currentChecksum;
         }
         continue;
       }

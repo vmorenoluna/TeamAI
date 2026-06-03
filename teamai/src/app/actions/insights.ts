@@ -5,7 +5,7 @@ import { getActiveProjectPath } from './projects';
 
 // Global sessions: projectPath → sessionId (shared across module contexts)
 declare global {
-  // eslint-disable-next-line no-var
+   
   var __insightsSessions: Map<string, string> | undefined;
 }
 const sessions: Map<string, string> =
