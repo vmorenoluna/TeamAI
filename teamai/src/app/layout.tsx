@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import { Inter, Geist_Mono } from 'next/font/google';
 import './globals.css';
-import { getProjects, getActiveProject } from '@/app/actions/projects';
+import { getProjects, getActiveProject, getOutdatedProjects } from '@/app/actions/projects';
 import { Sidebar } from '@/components/sidebar';
 import { ProjectSelector } from '@/components/project-selector';
+import { DefaultsUpdater } from '@/components/defaults-updater';
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
@@ -16,6 +17,7 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const projects = await getProjects();
   const activeProject = await getActiveProject();
+  const staleDefaults = await getOutdatedProjects();
 
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full`}>
@@ -24,6 +26,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <div className="flex-1 min-w-0 overflow-auto flex flex-col">
           {/* Project tabs row - moved above main content */}
           <ProjectSelector projects={projects} activeProjectPath={activeProject?.path ?? null} />
+          {/* Defaults update banner — shows when projects have outdated copies of TeamAI defaults */}
+          <DefaultsUpdater initialStale={staleDefaults} />
           <div className="flex-1 min-h-0">{children}</div>
         </div>
       </body>

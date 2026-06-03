@@ -2398,7 +2398,7 @@ describe('Orchestrator', () => {
         '# Human Review Feedback\\n\\nAlso fix the header alignment\\n');
 
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
-        subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px'] }],
+        subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px [QA CORRECTION: Mobile layout is broken]'], qa_flagged: true }],
       }));
 
       const slug = 'test-task';
@@ -2453,7 +2453,7 @@ describe('Orchestrator', () => {
         '# QA Feedback\\n\\nMobile layout is broken\\n');
 
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
-        subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px'] }],
+        subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px [QA CORRECTION: Mobile layout is broken]'], qa_flagged: true }],
       }));
 
       const slug = 'test-task';
@@ -2500,7 +2500,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root);
 
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
-        subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px'] }],
+        subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px [QA CORRECTION: Mobile layout is broken]'], qa_flagged: true }],
       }));
 
       const slug = 'test-task';
