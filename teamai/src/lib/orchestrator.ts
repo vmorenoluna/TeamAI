@@ -464,14 +464,7 @@ export class Orchestrator {
     const humanFeedbackPath = path.join(pipeline.specPath, 'human_feedback.md');
     const hasQaFeedback = existsSync(qaFeedbackPath);
     const hasHumanFeedback = existsSync(humanFeedbackPath);
-    let qaFeedbackContent = '';
-    if (hasQaFeedback) {
-      const fullFeedback = readFileSync(qaFeedbackPath, 'utf-8');
-      qaFeedbackContent = fullFeedback;
-    }
     if (hasHumanFeedback) {
-      const humanFeedback = readFileSync(humanFeedbackPath, 'utf-8');
-      qaFeedbackContent = (qaFeedbackContent ? qaFeedbackContent + '\n\n---\n\n' : '') + humanFeedback;
       // ── Belt-and-suspenders: snapshot human_feedback if rejectTask didn't create it ──
       const snapshotPath = path.join(pipeline.specPath, 'human_feedback_before_bounce.md');
       if (!existsSync(snapshotPath)) {
@@ -526,16 +519,69 @@ export class Orchestrator {
           // QA feedback is prepended at the top so the coder reads it first.
           // Plan.json acceptance criteria have already been patched with QA corrections.
 
+          // In QA rework mode, only send the QA-flagged criteria — the agent
+          // should focus exclusively on fixes, not re-validate passed criteria.
+          const qaOnlyCriteria = hasQaFeedback
+            ? subtask.acceptance_criteria.filter(
+                ac => ac.includes('[QA CORRECTION') || ac.includes('[QA ISSUE')
+              )
+            : subtask.acceptance_criteria;
+          const criteriaLine = hasQaFeedback
+            ? (qaOnlyCriteria.length > 0
+                ? `QA issues to fix: ${qaOnlyCriteria.join('; ')}`
+                : `No specific QA criteria for this subtask — see the QA feedback above for issues to address.`)
+            : `Acceptance criteria: ${subtask.acceptance_criteria.join('; ')}`;
+
+          // Build per-subtask QA feedback — each agent only sees issues for its own subtask.
+          const subtaskFeedback = (() => {
+            if (!hasQaFeedback) return '';
+            const lines: string[] = [];
+            lines.push('## ⚠️ QA FEEDBACK — FIX THESE FIRST ⚠️');
+            lines.push('');
+            // Overall status from the QA report
+            try {
+              const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+              if (existsSync(reportPath)) {
+                const report: QaReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
+                if (report.overall) lines.push(`Overall: **${report.overall}**`);
+              }
+            } catch { /* best-effort */ }
+            // Only this subtask's issues
+            if (qaOnlyCriteria.length > 0) {
+              lines.push('');
+              lines.push(`Issues in subtask ${subtask.id} **${subtask.title}**:`);
+              for (const c of qaOnlyCriteria) {
+                // Strip [QA CORRECTION: ...] / [QA ISSUE: ...] markers for readability
+                const cleaned = c.replace(/\s*\[QA (?:CORRECTION|ISSUE):\s*/g, ': ').replace(/\]$/, '');
+                lines.push(`- ${cleaned}`);
+              }
+            }
+            // Human feedback is task-level — include if present
+            if (hasHumanFeedback) {
+              try {
+                const hf = readFileSync(humanFeedbackPath, 'utf-8');
+                lines.push('');
+                lines.push('---');
+                lines.push('');
+                lines.push(hf);
+              } catch { /* best-effort */ }
+            }
+            lines.push('');
+            return lines.join('\n');
+          })();
+
           const prompt =
-            (hasQaFeedback && qaFeedbackContent
-              ? `## ⚠️ QA FEEDBACK — FIX THESE FIRST ⚠️\n\n` +
-                `${qaFeedbackContent}\n\n` +
-                `---\n`
+            (subtaskFeedback
+              ? subtaskFeedback + '\n---\n'
               : '') +
             `/implement Subtask ${subtask.id}: ${subtask.title}\n\n` +
             `${subtask.description}\n\n` +
             `Files: ${subtask.files.join(', ')}\n\n` +
-            `Acceptance criteria: ${subtask.acceptance_criteria.join('; ')}`;
+            `${criteriaLine}\n\n` +
+            (hasQaFeedback
+              ? `⚠️ Only fix the QA issues listed above. Do NOT re-validate criteria that QA already passed.\n` +
+                `After fixing all issues, run the FULL test suite to verify no regressions.\n`
+              : '');
           processManager.sendMessage(sessionId, prompt);
           await this.waitForCompletion(sessionId);
           processManager.killSession(sessionId);

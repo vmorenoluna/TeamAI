@@ -9,14 +9,19 @@ $ARGUMENTS
 
 If the prompt includes "⚠️ QA FEEDBACK" at the top, you are in QA rework mode:
 
-1. Read the QA feedback FIRST. It takes priority over the acceptance criteria below.
-2. For each issue in the QA feedback:
-   - Address it even if the current code already satisfies the plan's acceptance criteria.
+1. Read the QA feedback FIRST. It takes priority over everything else.
+2. Address ONLY the QA issues listed. The acceptance criteria below are limited
+   to items marked [QA CORRECTION] or [QA ISSUE] — fix those and nothing else.
+3. Do NOT re-read the full spec or re-validate criteria that QA already passed.
+   Those were verified by the QA agent and require no changes.
+4. For each QA issue:
+   - Address it even if the current code already satisfies the original plan.
    - If the issue requires a different approach than the plan, follow the QA feedback.
-   - The plan may be outdated — trust the QA report over the plan.
-3. Do NOT skip an issue because the code "already matches the plan."
-4. Do NOT mark the subtask as complete unless ALL QA issues are addressed.
-5. Focus on the specific issues listed — don't refactor unrelated code.
+5. Do NOT skip an issue because the code "already matches the plan."
+6. Do NOT mark the subtask as complete unless ALL QA issues are addressed.
+7. Focus on the specific issues listed — don't refactor unrelated code.
+8. **Run the full test suite** after all fixes are committed to catch regressions
+   on already-passed subtasks that shouldn't be affected by your changes.
 
 ## Instructions
 1. Read the subtask description and acceptance criteria carefully.

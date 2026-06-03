@@ -7,6 +7,7 @@ import { RoleEditor } from '@/components/role-editor';
 import { PipelineConfigEditor } from '@/components/pipeline-config';
 import { ProviderConfigEditor } from '@/components/provider-config';
 import { ContainerConfigEditor } from '@/components/container-config';
+import { ProjectsSettings } from '@/components/projects-settings';
 
 export default async function SettingsPage() {
   const activeProject = await getActiveProject();
@@ -70,6 +71,9 @@ export default async function SettingsPage() {
             ))}
           </div>
         </section>
+
+        {/* Project defaults sync */}
+        <ProjectsSettings />
       </div>
     </div>
   );

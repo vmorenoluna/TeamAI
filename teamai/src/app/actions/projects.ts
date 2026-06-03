@@ -89,3 +89,43 @@ export async function removeProject(projectPath: string) {
 export async function getProjects() {
   return projectStore.getAll();
 }
+
+/** Check all registered projects for outdated default files. */
+export async function getOutdatedProjects() {
+  return projectStore.getStaleDefaults();
+}
+
+/** Sync defaults for a specific project. Returns list of updated file paths. */
+export async function syncProjectDefaults(projectPath: string): Promise<string[]> {
+  const updated = projectStore.syncDefaults(projectPath);
+  if (updated.length > 0) revalidatePath('/');
+  return updated;
+}
+
+/** Result type for the project settings sync-status table. */
+export interface ProjectSyncStatus {
+  projectName: string;
+  projectPath: string;
+  /** True when defaults are up to date (no files outdated). */
+  upToDate: boolean;
+  /** Relative paths of outdated default files. */
+  outdatedFiles: string[];
+}
+
+/**
+ * Get sync status for ALL registered projects (not just stale ones).
+ * Uses dry-run syncDefaults per project so files are never modified.
+ */
+export async function getAllProjectsSyncStatus(): Promise<ProjectSyncStatus[]> {
+  const projects = projectStore.getAll();
+  const staleMap = new Map(projectStore.getStaleDefaults().map(s => [s.projectPath, s.outdatedFiles]));
+  return projects.map(p => {
+    const outdated = staleMap.get(p.path) ?? [];
+    return {
+      projectName: p.name,
+      projectPath: p.path,
+      upToDate: outdated.length === 0,
+      outdatedFiles: outdated,
+    };
+  });
+}
