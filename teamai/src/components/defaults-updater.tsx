@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useTransition } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { getOutdatedProjects, syncProjectDefaults } from '@/app/actions/projects';
 import type { StaleDefaults } from '@/lib/project-store';
@@ -12,7 +12,6 @@ interface Props {
 
 export function DefaultsUpdater({ initialStale }: Props) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
   // Client-fetched stale data — only used when initialStale is not provided.
   // When initialStale IS provided, it's the source of truth (always fresh from server).
   const [clientStale, setClientStale] = useState<StaleDefaults[]>([]);
@@ -26,11 +25,14 @@ export function DefaultsUpdater({ initialStale }: Props) {
   // Fetch on mount when no server data is provided
   useEffect(() => {
     if (initialStale === undefined) {
-      startTransition(async () => {
-        const data = await getOutdatedProjects();
-        setClientStale(data);
-        setLoading(false);
-      });
+      (async () => {
+        try {
+          const data = await getOutdatedProjects();
+          setClientStale(data);
+        } finally {
+          setLoading(false);
+        }
+      })();
     }
   }, [initialStale]);
 
@@ -42,32 +44,33 @@ export function DefaultsUpdater({ initialStale }: Props) {
       return;
     }
     setLoading(true);
-    startTransition(async () => {
-      const data = await getOutdatedProjects();
-      setClientStale(data);
-      setLoading(false);
-    });
+    (async () => {
+      try {
+        const data = await getOutdatedProjects();
+        setClientStale(data);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }
 
-  function handleSync(projectPath: string) {
+  async function handleSync(projectPath: string) {
     setSyncing(projectPath);
-    startTransition(async () => {
-      try {
-        const updated = await syncProjectDefaults(projectPath);
-        setResults(prev => ({ ...prev, [projectPath]: { updated } }));
-      } catch {
-        setResults(prev => ({
-          ...prev,
-          [projectPath]: { updated: [], error: 'Sync failed' },
-        }));
-      } finally {
-        setSyncing(null);
-        // router.refresh() triggers a server re-render with fresh initialStale.
-        // Since stale is derived from initialStale (when provided), it updates
-        // automatically — no need to manually filter the local state.
-        router.refresh();
-      }
-    });
+    try {
+      const updated = await syncProjectDefaults(projectPath);
+      setResults(prev => ({ ...prev, [projectPath]: { updated } }));
+    } catch {
+      setResults(prev => ({
+        ...prev,
+        [projectPath]: { updated: [], error: 'Sync failed' },
+      }));
+    } finally {
+      setSyncing(null);
+      // router.refresh() triggers a server re-render with fresh initialStale.
+      // Since stale is derived from initialStale (when provided), it updates
+      // automatically — no need to manually filter the local state.
+      router.refresh();
+    }
   }
 
   // Filter out already-synced projects (tracked locally via results)
@@ -100,7 +103,7 @@ export function DefaultsUpdater({ initialStale }: Props) {
         </span>
         <button
           onClick={handleCheck}
-          disabled={loading || isPending}
+          disabled={loading}
           className="text-[10px] text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-40"
         >
           {loading ? 'Checking…' : 'Refresh'}
@@ -119,7 +122,7 @@ export function DefaultsUpdater({ initialStale }: Props) {
           </div>
           <button
             onClick={() => handleSync(s.projectPath)}
-            disabled={syncing === s.projectPath || isPending}
+            disabled={syncing === s.projectPath}
             className="shrink-0 px-2.5 py-1 text-[11px] font-medium bg-amber-900/50 text-amber-300 rounded border border-amber-800/50 hover:bg-amber-900/70 disabled:opacity-40 transition-colors"
           >
             {syncing === s.projectPath ? 'Updating…' : 'Sync'}

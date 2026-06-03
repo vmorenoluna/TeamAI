@@ -41,23 +41,10 @@ test.describe('DefaultsUpdater', () => {
       const bannerSection = page.locator('text=Defaults update available');
       await expect(bannerSection).toBeVisible({ timeout: 10_000 });
 
-      // Wait for React to fully hydrate the component. After SSR, React
-      // attaches fibers to DOM nodes asynchronously. Poll for a fiber key
-      // on the Sync button — this confirms React's event delegation is
-      // active and Playwright's click() will trigger the onClick handler.
-      await page.waitForFunction(() => {
-        const buttons = document.querySelectorAll('button');
-        for (const btn of buttons) {
-          if (btn.textContent?.trim() !== 'Sync') continue;
-          if (Object.keys(btn).some(k => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'))) {
-            return true;
-          }
-        }
-        return false;
-      }, { timeout: 10_000 });
+      // Brief wait for React hydration to complete before clicking.
+      await page.waitForTimeout(1000);
 
-      // Now click the Sync button. React's event delegation is active,
-      // so Playwright's click() will fire the onClick handler.
+      // Click the Sync button to trigger handleSync → syncProjectDefaults.
       const syncButton = page.locator('button:has-text("Sync"):not(:has-text("All"))').first();
       await syncButton.click();
 
