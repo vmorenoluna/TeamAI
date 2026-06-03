@@ -10,11 +10,11 @@ const importLogger = async () => {
 };
 
 describe('logger', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let consoleLogSpy: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let consoleWarnSpy: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let consoleErrorSpy: any;
 
   beforeEach(() => {

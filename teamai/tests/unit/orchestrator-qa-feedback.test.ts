@@ -9,7 +9,7 @@ import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { createTestProject } from '../utils/test-project';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type AnyOrch = any;
 
 // Mock process-manager

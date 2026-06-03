@@ -89,7 +89,7 @@ function RoadmapCard({
   isDeleting,
   hasError,
   isExpanded,
-  onToggle,
+  onToggle: _onToggle,
   isSelected,
   onToggleSelect,
   onSelectTask,
@@ -346,7 +346,7 @@ export function PhasedKanban({
       }
     }
     return ids;
-  }, [phases.now, phases.next, phases.later, phases.icebox]);
+  }, [phases]);
 
   // Fetch statuses for all linked items on mount / when report changes
   useEffect(() => {
@@ -406,6 +406,7 @@ export function PhasedKanban({
   }
 
   async function handleConvertAndSelect(phaseKey: string, itemIndex: number) {
+     
     const key = `${phaseKey}:${itemIndex}`;
     setErrorKey(null);
     setConvertingKey(key);
@@ -714,10 +715,11 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     setSelectedRoadmapItem(null);
   }, []);
 
-  const handleLinkedTaskNotFound = useCallback((item: RoadmapItem, phaseKey: string, itemIndex: number) => {
+  const handleLinkedTaskNotFound = useCallback((_item: RoadmapItem, _phaseKey: string, _itemIndex: number) => {
     // When linked task doesn't exist, open the roadmap item detail instead
     if (!rmFilename) return;
-    setSelectedRoadmapItem({ item, phaseKey, itemIndex, filename: rmFilename });
+     
+    setSelectedRoadmapItem({ item: _item, phaseKey: _phaseKey, itemIndex: _itemIndex, filename: rmFilename });
   }, [rmFilename]);
 
   const handleOpenRoadmapItem = useCallback((item: RoadmapItem, phaseKey: string, itemIndex: number) => {
@@ -739,6 +741,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
         console.error('Failed to convert roadmap item:', e);
       }
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRoadmapItem]);
 
   function handleGenerateRoadmap() {

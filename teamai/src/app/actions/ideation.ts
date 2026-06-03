@@ -6,7 +6,7 @@ import { readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
 declare global {
-  // eslint-disable-next-line no-var
+   
   var __ideationSessions: Map<string, string> | undefined;
 }
 const sessions: Map<string, string> =

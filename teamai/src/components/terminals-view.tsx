@@ -5,7 +5,6 @@ import { createTerminalSession, closeTerminalSession } from '@/app/actions/termi
 import { getAvailableModels, getProvidersConfig } from '@/app/actions/providers';
 import { TerminalPanel } from './terminal-panel';
 import type { RoleDefinition } from '@/app/actions/roles';
-import type { ProvidersConfig } from '@/app/actions/providers';
 
 const PROVIDERS = ['anthropic', 'bedrock', 'vertex', 'openai', 'gemini', 'ollama'] as const;
 

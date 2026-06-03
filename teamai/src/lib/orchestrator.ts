@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, truncateSync, openSync, closeSync, statSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, statSync, rmSync } from 'fs';
 import path from 'path';
 import { warn as logWarn } from './logger';
 import { processManager, type AgentSession } from './process-manager';
@@ -1123,7 +1123,6 @@ export class Orchestrator {
       // the orchestrator would incorrectly treat it as success. Detecting it here lets
       // handleRateLimit pause and retry the task after the usage window resets.
       let sessionLimitResetsAt: number | null = null;
-      let settled = false;
 
       const cleanup = () => {
         processManager.off('event', onEvent);
@@ -1152,7 +1151,6 @@ export class Orchestrator {
         }
 
         if (event.type === 'result') {
-          settled = true;
           cleanup();
           // Session limit takes priority: exit is clean (is_error=false) but no work was done
           if (sessionLimitResetsAt) {
@@ -1166,7 +1164,6 @@ export class Orchestrator {
       };
       const onExit = ({ sessionId: sid, code }: { sessionId: string; code: number | null }) => {
         if (sid !== sessionId) return;
-        settled = true;
         cleanup();
         if (sessionLimitResetsAt) reject(new RateLimitError(sessionLimitResetsAt));
         else if (code === 0 || code === null) resolve();
