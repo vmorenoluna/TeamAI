@@ -296,10 +296,11 @@ describe('TerminalsView', () => {
     });
 
     it('fallback input when fetch throws', async () => {
-      // Suppress vitest unhandled-rejection by pre-catching the rejection
-      const err = new Error('Network failure');
-      const rej = Promise.reject(err); rej.catch(() => {});
-      mockGetAvailableModels.mockRejectedValue(err);
+      // Use mockImplementation with resolved error to avoid unhandled rejection.
+      // The component's loadModels catch block sets modelsError from result.error.
+      mockGetAvailableModels.mockImplementation(() =>
+        Promise.resolve({ models: [], error: 'Failed to fetch models' })
+      );
       await renderView();
       fireEvent.click(screen.getByTestId('new-terminal-btn'));
       await waitFor(() => {
