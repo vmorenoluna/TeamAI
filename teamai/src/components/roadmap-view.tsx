@@ -405,6 +405,7 @@ export function PhasedKanban({
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async function handleConvertAndSelect(phaseKey: string, itemIndex: number) {
      
     const key = `${phaseKey}:${itemIndex}`;
@@ -714,13 +715,6 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     setSelectedTaskId(taskId);
     setSelectedRoadmapItem(null);
   }, []);
-
-  const handleLinkedTaskNotFound = useCallback((_item: RoadmapItem, _phaseKey: string, _itemIndex: number) => {
-    // When linked task doesn't exist, open the roadmap item detail instead
-    if (!rmFilename) return;
-     
-    setSelectedRoadmapItem({ item: _item, phaseKey: _phaseKey, itemIndex: _itemIndex, filename: rmFilename });
-  }, [rmFilename]);
 
   const handleOpenRoadmapItem = useCallback((item: RoadmapItem, phaseKey: string, itemIndex: number) => {
     if (!rmFilename) return;

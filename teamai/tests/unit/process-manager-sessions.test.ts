@@ -7,7 +7,7 @@
  *   - createTerminalSession (node-pty, role file, findExecutable)
  *   - Global singleton pattern
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Module-level mocks (must be before any imports from the file under test) ──
 

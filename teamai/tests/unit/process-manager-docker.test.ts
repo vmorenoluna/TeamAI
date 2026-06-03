@@ -2,7 +2,7 @@
  * Tests for ProcessManager.createSession with container (Docker) mode enabled.
  * Covers the docker exec spawn path (lines ~73-90 of process-manager.ts).
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'events';
 
 // ── Hoisted mocks ──

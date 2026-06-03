@@ -891,7 +891,7 @@ describe('Orchestrator', () => {
         containerId: 'cont-abc',
         remoteWorkspaceFolder: '/workspace',
       } as any);
-      vi.mocked(hostToContainerPath).mockImplementation((hp: string, _root: string, _ws: string) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+      vi.mocked(hostToContainerPath).mockImplementation((hp: string, _root: string, _ws: string) => {
         return '/workspace' + (hp === testData.root ? '' : '/cwd');
       });
 

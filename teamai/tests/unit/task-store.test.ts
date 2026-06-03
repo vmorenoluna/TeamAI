@@ -92,13 +92,13 @@ describe('TaskStore', () => {
 
     it('writes task.json to a slugified directory', () => {
       // slugify('Fix Login BUG') → 'fix-login-bug' (no trailing punctuation)
-      const task = createTask('Fix Login BUG', 'desc');
+      const _task = createTask('Fix Login BUG', 'desc');
 
       const dir = join(root, '.teamai', 'fix-login-bug');
       expect(existsSync(dir)).toBe(true);
 
       const raw = JSON.parse(readFileSync(join(dir, 'task.json'), 'utf-8'));
-      expect(raw.id).toBe(task.id);
+      expect(raw.id).toBe(_task.id);
       expect(raw.title).toBe('Fix Login BUG');
     });
 
@@ -114,7 +114,7 @@ describe('TaskStore', () => {
     });
 
     it('does not leave stale .tmp files after a successful write', () => {
-      const task = createTask('Atomic test', 'desc');
+      void createTask('Atomic test', 'desc');
       const dir = join(root, '.teamai', 'atomic-test');
       const tmpPath = join(dir, 'task.json.tmp');
 

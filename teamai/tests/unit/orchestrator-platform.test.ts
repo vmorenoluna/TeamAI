@@ -4,7 +4,6 @@
  * _execGit container path, handleRateLimit/timeout, getWorktreeBase container path.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { EventEmitter } from 'events';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
