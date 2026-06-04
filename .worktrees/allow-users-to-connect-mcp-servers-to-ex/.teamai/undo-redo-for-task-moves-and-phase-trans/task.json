@@ -1,9 +1,0 @@
-{
-  "id": "d02909c7-42b4-4982-8199-7c2acf4270c5",
-  "title": "Undo/redo for task moves and phase transitions",
-  "description": "Implement an undo/redo stack for task operations (move, phase change, delete) so users can recover from accidental drag-and-drop actions. Show a subtle toast notification with 'Undo' button after each action.",
-  "phase": "done",
-  "source": "ideation",
-  "createdAt": "2026-05-12T10:21:32.232Z",
-  "updatedAt": "2026-05-12T15:30:00.000Z"
-}

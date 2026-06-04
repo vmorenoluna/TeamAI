@@ -1,3 +1,0 @@
-#!/bin/sh
-# Run full typecheck first (tsc can't accept individual file args — it ignores tsconfig)
-cd teamai && npx tsc --noEmit && npx lint-staged

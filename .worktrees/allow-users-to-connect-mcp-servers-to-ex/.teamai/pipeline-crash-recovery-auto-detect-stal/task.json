@@ -1,9 +1,0 @@
-{
-  "id": "91f70088-9909-41f6-b6fe-22da8ae6ae0b",
-  "title": "Pipeline crash recovery — auto-detect stale sessions and orphaned worktrees",
-  "description": "When the server crashes or restarts mid-pipeline, stale session references and orphaned git worktrees can persist, causing errors on the next pipeline run. Implement startup recovery that scans for and cleans up stale sessions and worktrees.",
-  "phase": "done",
-  "source": "ideation",
-  "createdAt": "2026-05-11T17:16:19.480Z",
-  "updatedAt": "2026-05-11T22:27:32.018Z"
-}
