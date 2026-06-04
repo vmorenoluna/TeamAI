@@ -343,6 +343,8 @@ describe('TaskStore', () => {
       writeFileSync(join(dir, 'qa_report.json'), '{}');
       writeFileSync(join(dir, 'qa_feedback.md'), '# feedback');
       writeFileSync(join(dir, 'completion_summary.md'), '# summary');
+      writeFileSync(join(dir, 'spec_revision_feedback.md'), '# revision feedback');
+      writeFileSync(join(dir, 'spec_v1.md'), '# original spec snapshot');
     });
 
     it('clears spec-level artifacts (spec.md, plan.json, qa_report.json)', () => {
@@ -352,8 +354,12 @@ describe('TaskStore', () => {
       expect(existsSync(join(dir, 'plan.json'))).toBe(false);
       expect(existsSync(join(dir, 'qa_report.json'))).toBe(false);
       // Lower-level artifacts should remain
+      // Lower-level artifacts should remain
       expect(existsSync(join(dir, 'qa_feedback.md'))).toBe(true);
       expect(existsSync(join(dir, 'completion_summary.md'))).toBe(true);
+      // Revision-related files should also be cleaned
+      expect(existsSync(join(dir, 'spec_revision_feedback.md'))).toBe(false);
+      expect(existsSync(join(dir, 'spec_v1.md'))).toBe(false);
     });
 
     it('clears plan-level artifacts (plan.json, qa_report.json)', () => {
