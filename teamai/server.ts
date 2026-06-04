@@ -4,7 +4,7 @@ import next from 'next';
 import { WebSocketServer, WebSocket } from 'ws';
 import { processManager } from './src/lib/process-manager';
 import { containerManager } from './src/lib/container-manager';
-import { startupCleanup } from './src/lib/recovery';
+import { startupCleanup, autoResumeInterruptedTasks } from './src/lib/recovery';
 import { error as logError } from './src/lib/logger';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
@@ -137,6 +137,29 @@ app.prepare().then(() => {
       }
     } else {
       console.log('[recovery] clean — no stale state detected');
+    }
+
+    // ── Auto-resume interrupted tasks on startup ────────────────────────
+    if (report.interruptedTasks.length > 0) {
+      autoResumeInterruptedTasks().then(count => {
+        console.log(`[auto-resume] Queued ${count} interrupted task(s) for resumption`);
+      }).catch(err => {
+        logError('auto-resume', 'Failed to auto-resume interrupted tasks', err);
+      });
+    }
+  });
+
+  // ── Container availability listener: auto-resume when container becomes available ──
+  containerManager.on('container-state', (data: { projectRoot: string; state: string }) => {
+    if (data.state === 'running') {
+      console.log(`[auto-resume] Container for ${data.projectRoot} became available — checking for interrupted tasks`);
+      autoResumeInterruptedTasks().then(count => {
+        if (count > 0) {
+          console.log(`[auto-resume] Queued ${count} interrupted task(s) after container became available`);
+        }
+      }).catch(err => {
+        logError('auto-resume', 'Failed to auto-resume after container became available', err);
+      });
     }
   });
 });

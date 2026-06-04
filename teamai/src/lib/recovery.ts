@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, existsSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { warn as logWarn } from './logger';
 
 const IN_PROGRESS_PHASES = new Set([
   'spec', 'plan', 'implement', 'qa-review', 'merge', 'create-pr',
@@ -256,6 +257,48 @@ export function reconcileTaskArtifacts(): ArtifactInconsistency[] {
   }
 
   return inconsistencies;
+}
+
+// Debounce guard: prevent auto-resume from firing twice within a short window
+// (e.g. on startup when both the initial call and the container-state listener fire).
+let _lastAutoResumeTime = 0;
+const AUTO_RESUME_DEBOUNCE_MS = 15_000; // 15 seconds
+
+/** @internal Reset the auto-resume debounce timer (used in tests). */
+export function _resetAutoResumeDebounce(): void {
+  _lastAutoResumeTime = 0;
+}
+
+/**
+ * Auto-resume all interrupted tasks by re-queuing them through the orchestrator.
+ * Called on server startup and when a container becomes available after being down.
+ * Debounced: subsequent calls within AUTO_RESUME_DEBOUNCE_MS are ignored.
+ * @returns the number of tasks that were auto-resumed, or 0 if debounced
+ */
+export async function autoResumeInterruptedTasks(): Promise<number> {
+  const now = Date.now();
+  if (now - _lastAutoResumeTime < AUTO_RESUME_DEBOUNCE_MS) {
+    return 0;
+  }
+  _lastAutoResumeTime = now;
+
+  // Dynamic import to avoid circular dependency at module load time
+  const { getOrchestrator } = await import('./orchestrator');
+  const interrupted = findInterruptedTasks();
+
+  for (const task of interrupted) {
+    try {
+      const orchestrator = getOrchestrator(task.projectPath);
+      console.log(`[auto-resume] Resuming task ${task.taskId} "${task.title}" at phase ${task.phase} in ${task.projectName}`);
+      orchestrator.resumeTask(task.taskId).catch(err => {
+        logWarn('auto-resume', `Task ${task.taskId} "${task.title}" failed to resume:`, err);
+      });
+    } catch (err) {
+      logWarn('auto-resume', `Failed to create orchestrator for ${task.projectPath}:`, err);
+    }
+  }
+
+  return interrupted.length;
 }
 
 export function startupCleanup(staleSessionCount: number): StartupRecoveryReport {
