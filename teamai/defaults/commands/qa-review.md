@@ -20,6 +20,20 @@ Read the spec at: $ARGUMENTS
    - Style: Does it match existing code conventions?
    - Regressions: Could this break existing functionality?
 
+## Step 6: Spec Gap Detection
+For each FAIL, determine the root cause:
+- **Implementation bug**: The code doesn't match the spec → standard FAIL, populate `fix_needed` as usual
+- **Spec gap**: The code correctly follows the spec, but the spec itself makes a wrong assumption → populate `spec_concerns`
+
+Flag a spec concern when:
+- The implementation correctly follows the spec, yet the outcome is wrong
+- The spec references APIs, types, or patterns that don't exist in the codebase
+- An acceptance criterion is impossible to satisfy as written
+- The spec contradicts itself or makes mutually exclusive requirements
+- The spec's assumptions about external dependencies (APIs, libraries, data formats) proved incorrect
+
+When spec concerns are present, the task goes to human review — the reviewer decides whether to revise the spec. Not all FAIL criteria are spec concerns; only flag when the *specification* is the root cause, not the implementation.
+
 ## Output
 Create `.teamai/{slug}/qa_report.json`:
 
@@ -41,7 +55,16 @@ Create `.teamai/{slug}/qa_report.json`:
       "file": "path",
       "fix_needed": "how to fix"
     }
+  ],
+  "spec_concerns": [
+    {
+      "issue": "one-line summary of the spec problem",
+      "reasoning": "why the spec is wrong (not the implementation)",
+      "suggested_fix": "how the spec should be updated to fix this"
+    }
   ]
 }
 ```
+
+Only include `spec_concerns` if spec gaps were detected. Omit the field entirely if all FAILs are implementation bugs.
 ```

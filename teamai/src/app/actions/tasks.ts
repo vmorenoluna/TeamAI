@@ -227,6 +227,12 @@ export async function rejectTask(taskId: string, feedback: string) {
   revalidatePath('/');
 }
 
+export async function reviseSpec(taskId: string) {
+  const { orchestrator } = await getStores();
+  await orchestrator.reviseSpec(taskId);
+  revalidatePath('/');
+}
+
 export async function getTasks() {
   const { taskStore } = await getStores();
   await getActiveProjectPath();

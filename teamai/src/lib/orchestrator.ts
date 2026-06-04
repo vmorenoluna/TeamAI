@@ -46,6 +46,13 @@ interface QaReport {
   criteria?: QaCriterion[];
   additional_issues?: QaIssue[];
   issues?: QaIssue[];
+  spec_concerns?: SpecConcern[];
+}
+
+interface SpecConcern {
+  issue: string;
+  reasoning: string;
+  suggested_fix?: string;
 }
 
 
@@ -310,6 +317,64 @@ export class Orchestrator {
     await this.executePhase(pipeline);
   }
 
+  async reviseSpec(taskId: string): Promise<void> {
+    const task = this.taskStore.getById(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+    const phase = task.phase;
+    if (phase !== 'awaiting-review') {
+      throw new Error(`cannot revise spec for a task in ${phase} — must be awaiting-review`);
+    }
+
+    const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, 'awaiting-review');
+    const specPath = pipeline.specPath;
+
+    // Write spec_revision_feedback.md from QA report's spec_concerns
+    const reportPath = path.join(specPath, 'qa_report.json');
+    let feedbackContent = '# Spec Revision Feedback\n\n';
+    feedbackContent += 'The QA reviewer identified issues with the specification itself ';
+    feedbackContent += '(not the implementation). The spec needs to be revised to address these concerns.\n\n';
+    if (existsSync(reportPath)) {
+      try {
+        const report: QaReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
+        if (report.spec_concerns && report.spec_concerns.length > 0) {
+          for (const sc of report.spec_concerns) {
+            feedbackContent += `## ${sc.issue}\n\n`;
+            feedbackContent += `**Reasoning:** ${sc.reasoning}\n\n`;
+            if (sc.suggested_fix) {
+              feedbackContent += `**Suggested fix:** ${sc.suggested_fix}\n\n`;
+            }
+          }
+        }
+      } catch { /* best-effort — produce feedback from whatever we can read */ }
+    }
+    writeFileSync(path.join(specPath, 'spec_revision_feedback.md'), feedbackContent);
+
+    // Snapshot the current spec before revision (preserves history)
+    const specMdPath = path.join(specPath, 'spec.md');
+    if (existsSync(specMdPath)) {
+      try {
+        writeFileSync(path.join(specPath, 'spec_v1.md'), readFileSync(specMdPath, 'utf-8'));
+      } catch { /* best-effort */ }
+    }
+
+    // Clear downstream artifacts — plan, QA, and feedback all need regeneration
+    // from the revised spec. clearArtifacts('plan') clears plan.json + qa_report.json.
+    this.taskStore.clearArtifacts(taskId, 'plan');
+
+    // Also clear additional revision-related files that should not persist
+    const extraFiles = ['qa_feedback.md', 'completion_summary.md', 'human_feedback.md', 'human_feedback_before_bounce.md'];
+    for (const f of extraFiles) {
+      try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
+    }
+
+    // Reset QA attempt counter — the revised spec gets a fresh QA cycle
+    pipeline.qaAttempt = 0;
+    this._savePipelineState(pipeline);
+
+    this.advancePhase(pipeline, 'spec');
+    await this.executePhase(pipeline);
+  }
+
   private async executePhase(pipeline: TaskPipeline): Promise<void> {
     switch (pipeline.phase) {
       case 'spec':         return this.runSpec(pipeline);
@@ -335,10 +400,29 @@ export class Orchestrator {
     // Pass the explicit output path so the agent writes spec.md to the task's directory,
     // not a new directory derived from the description slug.
     const agentSpecPath = this._toAgentPath(pipeline.specPath);
-    processManager.sendMessage(sessionId,
-      `/spec ${pipeline.description}\n\nIMPORTANT: Write the spec file to \`${agentSpecPath}/spec.md\` (use this exact path, not a new subdirectory).`);
+
+    // Check for revision mode — spec_revision_feedback.md is written by reviseSpec()
+    const revisionFeedbackPath = path.join(pipeline.specPath, 'spec_revision_feedback.md');
+    const isRevision = existsSync(revisionFeedbackPath);
+
+    if (isRevision) {
+      processManager.sendMessage(sessionId,
+        `REVISION: ${pipeline.description}\n\n` +
+        `Read the existing spec at: \`${agentSpecPath}/spec.md\`\n` +
+        `Read the spec revision feedback at: \`${agentSpecPath}/spec_revision_feedback.md\`\n` +
+        `Revise the spec to address ALL concerns in the feedback.\n` +
+        `Preserve parts of the spec that are still valid — only change what the feedback asks for.\n` +
+        `IMPORTANT: Write the revised spec to \`${agentSpecPath}/spec.md\` (overwrite the existing file).`);
+    } else {
+      processManager.sendMessage(sessionId,
+        `/spec ${pipeline.description}\n\nIMPORTANT: Write the spec file to \`${agentSpecPath}/spec.md\` (use this exact path, not a new subdirectory).`);
+    }
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
+    // Clean up revision feedback after spec revision is complete
+    if (isRevision && existsSync(revisionFeedbackPath)) {
+      unlinkSync(revisionFeedbackPath);
+    }
     this.advancePhase(pipeline, 'plan');
     await this.executePhase(pipeline);
   }
@@ -817,9 +901,16 @@ export class Orchestrator {
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 
-    const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+    const report: QaReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
 
-    if (report.overall === 'PASS') {
+    // When spec concerns exist, go to human review regardless of overall verdict.
+    // The spec itself needs changes — the reviewer decides whether to revise the spec
+    // or bounce back to implement with the standard QA feedback.
+    const hasSpecConcerns = report.spec_concerns && Array.isArray(report.spec_concerns) && report.spec_concerns.length > 0;
+
+    if (hasSpecConcerns) {
+      this.advancePhase(pipeline, 'awaiting-review');
+    } else if (report.overall === 'PASS') {
       this.advancePhase(pipeline, 'awaiting-review');
     } else if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
       // Write completion summary before marking as failed

@@ -2596,6 +2596,433 @@ describe('Orchestrator', () => {
     });
   });
 
+  // ── Spec revision — runQaReview with spec_concerns ───────────────
+
+  describe('runQaReview — spec concerns diversion', () => {
+    it('advances to awaiting-review when spec_concerns exist, bypassing the implement bounce', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        qaAttempt: 0,
+        maxQaAttempts: 3,
+      });
+
+      mockCreateSession.mockResolvedValue('sess-qa-spec');
+
+      // QA report with spec_concerns — the spec itself is the problem,
+      // not the implementation
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [
+          { name: 'API response matches spec', status: 'PASS', notes: 'Code correctly uses { data: [...] } as spec says' },
+        ],
+        spec_concerns: [
+          {
+            issue: 'Spec assumes wrong API response shape',
+            reasoning: 'The spec says the API returns { data: [...] } but the actual API returns { results: [...] }. The implementation follows the spec correctly but the spec itself is wrong.',
+            suggested_fix: 'Update acceptance criteria to reference { results: [...] } instead of { data: [...] }',
+          },
+        ],
+      }));
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-qa-spec', event: { type: 'result' } });
+      await promise;
+
+      // Should have advanced to awaiting-review (not implement, not failed)
+      expect(pipeline.phase).toBe('awaiting-review');
+      expect(pipeline.qaAttempt).toBe(1);
+    });
+
+    it('advances to awaiting-review even when overall is PASS but spec_concerns exist', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        qaAttempt: 0,
+        maxQaAttempts: 3,
+      });
+
+      mockCreateSession.mockResolvedValue('sess-qa-pass-spec');
+
+      // QA passes implementation (code matches spec) but flags spec-level concerns
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [
+          { name: 'API integration', status: 'PASS', notes: 'Code follows spec' },
+        ],
+        spec_concerns: [
+          {
+            issue: 'Spec contradicts itself',
+            reasoning: 'Requirement 3 says use POST but requirement 5 says use GET for the same endpoint. The implementation used POST per requirement 3, but this may be wrong.',
+            suggested_fix: 'Resolve contradiction and pick one HTTP method.',
+          },
+        ],
+      }));
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-qa-pass-spec', event: { type: 'result' } });
+      await promise;
+
+      // Spec concerns take priority over PASS — goes to human review
+      expect(pipeline.phase).toBe('awaiting-review');
+    });
+
+    it('still bounces to implement when overall is FAIL and no spec_concerns exist', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        qaAttempt: 0,
+        maxQaAttempts: 3,
+      });
+
+      // Need to mock createSession for both QA and implement phases
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve('sess-qa-fail');
+        return Promise.reject(new Error('simulated abort'));
+      });
+
+      // Standard FAIL — no spec_concerns
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [
+          { name: 'Button visible on mobile', status: 'FAIL', notes: 'Button hidden at 375px', fix_needed: 'Fix the z-index' },
+        ],
+      }));
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-qa-fail', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 30));
+      await promise;
+
+      // Standard FAIL without spec_concerns should bounce to implement
+      expect(pipeline.phase).toBe('implement');
+    });
+
+    it('handles empty spec_concerns array like no spec_concerns at all', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        qaAttempt: 0,
+        maxQaAttempts: 3,
+      });
+
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve('sess-qa-empty');
+        return Promise.reject(new Error('simulated abort'));
+      });
+
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [
+          { name: 'Test', status: 'FAIL', notes: 'Failed' },
+        ],
+        spec_concerns: [],
+      }));
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-qa-empty', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 30));
+      await promise;
+
+      // Empty spec_concerns should follow normal FAIL path → bounce to implement
+      expect(pipeline.phase).toBe('implement');
+    });
+  });
+
+  // ── Spec revision — reviseSpec method ─────────────────────────────
+
+  describe('reviseSpec', () => {
+    it('throws when task is not in awaiting-review', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      await expect(orch.reviseSpec(testData.taskId)).rejects.toThrow('cannot revise spec for a task in backlog');
+    });
+
+    it('writes spec_revision_feedback.md from QA report spec_concerns', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      // Set task to awaiting-review
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
+
+      // Write existing spec.md and qa_report.json with spec_concerns
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Original Spec\n\nSome wrong assumptions.');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [],
+        spec_concerns: [
+          {
+            issue: 'Wrong API assumption',
+            reasoning: 'Spec says the API returns XML but it actually returns JSON.',
+            suggested_fix: 'Update all API examples to use JSON.',
+          },
+          {
+            issue: 'Missing edge case',
+            reasoning: 'Spec does not cover the rate-limiting scenario.',
+          },
+        ],
+      }));
+
+      // Mock createSession to abort the cascading pipeline after spec starts
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+
+      await orch.reviseSpec(testData.taskId).catch(() => {});
+
+      // Verify spec_revision_feedback.md was written with both concerns
+      const feedbackPath = join(testData.taskDir, 'spec_revision_feedback.md');
+      expect(existsSync(feedbackPath)).toBe(true);
+      const feedback = readFileSync(feedbackPath, 'utf-8');
+      expect(feedback).toContain('Wrong API assumption');
+      expect(feedback).toContain('Spec says the API returns XML but it actually returns JSON');
+      expect(feedback).toContain('Update all API examples to use JSON');
+      expect(feedback).toContain('Missing edge case');
+      expect(feedback).toContain('Spec does not cover the rate-limiting scenario');
+    });
+
+    it('snapshots spec.md as spec_v1.md before revision', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
+
+      const originalSpec = '# Original Spec\n\nAssumption: API returns XML.';
+      writeFileSync(join(testData.taskDir, 'spec.md'), originalSpec);
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        spec_concerns: [
+          { issue: 'Wrong format', reasoning: 'API returns JSON, not XML.' },
+        ],
+      }));
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.reviseSpec(testData.taskId).catch(() => {});
+
+      // spec_v1.md should contain the original spec content
+      const snapshotPath = join(testData.taskDir, 'spec_v1.md');
+      expect(existsSync(snapshotPath)).toBe(true);
+      expect(readFileSync(snapshotPath, 'utf-8')).toBe(originalSpec);
+    });
+
+    it('clears downstream artifacts (plan.json, qa_report.json, feedback files)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
+
+      // Write artifacts that should be cleared
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [] }));
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        spec_concerns: [{ issue: 'Test', reasoning: 'Test' }],
+      }));
+      writeFileSync(join(testData.taskDir, 'qa_feedback.md'), 'old qa feedback');
+      writeFileSync(join(testData.taskDir, 'completion_summary.md'), 'old summary');
+      writeFileSync(join(testData.taskDir, 'human_feedback.md'), 'old human feedback');
+      writeFileSync(join(testData.taskDir, 'human_feedback_before_bounce.md'), 'old snapshot');
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.reviseSpec(testData.taskId).catch(() => {});
+
+      // plan.json and qa_report.json cleared by clearArtifacts('plan')
+      expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'qa_report.json'))).toBe(false);
+
+      // Extra files manually cleared
+      expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'completion_summary.md'))).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'human_feedback.md'))).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'human_feedback_before_bounce.md'))).toBe(false);
+
+      // spec.md should still exist (it gets revised, not deleted)
+      expect(existsSync(join(testData.taskDir, 'spec.md'))).toBe(true);
+    });
+
+    it('resets qaAttempt to 0 for a fresh QA cycle on revised spec', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        spec_concerns: [{ issue: 'Test', reasoning: 'Test' }],
+      }));
+
+      // Register a pipeline with a non-zero qaAttempt
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        phase: 'awaiting-review',
+        specPath: testData.taskDir,
+        qaAttempt: 3,
+      });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.reviseSpec(testData.taskId).catch(() => {});
+
+      // QA attempt should be reset to 0
+      expect(pipeline.qaAttempt).toBe(0);
+    });
+
+    it('advances to spec phase and starts the pipeline', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        spec_concerns: [{ issue: 'Test', reasoning: 'Test' }],
+      }));
+
+      // Mock createSession to verify the pipeline actually starts (createSession is called)
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+
+      await orch.reviseSpec(testData.taskId).catch(() => {});
+
+      // createSession should have been called (proves executePhase → runSpec was reached)
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+  });
+
+  // ── Spec revision — runSpec revision mode detection ───────────────
+
+  describe('runSpec — revision mode', () => {
+    it('sends REVISION prompt when spec_revision_feedback.md exists', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      // Write spec_revision_feedback.md to trigger revision mode
+      writeFileSync(join(testData.taskDir, 'spec_revision_feedback.md'),
+        '## Wrong API assumption\n\n**Reasoning:** API returns JSON, not XML.\n\n**Suggested fix:** Update spec.\n');
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+      });
+
+      // First createSession succeeds (spec), second rejects (plan cascade)
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve('sess-spec-rev');
+        return Promise.reject(new Error('simulated abort'));
+      });
+
+      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+      // Should have sent a REVISION prompt, not /spec
+      const sendCalls = mockSendMessage.mock.calls.filter(
+        (call: any[]) => call[0] === 'sess-spec-rev'
+      );
+      expect(sendCalls.length).toBeGreaterThanOrEqual(1);
+      const prompt = sendCalls[0][1];
+      expect(prompt).toContain('REVISION:');
+      expect(prompt).toContain('spec_revision_feedback.md');
+      expect(prompt).toContain('Revise the spec to address ALL concerns');
+      // REVISION prompt starts with REVISION:, not /spec
+      expect(prompt.startsWith('REVISION:')).toBe(true);
+
+      // Fire completion
+      fireEvent('event', { sessionId: 'sess-spec-rev', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+      await promise;
+    });
+
+    it('cleans up spec_revision_feedback.md after revision completes', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'spec_revision_feedback.md'),
+        '## Test concern\n\n**Reasoning:** Test.\n');
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+      });
+
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve('sess-spec-cleanup');
+        return Promise.reject(new Error('simulated abort'));
+      });
+
+      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+      // File should still exist during spec execution
+      expect(existsSync(join(testData.taskDir, 'spec_revision_feedback.md'))).toBe(true);
+
+      fireEvent('event', { sessionId: 'sess-spec-cleanup', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+      await promise;
+
+      // After spec completes, revision feedback should be cleaned up
+      expect(existsSync(join(testData.taskDir, 'spec_revision_feedback.md'))).toBe(false);
+    });
+
+    it('sends standard /spec prompt when spec_revision_feedback.md does not exist', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      // No spec_revision_feedback.md — this is a normal spec phase
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+      });
+
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve('sess-spec-normal');
+        return Promise.reject(new Error('simulated abort'));
+      });
+
+      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+      const sendCalls = mockSendMessage.mock.calls.filter(
+        (call: any[]) => call[0] === 'sess-spec-normal'
+      );
+      expect(sendCalls.length).toBeGreaterThanOrEqual(1);
+      const prompt = sendCalls[0][1];
+      expect(prompt).toContain('/spec');
+      expect(prompt).not.toContain('REVISION:');
+
+      fireEvent('event', { sessionId: 'sess-spec-normal', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+      await promise;
+    });
+  });
+
   // ── Clean up global orchestrators after tests ─────────────────────
 
   afterAll(() => {
