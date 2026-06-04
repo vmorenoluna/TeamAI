@@ -19,6 +19,8 @@ If the prompt includes "⚠️ QA FEEDBACK" at the top, you are in QA rework mod
    - If the issue requires a different approach than the plan, follow the QA feedback.
 5. Do NOT skip an issue because the code "already matches the plan."
 6. Do NOT mark the subtask as complete unless ALL QA issues are addressed.
+   - Issues marked as **critical** or **error** severity are HARD BLOCKERS — they carry the same weight as FAIL criteria. You MUST fix them; they are not suggestions.
+   - Only **suggestion** severity items are optional.
 7. Focus on the specific issues listed — don't refactor unrelated code.
 8. **Run the full test suite** after all fixes are committed to catch regressions
    on already-passed subtasks that shouldn't be affected by your changes.

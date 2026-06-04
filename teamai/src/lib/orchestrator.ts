@@ -636,7 +636,10 @@ export class Orchestrator {
               lines.push(`Issues in subtask ${subtask.id} **${subtask.title}**:`);
               for (const c of qaOnlyCriteria) {
                 // Strip [QA CORRECTION: ...] / [QA ISSUE: ...] markers for readability
-                const cleaned = c.replace(/\s*\[QA (?:CORRECTION|ISSUE):\s*/g, ': ').replace(/\]$/, '');
+                const cleaned = c
+                  .replace(/\s*\[QA CORRECTION:\s*/g, '[BLOCKER] ')
+                  .replace(/\s*\[QA ISSUE\s*\((\w*)\):\s*/g, '[$1] ')
+                  .replace(/\]$/, '');
                 lines.push(`- ${cleaned}`);
               }
             }
@@ -1648,7 +1651,7 @@ export class Orchestrator {
             return fileBase === issueBase || f.endsWith(issue.file!) || issue.file!.endsWith(f);
           })) {
                   if (!subtask.acceptance_criteria) subtask.acceptance_criteria = [];
-                  subtask.acceptance_criteria.push(`[QA ISSUE: ${desc}${fix ? ` → Fix: ${fix}` : ''}]`);
+                  subtask.acceptance_criteria.push(`[QA ISSUE (${issue.severity || 'unknown'}): ${desc}${fix ? ` → Fix: ${fix}` : ''}]`);
                   subtask.qa_flagged = true;
                   modified = true;
                   // Don't break — same file may appear in multiple subtasks
