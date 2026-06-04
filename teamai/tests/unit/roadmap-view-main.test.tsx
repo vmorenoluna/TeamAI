@@ -121,7 +121,9 @@ import { RoadmapView } from '@/components/roadmap-view';
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function renderView(noProject = false) {
-  render(<RoadmapView noProject={noProject} />);
+  act(() => {
+    render(<RoadmapView noProject={noProject} />);
+  });
 }
 
 function ev(type: string, text?: string): SessionEvent {

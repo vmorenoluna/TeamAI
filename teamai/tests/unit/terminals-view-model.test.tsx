@@ -61,7 +61,10 @@ describe('TerminalsView - Model Controls', () => {
   // ── Dialog open/close ───────────────────────────────────────────────
 
   it('opens the New Terminal dialog when + New Terminal is clicked', async () => {
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     const newBtn = screen.getByText('+ New Terminal');
     await act(async () => {
@@ -74,7 +77,10 @@ describe('TerminalsView - Model Controls', () => {
   });
 
   it('closes the dialog when Cancel is clicked', async () => {
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     // Open dialog
     await act(async () => {
@@ -92,7 +98,10 @@ describe('TerminalsView - Model Controls', () => {
   // ── Provider select ─────────────────────────────────────────────────
 
   it('shows provider select in the dialog', async () => {
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     await act(async () => {
       fireEvent.click(screen.getByText('+ New Terminal'));
@@ -109,7 +118,10 @@ describe('TerminalsView - Model Controls', () => {
   // ── Model loading ───────────────────────────────────────────────────
 
   it('loads models for the default provider on mount', async () => {
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     await waitFor(() => {
       expect(mockGetAvailableModels).toHaveBeenCalledWith('anthropic', false);
@@ -117,7 +129,10 @@ describe('TerminalsView - Model Controls', () => {
   });
 
   it('shows model controls in the dialog', async () => {
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     await act(async () => {
       fireEvent.click(screen.getByText('+ New Terminal'));
@@ -129,7 +144,10 @@ describe('TerminalsView - Model Controls', () => {
   });
 
   it('shows model select with options after models load', async () => {
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     await act(async () => {
       fireEvent.click(screen.getByText('+ New Terminal'));
@@ -153,7 +171,10 @@ describe('TerminalsView - Model Controls', () => {
       .mockResolvedValueOnce({ models: CURATED_MODELS_ANTHROPIC, error: undefined })
       .mockResolvedValue({ models: ['gpt-4o', 'gpt-4o-mini'], error: undefined });
 
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     await act(async () => {
       fireEvent.click(screen.getByText('+ New Terminal'));
@@ -185,7 +206,10 @@ describe('TerminalsView - Model Controls', () => {
   // ── Custom model ────────────────────────────────────────────────────
 
   it('shows custom model input when "Custom…" is selected', async () => {
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     await act(async () => {
       fireEvent.click(screen.getByText('+ New Terminal'));
@@ -221,7 +245,10 @@ describe('TerminalsView - Model Controls', () => {
   // ── Refresh button ──────────────────────────────────────────────────
 
   it('calls loadModels with refresh=true when refresh button is clicked', async () => {
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     await act(async () => {
       fireEvent.click(screen.getByText('+ New Terminal'));
@@ -246,7 +273,10 @@ describe('TerminalsView - Model Controls', () => {
   // ── Role select ─────────────────────────────────────────────────────
 
   it('renders role options from the provided roles', async () => {
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     await act(async () => {
       fireEvent.click(screen.getByText('+ New Terminal'));
@@ -274,7 +304,10 @@ describe('TerminalsView - Model Controls', () => {
       error: 'ANTHROPIC_API_KEY not set',
     });
 
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     await act(async () => {
       fireEvent.click(screen.getByText('+ New Terminal'));
@@ -297,7 +330,9 @@ describe('TerminalsView - Model Controls', () => {
 
     mockGetAvailableModels.mockImplementation(() => loadingPromise);
 
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
 
     await act(async () => {
       fireEvent.click(screen.getByText('+ New Terminal'));
@@ -316,7 +351,10 @@ describe('TerminalsView - Model Controls', () => {
   // ── Open button ─────────────────────────────────────────────────────
 
   it('has Open button disabled until a role is selected', async () => {
-    render(<TerminalsView roles={MOCK_ROLES} />);
+    act(() => {
+      render(<TerminalsView roles={MOCK_ROLES} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     await act(async () => {
       fireEvent.click(screen.getByText('+ New Terminal'));

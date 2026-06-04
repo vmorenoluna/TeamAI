@@ -47,14 +47,20 @@ describe('ProviderConfigEditor', () => {
 
   // ── Rendering ───────────────────────────────────────────────────────
 
-  it('renders default section and role overrides section', () => {
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+  it('renders default section and role overrides section', async () => {
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     expect(screen.getByText('Default (all roles)')).toBeInTheDocument();
     expect(screen.getByText('Role overrides')).toBeInTheDocument();
   });
 
-  it('renders label for each role', () => {
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+  it('renders label for each role', async () => {
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     expect(screen.getByText('Default')).toBeInTheDocument();
     expect(screen.getByText('analyst')).toBeInTheDocument();
     expect(screen.getByText('planner')).toBeInTheDocument();
@@ -64,7 +70,9 @@ describe('ProviderConfigEditor', () => {
   });
 
   it('calls getAvailableModels on mount with the default provider', async () => {
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
     await waitFor(() => {
       expect(mockGetAvailableModels).toHaveBeenCalledWith('anthropic', false);
     });
@@ -73,7 +81,9 @@ describe('ProviderConfigEditor', () => {
   // ── Model select ────────────────────────────────────────────────────
 
   it('shows model select with options after models load', async () => {
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
     await waitFor(() => {
       const comboboxes = screen.getAllByRole('combobox');
       const modelSelect = findSelect(comboboxes, opts =>
@@ -84,7 +94,9 @@ describe('ProviderConfigEditor', () => {
   });
 
   it('selects the current model in the dropdown', async () => {
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
     await waitFor(() => {
       const comboboxes = screen.getAllByRole('combobox');
       const modelSelect = findSelect(comboboxes, opts =>
@@ -100,15 +112,20 @@ describe('ProviderConfigEditor', () => {
       default: { model: 'my-custom-model-v1', provider: 'anthropic' },
       roles: {},
     };
-    render(<ProviderConfigEditor config={configWithCustomModel} />);
+    act(() => {
+      render(<ProviderConfigEditor config={configWithCustomModel} />);
+    });
     const customInput = await screen.findByPlaceholderText('Type a model name…');
     expect(customInput).toHaveValue('my-custom-model-v1');
   });
 
   // ── Provider select ─────────────────────────────────────────────────
 
-  it('renders provider select with all providers', () => {
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+  it('renders provider select with all providers', async () => {
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     expect(screen.getAllByRole('option', { name: 'anthropic' }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByRole('option', { name: 'openai' }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByRole('option', { name: 'bedrock' }).length).toBeGreaterThanOrEqual(1);
@@ -120,7 +137,9 @@ describe('ProviderConfigEditor', () => {
   // ── Refresh button ──────────────────────────────────────────────────
 
   it('calls getAvailableModels with refresh=true when refresh button is clicked', async () => {
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
 
     // Wait for initial load to complete so the refresh button is enabled
     await waitFor(() => {
@@ -140,7 +159,9 @@ describe('ProviderConfigEditor', () => {
   // ── Custom model input ──────────────────────────────────────────────
 
   it('shows custom model input when "Custom…" is selected', async () => {
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
 
     // Wait for models to load and model select with __custom__ to appear
     const select = await screen.findByDisplayValue('claude-sonnet-4-6');
@@ -157,7 +178,9 @@ describe('ProviderConfigEditor', () => {
   });
 
   it('updates model when custom input is blurred', async () => {
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
 
     // Wait for models to finish loading so the select renders with the current value
     await waitFor(() => {
@@ -195,7 +218,9 @@ describe('ProviderConfigEditor', () => {
       .mockResolvedValueOnce({ models: CURATED_MODELS_ANTHROPIC, error: undefined })
       .mockResolvedValue({ models: ['gpt-4o', 'gpt-4o-mini'], error: undefined });
 
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
 
     await waitFor(() => {
       expect(mockGetAvailableModels).toHaveBeenCalledWith('anthropic', false);
@@ -229,8 +254,11 @@ describe('ProviderConfigEditor', () => {
       error: 'ANTHROPIC_API_KEY not set',
     });
 
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
 
+    await waitFor(() => expect(mockGetAvailableModels).toHaveBeenCalled());
     const inputs = await screen.findAllByPlaceholderText(
       /ANTHROPIC_API_KEY not set — type a model name/i,
     );
@@ -239,13 +267,19 @@ describe('ProviderConfigEditor', () => {
 
   // ── Save button ─────────────────────────────────────────────────────
 
-  it('renders save button', () => {
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+  it('renders save button', async () => {
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     expect(screen.getByText('Save Provider Config')).toBeInTheDocument();
   });
 
   it('calls saveProvidersConfig when save button is clicked', async () => {
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     const saveButton = screen.getByText('Save Provider Config');
     await act(async () => {
       fireEvent.click(saveButton);
@@ -254,7 +288,10 @@ describe('ProviderConfigEditor', () => {
   });
 
   it('shows "Saved!" text after saving', async () => {
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     const saveButton = screen.getByText('Save Provider Config');
     await act(async () => {
       fireEvent.click(saveButton);
@@ -275,7 +312,9 @@ describe('ProviderConfigEditor', () => {
 
     mockGetAvailableModels.mockImplementation(() => loadingPromise);
 
-    render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
 
     const indicators = screen.getAllByText('Loading models…');
     expect(indicators).toHaveLength(6);
