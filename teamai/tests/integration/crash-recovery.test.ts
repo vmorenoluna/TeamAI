@@ -18,6 +18,11 @@ import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
 
+// ── Hoisted listeners for container-state event capture ──────────────────────
+
+const containerStateListeners = vi.hoisted(() => new Map<string, Array<(...args: unknown[]) => void>>());
+const mockAutoResumeInterruptedTasks = vi.hoisted(() => vi.fn().mockResolvedValue(0) as any);
+
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockCreateSession = vi.fn();
@@ -59,17 +64,34 @@ vi.mock('@/lib/process-manager', () => ({
 
 vi.mock('@/lib/container-manager', () => ({
   containerManager: {
-    on: vi.fn(),
+    on: (event: string, handler: (...args: unknown[]) => void) => {
+      if (!containerStateListeners.has(event)) containerStateListeners.set(event, []);
+      containerStateListeners.get(event)!.push(handler);
+    },
     off: vi.fn(),
     start: vi.fn(),
     stop: vi.fn(),
     getStatus: vi.fn().mockReturnValue('stopped'),
+    emit: (event: string, data: unknown) => {
+      const handlers = containerStateListeners.get(event);
+      if (handlers) for (const h of handlers) h(data);
+    },
   },
   readContainerConfig: vi.fn().mockReturnValue({ enabled: false }),
   readContainerRemoteUser: vi.fn(() => 'node'),
   hostToContainerPath: vi.fn((p: string) => p),
   dockerAvailable: vi.fn(() => false),
   _resetDockerAvailableCache: vi.fn(),
+}));
+
+vi.mock('@/lib/recovery', () => ({
+  findInterruptedTasks: () => [],
+  findOrphanedWorktrees: () => [],
+  startupCleanup: () => ({ interruptedTasks: [], staleSessions: 0, orphanedWorktrees: [], autoClearedRateLimits: 0, artifactInconsistencies: [] }),
+  autoClearExpiredRateLimits: () => 0,
+  reconcileTaskArtifacts: () => [],
+  autoResumeInterruptedTasks: (...args: unknown[]) => mockAutoResumeInterruptedTasks(...args),
+  _resetAutoResumeDebounce: () => {},
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -126,10 +148,21 @@ function setupTestProject() {
 function cleanup() {
   vi.clearAllMocks();
   onHandlers.clear();
+  containerStateListeners.clear();
 
   if (testDir && existsSync(testDir)) {
     try { rmSync(testDir, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
+}
+
+/** Helper to register the container-state → auto-resume listener as server.ts does */
+async function registerContainerAutoResumeListener() {
+  const { containerManager } = await import('@/lib/container-manager');
+  containerManager.on('container-state', (data: { projectRoot: string; state: string }) => {
+    if (data.state === 'running') {
+      void mockAutoResumeInterruptedTasks();
+    }
+  });
 }
 
 /** Create a plan.json with subtasks for crash recovery testing */
@@ -1721,6 +1754,81 @@ describe('Crash Recovery Integration', () => {
 
     it('pipelines map is empty initially', () => {
       expect((orch as AnyOrch).pipelines.size).toBe(0);
+    });
+  });
+
+  // ── Container die/restart → auto-resume ──────────────────────────────
+
+  describe('container die/restart triggers auto-resume', () => {
+    beforeEach(async () => {
+      vi.clearAllMocks();
+      onHandlers.clear();
+      containerStateListeners.clear();
+      mockAutoResumeInterruptedTasks.mockResolvedValue(0);
+
+      setupTestProject();
+
+      // Register the container-state → auto-resume listener like server.ts does
+      await registerContainerAutoResumeListener();
+    });
+
+    afterEach(() => {
+      cleanup();
+      vi.resetModules();
+    });
+
+    it('calls autoResumeInterruptedTasks when container-state emits "running"', async () => {
+      // Simulate: container dies, restarts, and becomes running
+      const { containerManager } = await import('@/lib/container-manager');
+
+      // Emit 'running' — this is what _doStart emits after successful restart
+      containerManager.emit('container-state', { projectRoot: testDir, state: 'running' });
+
+      expect(mockAutoResumeInterruptedTasks).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT call autoResumeInterruptedTasks for non-"running" container-state events', async () => {
+      const { containerManager } = await import('@/lib/container-manager');
+
+      // Emit states that should NOT trigger auto-resume
+      containerManager.emit('container-state', { projectRoot: testDir, state: 'starting' });
+      containerManager.emit('container-state', { projectRoot: testDir, state: 'restarting' });
+      containerManager.emit('container-state', { projectRoot: testDir, state: 'stopped' });
+
+      expect(mockAutoResumeInterruptedTasks).not.toHaveBeenCalled();
+    });
+
+    it('simulates full container die/restart cycle and verifies auto-resume only fires on "running"', async () => {
+      const { containerManager } = await import('@/lib/container-manager');
+
+      // Step 1: Container starts — emits 'starting'
+      containerManager.emit('container-state', { projectRoot: testDir, state: 'starting' });
+      expect(mockAutoResumeInterruptedTasks).not.toHaveBeenCalled();
+
+      // Step 2: Container is running — emits 'running' (first time, e.g. initial startup)
+      containerManager.emit('container-state', { projectRoot: testDir, state: 'running' });
+      expect(mockAutoResumeInterruptedTasks).toHaveBeenCalledTimes(1);
+      mockAutoResumeInterruptedTasks.mockClear();
+
+      // Step 3: Container dies — emits 'restarting' (Docker event watcher detects die)
+      containerManager.emit('container-state', { projectRoot: testDir, state: 'restarting' });
+      expect(mockAutoResumeInterruptedTasks).not.toHaveBeenCalled();
+
+      // Step 4: Container restarts successfully — emits 'running' (should trigger auto-resume)
+      containerManager.emit('container-state', { projectRoot: testDir, state: 'running' });
+      expect(mockAutoResumeInterruptedTasks).toHaveBeenCalledTimes(1);
+    });
+
+    it('multiple "running" events each trigger auto-resume (debounce handled in recovery.ts)', async () => {
+      const { containerManager } = await import('@/lib/container-manager');
+
+      // Simulate two separate container restarts
+      containerManager.emit('container-state', { projectRoot: testDir, state: 'running' });
+      expect(mockAutoResumeInterruptedTasks).toHaveBeenCalledTimes(1);
+
+      // Second restart — listener fires again (debounce in autoResumeInterruptedTasks handles dedup)
+      containerManager.emit('container-state', { projectRoot: testDir, state: 'running' });
+      expect(mockAutoResumeInterruptedTasks).toHaveBeenCalledTimes(2);
     });
   });
 });
