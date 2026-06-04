@@ -2,11 +2,18 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { approveTask, rejectTask, markTaskDone } from '@/app/actions/tasks';
+import { approveTask, rejectTask, markTaskDone, reviseSpec } from '@/app/actions/tasks';
+
+interface SpecConcern {
+  issue: string;
+  reasoning: string;
+  suggested_fix?: string;
+}
 
 interface QaReport {
   overall: 'PASS' | 'FAIL';
   criteria?: { criterion?: string; name?: string; status: 'PASS' | 'FAIL'; notes?: string }[];
+  spec_concerns?: SpecConcern[];
 }
 
 interface Props {
@@ -48,7 +55,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-type PendingAction = 'approve-local' | 'approve-pr' | 'reject' | 'mark-done' | null;
+type PendingAction = 'approve-local' | 'approve-pr' | 'reject' | 'mark-done' | 'revise-spec' | null;
 
 export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase }: Props) {
   const router = useRouter();
@@ -80,6 +87,16 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
     }
   }
 
+  async function handleReviseSpec() {
+    setPendingAction('revise-spec');
+    try {
+      await reviseSpec(taskId);
+      router.refresh();
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   async function handleMarkDone() {
     setPendingAction('mark-done');
     try {
@@ -103,6 +120,27 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
             }`}>
               {qaReport.overall}
             </div>
+
+            {/* Spec concerns banner — shown when QA detected spec-level issues */}
+            {qaReport.spec_concerns && qaReport.spec_concerns.length > 0 && (
+              <div className="rounded-md border border-purple-800/40 bg-purple-950/20 p-3">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <span className="text-purple-400 text-xs">📋</span>
+                  <span className="text-xs font-semibold text-purple-300">Spec Concerns — The specification needs revision</span>
+                </div>
+                <div className="space-y-2">
+                  {qaReport.spec_concerns.map((sc, i) => (
+                    <div key={i} className="text-xs text-purple-200/90">
+                      <p className="font-medium">{sc.issue}</p>
+                      <p className="text-purple-300/70 mt-0.5">{sc.reasoning}</p>
+                      {sc.suggested_fix && (
+                        <p className="text-purple-300/50 mt-0.5 italic">Suggested: {sc.suggested_fix}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Human feedback banner */}
             {humanFeedback && (
@@ -189,6 +227,15 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
               >
                 {pendingAction === 'approve-pr' ? 'Creating PR…' : 'Open Pull Request'}
               </button>
+              {qaReport?.spec_concerns && qaReport.spec_concerns.length > 0 && (
+              <button
+                onClick={handleReviseSpec}
+                disabled={pendingAction !== null}
+                className="flex-1 px-4 py-2 text-sm font-medium bg-purple-700/60 text-purple-200 hover:bg-purple-600/70 disabled:opacity-50 rounded-md transition-colors"
+              >
+                {pendingAction === 'revise-spec' ? 'Revising Spec…' : 'Revise Spec'}
+              </button>
+              )}
             </>
           )}
 
