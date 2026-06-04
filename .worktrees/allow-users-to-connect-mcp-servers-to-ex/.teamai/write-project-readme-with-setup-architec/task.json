@@ -1,9 +1,0 @@
-{
-  "id": "11fb38fd-8fd1-4d57-8c73-5fe30beeede0",
-  "title": "Write project README with setup, architecture, and contributor guide",
-  "description": "The current README.md is the stock Next.js template with no TeamAI-specific content. Replace it with a comprehensive guide covering: project overview, setup instructions, architecture diagram, configuration reference, and contribution guidelines.",
-  "phase": "done",
-  "source": "ideation",
-  "createdAt": "2026-05-11T21:49:06.536Z",
-  "updatedAt": "2026-05-11T22:46:00.270Z"
-}
