@@ -50,12 +50,18 @@ Create `.teamai/{slug}/qa_report.json`:
   ],
   "additional_issues": [
     {
-      "severity": "critical" | "warning" | "suggestion",
+      "severity": "critical" | "error" | "warning" | "suggestion",
       "description": "issue found",
       "file": "path",
       "fix_needed": "how to fix"
     }
   ],
+
+Severity semantics for additional_issues:
+- **critical**: Hard blocker — the task cannot pass QA until this is fixed. Treated as equivalent to a FAIL criterion. The fixer MUST address this.
+- **error**: Same as critical — hard blocker. Used interchangeably with critical for issues that prevent QA pass.
+- **warning**: Should be addressed but does not block QA pass on its own. If time permits, fix it.
+- **suggestion**: Nice-to-have improvement. Optional — the fixer may skip this without penalty.
   "spec_concerns": [
     {
       "issue": "one-line summary of the spec problem",
