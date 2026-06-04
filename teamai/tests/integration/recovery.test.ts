@@ -28,6 +28,15 @@ vi.mock('os', async () => {
   };
 });
 
+// ── Orchestrator mock for auto-resume integration tests ─────────────────────
+
+const mockOrchResumeTask = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockGetOrchestrator = vi.hoisted(() => vi.fn());
+
+vi.mock('../../src/lib/orchestrator', () => ({
+  getOrchestrator: (...args: unknown[]) => mockGetOrchestrator(...args),
+}));
+
 // ── Test Fixture Helpers ────────────────────────────────────────────────────
 
 let homeDir: string;
@@ -467,6 +476,113 @@ describe('Recovery Integration', () => {
 
       // task.id is undefined, doesn't match the worktree's taskId → orphaned
       expect(result).toHaveLength(1);
+    });
+  });
+
+  // ── autoResumeInterruptedTasks ─────────────────────────────────────
+
+  describe('autoResumeInterruptedTasks', () => {
+    beforeEach(async () => {
+      vi.clearAllMocks();
+      mockGetOrchestrator.mockReturnValue({ resumeTask: mockOrchResumeTask });
+      mockOrchResumeTask.mockResolvedValue(undefined);
+      // Reset the debounce timer so each test starts fresh
+      const { _resetAutoResumeDebounce } = await import('../../src/lib/recovery');
+      _resetAutoResumeDebounce();
+    });
+
+    it('calls resumeTask on orchestrator for each interrupted task on disk', async () => {
+      const projectPath = registerProject('auto-resume-test');
+      createTask(projectPath, 't-spec', { phase: 'spec', title: 'In Spec' });
+      createTask(projectPath, 't-impl', { phase: 'implement', title: 'In Implement' });
+
+      const { autoResumeInterruptedTasks } = await import('../../src/lib/recovery');
+      const count = await autoResumeInterruptedTasks();
+
+      expect(count).toBe(2);
+      expect(mockGetOrchestrator).toHaveBeenCalledTimes(2);
+      expect(mockGetOrchestrator).toHaveBeenCalledWith(projectPath);
+      expect(mockOrchResumeTask).toHaveBeenCalledTimes(2);
+      expect(mockOrchResumeTask).toHaveBeenCalledWith('t-spec');
+      expect(mockOrchResumeTask).toHaveBeenCalledWith('t-impl');
+    });
+
+    it('returns 0 when no interrupted tasks on disk', async () => {
+      // Register a project with only non-interrupted tasks
+      const projectPath = registerProject('clean-proj');
+      createTask(projectPath, 't-done', { phase: 'done', title: 'Done Task' });
+
+      const { autoResumeInterruptedTasks } = await import('../../src/lib/recovery');
+      const count = await autoResumeInterruptedTasks();
+
+      expect(count).toBe(0);
+      expect(mockGetOrchestrator).not.toHaveBeenCalled();
+      expect(mockOrchResumeTask).not.toHaveBeenCalled();
+    });
+
+    it('skips tasks in non-in-progress phases (backlog, done, failed, cancelled)', async () => {
+      const projectPath = registerProject('mixed-phases');
+      createTask(projectPath, 't-backlog', { phase: 'backlog', title: 'Backlog' });
+      createTask(projectPath, 't-done', { phase: 'done', title: 'Done' });
+      createTask(projectPath, 't-failed', { phase: 'failed', title: 'Failed' });
+      createTask(projectPath, 't-cancelled', { phase: 'cancelled', title: 'Cancelled' });
+      // Only this one should be resumed
+      createTask(projectPath, 't-spec', { phase: 'spec', title: 'Only Spec' });
+
+      const { autoResumeInterruptedTasks } = await import('../../src/lib/recovery');
+      const count = await autoResumeInterruptedTasks();
+
+      expect(count).toBe(1);
+      expect(mockOrchResumeTask).toHaveBeenCalledTimes(1);
+      expect(mockOrchResumeTask).toHaveBeenCalledWith('t-spec');
+    });
+
+    it('handles multiple projects with interrupted tasks', async () => {
+      const projA = registerProject('proj-a');
+      const projB = createProject('proj-b');
+      writeProjects([
+        { name: 'proj-a', path: projA },
+        { name: 'proj-b', path: projB },
+      ]);
+
+      createTask(projA, 'a1', { phase: 'plan', title: 'Proj A Task' });
+      createTask(projB, 'b1', { phase: 'qa-review', title: 'Proj B Task' });
+
+      const { autoResumeInterruptedTasks } = await import('../../src/lib/recovery');
+      const count = await autoResumeInterruptedTasks();
+
+      expect(count).toBe(2);
+      expect(mockGetOrchestrator).toHaveBeenCalledWith(projA);
+      expect(mockGetOrchestrator).toHaveBeenCalledWith(projB);
+      expect(mockOrchResumeTask).toHaveBeenCalledWith('a1');
+      expect(mockOrchResumeTask).toHaveBeenCalledWith('b1');
+    });
+
+    it('handles orchestrator creation failure gracefully', async () => {
+      const projectPath = registerProject('fail-proj');
+      createTask(projectPath, 't-spec', { phase: 'spec', title: 'Will Fail' });
+
+      mockGetOrchestrator.mockImplementation(() => {
+        throw new Error('Orchestrator creation failed');
+      });
+
+      const { autoResumeInterruptedTasks } = await import('../../src/lib/recovery');
+      const count = await autoResumeInterruptedTasks();
+
+      // Should still count interrupted tasks found on disk
+      expect(count).toBe(1);
+      expect(mockGetOrchestrator).toHaveBeenCalledTimes(1);
+      expect(mockOrchResumeTask).not.toHaveBeenCalled();
+    });
+
+    it('verifies resumeTask receives the correct taskId from persisted task.json', async () => {
+      const projectPath = registerProject('verify-ids');
+      createTask(projectPath, 'real-task-uuid-123', { phase: 'spec', title: 'Real Task' });
+
+      const { autoResumeInterruptedTasks } = await import('../../src/lib/recovery');
+      await autoResumeInterruptedTasks();
+
+      expect(mockOrchResumeTask).toHaveBeenCalledWith('real-task-uuid-123');
     });
   });
 });
