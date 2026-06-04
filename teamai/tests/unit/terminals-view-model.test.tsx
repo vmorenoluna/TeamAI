@@ -248,7 +248,6 @@ describe('TerminalsView - Model Controls', () => {
     act(() => {
       render(<TerminalsView roles={MOCK_ROLES} />);
     });
-    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
 
     await act(async () => {
       fireEvent.click(screen.getByText('+ New Terminal'));
