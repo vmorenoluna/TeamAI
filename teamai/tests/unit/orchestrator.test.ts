@@ -93,7 +93,7 @@ function fireEvent(event: string, data: any) {
 
 // ── Helpers ──
 
-function setupTestProject(options?: { initGit?: boolean; containerEnabled?: boolean }): { root: string; taskId: string; taskDir: string; clean: () => void } {
+function setupTestProject(options?: { initGit?: boolean; containerEnabled?: boolean }): { root: string; taskId: string; taskDir: string; branchName: string; slug: string; clean: () => void } {
   const root = join(tmpdir(), `teamai-ocrh-${randomUUID().slice(0, 8)}`);
   mkdirSync(root, { recursive: true });
 
@@ -128,13 +128,16 @@ function setupTestProject(options?: { initGit?: boolean; containerEnabled?: bool
     updatedAt: new Date().toISOString(),
   }));
 
+  const slug = randomUUID().slice(0, 8);
+  const branchName = `feat-${slug}`;
+
   const clean = () => {
     onHandlers.clear();
     vi.clearAllMocks();
     if (existsSync(root)) rmSync(root, { recursive: true, force: true });
   };
 
-  return { root, taskId, taskDir, clean };
+  return { root, taskId, taskDir, branchName, slug, clean };
 }
 
 /** Returns a fresh orchestrator for the given project root. */
@@ -1037,14 +1040,14 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
 
-      // Set a branch on the task
+      // Set description and branch so getWorktreePath derives the correct directory
       const taskStore = (orch as AnyOrch).taskStore;
-      taskStore.update(testData.taskId, { branch: 'feat/test-task' });
+      taskStore.update(testData.taskId, { description: testData.slug, branch: testData.branchName });
 
       const result = orch.getWorktreePath(testData.taskId);
       expect(result).not.toBeNull();
       expect(result).toContain('worktrees');
-      expect(result).toContain('test-task');
+      expect(result).toContain(testData.slug);
     });
   });
 
@@ -1107,7 +1110,7 @@ describe('Orchestrator', () => {
 
       // Give the task a branch so getWorktreePath returns a path
       const taskStore = (orch as AnyOrch).taskStore;
-      taskStore.update(testData.taskId, { branch: 'feat/test-branch' });
+      taskStore.update(testData.taskId, { branch: testData.branchName });
 
       // Create the worktree directory on disk so existsSync returns true
       // and removeWorktree proceeds past the early-return guard at line 567
@@ -1148,7 +1151,7 @@ describe('Orchestrator', () => {
 
         const orch = makeOrch(testData.root);
         const taskStore = (orch as AnyOrch).taskStore;
-        taskStore.update(testData.taskId, { description: 'test-task', branch: 'feat/test-task' });
+        taskStore.update(testData.taskId, { description: testData.slug, branch: testData.branchName });
 
         // In container mode, getWorktreeBase returns .worktrees inside projectRoot
         const wtPath = orch.getWorktreePath(testData.taskId)!;
@@ -1165,7 +1168,7 @@ describe('Orchestrator', () => {
         // Branch cleanup runs on host (not through _execGit)
         expect(mockExecFileSync).toHaveBeenCalledWith(
           'git',
-          expect.arrayContaining(['branch', '-D', 'feat/test-task']),
+          expect.arrayContaining(['branch', '-D', testData.branchName]),
           expect.objectContaining({ cwd: testData.root }),
         );
         // taskStore updated to clear branch
@@ -1188,7 +1191,7 @@ describe('Orchestrator', () => {
 
         const orch = makeOrch(testData.root);
         const taskStore = (orch as AnyOrch).taskStore;
-        taskStore.update(testData.taskId, { description: 'test-task', branch: 'feat/test-task' });
+        taskStore.update(testData.taskId, { description: testData.slug, branch: testData.branchName });
 
         const wtPath = orch.getWorktreePath(testData.taskId)!;
         mkdirSync(wtPath, { recursive: true });
@@ -1215,7 +1218,7 @@ describe('Orchestrator', () => {
         // Branch cleanup still runs on host
         expect(mockExecFileSync).toHaveBeenCalledWith(
           'git',
-          expect.arrayContaining(['branch', '-D', 'feat/test-task']),
+          expect.arrayContaining(['branch', '-D', testData.branchName]),
           expect.objectContaining({ cwd: testData.root }),
         );
         // taskStore updated to clear branch
@@ -1238,7 +1241,7 @@ describe('Orchestrator', () => {
 
         const orch = makeOrch(testData.root);
         const taskStore = (orch as AnyOrch).taskStore;
-        taskStore.update(testData.taskId, { description: 'test-task', branch: 'feat/test-task' });
+        taskStore.update(testData.taskId, { description: testData.slug, branch: testData.branchName });
 
         const wtPath = orch.getWorktreePath(testData.taskId)!;
         mkdirSync(wtPath, { recursive: true });
@@ -1266,7 +1269,7 @@ describe('Orchestrator', () => {
         // Branch cleanup still runs
         expect(mockExecFileSync).toHaveBeenCalledWith(
           'git',
-          expect.arrayContaining(['branch', '-D', 'feat/test-task']),
+          expect.arrayContaining(['branch', '-D', testData.branchName]),
           expect.objectContaining({ cwd: testData.root }),
         );
         // taskStore updated to clear branch even in last-resort path
@@ -1646,7 +1649,7 @@ describe('Orchestrator', () => {
     it('creates session, sends /merge command, waits, kills, cleans up', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
-      const slug = 'test-task';
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
@@ -1701,7 +1704,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature\n\nImplement this feature.');
 
-      const slug = 'test-task';
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
@@ -1738,7 +1741,7 @@ describe('Orchestrator', () => {
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
       writeFileSync(join(testData.taskDir, 'output.log'), 'Created: https://github.com/owner/repo/pull/42\n');
 
-      const slug = 'test-task';
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
@@ -1773,7 +1776,7 @@ describe('Orchestrator', () => {
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
-        branch: 'feat/test-task',
+        branch: testData.branchName,
       });
 
       mockCreateSession.mockResolvedValue('sess-pr');
@@ -1800,7 +1803,7 @@ describe('Orchestrator', () => {
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
-        branch: 'feat/test-task',
+        branch: testData.branchName,
       });
 
       mockCreateSession.mockResolvedValue('sess-pr');
@@ -1846,7 +1849,7 @@ describe('Orchestrator', () => {
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { phase: 'awaiting-review' });
 
-      const slug = 'test-task';
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         phase: 'awaiting-review',
@@ -1879,7 +1882,7 @@ describe('Orchestrator', () => {
         taskId: testData.taskId,
         phase: 'awaiting-review',
         specPath: testData.taskDir,
-        branch: 'feat/test-task',
+        branch: testData.branchName,
       });
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
@@ -1899,9 +1902,9 @@ describe('Orchestrator', () => {
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [] }));
 
       const taskStore = (orch as AnyOrch).taskStore;
-      taskStore.update(testData.taskId, { description: 'test-task', branch: 'feat/test-task' });
+      taskStore.update(testData.taskId, { description: testData.slug, branch: testData.branchName });
 
-      const slug = 'test-task';
+      const slug = testData.slug;
       const worktreePath = join(testData.root, '..', 'worktrees', slug);
       mkdirSync(worktreePath, { recursive: true });
 
@@ -2125,7 +2128,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root);
 
       const taskStore = (orch as AnyOrch).taskStore;
-      taskStore.update(testData.taskId, { branch: 'feat/test-task' });
+      taskStore.update(testData.taskId, { branch: testData.branchName });
 
       const wtPath = orch.getWorktreePath(testData.taskId);
       if (wtPath) mkdirSync(wtPath, { recursive: true });
@@ -2159,7 +2162,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root);
 
       const taskStore = (orch as AnyOrch).taskStore;
-      taskStore.update(testData.taskId, { branch: 'feat/test-task' });
+      taskStore.update(testData.taskId, { branch: testData.branchName });
 
       const wtPath = orch.getWorktreePath(testData.taskId);
       if (wtPath) mkdirSync(wtPath, { recursive: true });
@@ -2177,7 +2180,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root);
 
       const taskStore = (orch as AnyOrch).taskStore;
-      taskStore.update(testData.taskId, { branch: 'feat/test-task' });
+      taskStore.update(testData.taskId, { branch: testData.branchName });
 
       const wtPath = orch.getWorktreePath(testData.taskId);
       if (wtPath) mkdirSync(wtPath, { recursive: true });
@@ -2204,7 +2207,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root);
 
       const taskStore = (orch as AnyOrch).taskStore;
-      taskStore.update(testData.taskId, { branch: 'feat/test-task' });
+      taskStore.update(testData.taskId, { branch: testData.branchName });
 
       const wtPath = orch.getWorktreePath(testData.taskId);
       if (wtPath) mkdirSync(wtPath, { recursive: true });
@@ -2224,7 +2227,7 @@ describe('Orchestrator', () => {
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: false });
       vi.mocked(dockerAvailable).mockReturnValue(false);
 
-      const slug = 'test-task';
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
@@ -2253,7 +2256,7 @@ describe('Orchestrator', () => {
         status: 'running',
       } as any);
 
-      const slug = 'test-task';
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
@@ -2301,7 +2304,7 @@ describe('Orchestrator', () => {
         subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [] }],
       }));
 
-      const slug = 'test-task';
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
@@ -2343,7 +2346,7 @@ describe('Orchestrator', () => {
         subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [] }],
       }));
 
-      const slug = 'test-task';
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
@@ -2401,7 +2404,7 @@ describe('Orchestrator', () => {
         subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px [QA CORRECTION: Mobile layout is broken]'], qa_flagged: true }],
       }));
 
-      const slug = 'test-task';
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
@@ -2456,7 +2459,7 @@ describe('Orchestrator', () => {
         subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px [QA CORRECTION: Mobile layout is broken]'], qa_flagged: true }],
       }));
 
-      const slug = 'test-task';
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
@@ -2503,7 +2506,7 @@ describe('Orchestrator', () => {
         subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px [QA CORRECTION: Mobile layout is broken]'], qa_flagged: true }],
       }));
 
-      const slug = 'test-task';
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,

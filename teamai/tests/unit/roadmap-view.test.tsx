@@ -97,15 +97,17 @@ function renderKanban(
   rpt: RoadmapReport = report(),
   filename = 'roadmap-2026-01-01.json'
 ) {
-  render(
-    <PhasedKanban
-      report={rpt}
-      filename={filename}
-      onRefresh={vi.fn()}
-      onSelectTask={vi.fn()}
-      onOpenRoadmapItem={vi.fn()}
-    />
-  );
+  act(() => {
+    render(
+      <PhasedKanban
+        report={rpt}
+        filename={filename}
+        onRefresh={vi.fn()}
+        onSelectTask={vi.fn()}
+        onOpenRoadmapItem={vi.fn()}
+      />
+    );
+  });
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
