@@ -93,3 +93,42 @@ The spec revision workflow allows a human reviewer to fix the spec itself (rathe
 5. **After revision**: The revised spec flows through plan → implement → QA normally. If QA now passes, the task goes to `awaiting-review` for final approval.
 
 **How retry integrates**: Ensure the project's `.claude/commands/` has the updated templates (synced from `defaults/commands/`) — then clicking **Retry** on any previously-failed task works seamlessly. It resumes from the last real phase using the updated command templates (with spec-gap detection) on the next run. No manual migration needed.
+
+### QA Report Severity Levels
+
+QA reports (`qa_report.json`) contain two kinds of issues:
+- **`criteria`** — formal pass/fail per spec acceptance criterion. FAIL criteria are always hard blockers.
+- **`additional_issues`** — issues found beyond the spec criteria, each tagged with a severity level.
+
+**Severity levels** (defined in `defaults/commands/qa-review.md`):
+
+| Severity | Meaning | Blocking? | Engineer must fix? |
+|----------|---------|-----------|-------------------|
+| `critical` | Hard blocker — cannot pass QA until fixed | Yes | Yes |
+| `error` | Same as `critical` — interchangeable | Yes | Yes |
+| `warning` | Should be fixed but doesn't block QA pass alone | No | If time permits |
+| `suggestion` | Nice-to-have improvement | No | Optional |
+
+**How severity flows through the pipeline:**
+
+1. **QA agent** produces `qa_report.json` with `additional_issues` containing `severity`, `description`, `file`, and optional `fix_needed`.
+
+2. **`_writeQaFeedback`** (orchestrator.ts) writes `qa_feedback.md` and patches `plan.json`:
+   - FAIL criteria → `[QA CORRECTION: fix_needed]` appended to matching subtask acceptance criteria
+   - `additional_issues` → `[QA ISSUE (severity): description → Fix: fix_needed]` appended to subtasks matching by file
+   - Both set `qa_flagged: true` so only affected subtasks re-run
+
+3. **`runImplement` QA rework mode** sends the engineer a prompt with per-subtask feedback:
+   - The cleaning regex transforms tags into human-readable severity indicators:
+     - `[QA CORRECTION: Fix X]` → `[BLOCKER] Fix X`
+     - `[QA ISSUE (critical): desc → Fix: x]` → `[critical] desc → Fix: x`
+     - `[QA ISSUE (warning): desc]` → `[warning] desc`
+     - `[QA ISSUE (suggestion): desc]` → `[suggestion] desc`
+   - Non-QA acceptance criteria pass through unchanged
+
+4. **`implement.md`** QA Rework Mode instructs the engineer:
+   - Issues marked `critical` or `error` are HARD BLOCKERS — must fix, not suggestions
+   - Only `suggestion` severity items are optional
+   - The engineer must address ALL QA issues before marking the subtask complete
+
+This design ensures the engineer can distinguish between a hard blocker ("this must be fixed or QA will fail again") and an optional suggestion ("nice to have but won't block the merge"), preventing infinite qa-fix loops where the engineer ignores critical issues they thought were optional.
