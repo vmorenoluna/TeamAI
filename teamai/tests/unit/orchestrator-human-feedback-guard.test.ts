@@ -14,6 +14,7 @@ import {
 } from 'fs';
 import { join } from 'path';
 import { mkdtempSync } from 'fs';
+import { randomUUID } from 'crypto';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ vi.mock('@/lib/container-manager', () => ({
 vi.mock('@/lib/task-store', () => {
   const TaskStore = vi.fn();
   TaskStore.prototype.getDirById = vi.fn((id: string) => join(testDir, id));
-  TaskStore.prototype.getById = vi.fn(() => ({ branch: 'feat/test', phase: 'implement' }));
+  TaskStore.prototype.getById = vi.fn(() => ({ branch: `feat/${worktreeName}`, phase: 'implement' }));
   TaskStore.prototype.updatePhase = vi.fn();
   TaskStore.prototype.update = vi.fn();
   TaskStore.prototype.getAll = vi.fn(() => []);
@@ -75,9 +76,11 @@ import { Orchestrator } from '@/lib/orchestrator';
 
 let testDir: string;
 let orch: Orchestrator;
+let worktreeName: string;
 
 beforeEach(() => {
   testDir = mkdtempSync('human-feedback-test-');
+  worktreeName = randomUUID().slice(0, 8);
   vi.clearAllMocks();
   onHandlers.clear();
   orch = new Orchestrator(testDir);
@@ -110,7 +113,7 @@ function makeProject(phase: string = 'awaiting-review') {
     id: taskId,
     title: 'Test task',
     description: 'Test task',
-    branch: 'feat/test',
+    branch: `feat/${worktreeName}`,
     phase,
   }));
 
@@ -120,8 +123,8 @@ function makeProject(phase: string = 'awaiting-review') {
     description: 'Test task',
     phase,
     specPath: taskDir,
-    worktreePath: join(testDir, 'worktrees', 'test-task'),
-    branch: 'feat/test',
+    worktreePath: join(testDir, 'worktrees', worktreeName),
+    branch: `feat/${worktreeName}`,
     qaAttempt: 0,
     maxQaAttempts: 3,
   });
@@ -135,8 +138,8 @@ function makePipeline(taskId: string, taskDir: string) {
     description: 'Test task',
     phase: 'implement' as const,
     specPath: taskDir,
-    worktreePath: join(testDir, 'worktrees', 'test-task'),
-    branch: 'feat/test',
+    worktreePath: join(testDir, 'worktrees', worktreeName),
+    branch: `feat/${worktreeName}`,
     qaAttempt: 0,
     maxQaAttempts: 3,
   };
@@ -270,7 +273,7 @@ describe('retryTask — restores human_feedback.md from snapshot', () => {
       id: taskId,
       title: 'Test task',
       description: 'Test task',
-      branch: 'feat/test',
+      branch: `feat/${worktreeName}`,
       phase: 'failed',
     }));
     store.getEvents.mockReturnValue([]);
@@ -299,7 +302,7 @@ describe('retryTask — restores human_feedback.md from snapshot', () => {
       id: taskId,
       title: 'Test task',
       description: 'Test task',
-      branch: 'feat/test',
+      branch: `feat/${worktreeName}`,
       phase: 'failed',
     }));
     store.getEvents.mockReturnValue([]);
