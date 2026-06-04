@@ -13,9 +13,17 @@ vi.mock('fs', () => ({
   writeFileSync: vi.fn(),
 }));
 
-import { findInterruptedTasks, findOrphanedWorktrees, startupCleanup, autoClearExpiredRateLimits, reconcileTaskArtifacts } from '../../src/lib/recovery';
+import { findInterruptedTasks, findOrphanedWorktrees, startupCleanup, autoClearExpiredRateLimits, reconcileTaskArtifacts, autoResumeInterruptedTasks, _resetAutoResumeDebounce } from '../../src/lib/recovery';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
+
+// Mock orchestrator module for autoResumeInterruptedTasks tests
+const mockOrchResumeTask = vi.fn();
+const mockGetOrchestrator = vi.fn();
+
+vi.mock('../../src/lib/orchestrator', () => ({
+  getOrchestrator: (...args: unknown[]) => mockGetOrchestrator(...args),
+}));
 
 // Helper: readdirSync and statSync have overloaded signatures that make
 // mockImplementation require a type assertion. These wrappers contain the
@@ -832,5 +840,160 @@ describe('findOrphanedWorktrees — catch blocks', () => {
     const result = findOrphanedWorktrees();
     expect(result).toHaveLength(1);
     expect(result[0].path).toBe(wtPath);
+  });
+});
+
+// ── autoResumeInterruptedTasks ──────────────────────────────────────
+
+describe('autoResumeInterruptedTasks', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetAutoResumeDebounce();
+    mockGetOrchestrator.mockReturnValue({ resumeTask: mockOrchResumeTask });
+    mockOrchResumeTask.mockResolvedValue(undefined);
+  });
+
+  it('resumes all interrupted tasks found by findInterruptedTasks', async () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFileA = join(teamaiDir, 'task-a', 'task.json');
+    const taskFileB = join(teamaiDir, 'task-b', 'task.json');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFileA) return true;
+      if (path === taskFileB) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === taskFileA)
+        return JSON.stringify({ id: 'task-a', title: 'Task A', phase: 'spec' });
+      if (path === taskFileB)
+        return JSON.stringify({ id: 'task-b', title: 'Task B', phase: 'implement' });
+      return '';
+    });
+    (vi.mocked(readdirSync) as any).mockImplementation((p: string) => {
+      if (String(p) === teamaiDir) return ['task-a', 'task-b'];
+      return [];
+    });
+
+    const count = await autoResumeInterruptedTasks();
+
+    expect(count).toBe(2);
+    expect(mockGetOrchestrator).toHaveBeenCalledTimes(2);
+    expect(mockGetOrchestrator).toHaveBeenCalledWith(projectPath);
+    expect(mockOrchResumeTask).toHaveBeenCalledTimes(2);
+    expect(mockOrchResumeTask).toHaveBeenCalledWith('task-a');
+    expect(mockOrchResumeTask).toHaveBeenCalledWith('task-b');
+  });
+
+  it('returns 0 when no interrupted tasks exist', async () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+
+    const count = await autoResumeInterruptedTasks();
+
+    expect(count).toBe(0);
+    expect(mockGetOrchestrator).not.toHaveBeenCalled();
+    expect(mockOrchResumeTask).not.toHaveBeenCalled();
+  });
+
+  it('returns 0 when debounced (called within 15s window)', async () => {
+    // First call — don't set up any tasks, just verify debounce works
+    vi.mocked(existsSync).mockReturnValue(false);
+    await autoResumeInterruptedTasks(); // sets _lastAutoResumeTime
+
+    // Second call within debounce window should return 0 without doing work
+    mockGetOrchestrator.mockClear();
+    const count = await autoResumeInterruptedTasks();
+
+    expect(count).toBe(0);
+    expect(mockGetOrchestrator).not.toHaveBeenCalled();
+  });
+
+  it('does not debounce after reset (for testing)', async () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+    await autoResumeInterruptedTasks();
+
+    _resetAutoResumeDebounce();
+    const count = await autoResumeInterruptedTasks();
+
+    expect(count).toBe(0); // no tasks, but debounce didn't block
+  });
+
+  it('handles orchestrator creation failure gracefully', async () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'task-a', 'task.json');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === taskFile)
+        return JSON.stringify({ id: 'task-a', title: 'Task A', phase: 'spec' });
+      return '';
+    });
+    (vi.mocked(readdirSync) as any).mockImplementation((p: string) => {
+      if (String(p) === teamaiDir) return ['task-a'];
+      return [];
+    });
+
+    mockGetOrchestrator.mockImplementation(() => {
+      throw new Error('Failed to create orchestrator');
+    });
+
+    const count = await autoResumeInterruptedTasks();
+
+    // Should still count the task even though orchestrator creation failed
+    expect(count).toBe(1);
+    expect(mockGetOrchestrator).toHaveBeenCalledTimes(1);
+    expect(mockOrchResumeTask).not.toHaveBeenCalled();
+  });
+
+  it('handles resumeTask rejection gracefully (fire-and-forget)', async () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'task-a', 'task.json');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === taskFile)
+        return JSON.stringify({ id: 'task-a', title: 'Task A', phase: 'spec' });
+      return '';
+    });
+    (vi.mocked(readdirSync) as any).mockImplementation((p: string) => {
+      if (String(p) === teamaiDir) return ['task-a'];
+      return [];
+    });
+
+    // resumeTask rejects, but the .catch handler should swallow it
+    mockOrchResumeTask.mockRejectedValueOnce(new Error('Session creation failed'));
+
+    const count = await autoResumeInterruptedTasks();
+
+    // Should still return count and not throw
+    expect(count).toBe(1);
+    expect(mockOrchResumeTask).toHaveBeenCalledWith('task-a');
   });
 });

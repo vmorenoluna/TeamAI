@@ -5,6 +5,8 @@ import { getProjects, getActiveProject, getOutdatedProjects } from '@/app/action
 import { Sidebar } from '@/components/sidebar';
 import { ProjectSelector } from '@/components/project-selector';
 import { DefaultsUpdater } from '@/components/defaults-updater';
+import { RecoveryBanner } from '@/components/recovery-banner';
+import { getInterruptedTasks } from '@/app/actions/recovery';
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
@@ -18,6 +20,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const projects = await getProjects();
   const activeProject = await getActiveProject();
   const staleDefaults = await getOutdatedProjects();
+  const interruptedTasks = await getInterruptedTasks();
 
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full`}>
@@ -28,6 +31,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <ProjectSelector projects={projects} activeProjectPath={activeProject?.path ?? null} />
           {/* Defaults update banner — shows when projects have outdated copies of TeamAI defaults */}
           <DefaultsUpdater initialStale={staleDefaults} />
+          {/* Recovery banner — shows when interrupted tasks are detected from previous session */}
+          <RecoveryBanner tasks={interruptedTasks} />
           <div className="flex-1 min-h-0">{children}</div>
         </div>
       </body>
