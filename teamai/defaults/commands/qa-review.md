@@ -20,7 +20,27 @@ Read the spec at: $ARGUMENTS
    - Style: Does it match existing code conventions?
    - Regressions: Could this break existing functionality?
 
-## Step 6: Spec Gap Detection
+## Step 6: Run Test Suite
+**Run the project's test suite to verify the implementation end-to-end.**
+
+1. Find the test command from the project's build config, Makefile, or package.json.
+2. Run it ONCE and wait for completion — do NOT re-run repeatedly.
+   See `.claude/teamai-workflow.md` for full guidance on long-running scripts.
+3. **On rework passes** (a previous `qa_report.json` exists in `.teamai/{slug}/`):
+   - Run the FULL suite, not just tests targeting changed files.
+   - The coder was told to run tests, but they may have introduced regressions
+     in areas QA previously passed. Independent verification is mandatory.
+   - Do NOT skip tests that "passed last time" — those are exactly the ones
+     that may be broken by a domain logic drift or unintended side effect.
+4. If tests fail:
+   - Failures in code the coder was assigned to change → standard FAIL on
+     the relevant acceptance criteria.
+   - Failures in code the coder was NOT supposed to touch → add a **critical**
+     `additional_issues` entry (regression / unintended side effect).
+5. Record the test command used and the result (pass/fail + any failure output)
+   as evidence in the QA report.
+
+## Step 7: Spec Gap Detection
 For each FAIL, determine the root cause:
 - **Implementation bug**: The code doesn't match the spec → standard FAIL, populate `fix_needed` as usual
 - **Spec gap**: The code correctly follows the spec, but the spec itself makes a wrong assumption → populate `spec_concerns`
@@ -33,6 +53,16 @@ Flag a spec concern when:
 - The spec's assumptions about external dependencies (APIs, libraries, data formats) proved incorrect
 
 When spec concerns are present, the task goes to human review — the reviewer decides whether to revise the spec. Not all FAIL criteria are spec concerns; only flag when the *specification* is the root cause, not the implementation.
+
+## Step 8: Domain Logic Integrity Check
+**Trigger**: If a previous `qa_report.json` exists in `.teamai/{slug}/`, this is a rework pass — activate this step.
+
+1. Examine the git diff for changes to algorithms, mathematical expressions, formulas, or business logic.
+2. Cross-reference any such changes against the QA issues from the previous review (check the previous `qa_report.json` in `.teamai/{slug}/`).
+3. If the coder changed a formula or algorithm that was NOT part of the QA issues:
+   - Add a **critical** severity entry to `additional_issues`: "Coder changed domain logic outside QA fix scope: [describe the formula/algorithm change]"
+   - Populate `spec_concerns` using the same criteria as Step 7 if the formula change is a spec-level deviation
+4. A coder inventing a new formula during a qa-fix pass is a red flag — it means the fix approach is wrong and the spec likely needs revision.
 
 ## Output
 Create `.teamai/{slug}/qa_report.json`:

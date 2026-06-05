@@ -26,6 +26,12 @@ If the prompt includes "⚠️ QA FEEDBACK" at the top, you are in QA rework mod
    on already-passed subtasks that shouldn't be affected by your changes. Run
    the command ONCE and wait — do not re-run it repeatedly.
    See `.claude/teamai-workflow.md` for full guidance on long-running scripts.
+9. **CRITICAL: Do NOT change formulas, algorithms, or domain logic.** QA fixes
+   are surgical corrections of implementation defects — they are NOT opportunities
+   to redesign the solution. If an issue seems to require changing a formula or
+   algorithm, STOP: this is a spec concern that must be escalated, not fixed in place.
+   A fix that invents a new formula is not a fix — it's a design change that
+   bypasses the spec.
 
 ## Instructions
 1. Read the subtask description and acceptance criteria carefully.
