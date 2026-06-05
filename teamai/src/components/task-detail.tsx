@@ -6,10 +6,9 @@ import { useRouter } from 'next/navigation';
 import { AgentPanel } from './agent-panel';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
-import { setTaskRoleOverride, addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, restartCurrentPhase } from '@/app/actions/tasks';
+import { addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, restartCurrentPhase } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, PlanSubtask, QAReportData, QACriterion } from '@/lib/stream-types';
-import type { RoleDefinition } from '@/app/actions/roles';
 import { PHASE_BADGE, PHASE_LABELS } from '@/constants/phases';
 
 type Tab = 'overview' | 'terminal' | 'spec' | 'plan' | 'qa';
@@ -25,7 +24,6 @@ interface Props {
   humanFeedback?: string | null;
   diff: string | null;
   agentOutput?: string | null;
-  roles: RoleDefinition[];
   onClose?: () => void;
   readonly?: boolean;
 }
@@ -246,7 +244,7 @@ export function QAReportView({ qaReport, humanFeedback }: { qaReport: QAReportDa
 // outside the component to avoid recreating on every render.
 const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, plan, qaReport, humanFeedback, diff, agentOutput, roles, onClose, readonly = false }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, plan, qaReport, humanFeedback, diff, agentOutput, onClose, readonly = false }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
 
@@ -281,13 +279,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
     { id: 'plan', label: 'Plan', badge: plan?.subtasks?.length ?? 0 },
     { id: 'qa', label: 'QA', badge: qaReport ? 1 : 0 },
   ];
-
-  function handleRoleOverride(role: string) {
-    startTransition(async () => {
-      await setTaskRoleOverride(task.id, role === '' ? null : role);
-      router.refresh();
-    });
-  }
 
   function handleDepToggle(depId: string, checked: boolean) {
     startTransition(async () => {
@@ -442,22 +433,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
             Created {new Date(task.createdAt).toLocaleString()}
             {' · '}Updated {new Date(task.updatedAt).toLocaleString()}
           </p>
-          {!readonly && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400">Agent:</span>
-              <select
-                value={task.roleOverride ?? ''}
-                onChange={e => handleRoleOverride(e.target.value)}
-                disabled={isPending}
-                className="text-xs border border-[#334155] rounded-lg px-2 py-0.5 bg-[#1a1f2e] text-slate-300 focus:outline-none focus:ring-1 focus:ring-[#2563eb] disabled:opacity-50"
-              >
-                <option value="">Auto (pipeline default)</option>
-                {roles.map(r => (
-                  <option key={r.filename} value={r.filename}>{r.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
         </div>
 
         {/* Tabs (hidden in readonly) */}

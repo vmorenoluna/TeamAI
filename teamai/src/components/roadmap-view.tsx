@@ -577,7 +577,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
   } | null>(null);
 
   // Cache task data so reopening a task is instant (no re-fetch / loading flash)
-  const taskCacheRef = useRef<Map<string, { data: FullData; roles: RoleDefinition[] }>>(new Map());
+  const taskCacheRef = useRef<Map<string, { data: FullData }>>(new Map());
 
   const rmStream = useSessionStream(rmSessionId);
   const clStream = useSessionStream(clSessionId);
@@ -977,9 +977,8 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
               onClose={() => setSelectedTaskId(null)}
               readonly
               cachedData={taskCacheRef.current.get(selectedTaskId)?.data ?? undefined}
-              cachedRoles={taskCacheRef.current.get(selectedTaskId)?.roles}
-              onDataLoaded={(data, roles, tid) => {
-                taskCacheRef.current.set(tid, { data, roles });
+              onDataLoaded={(data, tid) => {
+                taskCacheRef.current.set(tid, { data });
               }}
               onError={(errorMsg) => {
                 // Only handle "not found" errors - other errors (network, etc.) should not redirect

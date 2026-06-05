@@ -17,16 +17,13 @@ import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, QAReportData } from '@/lib/stream-types';
-import type { RoleDefinition } from '@/app/actions/roles';
-
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
 
 const mockGetTaskFull = vi.hoisted(() => vi.fn());
-const mockGetRoles = vi.hoisted(() => vi.fn());
 
 vi.mock('@/app/actions/tasks', () => ({
   getTaskFull: (...args: unknown[]) => mockGetTaskFull(...args),
-  setTaskRoleOverride: vi.fn(),
+
   addDependency: vi.fn(),
   removeDependency: vi.fn(),
   addBlock: vi.fn(),
@@ -34,10 +31,6 @@ vi.mock('@/app/actions/tasks', () => ({
   deleteTask: vi.fn(),
   retryTask: vi.fn(),
   restartCurrentPhase: vi.fn(),
-}));
-
-vi.mock('@/app/actions/roles', () => ({
-  getRoles: (...args: unknown[]) => mockGetRoles(...args),
 }));
 
 const mockRouterRefresh = vi.hoisted(() => vi.fn());
@@ -141,13 +134,6 @@ function makeFullData(overrides: Partial<{
   };
 }
 
-function makeRoles(): RoleDefinition[] {
-  return [
-    { filename: 'senior-dev', name: 'Senior Developer', content: '# Role: Senior Developer\n\nExpert coder.' },
-    { filename: 'qa-expert', name: 'QA Expert', content: '# Role: QA Expert\n\nTests everything.' },
-  ];
-}
-
 function qaPass(): QAReportData {
   return {
     overall: 'PASS',
@@ -187,9 +173,7 @@ beforeEach(() => {
   gOnMessageCbs.length = 0;
   closeCalls = 0;
   mockGetTaskFull.mockReset();
-  mockGetRoles.mockReset();
   mockGetTaskFull.mockResolvedValue(makeFullData());
-  mockGetRoles.mockResolvedValue(makeRoles());
   // Mock navigator.clipboard
   Object.defineProperty(navigator, 'clipboard', {
     value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -214,8 +198,7 @@ describe('TaskPanel', () => {
     readonly?: boolean;
     onError?: (msg: string) => void;
     cachedData?: FullData | null;
-    cachedRoles?: RoleDefinition[];
-    onDataLoaded?: (data: FullData, roles: RoleDefinition[], taskId: string) => void;
+    onDataLoaded?: (data: FullData, taskId: string) => void;
   } = {}) {
     const onClose = () => { closeCalls++; };
     render(
@@ -225,7 +208,6 @@ describe('TaskPanel', () => {
         readonly={overrides.readonly}
         onError={overrides.onError}
         cachedData={overrides.cachedData}
-        cachedRoles={overrides.cachedRoles}
         onDataLoaded={overrides.onDataLoaded}
       />
     );
@@ -238,7 +220,6 @@ describe('TaskPanel', () => {
       let _resolve: (v: unknown) => void;
       const promise = new Promise(r => { _resolve = r; });
       mockGetTaskFull.mockReturnValue(promise);
-      mockGetRoles.mockResolvedValue(makeRoles());
 
       renderPanel();
       // "Loading…" appears in both title bar and content area
@@ -250,7 +231,6 @@ describe('TaskPanel', () => {
       let _resolve: (v: unknown) => void;
       const promise = new Promise(r => { _resolve = r; });
       mockGetTaskFull.mockReturnValue(promise);
-      mockGetRoles.mockResolvedValue(makeRoles());
 
       renderPanel();
       // The content area shows "Loading…" text; title bar also shows "Loading…"
@@ -264,7 +244,6 @@ describe('TaskPanel', () => {
   describe('error state', () => {
     it('shows "Failed to load task." when fetch fails', async () => {
       mockGetTaskFull.mockRejectedValue(new Error('Network error'));
-      mockGetRoles.mockResolvedValue(makeRoles());
 
       renderPanel();
 
@@ -275,7 +254,6 @@ describe('TaskPanel', () => {
 
     it('calls onError callback with the error message', async () => {
       mockGetTaskFull.mockRejectedValue(new Error('Boom'));
-      mockGetRoles.mockResolvedValue(makeRoles());
       const onError = vi.fn();
 
       renderPanel({ onError });
@@ -287,7 +265,6 @@ describe('TaskPanel', () => {
 
     it('calls onError with generic message for non-Error rejects', async () => {
       mockGetTaskFull.mockRejectedValue('string error');
-      mockGetRoles.mockResolvedValue(makeRoles());
       const onError = vi.fn();
 
       renderPanel({ onError });
@@ -329,7 +306,6 @@ describe('TaskPanel', () => {
       let _resolve: (v: unknown) => void;
       const promise = new Promise(r => { _resolve = r; });
       mockGetTaskFull.mockReturnValue(promise);
-      mockGetRoles.mockResolvedValue(makeRoles());
 
       renderPanel();
 
@@ -448,8 +424,6 @@ describe('TaskPanel', () => {
     it('calls onDataLoaded after successful fetch', async () => {
       const data = makeFullData({ task: { id: 'task-1', title: 'Loaded' } });
       mockGetTaskFull.mockResolvedValue(data);
-      const roles = makeRoles();
-      mockGetRoles.mockResolvedValue(roles);
       const onDataLoaded = vi.fn();
 
       renderPanel({ onDataLoaded });
@@ -457,7 +431,6 @@ describe('TaskPanel', () => {
       await waitFor(() => {
         expect(onDataLoaded).toHaveBeenCalledWith(
           expect.objectContaining({ task: expect.objectContaining({ title: 'Loaded' }) }),
-          expect.arrayContaining([expect.objectContaining({ filename: 'senior-dev' })]),
           'task-1',
         );
       });
@@ -677,7 +650,6 @@ describe('TaskDetail', () => {
     humanFeedback: string | null;
     diff: string | null;
     agentOutput: string | null;
-    roles: RoleDefinition[];
     readonly: boolean;
     onClose: () => void;
   }> = {}) {
@@ -694,7 +666,6 @@ describe('TaskDetail', () => {
         humanFeedback={overrides.humanFeedback ?? null}
         diff={overrides.diff ?? null}
         agentOutput={overrides.agentOutput ?? null}
-        roles={overrides.roles ?? makeRoles()}
         readonly={overrides.readonly ?? false}
         onClose={overrides.onClose}
       />
@@ -942,24 +913,6 @@ describe('TaskDetail', () => {
     it('does not show banner in readonly mode', () => {
       renderDetail({ task: { rateLimitedUntil: '2026-06-04T08:00:00.000Z' }, readonly: true });
       expect(screen.queryByText(/API token limit hit/)).not.toBeInTheDocument();
-    });
-  });
-
-  // ── Agent role override ──────────────────────────────────────────────
-
-  describe('agent role override', () => {
-    it('renders role override dropdown', () => {
-      renderDetail();
-      const select = screen.getByRole('combobox');
-      expect(select).toBeInTheDocument();
-      expect(screen.getByText('Auto (pipeline default)')).toBeInTheDocument();
-    });
-
-    it('shows role options from roles prop', () => {
-      renderDetail({
-        roles: [{ filename: 'senior-dev', name: 'Senior Developer', content: '# Role: Senior Developer' }],
-      });
-      expect(screen.getByText('Senior Developer')).toBeInTheDocument();
     });
   });
 
