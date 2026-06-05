@@ -51,7 +51,7 @@ vi.mock('@/components/task-card', () => ({
 }));
 
 vi.mock('@/components/task-panel', () => ({
-  TaskPanel: ({ taskId, onClose }: { taskId: string; onClose: () => void; readonly?: boolean; cachedData?: unknown; cachedRoles?: unknown; onDataLoaded?: () => void; onError?: () => void }) => (
+  TaskPanel: ({ taskId, onClose }: { taskId: string; onClose: () => void; readonly?: boolean; cachedData?: unknown; onDataLoaded?: () => void; onError?: () => void }) => (
     <div data-testid="task-panel" data-task-id={taskId}>
       <button data-testid="close-panel" onClick={onClose}>Close</button>
     </div>

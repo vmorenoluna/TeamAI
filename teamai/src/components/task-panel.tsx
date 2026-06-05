@@ -2,30 +2,26 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { getTaskFull } from '@/app/actions/tasks';
-import { getRoles } from '@/app/actions/roles';
 import { TaskDetail } from './task-detail';
 import { useWebSocket } from '@/hooks/use-websocket';
-import type { RoleDefinition } from '@/app/actions/roles';
 
 export type FullData = Awaited<ReturnType<typeof getTaskFull>>;
 
-export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedData, cachedRoles, onDataLoaded }: {
+export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedData, onDataLoaded }: {
   taskId: string;
   onClose: () => void;
   readonly?: boolean;
   onError?: (error: string) => void;
   cachedData?: FullData | null;
-  cachedRoles?: RoleDefinition[];
-  onDataLoaded?: (data: FullData, roles: RoleDefinition[], taskId: string) => void;
+  onDataLoaded?: (data: FullData, taskId: string) => void;
 }) {
   const [data, setData] = useState<FullData | null>(cachedData ?? null);
-  const [roles, setRoles] = useState<RoleDefinition[]>(cachedRoles ?? []);
   const [loading, setLoading] = useState(!cachedData);
 
   const refresh = (silent = false) => {
     if (!silent) setLoading(true);
-    Promise.all([getTaskFull(taskId), getRoles()])
-      .then(([full, r]) => { setData(full); setRoles(r); onDataLoaded?.(full, r, taskId); })
+    getTaskFull(taskId)
+      .then((full) => { setData(full); onDataLoaded?.(full, taskId); })
       .catch((e) => {
         if (!silent && onError) {
           onError(e instanceof Error ? e.message : 'Failed to load task');
@@ -96,7 +92,6 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
             qaReport={data.qaReport}
             diff={data.diff}
             agentOutput={data.agentOutput}
-            roles={roles}
             onClose={onClose}
             readonly={readonly}
           />
