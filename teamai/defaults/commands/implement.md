@@ -23,13 +23,18 @@ If the prompt includes "⚠️ QA FEEDBACK" at the top, you are in QA rework mod
    - Only **suggestion** severity items are optional.
 7. Focus on the specific issues listed — don't refactor unrelated code.
 8. **Run the full test suite** after all fixes are committed to catch regressions
-   on already-passed subtasks that shouldn't be affected by your changes.
+   on already-passed subtasks that shouldn't be affected by your changes. Run
+   the command ONCE and wait — do not re-run it repeatedly.
+   See `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 
 ## Instructions
 1. Read the subtask description and acceptance criteria carefully.
 2. Read ALL files listed in the subtask before making any changes.
 3. Implement the changes. Follow existing code patterns and conventions.
-4. Run any existing tests related to the changed files (`npm test`, `pytest`, etc.).
+4. Run any existing tests related to the changed files (check the project's
+   build config or Makefile for the test command). Run the command ONCE
+   and wait — do NOT re-run it repeatedly in a loop.
+   See `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 5. If tests fail, fix the issues before proceeding.
 6. Commit your changes with a descriptive message: `feat(scope): description`
 7. Print a summary of what was changed and the test results.

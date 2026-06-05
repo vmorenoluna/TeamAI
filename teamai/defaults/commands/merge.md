@@ -10,7 +10,9 @@ You are merging a feature branch back to the target branch.
    - Understand the intent of each change.
    - Produce a merged version that preserves both intents.
    - If intents are contradictory, prefer the feature branch.
-3. Run the project's test suite after resolving conflicts.
+3. Run the project's test suite after resolving conflicts. Run the command ONCE
+   and wait for it to complete — do NOT re-run it repeatedly.
+   See `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 4. If tests pass, commit the merge.
 5. If tests fail, fix the issues and re-run.
 6. Print a summary of conflicts resolved and test results.
