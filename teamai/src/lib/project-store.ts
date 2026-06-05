@@ -3,7 +3,28 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
 
-const CONFIG_DIR = join(homedir(), '.teamai');
+/**
+ * Resolve the TeamAI config directory. Precedence:
+ * 1. TEAMAI_CONFIG_DIR env var (set by e2e tests to isolate from real config)
+ * 2. .teamai-e2e-config-path file (written by Playwright globalSetup so the
+ *    dev server child process picks up the temp dir even without the env var)
+ * 3. ~/.teamai/ (production)
+ */
+function resolveConfigDir(): string {
+  if (process.env.TEAMAI_CONFIG_DIR) {
+    return join(process.env.TEAMAI_CONFIG_DIR, '.teamai');
+  }
+  try {
+    const e2ePathFile = join(process.cwd(), '.teamai-e2e-config-path');
+    if (existsSync(e2ePathFile)) {
+      const dir = readFileSync(e2ePathFile, 'utf-8').trim();
+      if (dir) return join(dir, '.teamai');
+    }
+  } catch { /* fall through */ }
+  return join(homedir(), '.teamai');
+}
+
+const CONFIG_DIR = resolveConfigDir();
 const PROJECTS_FILE = join(CONFIG_DIR, 'projects.json');
 const BACKUP_FILE = PROJECTS_FILE + '.backup';
 const TMP_FILE = PROJECTS_FILE + '.tmp';
