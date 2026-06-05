@@ -5,6 +5,27 @@ import { createHash } from 'crypto';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 
+// ── Windows file-lock retry helper ──────────────────────────────────────────
+// On Windows, writeFileSync / renameSync can fail with EPERM or EBUSY when
+// another test file (running in parallel) has the same file open. Retry with
+// exponential backoff up to 5 attempts to absorb those transient lock windows.
+
+function retryOnLock(fn: () => void, maxRetries = 5, baseDelay = 50): void {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      fn();
+      return;
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (i === maxRetries - 1 || (err.code !== 'EPERM' && err.code !== 'EBUSY')) throw e;
+      // Busy-wait (synchronous Node.js has no sleep primitive); max total
+      // delay across all retries is ~1.5 s, acceptable for a test helper.
+      const start = Date.now();
+      while (Date.now() - start < baseDelay * Math.pow(2, i)) { /* spin */ }
+    }
+  }
+}
+
 // ── Mock homedir to a temp directory so tests NEVER touch the real ~/.teamai ──
 // vi.hoisted() runs before vi.mock factories, so TEST_HOME is initialized first.
 const TEST_HOME = vi.hoisted(() => {
@@ -253,7 +274,7 @@ describe('ProjectStore', () => {
       expect(newManifest.files['commands/implement.md']).not.toBe(storedChecksum);
     } finally {
       // Restore the default file
-      writeFileSync(defaultImplSrc, defaultBackup);
+      retryOnLock(() => writeFileSync(defaultImplSrc, defaultBackup));
     }
   });
 
@@ -285,7 +306,7 @@ describe('ProjectStore', () => {
       expect(currentContent).not.toContain('Updated in TeamAI v2.0');
     } finally {
       // Restore the default file
-      writeFileSync(defaultImplSrc, defaultBackup);
+      retryOnLock(() => writeFileSync(defaultImplSrc, defaultBackup));
     }
   });
 
@@ -308,7 +329,7 @@ describe('ProjectStore', () => {
       // Other files that didn't change should NOT be in the list
       expect(updated).not.toContain('roles/coder.md');
     } finally {
-      writeFileSync(defaultImplSrc, defaultBackup);
+      retryOnLock(() => writeFileSync(defaultImplSrc, defaultBackup));
     }
   });
 
@@ -367,7 +388,7 @@ describe('ProjectStore', () => {
       const manifestAfter = readFileSync(manifestPath, 'utf-8');
       expect(manifestAfter).toBe(manifestBefore);
     } finally {
-      writeFileSync(defaultImplSrc, defaultBackup);
+      retryOnLock(() => writeFileSync(defaultImplSrc, defaultBackup));
     }
   });
 
@@ -397,7 +418,7 @@ describe('ProjectStore', () => {
       const restoredContent = readFileSync(cmdPath, 'utf-8');
       expect(restoredContent).toBe(defaultCmdBackup + '\n\n<!-- restore-deleted test -->\n');
     } finally {
-      writeFileSync(defaultCmdSrc, defaultCmdBackup);
+      retryOnLock(() => writeFileSync(defaultCmdSrc, defaultCmdBackup));
     }
   });
 
@@ -422,7 +443,7 @@ describe('ProjectStore', () => {
       expect(updated).toContain('commands/merge.md');
       expect(existsSync(cmdPath)).toBe(false);
     } finally {
-      writeFileSync(defaultCmdSrc, defaultCmdBackup);
+      retryOnLock(() => writeFileSync(defaultCmdSrc, defaultCmdBackup));
     }
   });
 
@@ -569,7 +590,7 @@ describe('ProjectStore', () => {
       expect(stale[0].projectPath).toBe(projectDir);
       expect(stale[0].outdatedFiles).toContain('commands/implement.md');
     } finally {
-      writeFileSync(defaultImplSrc, defaultBackup);
+      retryOnLock(() => writeFileSync(defaultImplSrc, defaultBackup));
     }
   });
 
@@ -602,7 +623,7 @@ describe('ProjectStore', () => {
       // Project B is customized — should NOT be stale (preserved)
       expect(stale.some(s => s.projectPath === projectB)).toBe(false);
     } finally {
-      writeFileSync(defaultImplSrc, defaultBackup);
+      retryOnLock(() => writeFileSync(defaultImplSrc, defaultBackup));
       store.remove(projectB);
       if (existsSync(projectB)) rmSync(projectB, { recursive: true, force: true });
     }
@@ -629,7 +650,7 @@ describe('ProjectStore', () => {
       const currentContent = readFileSync(implPath, 'utf-8');
       expect(currentContent).toBe(originalContent);
     } finally {
-      writeFileSync(defaultImplSrc, defaultBackup);
+      retryOnLock(() => writeFileSync(defaultImplSrc, defaultBackup));
     }
   });
 
