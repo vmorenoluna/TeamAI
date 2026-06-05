@@ -2775,6 +2775,51 @@ describe('Orchestrator', () => {
     });
   });
 
+    it('falls back to awaiting-review when max spec revisions reached', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        qaAttempt: 0,
+        maxQaAttempts: 3,
+      });
+      // Already at max revisions (3) � next auto-revision should fall back
+      pipeline.specRevision = 3;
+
+      mockCreateSession.mockResolvedValue('sess-qa-max-rev');
+
+      // QA report with spec_concerns � but we're out of revision budget
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [
+          { name: 'Edge case handling', status: 'FAIL', notes: 'Missing null check on input', fix_needed: 'Add null guard' },
+        ],
+        spec_concerns: [
+          {
+            issue: 'Spec uses deprecated API',
+            reasoning: 'The spec references /v1/api which was deprecated in favour of /v2/api. The implementation used /v1 as specified, but this is wrong.',
+            suggested_fix: 'Update spec to reference /v2/api',
+          },
+        ],
+      }));
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-qa-max-rev', event: { type: 'result' } });
+      await promise;
+
+      // Max revisions exhausted � must fall back to human review, NOT auto-revise
+      expect(pipeline.phase).toBe('awaiting-review');
+      expect(pipeline.specRevision).toBeGreaterThanOrEqual(3);
+      expect(pipeline.qaAttempt).toBe(1); // guard path: qaAttempt NOT reset (unlike auto-revision path)
+      // Should NOT have auto-revised � no spec_revision_feedback.md
+      const feedbackPath = join(testData.taskDir, 'spec_revision_feedback.md');
+      expect(existsSync(feedbackPath)).toBe(false);
+    });
+
+
   // ── Spec revision — reviseSpec method ─────────────────────────────
 
   describe('reviseSpec', () => {
