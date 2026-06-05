@@ -1,69 +1,46 @@
 /**
- * Playwright global teardown — removes the seeded E2E test project and cleans
- * up the entry from ~/.teamai/projects.json so user projects are not polluted.
+ * Playwright global teardown — removes the seeded E2E test project and the
+ * isolated temp config directory.
  *
- * Runs after every Playwright test suite (pass or fail). Also restores from
- * backup if a previous run crashed before teardown could clean up.
- *
- * Uses fs.rmSync for cross-platform compatibility (Windows, macOS, Linux).
+ * Since the seed and tests now use an isolated TEAMAI_CONFIG_DIR, there is
+ * no need to manipulate the user's real ~/.teamai/projects.json. This
+ * teardown only cleans up temp files created during setup.
  */
 
-import { rmSync, readFileSync, writeFileSync, existsSync } from 'fs';
+import { rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 
 async function globalTeardown() {
-  const seedDir = join(__dirname, '..', '..', '.teamai-e2e-seed');
-  console.log(`[playwright-teardown] Cleaning up E2E seed project at ${seedDir}...`);
+  const cwd = process.cwd();
+  const seedDir = join(cwd, '.teamai-e2e-seed');
+  const pathFile = join(cwd, '.teamai-e2e-config-path');
 
-  // Remove the seed directory
-  try {
-    if (existsSync(seedDir)) {
+  console.log('[playwright-teardown] Cleaning up E2E artifacts…');
+
+  // ── Remove the seed directory ────────────────────────────────────────
+  if (existsSync(seedDir)) {
+    try {
       rmSync(seedDir, { recursive: true, force: true });
       console.log('[playwright-teardown] Removed seed directory');
+    } catch (err) {
+      console.warn('[playwright-teardown] Failed to remove seed directory (non-fatal):', err);
     }
-  } catch (err) {
-    console.warn('[playwright-teardown] Failed to remove seed directory (non-fatal):', err);
   }
 
-  // Clean up ~/.teamai/projects.json
-  try {
-    const projectsFile = join(homedir(), '.teamai', 'projects.json');
-    const backupFile = projectsFile + '.e2e-backup';
-    const tmpFile = projectsFile + '.tmp';
-
-    // ═══ Crash recovery: restore from backup if a previous run crashed ═══
-    if (existsSync(backupFile)) {
-      console.log('[playwright-teardown] Found leftover backup — restoring projects.json…');
-      try {
-        writeFileSync(projectsFile, readFileSync(backupFile, 'utf-8'));
-        rmSync(backupFile);
-        console.log('[playwright-teardown] Restored projects.json from backup');
-      } catch (err) {
-        console.warn('[playwright-teardown] Failed to restore from backup (non-fatal):', err);
+  // ── Remove the temp config directory ─────────────────────────────────
+  if (existsSync(pathFile)) {
+    try {
+      const tempConfigDir = readFileSync(pathFile, 'utf-8').trim();
+      if (tempConfigDir && existsSync(tempConfigDir)) {
+        rmSync(tempConfigDir, { recursive: true, force: true });
+        console.log('[playwright-teardown] Removed temp config directory');
       }
+    } catch (err) {
+      console.warn('[playwright-teardown] Failed to remove temp config directory (non-fatal):', err);
     }
 
-    // Clean up any stale tmp file from a crashed seed
-    if (existsSync(tmpFile)) {
-      try { rmSync(tmpFile); } catch { /* best-effort */ }
-    }
-
-    if (existsSync(projectsFile)) {
-      const projects: Array<{ name: string; path: string }> = JSON.parse(readFileSync(projectsFile, 'utf-8'));
-      // Remove ALL seed entries (belt + suspenders: catch both exact match and stale entries)
-      const filtered = projects.filter((p) =>
-        p.path !== seedDir && !p.path.includes('.teamai-e2e-seed')
-      );
-      if (filtered.length < projects.length) {
-        writeFileSync(projectsFile, JSON.stringify(filtered, null, 2));
-        console.log(`[playwright-teardown] Removed ${projects.length - filtered.length} E2E seed project(s) from projects.json`);
-      } else {
-        console.log('[playwright-teardown] No E2E seed entries found in projects.json');
-      }
-    }
-  } catch (err) {
-    console.warn('[playwright-teardown] Failed to clean up projects.json (non-fatal):', err);
+    // Always remove the path file itself
+    try { rmSync(pathFile); } catch { /* best-effort */ }
   }
 
   console.log('[playwright-teardown] Cleanup complete.');
