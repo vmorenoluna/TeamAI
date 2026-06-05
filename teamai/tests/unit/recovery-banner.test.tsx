@@ -18,7 +18,7 @@ import type { InterruptedTask } from '@/lib/recovery';
 
 // ── Imports ─────────────────────────────────────────────────────────────────
 
-import { RecoveryBanner } from '@/components/recovery-banner';
+import { RecoveryBanner, resetRecoveryBannerDismissed } from '@/components/recovery-banner';
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -42,6 +42,7 @@ function renderBanner(tasks: InterruptedTask[] = []) {
 describe('RecoveryBanner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetRecoveryBannerDismissed();
   });
 
   // ── Show/hide behavior ───────────────────────────────────────────────
@@ -130,7 +131,7 @@ describe('RecoveryBanner', () => {
       expect(screen.queryByText(/interrupted/)).not.toBeInTheDocument();
     });
 
-    it('stays hidden on re-render since dismissal persists until page refresh', () => {
+    it('stays hidden on re-render — dismissal persists across mounts until server restart', () => {
       const { rerender } = render(<RecoveryBanner tasks={[interruptedTask({ taskId: 't1', title: 'Task 1' })]} />);
 
       // Dismiss

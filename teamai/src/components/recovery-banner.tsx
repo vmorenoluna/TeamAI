@@ -3,10 +3,18 @@
 import { useState } from 'react';
 import type { InterruptedTask } from '@/lib/recovery';
 
-export function RecoveryBanner({ tasks }: { tasks: InterruptedTask[] }) {
-  const [dismissed, setDismissed] = useState(false);
+/** Module-level flag: once dismissed, stays gone until server restart. */
+let dismissed = false;
 
-  if (tasks.length === 0 || dismissed) return null;
+/** Reset dismissal state — exposed for tests. */
+export function resetRecoveryBannerDismissed() {
+  dismissed = false;
+}
+
+export function RecoveryBanner({ tasks }: { tasks: InterruptedTask[] }) {
+  const [hidden, setHidden] = useState(dismissed);
+
+  if (tasks.length === 0 || hidden || dismissed) return null;
 
   return (
     <div className="shrink-0 bg-amber-950/20 border-b border-amber-800/30 px-4 py-2 flex items-center justify-between gap-3">
@@ -18,7 +26,7 @@ export function RecoveryBanner({ tasks }: { tasks: InterruptedTask[] }) {
         )}
       </p>
       <button
-        onClick={() => setDismissed(true)}
+        onClick={() => { dismissed = true; setHidden(true); }}
         title="Dismiss"
         className="shrink-0 w-5 h-5 flex items-center justify-center rounded text-amber-400/60 hover:text-amber-300 hover:bg-amber-900/30 transition-colors text-sm leading-none"
       >
