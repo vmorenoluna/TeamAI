@@ -35,7 +35,6 @@ export interface Task {
   phase: string;
   branch?: string;
   dependencies?: string[];     // IDs of tasks this task depends on
-  roleOverride?: string;       // role filename (e.g. 'coder.md') for implement phase
   rateLimitedUntil?: string;   // ISO timestamp — set when pipeline is paused by API rate limit
   source?: string;             // 'ideation' | 'competitor-analysis' — source of roadmap item
   competitiveContext?: string; // competitor context from roadmap item

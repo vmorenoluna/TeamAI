@@ -539,9 +539,7 @@ export class Orchestrator {
     const planPath = path.join(pipeline.specPath, 'plan.json');
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
 
-    // Honour per-task role override set by the user in the UI
-    const task = this.taskStore.getById(pipeline.taskId);
-    const coderRole = (task?.roleOverride ?? 'coder.md').replace('.md', '') as AgentSession['role'];
+    const coderRole = 'coder' as AgentSession['role'];
 
     // Check for QA feedback if bouncing back from QA, and human feedback if bouncing from review
     const qaFeedbackPath = path.join(pipeline.specPath, 'qa_feedback.md');
