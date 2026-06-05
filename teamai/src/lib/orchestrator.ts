@@ -85,6 +85,7 @@ interface TaskPipeline {
   branch: string;
   qaAttempt: number;
   maxQaAttempts: number;
+  specRevision: number;
   mergeStrategy?: MergeStrategy;
   sessionId?: string;
 }
@@ -215,6 +216,7 @@ export class Orchestrator {
       branch,
       qaAttempt: 0,
       maxQaAttempts: config.maxQaAttempts,
+      specRevision: 0,
     };
 
     // Use provided startPhase, else first phase in config.
@@ -326,7 +328,28 @@ export class Orchestrator {
     }
 
     const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, 'awaiting-review');
+    await this._autoReviseSpec(pipeline);
+  }
+
+  /**
+   * Auto-triggered spec revision when QA finds spec_concerns.
+   * Writes revision feedback, snapshots the old spec, clears downstream artifacts,
+   * and restarts the pipeline from the spec phase (analyst).
+   */
+  private async _autoReviseSpec(pipeline: TaskPipeline): Promise<void> {
     const specPath = pipeline.specPath;
+    const logFile = path.join(specPath, 'output.log');
+
+    // Guard: max 3 spec revisions before falling back to human review.
+    // Prevents infinite loops when the analyst produces the same flawed spec.
+    pipeline.specRevision++;
+    if (pipeline.specRevision > 3) {
+      try {
+        appendFileSync(logFile, `\n[REFINE] Max spec revisions (3) reached — pausing for human review\n`);
+      } catch { /* best-effort */ }
+      this.advancePhase(pipeline, 'awaiting-review');
+      return;
+    }
 
     // Write spec_revision_feedback.md from QA report's spec_concerns
     const reportPath = path.join(specPath, 'qa_report.json');
@@ -359,7 +382,7 @@ export class Orchestrator {
 
     // Clear downstream artifacts — plan, QA, and feedback all need regeneration
     // from the revised spec. clearArtifacts('plan') clears plan.json + qa_report.json.
-    this.taskStore.clearArtifacts(taskId, 'plan');
+    this.taskStore.clearArtifacts(pipeline.taskId, 'plan');
 
     // Also clear additional revision-related files that should not persist
     const extraFiles = ['qa_feedback.md', 'completion_summary.md', 'human_feedback.md', 'human_feedback_before_bounce.md'];
@@ -371,6 +394,9 @@ export class Orchestrator {
     pipeline.qaAttempt = 0;
     this._savePipelineState(pipeline);
 
+    try {
+      appendFileSync(logFile, `\n[REFINE] Spec concerns detected — auto-revising spec with analyst (revision ${pipeline.specRevision}/3)\n`);
+    } catch { /* best-effort */ }
     this.advancePhase(pipeline, 'spec');
     await this.executePhase(pipeline);
   }
@@ -560,13 +586,23 @@ export class Orchestrator {
     // Non-flagged subtasks already passed QA — no need to redo them.
     const subtasksToRun = hasQaFeedback
       ? plan.subtasks.filter((s: PlanSubtask) => s.qa_flagged)
-      : plan.subtasks;
+      : plan.subtasks.filter((s: PlanSubtask) => !s.completed);
 
     // Safety fallback: if QA feedback exists but no subtasks were flagged
     // (e.g., QA report criteria didn't match any subtask), run all subtasks.
     const effectiveSubtasks = hasQaFeedback && subtasksToRun.length === 0
       ? plan.subtasks
       : subtasksToRun;
+
+    // Guard: if every subtask is already completed and we're not in QA rework,
+    // skip implement entirely — advance directly to QA review.
+    if (!hasQaFeedback && effectiveSubtasks.length === 0 && plan.subtasks.length > 0) {
+      const logFile = path.join(pipeline.specPath, 'output.log');
+      appendFileSync(logFile, '\n[SKIP] All subtasks already completed — skipping implement, advancing to QA review\n');
+      this.advancePhase(pipeline, 'qa-review');
+      await this.executePhase(pipeline);
+      return;
+    }
 
     // Reset completed only for subtasks we're about to re-run
     if (hasQaFeedback) {
@@ -910,7 +946,11 @@ export class Orchestrator {
     const hasSpecConcerns = report.spec_concerns && Array.isArray(report.spec_concerns) && report.spec_concerns.length > 0;
 
     if (hasSpecConcerns) {
-      this.advancePhase(pipeline, 'awaiting-review');
+      // Auto-revise the spec via the analyst instead of pausing for human review.
+      // The analyst reads the revision feedback, fixes the spec, then the pipeline
+      // proceeds normally through plan → implement → qa-review.
+      await this._autoReviseSpec(pipeline);
+      return;
     } else if (report.overall === 'PASS') {
       this.advancePhase(pipeline, 'awaiting-review');
     } else if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
@@ -1394,6 +1434,7 @@ export class Orchestrator {
       branch,
       qaAttempt: 0,
       maxQaAttempts: this.getPipelineConfig().maxQaAttempts,
+      specRevision: 0,
     };
     this.pipelines.set(taskId, pipeline);
     return pipeline;
@@ -1480,15 +1521,9 @@ export class Orchestrator {
     let startPhase: PipelinePhase;
     if (hasPlan) {
       startPhase = 'implement';
-      // Reset subtask completions so implement phases re-do all work from scratch
-      const planPath = path.join(dir, 'plan.json');
-      try {
-        const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
-        if (plan.subtasks) {
-          for (const s of plan.subtasks) s.completed = false;
-        }
-        writeFileSync(planPath, JSON.stringify(plan, null, 2));
-      } catch { /* best-effort */ }
+      // Subtask completions are preserved — runImplement skips already-completed
+      // subtasks. If the user wants a full re-run, they should stop the task
+      // (move to backlog) and restart it, which calls cleanupTaskArtifacts.
     } else if (hasSpec) {
       startPhase = 'plan';
     } else {

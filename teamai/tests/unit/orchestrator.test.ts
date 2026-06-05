@@ -2031,7 +2031,7 @@ describe('Orchestrator', () => {
   // ── resumeTask ────────────────────────────────────────────────────
 
   describe('resumeTask', () => {
-    it('resumes from implement when plan.json exists and resets completions', async () => {
+    it('resumes from implement when plan.json exists and preserves completions', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
 
@@ -2046,7 +2046,8 @@ describe('Orchestrator', () => {
       expect(mockCreateSession).toHaveBeenCalled();
 
       const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
-      expect(plan.subtasks[0].completed).toBe(false);
+      // Completions are now preserved � runImplement skips already-completed subtasks
+      expect(plan.subtasks[0].completed).toBe(true);
     });
 
     it('resumes from plan when only spec.md exists', async () => {
@@ -2599,7 +2600,7 @@ describe('Orchestrator', () => {
   // ── Spec revision — runQaReview with spec_concerns ───────────────
 
   describe('runQaReview — spec concerns diversion', () => {
-    it('advances to awaiting-review when spec_concerns exist, bypassing the implement bounce', async () => {
+    it('auto-revises spec when spec_concerns exist instead of awaiting human review', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
 
@@ -2610,9 +2611,15 @@ describe('Orchestrator', () => {
         maxQaAttempts: 3,
       });
 
-      mockCreateSession.mockResolvedValue('sess-qa-spec');
+      // First call: QA session; second call: spec revision session (abort to stop cascade)
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve('sess-qa-spec');
+        return Promise.reject(new Error('simulated abort after spec revision'));
+      });
 
-      // QA report with spec_concerns — the spec itself is the problem,
+      // QA report with spec_concerns � the spec itself is the problem,
       // not the implementation
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'FAIL',
@@ -2631,14 +2638,22 @@ describe('Orchestrator', () => {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       await new Promise(r => setTimeout(r, 10));
       fireEvent('event', { sessionId: 'sess-qa-spec', event: { type: 'result' } });
-      await promise;
+      // Wait for auto-revision to kick in (second createSession)
+      await new Promise(r => setTimeout(r, 20));
+      await promise.catch(() => {}); // swallow abort error
 
-      // Should have advanced to awaiting-review (not implement, not failed)
-      expect(pipeline.phase).toBe('awaiting-review');
-      expect(pipeline.qaAttempt).toBe(1);
+      // Should have auto-revised spec � NOT awaiting human review
+      expect(pipeline.phase).not.toBe('awaiting-review');
+      expect(pipeline.phase).toBe('spec');
+      expect(pipeline.qaAttempt).toBe(0); // reset for fresh cycle
+      // Should write spec_revision_feedback.md
+      const feedbackPath = join(testData.taskDir, 'spec_revision_feedback.md');
+      expect(existsSync(feedbackPath)).toBe(true);
+      const feedback = readFileSync(feedbackPath, 'utf-8');
+      expect(feedback).toContain('Spec assumes wrong API response shape');
     });
 
-    it('advances to awaiting-review even when overall is PASS but spec_concerns exist', async () => {
+    it('auto-revises spec even when overall is PASS but spec_concerns exist', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
 
@@ -2649,7 +2664,12 @@ describe('Orchestrator', () => {
         maxQaAttempts: 3,
       });
 
-      mockCreateSession.mockResolvedValue('sess-qa-pass-spec');
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve('sess-qa-pass-spec');
+        return Promise.reject(new Error('simulated abort after spec revision'));
+      });
 
       // QA passes implementation (code matches spec) but flags spec-level concerns
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
@@ -2669,10 +2689,16 @@ describe('Orchestrator', () => {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       await new Promise(r => setTimeout(r, 10));
       fireEvent('event', { sessionId: 'sess-qa-pass-spec', event: { type: 'result' } });
-      await promise;
+      await new Promise(r => setTimeout(r, 20));
+      await promise.catch(() => {});
 
-      // Spec concerns take priority over PASS — goes to human review
-      expect(pipeline.phase).toBe('awaiting-review');
+      // Spec concerns trigger auto-revision � NOT human review
+      expect(pipeline.phase).not.toBe('awaiting-review');
+      expect(pipeline.phase).toBe('spec');
+      const feedbackPath = join(testData.taskDir, 'spec_revision_feedback.md');
+      expect(existsSync(feedbackPath)).toBe(true);
+      const feedback = readFileSync(feedbackPath, 'utf-8');
+      expect(feedback).toContain('Spec contradicts itself');
     });
 
     it('still bounces to implement when overall is FAIL and no spec_concerns exist', async () => {
