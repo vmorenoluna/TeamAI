@@ -968,8 +968,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
             onClick={() => setSelectedTaskId(null)}
           />
           {/* Window */}
-          <div
-            className="relative w-[800px] max-w-[95vw] max-h-[85vh] h-[650px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
+          <div              className="relative w-[800px] max-w-[95vw] max-h-[80vh] h-[650px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
             onClick={e => e.stopPropagation()}
           >
             <TaskPanel
