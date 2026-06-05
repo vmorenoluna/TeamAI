@@ -398,23 +398,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
           </p>
         )}
 
-        {/* Source info (for tasks converted from roadmap) */}
-        {task.source && (
-          <div className="mb-3 flex items-center gap-3 text-xs">
-            <span className="text-slate-500">Source:</span>
-            <span className={`px-2 py-0.5 rounded font-medium ${
-              task.source === 'competitor-analysis'
-                ? 'bg-amber-900/30 text-amber-400'
-                : 'bg-blue-900/30 text-blue-400'
-            }`}>
-              {task.source === 'competitor-analysis' ? 'Competitor Analysis' : 'Ideation'}
-            </span>
-            {task.competitiveContext && (
-              <span className="text-amber-400 italic">{task.competitiveContext}</span>
-            )}
-          </div>
-        )}
-
         {/* Rate-limit banner */}
         {!readonly && task.rateLimitedUntil && (
           <div className="mt-2 mb-1 flex items-center gap-2 text-xs bg-amber-950/30 border border-amber-800/50 text-amber-300 rounded-md px-3 py-1.5">
@@ -427,8 +410,24 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, pla
           </div>
         )}
 
-        {/* Meta row: timestamps + role override (hidden in readonly) */}
-        <div className="flex items-center gap-4 flex-wrap mb-3">
+        {/* Meta row: source (if any) + timestamps */}
+        <div className="flex items-center gap-3 flex-wrap mb-3">
+          {task.source && (
+            <>
+              <span className="text-xs text-slate-500">Source:</span>
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                task.source === 'competitor-analysis'
+                  ? 'bg-amber-900/30 text-amber-400'
+                  : 'bg-blue-900/30 text-blue-400'
+              }`}>
+                {task.source === 'competitor-analysis' ? 'Competitor Analysis' : 'Ideation'}
+              </span>
+              {task.competitiveContext && (
+                <span className="text-amber-400 italic text-xs">{task.competitiveContext}</span>
+              )}
+              <span className="text-slate-400 text-xs">·</span>
+            </>
+          )}
           <p className="text-xs text-slate-400">
             Created {new Date(task.createdAt).toLocaleString()}
             {' · '}Updated {new Date(task.updatedAt).toLocaleString()}
