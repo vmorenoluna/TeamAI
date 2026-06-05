@@ -31,6 +31,8 @@ Rules:
 - Subtasks with the same `parallel_group` letter can run concurrently.
 - Subtasks with `depends_on` entries must wait for those IDs to complete.
 - Each subtask must be self-contained enough for an independent agent to implement.
+- Subtasks must be small enough to complete in a single session — no multi-day epics.
 - Include ALL files that need to change, not just the primary ones.
 - Order subtasks so dependencies are resolved top-down.
+- Flag risks explicitly in the subtask description — don't assume things will work out.
 ```
