@@ -76,7 +76,7 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
       </div>
 
       {/* Content */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {loading && (
           <div className="h-full flex items-start justify-center pt-8 text-sm text-slate-500">Loading…</div>
         )}
