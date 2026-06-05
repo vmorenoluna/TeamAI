@@ -345,12 +345,6 @@ export async function getTaskFull(taskId: string) {
   return { task, allTasks, dependencies, dependents, spec, plan, qaReport, humanFeedback, diff, agentOutput };
 }
 
-export async function setTaskRoleOverride(taskId: string, role: string | null): Promise<void> {
-  const { taskStore } = await getStores();
-  taskStore.update(taskId, { roleOverride: role ?? undefined });
-  revalidatePath(`/task/${taskId}`);
-}
-
 export async function addDependency(taskId: string, depId: string): Promise<void> {
   const { taskStore } = await getStores();
   const task = taskStore.getById(taskId);
