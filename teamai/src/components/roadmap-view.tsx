@@ -22,7 +22,6 @@ import { useSessionStream } from '@/hooks/use-session-stream';
 import { extractText } from '@/lib/stream-types';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskPanel, type FullData } from './task-panel';
-import type { RoleDefinition } from '@/app/actions/roles';
 import { PHASE_BADGE, PHASE_LABELS as TASK_PHASE_LABELS, PRIORITY_COLORS } from '@/constants/phases';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -968,7 +967,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
             onClick={() => setSelectedTaskId(null)}
           />
           {/* Window */}
-          <div              className="relative w-[800px] max-w-[95vw] max-h-[80vh] h-[650px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
+          <div              className="relative w-[800px] max-w-[95vw] max-h-[calc(100%-3rem)] h-[650px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
             onClick={e => e.stopPropagation()}
           >
             <TaskPanel
