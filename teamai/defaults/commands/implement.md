@@ -9,6 +9,10 @@ $ARGUMENTS
 
 If the prompt includes "⚠️ QA FEEDBACK" at the top, you are in QA rework mode:
 
+QA feedback represents the latest requirements. The plan may be stale — QA findings are
+the ground truth. Where QA feedback and the plan conflict, follow the QA feedback and
+note the deviation from the plan.
+
 1. Read the QA feedback FIRST. It takes priority over everything else.
 2. Address ONLY the QA issues listed. The acceptance criteria below are limited
    to items marked [QA CORRECTION] or [QA ISSUE] — fix those and nothing else.
