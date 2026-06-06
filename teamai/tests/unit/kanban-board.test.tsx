@@ -211,7 +211,7 @@ describe('KanbanBoard', () => {
   describe('filter toolbar', () => {
     it('renders search input', () => {
       renderBoard();
-      expect(screen.getByPlaceholderText('Search tasks…')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Search…')).toBeInTheDocument();
     });
 
     it('filters tasks by search query', () => {
@@ -220,7 +220,7 @@ describe('KanbanBoard', () => {
         task({ id: '2', title: 'Add dark mode', phase: 'backlog' }),
       ]);
 
-      const searchInput = screen.getByPlaceholderText('Search tasks…');
+      const searchInput = screen.getByPlaceholderText('Search…');
       fireEvent.change(searchInput, { target: { value: 'login' } });
 
       // Only "Fix login bug" should remain
@@ -235,7 +235,7 @@ describe('KanbanBoard', () => {
         task({ id: '2', title: 'Task B', description: 'something else', phase: 'backlog' }),
       ]);
 
-      fireEvent.change(screen.getByPlaceholderText('Search tasks…'), { target: { value: 'keyword' } });
+      fireEvent.change(screen.getByPlaceholderText('Search…'), { target: { value: 'keyword' } });
 
       expect(screen.getAllByTestId('task-card')).toHaveLength(1);
     });
@@ -243,7 +243,7 @@ describe('KanbanBoard', () => {
     it('shows clear button when search query is entered', () => {
       renderBoard();
 
-      fireEvent.change(screen.getByPlaceholderText('Search tasks…'), { target: { value: 'test' } });
+      fireEvent.change(screen.getByPlaceholderText('Search…'), { target: { value: 'test' } });
 
       // The × button should appear
       const clearBtns = screen.getAllByText('×');
@@ -261,7 +261,7 @@ describe('KanbanBoard', () => {
     it('shows Reset button when filters are active', () => {
       renderBoard();
 
-      fireEvent.change(screen.getByPlaceholderText('Search tasks…'), { target: { value: 'test' } });
+      fireEvent.change(screen.getByPlaceholderText('Search…'), { target: { value: 'test' } });
 
       expect(screen.getByText('Reset')).toBeInTheDocument();
     });
@@ -269,7 +269,7 @@ describe('KanbanBoard', () => {
     it('Reset clears all filters', () => {
       renderBoard([task({ id: '1', title: 'A', description: '' }), task({ id: '2', title: 'B', description: '' })]);
 
-      fireEvent.change(screen.getByPlaceholderText('Search tasks…'), { target: { value: 'zzznotfound' } });
+      fireEvent.change(screen.getByPlaceholderText('Search…'), { target: { value: 'zzznotfound' } });
 
       // Tasks are filtered out — no cards visible
       expect(screen.queryAllByTestId('task-card')).toHaveLength(0);

@@ -354,29 +354,21 @@ export function KanbanBoard({ tasks }: Props) {
 
   return (
     <div className="flex flex-col h-full bg-[#11131b]">
-      <div className="flex items-center justify-between px-6 py-4 border-b bg-[#11131b] border-[#1e293b] shrink-0">
-        <div className="flex items-center gap-2">
+      {/* Unified header row: Board title + filters + New Task */}
+      <div className="flex items-center flex-wrap gap-3 px-6 py-3 border-b bg-[#11131b] border-[#1e293b] shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <ConnectionIndicator connected={wsStatus === 'connected'} initial={wsStatus === 'connecting'} />
-          <h1 className="text-xl font-bold text-white">Board</h1>
+          <h1 className="text-lg font-bold text-white">Board</h1>
         </div>
-        <button
-          onClick={() => setShowDialog(true)}
-          className="px-3 py-1.5 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] transition-colors"
-        >
-          + New Task
-        </button>
-      </div>
 
-      {/* Filter toolbar */}
-      <div className="flex items-center gap-3 px-6 py-2.5 border-b bg-[#0f1119] border-[#1e293b] shrink-0">
         {/* Search */}
-        <div className="relative flex-1 max-w-xs">
+        <div className="relative flex-1 max-w-[200px]">
           <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
             type="text"
-            placeholder="Search tasks…"
+            placeholder="Search…"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full pl-8 pr-8 py-1.5 text-xs bg-[#1a1f2e] border border-[#334155] rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-[#2563eb]"
@@ -531,6 +523,13 @@ export function KanbanBoard({ tasks }: Props) {
             Reset
           </button>
         )}
+
+        <button
+          onClick={() => setShowDialog(true)}
+          className="px-3 py-1.5 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] transition-colors shrink-0"
+        >
+          + New Task
+        </button>
       </div>
 
       {/* Close dropdowns on outside click */}
