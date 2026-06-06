@@ -118,6 +118,7 @@ function makeFullData(overrides: Partial<{
   humanFeedback: string | null;
   diff: string | null;
   agentOutput: string | null;
+  specVersions: Record<string, string>;
 }> = {}): FullData {
   const task = makeTask(overrides.task ?? {});
   return {
@@ -131,6 +132,7 @@ function makeFullData(overrides: Partial<{
     humanFeedback: overrides.humanFeedback ?? null,
     diff: overrides.diff ?? null,
     agentOutput: overrides.agentOutput ?? null,
+    specVersions: overrides.specVersions ?? {},
   };
 }
 
@@ -650,6 +652,7 @@ describe('TaskDetail', () => {
     humanFeedback: string | null;
     diff: string | null;
     agentOutput: string | null;
+    specVersions: Record<string, string>;
     readonly: boolean;
     onClose: () => void;
   }> = {}) {
@@ -666,6 +669,7 @@ describe('TaskDetail', () => {
         humanFeedback={overrides.humanFeedback ?? null}
         diff={overrides.diff ?? null}
         agentOutput={overrides.agentOutput ?? null}
+        specVersions={overrides.specVersions ?? {}}
         readonly={overrides.readonly ?? false}
         onClose={overrides.onClose}
       />
@@ -855,6 +859,372 @@ describe('TaskDetail', () => {
       fireEvent.click(screen.getByText('Spec'));
 
       expect(screen.getByText('No spec generated yet. Run the pipeline to create one.')).toBeInTheDocument();
+    });
+  });
+
+  // ── Spec tab — version selector ──────────────────────────────────────
+
+  describe('spec tab — version selector', () => {
+    it('shows version buttons (current, v1, v2) when specVersions are provided', () => {
+      renderDetail({
+        spec: '# Current Spec',
+        specVersions: {
+          v1: '# Spec v1 content',
+          v2: '# Spec v2 content',
+        },
+      });
+      fireEvent.click(screen.getByText('Spec'));
+
+      expect(screen.getByText('current')).toBeInTheDocument();
+      expect(screen.getByText('v1')).toBeInTheDocument();
+      expect(screen.getByText('v2')).toBeInTheDocument();
+    });
+
+    it('displays current spec content by default', () => {
+      renderDetail({
+        spec: '# Current Spec',
+        specVersions: {
+          v1: '# Spec v1 content',
+          v2: '# Spec v2 content',
+        },
+      });
+      fireEvent.click(screen.getByText('Spec'));
+
+      const pre = document.querySelector('pre');
+      expect(pre?.textContent).toContain('# Current Spec');
+      expect(pre?.textContent).not.toContain('# Spec v1 content');
+    });
+
+    it('"current" button has blue highlight by default', () => {
+      renderDetail({
+        spec: '# Current Spec',
+        specVersions: { v1: '# Spec v1 content' },
+      });
+      fireEvent.click(screen.getByText('Spec'));
+
+      const currentBtn = screen.getByText('current');
+      expect(currentBtn.className).toContain('border-[#2563eb]');
+      expect(currentBtn.className).toContain('text-blue-300');
+    });
+
+    it('clicking v1 shows v1 content and highlights v1 button', () => {
+      renderDetail({
+        spec: '# Current Spec',
+        specVersions: {
+          v1: '# Spec v1 content',
+          v2: '# Spec v2 content',
+        },
+      });
+      fireEvent.click(screen.getByText('Spec'));
+      fireEvent.click(screen.getByText('v1'));
+
+      // Content should be v1
+      const pre = document.querySelector('pre');
+      expect(pre?.textContent).toContain('# Spec v1 content');
+      expect(pre?.textContent).not.toContain('# Current Spec');
+
+      // v1 button should be highlighted
+      const v1Btn = screen.getByText('v1');
+      expect(v1Btn.className).toContain('border-[#2563eb]');
+      expect(v1Btn.className).toContain('text-blue-300');
+
+      // current button should NOT be highlighted
+      const currentBtn = screen.getByText('current');
+      expect(currentBtn.className).toContain('text-slate-400');
+      expect(currentBtn.className).not.toContain('border-[#2563eb]');
+    });
+
+    it('clicking v2 shows v2 content', () => {
+      renderDetail({
+        spec: '# Current Spec',
+        specVersions: {
+          v1: '# Spec v1 content',
+          v2: '# Spec v2 content',
+        },
+      });
+      fireEvent.click(screen.getByText('Spec'));
+      fireEvent.click(screen.getByText('v2'));
+
+      const pre = document.querySelector('pre');
+      expect(pre?.textContent).toContain('# Spec v2 content');
+      expect(pre?.textContent).not.toContain('# Spec v1 content');
+      expect(pre?.textContent).not.toContain('# Current Spec');
+    });
+
+    it('clicking "current" after viewing a snapshot restores current spec', () => {
+      renderDetail({
+        spec: '# Current Spec',
+        specVersions: { v1: '# Spec v1 content' },
+      });
+      fireEvent.click(screen.getByText('Spec'));
+
+      // Switch to v1
+      fireEvent.click(screen.getByText('v1'));
+      expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
+
+      // Switch back to current
+      fireEvent.click(screen.getByText('current'));
+      expect(document.querySelector('pre')?.textContent).toContain('# Current Spec');
+      expect(document.querySelector('pre')?.textContent).not.toContain('# Spec v1 content');
+    });
+
+    it('shows correct badge count when spec and versions exist', () => {
+      renderDetail({
+        spec: '# Current Spec',
+        specVersions: { v1: '# v1', v2: '# v2', v3: '# v3' },
+      });
+      fireEvent.click(screen.getByText('Spec'));
+
+      // Badge should be 4: 1 (current) + 3 (v1, v2, v3)
+      const specTab = screen.getByText('Spec').closest('button')!;
+      const badgeSpans = specTab.querySelectorAll('span');
+      const badgeTexts = Array.from(badgeSpans).map(b => b.textContent);
+      expect(badgeTexts).toContain('4');
+    });
+
+    it('does not show version buttons when specVersions is empty', () => {
+      renderDetail({
+        spec: '# Current Spec',
+        specVersions: {},
+      });
+      fireEvent.click(screen.getByText('Spec'));
+
+      expect(screen.queryByText('v1')).not.toBeInTheDocument();
+      expect(screen.queryByText('v2')).not.toBeInTheDocument();
+      expect(screen.queryByText('v3')).not.toBeInTheDocument();
+    });
+
+    it('does not show version buttons when specVersions is undefined', () => {
+      renderDetail({ spec: '# Current Spec' });
+      fireEvent.click(screen.getByText('Spec'));
+
+      expect(screen.queryByText('v1')).not.toBeInTheDocument();
+      expect(screen.queryByText('v2')).not.toBeInTheDocument();
+    });
+
+    it('shows snapshot content only (no current spec) when spec is null but versions exist', () => {
+      renderDetail({
+        spec: null,
+        specVersions: { v1: '# Spec v1 content' },
+      });
+      fireEvent.click(screen.getByText('Spec'));
+
+      // Should show empty state for "current" but the version button should still be there
+      expect(screen.getByText('current')).toBeInTheDocument();
+      expect(screen.getByText('v1')).toBeInTheDocument();
+
+      // Clicking v1 should show the snapshot
+      fireEvent.click(screen.getByText('v1'));
+      expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
+
+      // Clicking "current" when spec is null should show empty content
+      fireEvent.click(screen.getByText('current'));
+      expect(document.querySelector('pre')?.textContent).toBe('');
+    });
+
+    it('preserves selected version when switching between Spec and other tabs', () => {
+      renderDetail({
+        spec: '# Current Spec',
+        specVersions: { v1: '# Spec v1 content', v2: '# Spec v2 content' },
+      });
+      fireEvent.click(screen.getByText('Spec'));
+      fireEvent.click(screen.getByText('v1'));
+      expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
+
+      // Switch to Overview tab
+      fireEvent.click(screen.getByText('Overview'));
+
+      // Switch back to Spec — should still show v1
+      fireEvent.click(screen.getByText('Spec'));
+      expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
+
+      const v1Btn = screen.getByText('v1');
+      expect(v1Btn.className).toContain('border-[#2563eb]');
+    });
+  });
+
+  // ── Spec tab — compare mode ──────────────────────────────────────────
+
+  describe('spec tab — compare mode', () => {
+    const specWithVersions = {
+      spec: '# Current Spec',
+      specVersions: {
+        v1: '# Spec v1 content',
+        v2: '# Spec v2 content',
+      },
+    };
+
+    function clickSpec() { fireEvent.click(screen.getByText('Spec')); }
+
+    it('shows compare toggle button when 2+ versions exist', () => {
+      renderDetail(specWithVersions);
+      clickSpec();
+      expect(screen.getByTestId('compare-toggle')).toBeInTheDocument();
+      expect(screen.getByText('⚖ Compare')).toBeInTheDocument();
+    });
+
+    it('shows compare toggle with just 1 snapshot (current + v1 = 2 total)', () => {
+      renderDetail({ spec: '# Current', specVersions: { v1: '# v1' } });
+      clickSpec();
+      // With 1 snapshot + current, total is 2 — toggle should appear
+      expect(screen.getByTestId('compare-toggle')).toBeInTheDocument();
+    });
+
+    it('does not show compare toggle when specVersions is undefined', () => {
+      renderDetail({ spec: '# Current' });
+      clickSpec();
+      expect(screen.queryByTestId('compare-toggle')).not.toBeInTheDocument();
+    });
+
+    it('clicking compare toggle shows side-by-side diff view', () => {
+      renderDetail(specWithVersions);
+      clickSpec();
+      fireEvent.click(screen.getByTestId('compare-toggle'));
+
+      // Compare toggle text changes
+      expect(screen.getByText('Compare ✓')).toBeInTheDocument();
+      // Version selectors appear
+      expect(screen.getByTestId('compare-left-select')).toBeInTheDocument();
+      expect(screen.getByTestId('compare-right-select')).toBeInTheDocument();
+      // Version buttons hidden in compare mode
+      expect(screen.queryByText('current')).not.toBeInTheDocument();
+    });
+
+    it('compare toggle is highlighted when active', () => {
+      renderDetail(specWithVersions);
+      clickSpec();
+      fireEvent.click(screen.getByTestId('compare-toggle'));
+
+      const toggle = screen.getByTestId('compare-toggle');
+      expect(toggle.className).toContain('border-emerald-600');
+      expect(toggle.className).toContain('text-emerald-300');
+    });
+
+    it('turning off compare mode returns to single-panel view', () => {
+      renderDetail(specWithVersions);
+      clickSpec();
+      fireEvent.click(screen.getByTestId('compare-toggle'));
+      // Turn off
+      fireEvent.click(screen.getByTestId('compare-toggle'));
+
+      expect(screen.getByText('⚖ Compare')).toBeInTheDocument();
+      // Version buttons should be back
+      expect(screen.getByText('current')).toBeInTheDocument();
+      expect(screen.getByText('v1')).toBeInTheDocument();
+    });
+
+    it('shows removed lines in red with strikethrough on left side', () => {
+      renderDetail({
+        spec: '# Current Spec',
+        specVersions: {
+          v1: '# Old Spec\nline to be removed\nunchanged line',
+          v2: '# New Spec\nunchanged line\nline added',
+        },
+      });
+      clickSpec();
+      fireEvent.click(screen.getByTestId('compare-toggle'));
+
+      // Explicitly select v1 vs v2
+      const leftSelect = screen.getByTestId('compare-left-select');
+      const rightSelect = screen.getByTestId('compare-right-select');
+      fireEvent.change(leftSelect, { target: { value: 'v1' } });
+      fireEvent.change(rightSelect, { target: { value: 'v2' } });
+
+      // Find removed text (should be on left side with red styling)
+      const allDiffLines = document.querySelectorAll('[data-testid^="diff-left-"] div');
+      const removedTexts = Array.from(allDiffLines).map(d => d.textContent?.trim());
+      expect(removedTexts).toContain('- line to be removed');
+    });
+
+    it('shows added lines in green on right side', () => {
+      renderDetail({
+        spec: '# Current Spec',
+        specVersions: {
+          v1: '# Old Spec\nunchanged line',
+          v2: '# New Spec\nunchanged line\nline added',
+        },
+      });
+      clickSpec();
+      fireEvent.click(screen.getByTestId('compare-toggle'));
+
+      // Explicitly select v1 vs v2
+      const leftSelect = screen.getByTestId('compare-left-select');
+      const rightSelect = screen.getByTestId('compare-right-select');
+      fireEvent.change(leftSelect, { target: { value: 'v1' } });
+      fireEvent.change(rightSelect, { target: { value: 'v2' } });
+
+      // Find added text (should be on right side with green styling)
+      const allDiffLines = document.querySelectorAll('[data-testid^="diff-right-"] div');
+      const addedTexts = Array.from(allDiffLines).map(d => d.textContent?.trim());
+      expect(addedTexts).toContain('+ line added');
+    });
+
+    it('shows unchanged lines on both sides with neutral styling', () => {
+      renderDetail({
+        spec: '# Current Spec',
+        specVersions: {
+          v1: '# Old Spec\nunchanged line',
+          v2: '# New Spec\nunchanged line',
+        },
+      });
+      clickSpec();
+      fireEvent.click(screen.getByTestId('compare-toggle'));
+
+      const leftLines = document.querySelectorAll('[data-testid^="diff-left-"] div');
+      const rightLines = document.querySelectorAll('[data-testid^="diff-right-"] div');
+      const leftTexts = Array.from(leftLines).map(d => d.textContent?.trim());
+      const rightTexts = Array.from(rightLines).map(d => d.textContent?.trim());
+
+      // Both should have the unchanged line
+      expect(leftTexts).toContain('unchanged line');
+      expect(rightTexts).toContain('unchanged line');
+    });
+
+    it('changing left dropdown updates the diff content', () => {
+      renderDetail({
+        spec: '# Current Spec\nshared line',
+        specVersions: {
+          v1: '# Old Spec\nline in v1 only\nshared line',
+          v2: '# New Spec\nshared line\nline in v2 only',
+        },
+      });
+      clickSpec();
+      fireEvent.click(screen.getByTestId('compare-toggle'));
+
+      // Explicitly set v1 vs v2 initially
+      const leftSelect = screen.getByTestId('compare-left-select');
+      const rightSelect = screen.getByTestId('compare-right-select');
+      fireEvent.change(leftSelect, { target: { value: 'v1' } });
+      fireEvent.change(rightSelect, { target: { value: 'v2' } });
+
+      // Verify diff shows v1-specific content on left
+      const leftLines = document.querySelectorAll('[data-testid^="diff-left-"] div');
+      const leftTexts = Array.from(leftLines).map(d => d.textContent);
+      expect(leftTexts.some(t => t?.includes('line in v1 only'))).toBe(true);
+
+      // Now switch left to 'current' spec
+      fireEvent.change(leftSelect, { target: { value: 'current' } });
+
+      // Diff should now compare current vs v2 (different content)
+      const updatedLeftLines = document.querySelectorAll('[data-testid^="diff-left-"] div');
+      const updatedLeftTexts = Array.from(updatedLeftLines).map(d => d.textContent);
+      expect(updatedLeftTexts.some(t => t?.includes('Current Spec'))).toBe(true);
+      // v1-specific content should no longer appear
+      expect(updatedLeftTexts.some(t => t?.includes('line in v1 only'))).toBe(false);
+      // Shared/unchanged content should persist after recomputing diff
+      expect(updatedLeftTexts.some(t => t?.includes('shared line'))).toBe(true);
+    });
+
+    it('renders column headers showing selected version labels', () => {
+      renderDetail(specWithVersions);
+      clickSpec();
+      fireEvent.click(screen.getByTestId('compare-toggle'));
+
+      // Headers should exist (v1 and v2 are auto-selected as the two most recent)
+      const headers = document.querySelectorAll('.grid.grid-cols-2 > div');
+      const headerTexts = Array.from(headers).map(h => h.textContent);
+      expect(headerTexts).toContain('v1');
+      expect(headerTexts).toContain('v2');
     });
   });
 

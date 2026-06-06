@@ -88,6 +88,7 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
             dependencies={data.dependencies}
             dependents={data.dependents}
             spec={data.spec}
+            specVersions={data.specVersions}
             plan={data.plan}
             qaReport={data.qaReport}
             diff={data.diff}

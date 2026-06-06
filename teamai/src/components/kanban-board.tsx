@@ -658,7 +658,7 @@ export function KanbanBoard({ tasks }: Props) {
             />
             {/* Window */}
             <div
-              className="relative w-[800px] max-w-[95vw] max-h-[calc(100%-3rem)] h-[650px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
+              className="relative w-[800px] max-w-[95vw] max-h-[min(700px,100%)] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
               onClick={e => e.stopPropagation()}
             >
               <TaskPanel

@@ -42,6 +42,7 @@ function renderBanner(tasks: InterruptedTask[] = []) {
 describe('RecoveryBanner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
     resetRecoveryBannerDismissed();
   });
 
@@ -132,7 +133,7 @@ describe('RecoveryBanner', () => {
     });
 
     it('stays hidden on re-render — dismissal persists across mounts until server restart', () => {
-      const { rerender } = render(<RecoveryBanner tasks={[interruptedTask({ taskId: 't1', title: 'Task 1' })]} />);
+      const { rerender, unmount } = render(<RecoveryBanner tasks={[interruptedTask({ taskId: 't1', title: 'Task 1' })]} />);
 
       // Dismiss
       fireEvent.click(screen.getByTitle('Dismiss'));
@@ -140,6 +141,11 @@ describe('RecoveryBanner', () => {
 
       // Rerender with different tasks — banner stays hidden (dismissal persists)
       rerender(<RecoveryBanner tasks={[interruptedTask({ taskId: 't2', title: 'Task 2' })]} />);
+      expect(screen.queryByText(/interrupted/)).not.toBeInTheDocument();
+
+      // Full unmount + remount (simulates page refresh) — still hidden via sessionStorage
+      unmount();
+      render(<RecoveryBanner tasks={[interruptedTask({ taskId: 't3', title: 'Task 3' })]} />);
       expect(screen.queryByText(/interrupted/)).not.toBeInTheDocument();
     });
   });
