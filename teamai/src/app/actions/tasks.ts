@@ -342,7 +342,16 @@ export async function getTaskFull(taskId: string) {
   const outputPath = join(dir, 'output.log');
   const agentOutput = existsSync(outputPath) ? readFileSync(outputPath, 'utf-8') : null;
 
-  return { task, allTasks, dependencies, dependents, spec, plan, qaReport, humanFeedback, diff, agentOutput };
+  // Load spec revision snapshots for comparison UI
+  const specVersions: Record<string, string> = {};
+  for (const version of [1, 2, 3]) {
+    const vPath = join(dir, `spec_v${version}.md`);
+    if (existsSync(vPath)) {
+      specVersions[`v${version}`] = readFileSync(vPath, 'utf-8');
+    }
+  }
+
+  return { task, allTasks, dependencies, dependents, spec, plan, qaReport, humanFeedback, diff, agentOutput, specVersions };
 }
 
 export async function addDependency(taskId: string, depId: string): Promise<void> {

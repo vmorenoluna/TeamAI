@@ -2896,6 +2896,43 @@ describe('Orchestrator', () => {
       expect(readFileSync(snapshotPath, 'utf-8')).toBe(originalSpec);
     });
 
+    it('creates spec_v2.md on second revision without overwriting spec_v1.md', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
+
+      // Pre-create spec_v1.md to simulate a prior revision
+      const originalSpecV1 = '# Original Spec v1\n\nAssumption: API returns XML.';
+      writeFileSync(join(testData.taskDir, 'spec_v1.md'), originalSpecV1);
+      const revisedSpec = '# Revised Spec\n\nAssumption: API returns JSON.';
+      writeFileSync(join(testData.taskDir, 'spec.md'), revisedSpec);
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        spec_concerns: [
+          { issue: 'Wrong authentication', reasoning: 'API uses OAuth, not API keys.' },
+        ],
+      }));
+
+      // Manually bump specRevision to 1 so _autoReviseSpec bumps it to 2
+      const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
+      pipeline.specRevision = 1;
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.reviseSpec(testData.taskId).catch(() => {});
+
+      // spec_v2.md should be created with the current spec.md content
+      const snapshotV2 = join(testData.taskDir, 'spec_v2.md');
+      expect(existsSync(snapshotV2)).toBe(true);
+      expect(readFileSync(snapshotV2, 'utf-8')).toBe(revisedSpec);
+
+      // spec_v1.md should still exist and NOT be overwritten
+      const snapshotV1 = join(testData.taskDir, 'spec_v1.md');
+      expect(existsSync(snapshotV1)).toBe(true);
+      expect(readFileSync(snapshotV1, 'utf-8')).toBe(originalSpecV1);
+    });
+
     it('clears downstream artifacts (plan.json, qa_report.json, feedback files)', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);

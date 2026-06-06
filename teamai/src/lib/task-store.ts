@@ -142,7 +142,7 @@ export class TaskStore {
   clearArtifacts(id: string, level: 'spec' | 'plan' | 'qa'): void {
     const dir = this.getDirById(id);
     const files: Record<string, string[]> = {
-      spec: ['spec.md', 'plan.json', 'qa_report.json', 'spec_revision_feedback.md', 'spec_v1.md'],
+      spec: ['spec.md', 'plan.json', 'qa_report.json', 'spec_revision_feedback.md', 'spec_v1.md', 'spec_v2.md', 'spec_v3.md'],
       plan: ['plan.json', 'qa_report.json'],
       qa:   ['qa_report.json', 'qa_feedback.md', 'completion_summary.md'],
     };
