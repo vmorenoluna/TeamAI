@@ -660,7 +660,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
 
       {/* Tab content — hidden entirely in readonly mode */}
       {!readonly && (
-        <div className={`flex-1 min-h-0 ${activeTab === 'terminal' ? 'overflow-hidden' : 'overflow-auto'}`}>
+        <div className={`flex-1 min-h-0 ${activeTab === 'terminal' ? 'flex flex-col overflow-hidden' : 'overflow-auto'}`}>
 
         {/* OVERVIEW */}
         {activeTab === 'overview' && (
@@ -816,7 +816,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
 
         {/* TERMINAL */}
         {activeTab === 'terminal' && (
-          <div className="p-4 h-full">
+          <div className="p-4 flex-1 min-h-0">
             <AgentPanel taskId={task.id} initialOutput={agentOutput} />
           </div>
         )}
