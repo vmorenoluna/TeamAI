@@ -25,6 +25,16 @@ export function resolveProvider(projectRoot: string, role: string): ProviderConf
 }
 
 /**
+ * Resolve the model for a terminal session given a role filename (e.g. "analyst.md").
+ * Strips the .md extension before looking up the role override in config.roles,
+ * falling back to config.default.model when no override is configured.
+ */
+export function resolveTerminalModel(roleFilename: string, config: { default: { model: string }; roles: Record<string, { model?: string }> }): string {
+  const roleKey = roleFilename.replace(/\.md$/, '');
+  return config.roles[roleKey]?.model ?? config.default.model;
+}
+
+/**
  * Convert a ProviderConfig into CLI args and env overrides for ProcessManager.createSession().
  */
 export function providerToSessionOpts(cfg: ProviderConfig): {

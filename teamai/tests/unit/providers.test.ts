@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { resolveProvider, providerToSessionOpts } from '@/lib/providers';
+import { resolveProvider, providerToSessionOpts, resolveTerminalModel } from '@/lib/providers';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { createTestProject } from '../utils/test-project';
@@ -165,5 +165,66 @@ describe('providerToSessionOpts', () => {
     // just passes through what it's given — test model at minimum
     const result = providerToSessionOpts({ model: 'sonnet' });
     expect(result.model).toBe('sonnet');
+  });
+});
+
+describe('resolveTerminalModel', () => {
+  const baseConfig = {
+    default: { model: 'claude-sonnet-4-6', provider: 'anthropic' as const },
+    roles: {} as Record<string, { model?: string }>,
+  };
+
+  it('strips .md extension and returns role-specific model', () => {
+    const config = {
+      ...baseConfig,
+      roles: { analyst: { model: 'claude-opus-4-5' } },
+    };
+    expect(resolveTerminalModel('analyst.md', config)).toBe('claude-opus-4-5');
+  });
+
+  it('returns default model when role has no override', () => {
+    const config = {
+      ...baseConfig,
+      roles: { analyst: { model: 'claude-opus-4-5' } },
+    };
+    expect(resolveTerminalModel('planner.md', config)).toBe('claude-sonnet-4-6');
+  });
+
+  it('returns default model when no role overrides exist', () => {
+    expect(resolveTerminalModel('coder.md', baseConfig)).toBe('claude-sonnet-4-6');
+  });
+
+  it('handles role without .md extension (bare name)', () => {
+    const config = {
+      ...baseConfig,
+      roles: { 'qa-reviewer': { model: 'gpt-5' } },
+    };
+    expect(resolveTerminalModel('qa-reviewer', config)).toBe('gpt-5');
+  });
+
+  it('handles multi-part filenames like qa-reviewer.md', () => {
+    const config = {
+      ...baseConfig,
+      roles: { 'qa-reviewer': { model: 'claude-opus-4-5' } },
+    };
+    expect(resolveTerminalModel('qa-reviewer.md', config)).toBe('claude-opus-4-5');
+  });
+
+  it('does not strip .md from middle of filename', () => {
+    const config = {
+      ...baseConfig,
+      roles: { 'some.md.role': { model: 'custom-model' } },
+    };
+    // Only trailing .md is stripped, so the key stays "some.md.role"
+    expect(resolveTerminalModel('some.md.role', config)).toBe('custom-model');
+  });
+
+  it('strips only trailing .md even with .md in middle', () => {
+    const config = {
+      ...baseConfig,
+      roles: { 'some.md.role': { model: 'custom-model' } },
+    };
+    // "some.md.role.md" → key "some.md.role" → matches
+    expect(resolveTerminalModel('some.md.role.md', config)).toBe('custom-model');
   });
 });

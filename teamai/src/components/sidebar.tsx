@@ -34,6 +34,7 @@ export function Sidebar({ projects: _projects, activeProjectPath: _activeProject
       <nav className={`flex-1 overflow-y-auto py-2 border-t border-[#1e293b]`}>
         {[
           { href: '/', label: 'Kanban', icon: '▦', match: (p: string) => p === '/' || p.startsWith('/task') },
+          { href: '/workflow', label: 'Workflow', icon: '⇢' },
           { href: '/insights', label: 'Insights', icon: '◎' },
           { href: '/ideation', label: 'Ideation', icon: '◈' },
           { href: '/terminals', label: 'Terminals', icon: '▶' },

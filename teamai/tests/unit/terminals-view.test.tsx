@@ -3,11 +3,11 @@
 /**
  * Unit tests for TerminalsView component.
  *
- * Tests terminal listing, provider selection, model selection, dialog controls,
- * session creation/closure, and error states.
+ * Tests terminal listing, role selection, dialog controls,
+ * session creation/closure, and edge cases.
  *
  * Uses vi.resetModules() between tests to reset the component's module-level
- * inflightFetches cache, ensuring each test starts with a clean state.
+ * state, ensuring each test starts with a clean state.
  *
  * React's useTransition is mocked (isPending=false, synchronous callback).
  */
@@ -21,8 +21,6 @@ import type { RoleDefinition } from '@/app/actions/roles';
 
 const mockCreateTerminalSession = vi.hoisted(() => vi.fn());
 const mockCloseTerminalSession = vi.hoisted(() => vi.fn());
-const mockGetAvailableModels = vi.hoisted(() => vi.fn());
-const mockGetProvidersConfig = vi.hoisted(() => vi.fn());
 const mockStartTransition = vi.hoisted(() =>
   vi.fn((cb: () => void) => {
     try { const r = cb() as unknown; if (r instanceof Promise) r.catch(() => {}); } catch { /* suppress */ }
@@ -34,14 +32,9 @@ vi.mock('@/app/actions/terminals', () => ({
   closeTerminalSession: (...a: unknown[]) => mockCloseTerminalSession(...a),
 }));
 
-vi.mock('@/app/actions/providers', () => ({
-  getAvailableModels: (...a: unknown[]) => mockGetAvailableModels(...a),
-  getProvidersConfig: (...a: unknown[]) => mockGetProvidersConfig(...a),
-}));
-
 vi.mock('@/components/terminal-panel', () => ({
-  TerminalPanel: ({ sessionId, role, onClose }: { sessionId: string; role: string; onClose: () => void }) => (
-    <div data-testid="terminal-panel" data-session-id={sessionId} data-role={role}>
+  TerminalPanel: ({ sessionId, role, model, onClose }: { sessionId: string; role: string; model: string; onClose: () => void }) => (
+    <div data-testid="terminal-panel" data-session-id={sessionId} data-role={role} data-model={model}>
       <button data-testid="close-terminal" onClick={onClose}>Close</button>
     </div>
   ),
@@ -69,28 +62,11 @@ function makeRoles(): RoleDefinition[] {
   ];
 }
 
-function sampleModels(): string[] {
-  return ['claude-sonnet-4-6', 'claude-opus-4-5', 'claude-haiku-4-1'];
-}
-
-function getSelect(index: number): HTMLSelectElement {
-  return document.querySelectorAll('select')[index] as HTMLSelectElement;
-}
-
-/** Renders TerminalsView with fresh module imports (resets inflightFetches cache) */
+/** Renders TerminalsView with fresh module imports */
 async function renderView(roles?: RoleDefinition[]) {
   const mod = await import('@/components/terminals-view');
   render(<mod.TerminalsView roles={roles ?? makeRoles()} />);
-  // Flush pending async effects
   await act(async () => { await new Promise(r => setTimeout(r, 100)); });
-}
-
-/** Open dialog and wait for 3 selects (model loaded) */
-async function openDialogAndWait() {
-  fireEvent.click(screen.getByTestId('new-terminal-btn'));
-  await waitFor(() => {
-    expect(document.querySelectorAll('select').length).toBe(3);
-  }, { timeout: 5000 });
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -98,9 +74,7 @@ async function openDialogAndWait() {
 describe('TerminalsView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetAvailableModels.mockResolvedValue({ models: sampleModels() });
-    mockGetProvidersConfig.mockResolvedValue({ default: { model: 'claude-sonnet-4-6', provider: 'anthropic' }, roles: {} });
-    mockCreateTerminalSession.mockResolvedValue('sess-1');
+    mockCreateTerminalSession.mockResolvedValue({ sessionId: 'sess-1', role: 'analyst.md', model: 'claude-sonnet-4-6' });
     mockCloseTerminalSession.mockResolvedValue(undefined);
   });
 
@@ -158,7 +132,8 @@ describe('TerminalsView', () => {
     it('shows all roles from props', async () => {
       await renderView();
       fireEvent.click(screen.getByTestId('new-terminal-btn'));
-      expect(getSelect(0).options).toHaveLength(3);
+      const roleSelect = document.querySelector('select') as HTMLSelectElement;
+      expect(roleSelect.options).toHaveLength(3);
       expect(screen.getByText('Analyst')).toBeInTheDocument();
       expect(screen.getByText('Coder')).toBeInTheDocument();
       expect(screen.getByText('QA Reviewer')).toBeInTheDocument();
@@ -171,176 +146,19 @@ describe('TerminalsView', () => {
     });
   });
 
-  // ── Provider ─────────────────────────────────────────────────────────
-
-  describe('provider', () => {
-    it('renders 6 providers, defaults to anthropic', async () => {
-      mockGetProvidersConfig.mockResolvedValue({ default: { model: '', provider: '' }, roles: {} });
-      await renderView();
-      fireEvent.click(screen.getByTestId('new-terminal-btn'));
-      const ps = getSelect(1);
-      expect(ps.options).toHaveLength(6);
-      expect(ps.value).toBe('anthropic');
-    });
-
-    it('switching provider triggers fetch', async () => {
-      await renderView();
-      fireEvent.click(screen.getByTestId('new-terminal-btn'));
-      await openDialogAndWait();
-      mockGetAvailableModels.mockClear();
-
-      fireEvent.change(getSelect(1), { target: { value: 'gemini' } });
-      await waitFor(() => {
-        expect(mockGetAvailableModels).toHaveBeenCalledWith('gemini', false);
-      });
-    });
-  });
-
-  // ── Model loading ────────────────────────────────────────────────────
-
-  describe('model loading', () => {
-    it('shows spinner while fetching', async () => {
-      mockGetAvailableModels.mockReturnValue(new Promise(() => {}));
-      await renderView();
-      fireEvent.click(screen.getByTestId('new-terminal-btn'));
-      expect(screen.getByText('Loading models…')).toBeInTheDocument();
-    });
-
-    it('renders model select with options when loaded', async () => {
-      await renderView();
-      await openDialogAndWait();
-      const ms = getSelect(2);
-      const vals = Array.from(ms.options).map(o => o.value);
-      expect(vals).toEqual(expect.arrayContaining(['claude-sonnet-4-6', 'claude-opus-4-5', 'claude-haiku-4-1']));
-      const last = ms.options[ms.options.length - 1];
-      expect(last.value).toBe('__custom__');
-    });
-  });
-
-  // ── Model selection ──────────────────────────────────────────────────
-
-  describe('model selection', () => {
-    it('selects a model from dropdown', async () => {
-      await renderView();
-      await openDialogAndWait();
-      const ms = getSelect(2);
-      fireEvent.change(ms, { target: { value: 'claude-opus-4-5' } });
-      expect(ms.value).toBe('claude-opus-4-5');
-    });
-  });
-
-  // ── Custom model ─────────────────────────────────────────────────────
-
-  describe('custom model', () => {
-    it('shows input after selecting Custom…', async () => {
-      await renderView();
-      await openDialogAndWait();
-      fireEvent.change(getSelect(2), { target: { value: '__custom__' } });
-      expect(screen.getByPlaceholderText('Type a model name…')).toBeInTheDocument();
-    });
-
-    it('Enter key on custom input sets value', async () => {
-      await renderView();
-      await openDialogAndWait();
-      fireEvent.change(getSelect(2), { target: { value: '__custom__' } });
-      const inp = screen.getByPlaceholderText('Type a model name…');
-      fireEvent.change(inp, { target: { value: 'my-model-v2' } });
-      fireEvent.keyDown(inp, { key: 'Enter' });
-      await waitFor(() => expect(screen.getByDisplayValue('my-model-v2')).toBeInTheDocument());
-    });
-
-    it('blur on custom input sets value', async () => {
-      await renderView();
-      await openDialogAndWait();
-      fireEvent.change(getSelect(2), { target: { value: '__custom__' } });
-      const inp = screen.getByPlaceholderText('Type a model name…');
-      fireEvent.change(inp, { target: { value: 'blur-model' } });
-      fireEvent.blur(inp);
-      expect(screen.getByDisplayValue('blur-model')).toBeInTheDocument();
-    });
-  });
-
-  // ── Refresh ──────────────────────────────────────────────────────────
-
-  describe('refresh', () => {
-    it('refresh button calls getAvailableModels(true)', async () => {
-      await renderView();
-      await openDialogAndWait();
-      mockGetAvailableModels.mockClear();
-      fireEvent.click(screen.getByTitle('Refresh anthropic models'));
-      await waitFor(() => {
-        expect(mockGetAvailableModels).toHaveBeenCalledWith('anthropic', true);
-      });
-    });
-  });
-
-  // ── Error states ─────────────────────────────────────────────────────
-
-  describe('error states', () => {
-    it('free text input when no models', async () => {
-      mockGetAvailableModels.mockResolvedValue({ models: [] });
-      await renderView();
-      fireEvent.click(screen.getByTestId('new-terminal-btn'));
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText('Type a model name…')).toBeInTheDocument();
-      }, { timeout: 3000 });
-    });
-
-    it('error in placeholder when fetch fails', async () => {
-      mockGetAvailableModels.mockResolvedValue({ models: [], error: 'API key not set' });
-      await renderView();
-      fireEvent.click(screen.getByTestId('new-terminal-btn'));
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText('API key not set — type a model name')).toBeInTheDocument();
-      }, { timeout: 3000 });
-    });
-
-    it('fallback input when fetch throws', async () => {
-      // Use mockImplementation with resolved error to avoid unhandled rejection.
-      // The component's loadModels catch block sets modelsError from result.error.
-      mockGetAvailableModels.mockImplementation(() =>
-        Promise.resolve({ models: [], error: 'Failed to fetch models' })
-      );
-      await renderView();
-      fireEvent.click(screen.getByTestId('new-terminal-btn'));
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText(/Failed to fetch models/)).toBeInTheDocument();
-      }, { timeout: 3000 });
-    });
-  });
-
   // ── Terminal CRUD ────────────────────────────────────────────────────
 
   describe('terminal operations', () => {
-    it('creates with role + model', async () => {
-      mockCreateTerminalSession.mockResolvedValue('sess-xyz');
-      await renderView();
-      await openDialogAndWait();
-      fireEvent.change(getSelect(2), { target: { value: 'claude-opus-4-5' } });
-      await act(async () => { fireEvent.click(screen.getByText('Open')); });
-      expect(mockCreateTerminalSession).toHaveBeenCalledWith('analyst.md', 'claude-opus-4-5');
-    });
-
-    it('creates with custom model', async () => {
-      await renderView();
-      await openDialogAndWait();
-      fireEvent.change(getSelect(2), { target: { value: '__custom__' } });
-      fireEvent.change(screen.getByPlaceholderText('Type a model name…'), { target: { value: 'gpt-5-turbo' } });
-      fireEvent.blur(screen.getByPlaceholderText('Type a model name…'));
-      await act(async () => { fireEvent.click(screen.getByText('Open')); });
-      expect(mockCreateTerminalSession).toHaveBeenCalledWith('analyst.md', 'gpt-5-turbo');
-    });
-
-    it('creates without model', async () => {
-      mockCreateTerminalSession.mockResolvedValue('sess-no-model');
+    it('creates a terminal session with the selected role', async () => {
+      mockCreateTerminalSession.mockResolvedValue({ sessionId: 'sess-xyz', role: 'analyst.md', model: 'claude-opus-4-5' });
       await renderView();
       fireEvent.click(screen.getByTestId('new-terminal-btn'));
       await act(async () => { fireEvent.click(screen.getByText('Open')); });
-      expect(mockCreateTerminalSession).toHaveBeenCalledWith('analyst.md', undefined);
+      expect(mockCreateTerminalSession).toHaveBeenCalledWith('analyst.md');
     });
 
     it('closes dialog after creation', async () => {
-      mockCreateTerminalSession.mockResolvedValue('sess-1');
+      mockCreateTerminalSession.mockResolvedValue({ sessionId: 'sess-1', role: 'analyst.md', model: 'claude-sonnet-4-6' });
       await renderView();
       fireEvent.click(screen.getByTestId('new-terminal-btn'));
       await act(async () => { fireEvent.click(screen.getByText('Open')); });
@@ -348,7 +166,7 @@ describe('TerminalsView', () => {
     });
 
     it('adds panel to grid', async () => {
-      mockCreateTerminalSession.mockResolvedValue('sess-abc');
+      mockCreateTerminalSession.mockResolvedValue({ sessionId: 'sess-abc', role: 'analyst.md', model: 'claude-sonnet-4-6' });
       await renderView();
       fireEvent.click(screen.getByTestId('new-terminal-btn'));
       await act(async () => { fireEvent.click(screen.getByText('Open')); });
@@ -359,13 +177,14 @@ describe('TerminalsView', () => {
       });
     });
 
-    it('passes role to TerminalPanel', async () => {
-      mockCreateTerminalSession.mockResolvedValue('sess-role');
+    it('passes role and model to TerminalPanel', async () => {
+      mockCreateTerminalSession.mockResolvedValue({ sessionId: 'sess-role', role: 'coder.md', model: 'claude-opus-4-5' });
       await renderView();
       fireEvent.click(screen.getByTestId('new-terminal-btn'));
       await act(async () => { fireEvent.click(screen.getByText('Open')); });
       await waitFor(() => {
-        expect(screen.getByTestId('terminal-panel').getAttribute('data-role')).toBe('analyst.md');
+        expect(screen.getByTestId('terminal-panel').getAttribute('data-role')).toBe('coder.md');
+        expect(screen.getByTestId('terminal-panel').getAttribute('data-model')).toBe('claude-opus-4-5');
       });
     });
   });
@@ -374,7 +193,7 @@ describe('TerminalsView', () => {
 
   describe('terminal closing', () => {
     it('removes from grid and calls closeTerminalSession', async () => {
-      mockCreateTerminalSession.mockResolvedValue('sess-close');
+      mockCreateTerminalSession.mockResolvedValue({ sessionId: 'sess-close', role: 'analyst.md', model: 'claude-sonnet-4-6' });
       await renderView();
       fireEvent.click(screen.getByTestId('new-terminal-btn'));
       await act(async () => { fireEvent.click(screen.getByText('Open')); });
@@ -386,7 +205,7 @@ describe('TerminalsView', () => {
 
     it('handles closeTerminalSession rejection', async () => {
       mockCloseTerminalSession.mockRejectedValue(new Error('Already closed'));
-      mockCreateTerminalSession.mockResolvedValue('sess-ignore');
+      mockCreateTerminalSession.mockResolvedValue({ sessionId: 'sess-ignore', role: 'analyst.md', model: 'claude-sonnet-4-6' });
       await renderView();
       fireEvent.click(screen.getByTestId('new-terminal-btn'));
       await act(async () => { fireEvent.click(screen.getByText('Open')); });
@@ -401,7 +220,7 @@ describe('TerminalsView', () => {
   describe('multiple terminals', () => {
     it('can create two and close one', async () => {
       let c = 0;
-      mockCreateTerminalSession.mockImplementation(() => Promise.resolve(`sess-${++c}`));
+      mockCreateTerminalSession.mockImplementation(() => Promise.resolve({ sessionId: `sess-${++c}`, role: 'analyst.md', model: 'claude-sonnet-4-6' }));
       await renderView();
 
       fireEvent.click(screen.getByTestId('new-terminal-btn'));
@@ -414,16 +233,6 @@ describe('TerminalsView', () => {
 
       fireEvent.click(screen.getAllByTestId('close-terminal')[0]);
       await waitFor(() => expect(screen.getAllByTestId('terminal-panel')).toHaveLength(1));
-    });
-  });
-
-  // ── Edge cases ───────────────────────────────────────────────────────
-
-  describe('edge cases', () => {
-    it('handles getProvidersConfig rejection', async () => {
-      mockGetProvidersConfig.mockRejectedValue(new Error('No project'));
-      await renderView();
-      expect(screen.getByText('Terminals')).toBeInTheDocument();
     });
   });
 });
