@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskPanel } from './task-panel';
 import { PIPELINE_PHASES } from '@/constants/phases';
@@ -205,46 +205,67 @@ export function WorkflowView({ workflowTasks }: Props) {
   const totalRows = otherTasks.length > 0 ? PIPELINE_PHASES.length + 1 : PIPELINE_PHASES.length;
   const diagramHeight = totalRows * PITCH;
 
-  // Build SVG arrow elements
-  const svgArrows = useMemo(() => {
+  const [hoveredTransition, setHoveredTransition] = useState<string | null>(null);
+
+  // ── Build arrow elements ────────────────────────────────────────────────
+  // Rendered inline (not useMemo) so hover state propagates to classNames.
+  function renderArrows(): React.ReactNode[] {
     const arrows: React.ReactNode[] = [];
 
-    const addStraightArrow = (from: string, to: string, className: string) => {
+    const arrowKey = (from: string, to: string) => `${from}→${to}`;
+    const isHovered = (key: string) => hoveredTransition === key;
+
+    const addStraightArrow = (from: string, to: string, baseClass: string, hoverClass: string) => {
       const fi = phaseIndex(from);
       const ti = phaseIndex(to);
       if (fi < 0 || ti < 0) return;
+      const key = arrowKey(from, to);
+      const h = isHovered(key);
       arrows.push(
-        <line
-          key={`${from}→${to}`}
-          x1={CENTER_X}
-          y1={nodeY(fi) + NODE_H}
-          x2={CENTER_X}
-          y2={nodeY(ti) - 6}
-          className={className}
-          markerEnd="url(#arrow-down)"
-        />,
+        <g key={key}>
+          {/* Invisible wider hit area */}
+          <line
+            x1={CENTER_X} y1={nodeY(fi) + NODE_H}
+            x2={CENTER_X} y2={nodeY(ti) - 6}
+            stroke="transparent" strokeWidth="14"
+            className="cursor-pointer"
+            onMouseEnter={() => setHoveredTransition(key)}
+            onMouseLeave={() => setHoveredTransition(null)}
+          />
+          {/* Visible arrow */}
+          <line
+            x1={CENTER_X} y1={nodeY(fi) + NODE_H}
+            x2={CENTER_X} y2={nodeY(ti) - 6}
+            className={`transition-all duration-200 ${baseClass} ${h ? hoverClass : ''}`}
+            markerEnd={h ? 'url(#arrow-down-hover)' : 'url(#arrow-down)'}
+          />
+        </g>,
       );
     };
 
-    const addRightCurve = (from: string, to: string, className: string) => {
+    const addRightCurve = (from: string, to: string, baseClass: string, hoverClass: string) => {
       const fi = phaseIndex(from);
       const ti = phaseIndex(to);
       if (fi < 0 || ti < 0) return;
       const sy = nodeCenterY(fi);
       const ty = nodeCenterY(ti);
       const cx = RIGHT_X + CURVE_OFFSET;
+      const key = arrowKey(from, to);
+      const h = isHovered(key);
+      const d = `M ${RIGHT_X + 2},${sy} C ${cx},${sy} ${cx},${ty} ${RIGHT_X + 6},${ty}`;
       arrows.push(
-        <path
-          key={`${from}→${to}`}
-          d={`M ${RIGHT_X + 2},${sy} C ${cx},${sy} ${cx},${ty} ${RIGHT_X + 6},${ty}`}
-          className={className}
-          fill="none"
-          markerEnd="url(#arrow-right)"
-        />,
+        <g key={key}>
+          <path d={d} fill="none" stroke="transparent" strokeWidth="14" className="cursor-pointer"
+            onMouseEnter={() => setHoveredTransition(key)}
+            onMouseLeave={() => setHoveredTransition(null)} />
+          <path d={d} fill="none"
+            className={`transition-all duration-200 ${baseClass} ${h ? hoverClass : ''}`}
+            markerEnd={h ? 'url(#arrow-right-hover)' : 'url(#arrow-right)'} />
+        </g>,
       );
     };
 
-    const addLeftCurve = (from: string, to: string, className: string, marker: string, label?: string, textFill?: string) => {
+    const addLeftCurve = (from: string, to: string, baseClass: string, hoverClass: string, marker: string, markerHover: string, label?: string, textFill?: string, labelX?: number) => {
       const fi = phaseIndex(from);
       const ti = phaseIndex(to);
       if (fi < 0 || ti < 0) return;
@@ -252,27 +273,27 @@ export function WorkflowView({ workflowTasks }: Props) {
       const ty = nodeCenterY(ti);
       const cx = LEFT_X - CURVE_OFFSET;
       const midY = (sy + ty) / 2;
+      const lx = labelX ?? cx - 10;
+      const key = arrowKey(from, to);
+      const h = isHovered(key);
+      const d = `M ${LEFT_X - 2},${sy} C ${cx},${sy} ${cx},${ty} ${LEFT_X},${ty}`;
       arrows.push(
-        <path
-          key={`${from}→${to}`}
-          d={`M ${LEFT_X - 2},${sy} C ${cx},${sy} ${cx},${ty} ${LEFT_X},${ty}`}
-          className={className}
-          fill="none"
-          markerEnd={`url(#${marker})`}
-        />,
+        <g key={key}>
+          <path d={d} fill="none" stroke="transparent" strokeWidth="14" className="cursor-pointer"
+            onMouseEnter={() => setHoveredTransition(key)}
+            onMouseLeave={() => setHoveredTransition(null)} />
+          <path d={d} fill="none"
+            className={`transition-all duration-200 ${baseClass} ${h ? hoverClass : ''}`}
+            markerEnd={`url(#${h ? markerHover : marker})`} />
+        </g>,
       );
       if (label) {
         arrows.push(
-          <text
-            key={`${from}→${to}-label`}
-            x={cx - 10}
-            y={midY}
-            fill={textFill ?? '#94a3b8'}
-            textAnchor="middle"
-            dominantBaseline="central"
-            transform={`rotate(-90, ${cx - 10}, ${midY})`}
-            className="text-[9px] font-medium"
-          >
+          <text key={`${key}-label`} x={lx} y={midY}
+            fill={h ? (textFill ?? '#94a3b8') : (textFill ?? '#94a3b8')}
+            textAnchor="middle" dominantBaseline="central"
+            transform={`rotate(-90, ${lx}, ${midY})`}
+            className={`text-[9px] font-medium transition-all duration-200 ${h ? 'opacity-100' : 'opacity-60'}`}>
             {label}
           </text>,
         );
@@ -285,38 +306,81 @@ export function WorkflowView({ workflowTasks }: Props) {
       const ti = phaseIndex(to);
       if (fi < 0 || ti < 0) continue;
       if (ti === fi + 1) {
-        addStraightArrow(from, to, 'stroke-slate-600 stroke-[1.5]');
+        addStraightArrow(from, to,
+          'stroke-slate-600 stroke-[1.5]',
+          'stroke-slate-400 stroke-[2.5] drop-shadow-[0_0_6px_rgba(148,163,184,0.3)]');
       } else {
-        addRightCurve(from, to, 'stroke-slate-600 stroke-[1.5]');
+        addRightCurve(from, to,
+          'stroke-slate-600 stroke-[1.5]',
+          'stroke-slate-400 stroke-[2.5] drop-shadow-[0_0_6px_rgba(148,163,184,0.3)]');
       }
     }
 
-    // Backward bounce-backs
+    // Backward bounce-backs — stagger label X to avoid overlap
+    let bounceLabelIdx = 0;
     for (const [from, to] of BACKWARD_TRANSITIONS) {
-      addLeftCurve(from, to, 'stroke-amber-500/60 stroke-[1.5] stroke-dasharray-[4_4]', 'arrow-left-amber', 'bounce back', '#f59e0b99');
+      const staggerX = (LEFT_X - CURVE_OFFSET - 10) + bounceLabelIdx * 16;
+      addLeftCurve(from, to,
+        'stroke-amber-500/60 stroke-[1.5] stroke-dasharray-[4_4]',
+        'stroke-amber-400 stroke-[2.5] stroke-dasharray-[4_4] drop-shadow-[0_0_8px_rgba(245,158,11,0.4)]',
+        'arrow-left-amber', 'arrow-left-amber-hover', 'bounce back', '#f59e0b99', staggerX);
+      bounceLabelIdx++;
     }
 
-    // Failure transitions
+    // Failure transitions — stagger label X to avoid overlap
+    let failLabelIdx = 0;
     for (const [from, to] of FAILURE_TRANSITIONS) {
-      addLeftCurve(from, to, 'stroke-red-500/50 stroke-[1.5] stroke-dasharray-[4_4]', 'arrow-left-red', 'max attempts', '#ef444488');
+      const staggerX = (LEFT_X - CURVE_OFFSET - 40) + failLabelIdx * 16;
+      addLeftCurve(from, to,
+        'stroke-red-500/50 stroke-[1.5] stroke-dasharray-[4_4]',
+        'stroke-red-400 stroke-[2.5] stroke-dasharray-[4_4] drop-shadow-[0_0_8px_rgba(239,68,68,0.4)]',
+        'arrow-left-red', 'arrow-left-red-hover', 'max attempts', '#ef444488', staggerX);
+      failLabelIdx++;
     }
 
     return arrows;
-  }, []);
+  }
+
+  const diagramRef = useRef<HTMLDivElement>(null);
+  const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({ top: 0, left: NODE_W + 12 });
 
   const isEmpty = workflowTasks.length === 0;
 
-  // Popover position: right of node, flip left if near viewport edge.
-  // Diagram is centered at width DIAGRAM_PANEL_W, so nodeRight in
-  // viewport coords = (innerWidth - DIAGRAM_PANEL_W) / 2 + LEFT_MARGIN + NODE_W.
-  function getPopoverStyle(_phaseIdx: number): React.CSSProperties {
-    const diagramLeft = (window.innerWidth - DIAGRAM_PANEL_W) / 2;
-    const nodeRight = diagramLeft + LEFT_MARGIN + NODE_W;
-    if (nodeRight + 12 + POPOVER_W > window.innerWidth) {
-      return { top: 0, left: -(POPOVER_W + 12) };
-    }
-    return { top: 0, left: NODE_W + 12 };
-  }
+  // Compute clamped popover position when hoveredPhase changes.
+  // Uses useLayoutEffect to block paint until position is recalculated,
+  // preventing a flash at the unclamped position.
+  useLayoutEffect(() => {
+    if (!hoveredPhase) return;
+    const idx = hoveredPhase === '__other__' ? PIPELINE_PHASES.length : phaseIndex(hoveredPhase);
+    if (idx < 0) return;
+
+    const containerEl = diagramRef.current;
+    if (!containerEl) return;
+
+    const containerRect = containerEl.getBoundingClientRect();
+    const nodeTop = containerRect.top + nodeY(idx);
+    const nodeRight = containerRect.left + LEFT_MARGIN + NODE_W;
+
+    // Horizontal: flip left if popover would overflow the right viewport edge
+    const overflowRight = nodeRight + 12 + POPOVER_W > window.innerWidth;
+    const left = overflowRight ? -(POPOVER_W + 12) : NODE_W + 12;
+
+    // Dynamic popover height estimate based on actual ticket count.
+    // Header (~36px) + content padding (~16px) + cards (~52px each incl. gap, capped at max-h-72 = 288px).
+    // Without this, a fixed 350px estimate would needlessly shift up popovers for nearly-empty phases.
+    const taskCount = hoveredPhase === '__other__'
+      ? otherTasks.length
+      : (tasksByPhase.get(hoveredPhase)?.length ?? 0);
+    const popoverEstH = taskCount === 0 ? 100 : 52 + Math.min(taskCount * 54, 288);
+
+    // Vertical: keep popover aligned (top: 0) when it fits; shift up only when it overflows
+    const popoverBottom = nodeTop + popoverEstH;
+    const top = popoverBottom > window.innerHeight - 8
+      ? -(popoverBottom - window.innerHeight + 8)
+      : 0;
+
+    setPopoverStyle({ top, left });
+  }, [hoveredPhase]);
 
   return (
     <div className="flex flex-col h-full bg-[#11131b]">
@@ -343,10 +407,10 @@ export function WorkflowView({ workflowTasks }: Props) {
       {/* Main content: full-width centered diagram */}
       <div
         className={`flex-1 ${selectedTaskId ? 'overflow-hidden pointer-events-none select-none' : ''}`}
-        onMouseLeave={handlePhaseLeave}
+        onMouseLeave={() => { handlePhaseLeave(); setHoveredTransition(null); }}
       >
         <div className="flex justify-center pt-6 pb-12">
-          <div className="relative overflow-visible shrink-0" style={{ width: DIAGRAM_PANEL_W, height: diagramHeight }}>
+          <div ref={diagramRef} className="relative overflow-visible shrink-0" style={{ width: DIAGRAM_PANEL_W, height: diagramHeight }}>
             {isEmpty ? (
               <div className="flex items-center justify-center h-full text-sm text-slate-500">
                 No tickets yet — create one from the Board.
@@ -355,7 +419,7 @@ export function WorkflowView({ workflowTasks }: Props) {
               <>
                 {/* SVG arrow layer */}
                 <svg
-                  className="absolute inset-0 pointer-events-none overflow-visible"
+                  className="absolute inset-0 overflow-visible"
                   width={RIGHT_X + CURVE_OFFSET + 10}
                   height={diagramHeight}
                 >
@@ -363,17 +427,29 @@ export function WorkflowView({ workflowTasks }: Props) {
                     <marker id="arrow-down" viewBox="0 0 10 10" refX="5" refY="0" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
                       <polygon points="0,0 5,10 10,0" className="fill-slate-600" />
                     </marker>
+                    <marker id="arrow-down-hover" viewBox="0 0 10 10" refX="5" refY="0" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                      <polygon points="0,0 5,10 10,0" className="fill-slate-400" />
+                    </marker>
                     <marker id="arrow-right" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
                       <polygon points="0,5 10,0 10,10" className="fill-slate-600" />
+                    </marker>
+                    <marker id="arrow-right-hover" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                      <polygon points="0,5 10,0 10,10" className="fill-slate-400" />
                     </marker>
                     <marker id="arrow-left-amber" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
                       <polygon points="0,0 10,5 0,10" className="fill-amber-500/60" />
                     </marker>
+                    <marker id="arrow-left-amber-hover" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                      <polygon points="0,0 10,5 0,10" className="fill-amber-400" />
+                    </marker>
                     <marker id="arrow-left-red" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
                       <polygon points="0,0 10,5 0,10" className="fill-red-500/50" />
                     </marker>
+                    <marker id="arrow-left-red-hover" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                      <polygon points="0,0 10,5 0,10" className="fill-red-400" />
+                    </marker>
                   </defs>
-                  {svgArrows}
+                  {renderArrows()}
                 </svg>
 
                 {/* Phase nodes */}
@@ -387,12 +463,12 @@ export function WorkflowView({ workflowTasks }: Props) {
                     <div
                       key={phase.phase}
                       className="absolute transition-all duration-150"
-                      style={{ top: nodeY(idx), left: LEFT_MARGIN, width: NODE_W }}
+                      style={{ top: nodeY(idx), left: LEFT_MARGIN, width: NODE_W, height: NODE_H }}
                       onMouseEnter={() => handlePhaseEnter(phase.phase)}
                       onMouseLeave={handlePhaseLeave}
                     >
                       <div
-                        className={`px-3 py-2.5 rounded-lg border-2 text-xs font-semibold cursor-pointer transition-all ${
+                        className={`h-full flex items-center px-3 rounded-lg border-2 text-xs font-semibold cursor-pointer transition-all ${
                           hasTasks
                             ? `${phase.color} text-white border-opacity-100`
                             : 'border-slate-700 bg-slate-800/50 text-slate-500'
@@ -415,7 +491,7 @@ export function WorkflowView({ workflowTasks }: Props) {
                         <PhasePopover
                           label={phase.label}
                           tasks={tasks}
-                          popoverStyle={getPopoverStyle(idx)}
+                          popoverStyle={popoverStyle}
                           onSelectTask={setSelectedTaskId}
                         />
                       )}
@@ -428,11 +504,11 @@ export function WorkflowView({ workflowTasks }: Props) {
                   <div
                     key="other"
                     className="absolute transition-all duration-150"
-                    style={{ top: nodeY(PIPELINE_PHASES.length), left: LEFT_MARGIN, width: NODE_W }}
+                    style={{ top: nodeY(PIPELINE_PHASES.length), left: LEFT_MARGIN, width: NODE_W, height: NODE_H }}
                     onMouseEnter={() => handlePhaseEnter('__other__')}
                     onMouseLeave={handlePhaseLeave}
                   >
-                    <div className={`px-3 py-2.5 rounded-lg border-2 border-dashed border-slate-600 bg-slate-800/40 text-xs font-semibold text-slate-400 cursor-pointer transition-all ${hoveredPhase === '__other__' ? 'scale-105 shadow-lg shadow-black/30' : ''}`}>
+                    <div className={`h-full flex items-center px-3 rounded-lg border-2 border-dashed border-slate-600 bg-slate-800/40 text-xs font-semibold text-slate-400 cursor-pointer transition-all ${hoveredPhase === '__other__' ? 'scale-105 shadow-lg shadow-black/30' : ''}`}>
                       <div className="flex items-center justify-between">
                         <span>Other</span>
                         <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${hoveredPhase === '__other__' ? 'bg-white/20 text-white' : 'bg-slate-700/50 text-slate-400'}`}>
@@ -446,7 +522,7 @@ export function WorkflowView({ workflowTasks }: Props) {
                         <PhasePopover
                           label="Other"
                           tasks={otherTasks}
-                          popoverStyle={getPopoverStyle(PIPELINE_PHASES.length)}
+                          popoverStyle={popoverStyle}
                           onSelectTask={setSelectedTaskId}
                         />
                       )}
