@@ -462,7 +462,7 @@ export function WorkflowView({ workflowTasks }: Props) {
                   return (
                     <div
                       key={phase.phase}
-                      className="absolute transition-all duration-150"
+                      className={`absolute rounded-lg transition-all duration-150 ${hasActive ? 'animate-pulse-glow' : ''}`}
                       style={{ top: nodeY(idx), left: LEFT_MARGIN, width: NODE_W, height: NODE_H }}
                       onMouseEnter={() => handlePhaseEnter(phase.phase)}
                       onMouseLeave={handlePhaseLeave}
@@ -472,7 +472,7 @@ export function WorkflowView({ workflowTasks }: Props) {
                           hasTasks
                             ? `${phase.color} text-white border-opacity-100`
                             : 'border-slate-700 bg-slate-800/50 text-slate-500'
-                        } ${isHovered ? 'scale-105 shadow-lg shadow-black/30' : ''} ${hasActive ? 'animate-pulse-glow' : ''}`}
+                        } ${isHovered ? 'scale-105 shadow-lg shadow-black/30' : ''}`}
                       >
                         <div className="flex items-center justify-between">
                           <span>{phase.label}</span>
@@ -503,7 +503,7 @@ export function WorkflowView({ workflowTasks }: Props) {
                 {otherTasks.length > 0 && (
                   <div
                     key="other"
-                    className="absolute transition-all duration-150"
+                    className={`absolute rounded-lg transition-all duration-150 ${otherTasks.some(wt => wt.isActive) ? 'animate-pulse-glow' : ''}`}
                     style={{ top: nodeY(PIPELINE_PHASES.length), left: LEFT_MARGIN, width: NODE_W, height: NODE_H }}
                     onMouseEnter={() => handlePhaseEnter('__other__')}
                     onMouseLeave={handlePhaseLeave}
