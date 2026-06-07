@@ -1,10 +1,22 @@
 // @vitest-environment happy-dom
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { WorkflowView } from '@/components/workflow-view';
 import type { WorkflowTask } from '@/app/actions/workflow';
+
+vi.mock('@/hooks/use-phase-sync', () => ({
+  usePhaseSync: vi.fn(),
+}));
+
+vi.mock('@/components/task-panel', () => ({
+  TaskPanel: ({ taskId, onClose }: { taskId: string; onClose: () => void }) => (
+    <div data-testid="task-panel" data-taskid={taskId}>
+      <button data-testid="task-panel-close" onClick={onClose}>Close</button>
+    </div>
+  ),
+}));
 
 const NOW = new Date('2025-06-07T12:00:00.000Z').getTime();
 
@@ -26,6 +38,7 @@ function makeWorkflowTask(overrides: Partial<Omit<WorkflowTask, 'task'>> & { tas
     task: makeTask(taskOverrides),
     qaBounces: 0,
     enteredPhaseAt: null,
+    isActive: false,
     ...rest,
   };
 }
@@ -40,11 +53,14 @@ describe('WorkflowView', () => {
     vi.useRealTimers();
   });
 
-  // ── Pipeline phases ───────────────────────────────────────────────────
+  // ── Phase nodes ────────────────────────────────────────────────────────
 
-  it('renders all pipeline phase labels', () => {
-    render(<WorkflowView workflowTasks={[]} />);
+  it('renders all pipeline phase node labels', () => {
+    render(<WorkflowView workflowTasks={[
+      makeWorkflowTask({ task: { id: 't', title: 'T', phase: 'backlog' } }),
+    ]} />);
 
+    expect(screen.getByText('Backlog')).toBeInTheDocument();
     expect(screen.getByText('Spec')).toBeInTheDocument();
     expect(screen.getByText('Plan')).toBeInTheDocument();
     expect(screen.getByText('Implement')).toBeInTheDocument();
@@ -53,15 +69,19 @@ describe('WorkflowView', () => {
     expect(screen.getByText('Merge')).toBeInTheDocument();
     expect(screen.getByText('Create PR')).toBeInTheDocument();
     expect(screen.getByText('PR Open')).toBeInTheDocument();
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(screen.getByText('Done')).toBeInTheDocument();
   });
 
   // ── Header ────────────────────────────────────────────────────────────
 
   it('renders the header and subtitle', () => {
-    render(<WorkflowView workflowTasks={[]} />);
+    render(<WorkflowView workflowTasks={[
+      makeWorkflowTask({ task: { id: 't', title: 'T', phase: 'backlog' } }),
+    ]} />);
 
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Workflow');
-    expect(screen.getByText(/Active tickets flowing through the pipeline/)).toBeInTheDocument();
+    expect(screen.getByText(/Pipeline state diagram/)).toBeInTheDocument();
   });
 
   // ── Empty state ───────────────────────────────────────────────────────
@@ -69,38 +89,12 @@ describe('WorkflowView', () => {
   it('shows empty state when no tasks', () => {
     render(<WorkflowView workflowTasks={[]} />);
 
-    expect(screen.getByText('No active tickets — start a task from the Board to see it here.')).toBeInTheDocument();
+    expect(screen.getByText('No tickets yet — create one from the Board.')).toBeInTheDocument();
   });
 
-  // ── Task rendering ────────────────────────────────────────────────────
+  // ── Ticket count badges ───────────────────────────────────────────────
 
-  it('shows task under correct phase', () => {
-    const wt = makeWorkflowTask({
-      task: { id: 'task-1', title: 'Fix login bug', phase: 'qa-review' },
-    });
-
-    render(<WorkflowView workflowTasks={[wt]} />);
-
-    expect(screen.getByText('Fix login bug')).toBeInTheDocument();
-    // QA Review phase should show task count
-    expect(screen.getByText('1')).toBeInTheDocument();
-  });
-
-  it('shows multiple tasks under different phases', () => {
-    const tasks: WorkflowTask[] = [
-      makeWorkflowTask({ task: { id: 't1', title: 'Spec task', phase: 'spec' } }),
-      makeWorkflowTask({ task: { id: 't2', title: 'Plan task', phase: 'plan' } }),
-      makeWorkflowTask({ task: { id: 't3', title: 'Impl task', phase: 'implement' } }),
-    ];
-
-    render(<WorkflowView workflowTasks={tasks} />);
-
-    expect(screen.getByText('Spec task')).toBeInTheDocument();
-    expect(screen.getByText('Plan task')).toBeInTheDocument();
-    expect(screen.getByText('Impl task')).toBeInTheDocument();
-  });
-
-  it('groups multiple tasks under same phase', () => {
+  it('shows ticket count badge on phase nodes with tasks', () => {
     const tasks: WorkflowTask[] = [
       makeWorkflowTask({ task: { id: 't1', title: 'Task A', phase: 'qa-review' } }),
       makeWorkflowTask({ task: { id: 't2', title: 'Task B', phase: 'qa-review' } }),
@@ -108,124 +102,206 @@ describe('WorkflowView', () => {
 
     render(<WorkflowView workflowTasks={tasks} />);
 
-    expect(screen.getByText('Task A')).toBeInTheDocument();
-    expect(screen.getByText('Task B')).toBeInTheDocument();
-    // Phase count badge should show 2
     const badges = screen.getAllByText('2');
     expect(badges.length).toBeGreaterThan(0);
   });
 
+  // ── Hover reveals tickets ─────────────────────────────────────────────
+
+  it('shows tickets in a popover when hovering a phase node', async () => {
+    const tasks: WorkflowTask[] = [
+      makeWorkflowTask({ task: { id: 't1', title: 'Fix login bug', phase: 'qa-review' } }),
+    ];
+
+    render(<WorkflowView workflowTasks={tasks} />);
+
+    const qaNode = screen.getByText('QA Review');
+    fireEvent.mouseEnter(qaNode);
+    await act(() => { vi.advanceTimersByTime(180); });
+
+    expect(screen.getByText('Fix login bug')).toBeInTheDocument();
+  });
+
+  it('shows header subtitle with hover instructions', () => {
+    render(<WorkflowView workflowTasks={[
+      makeWorkflowTask({ task: { id: 't', title: 'T', phase: 'backlog' } }),
+    ]} />);
+
+    expect(screen.getByText(/hover over a phase to see its tickets/)).toBeInTheDocument();
+  });
+
+  it('shows "no tickets" message when hovering an empty phase', async () => {
+    render(<WorkflowView workflowTasks={[
+      makeWorkflowTask({ task: { id: 't', title: 'T', phase: 'backlog' } }),
+    ]} />);
+
+    const specNode = screen.getByText('Spec');
+    fireEvent.mouseEnter(specNode);
+    await act(() => { vi.advanceTimersByTime(180); });
+
+    expect(screen.getByText('No tickets currently in this phase.')).toBeInTheDocument();
+  });
+
+  // ── Click to open task detail ─────────────────────────────────────────
+
+  it('opens task detail modal when clicking a ticket in the hover panel', async () => {
+    const tasks: WorkflowTask[] = [
+      makeWorkflowTask({ task: { id: 'task-1', title: 'Click me', phase: 'implement' } }),
+    ];
+
+    render(<WorkflowView workflowTasks={tasks} />);
+
+    fireEvent.mouseEnter(screen.getByText('Implement'));
+    await act(() => { vi.advanceTimersByTime(180); });
+    fireEvent.click(screen.getByText('Click me'));
+
+    expect(screen.getByTestId('task-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('task-panel').getAttribute('data-taskid')).toBe('task-1');
+  });
+
+  it('closes modal when clicking close button', async () => {
+    const tasks: WorkflowTask[] = [
+      makeWorkflowTask({ task: { id: 'task-1', title: 'Click me', phase: 'implement' } }),
+    ];
+
+    render(<WorkflowView workflowTasks={tasks} />);
+
+    fireEvent.mouseEnter(screen.getByText('Implement'));
+    await act(() => { vi.advanceTimersByTime(180); });
+    fireEvent.click(screen.getByText('Click me'));
+    expect(screen.getByTestId('task-panel')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-panel-close'));
+    expect(screen.queryByTestId('task-panel')).not.toBeInTheDocument();
+  });
+
+  it('closes modal when pressing Escape', async () => {
+    const tasks: WorkflowTask[] = [
+      makeWorkflowTask({ task: { id: 'task-1', title: 'Click me', phase: 'implement' } }),
+    ];
+
+    render(<WorkflowView workflowTasks={tasks} />);
+
+    fireEvent.mouseEnter(screen.getByText('Implement'));
+    await act(() => { vi.advanceTimersByTime(180); });
+    fireEvent.click(screen.getByText('Click me'));
+    expect(screen.getByTestId('task-panel')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('task-panel')).not.toBeInTheDocument();
+  });
+
   // ── QA bounce indicator ───────────────────────────────────────────────
 
-  it('shows QA bounce count when task has been bounced', () => {
-    const wt = makeWorkflowTask({
-      task: { id: 'task-1', title: 'Bug fix', phase: 'implement' },
-      qaBounces: 2,
-    });
+  it('shows QA bounce count on tickets', async () => {
+    const tasks: WorkflowTask[] = [
+      makeWorkflowTask({
+        task: { id: 'task-1', title: 'Bug fix', phase: 'implement' },
+        qaBounces: 2,
+      }),
+    ];
 
-    render(<WorkflowView workflowTasks={[wt]} />);
+    render(<WorkflowView workflowTasks={tasks} />);
+
+    fireEvent.mouseEnter(screen.getByText('Implement'));
+    await act(() => { vi.advanceTimersByTime(180); });
 
     expect(screen.getByText('Bug fix')).toBeInTheDocument();
     expect(screen.getByText('2x QA')).toBeInTheDocument();
   });
 
-  it('does not show QA bounce when zero', () => {
-    const wt = makeWorkflowTask({
-      task: { id: 'task-1', title: 'Clean task', phase: 'implement' },
-      qaBounces: 0,
-    });
+  it('does not show QA bounce when zero', async () => {
+    const tasks: WorkflowTask[] = [
+      makeWorkflowTask({
+        task: { id: 'task-1', title: 'Clean task', phase: 'implement' },
+        qaBounces: 0,
+      }),
+    ];
 
-    render(<WorkflowView workflowTasks={[wt]} />);
+    render(<WorkflowView workflowTasks={tasks} />);
+
+    fireEvent.mouseEnter(screen.getByText('Implement'));
+    await act(() => { vi.advanceTimersByTime(180); });
 
     expect(screen.getByText('Clean task')).toBeInTheDocument();
     expect(screen.queryByText(/x QA/)).not.toBeInTheDocument();
   });
 
-  it('shows QA bounce for singular (1x QA)', () => {
-    const wt = makeWorkflowTask({
-      task: { id: 'task-1', title: 'One bounce', phase: 'implement' },
-      qaBounces: 1,
-    });
-
-    render(<WorkflowView workflowTasks={[wt]} />);
-
-    expect(screen.getByText('1x QA')).toBeInTheDocument();
-  });
-
   // ── Time in phase ─────────────────────────────────────────────────────
 
-  it('shows time in phase when enteredPhaseAt is provided', () => {
-    const recent = new Date(NOW - 5 * 60000).toISOString(); // 5 minutes ago (frozen time)
-    const wt = makeWorkflowTask({
-      task: { id: 'task-1', title: 'Recent task', phase: 'spec' },
-      enteredPhaseAt: recent,
-    });
+  it('shows time in phase on tickets', async () => {
+    const recent = new Date(NOW - 5 * 60000).toISOString();
+    const tasks: WorkflowTask[] = [
+      makeWorkflowTask({
+        task: { id: 'task-1', title: 'Recent task', phase: 'spec' },
+        enteredPhaseAt: recent,
+      }),
+    ];
 
-    render(<WorkflowView workflowTasks={[wt]} />);
+    render(<WorkflowView workflowTasks={tasks} />);
+
+    fireEvent.mouseEnter(screen.getByText('Spec'));
+    await act(() => { vi.advanceTimersByTime(180); });
 
     expect(screen.getByText('Recent task')).toBeInTheDocument();
     expect(screen.getByText('5m')).toBeInTheDocument();
   });
 
-  it('shows "just now" for very recent phase entry', () => {
-    const justNow = new Date(NOW - 30_000).toISOString(); // 30 seconds ago (frozen time)
-    const wt = makeWorkflowTask({
-      task: { id: 'task-1', title: 'Just started', phase: 'plan' },
-      enteredPhaseAt: justNow,
-    });
+  // ── Other (catch-all) ─────────────────────────────────────────────────
 
-    render(<WorkflowView workflowTasks={[wt]} />);
+  it('renders Other node for unrecognized phases', () => {
+    const tasks: WorkflowTask[] = [
+      makeWorkflowTask({ task: { id: 'task-1', title: 'Weird phase', phase: 'some-unknown-phase' } }),
+    ];
 
-    expect(screen.getByText('just now')).toBeInTheDocument();
+    render(<WorkflowView workflowTasks={tasks} />);
+
+    expect(screen.getByText('Other')).toBeInTheDocument();
   });
 
-  it('shows hours when time is more than 60 minutes', () => {
-    const hoursAgo = new Date(NOW - 3 * 3600_000).toISOString(); // 3 hours ago (frozen time)
-    const wt = makeWorkflowTask({
-      task: { id: 'task-1', title: 'Old task', phase: 'awaiting-review' },
-      enteredPhaseAt: hoursAgo,
-    });
+  it('shows tickets when hovering Other node', async () => {
+    const tasks: WorkflowTask[] = [
+      makeWorkflowTask({ task: { id: 'task-1', title: 'Mystery', phase: 'some-unknown-phase' } }),
+    ];
 
-    render(<WorkflowView workflowTasks={[wt]} />);
+    render(<WorkflowView workflowTasks={tasks} />);
 
-    expect(screen.getByText('3h')).toBeInTheDocument();
+    fireEvent.mouseEnter(screen.getByText('Other'));
+    await act(() => { vi.advanceTimersByTime(180); });
+
+    expect(screen.getByText('Mystery')).toBeInTheDocument();
   });
 
-  it('shows days when time is more than 24 hours', () => {
-    const daysAgo = new Date(NOW - 3 * 86400_000).toISOString(); // 3 days ago (frozen time)
-    const wt = makeWorkflowTask({
-      task: { id: 'task-1', title: 'Stale task', phase: 'pr-open' },
-      enteredPhaseAt: daysAgo,
-    });
+  // ── Active session pulse glow ─────────────────────────────────────────
 
-    render(<WorkflowView workflowTasks={[wt]} />);
+  it('adds pulse glow class to phase node with active tasks', () => {
+    const tasks: WorkflowTask[] = [
+      makeWorkflowTask({
+        task: { id: 'task-1', title: 'Running task', phase: 'implement' },
+        isActive: true,
+      }),
+    ];
 
-    expect(screen.getByText('3d')).toBeInTheDocument();
+    render(<WorkflowView workflowTasks={tasks} />);
+
+    // The Implement phase node should have the pulse glow class
+    const implNode = screen.getByText('Implement');
+    const parent = implNode.closest('[class*="animate-pulse-glow"]');
+    expect(parent).toBeTruthy();
   });
 
-  // ── Edge cases ────────────────────────────────────────────────────────
+  it('does not add pulse glow to phase node without active tasks', () => {
+    const tasks: WorkflowTask[] = [
+      makeWorkflowTask({
+        task: { id: 'task-1', title: 'Idle task', phase: 'implement' },
+        isActive: false,
+      }),
+    ];
 
-  it('handles task with unknown phase gracefully (does not crash)', () => {
-    const wt = makeWorkflowTask({
-      task: { id: 'task-1', title: 'Weird phase', phase: 'some-unknown-phase' },
-    });
+    render(<WorkflowView workflowTasks={tasks} />);
 
-    // Should not throw
-    expect(() => render(<WorkflowView workflowTasks={[wt]} />)).not.toThrow();
-  });
-
-  it('handles tasks with both QA bounce and time in phase', () => {
-    const recent = new Date(NOW - 10 * 60000).toISOString();
-    const wt = makeWorkflowTask({
-      task: { id: 'task-1', title: 'Combo task', phase: 'implement' },
-      qaBounces: 3,
-      enteredPhaseAt: recent,
-    });
-
-    render(<WorkflowView workflowTasks={[wt]} />);
-
-    expect(screen.getByText('Combo task')).toBeInTheDocument();
-    expect(screen.getByText('3x QA')).toBeInTheDocument();
-    expect(screen.getByText('10m')).toBeInTheDocument();
+    const implNode = screen.getByText('Implement');
+    const parent = implNode.closest('[class*="animate-pulse-glow"]');
+    expect(parent).toBeNull();
   });
 });

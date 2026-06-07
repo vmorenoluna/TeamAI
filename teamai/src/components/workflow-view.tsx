@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskPanel } from './task-panel';
 import { PIPELINE_PHASES } from '@/constants/phases';
@@ -9,7 +9,7 @@ import type { WorkflowTask } from '@/app/actions/workflow';
 // ── Layout constants ─────────────────────────────────────────────────────────
 
 const DIAGRAM_PANEL_W = 420;
-const TICKET_PANEL_W = 340;
+const POPOVER_W = 260;
 const NODE_H = 48;
 const NODE_GAP = 24;
 const PITCH = NODE_H + NODE_GAP;
@@ -101,6 +101,50 @@ function TaskCard({ wt, onClick }: { wt: WorkflowTask; onClick: () => void }) {
   );
 }
 
+// ── Phase popover ────────────────────────────────────────────────────────────
+
+function PhasePopover({
+  label,
+  tasks,
+  popoverStyle,
+  onSelectTask,
+}: {
+  label: string;
+  tasks: WorkflowTask[];
+  popoverStyle: React.CSSProperties;
+  onSelectTask: (id: string) => void;
+}) {
+  return (
+    <div
+      className="absolute z-20"
+      style={{ ...popoverStyle, width: POPOVER_W }}
+      onMouseEnter={e => { e.stopPropagation(); }}
+    >
+      <div className="bg-[#1e2333] rounded-lg border border-[#334155] shadow-xl shadow-black/40 overflow-hidden animate-fade-in">
+        <div className="px-3 py-2 border-b border-[#1e293b]">
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-semibold text-white">{label}</h3>
+            <span className="text-[10px] text-slate-500">
+              {tasks.length} ticket{tasks.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1.5 max-h-72 overflow-y-auto">
+          {tasks.length > 0 ? (
+            tasks.map(wt => (
+              <TaskCard key={wt.task.id} wt={wt} onClick={() => onSelectTask(wt.task.id)} />
+            ))
+          ) : (
+            <p className="text-xs text-slate-500 px-2 py-4 text-center">
+              No tickets currently in this phase.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 
 interface Props {
@@ -112,6 +156,22 @@ export function WorkflowView({ workflowTasks }: Props) {
 
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup hover timer on unmount
+  useEffect(() => {
+    return () => { if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); };
+  }, []);
+
+  function handlePhaseEnter(phase: string) {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => setHoveredPhase(phase), 180);
+  }
+
+  function handlePhaseLeave() {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    setHoveredPhase(null);
+  }
 
   // Close the task window on Escape key
   useEffect(() => {
@@ -244,8 +304,19 @@ export function WorkflowView({ workflowTasks }: Props) {
     return arrows;
   }, []);
 
-  const hoveredTasks = hoveredPhase ? (tasksByPhase.get(hoveredPhase) ?? []) : [];
   const isEmpty = workflowTasks.length === 0;
+
+  // Popover position: right of node, flip left if near viewport edge.
+  // Diagram is centered at width DIAGRAM_PANEL_W, so nodeRight in
+  // viewport coords = (innerWidth - DIAGRAM_PANEL_W) / 2 + LEFT_MARGIN + NODE_W.
+  function getPopoverStyle(_phaseIdx: number): React.CSSProperties {
+    const diagramLeft = (window.innerWidth - DIAGRAM_PANEL_W) / 2;
+    const nodeRight = diagramLeft + LEFT_MARGIN + NODE_W;
+    if (nodeRight + 12 + POPOVER_W > window.innerWidth) {
+      return { top: 0, left: -(POPOVER_W + 12) };
+    }
+    return { top: 0, left: NODE_W + 12 };
+  }
 
   return (
     <div className="flex flex-col h-full bg-[#11131b]">
@@ -269,44 +340,43 @@ export function WorkflowView({ workflowTasks }: Props) {
         </div>
       </div>
 
-      {/* Main content: diagram + hover panel */}
+      {/* Main content: full-width centered diagram */}
       <div
-        className={`flex-1 flex justify-center min-h-0 ${selectedTaskId ? 'overflow-hidden pointer-events-none select-none' : ''}`}
-        onMouseLeave={() => setHoveredPhase(null)}
+        className={`flex-1 ${selectedTaskId ? 'overflow-hidden pointer-events-none select-none' : ''}`}
+        onMouseLeave={handlePhaseLeave}
       >
-        {/* Left: State diagram (always visible) */}
-        <div className="shrink-0 overflow-y-auto border-r border-[#1e293b] p-6" style={{ width: DIAGRAM_PANEL_W }}>
-          {isEmpty ? (
-            <div className="flex items-center justify-center h-full text-sm text-slate-500">
-              No tickets yet — create one from the Board.
-            </div>
-          ) : (
-            <div className="relative" style={{ height: diagramHeight }}>
-              {/* SVG arrow layer */}
-              <svg
-                className="absolute inset-0 pointer-events-none overflow-visible"
-                width={RIGHT_X + CURVE_OFFSET + 10}
-                height={diagramHeight}
-              >
-                <defs>
-                  <marker id="arrow-down" viewBox="0 0 10 10" refX="5" refY="0" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
-                    <polygon points="0,0 5,10 10,0" className="fill-slate-600" />
-                  </marker>
-                  <marker id="arrow-right" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
-                    <polygon points="0,5 10,0 10,10" className="fill-slate-600" />
-                  </marker>
-                  <marker id="arrow-left-amber" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
-                    <polygon points="0,0 10,5 0,10" className="fill-amber-500/60" />
-                  </marker>
-                  <marker id="arrow-left-red" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
-                    <polygon points="0,0 10,5 0,10" className="fill-red-500/50" />
-                  </marker>
-                </defs>
-                {svgArrows}
-              </svg>
+        <div className="flex justify-center pt-6 pb-12">
+          <div className="relative overflow-visible shrink-0" style={{ width: DIAGRAM_PANEL_W, height: diagramHeight }}>
+            {isEmpty ? (
+              <div className="flex items-center justify-center h-full text-sm text-slate-500">
+                No tickets yet — create one from the Board.
+              </div>
+            ) : (
+              <>
+                {/* SVG arrow layer */}
+                <svg
+                  className="absolute inset-0 pointer-events-none overflow-visible"
+                  width={RIGHT_X + CURVE_OFFSET + 10}
+                  height={diagramHeight}
+                >
+                  <defs>
+                    <marker id="arrow-down" viewBox="0 0 10 10" refX="5" refY="0" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                      <polygon points="0,0 5,10 10,0" className="fill-slate-600" />
+                    </marker>
+                    <marker id="arrow-right" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                      <polygon points="0,5 10,0 10,10" className="fill-slate-600" />
+                    </marker>
+                    <marker id="arrow-left-amber" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                      <polygon points="0,0 10,5 0,10" className="fill-amber-500/60" />
+                    </marker>
+                    <marker id="arrow-left-red" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                      <polygon points="0,0 10,5 0,10" className="fill-red-500/50" />
+                    </marker>
+                  </defs>
+                  {svgArrows}
+                </svg>
 
-              {/* Phase nodes */}
-              <div className="relative z-10">
+                {/* Phase nodes */}
                 {PIPELINE_PHASES.map((phase, idx) => {
                   const tasks = tasksByPhase.get(phase.phase) ?? [];
                   const hasTasks = tasks.length > 0;
@@ -318,7 +388,8 @@ export function WorkflowView({ workflowTasks }: Props) {
                       key={phase.phase}
                       className="absolute transition-all duration-150"
                       style={{ top: nodeY(idx), left: LEFT_MARGIN, width: NODE_W }}
-                      onMouseEnter={() => setHoveredPhase(phase.phase)}
+                      onMouseEnter={() => handlePhaseEnter(phase.phase)}
+                      onMouseLeave={handlePhaseLeave}
                     >
                       <div
                         className={`px-3 py-2.5 rounded-lg border-2 text-xs font-semibold cursor-pointer transition-all ${
@@ -338,6 +409,16 @@ export function WorkflowView({ workflowTasks }: Props) {
                           )}
                         </div>
                       </div>
+
+                      {/* Floating popover on hover */}
+                      {isHovered && (
+                        <PhasePopover
+                          label={phase.label}
+                          tasks={tasks}
+                          popoverStyle={getPopoverStyle(idx)}
+                          onSelectTask={setSelectedTaskId}
+                        />
+                      )}
                     </div>
                   );
                 })}
@@ -348,58 +429,32 @@ export function WorkflowView({ workflowTasks }: Props) {
                     key="other"
                     className="absolute transition-all duration-150"
                     style={{ top: nodeY(PIPELINE_PHASES.length), left: LEFT_MARGIN, width: NODE_W }}
-                    onMouseEnter={() => setHoveredPhase('__other__')}
+                    onMouseEnter={() => handlePhaseEnter('__other__')}
+                    onMouseLeave={handlePhaseLeave}
                   >
-                    <div className="px-3 py-2.5 rounded-lg border-2 border-dashed border-slate-600 bg-slate-800/40 text-xs font-semibold text-slate-400 cursor-pointer">
+                    <div className={`px-3 py-2.5 rounded-lg border-2 border-dashed border-slate-600 bg-slate-800/40 text-xs font-semibold text-slate-400 cursor-pointer transition-all ${hoveredPhase === '__other__' ? 'scale-105 shadow-lg shadow-black/30' : ''}`}>
                       <div className="flex items-center justify-between">
                         <span>Other</span>
-                        <span className="ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-700/50 text-slate-400">
+                        <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${hoveredPhase === '__other__' ? 'bg-white/20 text-white' : 'bg-slate-700/50 text-slate-400'}`}>
                           {otherTasks.length}
                         </span>
                       </div>
                     </div>
+
+                      {/* Floating popover on hover */}
+                      {hoveredPhase === '__other__' && (
+                        <PhasePopover
+                          label="Other"
+                          tasks={otherTasks}
+                          popoverStyle={getPopoverStyle(PIPELINE_PHASES.length)}
+                          onSelectTask={setSelectedTaskId}
+                        />
+                      )}
                   </div>
                 )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Right: Hover ticket panel */}
-        <div className="shrink-0 overflow-y-auto p-6" style={{ width: TICKET_PANEL_W }}>
-          {hoveredPhase ? (
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <h2 className="text-sm font-semibold text-white">
-                  {hoveredPhase === '__other__'
-                    ? 'Other'
-                    : PIPELINE_PHASES.find(p => p.phase === hoveredPhase)?.label ?? hoveredPhase}
-                </h2>
-                <span className="text-xs text-slate-500">
-                  {hoveredTasks.length} ticket{hoveredTasks.length !== 1 ? 's' : ''}
-                </span>
-              </div>
-              {hoveredPhase === '__other__' ? (
-                <div className="space-y-2" style={{ maxWidth: 340 }}>
-                  {otherTasks.map(wt => (
-                    <TaskCard key={wt.task.id} wt={wt} onClick={() => setSelectedTaskId(wt.task.id)} />
-                  ))}
-                </div>
-              ) : hoveredTasks.length > 0 ? (
-                <div className="space-y-2" style={{ maxWidth: 340 }}>
-                  {hoveredTasks.map(wt => (
-                    <TaskCard key={wt.task.id} wt={wt} onClick={() => setSelectedTaskId(wt.task.id)} />
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-slate-500">No tickets currently in this phase.</p>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center justify-center h-full text-sm text-slate-500">
-              Hover over a phase on the left to see its tickets.
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 

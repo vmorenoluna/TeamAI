@@ -61,6 +61,16 @@ body {
   from { transform: scale(0.95); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(37, 99, 235, 0.3), 0 0 20px rgba(37, 99, 235, 0.1); }
+  50% { box-shadow: 0 0 16px rgba(37, 99, 235, 0.6), 0 0 32px rgba(37, 99, 235, 0.25); }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
 .animate-modal-in {
   animation: zoom-in-95 0.15s ease-out, fade-in 0.15s ease-out;
+}
+.animate-fade-in {
+  animation: fade-in 0.12s ease-out;
 }
