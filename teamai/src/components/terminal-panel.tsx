@@ -8,6 +8,7 @@ import type { FitAddon } from '@xterm/addon-fit';
 interface Props {
   sessionId: string;
   role: string;
+  model: string;
   onClose: () => void;
 }
 
@@ -19,7 +20,7 @@ const ROLE_COLORS: Record<string, string> = {
   'analyst.md':      'border-indigo-500',
 };
 
-export function TerminalPanel({ sessionId, role, onClose }: Props) {
+export function TerminalPanel({ sessionId, role, model, onClose }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<{ terminal: Terminal; fitAddon: FitAddon } | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -107,7 +108,10 @@ export function TerminalPanel({ sessionId, role, onClose }: Props) {
     <div className={`flex flex-col rounded-lg overflow-hidden border-2 ${borderColor} bg-slate-950 h-full`}>
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#1a1f2e] shrink-0">
         <span className="text-xs font-medium text-slate-300">
-          {role.replace('.md', '')} {!connected && <span className="text-slate-500">(connecting…)</span>}
+          {role.replace('.md', '')}
+          {' — '}
+          <span className="text-slate-500">{model}</span>
+          {!connected && <span className="text-slate-500"> (connecting…)</span>}
         </span>
         <button
           onClick={handleClose}

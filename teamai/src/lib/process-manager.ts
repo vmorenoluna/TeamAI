@@ -270,6 +270,11 @@ export class ProcessManager extends EventEmitter {
     const roleFile = join(opts.projectPath, '.claude', 'roles', opts.role);
     // Read content inline to avoid Windows path issues with --append-system-prompt-file
     const roleContent = existsSync(roleFile) ? readFileSync(roleFile, 'utf-8') : '';
+    if (roleContent) {
+      console.log(`[terminal ${id}] Role persona loaded from ${roleFile} (${roleContent.length} chars)`);
+    } else {
+      console.warn(`[terminal ${id}] Role file not found or empty: ${roleFile} — starting without role persona`);
+    }
     const args = roleContent ? ['--append-system-prompt', roleContent] : [];
     if (opts.model) args.push('--model', opts.model);
 
