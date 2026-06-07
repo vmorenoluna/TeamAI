@@ -1,20 +1,63 @@
 'use client';
 
+import { useState, useEffect, useMemo } from 'react';
+import { usePhaseSync } from '@/hooks/use-phase-sync';
+import { TaskPanel } from './task-panel';
+import { PIPELINE_PHASES } from '@/constants/phases';
 import type { WorkflowTask } from '@/app/actions/workflow';
 
-const PIPELINE_PHASES: { phase: string; label: string; color: string }[] = [
-  { phase: 'spec', label: 'Spec', color: 'border-indigo-500 bg-indigo-500/10' },
-  { phase: 'plan', label: 'Plan', color: 'border-violet-500 bg-violet-500/10' },
-  { phase: 'implement', label: 'Implement', color: 'border-amber-500 bg-amber-500/10' },
-  { phase: 'qa-review', label: 'QA Review', color: 'border-orange-500 bg-orange-500/10' },
-  { phase: 'awaiting-review', label: 'Awaiting Review', color: 'border-yellow-500 bg-yellow-500/10' },
-  { phase: 'merge', label: 'Merge', color: 'border-teal-500 bg-teal-500/10' },
-  { phase: 'create-pr', label: 'Create PR', color: 'border-cyan-500 bg-cyan-500/10' },
-  { phase: 'pr-open', label: 'PR Open', color: 'border-emerald-500 bg-emerald-500/10' },
+// ── Layout constants ─────────────────────────────────────────────────────────
+
+const DIAGRAM_PANEL_W = 420;
+const TICKET_PANEL_W = 340;
+const NODE_H = 48;
+const NODE_GAP = 24;
+const PITCH = NODE_H + NODE_GAP;
+const NODE_W = 200;
+const LEFT_MARGIN = Math.floor((DIAGRAM_PANEL_W - NODE_W) / 2);
+const CENTER_X = LEFT_MARGIN + NODE_W / 2;
+const LEFT_X = LEFT_MARGIN;
+const RIGHT_X = LEFT_MARGIN + NODE_W;
+const CURVE_OFFSET = 80;
+
+// ── Transition definitions ───────────────────────────────────────────────────
+
+const FORWARD_TRANSITIONS: [string, string][] = [
+  ['backlog', 'spec'],
+  ['spec', 'plan'],
+  ['plan', 'implement'],
+  ['implement', 'qa-review'],
+  ['qa-review', 'awaiting-review'],
+  ['awaiting-review', 'merge'],
+  ['awaiting-review', 'create-pr'],
+  ['merge', 'done'],
+  ['create-pr', 'pr-open'],
+  ['pr-open', 'done'],
 ];
 
-interface Props {
-  workflowTasks: WorkflowTask[];
+const BACKWARD_TRANSITIONS: [string, string][] = [
+  ['qa-review', 'implement'],
+  ['awaiting-review', 'implement'],
+  ['pr-open', 'implement'],
+];
+
+const FAILURE_TRANSITIONS: [string, string][] = [
+  ['implement', 'failed'],
+  ['qa-review', 'failed'],
+];
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function phaseIndex(phase: string): number {
+  return PIPELINE_PHASES.findIndex(p => p.phase === phase);
+}
+
+function nodeY(idx: number): number {
+  return idx * PITCH;
+}
+
+function nodeCenterY(idx: number): number {
+  return nodeY(idx) + NODE_H / 2;
 }
 
 function timeInPhase(enteredPhaseAt: string | null): string {
@@ -28,12 +71,15 @@ function timeInPhase(enteredPhaseAt: string | null): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-function TaskCard({ wt }: { wt: WorkflowTask }) {
+// ── Sub-components ───────────────────────────────────────────────────────────
+
+function TaskCard({ wt, onClick }: { wt: WorkflowTask; onClick: () => void }) {
   return (
     <div
-      className={`rounded-lg border px-3 py-2 text-xs transition-colors ${
+      onClick={onClick}
+      className={`rounded-lg border px-3 py-2 text-xs transition-colors cursor-pointer ${
         wt.qaBounces > 0
-          ? 'border-amber-500/40 bg-amber-500/5'
+          ? 'border-amber-500/40 bg-amber-500/5 hover:border-amber-500/60'
           : 'border-slate-700 bg-slate-800/30 hover:border-slate-600'
       }`}
     >
@@ -55,31 +101,151 @@ function TaskCard({ wt }: { wt: WorkflowTask }) {
   );
 }
 
-function PhaseTaskCards({ tasks }: { tasks: WorkflowTask[] }) {
-  return (
-    <div className="mt-3 space-y-2" style={{ width: 200 }}>
-      {tasks.map(wt => (
-        <TaskCard key={wt.task.id} wt={wt} />
-      ))}
-      {tasks.length === 0 && <div className="h-1" />}
-    </div>
-  );
+// ── Main component ───────────────────────────────────────────────────────────
+
+interface Props {
+  workflowTasks: WorkflowTask[];
 }
 
 export function WorkflowView({ workflowTasks }: Props) {
-  const tasksByPhase = new Map<string, WorkflowTask[]>();
-  const otherTasks: WorkflowTask[] = [];
-  for (const phase of PIPELINE_PHASES) {
-    tasksByPhase.set(phase.phase, []);
-  }
-  for (const wt of workflowTasks) {
-    const existing = tasksByPhase.get(wt.task.phase);
-    if (existing) {
-      existing.push(wt);
-    } else {
-      otherTasks.push(wt);
+  usePhaseSync();
+
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
+
+  // Close the task window on Escape key
+  useEffect(() => {
+    if (!selectedTaskId) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setSelectedTaskId(null);
     }
-  }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [selectedTaskId]);
+
+  // Group tasks by phase
+  const { tasksByPhase, otherTasks } = useMemo(() => {
+    const byPhase = new Map<string, WorkflowTask[]>();
+    const other: WorkflowTask[] = [];
+    for (const phase of PIPELINE_PHASES) {
+      byPhase.set(phase.phase, []);
+    }
+    for (const wt of workflowTasks) {
+      const existing = byPhase.get(wt.task.phase);
+      if (existing) {
+        existing.push(wt);
+      } else {
+        other.push(wt);
+      }
+    }
+    return { tasksByPhase: byPhase, otherTasks: other };
+  }, [workflowTasks]);
+
+  // Account for the Other node if present
+  const totalRows = otherTasks.length > 0 ? PIPELINE_PHASES.length + 1 : PIPELINE_PHASES.length;
+  const diagramHeight = totalRows * PITCH;
+
+  // Build SVG arrow elements
+  const svgArrows = useMemo(() => {
+    const arrows: React.ReactNode[] = [];
+
+    const addStraightArrow = (from: string, to: string, className: string) => {
+      const fi = phaseIndex(from);
+      const ti = phaseIndex(to);
+      if (fi < 0 || ti < 0) return;
+      arrows.push(
+        <line
+          key={`${from}→${to}`}
+          x1={CENTER_X}
+          y1={nodeY(fi) + NODE_H}
+          x2={CENTER_X}
+          y2={nodeY(ti) - 6}
+          className={className}
+          markerEnd="url(#arrow-down)"
+        />,
+      );
+    };
+
+    const addRightCurve = (from: string, to: string, className: string) => {
+      const fi = phaseIndex(from);
+      const ti = phaseIndex(to);
+      if (fi < 0 || ti < 0) return;
+      const sy = nodeCenterY(fi);
+      const ty = nodeCenterY(ti);
+      const cx = RIGHT_X + CURVE_OFFSET;
+      arrows.push(
+        <path
+          key={`${from}→${to}`}
+          d={`M ${RIGHT_X + 2},${sy} C ${cx},${sy} ${cx},${ty} ${RIGHT_X + 6},${ty}`}
+          className={className}
+          fill="none"
+          markerEnd="url(#arrow-right)"
+        />,
+      );
+    };
+
+    const addLeftCurve = (from: string, to: string, className: string, marker: string, label?: string, textFill?: string) => {
+      const fi = phaseIndex(from);
+      const ti = phaseIndex(to);
+      if (fi < 0 || ti < 0) return;
+      const sy = nodeCenterY(fi);
+      const ty = nodeCenterY(ti);
+      const cx = LEFT_X - CURVE_OFFSET;
+      const midY = (sy + ty) / 2;
+      arrows.push(
+        <path
+          key={`${from}→${to}`}
+          d={`M ${LEFT_X - 2},${sy} C ${cx},${sy} ${cx},${ty} ${LEFT_X},${ty}`}
+          className={className}
+          fill="none"
+          markerEnd={`url(#${marker})`}
+        />,
+      );
+      if (label) {
+        arrows.push(
+          <text
+            key={`${from}→${to}-label`}
+            x={cx - 10}
+            y={midY}
+            fill={textFill ?? '#94a3b8'}
+            textAnchor="middle"
+            dominantBaseline="central"
+            transform={`rotate(-90, ${cx - 10}, ${midY})`}
+            className="text-[9px] font-medium"
+          >
+            {label}
+          </text>,
+        );
+      }
+    };
+
+    // Forward transitions: straight if adjacent, right curve if skipping
+    for (const [from, to] of FORWARD_TRANSITIONS) {
+      const fi = phaseIndex(from);
+      const ti = phaseIndex(to);
+      if (fi < 0 || ti < 0) continue;
+      if (ti === fi + 1) {
+        addStraightArrow(from, to, 'stroke-slate-600 stroke-[1.5]');
+      } else {
+        addRightCurve(from, to, 'stroke-slate-600 stroke-[1.5]');
+      }
+    }
+
+    // Backward bounce-backs
+    for (const [from, to] of BACKWARD_TRANSITIONS) {
+      addLeftCurve(from, to, 'stroke-amber-500/60 stroke-[1.5] stroke-dasharray-[4_4]', 'arrow-left-amber', 'bounce back', '#f59e0b99');
+    }
+
+    // Failure transitions
+    for (const [from, to] of FAILURE_TRANSITIONS) {
+      addLeftCurve(from, to, 'stroke-red-500/50 stroke-[1.5] stroke-dasharray-[4_4]', 'arrow-left-red', 'max attempts', '#ef444488');
+    }
+
+    return arrows;
+  }, []);
+
+  const hoveredTasks = hoveredPhase ? (tasksByPhase.get(hoveredPhase) ?? []) : [];
+  const isEmpty = workflowTasks.length === 0;
 
   return (
     <div className="flex flex-col h-full bg-[#11131b]">
@@ -88,68 +254,173 @@ export function WorkflowView({ workflowTasks }: Props) {
         <div>
           <h1 className="text-base font-semibold text-white">Workflow</h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Active tickets flowing through the pipeline. Each card shows QA bounces and time in phase.
+            Pipeline state diagram — hover over a phase to see its tickets.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <span className="inline-block w-2 h-2 rounded-full bg-amber-500/60" /> QA bounce &ge; 1
+        <div className="flex items-center gap-3 text-xs text-slate-500">
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-2 h-0.5 bg-amber-500/60 rounded" />
+            bounce
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-2 h-0.5 bg-red-500/50 rounded" />
+            failure
+          </span>
         </div>
       </div>
 
-      {/* Pipeline flow chart */}
-      <div className="flex-1 overflow-auto p-4">
-        <div className="flex gap-0 min-w-max">
-          {PIPELINE_PHASES.map((phase, idx) => {
-            const tasks = tasksByPhase.get(phase.phase) ?? [];
-            const isLast = idx === PIPELINE_PHASES.length - 1;
-            const hasTasks = tasks.length > 0;
+      {/* Main content: diagram + hover panel */}
+      <div
+        className={`flex-1 flex justify-center min-h-0 ${selectedTaskId ? 'overflow-hidden pointer-events-none select-none' : ''}`}
+        onMouseLeave={() => setHoveredPhase(null)}
+      >
+        {/* Left: State diagram (always visible) */}
+        <div className="shrink-0 overflow-y-auto border-r border-[#1e293b] p-6" style={{ width: DIAGRAM_PANEL_W }}>
+          {isEmpty ? (
+            <div className="flex items-center justify-center h-full text-sm text-slate-500">
+              No tickets yet — create one from the Board.
+            </div>
+          ) : (
+            <div className="relative" style={{ height: diagramHeight }}>
+              {/* SVG arrow layer */}
+              <svg
+                className="absolute inset-0 pointer-events-none overflow-visible"
+                width={RIGHT_X + CURVE_OFFSET + 10}
+                height={diagramHeight}
+              >
+                <defs>
+                  <marker id="arrow-down" viewBox="0 0 10 10" refX="5" refY="0" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                    <polygon points="0,0 5,10 10,0" className="fill-slate-600" />
+                  </marker>
+                  <marker id="arrow-right" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                    <polygon points="0,5 10,0 10,10" className="fill-slate-600" />
+                  </marker>
+                  <marker id="arrow-left-amber" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                    <polygon points="0,0 10,5 0,10" className="fill-amber-500/60" />
+                  </marker>
+                  <marker id="arrow-left-red" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                    <polygon points="0,0 10,5 0,10" className="fill-red-500/50" />
+                  </marker>
+                </defs>
+                {svgArrows}
+              </svg>
 
-            return (
-              <div key={phase.phase} className="flex flex-col items-stretch">
-                {/* Phase header with connector */}
-                <div className="flex items-center">
-                  <div
-                    className={`shrink-0 px-3 py-1.5 rounded-lg border-2 text-xs font-semibold whitespace-nowrap transition-colors ${
-                      hasTasks ? `${phase.color} text-white border-opacity-100` : 'border-slate-700 bg-slate-800/50 text-slate-500'
-                    }`}
-                  >
-                    {phase.label}
-                    {hasTasks && (
-                      <span className="ml-1.5 text-[10px] opacity-75">{tasks.length}</span>
-                    )}
-                  </div>
-                  {!isLast && (
-                    <div className="flex items-center">
-                      <div className={`w-8 h-0.5 ${hasTasks ? 'bg-slate-600' : 'bg-slate-800'}`} />
-                      <div className={`w-0 h-0 border-t-4 border-b-4 border-l-4 border-t-transparent border-b-transparent ${hasTasks ? 'border-l-slate-600' : 'border-l-slate-800'}`} />
+              {/* Phase nodes */}
+              <div className="relative z-10">
+                {PIPELINE_PHASES.map((phase, idx) => {
+                  const tasks = tasksByPhase.get(phase.phase) ?? [];
+                  const hasTasks = tasks.length > 0;
+                  const hasActive = tasks.some(wt => wt.isActive);
+                  const isHovered = hoveredPhase === phase.phase;
+
+                  return (
+                    <div
+                      key={phase.phase}
+                      className="absolute transition-all duration-150"
+                      style={{ top: nodeY(idx), left: LEFT_MARGIN, width: NODE_W }}
+                      onMouseEnter={() => setHoveredPhase(phase.phase)}
+                    >
+                      <div
+                        className={`px-3 py-2.5 rounded-lg border-2 text-xs font-semibold cursor-pointer transition-all ${
+                          hasTasks
+                            ? `${phase.color} text-white border-opacity-100`
+                            : 'border-slate-700 bg-slate-800/50 text-slate-500'
+                        } ${isHovered ? 'scale-105 shadow-lg shadow-black/30' : ''} ${hasActive ? 'animate-pulse-glow' : ''}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>{phase.label}</span>
+                          {hasTasks && (
+                            <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                              isHovered ? 'bg-white/20 text-white' : 'bg-slate-700/50 text-slate-400'
+                            }`}>
+                              {tasks.length}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  )}
-                </div>
-                <PhaseTaskCards tasks={tasks} />
+                  );
+                })}
+
+                {/* Other (catch-all) node */}
+                {otherTasks.length > 0 && (
+                  <div
+                    key="other"
+                    className="absolute transition-all duration-150"
+                    style={{ top: nodeY(PIPELINE_PHASES.length), left: LEFT_MARGIN, width: NODE_W }}
+                    onMouseEnter={() => setHoveredPhase('__other__')}
+                  >
+                    <div className="px-3 py-2.5 rounded-lg border-2 border-dashed border-slate-600 bg-slate-800/40 text-xs font-semibold text-slate-400 cursor-pointer">
+                      <div className="flex items-center justify-between">
+                        <span>Other</span>
+                        <span className="ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-700/50 text-slate-400">
+                          {otherTasks.length}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            );
-          })}
-          {/* Catch-all for unrecognized phases */}
-          {otherTasks.length > 0 && (
-            <div className="flex flex-col items-stretch">
-              <div className="flex items-center">
-                <div className="shrink-0 px-3 py-1.5 rounded-lg border-2 border-slate-600 bg-slate-800/40 text-xs font-semibold text-slate-400">
-                  Other
-                  <span className="ml-1.5 text-[10px] opacity-75">{otherTasks.length}</span>
-                </div>
-              </div>
-              <PhaseTaskCards tasks={otherTasks} />
             </div>
           )}
         </div>
 
-        {/* Empty state */}
-        {workflowTasks.length === 0 && (
-          <div className="flex items-center justify-center mt-12 text-sm text-slate-500">
-            No active tickets — start a task from the Board to see it here.
-          </div>
-        )}
+        {/* Right: Hover ticket panel */}
+        <div className="shrink-0 overflow-y-auto p-6" style={{ width: TICKET_PANEL_W }}>
+          {hoveredPhase ? (
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <h2 className="text-sm font-semibold text-white">
+                  {hoveredPhase === '__other__'
+                    ? 'Other'
+                    : PIPELINE_PHASES.find(p => p.phase === hoveredPhase)?.label ?? hoveredPhase}
+                </h2>
+                <span className="text-xs text-slate-500">
+                  {hoveredTasks.length} ticket{hoveredTasks.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              {hoveredPhase === '__other__' ? (
+                <div className="space-y-2" style={{ maxWidth: 340 }}>
+                  {otherTasks.map(wt => (
+                    <TaskCard key={wt.task.id} wt={wt} onClick={() => setSelectedTaskId(wt.task.id)} />
+                  ))}
+                </div>
+              ) : hoveredTasks.length > 0 ? (
+                <div className="space-y-2" style={{ maxWidth: 340 }}>
+                  {hoveredTasks.map(wt => (
+                    <TaskCard key={wt.task.id} wt={wt} onClick={() => setSelectedTaskId(wt.task.id)} />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">No tickets currently in this phase.</p>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full text-sm text-slate-500">
+              Hover over a phase on the left to see its tickets.
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Floating task detail modal */}
+      {selectedTaskId && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center p-6">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setSelectedTaskId(null)}
+          />
+          <div
+            className="relative w-[800px] max-w-[95vw] h-full max-h-[700px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
+            onClick={e => e.stopPropagation()}
+          >
+            <TaskPanel
+              taskId={selectedTaskId}
+              onClose={() => setSelectedTaskId(null)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
