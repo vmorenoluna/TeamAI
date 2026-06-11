@@ -19,7 +19,7 @@ const eslintConfig = defineConfig([
   {
     files: ["tests/**/*.{ts,tsx}"],
     rules: {
-      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-explicit-any": "warn",
     },
   },
   // Allow underscore-prefixed unused variables (intentionally ignored)

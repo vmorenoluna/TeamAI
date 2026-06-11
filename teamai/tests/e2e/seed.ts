@@ -15,7 +15,7 @@
  * ~/.teamai/projects.json.
  */
 
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, renameSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, renameSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { homedir } from 'os';

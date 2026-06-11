@@ -1,3 +1,21 @@
+/** Ordered pipeline phases with label and border color for workflow diagrams */
+export const PIPELINE_PHASES: { phase: string; label: string; color: string }[] = [
+  { phase: 'backlog', label: 'Backlog', color: 'border-slate-500 bg-slate-500/10' },
+  { phase: 'spec', label: 'Spec', color: 'border-indigo-500 bg-indigo-500/10' },
+  { phase: 'plan', label: 'Plan', color: 'border-violet-500 bg-violet-500/10' },
+  { phase: 'implement', label: 'Implement', color: 'border-amber-500 bg-amber-500/10' },
+  { phase: 'qa-review', label: 'QA Review', color: 'border-orange-500 bg-orange-500/10' },
+  { phase: 'awaiting-review', label: 'Awaiting Review', color: 'border-yellow-500 bg-yellow-500/10' },
+  { phase: 'merge', label: 'Merge', color: 'border-teal-500 bg-teal-500/10' },
+  { phase: 'create-pr', label: 'Create PR', color: 'border-cyan-500 bg-cyan-500/10' },
+  { phase: 'pr-open', label: 'PR Open', color: 'border-emerald-500 bg-emerald-500/10' },
+  { phase: 'failed', label: 'Failed', color: 'border-red-500 bg-red-500/10' },
+  { phase: 'done', label: 'Done', color: 'border-green-500 bg-green-500/10' },
+];
+
+/** Union type of all pipeline phase identifiers */
+export type PipelinePhase = typeof PIPELINE_PHASES[number]['phase'];
+
 /** Tailwind CSS classes for roadmap priority badge styling */
 export const PRIORITY_COLORS: Record<string, string> = {
   P0: 'bg-red-900/30 text-red-400',
