@@ -16,7 +16,7 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: 'npm run dev',
+    command: 'npx tsx server.ts',
     url: 'http://localhost:3000',
     reuseExistingServer: true,
     timeout: 120_000,
