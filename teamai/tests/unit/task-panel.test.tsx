@@ -219,6 +219,7 @@ describe('TaskPanel', () => {
 
   describe('loading state', () => {
     it('shows "Loading…" in the title bar while fetching', () => {
+      // @ts-expect-error -- _resolve assigned in Promise callback but never invoked, intentional
       let _resolve: (v: unknown) => void;
       const promise = new Promise(r => { _resolve = r; });
       mockGetTaskFull.mockReturnValue(promise);
@@ -230,6 +231,7 @@ describe('TaskPanel', () => {
     });
 
     it('shows loading content area while fetching', () => {
+      // @ts-expect-error -- _resolve assigned in Promise callback but never invoked, intentional
       let _resolve: (v: unknown) => void;
       const promise = new Promise(r => { _resolve = r; });
       mockGetTaskFull.mockReturnValue(promise);
@@ -305,6 +307,7 @@ describe('TaskPanel', () => {
 
   describe('title bar', () => {
     it('shows "Task Details" title bar fallback while loading', () => {
+      // @ts-expect-error -- _resolve assigned in Promise callback but never invoked, intentional
       let _resolve: (v: unknown) => void;
       const promise = new Promise(r => { _resolve = r; });
       mockGetTaskFull.mockReturnValue(promise);

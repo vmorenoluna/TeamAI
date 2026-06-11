@@ -7,6 +7,7 @@ import { readContainerConfig, readContainerRemoteUser, containerManager, hostToC
 import { TaskStore } from './task-store';
 import { resolveProvider, providerToSessionOpts } from './providers';
 import { slugify } from './utils';
+import type { PipelinePhase } from '@/constants/phases';
 
 interface PlanSubtask {
   id: number;
@@ -62,17 +63,8 @@ class RateLimitError extends Error {
   }
 }
 
-type PipelinePhase =
-  | 'spec'
-  | 'plan'
-  | 'implement'
-  | 'qa-review'
-  | 'awaiting-review'
-  | 'merge'
-  | 'create-pr'
-  | 'pr-open'
-  | 'done'
-  | 'failed';
+/** Phases where a rate-limited task should NOT auto-resume */
+const NO_RESUME_PHASES = new Set(['backlog', 'done', 'failed', 'awaiting-review', 'pr-open']);
 
 type MergeStrategy = 'local-merge' | 'pull-request';
 
@@ -134,8 +126,7 @@ export class Orchestrator {
     const dir = this.taskStore.getDirById(taskId);
 
     // Phases that require no pipeline action
-    const noRunPhases = ['backlog', 'awaiting-review', 'pr-open', 'failed', 'done'];
-    if (noRunPhases.includes(targetPhase)) {
+    if (NO_RESUME_PHASES.has(targetPhase)) {
       // Auto-delete the git worktree when moving to 'done', 'backlog', or 'failed'
       if (targetPhase === 'done' || targetPhase === 'backlog' || targetPhase === 'failed') {
         this.removeWorktree(taskId);
@@ -1139,7 +1130,7 @@ export class Orchestrator {
    * Restore pipeline state from disk after a crash.
    * Returns null if no saved state exists.
    */
-  private _restorePipelineState(taskId: string, specPath: string): Partial<TaskPipeline> | null {
+  private _restorePipelineState(_taskId: string, specPath: string): Partial<TaskPipeline> | null {
     try {
       const statePath = path.join(specPath, '.pipeline_state.json');
       if (!existsSync(statePath)) return null;
@@ -1332,6 +1323,27 @@ export class Orchestrator {
     console.log(`[rate-limit] Task ${pipeline.taskId} paused for ~${mins}min. Resuming at ${resetsAtISO}`);
 
     setTimeout(async () => {
+      // Before resuming, check if the task was manually moved to a terminal phase
+      // (e.g. user dragged it to backlog to pause it). Respect the user's intent.
+      const task = this.taskStore.getById(pipeline.taskId);
+      if (!task || NO_RESUME_PHASES.has(task.phase)) {
+        console.log(`[rate-limit] Task ${pipeline.taskId} is in terminal phase "${task?.phase}" — skipping resume`);
+        this.taskStore.update(pipeline.taskId, { rateLimitedUntil: undefined });
+        this.pipelines.delete(pipeline.taskId);
+        this.activeTasks.delete(pipeline.taskId);
+        return;
+      }
+
+      // Before resuming, verify the pipeline object hasn't been replaced
+      // (e.g. user stopped and restarted the task while waiting). A different
+      // pipeline object means a new run is active — skip this stale one.
+      const currentPipeline = this.pipelines.get(pipeline.taskId);
+      if (currentPipeline !== pipeline) {
+        console.log(`[rate-limit] Task ${pipeline.taskId} pipeline was replaced — skipping stale resume`);
+        this.taskStore.update(pipeline.taskId, { rateLimitedUntil: undefined });
+        return;
+      }
+
       console.log(`[rate-limit] Resuming task ${pipeline.taskId}`);
       this.taskStore.update(pipeline.taskId, { rateLimitedUntil: undefined });
       let wasRateLimited = false;

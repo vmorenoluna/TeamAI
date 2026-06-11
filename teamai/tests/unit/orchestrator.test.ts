@@ -1483,7 +1483,7 @@ describe('Orchestrator', () => {
       // Pipeline must be registered so handleRateLimit can re-acquire the lock
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
-      // Mock createSession to reject with a regular Error (not a RateLimitError)
+      const tStore = (orch as AnyOrch).taskStore; tStore.update(testData.taskId, { phase: 'spec' }); // Mock createSession to reject with a regular Error (not a RateLimitError)
       // This makes executePhase fail fast when it reaches runSpec
       mockCreateSession.mockRejectedValue(new Error('simulated createSession failure'));
 
@@ -1520,7 +1520,7 @@ describe('Orchestrator', () => {
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
-      // Make createSession succeed so executePhase reaches waitForCompletion
+      const tStore2 = (orch as AnyOrch).taskStore; tStore2.update(testData.taskId, { phase: 'spec' }); // Make createSession succeed so executePhase reaches waitForCompletion
       mockCreateSession.mockResolvedValue('retry-sess');
 
       // Track how many times handleRateLimit is called
@@ -1574,6 +1574,85 @@ describe('Orchestrator', () => {
 
       // wasRateLimited was true â†’ finally block did NOT clean up
       expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(true);
+    });
+
+    it('skips resume when task was moved to backlog during rate limit', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'spec' });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      mockCreateSession.mockRejectedValue(new Error('should not be called â€” resume was skipped'));
+
+      let advanceCalled = false;
+      const origAdvance = (orch as AnyOrch).advancePhase.bind(orch);
+      (orch as AnyOrch).advancePhase = (p: any, phase: string) => { advanceCalled = true; origAdvance(p, phase); };
+
+      (orch as AnyOrch).handleRateLimit(pipeline, 0);
+
+      taskStore.update(testData.taskId, { phase: 'backlog' });
+
+      await new Promise(r => setTimeout(r, 30));
+
+      delete (orch as AnyOrch).advancePhase;
+
+      expect((orch as AnyOrch).pipelines.has(testData.taskId)).toBe(false);
+      expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(false);
+      expect(mockCreateSession).not.toHaveBeenCalled();
+      expect(advanceCalled).toBe(false);
+
+      const task = taskStore.getById(testData.taskId);
+      expect(task?.rateLimitedUntil).toBeUndefined();
+    });
+
+    it('skips resume when pipeline was replaced (stale pipeline guard)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const pipelineA = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'spec' });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipelineA);
+
+      // Create a second pipeline object â€” simulating user restarted the task.
+      // The handleRateLimit closure captured pipelineA, but the maps now hold pipelineB.
+      const pipelineB = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+
+      mockCreateSession.mockRejectedValue(new Error('should not be called â€” stale pipeline skipped'));
+
+      let advanceCalled = false;
+      const origAdvance = (orch as AnyOrch).advancePhase.bind(orch);
+      (orch as AnyOrch).advancePhase = (p: any, phase: string) => { advanceCalled = true; origAdvance(p, phase); };
+
+      // Call handleRateLimit â€” its synchronous part registers pipelineA in the maps
+      (orch as AnyOrch).handleRateLimit(pipelineA, 0);
+
+      // Immediately replace pipelineA with pipelineB in the maps,
+      // simulating that the task was stopped and restarted
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipelineB);
+
+      // Wait for the setTimeout callback to fire
+      await new Promise(r => setTimeout(r, 30));
+
+      delete (orch as AnyOrch).advancePhase;
+
+      // Identity guard should have skipped resume WITHOUT clearing activeTasks
+      // (the new pipeline owns that lock)
+      expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(true);
+
+      // The map should still contain pipelineB (not deleted by the stale guard)
+      expect((orch as AnyOrch).pipelines.get(testData.taskId)).toBe(pipelineB);
+
+      // No phase execution should have occurred
+      expect(mockCreateSession).not.toHaveBeenCalled();
+      expect(advanceCalled).toBe(false);
+
+      // rateLimitedUntil must be cleared even for stale pipelines
+      const task = taskStore.getById(testData.taskId);
+      expect(task?.rateLimitedUntil).toBeUndefined();
     });
   });
 
@@ -2046,7 +2125,7 @@ describe('Orchestrator', () => {
       expect(mockCreateSession).toHaveBeenCalled();
 
       const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
-      // Completions are now preserved — runImplement skips already-completed subtasks
+      // Completions are now preserved ï¿½ runImplement skips already-completed subtasks
       expect(plan.subtasks[0].completed).toBe(true);
     });
 
@@ -2619,7 +2698,7 @@ describe('Orchestrator', () => {
         return Promise.reject(new Error('simulated abort after spec revision'));
       });
 
-      // QA report with spec_concerns — the spec itself is the problem,
+      // QA report with spec_concerns ï¿½ the spec itself is the problem,
       // not the implementation
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'FAIL',
@@ -2636,13 +2715,13 @@ describe('Orchestrator', () => {
       }));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
+      const caught = promise.catch(() => {}); // attach handler before cascade microtasks fire
       await new Promise(r => setTimeout(r, 10));
       fireEvent('event', { sessionId: 'sess-qa-spec', event: { type: 'result' } });
-      // Wait for auto-revision to kick in (second createSession)
-      await new Promise(r => setTimeout(r, 20));
-      await promise.catch(() => {}); // swallow abort error
+      // Wait for auto-revision cascade to complete (including the abort)
+      await caught;
 
-      // Should have auto-revised spec — NOT awaiting human review
+      // Should have auto-revised spec ï¿½ NOT awaiting human review
       expect(pipeline.phase).not.toBe('awaiting-review');
       expect(pipeline.phase).toBe('spec');
       expect(pipeline.qaAttempt).toBe(0); // reset for fresh cycle
@@ -2687,12 +2766,12 @@ describe('Orchestrator', () => {
       }));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
+      const caught = promise.catch(() => {}); // attach handler before cascade microtasks fire
       await new Promise(r => setTimeout(r, 10));
       fireEvent('event', { sessionId: 'sess-qa-pass-spec', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 20));
-      await promise.catch(() => {});
+      await caught;
 
-      // Spec concerns trigger auto-revision — NOT human review
+      // Spec concerns trigger auto-revision ï¿½ NOT human review
       expect(pipeline.phase).not.toBe('awaiting-review');
       expect(pipeline.phase).toBe('spec');
       const feedbackPath = join(testData.taskDir, 'spec_revision_feedback.md');
@@ -2785,12 +2864,12 @@ describe('Orchestrator', () => {
         qaAttempt: 0,
         maxQaAttempts: 3,
       });
-      // Already at max revisions (3) — next auto-revision should fall back
+      // Already at max revisions (3) ï¿½ next auto-revision should fall back
       pipeline.specRevision = 3;
 
       mockCreateSession.mockResolvedValue('sess-qa-max-rev');
 
-      // QA report with spec_concerns — but we're out of revision budget
+      // QA report with spec_concerns ï¿½ but we're out of revision budget
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'FAIL',
         criteria: [
@@ -2810,11 +2889,11 @@ describe('Orchestrator', () => {
       fireEvent('event', { sessionId: 'sess-qa-max-rev', event: { type: 'result' } });
       await promise;
 
-      // Max revisions exhausted — must fall back to human review, NOT auto-revise
+      // Max revisions exhausted ï¿½ must fall back to human review, NOT auto-revise
       expect(pipeline.phase).toBe('awaiting-review');
       expect(pipeline.specRevision).toBeGreaterThanOrEqual(3);
       expect(pipeline.qaAttempt).toBe(1); // guard path: qaAttempt NOT reset (unlike auto-revision path)
-      // Should NOT have auto-revised — no spec_revision_feedback.md
+      // Should NOT have auto-revised ï¿½ no spec_revision_feedback.md
       const feedbackPath = join(testData.taskDir, 'spec_revision_feedback.md');
       expect(existsSync(feedbackPath)).toBe(false);
     });

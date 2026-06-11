@@ -404,22 +404,7 @@ export function PhasedKanban({
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async function handleConvertAndSelect(phaseKey: string, itemIndex: number) {
-     
-    const key = `${phaseKey}:${itemIndex}`;
-    setErrorKey(null);
-    setConvertingKey(key);
-    try {
-      const result = await convertToTask(filename, itemIndex, phaseKey);
-      onRefresh();
-      onSelectTask(result.taskId);
-    } catch {
-      setErrorKey(key);
-    } finally {
-      setConvertingKey(null);
-    }
-  }
+
 
   // Clear individual error after 5s
   useEffect(() => {

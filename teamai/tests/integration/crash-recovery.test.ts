@@ -1717,15 +1717,12 @@ describe('Crash Recovery Integration', () => {
   });
 
   describe('activeTasks guard', () => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    let specPath: string;
 
     beforeEach(async () => {
       vi.clearAllMocks();
       onHandlers.clear();
       mockGetSession.mockReturnValue(undefined);
       setupTestProject();
-      specPath = join(testDir, '.teamai', taskId);
 
       const mod = await import('@/lib/orchestrator');
       orch = mod.getOrchestrator(testDir);
