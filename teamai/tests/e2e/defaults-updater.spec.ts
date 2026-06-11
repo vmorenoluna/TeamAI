@@ -20,9 +20,12 @@ test.describe('DefaultsUpdater', () => {
 
   test.afterEach(() => {
     if (!existsSync(defaultImplSrc)) return;
-    const content = readFileSync(defaultImplSrc, 'utf-8');
+    let content = readFileSync(defaultImplSrc, 'utf-8');
     if (content.includes('E2E defaults-updater test marker')) {
-      writeFileSync(defaultImplSrc, content.replace(MARKER, ''));
+      // Normalize line endings before replace (MARKER uses LF, file may use CRLF)
+      content = content.replace(/\r\n/g, '\n');
+      content = content.replace(MARKER, '');
+      writeFileSync(defaultImplSrc, content, 'utf-8');
     }
   });
 
@@ -31,39 +34,40 @@ test.describe('DefaultsUpdater', () => {
     await expect(banner).not.toBeVisible({ timeout: 5_000 });
   });
 
-  test('banner appears when a default is stale, sync updates the file, and banner disappears', async ({ page }) => {
+  test('stale defaults are detected and banner appears after reload', async ({ page }) => {
+    // ── Modify the defaults file to simulate a TeamAI update ──────────
     const backup = readFileSync(defaultImplSrc, 'utf-8');
     writeFileSync(defaultImplSrc, backup + MARKER);
 
     try {
+      // Full page reload — layout.tsx calls getOutdatedProjects() during SSR
       await page.reload();
 
       const bannerSection = page.locator('text=Defaults update available');
       await expect(bannerSection).toBeVisible({ timeout: 10_000 });
 
-      // Brief wait for React hydration to complete before clicking.
+      // ── Sync the stale defaults ─────────────────────────────────────
       await page.waitForTimeout(1000);
 
-      // Click the Sync button to trigger handleSync → syncProjectDefaults.
+      // Click the Sync button to trigger handleSync → syncProjectDefaults
       const syncButton = page.locator('button:has-text("Sync"):not(:has-text("All"))').first();
       await syncButton.click();
 
-      // The button text should change to "Updating…" while the server
-      // action runs, confirming handleSync was triggered.
+      // Button text should change to "Updating…" while the server action runs
       const updatingLocator = page.locator('button:has-text("Updating…")').first();
       await expect(updatingLocator).toBeVisible({ timeout: 5_000 });
 
-      // Wait for sync to complete: "Updating…" disappears.
+      // Wait for sync to complete: "Updating…" disappears
       await expect(updatingLocator).not.toBeVisible({ timeout: 15_000 });
 
-      // Verify the file on disk was updated.
+      // Verify the project file on disk was updated with the new default
       const implPath = join(SEED_DIR, '.claude', 'commands', 'implement.md');
       expect(readFileSync(implPath, 'utf-8')).toContain('E2E defaults-updater test marker');
 
-      // Full page reload: server re-computes with updated manifest.
+      // Full page reload: server re-computes with the updated manifest
       await page.reload();
 
-      // Banner should be gone.
+      // Banner should be gone (project is now up to date)
       await expect(bannerSection).not.toBeVisible({ timeout: 10_000 });
     } finally {
       writeFileSync(defaultImplSrc, backup);
