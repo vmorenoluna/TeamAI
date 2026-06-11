@@ -10,29 +10,29 @@
  */
 
 import { execFileSync } from 'child_process';
-import { existsSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
-import { randomUUID } from 'crypto';
 
 async function globalSetup() {
   const seedDir = join(process.cwd(), '.teamai-e2e-seed');
+
+  // ── Read temp config dir created by pre-setup (runs before webServer) ──
+  // pre-setup.ts creates .teamai-e2e-config-path before server.ts starts,
+  // so project-store.ts resolves CONFIG_DIR correctly at module import time.
+  const pathFile = join(process.cwd(), '.teamai-e2e-config-path');
+  if (!existsSync(pathFile)) {
+    throw new Error(
+      '[playwright-setup] .teamai-e2e-config-path not found — ' +
+      'pre-setup.ts must run before the dev server starts.'
+    );
+  }
+  const tempConfigDir = readFileSync(pathFile, 'utf-8').trim();
+  console.log(`[playwright-setup] Using temp config dir: ${tempConfigDir}`);
 
   // Always clean and re-seed for a deterministic baseline
   if (existsSync(seedDir)) {
     try { rmSync(seedDir, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
-
-  // ── Create isolated config directory ──────────────────────────────────
-  const tempConfigDir = join(tmpdir(), `teamai-e2e-config-${randomUUID().slice(0, 8)}`);
-  mkdirSync(tempConfigDir, { recursive: true });
-  console.log(`[playwright-setup] Created temp config dir: ${tempConfigDir}`);
-
-  // Write path to a well-known file so project-store.ts can discover it
-  // even if the dev server doesn't inherit the env var from the setup process
-  const pathFile = join(process.cwd(), '.teamai-e2e-config-path');
-  writeFileSync(pathFile, tempConfigDir);
-  console.log(`[playwright-setup] Wrote config path file: ${pathFile}`);
 
   // ── Seed the test project ────────────────────────────────────────────
   console.log('[playwright-setup] Seeding E2E test project…');

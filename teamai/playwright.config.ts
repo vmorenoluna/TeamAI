@@ -16,7 +16,7 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: 'npx tsx server.ts',
+    command: 'npx tsx tests/e2e/pre-setup.ts && npx tsx server.ts',
     url: 'http://localhost:3000',
     reuseExistingServer: true,
     timeout: 120_000,
