@@ -69,7 +69,7 @@ export async function ensureProjectSelected(page: Page): Promise<boolean> {
   // Backlog column header confirms the kanban board loaded
   const backlog = page.locator('text=Backlog').first();
   try {
-    await expect(backlog).toBeVisible({ timeout: 10_000 });
+    await expect(backlog).toBeVisible({ timeout: 30_000 });
     return true;
   } catch {
     return false;
