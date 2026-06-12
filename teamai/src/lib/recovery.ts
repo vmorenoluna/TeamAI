@@ -264,6 +264,10 @@ export function reconcileTaskArtifacts(): ArtifactInconsistency[] {
 let _lastAutoResumeTime = 0;
 const AUTO_RESUME_DEBOUNCE_MS = 15_000; // 15 seconds
 
+/** Threshold for detecting stalled tasks — tasks inactive for longer than this
+ *  are considered stuck and eligible for auto-resume. */
+const STALLED_TASK_THRESHOLD_MS = 30 * 60_000; // 30 minutes
+
 /** @internal Reset the auto-resume debounce timer (used in tests). */
 export function _resetAutoResumeDebounce(): void {
   _lastAutoResumeTime = 0;
@@ -314,6 +318,107 @@ export function startupCleanup(staleSessionCount: number): StartupRecoveryReport
     autoClearedRateLimits,
     artifactInconsistencies,
   };
+}
+
+/**
+ * Scan all projects for tasks that are stalled mid-pipeline:
+ * - Task is in an active phase (in-progress)
+ * - `rateLimitedUntil` has expired (timestamp in the past)
+ * - The orchestrator lost the resume timeout (e.g. process restart, or
+ *   the finally-block deletion bug)
+ *
+ * This is a periodic safety-net sweep, separate from the one-shot startup
+ * recovery.  Called on a 5-minute interval while the server is running.
+ *
+ * @returns the number of stalled tasks that were auto-cleared and queued for resume.
+ */
+export async function sweepStalledTasks(): Promise<number> {
+  // Dynamic import to avoid circular dependency at module load time
+  const { getOrchestrator } = await import('./orchestrator');
+  // Dynamic import processManager to avoid circular dependency
+  const { processManager } = await import('./process-manager');
+
+  const projects = _loadProjects();
+  let resumed = 0;
+
+  for (const project of projects) {
+    const teamaiDir = join(project.path, '.teamai');
+    if (!existsSync(teamaiDir)) continue;
+
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(teamaiDir);
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const taskFile = join(teamaiDir, entry, 'task.json');
+      if (!existsSync(taskFile)) continue;
+      try {
+        const raw = readFileSync(taskFile, 'utf-8');
+        const task = JSON.parse(raw);
+
+        // Only consider tasks in active pipeline phases
+        if (!IN_PROGRESS_PHASES.has(task.phase)) continue;
+
+        // Check 1: expired rate limit — the timeout was lost
+        if (task.rateLimitedUntil) {
+          const expiresAt = new Date(task.rateLimitedUntil).getTime();
+          if (expiresAt > Date.now()) continue; // still rate-limited, leave alone
+
+          // Rate limit expired but task never resumed.
+          // Skip if the orchestrator already has an active pipeline for this task —
+          // the handleRateLimit setTimeout will resume it (the finally-block bug is fixed).
+          try {
+            const orchestrator = getOrchestrator(project.path);
+            if (orchestrator.isTaskActive(task.id)) continue;
+          } catch { /* orchestrator not available — proceed */ }
+
+          // Clear the stale rate-limit flag and re-queue
+          console.log(`[sweep] Task ${task.id} "${task.title}" has expired rate limit (was ${task.rateLimitedUntil}) — clearing and resuming`);
+          delete task.rateLimitedUntil;
+          try { writeFileSync(taskFile, JSON.stringify(task, null, 2)); } catch { /* best-effort */ }
+        } else {
+          // Check 2: no rate limit, but task has been in this phase with no
+          // active session for > 30 minutes — likely a silent crash or exit.
+          // Skip if the orchestrator is actively running a pipeline for this task.
+          try {
+            const orchestrator = getOrchestrator(project.path);
+            if (orchestrator.isTaskActive(task.id)) continue;
+          } catch { /* orchestrator not available — proceed */ }
+
+          // Check if any active session still exists for this task
+          const activeSession = processManager.getAllSessions().find(
+            s => s.taskId === task.id && s.status === 'running'
+          );
+          if (activeSession) continue; // session still running, don't interfere
+
+          // Check last-updated time: if task hasn't been touched recently
+          const updatedAt = task.updatedAt ? new Date(task.updatedAt).getTime() : 0;
+          const staleThreshold = Date.now() - STALLED_TASK_THRESHOLD_MS;
+          if (updatedAt > staleThreshold) continue; // recently updated, leave alone
+
+          console.log(`[sweep] Task ${task.id} "${task.title}" stalled >30min in phase "${task.phase}" — resuming`);
+        }
+
+        // Re-queue the task for resumption
+        try {
+          const orchestrator = getOrchestrator(project.path);
+          orchestrator.resumeTask(task.id).catch(err => {
+            logWarn('sweep', `Stalled task ${task.id} "${task.title}" failed to resume:`, err);
+          });
+          resumed++;
+        } catch (err) {
+          logWarn('sweep', `Failed to create orchestrator for ${project.path}:`, err);
+        }
+      } catch {
+        // skip malformed task.json
+      }
+    }
+  }
+
+  return resumed;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
