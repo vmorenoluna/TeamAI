@@ -227,10 +227,12 @@ export class Orchestrator {
     }
 
     this._savePipelineState(pipeline);
+    let rateLimited = false;
     try {
       await this.executePhase(pipeline);
     } catch (e) {
       if (e instanceof RateLimitError) {
+        rateLimited = true;
         this.handleRateLimit(pipeline, e.resetsAt);
       } else {
         const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
@@ -241,9 +243,12 @@ export class Orchestrator {
       }
     } finally {
       // Release lock after pipeline completes or fails.
-      // For rate-limited tasks the lock is re-acquired in handleRateLimit.
-      this.pipelines.delete(taskId);
-      this.activeTasks.delete(taskId);
+      // For rate-limited tasks the lock is re-acquired in handleRateLimit
+      // and must not be deleted here — the setTimeout callback owns cleanup.
+      if (!rateLimited) {
+        this.pipelines.delete(taskId);
+        this.activeTasks.delete(taskId);
+      }
     }
   }
 

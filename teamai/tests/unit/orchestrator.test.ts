@@ -1654,7 +1654,52 @@ describe('Orchestrator', () => {
       const task = taskStore.getById(testData.taskId);
       expect(task?.rateLimitedUntil).toBeUndefined();
     });
+
+    it('keeps pipeline in maps after runTask catches RateLimitError (rateLimited flag fix)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      mockCreateSession.mockResolvedValue('sess-rl-runTask');
+      const runPromise = orch.runTask(testData.taskId, 'test task', 'spec').catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+      const future = Math.floor(Date.now() / 1000) + 9999;
+      fireEvent('event', { sessionId: 'sess-rl-runTask', event: { type: 'rate_limit_event', rate_limit_info: { status: 'limited', resetsAt: future } } });
+      fireEvent('event', { sessionId: 'sess-rl-runTask', event: { type: 'result', is_error: true } });
+      await new Promise(r => setTimeout(r, 30));
+      await runPromise;
+      expect((orch as AnyOrch).pipelines.has(testData.taskId)).toBe(true);
+      expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(true);
+      
+    });
+
+    it('setTimeout stale-pipeline guard passes when pipeline remains in map', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+      (orch as AnyOrch).activeTasks.add(testData.taskId);
+      const tStore = (orch as AnyOrch).taskStore;
+      tStore.update(testData.taskId, { phase: 'spec' });
+      let executePhaseCalled = false;
+      // Use a pending promise so the setTimeout callback's finally block
+      // doesn't clean up activeTasks before our assertion runs.
+      let resolveExecute!: () => void;
+      const executePromise = new Promise<void>(r => { resolveExecute = r; });
+      (orch as AnyOrch).executePhase = async (_p: any) => { executePhaseCalled = true; return executePromise; };
+      (orch as AnyOrch).handleRateLimit(pipeline, 0);
+      await new Promise(r => setTimeout(r, 30));
+      // executePhase was called, but hasn't resolved yet — pipeline should still be in maps
+      expect(executePhaseCalled).toBe(true);
+      expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(true);
+      // Now resolve and let the finally block clean up
+      resolveExecute();
+      await new Promise(r => setTimeout(r, 10));
+      delete (orch as AnyOrch).executePhase;
+      // finally block has run — clean up our manual additions
+      (orch as AnyOrch).pipelines.delete(testData.taskId);
+      (orch as AnyOrch).activeTasks.delete(testData.taskId);
+    });
   });
+
 
   // ── Pipeline phase methods ────────────────────────────────────────
 

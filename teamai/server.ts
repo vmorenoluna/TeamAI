@@ -4,7 +4,7 @@ import next from 'next';
 import { WebSocketServer, WebSocket } from 'ws';
 import { processManager } from './src/lib/process-manager';
 import { containerManager } from './src/lib/container-manager';
-import { startupCleanup, autoResumeInterruptedTasks } from './src/lib/recovery';
+import { startupCleanup, autoResumeInterruptedTasks, sweepStalledTasks } from './src/lib/recovery';
 import { error as logError } from './src/lib/logger';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
@@ -147,6 +147,20 @@ app.prepare().then(() => {
         logError('auto-resume', 'Failed to auto-resume interrupted tasks', err);
       });
     }
+
+    // ── Periodic stall-detection sweep ──────────────────────────────────
+    // Every 5 minutes, scan all projects for tasks stuck in active phases
+    // (expired rate-limit windows, silent session exits, etc.) and re-queue them.
+    const SWEEP_INTERVAL_MS = 5 * 60_000; // 5 minutes
+    setInterval(() => {
+      sweepStalledTasks().then(count => {
+        if (count > 0) {
+          console.log(`[sweep] Re-queued ${count} stalled task(s)`);
+        }
+      }).catch(err => {
+        logError('sweep', 'Periodic stall-detection sweep failed', err);
+      });
+    }, SWEEP_INTERVAL_MS);
   });
 
   // ── Container availability listener: auto-resume when container becomes available ──
