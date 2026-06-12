@@ -916,4 +916,121 @@ describe('Rate Limit Integration', () => {
       orch.activeTasks.delete(taskId);
     });
   });
+
+  // ── Rate limit during merge phase ───────────────────────────────────────
+
+  describe('rate limit during merge phase', () => {
+    it('pipeline survives rate limit during merge and resumes at merge', async () => {
+      // Create a real worktree so removeWorktree can clean it up after merge
+      mkdirSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true });
+
+      const pipeline = makePipeline({ phase: 'merge' });
+      orch.pipelines.set(taskId, pipeline);
+      orch.activeTasks.add(taskId);
+      orch.taskStore.update(taskId, { phase: 'merge' });
+
+      let sessionCounter = 0;
+      mockCreateSession.mockImplementation(() => Promise.resolve(`sess-merge-${++sessionCounter}`));
+
+      // handleRateLimit timeout fires → executePhase → runMerge
+      orch.handleRateLimit(pipeline, 0);
+
+      await new Promise(r => setTimeout(r, 50));
+
+      // runMerge should have created a session with merger role and /merge command
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-1', expect.stringContaining('/merge'));
+
+      // Fire rate limit events for the merge session
+      fireEvent('event', {
+        sessionId: 'sess-merge-1',
+        event: {
+          type: 'rate_limit_event',
+          rate_limit_info: { status: 'limited', resetsAt: Math.floor(Date.now() / 1000) + 9999 },
+        },
+      });
+      fireEvent('event', {
+        sessionId: 'sess-merge-1',
+        event: { type: 'result', is_error: true },
+      });
+
+      await new Promise(r => setTimeout(r, 50));
+
+      // Pipeline should survive
+      expect(orch.pipelines.has(taskId)).toBe(true);
+      expect(orch.activeTasks.has(taskId)).toBe(true);
+      expect(pipeline.phase).toBe('merge');
+
+      // rateLimitedUntil should be set
+      const task = orch.taskStore.getById(taskId);
+      expect(task?.rateLimitedUntil).toBeDefined();
+
+      // Clean up
+      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch {}
+      orch.pipelines.delete(taskId);
+      orch.activeTasks.delete(taskId);
+    });
+
+    it('merge resume completes and advances to done', async () => {
+      mkdirSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true });
+
+      const pipeline = makePipeline({ phase: 'merge' });
+      orch.pipelines.set(taskId, pipeline);
+      orch.activeTasks.add(taskId);
+      orch.taskStore.update(taskId, { phase: 'merge' });
+      // Set branch on task so removeWorktree cleanup works
+      orch.taskStore.update(taskId, { branch: 'feat/test-slug' });
+
+      mockCreateSession.mockResolvedValue('sess-merge-done');
+
+      orch.handleRateLimit(pipeline, 0);
+
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-done', expect.stringContaining('/merge'));
+
+      // Complete the merge session — advances to 'done' and cleans up worktree
+      fireEvent('event', { sessionId: 'sess-merge-done', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 100));
+
+      // Phase should be 'done' after merge completes
+      expect(pipeline.phase).toBe('done');
+
+      // rateLimitedUntil cleared
+      const task = orch.taskStore.getById(taskId);
+      expect(task?.rateLimitedUntil).toBeUndefined();
+
+      // Pipeline cleaned up by finally block
+      expect(orch.pipelines.has(taskId)).toBe(false);
+      expect(orch.activeTasks.has(taskId)).toBe(false);
+    });
+
+    it('merge resume sends correct /merge command with branch name', async () => {
+      mkdirSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true });
+
+      const pipeline = makePipeline({ phase: 'merge', branch: 'feat/my-feature-branch' });
+      orch.pipelines.set(taskId, pipeline);
+      orch.activeTasks.add(taskId);
+      orch.taskStore.update(taskId, { phase: 'merge' });
+
+      mockCreateSession.mockResolvedValue('sess-merge-branch');
+
+      orch.handleRateLimit(pipeline, 0);
+
+      await new Promise(r => setTimeout(r, 50));
+
+      // The merger should receive the branch name in the command
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'sess-merge-branch',
+        expect.stringContaining('/merge feat/my-feature-branch'),
+      );
+
+      // Complete the session cleanly
+      fireEvent('event', { sessionId: 'sess-merge-branch', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+
+      // Clean up worktree (already cleaned from maps by finally block after merge→done)
+      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch {}
+    });
+  });
 });
