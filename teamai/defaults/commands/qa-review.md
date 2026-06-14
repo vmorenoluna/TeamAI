@@ -24,7 +24,9 @@ Read the spec at: $ARGUMENTS
 **Run the project's test suite to verify the implementation end-to-end.**
 
 1. Find the test command from the project's build config, Makefile, or package.json.
-2. Run it ONCE and wait for completion — do NOT re-run repeatedly.
+2. Run it ONCE and wait for completion — do NOT re-run repeatedly. Capture only the
+   pass/fail summary line — do not read the full test output into context unless a
+   failure requires diagnosis.
    See `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 3. **On rework passes** (a previous `qa_report.json` exists in `.teamai/{slug}/`):
    - Run the FULL suite, not just tests targeting changed files.
@@ -65,7 +67,10 @@ When spec concerns are present, the task goes to human review — the reviewer d
 4. A coder inventing a new formula during a qa-fix pass is a red flag — it means the fix approach is wrong and the spec likely needs revision.
 
 ## Output
-Create `.teamai/{slug}/qa_report.json`:
+Write the QA report to the **exact absolute path** specified in the prompt instructions (e.g., `/path/to/.teamai/{slug}/qa_report.json`).
+
+The orchestrator will provide the correct output path — do NOT guess or derive it from the working directory.
+If no explicit path is provided (fallback), resolve the main repository root first (e.g., `git rev-parse --show-toplevel`) and write to `<repo-root>/.teamai/{slug}/qa_report.json`.
 
 ```json
 {
