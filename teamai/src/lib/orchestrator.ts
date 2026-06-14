@@ -930,7 +930,11 @@ export class Orchestrator {
 
     const sessionId = await processManager.createSession(this.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
-    processManager.sendMessage(sessionId, `/qa-review ${this._toAgentPath(pipeline.specPath)}/spec.md`);
+    const agentSpecPath = this._toAgentPath(pipeline.specPath);
+    processManager.sendMessage(sessionId,
+      `/qa-review ${agentSpecPath}/spec.md\n\n` +
+      `IMPORTANT: Write the QA report to \`${agentSpecPath}/qa_report.json\` (use this exact absolute path, not a relative path).\n` +
+      `The working directory is a git worktree — do NOT write to a .teamai/ subdirectory relative to the current directory.`);
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 

@@ -12,9 +12,31 @@ interface ProvidersFile {
   roles?: Record<string, ProviderConfig>;
 }
 
+const DEFAULTS_DIR = join(process.cwd(), 'defaults');
+
+/** Read the TeamAI-shipped defaults file. Returns null on any failure. */
+function readDefaultProviders(): ProvidersFile | null {
+  try {
+    const defaultsPath = join(DEFAULTS_DIR, 'providers.json');
+    if (!existsSync(defaultsPath)) return null;
+    return JSON.parse(readFileSync(defaultsPath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
 export function resolveProvider(projectRoot: string, role: string): ProviderConfig {
   const cfgPath = join(projectRoot, '.teamai', 'providers.json');
-  if (!existsSync(cfgPath)) return {};
+  if (!existsSync(cfgPath)) {
+    // Fall back to TeamAI defaults when no project-level config exists,
+    // so the orchestrator uses intended role-specific models (analyst → Opus, etc.)
+    const defaults = readDefaultProviders();
+    if (defaults) {
+      const roleOverride = defaults.roles?.[role] ?? {};
+      return { ...(defaults.default ?? {}), ...roleOverride };
+    }
+    return {};
+  }
   try {
     const cfg: ProvidersFile = JSON.parse(readFileSync(cfgPath, 'utf-8'));
     const roleOverride = cfg.roles?.[role] ?? {};
