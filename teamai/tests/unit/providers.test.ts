@@ -21,9 +21,11 @@ describe('resolveProvider', () => {
     _cleanDir = null;
   });
 
-  it('returns empty object when no providers file exists', () => {
+  it('falls back to defaults when no project-level providers file exists', () => {
     const result = resolveProvider('/tmp/nonexistent-dir-12345', 'coder');
-    expect(result).toEqual({});
+    // Coder has no role override in defaults → inherits default model
+    expect(result.model).toBe('claude-sonnet-4-6');
+    expect(result.provider).toBe('anthropic');
   });
 
   it('returns empty object when providers file is invalid JSON', () => {
@@ -80,6 +82,66 @@ describe('resolveProvider', () => {
 
     const result = resolveProvider(dir, 'coder');
     expect(result.env).toEqual({ OPENAI_API_KEY: 'sk-coder' });
+  });
+
+  describe('role-based model resolution (default providers.json)', () => {
+    // Simulates the actual default providers.json shipped with TeamAI:
+    // analyst → Opus, planner → Haiku, merger → Haiku, others → Sonnet (default)
+    const defaultConfig = {
+      default: { model: 'claude-sonnet-4-6', provider: 'anthropic' as const },
+      roles: {
+        analyst: { model: 'claude-opus-4-5' },
+        planner: { model: 'claude-haiku-4-5' },
+        merger: { model: 'claude-haiku-4-5' },
+      },
+    };
+
+    it('analyst resolves to Opus', () => {
+      const { dir, clean } = setupProvidersTest(defaultConfig);
+      _cleanDir = clean;
+      const result = resolveProvider(dir, 'analyst');
+      expect(result.model).toBe('claude-opus-4-5');
+      expect(result.provider).toBe('anthropic');
+    });
+
+    it('planner resolves to Haiku', () => {
+      const { dir, clean } = setupProvidersTest(defaultConfig);
+      _cleanDir = clean;
+      const result = resolveProvider(dir, 'planner');
+      expect(result.model).toBe('claude-haiku-4-5');
+      expect(result.provider).toBe('anthropic');
+    });
+
+    it('merger resolves to Haiku', () => {
+      const { dir, clean } = setupProvidersTest(defaultConfig);
+      _cleanDir = clean;
+      const result = resolveProvider(dir, 'merger');
+      expect(result.model).toBe('claude-haiku-4-5');
+      expect(result.provider).toBe('anthropic');
+    });
+
+    it('coder resolves to default (Sonnet) — no role override', () => {
+      const { dir, clean } = setupProvidersTest(defaultConfig);
+      _cleanDir = clean;
+      const result = resolveProvider(dir, 'coder');
+      expect(result.model).toBe('claude-sonnet-4-6');
+      expect(result.provider).toBe('anthropic');
+    });
+
+    it('qa-reviewer resolves to default (Sonnet) — no role override', () => {
+      const { dir, clean } = setupProvidersTest(defaultConfig);
+      _cleanDir = clean;
+      const result = resolveProvider(dir, 'qa-reviewer');
+      expect(result.model).toBe('claude-sonnet-4-6');
+      expect(result.provider).toBe('anthropic');
+    });
+
+    it('unknown role falls back to default model', () => {
+      const { dir, clean } = setupProvidersTest(defaultConfig);
+      _cleanDir = clean;
+      const result = resolveProvider(dir, 'nonexistent-role');
+      expect(result.model).toBe('claude-sonnet-4-6');
+    });
   });
 });
 

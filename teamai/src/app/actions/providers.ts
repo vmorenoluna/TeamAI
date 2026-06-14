@@ -18,7 +18,11 @@ export interface ProvidersConfig {
 
 const DEFAULT: ProvidersConfig = {
   default: { model: 'claude-sonnet-4-6', provider: 'anthropic' },
-  roles: {},
+  roles: {
+    analyst: { model: 'claude-opus-4-5' },
+    planner: { model: 'claude-haiku-4-5' },
+    merger: { model: 'claude-haiku-4-5' },
+  },
 };
 
 // ── Cache helpers ──────────────────────────────────────────────────────
