@@ -1422,7 +1422,11 @@ export class Orchestrator {
   }
 
   private _execGit(args: string[], hostCwd: string): void {
-    if (readContainerConfig(this.projectRoot).enabled) {
+    // git worktree add/remove must always run on the host filesystem — worktrees are
+    // host-side directories accessed by the container via volume mount. Running them
+    // via docker exec would target a container path where the .worktrees/ directory
+    // doesn't exist, causing "could not create leading directories" failures.
+    if (readContainerConfig(this.projectRoot).enabled && args[0] !== 'worktree') {
       const info = containerManager.getRunningContainer(this.projectRoot);
       if (info) {
         const containerCwd = hostToContainerPath(hostCwd, this.projectRoot, info.remoteWorkspaceFolder);
