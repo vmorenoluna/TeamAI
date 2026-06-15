@@ -35,4 +35,9 @@ Rules:
 - Include ALL files that need to change, not just the primary ones.
 - Order subtasks so dependencies are resolved top-down.
 - Flag risks explicitly in the subtask description — don't assume things will work out.
+- **NEVER include subtasks that create, modify, or delete files under `.teamai/`.** Ticket
+  creation is the analyst's responsibility (the analyst uses a more capable model with
+  broader project context). If the spec says to file follow-up tickets for findings,
+  document those findings in the final documentation subtask instead — the analyst will
+  create the follow-up tickets after reviewing the completed work.
 ```
