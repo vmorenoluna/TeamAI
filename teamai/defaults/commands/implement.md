@@ -22,6 +22,11 @@ note the deviation from the plan.
    - Address it even if the current code already satisfies the original plan.
    - If the issue requires a different approach than the plan, follow the QA feedback.
 5. Do NOT skip an issue because the code "already matches the plan."
+   - If a FAIL criterion includes a `fix_needed` field, that field describes exactly
+     what must be ADDED or CHANGED. A passing test suite does NOT mean the required
+     code exists — it means existing code is not broken. QA FAIL means something is
+     MISSING. Add it even if all current tests pass and all plan subtasks are marked
+     `completed: true`.
 6. Do NOT mark the subtask as complete unless ALL QA issues are addressed.
    - Issues marked as **critical** or **error** severity are HARD BLOCKERS — they carry the same weight as FAIL criteria. You MUST fix them; they are not suggestions.
    - Only **suggestion** severity items are optional.
@@ -57,7 +62,8 @@ re-read a file to verify an `Edit` that returned success.
    `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 5. If tests fail, fix the issues before proceeding.
 6. Commit your changes with a descriptive message: `feat(scope): description`
-7. Print a summary of what was changed and the test results.
+7. Push the branch: `git push origin HEAD` (QA cannot verify unpushed commits).
+8. Print a summary of what was changed and the test results.
 
 ## Rules
 - Only modify files listed in the subtask unless absolutely necessary.
