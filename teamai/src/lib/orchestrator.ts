@@ -777,18 +777,23 @@ export class Orchestrator {
     }
 
     // ── Gap 2: Mandatory git push before advancing to QA ──
-    // The engineer must push commits so QA reviews the same code reviewers see.
-    // If push fails, the task must not advance to awaiting-review.
+    // Always push from the host, never from the container — host credentials
+    // (Windows Credential Manager / gh CLI) are reliable; container HTTPS
+    // credentials are not. GIT_TERMINAL_PROMPT=0 prevents git from trying to open
+    // /dev/tty for interactive credential prompting, which fails when spawned by
+    // Node.js (no TTY available). If credentials aren't cached the push fails fast
+    // with a clear error rather than hanging.
     this._phaseHeader(logFile, 'implement — push to remote');
+    const noPromptEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
     try {
       // Use --force-with-lease like runCreatePR to handle recovery scenarios
       // where the branch was already pushed (crash recovery, QA bounce-back, re-run)
-      execFileSync('git', ['push', '-u', '--force-with-lease', 'origin', pipeline.branch], { cwd: this.projectRoot, stdio: 'pipe' });
+      execFileSync('git', ['push', '-u', '--force-with-lease', 'origin', pipeline.branch], { cwd: this.projectRoot, stdio: 'pipe', env: noPromptEnv });
       appendFileSync(logFile, `[PUSH] Successfully pushed ${pipeline.branch} to origin\n`);
 
       // Verify remote HEAD matches local HEAD
       try {
-        execFileSync('git', ['fetch', 'origin', pipeline.branch], { cwd: this.projectRoot, stdio: 'pipe' });
+        execFileSync('git', ['fetch', 'origin', pipeline.branch], { cwd: this.projectRoot, stdio: 'pipe', env: noPromptEnv });
         const localHead = execFileSync('git', ['rev-parse', pipeline.branch], {
           cwd: this.projectRoot, encoding: 'utf-8', stdio: 'pipe',
         }).trim();
@@ -1015,7 +1020,9 @@ export class Orchestrator {
     // doesn't exist on the host filesystem. Branch name is enough; no worktree cwd needed.
     // Use --force-with-lease to handle the case where the branch was already pushed
     // (e.g. from a previous failed create-pr attempt) or the rebase rewrote history.
-    execFileSync('git', ['push', '-u', '--force-with-lease', 'origin', pipeline.branch], { cwd: this.projectRoot });
+    // GIT_TERMINAL_PROMPT=0 prevents git from trying to open /dev/tty for credential
+    // prompting when spawned non-interactively by Node.js.
+    execFileSync('git', ['push', '-u', '--force-with-lease', 'origin', pipeline.branch], { cwd: this.projectRoot, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
 
     // Run merger on the host — gh CLI needs host credentials (gh auth login); inside the
     // container only git HTTPS is wired (gh auth setup-git), not the full gh API token.
