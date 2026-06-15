@@ -9,7 +9,8 @@ Read the spec at: $ARGUMENTS
 1. Read the spec's acceptance criteria.
 2. Read every file listed in the spec's "Files to Modify" section. Read the current file content — not just the diff.
 3. Check the git diff to see what actually changed: `git diff origin/HEAD...HEAD`
-4. For each acceptance criterion, determine PASS or FAIL with evidence from the actual file content:
+4. **Ticket-creation subtasks**: If the coder's summary contains `[SKIPPED] Ticket creation is the analyst's responsibility`, treat all acceptance criteria for that subtask as **PASS**. Creating files under `.teamai/` is explicitly out of scope for the coder role — the analyst handles follow-up tickets. Do NOT mark these criteria as FAIL.
+5. For each acceptance criterion, determine PASS or FAIL with evidence from the actual file content:
    - If a criterion says "no occurrences of X remain": grep the relevant files and paste the result.
    - If a criterion says "Y is used instead of Z": read the file and confirm.
    - Never infer a criterion is satisfied from the diff alone — verify against current code.
