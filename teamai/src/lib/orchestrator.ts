@@ -785,11 +785,10 @@ export class Orchestrator {
     // with a clear error rather than hanging.
     this._phaseHeader(logFile, 'implement — push to remote');
     const noPromptEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-    this._ensureGhCredentials(logFile);
     try {
       // Use --force-with-lease like runCreatePR to handle recovery scenarios
       // where the branch was already pushed (crash recovery, QA bounce-back, re-run)
-      execFileSync('git', ['push', '-u', '--force-with-lease', 'origin', pipeline.branch], { cwd: this.projectRoot, stdio: 'pipe', env: noPromptEnv });
+      this._gitPush(['push', '-u', '--force-with-lease', 'origin', pipeline.branch], logFile);
       appendFileSync(logFile, `[PUSH] Successfully pushed ${pipeline.branch} to origin\n`);
 
       // Verify remote HEAD matches local HEAD
@@ -881,8 +880,7 @@ export class Orchestrator {
         appendFileSync(logFile, `\n[QA-PRECHECK] Unpushed commits detected on ${pipeline.branch}:\n${unpushed}\n`);
         // Attempt to push them automatically
         try {
-          this._ensureGhCredentials(logFile);
-          execFileSync('git', ['push', 'origin', pipeline.branch], { cwd: this.projectRoot, stdio: 'pipe' });
+          this._gitPush(['push', 'origin', pipeline.branch], logFile);
           appendFileSync(logFile, '[QA-PRECHECK] Pushed unpushed commits successfully — remote matches worktree\n');
           hasUnpushed = false;
         } catch (pushErr) {
@@ -1016,16 +1014,10 @@ export class Orchestrator {
       appendFileSync(logFile, '\n[WARN] Rebase onto master had conflicts — PR may require manual conflict resolution\n');
     }
 
-    // Always push from the host — container git push credentials are unreliable even
-    // with gh auth setup-git; host credentials (Windows Credential Manager / gh CLI) work.
-    // Push from the main repo root — pipeline.worktreePath is the container-side path and
-    // doesn't exist on the host filesystem. Branch name is enough; no worktree cwd needed.
-    // Use --force-with-lease to handle the case where the branch was already pushed
-    // (e.g. from a previous failed create-pr attempt) or the rebase rewrote history.
-    // GIT_TERMINAL_PROMPT=0 prevents git from trying to open /dev/tty for credential
-    // prompting when spawned non-interactively by Node.js.
-    this._ensureGhCredentials(logFile);
-    execFileSync('git', ['push', '-u', '--force-with-lease', 'origin', pipeline.branch], { cwd: this.projectRoot, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    // Always push from the host — container git push credentials are unreliable.
+    // _gitPush injects the gh OAuth token via http.extraheader, bypassing the
+    // credential-helper chain entirely (same technique as GitHub Actions).
+    this._gitPush(['push', '-u', '--force-with-lease', 'origin', pipeline.branch], logFile);
 
     // Run merger on the host — gh CLI needs host credentials (gh auth login); inside the
     // container only git HTTPS is wired (gh auth setup-git), not the full gh API token.
@@ -1797,19 +1789,33 @@ export class Orchestrator {
   }
 
   /**
-   * Ensure the gh CLI credential helper is registered with git before a push.
-   * `gh auth setup-git` is idempotent and only touches the git credential-helper
-   * config entry — safe to call before every push. Silently no-ops when gh is not
-   * installed or the remote is not GitHub, so non-GitHub projects are unaffected.
+   * Push a branch to origin, injecting a GitHub OAuth token via http.extraheader
+   * when the gh CLI is available. This is the same technique GitHub Actions uses
+   * internally — it bypasses the git credential-helper chain entirely, so it works
+   * reliably in non-interactive Node.js-spawned processes regardless of how the
+   * global ~/.gitconfig credential section is configured.
+   *
+   * Falls back to a plain git push (relying on whatever credential helper is already
+   * registered) when gh is not installed or not authenticated.
    */
-  private _ensureGhCredentials(logFile: string): void {
+  private _gitPush(pushArgs: string[], logFile: string): void {
+    const noPromptEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+    let extraConfigArgs: string[] = [];
     try {
-      execFileSync('gh', ['auth', 'setup-git'], { stdio: 'pipe' });
-      appendFileSync(logFile, '[GIT] gh credential helper configured via gh auth setup-git\n');
+      const token = execFileSync('gh', ['auth', 'token'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
+      if (token) {
+        // Inject the token as an HTTP header — scoped to this single git invocation
+        // via -c (does not persist to any config file).
+        extraConfigArgs = ['-c', `http.extraheader=Authorization: token ${token}`];
+        appendFileSync(logFile, '[GIT] Using gh OAuth token via http.extraheader\n');
+      }
     } catch {
-      // gh not installed, not authenticated, or not a GitHub remote — fall through
-      // to whatever credential helper is already registered (Credential Manager, etc.)
+      // gh not installed or not authenticated — fall through to existing credential helper
+      appendFileSync(logFile, '[GIT] gh token not available — falling back to default credential helper\n');
     }
+    execFileSync('git', [...extraConfigArgs, ...pushArgs], {
+      cwd: this.projectRoot, stdio: 'pipe', env: noPromptEnv,
+    });
   }
 }
 
