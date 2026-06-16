@@ -1801,8 +1801,9 @@ export class Orchestrator {
   private _gitPush(pushArgs: string[], logFile: string): void {
     const noPromptEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
     let extraConfigArgs: string[] = [];
+    let token = '';
     try {
-      const token = execFileSync('gh', ['auth', 'token'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
+      token = execFileSync('gh', ['auth', 'token'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
       if (token) {
         // Rewrite https://github.com/ URLs to embed credentials directly.
         // git's credential layer runs before any HTTP request — http.extraheader
@@ -1819,9 +1820,18 @@ export class Orchestrator {
       // gh not installed or not authenticated — fall through to existing credential helper
       appendFileSync(logFile, '[GIT] gh token not available — falling back to default credential helper\n');
     }
-    execFileSync('git', [...extraConfigArgs, ...pushArgs], {
-      cwd: this.projectRoot, stdio: 'pipe', env: noPromptEnv,
-    });
+    try {
+      execFileSync('git', [...extraConfigArgs, ...pushArgs], {
+        cwd: this.projectRoot, stdio: 'pipe', env: noPromptEnv,
+      });
+    } catch (err) {
+      // Redact the token from the error message before it reaches the log file.
+      // execFileSync includes the full command string in the error, which would
+      // expose the token in output.log if not scrubbed.
+      const raw = err instanceof Error ? err.message : String(err);
+      const safe = token ? raw.replaceAll(token, '[REDACTED]') : raw;
+      throw new Error(safe);
+    }
   }
 }
 
