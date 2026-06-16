@@ -1804,10 +1804,16 @@ export class Orchestrator {
     try {
       const token = execFileSync('gh', ['auth', 'token'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
       if (token) {
-        // Inject the token as an HTTP header — scoped to this single git invocation
-        // via -c (does not persist to any config file).
-        extraConfigArgs = ['-c', `http.extraheader=Authorization: token ${token}`];
-        appendFileSync(logFile, '[GIT] Using gh OAuth token via http.extraheader\n');
+        // Rewrite https://github.com/ URLs to embed credentials directly.
+        // git's credential layer runs before any HTTP request — http.extraheader
+        // is too late because git still prompts for a username/password first.
+        // url.insteadOf embeds credentials in the URL itself so git's credential
+        // system sees them before prompting. No spaces in the config key, so
+        // Windows command-line quoting is not an issue.
+        extraConfigArgs = [
+          '-c', `url.https://x-access-token:${token}@github.com/.insteadOf=https://github.com/`,
+        ];
+        appendFileSync(logFile, '[GIT] Using gh OAuth token via url.insteadOf\n');
       }
     } catch {
       // gh not installed or not authenticated — fall through to existing credential helper
