@@ -785,6 +785,7 @@ export class Orchestrator {
     // with a clear error rather than hanging.
     this._phaseHeader(logFile, 'implement — push to remote');
     const noPromptEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+    this._ensureGhCredentials(logFile);
     try {
       // Use --force-with-lease like runCreatePR to handle recovery scenarios
       // where the branch was already pushed (crash recovery, QA bounce-back, re-run)
@@ -880,6 +881,7 @@ export class Orchestrator {
         appendFileSync(logFile, `\n[QA-PRECHECK] Unpushed commits detected on ${pipeline.branch}:\n${unpushed}\n`);
         // Attempt to push them automatically
         try {
+          this._ensureGhCredentials(logFile);
           execFileSync('git', ['push', 'origin', pipeline.branch], { cwd: this.projectRoot, stdio: 'pipe' });
           appendFileSync(logFile, '[QA-PRECHECK] Pushed unpushed commits successfully — remote matches worktree\n');
           hasUnpushed = false;
@@ -1022,6 +1024,7 @@ export class Orchestrator {
     // (e.g. from a previous failed create-pr attempt) or the rebase rewrote history.
     // GIT_TERMINAL_PROMPT=0 prevents git from trying to open /dev/tty for credential
     // prompting when spawned non-interactively by Node.js.
+    this._ensureGhCredentials(logFile);
     execFileSync('git', ['push', '-u', '--force-with-lease', 'origin', pipeline.branch], { cwd: this.projectRoot, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
 
     // Run merger on the host — gh CLI needs host credentials (gh auth login); inside the
@@ -1791,6 +1794,22 @@ export class Orchestrator {
     try {
       appendFileSync(logFile, `\n${'─'.repeat(40)}\n▶ ${phase.toUpperCase()}\n${'─'.repeat(40)}\n`);
     } catch (err) { logWarn('orchestrator', 'Failed to write phase header to log file', err); }
+  }
+
+  /**
+   * Ensure the gh CLI credential helper is registered with git before a push.
+   * `gh auth setup-git` is idempotent and only touches the git credential-helper
+   * config entry — safe to call before every push. Silently no-ops when gh is not
+   * installed or the remote is not GitHub, so non-GitHub projects are unaffected.
+   */
+  private _ensureGhCredentials(logFile: string): void {
+    try {
+      execFileSync('gh', ['auth', 'setup-git'], { stdio: 'pipe' });
+      appendFileSync(logFile, '[GIT] gh credential helper configured via gh auth setup-git\n');
+    } catch {
+      // gh not installed, not authenticated, or not a GitHub remote — fall through
+      // to whatever credential helper is already registered (Credential Manager, etc.)
+    }
   }
 }
 
