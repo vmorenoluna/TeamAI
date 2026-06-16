@@ -5,6 +5,24 @@ You are a QA reviewer validating an implementation against its specification.
 
 Read the spec at: $ARGUMENTS
 
+## Step 0: Detect Rework Pass (run first, before anything else)
+
+Check whether a previous `qa_report.json` already exists in `.teamai/{slug}/`.
+
+**If it DOES exist** (this is a rework pass):
+1. Read the previous `qa_report.json`. Note which criteria previously FAILed and which PASSed.
+2. Read `head_at_review` from the previous report (the sha of the commit QA last reviewed).
+3. Run: `git diff <head_at_review>...HEAD --name-only` to get the list of files changed since last review.
+4. For each criterion that previously **PASSED**:
+   - If NONE of the criterion's relevant files appear in the changed-files list → carry forward the PASS with the original evidence. Do NOT re-verify.
+   - If any relevant file DID change → re-verify from scratch.
+5. For each criterion that previously **FAILed** → always re-verify from scratch.
+6. Skip Steps 1–4 of the Review Process for carry-forward criteria (they are already verified).
+
+**If it does NOT exist** (first QA pass) → proceed normally from Step 1.
+
+This means on a rework pass where only one criterion failed and its file was changed, QA only needs to re-verify that one criterion — not all of them.
+
 ## Review Process
 1. Read the spec's acceptance criteria.
 2. Read every file listed in the spec's "Files to Modify" section. Read the current file content — not just the diff.
@@ -14,6 +32,11 @@ Read the spec at: $ARGUMENTS
    - If a criterion says "no occurrences of X remain": grep the relevant files and paste the result.
    - If a criterion says "Y is used instead of Z": read the file and confirm.
    - Never infer a criterion is satisfied from the diff alone — verify against current code.
+     - **After evaluating each criterion**: write the partial QA report to disk immediately
+       (with `"overall": "IN_PROGRESS"` as a placeholder). This ensures that if the session
+       is interrupted, partial results are preserved and the next pass can continue from
+       where it left off rather than restarting entirely. Replace `"IN_PROGRESS"` with the
+       final `"PASS"` or `"FAIL"` once all criteria are evaluated.
 5. Check for:
    - Correctness: Does the code do what the spec says?
    - Edge cases: Are error states handled?
@@ -33,8 +56,11 @@ Read the spec at: $ARGUMENTS
    - Run the FULL suite, not just tests targeting changed files.
    - The coder was told to run tests, but they may have introduced regressions
      in areas QA previously passed. Independent verification is mandatory.
-   - Do NOT skip tests that "passed last time" — those are exactly the ones
-     that may be broken by a domain logic drift or unintended side effect.
+   - **Exception — skip the test suite entirely** if `git diff <head_at_review>...HEAD --name-only`
+     shows zero changes under `src/main/scala/` or `src/test/scala/`. In that case,
+     carry forward the previous test evidence ("Tests: succeeded N, failed 0") as PASS.
+     Only non-Scala changes (scripts/, docs/, `.teamai/`, config files) cannot cause
+     Scala test regressions. Do NOT skip tests if any `.scala` file changed.
 4. If tests fail:
    - Failures in code the coder was assigned to change → standard FAIL on
      the relevant acceptance criteria.
@@ -73,9 +99,15 @@ Write the QA report to the **exact absolute path** specified in the prompt instr
 The orchestrator will provide the correct output path — do NOT guess or derive it from the working directory.
 If no explicit path is provided (fallback), resolve the main repository root first (e.g., `git rev-parse --show-toplevel`) and write to `<repo-root>/.teamai/{slug}/qa_report.json`.
 
+`fail_type`: Set to `"cleanup"` when ALL failing criteria require only file-system or git operations
+(e.g., `git rm`, `git add`, committing a missing file) and zero Scala source changes. Set to `"code"`
+when any failure requires changing source code, tests, or configuration. Set to `null` on PASS.
+The orchestrator uses this to route cleanup failures directly without spawning a coder session.
+
 ```json
 {
   "overall": "PASS" | "FAIL",
+  "fail_type": "code" | "cleanup" | null,
   "criteria": [
     {
       "criterion": "text from spec",

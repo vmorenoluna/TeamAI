@@ -1160,10 +1160,11 @@ describe('Orchestrator', () => {
         mockExecFileSync.mockReturnValue('');
         (orch as AnyOrch).removeWorktree(testData.taskId);
 
-        // Tier 1: normal remove via docker exec
+        // _execGit skips container routing for worktree commands — runs on host
         expect(mockExecFileSync).toHaveBeenCalledWith(
-          'docker',
-          expect.arrayContaining(['exec', '-u', 'node', 'cont-abc', 'git', 'worktree', 'remove']),
+          'git',
+          expect.arrayContaining(['worktree', 'remove']),
+          expect.any(Object),
         );
         // Branch cleanup runs on host (not through _execGit)
         expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -1198,7 +1199,7 @@ describe('Orchestrator', () => {
 
         // Normal remove (docker exec) throws — simulate uncommitted changes
         mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-          if (cmd === 'docker' && args.includes('remove') && !args.includes('--force')) {
+          if (cmd === 'git' && args.includes('remove') && !args.includes('--force')) {
             throw new Error('worktree has uncommitted changes');
           }
           return '';
@@ -1206,14 +1207,16 @@ describe('Orchestrator', () => {
 
         (orch as AnyOrch).removeWorktree(testData.taskId);
 
-        // Both tiers were attempted via docker exec
+        // _execGit skips container routing for worktree commands — runs on host
         expect(mockExecFileSync).toHaveBeenCalledWith(
-          'docker',
-          expect.arrayContaining(['exec', '-u', 'node', 'cont-abc', 'git', 'worktree', 'remove']),
+          'git',
+          expect.arrayContaining(['worktree', 'remove']),
+          expect.any(Object),
         );
         expect(mockExecFileSync).toHaveBeenCalledWith(
-          'docker',
-          expect.arrayContaining(['exec', '-u', 'node', 'cont-abc', 'git', 'worktree', 'remove', '--force']),
+          'git',
+          expect.arrayContaining(['worktree', 'remove', '--force']),
+          expect.any(Object),
         );
         // Branch cleanup still runs on host
         expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -1250,7 +1253,7 @@ describe('Orchestrator', () => {
 
         // Both docker exec attempts throw — simulate locked files
         mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-          if (cmd === 'docker' && args.includes('remove')) {
+          if (cmd === 'git' && args.includes('remove')) {
             throw new Error('worktree is locked');
           }
           return '';
@@ -1905,9 +1908,9 @@ describe('Orchestrator', () => {
 
       mockCreateSession.mockResolvedValue('sess-pr');
       let callCount = 0;
-      mockExecFileSync.mockImplementation(() => {
+      mockExecFileSync.mockImplementation((cmd: string) => {
         callCount++;
-        if (callCount >= 4) throw new Error('gh command not found');
+        if (cmd === 'gh' && callCount >= 7) throw new Error('gh command not found');
         return '';
       });
 

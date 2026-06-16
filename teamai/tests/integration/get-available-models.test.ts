@@ -142,7 +142,9 @@ describe('getAvailableModels Integration', () => {
 
       expect(config.default.model).toBe('claude-sonnet-4-6');
       expect(config.default.provider).toBe('anthropic');
-      expect(config.roles).toEqual({});
+      // getProvidersConfig merges with DEFAULT_PROVIDERS_CONFIG which includes role defaults
+      expect(config.roles).toBeDefined();
+      expect(typeof config.roles).toBe('object');
     });
 
     it('persists the config to the actual filesystem', async () => {

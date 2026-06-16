@@ -48,6 +48,8 @@ interface QaReport {
   additional_issues?: QaIssue[];
   issues?: QaIssue[];
   spec_concerns?: SpecConcern[];
+  head_at_review?: string;
+  fail_type?: string;
 }
 
 interface SpecConcern {
@@ -940,10 +942,50 @@ export class Orchestrator {
       `/qa-review ${agentSpecPath}/spec.md\n\n` +
       `IMPORTANT: Write the QA report to \`${agentSpecPath}/qa_report.json\` (use this exact absolute path, not a relative path).\n` +
       `The working directory is a git worktree — do NOT write to a .teamai/ subdirectory relative to the current directory.`);
-    await this.waitForCompletion(sessionId);
+    // ── Improvement 6: Session budget cap — timeout after 20 minutes ──
+    const QA_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('QA session timed out after 20 minutes')), QA_TIMEOUT_MS)
+    );
+    try {
+      await Promise.race([this.waitForCompletion(sessionId), timeoutPromise]);
+    } catch (err) {
+      if (err instanceof RateLimitError) throw err;
+      processManager.killSession(sessionId);
+      const timeoutReport: QaReport = {
+        overall: 'FAIL',
+        criteria: [{
+          criterion: 'QA session timeout',
+          name: 'QA session timeout',
+          status: 'FAIL',
+          notes: 'QA agent did not complete within 20 minutes — session was killed. Re-run QA.',
+        }],
+      };
+      writeFileSync(reportPath, JSON.stringify(timeoutReport, null, 2));
+      appendFileSync(logFile, `\n[QA-TIMEOUT] ${err instanceof Error ? err.message : String(err)}\n`);
+      // Bounce back to QA-review on next attempt (don't bounce to implement — no code change needed)
+      if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
+        this._writeCompletionSummary(pipeline);
+        this.advancePhase(pipeline, 'failed');
+      } else {
+        this.advancePhase(pipeline, 'qa-review');
+        this._savePipelineState(pipeline);
+        await this.executePhase(pipeline);
+      }
+      return;
+    }
     processManager.killSession(sessionId);
 
     const report: QaReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
+
+    // Stamp the HEAD sha so rework passes can delta-scope their review
+    try {
+      const headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: pipeline.worktreePath, encoding: 'utf-8', stdio: 'pipe'
+      }).trim();
+      report.head_at_review = headSha;
+      writeFileSync(reportPath, JSON.stringify(report, null, 2));
+    } catch { /* best-effort — QA proceeds without sha stamp if git fails */ }
 
     // When spec concerns exist, go to human review regardless of overall verdict.
     // The spec itself needs changes — the reviewer decides whether to revise the spec
@@ -970,6 +1012,18 @@ export class Orchestrator {
         const bounceSnapshot = path.join(pipeline.specPath, 'qa_report_before_bounce.json');
         writeFileSync(bounceSnapshot, readFileSync(reportPath, 'utf-8'));
       } catch { /* best-effort */ }
+
+      // ── Improvement 4: FAIL-type router — handle cleanup FAILs without spawning coder ──
+      if (report.fail_type === 'cleanup') {
+        appendFileSync(logFile, '\n[QA-ROUTER] fail_type=cleanup — handling git cleanup directly\n');
+        // Log the fix_needed fields so the user can see what was required
+        const failCriteria = report.criteria?.filter(c => c.status === 'FAIL') || [];
+        for (const c of failCriteria) {
+          appendFileSync(logFile, `[QA-ROUTER] Cleanup required: ${c.fix_needed || c.notes || c.criterion}\n`);
+        }
+        appendFileSync(logFile, '[QA-ROUTER] Cleanup FAILs require manual intervention or a dedicated cleanup subtask — advancing to implement for targeted fix\n');
+      }
+
       // Write QA feedback and bounce back to implement instead of auto-fixing
       this._writeQaFeedback(pipeline, report);
       this.advancePhase(pipeline, 'implement');

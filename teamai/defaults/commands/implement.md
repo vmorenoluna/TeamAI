@@ -13,6 +13,17 @@ QA feedback represents the latest requirements. The plan may be stale — QA fin
 the ground truth. Where QA feedback and the plan conflict, follow the QA feedback and
 note the deviation from the plan.
 
+**Before reading the full QA feedback**, check if `fail_type` in the QA report is `"cleanup"`.
+If so, you are in **cleanup-only rework mode**:
+- The QA issues require only file-system or git operations (e.g., `git rm`, committing a missing file).
+- Do NOT re-read the full spec. Do NOT run the test suite (no Scala source will change).
+- Execute only the `fix_needed` operations from the failing criteria.
+- Commit and push.
+- Print a summary of what was cleaned up.
+- Cleanup rework is complete — do not mark additional subtasks as complete.
+
+If `fail_type` is `"code"` or absent, proceed with the standard QA rework steps below.
+
 1. Read the QA feedback FIRST. It takes priority over everything else.
 2. Address ONLY the QA issues listed. The acceptance criteria below are limited
    to items marked [QA CORRECTION] or [QA ISSUE] — fix those and nothing else.
@@ -95,4 +106,21 @@ integration run) that takes more than ~30 seconds:
    don't poll" contract. One start + one await is the complete pattern.
 5. Capture only the summary line from the output (pass/fail count, error list) —
    do not read the full output into context unless a failure requires diagnosis.
+
+### When the sweep output is a committed artifact
+
+If the subtask requires running a sweep that **produces files you will commit** (e.g.,
+`summary.jsonl`, `aggregate.md`, log directories):
+
+1. Run the sweep ONCE with `run_in_background: true`. The output files will be written to disk.
+2. While it runs, complete any doc edits or other non-blocking subtask work.
+3. Wait for the background completion notification — do NOT read the output file while it is
+   running, do NOT re-run the sweep to "check progress", do NOT tail the log.
+4. When the notification arrives, verify the output (record count, no truncated JSON lines,
+   expected fields present) by reading only the first and last records.
+5. Run the aggregator script (if one exists) against the completed output.
+6. `git add` the sweep output directory + aggregated results. Commit.
+7. **Never commit a partial sweep.** If the sweep was interrupted, delete the partial output
+   and re-run from the beginning. A committed summary.jsonl with 1,431 of 3,000 expected
+   records is harder to diagnose than no file at all.
 ```
