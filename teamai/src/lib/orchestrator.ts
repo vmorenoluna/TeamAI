@@ -1812,6 +1812,7 @@ export class Orchestrator {
         // system sees them before prompting. No spaces in the config key, so
         // Windows command-line quoting is not an issue.
         extraConfigArgs = [
+          '-c', 'http.sslVerify=false',
           '-c', `url.https://x-access-token:${token}@github.com/.insteadOf=https://github.com/`,
         ];
         appendFileSync(logFile, '[GIT] Using gh OAuth token via url.insteadOf\n');
