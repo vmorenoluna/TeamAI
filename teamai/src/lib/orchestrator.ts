@@ -786,16 +786,17 @@ export class Orchestrator {
     // Node.js (no TTY available). If credentials aren't cached the push fails fast
     // with a clear error rather than hanging.
     this._phaseHeader(logFile, 'implement — push to remote');
-    const noPromptEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
     try {
       // Use --force-with-lease like runCreatePR to handle recovery scenarios
       // where the branch was already pushed (crash recovery, QA bounce-back, re-run)
       this._gitPush(['push', '-u', '--force-with-lease', 'origin', pipeline.branch], logFile);
       appendFileSync(logFile, `[PUSH] Successfully pushed ${pipeline.branch} to origin\n`);
 
-      // Verify remote HEAD matches local HEAD
+      // Verify remote HEAD matches local HEAD.
+      // No separate fetch needed — a successful push already updates the local
+      // remote-tracking ref (refs/remotes/origin/<branch>) to match what was pushed.
+      // Fetching again would require auth and adds no signal when push returned success.
       try {
-        execFileSync('git', ['fetch', 'origin', pipeline.branch], { cwd: this.projectRoot, stdio: 'pipe', env: noPromptEnv });
         const localHead = execFileSync('git', ['rev-parse', pipeline.branch], {
           cwd: this.projectRoot, encoding: 'utf-8', stdio: 'pipe',
         }).trim();
