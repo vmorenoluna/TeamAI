@@ -787,9 +787,11 @@ export class Orchestrator {
     // with a clear error rather than hanging.
     this._phaseHeader(logFile, 'implement — push to remote');
     try {
-      // Use --force-with-lease like runCreatePR to handle recovery scenarios
-      // where the branch was already pushed (crash recovery, QA bounce-back, re-run)
-      this._gitPush(['push', '-u', '--force-with-lease', 'origin', pipeline.branch], logFile);
+      // Use --force for recovery scenarios (crash recovery, QA bounce-back, re-run).
+      // --force-with-lease rejects pushes when the local remote-tracking ref is stale
+      // (e.g. worktree recreated without fetching), which breaks automated pipelines.
+      // --force is safe here: orchestrator is the sole writer to these feat/ branches.
+      this._gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
       appendFileSync(logFile, `[PUSH] Successfully pushed ${pipeline.branch} to origin\n`);
 
       // Verify remote HEAD matches local HEAD.
