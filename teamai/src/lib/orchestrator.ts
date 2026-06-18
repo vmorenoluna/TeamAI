@@ -466,8 +466,10 @@ export class Orchestrator {
 
     // Pull latest master from remote before branching so the feature branch starts
     // from up-to-date code, minimising conflicts at PR time.
+    // Uses _gitPush with 'pull' args so the OAuth token is injected — same reason
+    // as the identical pull in runImplement (see comment there).
     try {
-      execFileSync('git', ['pull', '--ff-only', 'origin', 'master'], { cwd: this.projectRoot, stdio: 'pipe' });
+      this._gitPush(['pull', '--ff-only', 'origin', 'master'], path.join(pipeline.specPath, 'output.log'));
     } catch { /* non-fast-forward or offline — proceed with local master */ }
 
     if (!existsSync(pipeline.worktreePath)) {
@@ -520,8 +522,11 @@ export class Orchestrator {
     // Pull latest master before creating the worktree so the feature branch starts
     // from up-to-date code, minimising conflicts at PR time.
     // (runPlan does the same pull; this covers the resume-directly-to-implement path.)
+    // Uses _gitPush with 'pull' args so the OAuth token is injected — plain git pull
+    // fails silently on machines where HTTPS requires token auth (SSL cert issues),
+    // leaving local master stale and causing avoidable PR conflicts.
     try {
-      execFileSync('git', ['pull', '--ff-only', 'origin', 'master'], { cwd: this.projectRoot, stdio: 'pipe' });
+      this._gitPush(['pull', '--ff-only', 'origin', 'master'], path.join(pipeline.specPath, 'output.log'));
     } catch { /* non-fast-forward or offline — proceed with local master */ }
 
     // Ensure worktree exists and is healthy — may be absent/corrupt when resuming (#4)
