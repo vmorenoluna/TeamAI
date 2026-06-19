@@ -1897,6 +1897,21 @@ export class Orchestrator {
       }
     }
 
+    // ── Rewrite task.json phase to "done" in the committed copy ──
+    // The live pipeline workspace still has the current phase (merge/create-pr),
+    // but by the time this branch is merged and pulled into main, the task will
+    // be done.  Committing "done" prevents a stale kanban entry (TaskStore scans
+    // every .teamai/ subdirectory for task.json to discover tasks).
+    const committedTaskJson = path.join(targetDir, 'task.json');
+    if (existsSync(committedTaskJson)) {
+      try {
+        const t = JSON.parse(readFileSync(committedTaskJson, 'utf-8'));
+        t.phase = 'done';
+        t.updatedAt = new Date().toISOString();
+        writeFileSync(committedTaskJson, JSON.stringify(t, null, 2));
+      } catch { /* best-effort — commit what we have */ }
+    }
+
     if (copied === 0) {
       appendFileSync(logFile, '[ARTIFACTS] No artifacts to commit\n');
       return;

@@ -182,6 +182,13 @@ describe('_commitArtifactsToWorktree', () => {
     expect(existsSync(join(targetDir, 'completion_summary.md'))).toBe(true);
     expect(existsSync(join(targetDir, 'task.json'))).toBe(true);
 
+    // Committed task.json should have phase: "done" — by the time the branch
+    // is merged and pulled into main, the task IS done, so the committed copy
+    // should reflect the final state and not create a stale kanban entry.
+    const committedTask = JSON.parse(readFileSync(join(targetDir, 'task.json'), 'utf-8'));
+    expect(committedTask.phase).toBe('done');
+    expect(committedTask.updatedAt).toBeTruthy();
+
     // _execGit should have been called with git add
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
@@ -450,6 +457,11 @@ describe('_commitArtifactsToWorktree', () => {
     expect(existsSync(join(targetDir, 'completion_summary.md'))).toBe(true);
     expect(existsSync(join(targetDir, 'events.jsonl'))).toBe(true);
     expect(existsSync(join(targetDir, 'task.json'))).toBe(true);
+
+    // Committed task.json should have phase: "done"
+    const committedTask = JSON.parse(readFileSync(join(targetDir, 'task.json'), 'utf-8'));
+    expect(committedTask.phase).toBe('done');
+    expect(committedTask.updatedAt).toBeTruthy();
 
     // Log should report 14 files committed (16 total - 2 excluded)
     const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
