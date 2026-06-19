@@ -42,6 +42,22 @@ Everything else that tells the story of the implementation is included:
 - **`human_feedback_before_bounce.md`** — feedback snapshot preserved across bounce cycles
 - **`spec_revision_feedback.md`** — QA spec concerns used to auto-revise the spec
 
+### `task.json` phase rewriting
+
+`task.json` is committed with one important modification: its `phase` field is rewritten
+to `"done"` in the committed copy. The live pipeline workspace retains the actual current
+phase (`merge` or `create-pr`), but the committed copy reflects the final state.
+
+**Why**: TaskStore discovers tasks by scanning every `.teamai/` subdirectory for
+`task.json`. After the PR is merged and `git pull` brings the branch's artifacts into
+`main`, a `task.json` frozen at `pr-open` or `merge` would create a **ghost task** in
+the kanban — a task that appears active but has no live pipeline behind it. By committing
+`"done"`, the committed artifacts accurately reflect that the branch's work is complete
+once it reaches `main`.
+
+The `updatedAt` timestamp is also refreshed to the commit time, marking when the
+artifact snapshot was finalized.
+
 ### Commit behavior
 
 1. Artifacts are committed to the feature branch in the worktree with a message like
