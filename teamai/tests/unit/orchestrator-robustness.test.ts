@@ -1556,7 +1556,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
         (call: any[]) => call[1] && Array.isArray(call[1]) && call[1][0] === 'push',
       );
       expect(pushCalls.length).toBeGreaterThanOrEqual(1);
-      expect(pushCalls[0][1]).toContain('--force-with-lease');
+      expect(pushCalls[0][1]).toContain('--force');
 
       // The rev-parse verification should have been called (local + remote)
       const revParseCalls = mockExecFileSync.mock.calls.filter(

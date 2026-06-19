@@ -6,7 +6,22 @@ import { TaskStore } from '@/lib/task-store';
 import { revalidatePath } from 'next/cache';
 
 export async function getInterruptedTasks(): Promise<InterruptedTask[]> {
-  return findInterruptedTasks();
+  const tasks = findInterruptedTasks();
+
+  // Filter out tasks that are currently being managed by an active orchestrator
+  // pipeline. These tasks are not interrupted — they're actively running in this
+  // server session. findInterruptedTasks() is a pure filesystem scan that has no
+  // way to distinguish between genuinely interrupted tasks (orphaned after a crash
+  // or restart) and tasks that are in-progress right now.
+  return tasks.filter(task => {
+    try {
+      const orchestrator = getOrchestrator(task.projectPath);
+      return !orchestrator.isTaskActive(task.taskId);
+    } catch {
+      // If we can't access the orchestrator, err on the side of showing the banner
+      return true;
+    }
+  });
 }
 
 export async function resumeTask(task: InterruptedTask): Promise<void> {

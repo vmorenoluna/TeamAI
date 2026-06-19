@@ -1,0 +1,458 @@
+/**
+ * Tests for _commitArtifactsToWorktree.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, unlinkSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { randomUUID } from 'crypto';
+
+// ── Hoisted mocks ──
+
+const onHandlers = vi.hoisted(() =>
+  new Map<string, Array<(...args: unknown[]) => void>>()
+);
+
+const mockExecFileSync = vi.hoisted(() => vi.fn());
+
+vi.mock('child_process', () => ({
+  execFileSync: mockExecFileSync,
+}));
+
+vi.mock('../../src/lib/logger', () => ({
+  warn: vi.fn(),
+}));
+
+vi.mock('../../src/lib/process-manager', () => ({
+  processManager: {
+    on: vi.fn(),
+    off: vi.fn(),
+    emit: vi.fn(),
+    createSession: vi.fn(),
+    sendMessage: vi.fn(),
+    killSession: vi.fn(),
+    getSession: vi.fn(),
+    getAllSessions: vi.fn(() => []),
+    getStaleSessions: vi.fn(() => []),
+    removeStaleSession: vi.fn(),
+    getTerminalSessions: vi.fn(() => []),
+    killTerminalSession: vi.fn(),
+    writeToSession: vi.fn(),
+    terminateSession: vi.fn(),
+  },
+}));
+
+vi.mock('../../src/lib/container-manager', () => ({
+  readContainerConfig: vi.fn(() => ({ enabled: false, explicit: false })),
+  readContainerRemoteUser: vi.fn(() => 'node'),
+  containerManager: {
+    ensureContainer: vi.fn(),
+    getRunningContainer: vi.fn(() => null),
+  },
+  hostToContainerPath: vi.fn((p: string) => p),
+  dockerAvailable: vi.fn(() => true),
+  _resetDockerAvailableCache: vi.fn(),
+}));
+
+// ── Imports after mocks ──
+
+import { Orchestrator, getOrchestrator } from '../../src/lib/orchestrator';
+import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache, readContainerRemoteUser } from '../../src/lib/container-manager';
+
+type AnyOrch = any;
+
+// ── Helpers ──
+
+function setupTestProject(): { root: string; taskId: string; taskDir: string; slug: string; clean: () => void } {
+  const root = join(tmpdir(), `teamai-artifacts-${randomUUID().slice(0, 8)}`);
+  mkdirSync(root, { recursive: true });
+
+  mkdirSync(join(root, '.teamai'), { recursive: true });
+
+  const taskId = randomUUID();
+  const taskDir = join(root, '.teamai', taskId);
+  mkdirSync(taskDir, { recursive: true });
+
+  writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
+    id: taskId,
+    title: 'Test Task',
+    description: 'A test task',
+    phase: 'spec',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }));
+
+  const slug = randomUUID().slice(0, 8);
+
+  const clean = () => {
+    onHandlers.clear();
+    vi.clearAllMocks();
+    if (existsSync(root)) rmSync(root, { recursive: true, force: true });
+  };
+
+  return { root, taskId, taskDir, slug, clean };
+}
+
+function makeOrch(root: string): Orchestrator {
+  const orch = getOrchestrator(root);
+  const a = orch as unknown as AnyOrch;
+  a.pipelines.clear();
+  a.activeTasks.clear();
+  return orch;
+}
+
+function makePipeline(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    taskId: 'task-id',
+    description: 'test',
+    phase: 'spec',
+    specPath: '/test/spec',
+    worktreePath: '/test/wt',
+    branch: 'feat/test',
+    qaAttempt: 0,
+    maxQaAttempts: 3,
+    ...overrides,
+  };
+}
+
+// ── Tests ──
+
+describe('_commitArtifactsToWorktree', () => {
+  let testData: ReturnType<typeof setupTestProject>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    onHandlers.clear();
+    vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
+    vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
+    vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+    vi.mocked(readContainerRemoteUser).mockReturnValue('node');
+    vi.mocked(dockerAvailable).mockReturnValue(true);
+    vi.mocked(_resetDockerAvailableCache).mockReturnValue(undefined);
+  });
+
+  afterEach(() => {
+    if (testData) testData.clean();
+    vi.resetModules();
+  });
+
+  // ── Successful commit ─────────────────────────────────────────────
+
+  it('copies artifacts, commits them, and logs success', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    // Set up artifact files in the specPath
+    writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature spec');
+    writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [{ id: 1, title: 'Task' }] }));
+    writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({ overall: 'PASS' }));
+    writeFileSync(join(testData.taskDir, 'output.log'), 'terminal output');  // excluded
+    writeFileSync(join(testData.taskDir, '.pipeline_state.json'), '{}');     // excluded
+    writeFileSync(join(testData.taskDir, 'events.jsonl'), JSON.stringify({ phase: 'plan' }));
+    writeFileSync(join(testData.taskDir, 'completion_summary.md'), '# Summary');
+
+    const worktreePath = join(testData.root, 'worktree-test');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: testData.slug,
+      specPath: testData.taskDir,
+      worktreePath,
+    });
+
+    mockExecFileSync.mockReturnValue('');
+
+    (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
+
+    // Verify target directory was created
+    const targetDir = join(worktreePath, '.teamai', testData.slug);
+    expect(existsSync(targetDir)).toBe(true);
+
+    // Excluded files should NOT be copied
+    expect(existsSync(join(targetDir, 'output.log'))).toBe(false);
+    expect(existsSync(join(targetDir, '.pipeline_state.json'))).toBe(false);
+
+    // Included files SHOULD be copied (6 files: spec, plan, qa_report, events,
+    // completion_summary, plus task.json from setupTestProject)
+    expect(existsSync(join(targetDir, 'spec.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'plan.json'))).toBe(true);
+    expect(existsSync(join(targetDir, 'qa_report.json'))).toBe(true);
+    expect(existsSync(join(targetDir, 'events.jsonl'))).toBe(true);
+    expect(existsSync(join(targetDir, 'completion_summary.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'task.json'))).toBe(true);
+
+    // _execGit should have been called with git add
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['add', '.teamai/']),
+      expect.objectContaining({ cwd: worktreePath }),
+    );
+    // And git commit
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['commit', '-m', expect.stringContaining('TeamAI pipeline artifacts')]),
+      expect.objectContaining({ cwd: worktreePath }),
+    );
+
+    // Log file should contain the phase header and success message
+    const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('ARTIFACTS');
+    expect(logContent).toContain('Committed 6 artifact file');
+  });
+
+  // ── Empty source directory ────────────────────────────────────────
+
+  it('returns early when source directory has no artifacts (only excluded files)', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    try { unlinkSync(join(testData.taskDir, 'task.json')); } catch {}
+
+    // Only put excluded files in the source dir
+    writeFileSync(join(testData.taskDir, 'output.log'), 'terminal output');
+    writeFileSync(join(testData.taskDir, '.pipeline_state.json'), '{}');
+
+    const worktreePath = join(testData.root, 'worktree-empty');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: testData.slug,
+      specPath: testData.taskDir,
+      worktreePath,
+    });
+
+    (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
+
+    // Should NOT have called git at all
+    const gitCalls = mockExecFileSync.mock.calls.filter(
+      (c: unknown[]) => c[0] === 'git'
+    );
+    expect(gitCalls.length).toBe(0);
+
+    // Log should indicate no artifacts
+    const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('No artifacts to commit');
+  });
+
+  it('throws when the specPath directory does not exist (no log file can be created)', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    const worktreePath = join(testData.root, 'worktree-nonexistent-src');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: testData.slug,
+      specPath: join(testData.taskDir, 'nonexistent-subdir'),
+      worktreePath,
+    });
+
+    // _phaseHeader catches the write failure, but the appendFileSync at
+    // the copied===0 branch does not — it throws ENOENT.
+    expect(() => (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline)).toThrow();
+  });
+
+  // ── Gitignore-blocked ─────────────────────────────────────────────
+
+  it('logs warning and returns when artifacts are gitignored', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+    writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
+
+    const worktreePath = join(testData.root, 'worktree-gitignore');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: testData.slug,
+      specPath: testData.taskDir,
+      worktreePath,
+    });
+
+    // git add succeeds, git commit fails with "nothing added to commit"
+    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+      if (Array.isArray(args) && args.includes('commit')) {
+        throw new Error('nothing added to commit but untracked files present');
+      }
+      return '';
+    });
+
+    // Should NOT throw
+    expect(() => (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline)).not.toThrow();
+
+    // Log should contain the gitignore warning
+    const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('appears to be gitignored');
+
+    // Files should still have been copied
+    const targetDir = join(worktreePath, '.teamai', testData.slug);
+    expect(existsSync(join(targetDir, 'spec.md'))).toBe(true);
+  });
+
+  // ── Already-committed ─────────────────────────────────────────────
+
+  it('logs and returns (no-op) when artifacts are already committed', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+    writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
+
+    const worktreePath = join(testData.root, 'worktree-already');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: testData.slug,
+      specPath: testData.taskDir,
+      worktreePath,
+    });
+
+    // git add succeeds, git commit fails with "nothing to commit, working tree clean"
+    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+      if (Array.isArray(args) && args.includes('commit')) {
+        throw new Error('nothing to commit, working tree clean');
+      }
+      return '';
+    });
+
+    // Should NOT throw
+    expect(() => (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline)).not.toThrow();
+
+    // Log should indicate already committed
+    const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('Already committed');
+  });
+
+  // ── Git add failure ───────────────────────────────────────────────
+
+  it('throws when git add fails', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+    writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
+
+    const worktreePath = join(testData.root, 'worktree-add-fail');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: testData.slug,
+      specPath: testData.taskDir,
+      worktreePath,
+    });
+
+    // git add throws a real error
+    mockExecFileSync.mockImplementation(() => {
+      throw new Error('fatal: not a git repository');
+    });
+
+    expect(() => (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline)).toThrow(
+      'not a git repository'
+    );
+  });
+
+  // ── Git commit unexpected error ────────────────────────────────────
+
+  it('throws when git commit fails with an unexpected error', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+    writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
+
+    const worktreePath = join(testData.root, 'worktree-commit-fail');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: testData.slug,
+      specPath: testData.taskDir,
+      worktreePath,
+    });
+
+    // git add succeeds, git commit fails with an unexpected error
+    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+      if (Array.isArray(args) && args.includes('commit')) {
+        throw new Error('fatal: unable to create commit');
+      }
+      return '';
+    });
+
+    expect(() => (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline)).toThrow(
+      'unable to create commit'
+    );
+  });
+
+  // ── Full artifact set (spec revisions, snapshots, etc.) ────────────
+
+  it('excludes output.log and .pipeline_state.json but includes spec revisions and snapshots', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    // Set up a full artifact directory with all the story-telling files
+    writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+    writeFileSync(join(testData.taskDir, 'spec_v1.md'), '# Spec v1');
+    writeFileSync(join(testData.taskDir, 'spec_v2.md'), '# Spec v2');
+    writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
+    writeFileSync(join(testData.taskDir, 'qa_report.json'), '{}');
+    writeFileSync(join(testData.taskDir, 'qa_report_before_bounce.json'), '{}');
+    writeFileSync(join(testData.taskDir, 'qa_report_before_failed.json'), '{}');
+    writeFileSync(join(testData.taskDir, 'qa_feedback.md'), '# Feedback');
+    writeFileSync(join(testData.taskDir, 'human_feedback.md'), '# Human feedback');
+    writeFileSync(join(testData.taskDir, 'human_feedback_before_bounce.md'), '# HF snapshot');
+    writeFileSync(join(testData.taskDir, 'spec_revision_feedback.md'), '# Revision feedback');
+    writeFileSync(join(testData.taskDir, 'completion_summary.md'), '# Summary');
+    writeFileSync(join(testData.taskDir, 'events.jsonl'), '{}');
+    writeFileSync(join(testData.taskDir, 'task.json'), '{}');
+    // These should be excluded
+    writeFileSync(join(testData.taskDir, 'output.log'), 'output');
+    writeFileSync(join(testData.taskDir, '.pipeline_state.json'), 'state');
+
+    const worktreePath = join(testData.root, 'worktree-full');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: testData.slug,
+      specPath: testData.taskDir,
+      worktreePath,
+    });
+
+    mockExecFileSync.mockReturnValue('');
+
+    (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
+
+    const targetDir = join(worktreePath, '.teamai', testData.slug);
+
+    // Excluded — should NOT be present
+    expect(existsSync(join(targetDir, 'output.log'))).toBe(false);
+    expect(existsSync(join(targetDir, '.pipeline_state.json'))).toBe(false);
+
+    // Included story files — should ALL be present
+    expect(existsSync(join(targetDir, 'spec.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'spec_v1.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'spec_v2.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'plan.json'))).toBe(true);
+    expect(existsSync(join(targetDir, 'qa_report.json'))).toBe(true);
+    expect(existsSync(join(targetDir, 'qa_report_before_bounce.json'))).toBe(true);
+    expect(existsSync(join(targetDir, 'qa_report_before_failed.json'))).toBe(true);
+    expect(existsSync(join(targetDir, 'qa_feedback.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'human_feedback.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'human_feedback_before_bounce.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'spec_revision_feedback.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'completion_summary.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'events.jsonl'))).toBe(true);
+    expect(existsSync(join(targetDir, 'task.json'))).toBe(true);
+
+    // Log should report 14 files committed (16 total - 2 excluded)
+    const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('Committed 14 artifact file');
+  });
+});

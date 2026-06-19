@@ -924,6 +924,11 @@ describe('Rate Limit Integration', () => {
       // Create a real worktree so removeWorktree can clean it up after merge
       mkdirSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true });
 
+      // _commitArtifactsToWorktree calls git add/commit in the worktree.
+      // The test worktree is a plain directory, not a real git checkout, so
+      // mock _execGit to prevent "fatal: not a git repository" errors.
+      const execGitSpy = vi.spyOn(orch, '_execGit').mockImplementation(() => {});
+
       const pipeline = makePipeline({ phase: 'merge' });
       orch.pipelines.set(taskId, pipeline);
       orch.activeTasks.add(taskId);
@@ -966,6 +971,7 @@ describe('Rate Limit Integration', () => {
       expect(task?.rateLimitedUntil).toBeDefined();
 
       // Clean up
+      execGitSpy.mockRestore();
       try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch {}
       orch.pipelines.delete(taskId);
       orch.activeTasks.delete(taskId);
@@ -973,6 +979,8 @@ describe('Rate Limit Integration', () => {
 
     it('merge resume completes and advances to done', async () => {
       mkdirSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true });
+
+      const execGitSpy = vi.spyOn(orch, '_execGit').mockImplementation(() => {});
 
       const pipeline = makePipeline({ phase: 'merge' });
       orch.pipelines.set(taskId, pipeline);
@@ -1003,10 +1011,14 @@ describe('Rate Limit Integration', () => {
       // Pipeline cleaned up by finally block
       expect(orch.pipelines.has(taskId)).toBe(false);
       expect(orch.activeTasks.has(taskId)).toBe(false);
+
+      execGitSpy.mockRestore();
     });
 
     it('merge resume sends correct /merge command with branch name', async () => {
       mkdirSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true });
+
+      const execGitSpy = vi.spyOn(orch, '_execGit').mockImplementation(() => {});
 
       const pipeline = makePipeline({ phase: 'merge', branch: 'feat/my-feature-branch' });
       orch.pipelines.set(taskId, pipeline);
@@ -1028,6 +1040,8 @@ describe('Rate Limit Integration', () => {
       // Complete the session cleanly
       fireEvent('event', { sessionId: 'sess-merge-branch', event: { type: 'result' } });
       await new Promise(r => setTimeout(r, 50));
+
+      execGitSpy.mockRestore();
 
       // Clean up worktree (already cleaned from maps by finally block after merge→done)
       try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch {}
