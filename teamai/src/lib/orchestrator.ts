@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, statSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, statSync, rmSync, copyFileSync, mkdirSync, readdirSync } from 'fs';
 import path from 'path';
 import { warn as logWarn } from './logger';
 import { processManager, type AgentSession } from './process-manager';
@@ -1047,6 +1047,11 @@ export class Orchestrator {
     this._persistAndEmitPhase(pipeline);
     const logFile = path.join(pipeline.specPath, 'output.log');
     this._phaseHeader(logFile, 'merge');
+
+    // Commit TeamAI artifacts to the worktree so the merge includes the full
+    // implementation story (spec, plan, QA, events, etc.).
+    this._commitArtifactsToWorktree(pipeline);
+
     const sessionId = await processManager.createSession(this.sessionOpts('merger', this.projectRoot, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
     processManager.sendMessage(sessionId, `/merge ${pipeline.branch}`);
@@ -1075,6 +1080,10 @@ export class Orchestrator {
       try { this._execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* ignore */ }
       appendFileSync(logFile, '\n[WARN] Rebase onto master had conflicts — PR may require manual conflict resolution\n');
     }
+
+    // Commit TeamAI artifacts to the worktree so the PR includes the full
+    // implementation story (spec, plan, QA, events, etc.).
+    this._commitArtifactsToWorktree(pipeline);
 
     // Always push from the host — container git push credentials are unreliable.
     // _gitPush injects the gh OAuth token via http.extraheader, bypassing the
@@ -1848,6 +1857,77 @@ export class Orchestrator {
     try {
       appendFileSync(logFile, `\n${'─'.repeat(40)}\n▶ ${phase.toUpperCase()}\n${'─'.repeat(40)}\n`);
     } catch (err) { logWarn('orchestrator', 'Failed to write phase header to log file', err); }
+  }
+
+  /** Files excluded from artifact commit — internal/transient orchestrator state. */
+  private static readonly ARTIFACT_EXCLUDE = new Set([
+    'output.log',
+    '.pipeline_state.json',
+  ]);
+
+  /**
+   * Copy the task's TeamAI artifacts into the worktree and commit them
+   * so the PR includes the full story of the implementation (spec, plan,
+   * QA report, spec revisions, events timeline, etc.).
+   *
+   * Throws on failure — the pipeline must not create a PR or merge without
+   * artifacts.  The caller (`runTask`) catches and advances to 'failed'.
+   */
+  private _commitArtifactsToWorktree(pipeline: TaskPipeline): void {
+    const logFile = path.join(pipeline.specPath, 'output.log');
+    this._phaseHeader(logFile, 'artifacts — commit to worktree');
+
+    const slug = slugify(pipeline.description);
+    const targetDir = path.join(pipeline.worktreePath, '.teamai', slug);
+
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+
+    // Copy all files except excluded ones
+    const sourceDir = pipeline.specPath;
+    let copied = 0;
+    if (existsSync(sourceDir)) {
+      const entries = readdirSync(sourceDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        if (Orchestrator.ARTIFACT_EXCLUDE.has(entry.name)) continue;
+        copyFileSync(path.join(sourceDir, entry.name), path.join(targetDir, entry.name));
+        copied++;
+      }
+    }
+
+    if (copied === 0) {
+      appendFileSync(logFile, '[ARTIFACTS] No artifacts to commit\n');
+      return;
+    }
+
+    // Stage and commit in the worktree. _execGit routes through docker exec
+    // in container mode so the worktree's .git file (container paths) resolves.
+    // Relative path is intentional — absolute paths break container mode
+    // (worktree is outside projectRoot so _execGit won't translate them).
+    this._execGit(['add', '.teamai/'], pipeline.worktreePath);
+
+    try {
+      this._execGit(['commit', '-m', `Add TeamAI pipeline artifacts for "${pipeline.description}"`], pipeline.worktreePath);
+    } catch (gitErr) {
+      const msg = gitErr instanceof Error ? gitErr.message : String(gitErr);
+      // "nothing to commit, working tree clean" — artifacts already committed
+      // (e.g. re-running create-pr after a reject-bounce cycle). No-op.
+      if (/nothing\s+to\s+commit.*working\s+tree\s+clean/i.test(msg)) {
+        appendFileSync(logFile, '[ARTIFACTS] Already committed — no new changes\n');
+        return;
+      }
+      // "nothing added to commit" — .teamai-artifacts/ is gitignored.
+      // Respect the user's choice; log a warning and continue without artifacts.
+      if (/nothing\s+added\s+to\s+commit/i.test(msg)) {
+        appendFileSync(logFile, '[ARTIFACTS] Warning: .teamai/ appears to be gitignored — skipping artifact commit\n');
+        return;
+      }
+      throw gitErr;
+    }
+
+    appendFileSync(logFile, `[ARTIFACTS] Committed ${copied} artifact file(s) to worktree\n`);
   }
 
   /**

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, readdirSync, renameSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, readdirSync, renameSync, rmSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
@@ -183,6 +183,40 @@ export class ProjectStore {
   }
 
   /**
+   * Ensure the project's .gitignore excludes transient TeamAI files that
+   * should never be version-controlled (sensitive terminal output, crash-
+   * recovery state). Appends entries only if they are not already present.
+   */
+  private _updateGitignore(projectPath: string): void {
+    const gitignorePath = join(projectPath, '.gitignore');
+    const TEAMAI_PATTERNS = ['.teamai/*/output.log', '.teamai/*/.pipeline_state.json'];
+
+    const buildBlock = (patterns: string[]) =>
+      '# TeamAI — exclude transient pipeline files\n' + patterns.join('\n') + '\n';
+
+    if (!existsSync(gitignorePath)) {
+      try {
+        writeFileSync(gitignorePath, buildBlock(TEAMAI_PATTERNS));
+      } catch { /* best-effort — don't block project setup on .gitignore write failure */ }
+      return;
+    }
+
+    try {
+      const existing = readFileSync(gitignorePath, 'utf-8');
+      const lines = existing.split('\n');
+
+      // Only append patterns that are not already present (exact line match).
+      const missing = TEAMAI_PATTERNS.filter(
+        pattern => !lines.some(line => line.trim() === pattern),
+      );
+      if (missing.length === 0) return;
+
+      const separator = existing.endsWith('\n') ? '' : '\n';
+      appendFileSync(gitignorePath, separator + '\n' + buildBlock(missing));
+    } catch { /* best-effort */ }
+  }
+
+  /**
    * Sync default files in a project that have NOT been customized.
    * If a default file was updated in TeamAI and the project's copy still
    * matches the old default (i.e., was never customized), update it.
@@ -346,6 +380,9 @@ export class ProjectStore {
         writeFileSync(claudeMdPath, IMPORT_LINE + '\n' + content);
       }
     }
+
+    // Ensure .gitignore excludes transient/potentially-sensitive TeamAI files
+    this._updateGitignore(projectPath);
 
     // Sync defaults that have been updated in TeamAI but not customized by the project
     this.syncDefaults(projectPath);
