@@ -179,7 +179,8 @@ describe('getAvailableModels Integration', () => {
         json: async () => ({
           data: [
             { id: 'claude-sonnet-4-6', type: 'model' },
-            { id: 'claude-3-5-sonnet-20241022', type: 'model' },
+            { id: 'claude-haiku-4-5', type: 'model' },
+            { id: 'claude-3-5-sonnet-20241022', type: 'model' }, // filtered: gen 3
           ],
         }),
       });
@@ -188,8 +189,9 @@ describe('getAvailableModels Integration', () => {
       const result = await getAvailableModels('anthropic');
 
       expect(result.error).toBeUndefined();
+      // claude-3-5-sonnet-20241022 is filtered out (not generation 4)
       expect(result.models).toEqual([
-        'claude-3-5-sonnet-20241022',
+        'claude-haiku-4-5',
         'claude-sonnet-4-6',
       ]);
     });
@@ -374,23 +376,23 @@ describe('getAvailableModels Integration', () => {
         json: async () => ({
           data: [
             { id: 'claude-sonnet-4-6', type: 'model' },
-            { id: 'claude-3-5-sonnet-20241022', type: 'model' },
+            { id: 'claude-haiku-4-5', type: 'model' },
           ],
         }),
       });
 
       const first = await getAvailableModels('anthropic');
-      expect(first.models).toEqual(['claude-3-5-sonnet-20241022', 'claude-sonnet-4-6']);
+      expect(first.models).toEqual(['claude-haiku-4-5', 'claude-sonnet-4-6']);
 
       // Verify cache was written to disk
       const cachePath = join(projectDir, '.teamai', 'models-cache.json');
       expect(existsSync(cachePath)).toBe(true);
       const cache = JSON.parse(readFileSync(cachePath, 'utf-8'));
-      expect(cache.anthropic.models).toEqual(['claude-3-5-sonnet-20241022', 'claude-sonnet-4-6']);
+      expect(cache.anthropic.models).toEqual(['claude-haiku-4-5', 'claude-sonnet-4-6']);
 
       // Second call: should use cache, not fetch
       const second = await getAvailableModels('anthropic');
-      expect(second.models).toEqual(['claude-3-5-sonnet-20241022', 'claude-sonnet-4-6']);
+      expect(second.models).toEqual(['claude-haiku-4-5', 'claude-sonnet-4-6']);
       // fetch should only have been called once (from the first call)
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
@@ -428,17 +430,17 @@ describe('getAvailableModels Integration', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          data: [{ id: 'fresh-model', type: 'model' }],
+          data: [{ id: 'claude-opus-4-5', type: 'model' }],
         }),
       });
 
       const result = await getAvailableModels('anthropic', true);
-      expect(result.models).toEqual(['fresh-model']);
+      expect(result.models).toEqual(['claude-opus-4-5']);
       expect(mockFetch).toHaveBeenCalledTimes(1);
 
       // Verify cache was updated with fresh data
       const cache = JSON.parse(readFileSync(cachePath, 'utf-8'));
-      expect(cache.anthropic.models).toEqual(['fresh-model']);
+      expect(cache.anthropic.models).toEqual(['claude-opus-4-5']);
     });
   });
 });
