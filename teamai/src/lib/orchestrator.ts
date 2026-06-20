@@ -1920,6 +1920,15 @@ export class Orchestrator {
       return;
     }
 
+    // In container mode, re-patch the worktree .git file before running docker exec.
+    // Host-side git operations between implement and create-pr phases (e.g. a push
+    // on the host) can rewrite the .git file back to a Windows path, causing
+    // docker exec git to fail with "fatal: not a git repository: (null)".
+    if (readContainerConfig(this.projectRoot).enabled) {
+      const info = containerManager.getRunningContainer(this.projectRoot);
+      if (info) this._patchWorktreeGitFile(pipeline.worktreePath, info.remoteWorkspaceFolder);
+    }
+
     // Stage and commit in the worktree. _execGit routes through docker exec
     // in container mode so the worktree's .git file (container paths) resolves.
     // Relative path is intentional — absolute paths break container mode
