@@ -11,6 +11,8 @@ Think through:
 - What are the edge cases and error states?
 - What are the dependencies on existing code?
 
+**CRITICAL — No Delegated Analysis:** Investigation and root-cause analysis are pre-spec activities. If the feature request asks you to "investigate", "analyse", or "determine the correct value for" something, complete that investigation yourself NOW — read the logs, derive the formula, determine the thresholds — and embed the findings directly into the spec's technical sections. NEVER delegate analysis to the engineer via requirements like "determine the correct value" or "analyse why X fails". By the time the spec reaches the engineer, every concrete value, formula, and threshold must already be decided and justified.
+
 ## Step 2: Codebase Research
 Use Glob and Grep to find:
 - Related existing code (patterns, highly relevant naming conventions, similar features)
@@ -33,6 +35,7 @@ Review your own spec. Check for:
 - Vague or untestable acceptance criteria
 - Scope creep beyond the original request
 - Missing files in the modification list
+- **Delegated analysis**: Are any requirements worded as research tasks ("analyse", "investigate", "determine") instead of concrete, computed specifications?
 
 ## Step 5: Output
 Print the path to the spec file and a one-paragraph summary.

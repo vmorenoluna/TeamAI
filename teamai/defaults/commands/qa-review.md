@@ -31,6 +31,7 @@ This means on a rework pass where only one criterion failed and its file was cha
 5. For each acceptance criterion, determine PASS or FAIL with evidence from the actual file content:
    - If a criterion says "no occurrences of X remain": grep the relevant files and paste the result.
    - If a criterion says "Y is used instead of Z": read the file and confirm.
+   - If a criterion requires empirical evidence from a script run (benchmark, integration test, etc.): read the committed output and confirm the results meet the criterion's thresholds. A coder claim of "mathematically verified" or theoretical justification does NOT satisfy an empirical criterion — mark it FAIL.
    - Never infer a criterion is satisfied from the diff alone — verify against current code.
      - **After evaluating each criterion**: write the partial QA report to disk immediately
        (with `"overall": "IN_PROGRESS"` as a placeholder). This ensures that if the session
@@ -99,9 +100,13 @@ Write the QA report to the **exact absolute path** specified in the prompt instr
 The orchestrator will provide the correct output path — do NOT guess or derive it from the working directory.
 If no explicit path is provided (fallback), resolve the main repository root first (e.g., `git rev-parse --show-toplevel`) and write to `<repo-root>/.teamai/{slug}/qa_report.json`.
 
-`fail_type`: Set to `"cleanup"` when ALL failing criteria require only file-system or git operations
-(e.g., `git rm`, `git add`, committing a missing file) and zero Scala source changes. Set to `"code"`
-when any failure requires changing source code, tests, or configuration. Set to `null` on PASS.
+`fail_type`: Set to `"cleanup"` when ALL failing criteria require only mechanical operations with zero source code changes.
+
+**Cleanup operations include:**
+- File-system or git operations (e.g., `git rm`, `git add`, committing a missing file)
+- Running a script and committing its output (e.g., the coder provided mathematical justification instead of running the required benchmark — the fix is to run the script and commit the results, which is a mechanical operation, not a code change)
+
+Set to `"code"` when any failure requires changing source code, tests, or configuration. Set to `null` on PASS.
 The orchestrator uses this to route cleanup failures directly without spawning a coder session.
 
 ```json

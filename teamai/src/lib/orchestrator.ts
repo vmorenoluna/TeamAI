@@ -1021,15 +1021,15 @@ export class Orchestrator {
         writeFileSync(bounceSnapshot, readFileSync(reportPath, 'utf-8'));
       } catch { /* best-effort */ }
 
-      // ── Improvement 4: FAIL-type router — handle cleanup FAILs without spawning coder ──
+      // ── Improvement 4: FAIL-type router — handle cleanup FAILs with lightweight coder session ──
       if (report.fail_type === 'cleanup') {
-        appendFileSync(logFile, '\n[QA-ROUTER] fail_type=cleanup — handling git cleanup directly\n');
+        appendFileSync(logFile, '\n[QA-ROUTER] fail_type=cleanup — routing to implement for automated mechanical fix\n');
         // Log the fix_needed fields so the user can see what was required
         const failCriteria = report.criteria?.filter(c => c.status === 'FAIL') || [];
         for (const c of failCriteria) {
           appendFileSync(logFile, `[QA-ROUTER] Cleanup required: ${c.fix_needed || c.notes || c.criterion}\n`);
         }
-        appendFileSync(logFile, '[QA-ROUTER] Cleanup FAILs require manual intervention or a dedicated cleanup subtask — advancing to implement for targeted fix\n');
+        appendFileSync(logFile, '[QA-ROUTER] Cleanup fix is automated — executing via implement cleanup-only rework mode (no spec re-read, no test suite)\n');
       }
 
       // Write QA feedback and bounce back to implement instead of auto-fixing
@@ -1708,6 +1708,9 @@ export class Orchestrator {
     content += `Where QA feedback and the plan's acceptance criteria conflict, **follow the QA feedback**. `;
     content += `The plan may be outdated — QA findings are the ground truth.\n\n`;
     content += `## Overall: ${report.overall}\n\n`;
+    if (report.fail_type) {
+      content += `**fail_type**: ${report.fail_type}\n\n`;
+    }
     if (report.criteria) {
       content += `## Failed Criteria\n\n`;
       for (const c of report.criteria) {
