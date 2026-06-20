@@ -15,11 +15,14 @@ note the deviation from the plan.
 
 **Before reading the full QA feedback**, check if `fail_type` in the QA report is `"cleanup"`.
 If so, you are in **cleanup-only rework mode**:
-- The QA issues require only file-system or git operations (e.g., `git rm`, committing a missing file).
-- Do NOT re-read the full spec. Do NOT run the test suite (no Scala source will change).
-- Execute only the `fix_needed` operations from the failing criteria.
+- The QA issues require only mechanical operations with zero source code changes.
+- Do NOT re-read the full spec. Do NOT run the test suite (no source code will change).
+- Execute only the `fix_needed` operations from the failing criteria:
+  - For git/file-system fixes: `git rm`, `git add`, `git mv`, committing missing files, etc.
+  - For artifact fixes: run the specified script, verify the output meets the criterion's thresholds,
+    `git add` the output, commit, and push.
 - Commit and push.
-- Print a summary of what was cleaned up.
+- Print a summary of what was cleaned up or what artifact was produced.
 - Cleanup rework is complete — do not mark additional subtasks as complete.
 
 If `fail_type` is `"code"` or absent, proceed with the standard QA rework steps below.
@@ -92,6 +95,15 @@ re-read a file to verify an `Edit` that returned success.
   why a specific value or formula was chosen, treat that as authoritative. Do not
   re-derive, re-test, or re-explore alternatives the spec explicitly marks as rejected
   or superseded.
+- **No mathematical substitution:** If an acceptance criterion requires empirical evidence
+  from a script run (benchmark, integration test, data pipeline, verification report),
+  you MUST run the script and commit the output. Mathematical or theoretical justification
+  does NOT satisfy an empirical criterion. A claim of "mathematically verified" for a
+  criterion that says "post-fix script exits with < 20 failures" is a FAIL. Changing the
+  wording of a claim from "verified" to "expected" or "mathematically estimated" is not
+  a fix — it is an acknowledgement of failure. If the script takes too long for the
+  session budget, stop and report the blocker explicitly rather than substituting a
+  theoretical claim.
 
 ## Long-Running Verification Scripts
 
@@ -106,6 +118,33 @@ integration run) that takes more than ~30 seconds:
    don't poll" contract. One start + one await is the complete pattern.
 5. Capture only the summary line from the output (pass/fail count, error list) —
    do not read the full output into context unless a failure requires diagnosis.
+
+### When background output is unreadable
+
+If a long-running background script does not deliver readable output after its
+completion notification, re-run it synchronously (without `run_in_background`).
+Do NOT substitute a partial or reduced run for the full required invocation, and
+do NOT change acceptance-criterion wording to work around missing evidence.
+
+### When the script produces incremental progress output
+
+If a long-running background script produces incremental output while running
+(a growing log file, a record counter, a progress line):
+
+1. **Check once** shortly after starting to confirm it is running and producing output.
+2. **Estimate remaining time** from the progress: how many records/steps have completed,
+   how many remain, what the throughput rate is.
+3. **Wait that estimated duration** before checking again — do NOT check on a fixed
+   short interval. A script processing 100 records/min with 900 remaining has ~9 minutes
+   left; checking every 30 seconds serves no purpose.
+4. **Do not restart** a script that is visibly making progress at the expected rate.
+   It is running correctly — restarting wastes time and risks corrupting partial output.
+   Do not start a parallel run — one running instance is sufficient.
+5. **Escalate only on clear failure signals:**
+   - No new output has appeared for more than 10 minutes
+   - The script has exited early (before completing the expected workload)
+   - An error line appears in the output
+   Do NOT restart or escalate because the script "feels slow" — use the math.
 
 ### When the sweep output is a committed artifact
 

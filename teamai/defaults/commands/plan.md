@@ -40,4 +40,12 @@ Rules:
   broader project context). If the spec says to file follow-up tickets for findings,
   document those findings in the final documentation subtask instead — the analyst will
   create the follow-up tickets after reviewing the completed work.
+- **Verification scripts need dedicated subtasks:** When the spec includes an acceptance
+  criterion that requires running a script to produce empirical evidence (e.g. a
+  benchmark, integration run, or data pipeline), the plan MUST include a dedicated
+  subtask for that script run. Never fold it into a documentation subtask. The subtask
+  must specify: (a) the exact command to run, (b) what output artifact to commit, and
+  (c) the specific check to apply to the output (e.g. "section X shows fewer than N
+  failures"). This makes the criterion independently verifiable by QA without relying
+  on the engineer's self-report.
 ```
