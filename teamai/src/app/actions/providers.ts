@@ -102,11 +102,16 @@ export async function saveProvidersConfig(config: ProvidersConfig): Promise<void
  *   Gen 3.x: claude-3-5-{family}-{date}         e.g. claude-3-5-sonnet-20241022
  *   Gen 3:   claude-3-{family}-{date}           e.g. claude-3-haiku-20240307
  *
+ * The optional numeric-gen prefix `(?:\d+(?:-\d+)?-)?` detects and strips
+ * any generation prefix (3-, 3-5-, 4-, 4-5-, 10-) so that the family name
+ * (opus, sonnet, haiku, …) is captured regardless of generation — no code
+ * change needed when Anthropic ships gen 4.5, gen 5, or beyond.
+ *
  * Returns the family name (opus, sonnet, haiku, fable, mythos, …) or null.
  * New families are detected automatically — no code change required.
  */
-function extractClaudeFamily(id: string): string | null {
-  const match = id.match(/^claude-(?:3(?:-5)?-)?([a-z]+)/);
+export function extractClaudeFamily(id: string): string | null {
+  const match = id.match(/^claude-(?:\d+(?:-\d+)?-)?([a-z]+)/);
   return match ? match[1] : null;
 }
 
@@ -118,7 +123,7 @@ function extractClaudeFamily(id: string): string | null {
  * this ensures multi-digit version components (claude-sonnet-4-10 vs 4-6) and
  * date suffixes (20241022 vs 20240307) sort correctly.
  */
-function sortKey(id: string): string {
+export function sortKey(id: string): string {
   return id.replace(/^claude-3-5-/, 'claude-3.5-');
 }
 

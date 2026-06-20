@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getAvailableModels } from '@/app/actions/providers';
+import { getAvailableModels, extractClaudeFamily, sortKey } from '@/app/actions/providers';
 import { CURATED_MODELS } from '@/defaults/models';
 
 const mockFetch = vi.fn();
@@ -554,5 +554,183 @@ describe('getAvailableModels', () => {
     // Dedup: sonnet and haiku are different families, both kept
     expect(result.models).toEqual(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6']);
     expect(mockFetch).toHaveBeenCalled();
+  });
+});
+
+// ── extractClaudeFamily ──────────────────────────────────────────────
+
+describe('extractClaudeFamily', () => {
+  // ── Gen 4+ (no gen prefix) ───────────────────────────────────────
+
+  it('extracts opus from claude-opus-4-8', () => {
+    expect(extractClaudeFamily('claude-opus-4-8')).toBe('opus');
+  });
+
+  it('extracts sonnet from claude-sonnet-4-6', () => {
+    expect(extractClaudeFamily('claude-sonnet-4-6')).toBe('sonnet');
+  });
+
+  it('extracts haiku from claude-haiku-4-5-20251001', () => {
+    expect(extractClaudeFamily('claude-haiku-4-5-20251001')).toBe('haiku');
+  });
+
+  it('extracts sonnet from claude-sonnet-4-20250514 (date-suffixed gen 4)', () => {
+    expect(extractClaudeFamily('claude-sonnet-4-20250514')).toBe('sonnet');
+  });
+
+  // ── Gen 3 │────────────────────────────────────────────────────────
+
+  it('extracts opus from claude-3-opus-20240229', () => {
+    expect(extractClaudeFamily('claude-3-opus-20240229')).toBe('opus');
+  });
+
+  it('extracts sonnet from claude-3-sonnet-20240229', () => {
+    expect(extractClaudeFamily('claude-3-sonnet-20240229')).toBe('sonnet');
+  });
+
+  it('extracts haiku from claude-3-haiku-20240307', () => {
+    expect(extractClaudeFamily('claude-3-haiku-20240307')).toBe('haiku');
+  });
+
+  // ── Gen 3.5 ──────────────────────────────────────────────────────
+
+  it('extracts sonnet from claude-3-5-sonnet-20241022', () => {
+    expect(extractClaudeFamily('claude-3-5-sonnet-20241022')).toBe('sonnet');
+  });
+
+  it('extracts haiku from claude-3-5-haiku-20241022', () => {
+    expect(extractClaudeFamily('claude-3-5-haiku-20241022')).toBe('haiku');
+  });
+
+  // ── Future generations (any numeric gen prefix) ────────────────
+
+  it('extracts sonnet from claude-4-sonnet-20250101 (hypothetical gen 4 prefixed)', () => {
+    expect(extractClaudeFamily('claude-4-sonnet-20250101')).toBe('sonnet');
+  });
+
+  it('extracts sonnet from claude-4-5-sonnet-20250101 (hypothetical gen 4.5)', () => {
+    expect(extractClaudeFamily('claude-4-5-sonnet-20250101')).toBe('sonnet');
+  });
+
+  it('extracts opus from claude-5-opus-20260101 (hypothetical gen 5)', () => {
+    expect(extractClaudeFamily('claude-5-opus-20260101')).toBe('opus');
+  });
+
+  it('extracts sonnet from claude-10-sonnet-20260101 (multi-digit gen)', () => {
+    expect(extractClaudeFamily('claude-10-sonnet-20260101')).toBe('sonnet');
+  });
+
+  // ── Future / hypothetical families (auto-detected) ──────────────
+
+  it('auto-detects a new family like fable', () => {
+    expect(extractClaudeFamily('claude-fable-4-1')).toBe('fable');
+  });
+
+  it('auto-detects a new family like mythos', () => {
+    expect(extractClaudeFamily('claude-mythos-5')).toBe('mythos');
+  });
+
+  it('auto-detects fable with gen 3.5 prefix', () => {
+    expect(extractClaudeFamily('claude-3-5-fable-20260101')).toBe('fable');
+  });
+
+  // ── Non-Claude IDs ───────────────────────────────────────────────
+
+  it('returns null for non-claude model ID', () => {
+    expect(extractClaudeFamily('gpt-4o')).toBeNull();
+  });
+
+  it('returns null for bedrock-prefixed ID', () => {
+    expect(extractClaudeFamily('anthropic.claude-sonnet-4-20250514-v2:0')).toBeNull();
+  });
+
+  it('returns null for empty string', () => {
+    expect(extractClaudeFamily('')).toBeNull();
+  });
+
+  it('returns null for bare claude without family', () => {
+    expect(extractClaudeFamily('claude-')).toBeNull();
+  });
+});
+
+// ── sortKey ─────────────────────────────────────────────────────────
+
+describe('sortKey', () => {
+  it('normalizes claude-3-5- to claude-3.5-', () => {
+    expect(sortKey('claude-3-5-sonnet-20241022')).toBe('claude-3.5-sonnet-20241022');
+  });
+
+  it('preserves claude-3- (no normalization needed)', () => {
+    expect(sortKey('claude-3-opus-20240229')).toBe('claude-3-opus-20240229');
+  });
+
+  it('preserves gen 4 IDs unchanged', () => {
+    expect(sortKey('claude-sonnet-4-6')).toBe('claude-sonnet-4-6');
+  });
+
+  it('preserves non-claude IDs unchanged', () => {
+    expect(sortKey('gpt-4o')).toBe('gpt-4o');
+  });
+
+  // ── Sort ordering verification ──────────────────────────────────
+
+  it('sorts gen 3.5 after gen 3 (same family)', () => {
+    const ids = ['claude-3-5-haiku-20241022', 'claude-3-haiku-20240307'];
+    ids.sort((a, b) =>
+      sortKey(a).localeCompare(sortKey(b), undefined, { numeric: true }),
+    );
+    expect(ids).toEqual(['claude-3-haiku-20240307', 'claude-3-5-haiku-20241022']);
+  });
+
+  it('sorts gen 4 after gen 3.5 (same family)', () => {
+    const ids = [
+      'claude-sonnet-4-6',
+      'claude-3-5-sonnet-20241022',
+      'claude-3-sonnet-20240229',
+    ];
+    ids.sort((a, b) =>
+      sortKey(a).localeCompare(sortKey(b), undefined, { numeric: true }),
+    );
+    expect(ids).toEqual([
+      'claude-3-sonnet-20240229',
+      'claude-3-5-sonnet-20241022',
+      'claude-sonnet-4-6',
+    ]);
+  });
+
+  it('sorts multi-digit versions correctly (4-10 after 4-6)', () => {
+    const ids = ['claude-sonnet-4-10', 'claude-sonnet-4-6'];
+    ids.sort((a, b) =>
+      sortKey(a).localeCompare(sortKey(b), undefined, { numeric: true }),
+    );
+    expect(ids).toEqual(['claude-sonnet-4-6', 'claude-sonnet-4-10']);
+  });
+
+  it('sorts date suffixes chronologically', () => {
+    const ids = ['claude-haiku-4-5-20251001', 'claude-haiku-4-5-20241201'];
+    ids.sort((a, b) =>
+      sortKey(a).localeCompare(sortKey(b), undefined, { numeric: true }),
+    );
+    expect(ids).toEqual([
+      'claude-haiku-4-5-20241201',
+      'claude-haiku-4-5-20251001',
+    ]);
+  });
+
+  it('sorts different families independently', () => {
+    const ids = [
+      'claude-sonnet-4-6',
+      'claude-opus-4-8',
+      'claude-haiku-4-5-20251001',
+    ];
+    ids.sort((a, b) =>
+      sortKey(a).localeCompare(sortKey(b), undefined, { numeric: true }),
+    );
+    // Alphabetical by family: haiku < opus < sonnet
+    expect(ids).toEqual([
+      'claude-haiku-4-5-20251001',
+      'claude-opus-4-8',
+      'claude-sonnet-4-6',
+    ]);
   });
 });
