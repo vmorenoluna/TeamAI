@@ -10,9 +10,9 @@
  */
 export const CURATED_MODELS: Record<string, string[]> = {
   anthropic: [
-    'claude-opus-4-5',
+    'claude-opus-4-8',
     'claude-sonnet-4-6',
-    'claude-haiku-4-5',
+    'claude-haiku-4-5-20251001',
   ],
   openai: [
     'gpt-4o',
