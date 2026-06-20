@@ -132,3 +132,37 @@ QA reports (`qa_report.json`) contain two kinds of issues:
    - The engineer must address ALL QA issues before marking the subtask complete
 
 This design ensures the engineer can distinguish between a hard blocker ("this must be fixed or QA will fail again") and an optional suggestion ("nice to have but won't block the merge"), preventing infinite qa-fix loops where the engineer ignores critical issues they thought were optional.
+
+### Pipeline Workflow Rules
+
+The command templates in `defaults/commands/` enforce cross-cutting guardrails to prevent common anti-patterns. These rules span multiple pipeline phases and are designed to work together.
+
+#### Spec Phase (analyst)
+
+1. **No Delegated Analysis** (`spec.md` Step 1): Investigation and root-cause analysis are pre-spec activities. If the feature request asks the analyst to "investigate", "analyse", or "determine the correct value for" something, the analyst must complete that investigation NOW — read logs, derive formulas, determine thresholds — and embed findings directly into the spec. NEVER delegate analysis to the implement phase via requirements like "determine the correct value" or "analyse why X fails". By the time the spec reaches the engineer, every concrete value, formula, and threshold must already be decided and justified.
+
+2. **Self-Critique Check** (`spec.md` Step 4): The analyst must check for delegated-analysis anti-patterns — are any requirements worded as research tasks ("analyse", "investigate", "determine") instead of concrete, computed specifications?
+
+#### Plan Phase (planner)
+
+3. **Verification Script Subtask Rule** (`plan.md` Rules): When the spec includes an acceptance criterion that requires running a script to produce empirical evidence (benchmark, integration run, data pipeline), the plan MUST include a dedicated subtask for that script run. Never fold it into a documentation subtask. The subtask must specify: (a) the exact command to run, (b) what output artifact to commit, and (c) the specific check to apply to the output (e.g. "section X shows fewer than N failures"). This makes the criterion independently verifiable by QA without relying on the engineer's self-report.
+
+#### Implement Phase (coder)
+
+4. **No Mathematical Substitution** (`implement.md` Rules): If an acceptance criterion requires empirical evidence from a script run (benchmark, integration test, data pipeline, verification report), the coder MUST run the script and commit the output. Mathematical or theoretical justification does NOT satisfy an empirical criterion. A claim of "mathematically verified" for a criterion that says "post-fix script exits with < 20 failures" is a FAIL.
+
+5. **Word-Gaming Prevention** (`implement.md` Rules): Changing the wording of a claim from "verified" to "expected" or "mathematically estimated" is not a fix — it is an acknowledgement of failure.
+
+6. **Session Budget Awareness** (`implement.md` Rules): If a required script takes too long for the session budget, stop and report the blocker explicitly rather than substituting a theoretical claim.
+
+7. **Cleanup-Only Rework Mode** (`implement.md` QA Rework): When `fail_type` is `"cleanup"`, the coder enters cleanup-only mode: no spec re-read, no test suite, execute only mechanical `fix_needed` operations. This covers both git/file-system fixes (git rm, git add) and artifact fixes (run a script, verify output, git add, commit, push).
+
+8. **Incremental Progress Estimation** (`implement.md` Long-Running Scripts): For scripts that produce incremental progress output (growing log, record counter, progress lines), check once to confirm it's running, estimate remaining time from throughput rate, wait that duration before checking again. Do NOT check on a fixed short interval. Do NOT restart a script making expected progress. Do NOT start parallel runs. Only escalate if: no output for 10+ minutes, script exited early, or an error line appears.
+
+9. **Background Output Unreadable** (`implement.md` Long-Running Scripts): If a long-running background script does not deliver readable output after its completion notification, re-run it synchronously (without `run_in_background`). Do NOT substitute a partial or reduced run for the full required invocation, and do NOT change acceptance-criterion wording to work around missing evidence.
+
+#### QA Review Phase (qa-reviewer)
+
+10. **Empirical Evidence Enforcement** (`qa-review.md` Step 5): For acceptance criteria requiring empirical evidence from a script run, the QA agent must read the committed output and confirm the results meet the criterion's thresholds. A coder claim of "mathematically verified" or theoretical justification does NOT satisfy an empirical criterion — mark it FAIL.
+
+11. **Extended Cleanup fail_type** (`qa-review.md` Output, `orchestrator.ts`): `fail_type: "cleanup"` covers ALL mechanical fixes with zero source code changes — both git/file-system operations AND script-run-and-commit operations (e.g., the coder substituted math for benchmark output; the fix is to run the script and commit results). The orchestrator routes cleanup failures to implement with cleanup-only rework mode, and writes `fail_type` into `qa_feedback.md` so the coder detects cleanup mode without needing to locate `qa_report.json`.
