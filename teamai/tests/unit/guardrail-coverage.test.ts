@@ -112,6 +112,27 @@ const GUARDRAILS: GuardrailCheck[] = [
     file: 'defaults/commands/qa-review.md',
     signatures: ['committing its output', 'mechanical operation, not a code change'],
   },
+  {
+    id: 12,
+    name: 'Spec Executability',
+    description: 'spec.md Step 4 — no unquantified requirements, reference implementations, or tribal-knowledge assumptions',
+    file: 'defaults/commands/spec.md',
+    signatures: ['Spec executability', 'unquantified', 'reference implementation'],
+  },
+  {
+    id: 13,
+    name: 'Plan Coverage',
+    description: 'plan.md Rules — every spec criterion maps to a subtask, no orphaned criteria, no conflicting file ownership',
+    file: 'defaults/commands/plan.md',
+    signatures: ['Plan coverage', 'orphaned criteria', 'parallel subtasks modify the same file'],
+  },
+  {
+    id: 14,
+    name: 'Spec Authority in Normal Mode',
+    description: 'implement.md Rules — don\'t silently change spec formulas/values, flag concerns instead',
+    file: 'defaults/commands/implement.md',
+    signatures: ['Spec authority', 'do NOT silently change'],
+  },
 ];
 
 // ---------------------------------------------------------------------------

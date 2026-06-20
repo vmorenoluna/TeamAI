@@ -36,6 +36,7 @@ Review your own spec. Check for:
 - Scope creep beyond the original request
 - Missing files in the modification list
 - **Delegated analysis**: Are any requirements worded as research tasks ("analyse", "investigate", "determine") instead of concrete, computed specifications?
+- **Spec executability**: Are any requirements unquantified ("fast enough", "sufficient", "reasonable")? Are there reference implementations ("do it like module X") instead of concrete specs? Does every requirement stand alone — can an engineer with no prior context implement it without guessing?
 
 ## Step 5: Output
 Print the path to the spec file and a one-paragraph summary.

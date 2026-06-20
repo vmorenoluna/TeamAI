@@ -40,6 +40,13 @@ Rules:
   broader project context). If the spec says to file follow-up tickets for findings,
   document those findings in the final documentation subtask instead — the analyst will
   create the follow-up tickets after reviewing the completed work.
+- **Plan coverage**: Every spec acceptance criterion must map to at least one subtask —
+  no orphaned criteria. After writing the plan, verify that each criterion from the
+  spec appears in a subtask's `acceptance_criteria` array. If a criterion has no
+  matching subtask, add one.
+- If two parallel subtasks modify the same file, add an explicit `depends_on` between
+  them or merge them into one subtask — parallel writes to the same file cause merge
+  conflicts that waste engineer sessions.
 - **Verification scripts need dedicated subtasks:** When the spec includes an acceptance
   criterion that requires running a script to produce empirical evidence (e.g. a
   benchmark, integration run, or data pipeline), the plan MUST include a dedicated
