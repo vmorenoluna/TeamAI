@@ -223,6 +223,13 @@ export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
     }));
   }
 
+  function setExplorationModel(value: string) {
+    setCfg(c => ({
+      ...c,
+      exploration: { model: value },
+    }));
+  }
+
   function handleSave() {
     startTransition(async () => {
       await saveProvidersConfig(cfg);
@@ -255,6 +262,19 @@ export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
             onProvider={v => setRole(role, 'provider', v)}
           />
         ))}
+      </div>
+      <div>
+        <p className="text-xs font-medium text-slate-400 mb-2">Exploration (ideation &amp; roadmap)</p>
+        <p className="text-xs text-slate-500 mb-2">
+          Model used for ideation scans and roadmap generation. Falls back to the Default model when left blank.
+        </p>
+        <ModelRow
+          label="Exploration"
+          model={cfg.exploration?.model ?? ''}
+          provider={cfg.default.provider}
+          onModel={setExplorationModel}
+          onProvider={() => {}}
+        />
       </div>
       <button
         onClick={handleSave}

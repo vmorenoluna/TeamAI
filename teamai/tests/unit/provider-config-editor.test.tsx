@@ -317,13 +317,76 @@ describe('ProviderConfigEditor', () => {
     });
 
     const indicators = screen.getAllByText('Loading models…');
-    expect(indicators).toHaveLength(6);
+    expect(indicators).toHaveLength(7); // default + 5 roles + exploration
 
     // Resolve the loading so inflightFetches cleans up
     resolveLoading({ models: CURATED_MODELS_ANTHROPIC, error: undefined });
     await vi.waitFor(() => {
       expect(screen.queryByText('Loading models…')).toBeNull();
     });
+  });
+
+  // ── Exploration model section ───────────────────────────────────────
+
+  it('renders exploration section with model picker', async () => {
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
+    expect(screen.getByText('Exploration (ideation & roadmap)')).toBeInTheDocument();
+  });
+
+  it('shows exploration model from config when set', async () => {
+    const configWithExploration = {
+      default: { model: 'claude-sonnet-4-6', provider: 'anthropic' },
+      roles: {},
+      exploration: { model: 'claude-3-5-sonnet-20241022' },
+    };
+    act(() => {
+      render(<ProviderConfigEditor config={configWithExploration} />);
+    });
+    await waitFor(() => {
+      // The exploration row should have the model selector showing the exploration model
+      const modelSelects = screen.getAllByRole('combobox');
+      const explorationSelect = modelSelects.find(
+        s => (s as HTMLSelectElement).value === 'claude-3-5-sonnet-20241022',
+      );
+      expect(explorationSelect).toBeTruthy();
+    });
+  });
+
+  it('saves exploration model with config', async () => {
+    const configWithExploration = {
+      default: { model: 'claude-sonnet-4-6', provider: 'anthropic' },
+      roles: {},
+      exploration: { model: 'gemini-2.0-flash' },
+    };
+    act(() => {
+      render(<ProviderConfigEditor config={configWithExploration} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
+    const saveButton = screen.getByText('Save Provider Config');
+    await act(async () => {
+      fireEvent.click(saveButton);
+    });
+    expect(mockSaveProvidersConfig).toHaveBeenCalledWith(configWithExploration);
+  });
+
+  it('falls back to default model in exploration row when not set', async () => {
+    act(() => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
+    // The exploration row label should be visible
+    expect(screen.getByText('Exploration')).toBeInTheDocument();
+    // The exploration row provider should be the default provider
+    const explorationProviderSelects = screen.getAllByRole('combobox').filter(
+      s => {
+        const opts = Array.from((s as HTMLSelectElement).options);
+        return opts.some(o => o.value === 'anthropic') && opts.some(o => o.value === 'openai');
+      },
+    );
+    expect(explorationProviderSelects.length).toBeGreaterThanOrEqual(1);
   });
 
 

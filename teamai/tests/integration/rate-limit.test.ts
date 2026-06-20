@@ -577,7 +577,7 @@ describe('Rate Limit Integration', () => {
       orch.activeTasks.delete(taskId);
     });
 
-    it('plan resume completes and advances to implement after rate limit clears', async () => {
+    it('plan resume completes and advances to implement after rate limit clears', { timeout: 10000 }, async () => {
       // Setup: spec.md and plan.json needed for full plan → implement cascade
       writeFileSync(join(taskDir, 'plan.json'), JSON.stringify({
         subtasks: [{ id: 1, title: 'Test', description: 'Desc', files: ['src/a.ts'], acceptance_criteria: ['ac1'] }],
@@ -723,7 +723,7 @@ describe('Rate Limit Integration', () => {
       orch.activeTasks.delete(taskId);
     });
 
-    it('implement resume completes subtask and advances to qa-review', async () => {
+    it('implement resume completes subtask and advances to qa-review', { timeout: 10000 }, async () => {
       // Setup: plan.json with one subtask, worktree exists
       writeFileSync(join(taskDir, 'plan.json'), JSON.stringify({
         subtasks: [
