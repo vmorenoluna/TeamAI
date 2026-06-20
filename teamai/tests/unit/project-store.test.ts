@@ -523,10 +523,88 @@ describe('ProjectStore', () => {
 
     try {
       const updated = store.syncDefaults(projectDir);
-      // Cannot auto-update without a baseline — not in the updated list
-      expect(updated).not.toContain('commands/.test-new-command-2.md');
+      // Cannot auto-update without a baseline — but we DO flag it as outdated
+      expect(updated).toContain('commands/.test-new-command-2.md');
+
+      // And record the project's checksum to the manifest (not the default's)
+      const manifestPath = join(projectDir, '.claude', '.teamai-scaffold.json');
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+      const projectChecksum = 'sha256:' + createHash('sha256').update('# Pre-existing project version\n').digest('hex').slice(0, 16);
+      expect(manifest.files['commands/.test-new-command-2.md']).toBe(projectChecksum);
+
       // Project file is preserved
       expect(readFileSync(destPath, 'utf-8')).toBe('# Pre-existing project version\n');
+    } finally {
+      if (existsSync(newDefaultPath)) unlinkSync(newDefaultPath);
+      if (existsSync(destPath)) unlinkSync(destPath);
+    }
+  });
+
+  it('syncDefaults flags pre-existing mismatched file as outdated without manifest baseline', () => {
+    store.add(projectDir, 'Test Project');
+
+    // Create a new default file
+    const newDefaultPath = join(process.cwd(), 'defaults', 'commands', '.test-outdated.md');
+    writeFileSync(newDefaultPath, '# New default\n');
+
+    // Create a pre-existing project file that differs from the default
+    const destPath = join(projectDir, '.claude', 'commands', '.test-outdated.md');
+    writeFileSync(destPath, '# Outdated project content\n');
+
+    try {
+      // First syncDefaults call should flag it as outdated
+      const updated = store.syncDefaults(projectDir);
+      expect(updated).toContain('commands/.test-outdated.md');
+
+      // But NOT overwrite the pre-existing project file
+      expect(readFileSync(destPath, 'utf-8')).toBe('# Outdated project content\n');
+    } finally {
+      if (existsSync(newDefaultPath)) unlinkSync(newDefaultPath);
+      if (existsSync(destPath)) unlinkSync(destPath);
+    }
+  });
+
+  it('syncDefaults updates a bootstrapped outdated file on the next run after default changes', () => {
+    // Simulate the full lifecycle: bootstrap flags a divergent file →
+    // default changes → second run picks it up and updates.
+    store.add(projectDir, 'Test Project');
+
+    const newDefaultPath = join(process.cwd(), 'defaults', 'commands', '.test-lifecycle.md');
+    const destPath = join(projectDir, '.claude', 'commands', '.test-lifecycle.md');
+
+    // Step 1: Create a default v1 and a pre-existing project file v0 that differs.
+    writeFileSync(newDefaultPath, '# Default v1\n');
+    writeFileSync(destPath, '# Project v0 (outdated)\n');
+
+    try {
+      // Step 2: Bootstrap — should flag as outdated and record project checksum.
+      const first = store.syncDefaults(projectDir);
+      expect(first).toContain('commands/.test-lifecycle.md');
+      expect(readFileSync(destPath, 'utf-8')).toBe('# Project v0 (outdated)\n');
+
+      // Verify manifest recorded the PROJECT checksum, not the default's.
+      const manifestPath = join(projectDir, '.claude', '.teamai-scaffold.json');
+      const manifestAfterFirst = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+      const projectV0Checksum = 'sha256:' + createHash('sha256').update('# Project v0 (outdated)\n').digest('hex').slice(0, 16);
+      expect(manifestAfterFirst.files['commands/.test-lifecycle.md']).toBe(projectV0Checksum);
+
+      // Step 3: Update the default to v2.
+      writeFileSync(newDefaultPath, '# Default v2 (updated)\n');
+
+      // Step 4: Second run — projectChecksum === storedChecksum (v0 hash),
+      // so the file is treated as uncustomized and gets updated with default v2.
+      const second = store.syncDefaults(projectDir);
+      expect(second).toContain('commands/.test-lifecycle.md');
+      expect(readFileSync(destPath, 'utf-8')).toBe('# Default v2 (updated)\n');
+
+      // Manifest should now have the v2 default checksum.
+      const manifestAfterSecond = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+      const defaultV2Checksum = 'sha256:' + createHash('sha256').update('# Default v2 (updated)\n').digest('hex').slice(0, 16);
+      expect(manifestAfterSecond.files['commands/.test-lifecycle.md']).toBe(defaultV2Checksum);
+
+      // Step 5: Third run — storedChecksum === currentChecksum, no changes.
+      const third = store.syncDefaults(projectDir);
+      expect(third).not.toContain('commands/.test-lifecycle.md');
     } finally {
       if (existsSync(newDefaultPath)) unlinkSync(newDefaultPath);
       if (existsSync(destPath)) unlinkSync(destPath);

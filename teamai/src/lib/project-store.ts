@@ -256,11 +256,19 @@ export class ProjectStore {
           updated.push(relPath);
         } else {
           // File exists but has no stored baseline (manifest was absent or the
-          // file predates the manifest). Record the current default checksum as
-          // the baseline so future default changes are tracked correctly.
-          // Do NOT copy — the file may be intentionally customised and we
-          // cannot distinguish a stale copy from a customisation without history.
-          newManifest[relPath] = currentChecksum;
+          // file predates the manifest). Compute the project file's checksum
+          // and compare to the current default. If they match, the file is
+          // genuinely in sync — record the default checksum as the baseline.
+          // If they differ, record the project's checksum so future default
+          // changes are still trackable, and flag the file as outdated.
+          const projectChecksum = this._computeChecksum(readFileSync(destFile, 'utf-8'));
+
+          if (projectChecksum === currentChecksum) {
+            newManifest[relPath] = currentChecksum;
+          } else {
+            newManifest[relPath] = projectChecksum;
+            updated.push(relPath);
+          }
         }
         continue;
       }
