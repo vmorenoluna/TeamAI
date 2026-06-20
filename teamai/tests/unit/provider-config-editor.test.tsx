@@ -22,9 +22,9 @@ const DEFAULT_CONFIG = {
 };
 
 const CURATED_MODELS_ANTHROPIC = [
-  'claude-sonnet-4-20250514',
+  'claude-opus-4-5',
   'claude-sonnet-4-6',
-  'claude-3-5-sonnet-20241022',
+  'claude-haiku-4-5',
 ];
 
 // Helper: find a <select> combobox whose options satisfy a predicate
@@ -340,7 +340,7 @@ describe('ProviderConfigEditor', () => {
     const configWithExploration = {
       default: { model: 'claude-sonnet-4-6', provider: 'anthropic' },
       roles: {},
-      exploration: { model: 'claude-3-5-sonnet-20241022' },
+      exploration: { model: 'claude-haiku-4-5' },
     };
     act(() => {
       render(<ProviderConfigEditor config={configWithExploration} />);
@@ -349,7 +349,7 @@ describe('ProviderConfigEditor', () => {
       // The exploration row should have the model selector showing the exploration model
       const modelSelects = screen.getAllByRole('combobox');
       const explorationSelect = modelSelects.find(
-        s => (s as HTMLSelectElement).value === 'claude-3-5-sonnet-20241022',
+        s => (s as HTMLSelectElement).value === 'claude-haiku-4-5',
       );
       expect(explorationSelect).toBeTruthy();
     });

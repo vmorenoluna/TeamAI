@@ -54,6 +54,19 @@ describe('getAvailableModels', () => {
     cleanTestDir();
   });
 
+  // ── Curated model list shape ────────────────────────────────────────
+
+  it('CURATED_MODELS.anthropic has only latest-gen models (opus, sonnet, haiku)', () => {
+    const models = CURATED_MODELS.anthropic;
+    expect(models).toHaveLength(3);
+    expect(models).toContain('claude-opus-4-5');
+    expect(models).toContain('claude-sonnet-4-6');
+    expect(models).toContain('claude-haiku-4-5');
+    // Ensure no old gen-3 models leaked in
+    const gen3 = models.filter(m => /claude-3/.test(m));
+    expect(gen3).toHaveLength(0);
+  });
+
   // ── Unknown provider ────────────────────────────────────────────────
 
   it('returns error for unknown provider', async () => {
@@ -191,7 +204,7 @@ describe('getAvailableModels', () => {
     vi.stubEnv('ANTHROPIC_API_KEY', '');
 
     // Write a cache entry manually
-    const cachedModels = ['claude-sonnet-4-6', 'claude-3-5-sonnet-20241022'];
+    const cachedModels = ['claude-opus-4-5', 'claude-sonnet-4-6'];
     const cacheDir = join(mockProjectPath, '.teamai');
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(
@@ -290,7 +303,10 @@ describe('getAvailableModels', () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
-        data: [{ id: 'claude-sonnet-4-6', type: 'model' }],
+        data: [
+          { id: 'claude-sonnet-4-6', type: 'model' },
+          { id: 'claude-3-opus-20240229', type: 'model' },
+        ],
       }),
     });
 
@@ -317,20 +333,22 @@ describe('getAvailableModels', () => {
         data: [
           { id: 'claude-sonnet-4-6', type: 'model' },
           { id: 'claude-3-5-sonnet-20241022', type: 'model' },
+          { id: 'claude-opus-4-5', type: 'model' },
         ],
       }),
     });
 
     const result = await getAvailableModels('anthropic');
     expect(result.error).toBeUndefined();
-    expect(result.models).toEqual(['claude-3-5-sonnet-20241022', 'claude-sonnet-4-6']);
+    // claude-3-5-sonnet-20241022 is filtered out (not generation 4)
+    expect(result.models).toEqual(['claude-opus-4-5', 'claude-sonnet-4-6']);
     expect(mockFetch).toHaveBeenCalled();
 
     // Verify cache was written
     const cache = JSON.parse(
       readFileSync(join(mockProjectPath, '.teamai', 'models-cache.json'), 'utf-8'),
     );
-    expect(cache.anthropic.models).toEqual(['claude-3-5-sonnet-20241022', 'claude-sonnet-4-6']);
+    expect(cache.anthropic.models).toEqual(['claude-opus-4-5', 'claude-sonnet-4-6']);
   });
 
   it('fetches OpenAI models from API when key is set', async () => {
@@ -438,6 +456,60 @@ describe('getAvailableModels', () => {
     expect(result.error).toBeUndefined();
   });
 
+  it('filters out all gen-3 models from API response, falls back to curated when none survive', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-anthropic');
+    // API returns only Claude 3 / 3.5 models — all filtered by gen-4 regex
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: 'claude-3-5-sonnet-20241022', type: 'model' },
+          { id: 'claude-3-5-haiku-20241022', type: 'model' },
+          { id: 'claude-3-opus-20240229', type: 'model' },
+          { id: 'claude-3-sonnet-20240229', type: 'model' },
+          { id: 'claude-3-haiku-20240307', type: 'model' },
+        ],
+      }),
+    });
+
+    const result = await getAvailableModels('anthropic');
+
+    // All gen-3 models filtered → empty models array → falls back to curated
+    expect(result.models).toEqual(CURATED_MODELS.anthropic);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('gen-4 filter passes claude-sonnet-4-20250514, opus-4-5, haiku-4-5; rejects gen-3 variants', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-anthropic');
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: 'claude-sonnet-4-20250514', type: 'model' },
+          { id: 'claude-opus-4-5', type: 'model' },
+          { id: 'claude-haiku-4-5', type: 'model' },
+          { id: 'claude-3-5-sonnet-20241022', type: 'model' },
+          { id: 'claude-3-5-haiku-20241022', type: 'model' },
+          { id: 'claude-3-opus-20240229', type: 'model' },
+          { id: 'claude-3-sonnet-20240229', type: 'model' },
+          { id: 'claude-3-haiku-20240307', type: 'model' },
+        ],
+      }),
+    });
+
+    const result = await getAvailableModels('anthropic');
+    expect(result.error).toBeUndefined();
+    // Only gen-4 models pass the filter, sorted alphabetically
+    expect(result.models).toEqual([
+      'claude-haiku-4-5',
+      'claude-opus-4-5',
+      'claude-sonnet-4-20250514',
+    ]);
+    // Verify no gen-3 models leaked through
+    const gen3 = result.models.filter(m => /claude-3/.test(m));
+    expect(gen3).toHaveLength(0);
+  });
+
   // ── No active project (getActiveProjectPath fails) ───────────────────
 
   it('works when no active project (falls back to curated defaults)', async () => {
@@ -461,12 +533,15 @@ describe('getAvailableModels', () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
-        data: [{ id: 'claude-sonnet-4-6', type: 'model' }],
+        data: [
+          { id: 'claude-sonnet-4-6', type: 'model' },
+          { id: 'claude-haiku-4-5', type: 'model' },
+        ],
       }),
     });
 
     const result = await getAvailableModels('anthropic', true);
-    expect(result.models).toEqual(['claude-sonnet-4-6']);
+    expect(result.models).toEqual(['claude-haiku-4-5', 'claude-sonnet-4-6']);
     expect(mockFetch).toHaveBeenCalled();
   });
 });

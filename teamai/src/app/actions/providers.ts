@@ -174,6 +174,7 @@ async function fetchModelsFromProvider(provider: string): Promise<{ models: stri
         const models = json.data
           .filter(m => m.type === 'model')
           .map(m => m.id)
+          .filter(id => /^claude-(opus|sonnet|haiku)-4/.test(id))
           .sort();
         return { models };
       } catch (err) {
