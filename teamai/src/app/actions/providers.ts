@@ -14,6 +14,8 @@ const execFileAsync = promisify(execFile);
 export interface ProvidersConfig {
   default: { model: string; provider: string };
   roles: Record<string, { model?: string; provider?: string }>;
+  /** Model to use for exploration commands (ideation, roadmap). Falls back to default.model when unset. */
+  exploration?: { model?: string };
 }
 
 const DEFAULT: ProvidersConfig = {

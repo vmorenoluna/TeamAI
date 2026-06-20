@@ -2,6 +2,7 @@
 
 import { processManager } from '@/lib/process-manager';
 import { getActiveProjectPath } from './projects';
+import { getProvidersConfig } from './providers';
 import { readdirSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { TaskStore } from '@/lib/task-store';
@@ -70,10 +71,13 @@ export async function startRoadmapGeneration(skipCompetitors: boolean = false): 
     }
   }
 
+  const providersConfig = await getProvidersConfig();
+  const explorationModel = providersConfig.exploration?.model || undefined;
   const sessionId = await processManager.createSession({
     taskId: `roadmap::${projectPath}`,
     role: 'general',
     cwd: projectPath,
+    model: explorationModel,
   });
   const key = `roadmap::${projectPath}`;
   sessions.set(key, sessionId);

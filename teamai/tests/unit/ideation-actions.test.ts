@@ -75,6 +75,7 @@ describe('ideation server actions', () => {
         taskId: `ideation::${root}`,
         role: 'general',
         cwd: root,
+        model: undefined,
       });
       expect(mockSendMessage).toHaveBeenCalledWith('session-ideation', '/ideation');
     });
@@ -98,7 +99,8 @@ describe('ideation server actions', () => {
       const { startIdeationScan } = await import('@/app/actions/ideation');
       await startIdeationScan();
 
-      expect(mockGetActiveProjectPath).toHaveBeenCalledTimes(1);
+      // getActiveProjectPath is called twice: once in startIdeationScan and once in getProvidersConfig
+      expect(mockGetActiveProjectPath).toHaveBeenCalledTimes(2);
       expect(mockCreateSession).toHaveBeenCalledWith(
         expect.objectContaining({ cwd: root, taskId: `ideation::${root}` }),
       );

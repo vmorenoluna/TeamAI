@@ -2,6 +2,7 @@
 
 import { processManager } from '@/lib/process-manager';
 import { getActiveProjectPath } from './projects';
+import { getProvidersConfig } from './providers';
 import { readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
@@ -14,10 +15,13 @@ const sessions: Map<string, string> =
 
 export async function startIdeationScan(): Promise<string> {
   const projectPath = await getActiveProjectPath();
+  const providersConfig = await getProvidersConfig();
+  const explorationModel = providersConfig.exploration?.model || undefined;
   const sessionId = await processManager.createSession({
     taskId: `ideation::${projectPath}`,
     role: 'general',
     cwd: projectPath,
+    model: explorationModel,
   });
   sessions.set(projectPath, sessionId);
   processManager.sendMessage(sessionId, '/ideation');
