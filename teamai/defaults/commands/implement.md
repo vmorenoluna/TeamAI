@@ -95,6 +95,13 @@ re-read a file to verify an `Edit` that returned success.
   why a specific value or formula was chosen, treat that as authoritative. Do not
   re-derive, re-test, or re-explore alternatives the spec explicitly marks as rejected
   or superseded.
+- **Spec authority**: If you believe a formula, algorithm, threshold, or design
+  decision in the spec is wrong, flag it in your summary — do NOT silently change it.
+  The spec is the contract between the analyst and the engineer; changing it without
+  revision is a spec bypass. Implement what the spec says, then escalate concerns so
+  the spec can be revised through the proper pipeline (spec → plan → implement),
+  not patched ad-hoc during implementation. This applies to NORMAL implement mode,
+  not just QA rework.
 - **No mathematical substitution:** If an acceptance criterion requires empirical evidence
   from a script run (benchmark, integration test, data pipeline, verification report),
   you MUST run the script and commit the output. Mathematical or theoretical justification

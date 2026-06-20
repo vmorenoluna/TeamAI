@@ -143,9 +143,13 @@ The command templates in `defaults/commands/` enforce cross-cutting guardrails t
 
 2. **Self-Critique Check** (`spec.md` Step 4): The analyst must check for delegated-analysis anti-patterns — are any requirements worded as research tasks ("analyse", "investigate", "determine") instead of concrete, computed specifications?
 
+12. **Spec Executability** (`spec.md` Step 4): The spec must be self-contained and executable without the analyst's tribal knowledge. No unquantified requirements ("fast enough", "sufficient", "reasonable"), no reference implementations ("do it like module X"), no vague justifications ("obviously", "clearly"). Every requirement must be independently testable by QA without needing the analyst's context.
+
 #### Plan Phase (planner)
 
 3. **Verification Script Subtask Rule** (`plan.md` Rules): When the spec includes an acceptance criterion that requires running a script to produce empirical evidence (benchmark, integration run, data pipeline), the plan MUST include a dedicated subtask for that script run. Never fold it into a documentation subtask. The subtask must specify: (a) the exact command to run, (b) what output artifact to commit, and (c) the specific check to apply to the output (e.g. "section X shows fewer than N failures"). This makes the criterion independently verifiable by QA without relying on the engineer's self-report.
+
+13. **Plan Coverage** (`plan.md` Rules): Every spec acceptance criterion must map to at least one subtask — no orphaned criteria. If two parallel subtasks modify the same file without coordination, add an explicit `depends_on` between them or merge them. Parallel writes to the same file cause merge conflicts that waste engineer sessions.
 
 #### Implement Phase (coder)
 
@@ -160,6 +164,8 @@ The command templates in `defaults/commands/` enforce cross-cutting guardrails t
 8. **Incremental Progress Estimation** (`implement.md` Long-Running Scripts): For scripts that produce incremental progress output (growing log, record counter, progress lines), check once to confirm it's running, estimate remaining time from throughput rate, wait that duration before checking again. Do NOT check on a fixed short interval. Do NOT restart a script making expected progress. Do NOT start parallel runs. Only escalate if: no output for 10+ minutes, script exited early, or an error line appears.
 
 9. **Background Output Unreadable** (`implement.md` Long-Running Scripts): If a long-running background script does not deliver readable output after its completion notification, re-run it synchronously (without `run_in_background`). Do NOT substitute a partial or reduced run for the full required invocation, and do NOT change acceptance-criterion wording to work around missing evidence.
+
+14. **Spec Authority** (`implement.md` Rules): If the coder believes a formula, algorithm, threshold, or design decision in the spec is wrong, they must flag it in their summary — NOT silently change it. The spec is the contract between analyst and engineer; changing it without revision is a spec bypass. This applies to normal implement mode, not just QA rework. Implement what the spec says, then escalate concerns through the proper pipeline.
 
 #### QA Review Phase (qa-reviewer)
 
