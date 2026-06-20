@@ -95,7 +95,7 @@ export async function saveProvidersConfig(config: ProvidersConfig): Promise<void
 // ── Model deduplication ─────────────────────────────────────────────────
 
 /**
- * Extract the model family from a Claude model ID.
+ * Extract the model family from a Claude model ID (internal sync version).
  *
  * Claude naming conventions:
  *   Gen 4+:  claude-{family}-{version}          e.g. claude-opus-4-8
@@ -110,21 +110,34 @@ export async function saveProvidersConfig(config: ProvidersConfig): Promise<void
  * Returns the family name (opus, sonnet, haiku, fable, mythos, …) or null.
  * New families are detected automatically — no code change required.
  */
-export function extractClaudeFamily(id: string): string | null {
+function _extractClaudeFamily(id: string): string | null {
   const match = id.match(/^claude-(?:\d+(?:-\d+)?-)?([a-z]+)/);
   return match ? match[1] : null;
 }
 
+/** Async wrapper required by Next.js 'use server'. */
+export async function extractClaudeFamily(id: string): Promise<string | null> {
+  return _extractClaudeFamily(id);
+}
+
 /**
- * Normalize a Claude model ID for chronological sorting.
+ * Normalize a Claude model ID for chronological sorting (internal sync version).
  *
- * Transforms claude-3-5-{family} → claude-3.5-{family} so that 3.5 sorts
- * after 3.0 (since '.' > '-' in ASCII).  Combined with localeCompare({numeric:true})
- * this ensures multi-digit version components (claude-sonnet-4-10 vs 4-6) and
- * date suffixes (20241022 vs 20240307) sort correctly.
+ * Transforms any claude-{gen}-{subgen}- prefix to claude-{gen}.{subgen}-
+ * (e.g. claude-3-5-sonnet → claude-3.5-sonnet, claude-4-5-sonnet → claude-4.5-sonnet)
+ * so that sub-generations sort after their base generation (since '.' > '-' in ASCII).
+ * When combined with localeCompare({numeric:true}) (done by the caller in
+ * deduplicateByLatestFamily), this ensures multi-digit version components
+ * (claude-sonnet-4-10 vs 4-6) and date suffixes (20241022 vs 20240307)
+ * sort correctly.
  */
-export function sortKey(id: string): string {
-  return id.replace(/^claude-3-5-/, 'claude-3.5-');
+function _sortKey(id: string): string {
+  return id.replace(/^claude-(\d+)-(\d+)-/, 'claude-$1.$2-');
+}
+
+/** Async wrapper required by Next.js 'use server'. */
+export async function sortKey(id: string): Promise<string> {
+  return _sortKey(id);
 }
 
 /**
@@ -137,7 +150,7 @@ function deduplicateByLatestFamily(modelIds: string[]): string[] {
   const byFamily = new Map<string, string[]>();
 
   for (const m of claudeModels) {
-    const family = extractClaudeFamily(m);
+    const family = _extractClaudeFamily(m);
     if (!family) continue;
     const existing = byFamily.get(family) || [];
     existing.push(m);
@@ -145,7 +158,7 @@ function deduplicateByLatestFamily(modelIds: string[]): string[] {
   }
 
   const sorter = (a: string, b: string) =>
-    sortKey(a).localeCompare(sortKey(b), undefined, { numeric: true });
+    _sortKey(a).localeCompare(_sortKey(b), undefined, { numeric: true });
 
   // Per family: sort ascending (older → newer) and take the last (latest)
   const latest: string[] = [];
