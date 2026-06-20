@@ -59,9 +59,9 @@ describe('getAvailableModels', () => {
   it('CURATED_MODELS.anthropic has only latest-gen models (opus, sonnet, haiku)', () => {
     const models = CURATED_MODELS.anthropic;
     expect(models).toHaveLength(3);
-    expect(models).toContain('claude-opus-4-5');
+    expect(models).toContain('claude-opus-4-8');
     expect(models).toContain('claude-sonnet-4-6');
-    expect(models).toContain('claude-haiku-4-5');
+    expect(models).toContain('claude-haiku-4-5-20251001');
     // Ensure no old gen-3 models leaked in
     const gen3 = models.filter(m => /claude-3/.test(m));
     expect(gen3).toHaveLength(0);
@@ -204,7 +204,7 @@ describe('getAvailableModels', () => {
     vi.stubEnv('ANTHROPIC_API_KEY', '');
 
     // Write a cache entry manually
-    const cachedModels = ['claude-opus-4-5', 'claude-sonnet-4-6'];
+    const cachedModels = ['claude-opus-4-8', 'claude-sonnet-4-6'];
     const cacheDir = join(mockProjectPath, '.teamai');
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(
@@ -318,8 +318,8 @@ describe('getAvailableModels', () => {
 
     const result = await getAvailableModels('anthropic');
 
-    // Should still return models despite cache write failure
-    expect(result.models).toEqual(['claude-sonnet-4-6']);
+    // Dedup keeps both: sonnet and opus are different families
+    expect(result.models).toEqual(['claude-3-opus-20240229', 'claude-sonnet-4-6']);
     expect(result.error).toBeUndefined();
   });
 
@@ -333,22 +333,22 @@ describe('getAvailableModels', () => {
         data: [
           { id: 'claude-sonnet-4-6', type: 'model' },
           { id: 'claude-3-5-sonnet-20241022', type: 'model' },
-          { id: 'claude-opus-4-5', type: 'model' },
+          { id: 'claude-opus-4-8', type: 'model' },
         ],
       }),
     });
 
     const result = await getAvailableModels('anthropic');
     expect(result.error).toBeUndefined();
-    // claude-3-5-sonnet-20241022 is filtered out (not generation 4)
-    expect(result.models).toEqual(['claude-opus-4-5', 'claude-sonnet-4-6']);
+    // sonnet: claude-sonnet-4-6 wins over claude-3-5-sonnet-20241022 (dedup: latest per family)
+    expect(result.models).toEqual(['claude-opus-4-8', 'claude-sonnet-4-6']);
     expect(mockFetch).toHaveBeenCalled();
 
     // Verify cache was written
     const cache = JSON.parse(
       readFileSync(join(mockProjectPath, '.teamai', 'models-cache.json'), 'utf-8'),
     );
-    expect(cache.anthropic.models).toEqual(['claude-opus-4-5', 'claude-sonnet-4-6']);
+    expect(cache.anthropic.models).toEqual(['claude-opus-4-8', 'claude-sonnet-4-6']);
   });
 
   it('fetches OpenAI models from API when key is set', async () => {
@@ -456,9 +456,9 @@ describe('getAvailableModels', () => {
     expect(result.error).toBeUndefined();
   });
 
-  it('filters out all gen-3 models from API response, falls back to curated when none survive', async () => {
+  it('keeps only the latest per family even when all models are older generations', async () => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-anthropic');
-    // API returns only Claude 3 / 3.5 models — all filtered by gen-4 regex
+    // API returns only Claude 3 / 3.5 models — dedup keeps the latest per family
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -473,21 +473,28 @@ describe('getAvailableModels', () => {
     });
 
     const result = await getAvailableModels('anthropic');
-
-    // All gen-3 models filtered → empty models array → falls back to curated
-    expect(result.models).toEqual(CURATED_MODELS.anthropic);
     expect(result.error).toBeUndefined();
+    // Per family, keep only the latest (alphabetically last):
+    // sonnet: claude-3-5-sonnet-20241022 > claude-3-sonnet-20240229
+    // haiku:  claude-3-5-haiku-20241022  > claude-3-haiku-20240307
+    // opus:   claude-3-opus-20240229 (only one)
+    // Sorted by sortKey: claude-3-opus < claude-3.5-haiku < claude-3.5-sonnet
+    expect(result.models).toEqual([
+      'claude-3-opus-20240229',
+      'claude-3-5-haiku-20241022',
+      'claude-3-5-sonnet-20241022',
+    ]);
   });
 
-  it('gen-4 filter passes claude-sonnet-4-20250514, opus-4-5, haiku-4-5; rejects gen-3 variants', async () => {
+  it('deduplicates to latest per family — older models lose to newer ones within same family', async () => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-anthropic');
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         data: [
           { id: 'claude-sonnet-4-20250514', type: 'model' },
-          { id: 'claude-opus-4-5', type: 'model' },
-          { id: 'claude-haiku-4-5', type: 'model' },
+          { id: 'claude-opus-4-8', type: 'model' },
+          { id: 'claude-haiku-4-5-20251001', type: 'model' },
           { id: 'claude-3-5-sonnet-20241022', type: 'model' },
           { id: 'claude-3-5-haiku-20241022', type: 'model' },
           { id: 'claude-3-opus-20240229', type: 'model' },
@@ -499,15 +506,18 @@ describe('getAvailableModels', () => {
 
     const result = await getAvailableModels('anthropic');
     expect(result.error).toBeUndefined();
-    // Only gen-4 models pass the filter, sorted alphabetically
+    // Per-family dedup: each family keeps only its latest (alphabetically last).
+    // sonnet: claude-sonnet-4-20250514 beats claude-3-5/3-sonnet
+    // haiku:  claude-haiku-4-5-20251001  beats claude-3-5/3-haiku
+    // opus:   claude-opus-4-8            beats claude-3-opus
     expect(result.models).toEqual([
-      'claude-haiku-4-5',
-      'claude-opus-4-5',
+      'claude-haiku-4-5-20251001',
+      'claude-opus-4-8',
       'claude-sonnet-4-20250514',
     ]);
-    // Verify no gen-3 models leaked through
-    const gen3 = result.models.filter(m => /claude-3/.test(m));
-    expect(gen3).toHaveLength(0);
+    // Verify no older models leaked through
+    const older = result.models.filter(m => /claude-3/.test(m));
+    expect(older).toHaveLength(0);
   });
 
   // ── No active project (getActiveProjectPath fails) ───────────────────
@@ -535,13 +545,14 @@ describe('getAvailableModels', () => {
       json: async () => ({
         data: [
           { id: 'claude-sonnet-4-6', type: 'model' },
-          { id: 'claude-haiku-4-5', type: 'model' },
+          { id: 'claude-haiku-4-5-20251001', type: 'model' },
         ],
       }),
     });
 
     const result = await getAvailableModels('anthropic', true);
-    expect(result.models).toEqual(['claude-haiku-4-5', 'claude-sonnet-4-6']);
+    // Dedup: sonnet and haiku are different families, both kept
+    expect(result.models).toEqual(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6']);
     expect(mockFetch).toHaveBeenCalled();
   });
 });

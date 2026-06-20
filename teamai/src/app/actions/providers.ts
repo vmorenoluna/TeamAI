@@ -21,9 +21,9 @@ export interface ProvidersConfig {
 const DEFAULT: ProvidersConfig = {
   default: { model: 'claude-sonnet-4-6', provider: 'anthropic' },
   roles: {
-    analyst: { model: 'claude-opus-4-5' },
-    planner: { model: 'claude-haiku-4-5' },
-    merger: { model: 'claude-haiku-4-5' },
+    analyst: { model: 'claude-opus-4-8' },
+    planner: { model: 'claude-haiku-4-5-20251001' },
+    merger: { model: 'claude-haiku-4-5-20251001' },
   },
 };
 
@@ -90,6 +90,66 @@ export async function saveProvidersConfig(config: ProvidersConfig): Promise<void
   const cfgPath = join(projectPath, '.teamai', 'providers.json');
   writeFileSync(cfgPath, JSON.stringify(config, null, 2));
   revalidatePath('/settings');
+}
+
+// ── Model deduplication ─────────────────────────────────────────────────
+
+/**
+ * Extract the model family from a Claude model ID.
+ *
+ * Claude naming conventions:
+ *   Gen 4+:  claude-{family}-{version}          e.g. claude-opus-4-8
+ *   Gen 3.x: claude-3-5-{family}-{date}         e.g. claude-3-5-sonnet-20241022
+ *   Gen 3:   claude-3-{family}-{date}           e.g. claude-3-haiku-20240307
+ *
+ * Returns the family name (opus, sonnet, haiku, fable, mythos, …) or null.
+ * New families are detected automatically — no code change required.
+ */
+function extractClaudeFamily(id: string): string | null {
+  const match = id.match(/^claude-(?:3(?:-5)?-)?([a-z]+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Normalize a Claude model ID for chronological sorting.
+ *
+ * Transforms claude-3-5-{family} → claude-3.5-{family} so that 3.5 sorts
+ * after 3.0 (since '.' > '-' in ASCII).  Combined with localeCompare({numeric:true})
+ * this ensures multi-digit version components (claude-sonnet-4-10 vs 4-6) and
+ * date suffixes (20241022 vs 20240307) sort correctly.
+ */
+function sortKey(id: string): string {
+  return id.replace(/^claude-3-5-/, 'claude-3.5-');
+}
+
+/**
+ * Keep only the latest model per family.
+ */
+function deduplicateByLatestFamily(modelIds: string[]): string[] {
+  const claudeModels = modelIds.filter(m => m.startsWith('claude-'));
+  if (claudeModels.length === 0) return [];
+
+  const byFamily = new Map<string, string[]>();
+
+  for (const m of claudeModels) {
+    const family = extractClaudeFamily(m);
+    if (!family) continue;
+    const existing = byFamily.get(family) || [];
+    existing.push(m);
+    byFamily.set(family, existing);
+  }
+
+  const sorter = (a: string, b: string) =>
+    sortKey(a).localeCompare(sortKey(b), undefined, { numeric: true });
+
+  // Per family: sort ascending (older → newer) and take the last (latest)
+  const latest: string[] = [];
+  for (const familyModels of byFamily.values()) {
+    familyModels.sort(sorter);
+    latest.push(familyModels[familyModels.length - 1]);
+  }
+
+  return latest.sort(sorter);
 }
 
 // ── Model listing ──────────────────────────────────────────────────────
@@ -171,11 +231,10 @@ async function fetchModelsFromProvider(provider: string): Promise<{ models: stri
           return { models: [], error: `Anthropic API returned ${res.status}` };
         }
         const json = await res.json() as { data: Array<{ id: string; display_name?: string; type: string }> };
-        const models = json.data
+        const allModels = json.data
           .filter(m => m.type === 'model')
-          .map(m => m.id)
-          .filter(id => /^claude-(opus|sonnet|haiku)-4/.test(id))
-          .sort();
+          .map(m => m.id);
+        const models = deduplicateByLatestFamily(allModels);
         return { models };
       } catch (err) {
         logError('providers', 'Failed to fetch Anthropic models', err);

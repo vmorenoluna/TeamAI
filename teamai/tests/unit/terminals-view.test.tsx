@@ -150,7 +150,7 @@ describe('TerminalsView', () => {
 
   describe('terminal operations', () => {
     it('creates a terminal session with the selected role', async () => {
-      mockCreateTerminalSession.mockResolvedValue({ sessionId: 'sess-xyz', role: 'analyst.md', model: 'claude-opus-4-5' });
+      mockCreateTerminalSession.mockResolvedValue({ sessionId: 'sess-xyz', role: 'analyst.md', model: 'claude-opus-4-8' });
       await renderView();
       fireEvent.click(screen.getByTestId('new-terminal-btn'));
       await act(async () => { fireEvent.click(screen.getByText('Open')); });
@@ -178,13 +178,13 @@ describe('TerminalsView', () => {
     });
 
     it('passes role and model to TerminalPanel', async () => {
-      mockCreateTerminalSession.mockResolvedValue({ sessionId: 'sess-role', role: 'coder.md', model: 'claude-opus-4-5' });
+      mockCreateTerminalSession.mockResolvedValue({ sessionId: 'sess-role', role: 'coder.md', model: 'claude-opus-4-8' });
       await renderView();
       fireEvent.click(screen.getByTestId('new-terminal-btn'));
       await act(async () => { fireEvent.click(screen.getByText('Open')); });
       await waitFor(() => {
         expect(screen.getByTestId('terminal-panel').getAttribute('data-role')).toBe('coder.md');
-        expect(screen.getByTestId('terminal-panel').getAttribute('data-model')).toBe('claude-opus-4-5');
+        expect(screen.getByTestId('terminal-panel').getAttribute('data-model')).toBe('claude-opus-4-8');
       });
     });
   });

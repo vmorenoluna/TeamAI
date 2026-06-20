@@ -90,9 +90,9 @@ describe('resolveProvider', () => {
     const defaultConfig = {
       default: { model: 'claude-sonnet-4-6', provider: 'anthropic' as const },
       roles: {
-        analyst: { model: 'claude-opus-4-5' },
-        planner: { model: 'claude-haiku-4-5' },
-        merger: { model: 'claude-haiku-4-5' },
+        analyst: { model: 'claude-opus-4-8' },
+        planner: { model: 'claude-haiku-4-5-20251001' },
+        merger: { model: 'claude-haiku-4-5-20251001' },
       },
     };
 
@@ -100,7 +100,7 @@ describe('resolveProvider', () => {
       const { dir, clean } = setupProvidersTest(defaultConfig);
       _cleanDir = clean;
       const result = resolveProvider(dir, 'analyst');
-      expect(result.model).toBe('claude-opus-4-5');
+      expect(result.model).toBe('claude-opus-4-8');
       expect(result.provider).toBe('anthropic');
     });
 
@@ -108,7 +108,7 @@ describe('resolveProvider', () => {
       const { dir, clean } = setupProvidersTest(defaultConfig);
       _cleanDir = clean;
       const result = resolveProvider(dir, 'planner');
-      expect(result.model).toBe('claude-haiku-4-5');
+      expect(result.model).toBe('claude-haiku-4-5-20251001');
       expect(result.provider).toBe('anthropic');
     });
 
@@ -116,7 +116,7 @@ describe('resolveProvider', () => {
       const { dir, clean } = setupProvidersTest(defaultConfig);
       _cleanDir = clean;
       const result = resolveProvider(dir, 'merger');
-      expect(result.model).toBe('claude-haiku-4-5');
+      expect(result.model).toBe('claude-haiku-4-5-20251001');
       expect(result.provider).toBe('anthropic');
     });
 
@@ -239,15 +239,15 @@ describe('resolveTerminalModel', () => {
   it('strips .md extension and returns role-specific model', () => {
     const config = {
       ...baseConfig,
-      roles: { analyst: { model: 'claude-opus-4-5' } },
+      roles: { analyst: { model: 'claude-opus-4-8' } },
     };
-    expect(resolveTerminalModel('analyst.md', config)).toBe('claude-opus-4-5');
+    expect(resolveTerminalModel('analyst.md', config)).toBe('claude-opus-4-8');
   });
 
   it('returns default model when role has no override', () => {
     const config = {
       ...baseConfig,
-      roles: { analyst: { model: 'claude-opus-4-5' } },
+      roles: { analyst: { model: 'claude-opus-4-8' } },
     };
     expect(resolveTerminalModel('planner.md', config)).toBe('claude-sonnet-4-6');
   });
@@ -267,9 +267,9 @@ describe('resolveTerminalModel', () => {
   it('handles multi-part filenames like qa-reviewer.md', () => {
     const config = {
       ...baseConfig,
-      roles: { 'qa-reviewer': { model: 'claude-opus-4-5' } },
+      roles: { 'qa-reviewer': { model: 'claude-opus-4-8' } },
     };
-    expect(resolveTerminalModel('qa-reviewer.md', config)).toBe('claude-opus-4-5');
+    expect(resolveTerminalModel('qa-reviewer.md', config)).toBe('claude-opus-4-8');
   });
 
   it('does not strip .md from middle of filename', () => {
