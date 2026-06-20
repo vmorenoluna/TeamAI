@@ -113,9 +113,8 @@ integration run) that takes more than ~30 seconds:
 1. Start it using `run_in_background: true` on the Bash tool call.
 2. Do any remaining non-blocking work (updating docs, minor edits) while it runs.
 3. When the background completion notification arrives, read the output **once**.
-4. **Never poll**: do not tail the output file, re-read partial output, or re-run
-   the script to check progress. Polling wastes tokens and violates the "run once,
-   don't poll" contract. One start + one await is the complete pattern.
+4. **Never poll on a fixed interval**: do not tail the output file on a short loop.
+   One start + one wait is the complete pattern. See below for progress-based waiting.
 5. Capture only the summary line from the output (pass/fail count, error list) —
    do not read the full output into context unless a failure requires diagnosis.
 
