@@ -79,7 +79,6 @@ describe('TerminalsView', () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
     vi.resetModules();
   });
 

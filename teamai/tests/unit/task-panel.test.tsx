@@ -187,7 +187,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  // Restore confirm spy only — avoids footgun of vi.restoreAllMocks()
+  // resetting hoisted mock implementations
+  vi.spyOn(window, 'confirm').mockRestore();
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -13,7 +13,7 @@
  * following the project's established pattern.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { Task } from '@/lib/task-store';
@@ -111,10 +111,6 @@ describe('KanbanBoard', () => {
     mockMoveTask.mockResolvedValue(undefined);
     mockCreateTask.mockResolvedValue(undefined);
     mockBulkDeleteTasks.mockResolvedValue(undefined);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   // ── Column rendering ─────────────────────────────────────────────────
