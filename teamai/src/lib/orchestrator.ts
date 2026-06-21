@@ -1466,6 +1466,36 @@ export class Orchestrator {
   }
 
   /**
+   * Rewrite the worktree's .git file and its back-reference to use HOST-style paths.
+   * Needed before running host-side git in the worktree when a prior
+   * _patchWorktreeGitFile call may have written container paths that the host cannot
+   * resolve (e.g. /workspaces/... doesn't exist on Windows).
+   */
+  private _restoreWorktreeGitFileToHostPaths(hostWorktreePath: string): void {
+    const gitFile = path.join(hostWorktreePath, '.git');
+    if (!existsSync(gitFile)) return;
+    try {
+      const content = readFileSync(gitFile, 'utf-8').trim();
+      if (!content.startsWith('gitdir:')) return;
+      const currentGitdir = content.slice('gitdir:'.length).trim().replace(/\\/g, '/');
+      const m = currentGitdir.match(/\/worktrees\/([^/]+)$/);
+      if (!m) return;
+      const worktreeName = m[1];
+      // Normalise the host project root to forward slashes so git on Windows can read it.
+      const hostRoot = this.projectRoot.replace(/\\/g, '/');
+      const hostGitdir = `${hostRoot}/.git/worktrees/${worktreeName}`;
+      if (currentGitdir === hostGitdir) return; // already correct
+      writeFileSync(gitFile, `gitdir: ${hostGitdir}\n`);
+      // Restore the back-reference so git worktree commands from the host work.
+      const backRefFile = path.join(this.projectRoot, '.git', 'worktrees', worktreeName, 'gitdir');
+      if (existsSync(backRefFile)) {
+        const hostWorktreeGitFile = `${hostWorktreePath.replace(/\\/g, '/')}/.git`;
+        writeFileSync(backRefFile, `${hostWorktreeGitFile}\n`);
+      }
+    } catch { /* best-effort — don't break the pipeline on a patch failure */ }
+  }
+
+  /**
    * Rewrite the worktree's .git file and its back-reference so both point to
    * container-relative paths. Needed when the worktree was created by host git
    * (container not yet running during plan phase), which leaves Windows-style
@@ -1920,23 +1950,15 @@ export class Orchestrator {
       return;
     }
 
-    // In container mode, re-patch the worktree .git file before running docker exec.
-    // Host-side git operations between implement and create-pr phases (e.g. a push
-    // on the host) can rewrite the .git file back to a Windows path, causing
-    // docker exec git to fail with "fatal: not a git repository: (null)".
-    if (readContainerConfig(this.projectRoot).enabled) {
-      const info = containerManager.getRunningContainer(this.projectRoot);
-      if (info) this._patchWorktreeGitFile(pipeline.worktreePath, info.remoteWorkspaceFolder);
-    }
-
-    // Stage and commit in the worktree. _execGit routes through docker exec
-    // in container mode so the worktree's .git file (container paths) resolves.
-    // Relative path is intentional — absolute paths break container mode
-    // (worktree is outside projectRoot so _execGit won't translate them).
-    this._execGit(['add', '.teamai/'], pipeline.worktreePath);
+    // Artifact files are written by the host-side Node.js process, so we always
+    // commit using HOST git (execFileSync directly) — no docker exec needed.
+    // In container mode, a prior _patchWorktreeGitFile call may have left container
+    // paths in the .git file; restore host paths first so host git can resolve the repo.
+    this._restoreWorktreeGitFileToHostPaths(pipeline.worktreePath);
+    execFileSync('git', ['add', '.teamai/'], { cwd: pipeline.worktreePath });
 
     try {
-      this._execGit(['commit', '-m', `Add TeamAI pipeline artifacts for "${pipeline.description}"`], pipeline.worktreePath);
+      execFileSync('git', ['commit', '-m', `Add TeamAI pipeline artifacts for "${pipeline.description}"`], { cwd: pipeline.worktreePath });
     } catch (gitErr) {
       const msg = gitErr instanceof Error ? gitErr.message : String(gitErr);
       // "nothing to commit, working tree clean" — artifacts already committed
