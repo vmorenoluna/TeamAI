@@ -27,6 +27,8 @@ const mockGetLatestChangelog = vi.hoisted(() => vi.fn());
 const mockGetActiveRoadmapSession = vi.hoisted(() => vi.fn().mockResolvedValue(null));
 const mockConvertToTask = vi.hoisted(() => vi.fn());
 const mockClearLinkedTaskId = vi.hoisted(() => vi.fn());
+const mockCancelRoadmapGeneration = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockIsRoadmapSessionAlive = vi.hoisted(() => vi.fn().mockResolvedValue(false));
 
 vi.mock('@/app/actions/roadmap', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/app/actions/roadmap')>();
@@ -44,6 +46,8 @@ vi.mock('@/app/actions/roadmap', async (importOriginal) => {
     },
     convertToTask: (...args: unknown[]) => mockConvertToTask(...args),
     clearLinkedTaskId: (...args: unknown[]) => mockClearLinkedTaskId(...args),
+    cancelRoadmapGeneration: (...args: unknown[]) => mockCancelRoadmapGeneration(...args),
+    isRoadmapSessionAlive: (...args: unknown[]) => mockIsRoadmapSessionAlive(...args),
   };
 });
 
@@ -310,7 +314,10 @@ describe('RoadmapView', () => {
         fireEvent.click(screen.getByText('Generate Roadmap'));
       });
 
-      expect(screen.getByText('Analysing codebase…')).toBeInTheDocument();
+      // rmFullText is set via useEffect — wait for it
+      await waitFor(() => {
+        expect(screen.getByText('Analysing codebase…')).toBeInTheDocument();
+      });
     });
 
     it('does not show streaming block when no text is available', async () => {
@@ -324,9 +331,10 @@ describe('RoadmapView', () => {
         fireEvent.click(screen.getByText('Generate Roadmap'));
       });
 
-      // StreamingBlock only renders when rmLatestText is truthy
-      const preElements = document.querySelectorAll('pre');
-      expect(preElements.length).toBe(0);
+      // rmFullText stays empty, so the Agent Output block doesn't render
+      await waitFor(() => {
+        expect(screen.queryByText('Agent Output')).not.toBeInTheDocument();
+      });
     });
 
     it('shows streaming text on the changelog tab too', async () => {
@@ -341,7 +349,10 @@ describe('RoadmapView', () => {
         fireEvent.click(screen.getByText('Generate Changelog'));
       });
 
-      expect(screen.getByText('Building changelog…')).toBeInTheDocument();
+      // clFullText is set via useEffect — wait for it
+      await waitFor(() => {
+        expect(screen.getByText('Building changelog…')).toBeInTheDocument();
+      });
     });
   });
 
@@ -424,6 +435,174 @@ describe('RoadmapView', () => {
       await waitFor(() => {
         expect(screen.queryByText('History:')).not.toBeInTheDocument();
       });
+    });
+  });
+
+  // ── Cancel race condition (rapid start/stop) ─────────────────────────
+
+  describe('cancel race condition', () => {
+    it('cancels an in-flight roadmap generation when Stop is clicked before start completes', async () => {
+      // Use a deferred promise so we can control when startRoadmapGeneration resolves
+      let resolveStart!: (value: string) => void;
+      const deferredStart = new Promise<string>(resolve => { resolveStart = resolve; });
+      mockStartRoadmapGeneration.mockReturnValue(deferredStart);
+
+      renderView(false);
+
+      // Click "Generate Roadmap" — triggers handleGenerateRoadmap
+      await act(async () => {
+        fireEvent.click(screen.getByText('Generate Roadmap'));
+      });
+
+      // Verify running state: "Generating…" button + "✕ Stop" button
+      expect(screen.getByText('Generating…')).toBeInTheDocument();
+      expect(screen.getByText('✕ Stop')).toBeInTheDocument();
+
+      // Click "✕ Stop" while start is still in-flight
+      // (mockCancelRoadmapGeneration resolves immediately so React batches rmCancelling
+      //  toggles; "Stopping…" won't visibly render, but the call count proves the flow)
+      await act(async () => {
+        fireEvent.click(screen.getByText('✕ Stop'));
+      });
+
+      // Cancel was called (best-effort — may not find session yet since start hasn't resolved)
+      expect(mockCancelRoadmapGeneration).toHaveBeenCalledWith('roadmap');
+
+      // Now resolve the deferred start — the transition callback will check cancelRequestedRef
+      await act(async () => {
+        resolveStart('sess-race');
+        // Wait for the promise chain to settle (microtask queue drains before macrotask)
+        await new Promise(r => setTimeout(r, 0));
+      });
+
+      // After transition resolves and sees cancel was requested, it auto-cancels.
+      // cancelRoadmapGeneration should have been called a second time (post-resolution)
+      expect(mockCancelRoadmapGeneration).toHaveBeenCalledTimes(2);
+
+      // Button should return to "Generate Roadmap" (running = false)
+      await waitFor(() => {
+        expect(screen.getByText('Generate Roadmap')).toBeInTheDocument();
+      });
+
+      // The Stop button should be gone
+      expect(screen.queryByText('✕ Stop')).not.toBeInTheDocument();
+    });
+
+    it('cancels an in-flight changelog generation when Stop is clicked before start completes', async () => {
+      let resolveStart!: (value: string) => void;
+      const deferredStart = new Promise<string>(resolve => { resolveStart = resolve; });
+      mockStartChangelogGeneration.mockReturnValue(deferredStart);
+
+      renderView(false);
+      fireEvent.click(screen.getByText('Changelog'));
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Generate Changelog'));
+      });
+
+      expect(screen.getByText('Generating…')).toBeInTheDocument();
+      expect(screen.getByText('✕ Stop')).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('✕ Stop'));
+      });
+
+      // Cancel handler ran immediately (mock resolves synchronously)
+      expect(mockCancelRoadmapGeneration).toHaveBeenCalledWith('changelog');
+
+      await act(async () => {
+        resolveStart('sess-cl-race');
+        await new Promise(r => setTimeout(r, 0));
+      });
+
+      expect(mockCancelRoadmapGeneration).toHaveBeenCalledTimes(2);
+
+      await waitFor(() => {
+        expect(screen.getByText('Generate Changelog')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('✕ Stop')).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Stale sessionStorage reconnect ───────────────────────────────────
+
+  describe('stale sessionStorage reconnect', () => {
+    it('does not reconnect when sessionStorage has a stale roadmap session from a previous server run', async () => {
+      // Simulate a stale session ID from a previous server run
+      mockSessionStorage.setItem('roadmap-session', 'stale-session-id');
+      mockIsRoadmapSessionAlive.mockResolvedValue(false);
+      mockGetRoadmapReports.mockResolvedValue([
+        { filename: 'roadmap-2026-06-01.json', date: '2026-06-01' },
+      ]);
+      mockGetRoadmapReport.mockResolvedValue({
+        generated_at: '2026-06-01',
+        executive_summary: 'Previous roadmap',
+        competitor_analysis_run: false,
+        phases: { now: [], next: [], later: [], icebox: [] },
+      });
+
+      renderView(false);
+
+      // Wait for mount effect to complete (load history, check reconnect)
+      await waitFor(() => {
+        // The stale session ID should have been removed from sessionStorage
+        expect(mockSessionStorage.getItem('roadmap-session')).toBeNull();
+      });
+
+      // isRoadmapSessionAlive should have been called with the stale ID
+      expect(mockIsRoadmapSessionAlive).toHaveBeenCalledWith('stale-session-id');
+
+      // Should NOT show "Generating…" (rmRunning stays false)
+      expect(screen.queryByText('Generating…')).not.toBeInTheDocument();
+
+      // Should auto-load the most recent report instead
+      await waitFor(() => {
+        expect(screen.getByText('Previous roadmap')).toBeInTheDocument();
+      });
+    });
+
+    it('does not reconnect when sessionStorage has a stale changelog session', async () => {
+      mockSessionStorage.setItem('changelog-session', 'stale-cl-id');
+      mockIsRoadmapSessionAlive.mockResolvedValue(false);
+      mockGetChangelogReports.mockResolvedValue([
+        { filename: 'changelog-2026-06-01.md', date: '2026-06-01' },
+      ]);
+      mockGetLatestChangelog.mockResolvedValue('# Changelog June 2026');
+
+      renderView(false);
+
+      await waitFor(() => {
+        expect(mockSessionStorage.getItem('changelog-session')).toBeNull();
+      });
+
+      expect(mockIsRoadmapSessionAlive).toHaveBeenCalledWith('stale-cl-id');
+
+      // Switch to changelog tab
+      fireEvent.click(screen.getByText('Changelog'));
+
+      // Should NOT show "Generating…"
+      expect(screen.queryByText('Generating…')).not.toBeInTheDocument();
+
+      // Should auto-load most recent changelog
+      await waitFor(() => {
+        expect(screen.getByText(/Changelog June 2026/)).toBeInTheDocument();
+      });
+    });
+
+    it('DOES reconnect when sessionStorage has a valid session that is still alive on server', async () => {
+      mockSessionStorage.setItem('roadmap-session', 'alive-session-id');
+      mockIsRoadmapSessionAlive.mockResolvedValue(true);
+      mockGetRoadmapReports.mockResolvedValue([]);
+
+      renderView(false);
+
+      await waitFor(() => {
+        // Should reconnect: show "Generating…" since rmRunning is set to true
+        expect(screen.getByText('Generating…')).toBeInTheDocument();
+      });
+
+      // sessionStorage should still have the session ID (not cleared)
+      expect(mockSessionStorage.getItem('roadmap-session')).toBe('alive-session-id');
     });
   });
 });

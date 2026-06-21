@@ -260,6 +260,23 @@ export async function getActiveRoadmapSession(type: 'roadmap' | 'changelog'): Pr
   return null;
 }
 
+/** Verify a stored session ID is still valid (running on the server). */
+export async function isRoadmapSessionAlive(sessionId: string): Promise<boolean> {
+  const session = processManager.getSession(sessionId);
+  return !!(session && session.status === 'running');
+}
+
+/** Cancel a running roadmap or changelog generation. */
+export async function cancelRoadmapGeneration(type: 'roadmap' | 'changelog'): Promise<void> {
+  const projectPath = await getActiveProjectPath();
+  const key = `${type}::${projectPath}`;
+  const sessionId = sessions.get(key);
+  if (sessionId) {
+    processManager.killSession(sessionId);
+    sessions.delete(key);
+  }
+}
+
 // ── Convert roadmap item(s) to kanban ticket(s) ─────────────────────────────
 
 const VALID_PHASES: readonly string[] = ['now', 'next', 'later', 'icebox'];
