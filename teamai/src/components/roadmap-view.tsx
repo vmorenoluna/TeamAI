@@ -9,6 +9,8 @@ import {
   getChangelogReports,
   getLatestChangelog,
   getActiveRoadmapSession,
+  cancelRoadmapGeneration,
+  isRoadmapSessionAlive,
   convertToTask,
   convertMultipleToTasks,
   type ConvertMultipleInput,
@@ -46,18 +48,6 @@ function ComplexityDots({ value }: { value: number }) {
         </span>
       ))}
     </span>
-  );
-}
-
-// ── Streaming output block ───────────────────────────────────────────────────
-
-function StreamingBlock({ text }: { text: string }) {
-  return (
-    <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-80 overflow-y-auto">
-      <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
-        {text}
-      </pre>
-    </div>
   );
 }
 
@@ -560,28 +550,73 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     filename: string;
   } | null>(null);
 
+  // Rate-limit state
+  const [rmRateLimited, setRmRateLimited] = useState(false);
+  const [rmRateLimitMessage, setRmRateLimitMessage] = useState('');
+  const [clRateLimited, setClRateLimited] = useState(false);
+  const [clRateLimitMessage, setClRateLimitMessage] = useState('');
+  // Cancel pending state
+  const [rmCancelling, setRmCancelling] = useState(false);
+  const [clCancelling, setClCancelling] = useState(false);
+
   // Cache task data so reopening a task is instant (no re-fetch / loading flash)
   const taskCacheRef = useRef<Map<string, { data: FullData }>>(new Map());
+  // Cancel-requested signals to handle rapid start/stop race (Bug 2)
+  const rmCancelRequestedRef = useRef(false);
+  const clCancelRequestedRef = useRef(false);
 
   const rmStream = useSessionStream(rmSessionId);
   const clStream = useSessionStream(clSessionId);
 
-  // Accumulate streaming text
-  const rmLatestText = (() => {
-    for (let i = rmStream.length - 1; i >= 0; i--) {
-      const t = extractText(rmStream[i].event);
-      if (t) return t;
+  // Accumulate full text from all stream events for terminal view
+  const rmFullText = useMemo(() => {
+    if (rmStream.length === 0) return '';
+    let allText = '';
+    for (const e of rmStream) {
+      const t = extractText(e.event);
+      if (t) allText += (allText ? '\n' : '') + t;
     }
-    return '';
-  })();
+    return allText;
+  }, [rmStream]);
 
-  const clLatestText = (() => {
-    for (let i = clStream.length - 1; i >= 0; i--) {
-      const t = extractText(clStream[i].event);
-      if (t) return t;
+  const clFullText = useMemo(() => {
+    if (clStream.length === 0) return '';
+    let allText = '';
+    for (const e of clStream) {
+      const t = extractText(e.event);
+      if (t) allText += (allText ? '\n' : '') + t;
     }
-    return '';
-  })();
+    return allText;
+  }, [clStream]);
+
+  // Detect rate-limit events in the stream
+  useEffect(() => {
+    if (rmStream.length === 0) return;
+    for (const e of rmStream) {
+      const text = extractText(e.event);
+      if (text && /session.?limit/i.test(text)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setRmRateLimited(true);
+        const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
+        setRmRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : 'Session limit hit — retry later');
+        return;
+      }
+    }
+  }, [rmStream]);
+
+  useEffect(() => {
+    if (clStream.length === 0) return;
+    for (const e of clStream) {
+      const text = extractText(e.event);
+      if (text && /session.?limit/i.test(text)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setClRateLimited(true);
+        const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
+        setClRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : 'Session limit hit — retry later');
+        return;
+      }
+    }
+  }, [clStream]);
 
   const rmDone = rmStream.some(e => e.event.type === 'result');
   const clDone = clStream.some(e => e.event.type === 'result');
@@ -618,10 +653,20 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
         if (!activeCl) activeCl = srvCl;
       }
 
+      let rmAlive = false;
       if (activeRm) {
-        setRmSessionId(activeRm);
-        setRmRunning(true);
-      } else if (rpts.length > 0) {
+        // Verify the session actually exists on the server before reconnecting.
+        // sessionStorage may contain a stale ID from a previous server run.
+        rmAlive = await isRoadmapSessionAlive(activeRm).catch(() => false);
+        if (rmAlive) {
+          setRmSessionId(activeRm);
+          setRmRunning(true);
+        } else {
+          // Stale session — clear sessionStorage and don't reconnect
+          try { sessionStorage.removeItem('roadmap-session'); } catch { /* noop */ }
+        }
+      }
+      if (!rmAlive && rpts.length > 0) {
         // Auto-load most recent roadmap
         try {
           const report = await getRoadmapReport(rpts[0].filename);
@@ -630,10 +675,17 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
         } catch { /* ignore stale files */ }
       }
 
+      let clAlive = false;
       if (activeCl) {
-        setClSessionId(activeCl);
-        setClRunning(true);
-      } else if (creps.length > 0) {
+        clAlive = await isRoadmapSessionAlive(activeCl).catch(() => false);
+        if (clAlive) {
+          setClSessionId(activeCl);
+          setClRunning(true);
+        } else {
+          try { sessionStorage.removeItem('changelog-session'); } catch { /* noop */ }
+        }
+      }
+      if (!clAlive && creps.length > 0) {
         // Auto-load most recent changelog
         try {
           const md = await getLatestChangelog(creps[0].filename);
@@ -723,23 +775,69 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
   }, [selectedRoadmapItem]);
 
   function handleGenerateRoadmap() {
+    rmCancelRequestedRef.current = false;
     setRmRunning(true);
+    setRmSessionId(null);
     setRmReport(null);
+    setRmRateLimited(false);
+    setRmRateLimitMessage('');
     startTransition(async () => {
       const id = await startRoadmapGeneration(skipCompetitors);
+      if (rmCancelRequestedRef.current) {
+        await cancelRoadmapGeneration('roadmap').catch(() => {});
+        setRmRunning(false);
+        return;
+      }
       try { sessionStorage.setItem('roadmap-session', id); } catch { /* noop */ }
       setRmSessionId(id);
     });
   }
 
+  async function handleCancelRoadmap() {
+    rmCancelRequestedRef.current = true;
+    setRmCancelling(true);
+    try {
+      await cancelRoadmapGeneration('roadmap');
+    } catch { /* best-effort */ }
+    setRmRunning(false);
+    setRmSessionId(null);
+    setRmRateLimited(false);
+    setRmRateLimitMessage('');
+    try { sessionStorage.removeItem('roadmap-session'); } catch { /* noop */ }
+    setRmCancelling(false);
+  }
+
   function handleGenerateChangelog() {
+    clCancelRequestedRef.current = false;
     setClRunning(true);
+    setClSessionId(null);
     setClMarkdown(null);
+    setClRateLimited(false);
+    setClRateLimitMessage('');
     startTransition(async () => {
       const id = await startChangelogGeneration();
+      if (clCancelRequestedRef.current) {
+        await cancelRoadmapGeneration('changelog').catch(() => {});
+        setClRunning(false);
+        return;
+      }
       try { sessionStorage.setItem('changelog-session', id); } catch { /* noop */ }
       setClSessionId(id);
     });
+  }
+
+  async function handleCancelChangelog() {
+    clCancelRequestedRef.current = true;
+    setClCancelling(true);
+    try {
+      await cancelRoadmapGeneration('changelog');
+    } catch { /* best-effort */ }
+    setClRunning(false);
+    setClSessionId(null);
+    setClRateLimited(false);
+    setClRateLimitMessage('');
+    try { sessionStorage.removeItem('changelog-session'); } catch { /* noop */ }
+    setClCancelling(false);
   }
 
   async function handleSelectRoadmapHistory(filename: string) {
@@ -843,11 +941,21 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
               <button
                 onClick={handleGenerateRoadmap}
-                disabled={isPending || (rmRunning && !rmDone)}
+                disabled={isPending || rmRunning}
                 className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
               >
                 {rmRunning && !rmDone ? 'Generating…' : 'Generate Roadmap'}
               </button>
+
+              {rmRunning && (
+                <button
+                  onClick={handleCancelRoadmap}
+                  disabled={rmCancelling}
+                  className="px-3 py-2 text-sm font-medium text-red-400 border border-red-800 rounded-lg hover:bg-red-950/30 disabled:opacity-40 transition-colors"
+                >
+                  {rmCancelling ? 'Stopping…' : '✕ Stop'}
+                </button>
+              )}
 
               {rmHistory.length > 0 && (
                 <div className="flex items-center gap-2 text-sm text-slate-400">
@@ -866,8 +974,35 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
               )}
             </div>
 
-            {/* Streaming output */}
-            {rmRunning && rmLatestText && <StreamingBlock text={rmLatestText} />}
+            {/* Rate-limit indicator */}
+            {rmRateLimited && (
+              <div className="bg-amber-950/30 border border-amber-800 rounded-lg p-4 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-amber-400 text-lg">⏳</span>
+                  <span className="text-sm text-amber-300">{rmRateLimitMessage}</span>
+                </div>
+                <button
+                  onClick={handleGenerateRoadmap}
+                  disabled={isPending}
+                  className="px-4 py-2 text-sm font-medium bg-amber-700 text-amber-100 rounded-lg hover:bg-amber-600 disabled:opacity-40 transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {/* Streaming output — show full accumulated text while running */}
+            {rmRunning && rmFullText && !rmRateLimited && (
+              <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-80 overflow-y-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Agent Output</span>
+                  <span className="text-[10px] text-slate-600">{rmStream.length} event{rmStream.length !== 1 ? 's' : ''}</span>
+                </div>
+                <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                  {rmFullText}
+                </pre>
+              </div>
+            )}
 
             {/* Phased kanban view */}
             {rmReport && rmFilename && (
@@ -881,7 +1016,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
             )}
 
             {/* Empty state */}
-            {!rmRunning && !rmReport && !rmLatestText && (
+            {!rmRunning && !rmReport && !rmFullText && (
               <p className="text-sm text-slate-400">
                 No roadmap generated yet. Click &apos;Generate Roadmap&apos; to start.
               </p>
@@ -895,11 +1030,21 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
             <div className="flex items-center gap-4 flex-wrap">
               <button
                 onClick={handleGenerateChangelog}
-                disabled={isPending || (clRunning && !clDone)}
+                disabled={isPending || clRunning}
                 className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
               >
                 {clRunning && !clDone ? 'Generating…' : 'Generate Changelog'}
               </button>
+
+              {clRunning && (
+                <button
+                  onClick={handleCancelChangelog}
+                  disabled={clCancelling}
+                  className="px-3 py-2 text-sm font-medium text-red-400 border border-red-800 rounded-lg hover:bg-red-950/30 disabled:opacity-40 transition-colors"
+                >
+                  {clCancelling ? 'Stopping…' : '✕ Stop'}
+                </button>
+              )}
 
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <span>Previous changelogs:</span>
@@ -921,8 +1066,35 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
               </div>
             </div>
 
-            {/* Streaming output */}
-            {clRunning && clLatestText && <StreamingBlock text={clLatestText} />}
+            {/* Rate-limit indicator */}
+            {clRateLimited && (
+              <div className="bg-amber-950/30 border border-amber-800 rounded-lg p-4 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-amber-400 text-lg">⏳</span>
+                  <span className="text-sm text-amber-300">{clRateLimitMessage}</span>
+                </div>
+                <button
+                  onClick={handleGenerateChangelog}
+                  disabled={isPending}
+                  className="px-4 py-2 text-sm font-medium bg-amber-700 text-amber-100 rounded-lg hover:bg-amber-600 disabled:opacity-40 transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {/* Streaming output — show full accumulated text while running */}
+            {clRunning && clFullText && !clRateLimited && (
+              <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-80 overflow-y-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Agent Output</span>
+                  <span className="text-[10px] text-slate-600">{clStream.length} event{clStream.length !== 1 ? 's' : ''}</span>
+                </div>
+                <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                  {clFullText}
+                </pre>
+              </div>
+            )}
 
             {/* Changelog result */}
             {clMarkdown && (
@@ -934,7 +1106,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
             )}
 
             {/* Empty state */}
-            {!clRunning && !clMarkdown && !clLatestText && (
+            {!clRunning && !clMarkdown && !clFullText && (
               <p className="text-sm text-slate-400">
                 No changelog generated yet. Click &apos;Generate Changelog&apos; to start.
               </p>

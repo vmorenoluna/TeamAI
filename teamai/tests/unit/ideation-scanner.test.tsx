@@ -23,9 +23,11 @@ import type { StreamEvent } from '@/lib/stream-types';
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
 
 const mockStartIdeationScan = vi.fn();
+const mockCancelIdeationScan = vi.fn();
 
 vi.mock('@/app/actions/ideation', () => ({
   startIdeationScan: (() => mockStartIdeationScan()) as typeof import('@/app/actions/ideation').startIdeationScan,
+  cancelIdeationScan: (() => mockCancelIdeationScan()) as typeof import('@/app/actions/ideation').cancelIdeationScan,
 }));
 
 const mockUseSessionStream = vi.fn();
@@ -224,12 +226,17 @@ describe('IdeationScanner', () => {
       expect(button).not.toBeDisabled();
     });
 
-    it('shows streaming output when text is available', () => {
+    it('shows streaming output when text is available', async () => {
+      mockStartIdeationScan.mockResolvedValue('sess-out');
       mockUseSessionStream.mockReturnValue([
         ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Sample output' }] } }),
       ]);
 
       renderComponent();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Run Scan' }));
+      });
 
       expect(screen.getByText('Sample output')).toBeInTheDocument();
     });
@@ -261,6 +268,56 @@ describe('IdeationScanner', () => {
       });
 
       expect(screen.getByRole('button', { name: 'Run Scan' })).toBeInTheDocument();
+    });
+  });
+
+  // ── Cancel race condition (rapid start/stop) ─────────────────────────
+
+  describe('cancel race condition', () => {
+    it('cancels an in-flight scan when Stop is clicked before start completes', async () => {
+      let resolveStart!: (value: string) => void;
+      const deferredStart = new Promise<string>(resolve => { resolveStart = resolve; });
+      mockStartIdeationScan.mockReturnValue(deferredStart);
+
+      renderComponent();
+
+      // Click "Run Scan" — triggers handleScan
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Run Scan' }));
+      });
+
+      // Verify running state: "Scanning…" button + "✕ Stop" button
+      expect(screen.getByRole('button', { name: 'Scanning…' })).toBeInTheDocument();
+      expect(screen.getByText('✕ Stop')).toBeInTheDocument();
+
+      // Click "✕ Stop" while start is still in-flight
+      // (mockCancelIdeationScan resolves immediately so React batches cancelling
+      //  toggles; "Stopping…" won't visibly render, but the call count proves the flow)
+      await act(async () => {
+        fireEvent.click(screen.getByText('✕ Stop'));
+      });
+
+      // Cancel was called (best-effort — may not find session yet since start hasn't resolved)
+      expect(mockCancelIdeationScan).toHaveBeenCalled();
+
+      // Now resolve the deferred start — the transition callback will check cancelRequestedRef
+      await act(async () => {
+        resolveStart('sess-ideation-race');
+        // Wait for the promise chain to settle (microtask queue drains before macrotask)
+        await new Promise(r => setTimeout(r, 0));
+      });
+
+      // After transition resolves and sees cancel was requested, it auto-cancels.
+      // cancelIdeationScan should have been called a second time (post-resolution)
+      expect(mockCancelIdeationScan).toHaveBeenCalledTimes(2);
+
+      // Button should return to "Run Scan" (running = false)
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Run Scan' })).toBeInTheDocument();
+      });
+
+      // The Stop button should be gone
+      expect(screen.queryByText('✕ Stop')).not.toBeInTheDocument();
     });
   });
 });

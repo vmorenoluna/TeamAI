@@ -37,3 +37,13 @@ export async function getIdeationReports(): Promise<{ filename: string; date: st
     .map(f => ({ filename: f, date: f.replace('ideation-', '').replace('.json', '') }))
     .sort((a, b) => b.date.localeCompare(a.date));
 }
+
+/** Cancel a running ideation scan. */
+export async function cancelIdeationScan(): Promise<void> {
+  const projectPath = await getActiveProjectPath();
+  const sessionId = sessions.get(projectPath);
+  if (sessionId) {
+    processManager.killSession(sessionId);
+    sessions.delete(projectPath);
+  }
+}
