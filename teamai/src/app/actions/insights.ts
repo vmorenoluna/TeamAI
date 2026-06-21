@@ -30,3 +30,13 @@ export async function getOrCreateInsightsSession(): Promise<string> {
 export async function sendInsightsMessage(sessionId: string, message: string): Promise<void> {
   processManager.sendMessage(sessionId, message);
 }
+
+/** Cancel a running insights chat session. */
+export async function cancelInsightsSession(): Promise<void> {
+  const projectPath = await getActiveProjectPath();
+  const sessionId = sessions.get(projectPath);
+  if (sessionId) {
+    processManager.killSession(sessionId);
+    sessions.delete(projectPath);
+  }
+}
