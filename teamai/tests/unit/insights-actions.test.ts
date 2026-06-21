@@ -14,12 +14,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const mockCreateSession = vi.fn();
 const mockSendMessage = vi.fn();
 const mockGetSession = vi.fn();
+const mockKillSession = vi.fn();
 
 vi.mock('@/lib/process-manager', () => ({
   processManager: {
     createSession: (...args: unknown[]) => mockCreateSession(...args),
     sendMessage: (...args: unknown[]) => mockSendMessage(...args),
     getSession: (...args: unknown[]) => mockGetSession(...args),
+    killSession: (...args: unknown[]) => mockKillSession(...args),
   },
 }));
 
@@ -57,6 +59,7 @@ describe('insights server actions', () => {
     const project = createTestProject();
     root = project.root;
     clean = project.clean;
+    vi.resetAllMocks();
     mockGetActiveProjectPath.mockResolvedValue(root);
     resetGlobalSessions();
   });
@@ -225,6 +228,54 @@ describe('insights server actions', () => {
       await sendInsightsMessage('session-multi', 'Line 1\nLine 2\nLine 3');
 
       expect(mockSendMessage).toHaveBeenCalledWith('session-multi', 'Line 1\nLine 2\nLine 3');
+    });
+  });
+
+  // ── cancelInsightsSession ───────────────────────────────────────────
+
+  describe('cancelInsightsSession', () => {
+    it('kills the active session and removes it from the tracking map', async () => {
+      mockCreateSession.mockResolvedValueOnce('session-to-kill');
+
+      const { getOrCreateInsightsSession, cancelInsightsSession } =
+        await import('@/app/actions/insights');
+
+      // Create a session first
+      await getOrCreateInsightsSession();
+
+      await cancelInsightsSession();
+
+      expect(mockKillSession).toHaveBeenCalledWith('session-to-kill');
+
+      // After cancel, creating a new session should make a fresh one
+      mockCreateSession.mockResolvedValueOnce('session-after-kill');
+      const newId = await getOrCreateInsightsSession();
+      expect(newId).toBe('session-after-kill');
+      expect(mockCreateSession).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not crash when cancelling with no active session (idempotent)', async () => {
+      const { cancelInsightsSession } = await import('@/app/actions/insights');
+      await expect(cancelInsightsSession()).resolves.toBeUndefined();
+      expect(mockKillSession).not.toHaveBeenCalled();
+    });
+
+    it('removes the session from the tracking map after kill', async () => {
+      mockCreateSession.mockResolvedValueOnce('session-rm');
+
+      const { getOrCreateInsightsSession, cancelInsightsSession } =
+        await import('@/app/actions/insights');
+
+      await getOrCreateInsightsSession();
+
+      await cancelInsightsSession();
+      expect(mockKillSession).toHaveBeenCalledWith('session-rm');
+
+      // Session map entry should be gone — next call creates a new session
+      mockCreateSession.mockResolvedValueOnce('session-fresh');
+      mockGetSession.mockReturnValueOnce(undefined); // force fresh lookup
+      const newId = await getOrCreateInsightsSession();
+      expect(newId).toBe('session-fresh');
     });
   });
 
