@@ -1466,10 +1466,11 @@ export class Orchestrator {
   }
 
   /**
-   * Rewrite the worktree's .git file and its back-reference to use HOST-style paths.
+   * Rewrite the worktree's .git file and its back-reference to use host-side paths.
    * Needed before running host-side git in the worktree when a prior
-   * _patchWorktreeGitFile call may have written container paths that the host cannot
-   * resolve (e.g. /workspaces/... doesn't exist on Windows).
+   * _patchWorktreeGitFile call may have written container-relative paths that the host
+   * cannot resolve (the container workspace path doesn't exist on the host filesystem).
+   * Both methods compare current content to expected and are no-ops when already correct.
    */
   private _restoreWorktreeGitFileToHostPaths(hostWorktreePath: string): void {
     const gitFile = path.join(hostWorktreePath, '.git');
@@ -1497,9 +1498,9 @@ export class Orchestrator {
 
   /**
    * Rewrite the worktree's .git file and its back-reference so both point to
-   * container-relative paths. Needed when the worktree was created by host git
-   * (container not yet running during plan phase), which leaves Windows-style
-   * gitdir paths that the Linux container cannot resolve.
+   * container-relative paths. Compares current file content to the expected value
+   * derived from containerWorkspace (runtime value from docker inspect) and is a
+   * no-op when already correct — safe to call unconditionally before any docker exec.
    */
   private _patchWorktreeGitFile(hostWorktreePath: string, containerWorkspace: string): void {
     const gitFile = path.join(hostWorktreePath, '.git');
@@ -1532,6 +1533,12 @@ export class Orchestrator {
     if (readContainerConfig(this.projectRoot).enabled && args[0] !== 'worktree') {
       const info = containerManager.getRunningContainer(this.projectRoot);
       if (info) {
+        // Ensure the worktree .git file (if any) uses paths resolvable inside the
+        // container before running docker exec. The current content might be host-style
+        // paths (e.g. from a prior host-side git op or a server restart), which the
+        // container cannot resolve. Both methods compare current vs expected and are
+        // no-ops when already correct, so this is safe to call unconditionally.
+        this._patchWorktreeGitFile(hostCwd, info.remoteWorkspaceFolder);
         const containerCwd = hostToContainerPath(hostCwd, this.projectRoot, info.remoteWorkspaceFolder);
         const mappedArgs = args.map(a =>
           path.isAbsolute(a) && a.startsWith(this.projectRoot)
@@ -1543,6 +1550,10 @@ export class Orchestrator {
         return;
       }
     }
+    // Host git fallback: ensure the worktree .git file (if any) uses host-style paths.
+    // The container path patch may have been applied earlier; undo it so host git can
+    // resolve the worktree correctly.
+    this._restoreWorktreeGitFileToHostPaths(hostCwd);
     execFileSync('git', args, { cwd: hostCwd });
   }
 
