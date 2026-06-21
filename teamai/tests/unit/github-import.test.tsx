@@ -25,6 +25,7 @@ const mockParseIssuesFromText = vi.fn();
 const mockSaveIssuesToFile = vi.fn();
 const mockImportIssues = vi.fn();
 const mockGetActiveIssueSession = vi.fn();
+const mockCancelGithubIssueListing = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@/app/actions/github', () => ({
   startIssueList: (() => mockStartIssueList()) as typeof import('@/app/actions/github').startIssueList,
@@ -32,6 +33,7 @@ vi.mock('@/app/actions/github', () => ({
   saveIssuesToFile: ((...args: unknown[]) => mockSaveIssuesToFile(...args)) as typeof import('@/app/actions/github').saveIssuesToFile,
   importIssues: ((...args: unknown[]) => mockImportIssues(...args)) as typeof import('@/app/actions/github').importIssues,
   getActiveIssueSession: (() => mockGetActiveIssueSession()) as typeof import('@/app/actions/github').getActiveIssueSession,
+  cancelGithubIssueListing: (() => mockCancelGithubIssueListing()) as typeof import('@/app/actions/github').cancelGithubIssueListing,
 }));
 
 const mockUseSessionStream = vi.fn();
@@ -113,6 +115,7 @@ describe('GitHubImport', () => {
     vi.clearAllMocks();
     mockUseSessionStream.mockReturnValue([]);
     mockGetActiveIssueSession.mockResolvedValue(null);
+    mockCancelGithubIssueListing.mockResolvedValue(undefined);
     mockParseIssuesFromText.mockReturnValue([]);
     // Default: extractText returns empty — prevents falsey `'' + undefined = 'undefined'`
     // from polluting streamText and hiding empty-state sections.
@@ -148,7 +151,7 @@ describe('GitHubImport', () => {
   // ── Fetching state ───────────────────────────────────────────────────
 
   describe('fetching state', () => {
-    it('shows Fetching… and disables the button while listing', async () => {
+    it('shows ✕ Stop button while listing is running', async () => {
       mockStartIssueList.mockReturnValue(new Promise(() => {}));
 
       renderComponent();
@@ -157,23 +160,29 @@ describe('GitHubImport', () => {
         fireEvent.click(screen.getByRole('button', { name: 'List Open Issues' }));
       });
 
-      const button = screen.getByRole('button', { name: 'Fetching…' });
+      const button = screen.getByRole('button', { name: '✕ Stop' });
       expect(button).toBeInTheDocument();
-      expect(button).toBeDisabled();
     });
 
     it('shows streaming output when text is available', async () => {
       mockStartIssueList.mockResolvedValue('session-stream');
-      // Override the default '' return for this specific test
       mockExtractText.mockReturnValue('Listing issues...');
+      mockUseSessionStream.mockReturnValue([]);
+
+      const { rerender } = render(<GitHubImport />);
+
+      // Click triggers startIssueList which sets sessionId
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'List Open Issues' }));
+      });
+
+      // Update mock to return stream events, then force re-render
       mockUseSessionStream.mockReturnValue([
         ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Listing issues...' }] } }),
       ]);
 
-      renderComponent();
-
       await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: 'List Open Issues' }));
+        rerender(<GitHubImport />);
       });
 
       await waitFor(() => {
@@ -522,7 +531,7 @@ describe('GitHubImport', () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Fetching…' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '✕ Stop' })).toBeInTheDocument();
       });
 
       // The component should reuse the existing session, not start a new one

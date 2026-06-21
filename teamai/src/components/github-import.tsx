@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useEffect, useRef } from 'react';
+import { useState, useTransition, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   startIssueList,
@@ -8,6 +8,7 @@ import {
   saveIssuesToFile,
   importIssues,
   getActiveIssueSession,
+  cancelGithubIssueListing,
 } from '@/app/actions/github';
 import { useSessionStream } from '@/hooks/use-session-stream';
 import { extractText } from '@/lib/stream-types';
@@ -24,8 +25,41 @@ export function GitHubImport() {
   const [importing, setImporting] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [rateLimited, setRateLimited] = useState(false);
+  const [rateLimitMessage, setRateLimitMessage] = useState('');
   const parsedRef = useRef(false);
+  const cancelRequestedRef = useRef(false);
   const streamEvents = useSessionStream(sessionId);
+
+  // Compute whether the agent is currently streaming from stream events
+  const isStreaming = useMemo(() => {
+    if (streamEvents.length === 0) return false;
+    const lastType = streamEvents[streamEvents.length - 1].event.type;
+    return lastType === 'assistant';
+  }, [streamEvents]);
+
+  // Sync running state from stream events
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRunning(isStreaming);
+  }, [isStreaming]);
+
+  // Detect rate-limit in stream events
+  useEffect(() => {
+    for (const e of streamEvents) {
+      const text = extractText(e.event);
+      if (
+        text &&
+        /(session.?limit|rate.?limit|too many requests|usage.?limit)/i.test(text)
+      ) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setRateLimited(true);
+        setRateLimitMessage(text.slice(0, 500));
+        setRunning(false);
+        return;
+      }
+    }
+  }, [streamEvents]);
 
   // Accumulate streaming text for display
   useEffect(() => {
@@ -47,6 +81,7 @@ export function GitHubImport() {
   // (avoids stale state issue — streamText is async, streamEvents is synchronous here)
   useEffect(() => {
     if (!done || !sessionId || parsedRef.current) return;
+    if (cancelRequestedRef.current) return;
     parsedRef.current = true;
 
     const sid = sessionId;
@@ -87,6 +122,7 @@ export function GitHubImport() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleListIssues() {
+    cancelRequestedRef.current = false;
     parsedRef.current = false;
     setRunning(true);
     setStreamText('');
@@ -94,16 +130,36 @@ export function GitHubImport() {
     setSelectedNumbers(new Set());
     setImportedCount(0);
     setError(null);
+    setRateLimited(false);
+    setRateLimitMessage('');
     startTransition(async () => {
       try {
         const id = await startIssueList();
-        setSessionId(id);
+        if (!cancelRequestedRef.current) setSessionId(id);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to start issue listing');
         setRunning(false);
       }
     });
   }
+
+  const handleCancel = useCallback(async () => {
+    cancelRequestedRef.current = true;
+    try {
+      await cancelGithubIssueListing();
+    } catch { /* best-effort */ }
+    setRunning(false);
+    setSessionId(null);
+    setRateLimited(false);
+    setRateLimitMessage('');
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    setRateLimited(false);
+    setRateLimitMessage('');
+    setRunning(false);
+    setSessionId(null);
+  }, []);
 
   function toggleIssue(number: number) {
     setSelectedNumbers(prev => {
@@ -155,18 +211,42 @@ export function GitHubImport() {
         </div>
       </div>
 
+      {/* Rate-limit banner */}
+      {rateLimited && (
+        <div className="shrink-0 bg-amber-950/60 border border-amber-800 rounded-lg text-amber-200 px-4 py-2.5 text-xs flex items-center justify-between">
+          <span className="truncate mr-2">
+            {rateLimitMessage || 'Rate limit reached. Please wait and try again.'}
+          </span>
+          <button
+            onClick={handleRetry}
+            className="shrink-0 px-3 py-1 text-xs font-medium bg-amber-700 hover:bg-amber-600 text-amber-100 rounded transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Actions bar */}
       <div className="flex items-center gap-3">
-        <button
-          onClick={handleListIssues}
-          disabled={isPending || (running && !done)}
-          className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors flex items-center gap-2"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
-          </svg>
-          {running && !done ? 'Fetching…' : 'List Open Issues'}
-        </button>
+        {running && !done ? (
+          <button
+            onClick={handleCancel}
+            className="px-4 py-2 text-sm font-medium bg-red-800 text-red-100 rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2"
+          >
+            ✕ Stop
+          </button>
+        ) : (
+          <button
+            onClick={handleListIssues}
+            disabled={isPending}
+            className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors flex items-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+            </svg>
+            List Open Issues
+          </button>
+        )}
 
         {done && issues.length > 0 && (
           <>

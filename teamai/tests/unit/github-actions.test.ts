@@ -17,12 +17,14 @@ import type { GitHubIssue } from '@/app/actions/github';
 const mockCreateSession = vi.fn();
 const mockSendMessage = vi.fn();
 const mockGetSession = vi.fn();
+const mockKillSession = vi.fn();
 
 vi.mock('@/lib/process-manager', () => ({
   processManager: {
     createSession: (...args: unknown[]) => mockCreateSession(...args),
     sendMessage: (...args: unknown[]) => mockSendMessage(...args),
     getSession: (...args: unknown[]) => mockGetSession(...args),
+    killSession: (...args: unknown[]) => mockKillSession(...args),
   },
 }));
 
@@ -82,6 +84,43 @@ describe('GitHub server actions', () => {
     vi.clearAllMocks();
     vi.resetModules();
     resetGlobalSessions();
+  });
+
+  // ── cancelGithubIssueListing ─────────────────────────────────────────
+
+  describe('cancelGithubIssueListing', () => {
+    it('kills the session and removes from tracking map', async () => {
+      mockCreateSession.mockResolvedValue('session-cancel');
+
+      const { startIssueList, cancelGithubIssueListing } = await import('@/app/actions/github');
+      await startIssueList();
+
+      const globalSessions: Map<string, string> =
+        (globalThis as Record<string, unknown>).__githubSessions as Map<string, string>;
+      expect(globalSessions.get(root)).toBe('session-cancel');
+
+      await cancelGithubIssueListing();
+
+      expect(mockKillSession).toHaveBeenCalledWith('session-cancel');
+      expect(globalSessions.has(root)).toBe(false);
+    });
+
+    it('does not crash when no session exists (idempotent)', async () => {
+      const { cancelGithubIssueListing } = await import('@/app/actions/github');
+      await expect(cancelGithubIssueListing()).resolves.toBeUndefined();
+    });
+
+    it('allows a new session after cancel', async () => {
+      mockCreateSession.mockResolvedValueOnce('session-first');
+      mockCreateSession.mockResolvedValueOnce('session-second');
+
+      const { startIssueList, cancelGithubIssueListing } = await import('@/app/actions/github');
+      await startIssueList();
+      await cancelGithubIssueListing();
+
+      const secondId = await startIssueList();
+      expect(secondId).toBe('session-second');
+    });
   });
 
   // ── startIssueList ───────────────────────────────────────────────────

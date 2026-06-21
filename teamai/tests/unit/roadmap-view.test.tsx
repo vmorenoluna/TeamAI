@@ -13,7 +13,7 @@
  * following the project's established pattern for component tests.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { RoadmapReport, RoadmapItem } from '@/app/actions/roadmap';
@@ -116,10 +116,6 @@ describe('PhasedKanban', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetLinkedTaskStatuses.mockResolvedValue({});
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   // ── Phase columns ────────────────────────────────────────────────────
