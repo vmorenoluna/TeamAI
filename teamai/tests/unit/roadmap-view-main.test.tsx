@@ -11,7 +11,7 @@
  * following the project's established pattern.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { SessionEvent } from '@/hooks/use-session-stream';
@@ -148,10 +148,6 @@ describe('RoadmapView', () => {
     mockGetChangelogReports.mockResolvedValue([]);
     mockGetActiveRoadmapSession.mockResolvedValue(null);
     mockExtractText.mockReturnValue('');
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   // ── No-project empty state ───────────────────────────────────────────

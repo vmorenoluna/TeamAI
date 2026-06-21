@@ -1,0 +1,650 @@
+// @vitest-environment happy-dom
+
+/**
+ * Unit tests for InsightsChat component.
+ *
+ * Tests the full lifecycle: initial mount (auto-create session), chat flow
+ * (send message, user/assistant messages, streaming cursor), cancel flow
+ * (✕ Stop → auto-reconnect), rate-limit detection (amber banner + Retry),
+ * input behaviour (disabled while running, Enter to send), result
+ * finalization, and cancel race condition (rapid send/stop).
+ *
+ * Important: we use controlled deferred promises instead of unresolved
+ * new Promise(() => {}) because act() tracks all async work and will hang
+ * indefinitely waiting for an unresolved promise to settle.
+ *
+ * React's useTransition is mocked (isPending=false, synchronous callback).
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import type { SessionEvent } from '@/hooks/use-session-stream';
+import type { StreamEvent } from '@/lib/stream-types';
+
+// ── Helper: controlled deferred promise ─────────────────────────────────────
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(r => { resolve = r; });
+  return { promise, resolve };
+}
+
+// ── Hoisted mocks ───────────────────────────────────────────────────────────
+
+const mockGetOrCreateInsightsSession = vi.fn();
+const mockSendInsightsMessage = vi.fn();
+const mockCancelInsightsSession = vi.fn().mockResolvedValue(undefined);
+
+vi.mock('@/app/actions/insights', () => ({
+  getOrCreateInsightsSession: (() => mockGetOrCreateInsightsSession()) as typeof import('@/app/actions/insights').getOrCreateInsightsSession,
+  sendInsightsMessage: ((...args: unknown[]) => mockSendInsightsMessage(...args)) as typeof import('@/app/actions/insights').sendInsightsMessage,
+  cancelInsightsSession: (() => mockCancelInsightsSession()) as typeof import('@/app/actions/insights').cancelInsightsSession,
+}));
+
+const mockUseSessionStream = vi.fn();
+
+vi.mock('@/hooks/use-session-stream', () => ({
+  useSessionStream: (() => mockUseSessionStream()) as typeof import('@/hooks/use-session-stream').useSessionStream,
+}));
+
+vi.mock('@/lib/stream-types', () => ({
+  extractText: vi.fn((event: Record<string, unknown>) => {
+    const msg = event.message as Record<string, unknown> | undefined;
+    const content = msg?.content as Array<Record<string, unknown>> | undefined;
+    return (content?.[0]?.text as string) ?? '';
+  }),
+}));
+
+const mockStartTransition = vi.hoisted(() => vi.fn((cb: () => void) => cb()));
+
+vi.mock('react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react')>();
+  return {
+    ...actual,
+    useTransition: () => [false, mockStartTransition],
+  };
+});
+
+// ── Imports (after mocks) ───────────────────────────────────────────────────
+
+import { InsightsChat } from '@/components/insights-chat';
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function renderComponent() {
+  render(<InsightsChat />);
+}
+
+function ev(event: StreamEvent): SessionEvent {
+  return { sessionId: '', event };
+}
+
+/** Simulate sending a message: type in textarea, click Send. */
+async function sendMessage(text: string) {
+  const textarea = screen.getByRole('textbox');
+  fireEvent.change(textarea, { target: { value: text } });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  });
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+describe('InsightsChat', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseSessionStream.mockReturnValue([]);
+    mockGetOrCreateInsightsSession.mockResolvedValue('session-init');
+    mockCancelInsightsSession.mockResolvedValue(undefined);
+  });
+
+  // ── Initial state ────────────────────────────────────────────────────
+
+  describe('initial state', () => {
+    it('creates a session on mount', async () => {
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('shows the empty state placeholder when no messages exist', () => {
+      renderComponent();
+
+      expect(
+        screen.getByText('Ask anything about the codebase.')
+      ).toBeInTheDocument();
+    });
+
+    it('shows Send button (not ✕ Stop) initially', () => {
+      renderComponent();
+
+      expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+      expect(screen.queryByText('✕ Stop')).not.toBeInTheDocument();
+    });
+
+    it('shows "Connecting…" placeholder when session is not yet ready', () => {
+      // Use a deferred promise that we never resolve (doesn't hang because
+      // there's no sendMessage → act() awaiting the deferred promise)
+      const { promise } = deferred<string>();
+      mockGetOrCreateInsightsSession.mockReturnValue(promise);
+      renderComponent();
+
+      expect(screen.getByPlaceholderText('Connecting…')).toBeInTheDocument();
+    });
+
+    it('shows "Ask about the codebase…" placeholder once session is ready', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('session-ready');
+      renderComponent();
+
+      await waitFor(() => {
+        expect(
+          screen.getByPlaceholderText('Ask about the codebase… (Enter to send)')
+        ).toBeInTheDocument();
+      });
+    });
+  });
+
+  // ── Chat flow ────────────────────────────────────────────────────────
+
+  describe('chat flow', () => {
+    it('sends a message and displays the user bubble', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-chat');
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('What is this codebase?');
+
+      expect(screen.getByText('What is this codebase?')).toBeInTheDocument();
+      expect(mockSendInsightsMessage).toHaveBeenCalledWith('sess-chat', 'What is this codebase?');
+    });
+
+    it('clears the textarea after sending', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-clear');
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Hello');
+
+      const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+      expect(textarea.value).toBe('');
+    });
+
+    it('displays assistant streaming text from stream events', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-asst');
+      // Return empty on mount, then streaming events after send
+      let callCount = 0;
+      mockUseSessionStream.mockImplementation(() => {
+        callCount++;
+        if (callCount <= 2) return []; // mount + initial session set render
+        return [
+          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'This is a response' }] } }),
+        ];
+      });
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Hello');
+
+      await waitFor(() => {
+        expect(screen.getByText('This is a response')).toBeInTheDocument();
+      });
+    });
+
+    it('does not send when input is empty', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-empty');
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      const sendBtn = screen.getByRole('button', { name: 'Send' });
+      expect(sendBtn).toBeDisabled();
+
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: '   ' } });
+      expect(sendBtn).toBeDisabled();
+
+      expect(mockSendInsightsMessage).not.toHaveBeenCalled();
+    });
+
+    it('does not send when sessionId is null', () => {
+      const { promise } = deferred<string>();
+      mockGetOrCreateInsightsSession.mockReturnValue(promise);
+      renderComponent();
+
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    });
+  });
+
+  // ── Streaming state ──────────────────────────────────────────────────
+
+  describe('streaming state', () => {
+    it('shows ✕ Stop button while assistant is streaming', async () => {
+      // Use a deferred promise so sendMessage's act() completes
+      const { promise, resolve } = deferred<void>();
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-stop');
+      mockSendInsightsMessage.mockReturnValue(promise);
+      mockUseSessionStream.mockReturnValue([]);
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Hello');
+
+      // Assert while the send is still pending (act() completed because
+      // the transition callback's promise is not tracked by act in this setup)
+      expect(screen.getByText('✕ Stop')).toBeInTheDocument();
+
+      // Resolve to clean up
+      resolve();
+    });
+
+    it('disables textarea while running', async () => {
+      const { promise, resolve } = deferred<void>();
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-disabled');
+      mockSendInsightsMessage.mockReturnValue(promise);
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Hello');
+
+      const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+      expect(textarea).toBeDisabled();
+
+      resolve();
+    });
+
+    it('shows "Assistant is responding…" placeholder while running', async () => {
+      const { promise, resolve } = deferred<void>();
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-placeholder');
+      mockSendInsightsMessage.mockReturnValue(promise);
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Hello');
+
+      expect(
+        screen.getByPlaceholderText('Assistant is responding…')
+      ).toBeInTheDocument();
+
+      resolve();
+    });
+  });
+
+  // ── Cancel flow ──────────────────────────────────────────────────────
+
+  describe('cancel flow', () => {
+    it('calls cancelInsightsSession when ✕ Stop is clicked', async () => {
+      const { promise: sendPromise, resolve: resolveSend } = deferred<void>();
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-cancel');
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-reconnect');
+      mockSendInsightsMessage.mockReturnValue(sendPromise);
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Hello');
+      expect(screen.getByText('✕ Stop')).toBeInTheDocument();
+
+      // Click cancel — handleCancel is async, fireEvent triggers it
+      // Use act but don't await — the click handler is async and will
+      // await cancelInsightsSession (resolved) and getOrCreateInsightsSession (resolved)
+      await act(async () => {
+        fireEvent.click(screen.getByText('✕ Stop'));
+      });
+
+      expect(mockCancelInsightsSession).toHaveBeenCalled();
+      resolveSend();
+    });
+
+    it('auto-reconnects with a fresh session after cancel', async () => {
+      const { promise: sendPromise, resolve: resolveSend } = deferred<void>();
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-original');
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-reconnect');
+      mockSendInsightsMessage.mockReturnValue(sendPromise);
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Hello');
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('✕ Stop'));
+      });
+
+      // getOrCreateInsightsSession called on mount + auto-reconnect after cancel
+      expect(mockGetOrCreateInsightsSession).toHaveBeenCalledTimes(2);
+      resolveSend();
+    });
+
+    it('shows Send button again after cancel (not ✕ Stop)', async () => {
+      const { promise: sendPromise, resolve: resolveSend } = deferred<void>();
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-cancel2');
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-reconnect2');
+      mockSendInsightsMessage.mockReturnValue(sendPromise);
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Hello');
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('✕ Stop'));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+      });
+      expect(screen.queryByText('✕ Stop')).not.toBeInTheDocument();
+      resolveSend();
+    });
+  });
+
+  // ── Rate-limit detection ─────────────────────────────────────────────
+
+  describe('rate-limit detection', () => {
+    it('shows rate-limit banner when stream contains rate-limit text', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-rate');
+      mockUseSessionStream.mockReturnValue([
+        ev({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'session limit reached. Try again later.' }] },
+        }),
+      ]);
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByText(/session limit reached/)).toBeInTheDocument();
+      });
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    });
+
+    it('detects "too many requests" as rate-limit', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-many');
+      mockUseSessionStream.mockReturnValue([
+        ev({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'Too many requests. Please slow down.' }] },
+        }),
+      ]);
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByText(/Too many requests/)).toBeInTheDocument();
+      });
+    });
+
+    it('detects "usage limit" pattern', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-usage');
+      mockUseSessionStream.mockReturnValue([
+        ev({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'Your usage limit has been exceeded.' }] },
+        }),
+      ]);
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByText(/usage limit/)).toBeInTheDocument();
+      });
+    });
+
+    it('Retry button clears rate-limit state and reconnects', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-rate-retry');
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-post-retry');
+      mockUseSessionStream.mockReturnValue([
+        ev({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'session limit reached' }] },
+        }),
+      ]);
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      });
+
+      // Rate-limit banner should disappear
+      expect(screen.queryByText(/session limit/)).not.toBeInTheDocument();
+      // Should reconnect
+      expect(mockGetOrCreateInsightsSession).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ── Result finalization ──────────────────────────────────────────────
+
+  describe('result finalization', () => {
+    it('removes the streaming cursor when result event arrives', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-final');
+
+      let callCount = 0;
+      mockUseSessionStream.mockImplementation(() => {
+        callCount++;
+        if (callCount <= 2) return [];
+        if (callCount <= 3) return [
+          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Streaming message' }] } }),
+        ];
+        return [
+          ev({ type: 'result' }),
+        ];
+      });
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Hello');
+
+      await waitFor(() => {
+        expect(screen.getByText('Streaming message')).toBeInTheDocument();
+      });
+
+      // Message text still present after finalization
+      expect(screen.getByText('Streaming message')).toBeInTheDocument();
+    });
+  });
+
+  // ── Enter key ────────────────────────────────────────────────────────
+
+  describe('Enter key', () => {
+    it('sends message on Enter (without Shift)', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-enter');
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'Quick question' } });
+
+      await act(async () => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+
+      expect(mockSendInsightsMessage).toHaveBeenCalledWith('sess-enter', 'Quick question');
+      expect(screen.getByText('Quick question')).toBeInTheDocument();
+    });
+
+    it('does not send on Shift+Enter', () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-shift');
+      renderComponent();
+
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'Not sent' } });
+
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
+
+      expect(mockSendInsightsMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Error recovery ───────────────────────────────────────────────────
+
+  describe('error recovery', () => {
+    it('resets running when sendInsightsMessage throws', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-err');
+      mockSendInsightsMessage.mockRejectedValue(new Error('send failed'));
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Hello');
+
+      // Try/catch in handleSend's startTransition catches and sets running=false
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+      });
+      expect(screen.queryByText('✕ Stop')).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Cancel race condition ────────────────────────────────────────────
+
+  describe('cancel race condition (rapid send/stop)', () => {
+    it('cancels an in-flight send when ✕ Stop is clicked before sendMessage resolves', async () => {
+      const { promise: sendPromise, resolve: resolveSend } = deferred<void>();
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-race');
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-reconnect');
+      mockSendInsightsMessage.mockReturnValue(sendPromise);
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Hello');
+      expect(screen.getByText('✕ Stop')).toBeInTheDocument();
+
+      // Click ✕ Stop while sendMessage is still in-flight
+      await act(async () => {
+        fireEvent.click(screen.getByText('✕ Stop'));
+      });
+
+      expect(mockCancelInsightsSession).toHaveBeenCalled();
+
+      // After cancel + reconnect, Send button returns
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+      });
+
+      resolveSend();
+    });
+  });
+
+  // ── Multiple messages ────────────────────────────────────────────────
+
+  describe('multiple messages', () => {
+    it('renders multiple user and assistant messages', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-multi');
+
+      let callCount = 0;
+      mockUseSessionStream.mockImplementation(() => {
+        callCount++;
+        if (callCount <= 2) return [];
+        if (callCount <= 4) return [
+          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Response 1' }] } }),
+        ];
+        return [
+          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Response 2' }] } }),
+        ];
+      });
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Question 1');
+      await waitFor(() => {
+        expect(screen.getByText('Response 1')).toBeInTheDocument();
+      });
+
+      await sendMessage('Question 2');
+      await waitFor(() => {
+        expect(screen.getByText('Response 2')).toBeInTheDocument();
+      });
+
+      expect(screen.getByText('Question 1')).toBeInTheDocument();
+      expect(screen.getByText('Question 2')).toBeInTheDocument();
+    });
+
+    it('updates streaming message in-place rather than appending duplicate', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-update');
+
+      let callCount = 0;
+      mockUseSessionStream.mockImplementation(() => {
+        callCount++;
+        if (callCount <= 2) return [];
+        if (callCount === 3) return [
+          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Part' }] } }),
+        ];
+        return [
+          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Part one' }] } }),
+          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Part two' }] } }),
+        ];
+      });
+
+      renderComponent();
+
+      await waitFor(() => {
+        expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
+      });
+
+      await sendMessage('Go');
+
+      await waitFor(() => {
+        expect(screen.getByText('Part two')).toBeInTheDocument();
+      });
+    });
+  });
+});

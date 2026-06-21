@@ -151,6 +151,16 @@ export async function importIssues(
   return { taskIds };
 }
 
+/** Cancel a running GitHub issue listing session. */
+export async function cancelGithubIssueListing(): Promise<void> {
+  const projectPath = await getActiveProjectPath();
+  const sessionId = sessions.get(projectPath);
+  if (sessionId) {
+    processManager.killSession(sessionId);
+    sessions.delete(projectPath);
+  }
+}
+
 /**
  * Check if there's an active GitHub issue listing session for reconnection.
  */
