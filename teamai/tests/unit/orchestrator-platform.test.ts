@@ -171,21 +171,25 @@ describe('buildPlatformPrompt', () => {
 
 describe('Orchestrator — remaining edge cases', () => {
   let orch: Orchestrator;
+  let pmSpies: ReturnType<typeof vi.spyOn>[] = [];
 
   beforeEach(() => {
     vi.clearAllMocks();
     // Mock the processManager methods needed for pipeline execution
-    vi.spyOn(processManager, 'on' as any).mockReturnValue(processManager);
-    vi.spyOn(processManager, 'off' as any).mockReturnValue(processManager);
-    vi.spyOn(processManager, 'emit' as any).mockReturnValue(true);
-    vi.spyOn(processManager, 'sendMessage' as any).mockImplementation(() => {});
-    vi.spyOn(processManager, 'killSession' as any).mockImplementation(() => {});
+    pmSpies = [
+      vi.spyOn(processManager, 'on' as any).mockReturnValue(processManager),
+      vi.spyOn(processManager, 'off' as any).mockReturnValue(processManager),
+      vi.spyOn(processManager, 'emit' as any).mockReturnValue(true),
+      vi.spyOn(processManager, 'sendMessage' as any).mockImplementation(() => {}),
+      vi.spyOn(processManager, 'killSession' as any).mockImplementation(() => {}),
+    ];
 
     orch = new Orchestrator(join(tmpdir(), `teamai-plat-${randomUUID().slice(0, 8)}`));
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    // Restore processManager spies only — not hoisted mocks (prevents footgun)
+    pmSpies.forEach(s => s.mockRestore());
   });
 
   describe('isTaskActive / cancelPipeline', () => {
