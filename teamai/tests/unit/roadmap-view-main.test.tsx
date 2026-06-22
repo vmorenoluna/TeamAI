@@ -601,4 +601,223 @@ describe('RoadmapView', () => {
       expect(mockSessionStorage.getItem('roadmap-session')).toBe('alive-session-id');
     });
   });
+
+  // ── Rate-limit detection ────────────────────────────────────────────
+
+  describe('rate-limit detection', () => {
+    // ── Roadmap rate-limit ────────────────────────────────────────────
+
+    describe('roadmap rate-limit', () => {
+      it('shows rate-limit banner when stream contains "session limit" text', () => {
+        mockExtractText.mockReturnValue('session limit reached. Try again later.');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+
+        expect(screen.getByText(/session limit reached/)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+      });
+
+      it('detects "rate limit" as rate-limit', () => {
+        mockExtractText.mockReturnValue('Rate limit exceeded. Please wait.');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+
+        expect(screen.getByText(/Rate limit exceeded/)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+      });
+
+      it('detects "too many requests" as rate-limit', () => {
+        mockExtractText.mockReturnValue('Too many requests. Slow down.');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+
+        expect(screen.getByText(/Too many requests/)).toBeInTheDocument();
+      });
+
+      it('detects "usage limit" as rate-limit', () => {
+        mockExtractText.mockReturnValue('Your usage limit has been exceeded.');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+
+        expect(screen.getByText(/usage limit/)).toBeInTheDocument();
+      });
+
+      it('extracts reset time from the rate-limit text', () => {
+        mockExtractText.mockReturnValue('Session limit hit — resets 3:45 pm UTC');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+
+        expect(
+          screen.getByText('Session limit hit — resets 3:45 pm UTC')
+        ).toBeInTheDocument();
+      });
+
+      it('shows truncated error text when no reset time is present', () => {
+        mockExtractText.mockReturnValue(
+          'Too many requests. Please wait before sending another message.'
+        );
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+
+        expect(
+          screen.getByText(
+            'Too many requests. Please wait before sending another message.'
+          )
+        ).toBeInTheDocument();
+      });
+
+      it('sets running to false when rate-limited', () => {
+        mockExtractText.mockReturnValue('session limit');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+
+        // Running is false → button shows "Generate Roadmap" not "Generating…"
+        expect(screen.getByText('Generate Roadmap')).toBeInTheDocument();
+        expect(screen.queryByText('Generating…')).not.toBeInTheDocument();
+      });
+
+      it('hides the streaming output when rate-limited', () => {
+        mockExtractText.mockReturnValue('session limit reached');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+
+        // rmRunning=true → rmRateLimited=true hides the Agent Output div
+        // But rmRunning is false after rate-limit, so Agent Output is hidden anyway
+        expect(screen.queryByText('Agent Output')).not.toBeInTheDocument();
+      });
+
+      it('Retry button clears rate-limit state and starts a new generation', async () => {
+        mockStartRoadmapGeneration.mockResolvedValue('sess-rm-retry');
+        mockExtractText.mockReturnValue('session limit reached');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+
+        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        });
+
+        // Rate-limit banner should disappear (Retry button gone); rate-limit
+        // text may still appear in the full-output div since running=true.
+        expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+        // Should have started a new roadmap generation
+        expect(mockStartRoadmapGeneration).toHaveBeenCalledTimes(1);
+      });
+
+      it('shows ⏳ icon in the rate-limit banner', () => {
+        mockExtractText.mockReturnValue('session limit');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+
+        expect(screen.getByText('⏳')).toBeInTheDocument();
+      });
+    });
+
+    // ── Changelog rate-limit ──────────────────────────────────────────
+
+    describe('changelog rate-limit', () => {
+      it('shows rate-limit banner on changelog tab when stream contains "session limit" text', () => {
+        mockExtractText.mockReturnValue('session limit reached. Try again later.');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+        fireEvent.click(screen.getByText('Changelog'));
+
+        expect(screen.getByText(/session limit reached/)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+      });
+
+      it('detects "rate limit" as rate-limit on changelog tab', () => {
+        mockExtractText.mockReturnValue('Rate limit exceeded. Please wait.');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+        fireEvent.click(screen.getByText('Changelog'));
+
+        expect(screen.getByText(/Rate limit exceeded/)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+      });
+
+      it('detects "too many requests" as rate-limit on changelog tab', () => {
+        mockExtractText.mockReturnValue('Too many requests. Slow down.');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+        fireEvent.click(screen.getByText('Changelog'));
+
+        expect(screen.getByText(/Too many requests/)).toBeInTheDocument();
+      });
+
+      it('detects "usage limit" as rate-limit on changelog tab', () => {
+        mockExtractText.mockReturnValue('Your usage limit has been exceeded.');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+        fireEvent.click(screen.getByText('Changelog'));
+
+        expect(screen.getByText(/usage limit/)).toBeInTheDocument();
+      });
+
+      it('sets running to false when changelog is rate-limited', () => {
+        mockExtractText.mockReturnValue('session limit');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+        fireEvent.click(screen.getByText('Changelog'));
+
+        // clRunning=false → button shows "Generate Changelog" not "Generating…"
+        expect(screen.getByText('Generate Changelog')).toBeInTheDocument();
+        expect(screen.queryByText('Generating…')).not.toBeInTheDocument();
+      });
+
+      it('hides changelog streaming output when rate-limited', () => {
+        mockExtractText.mockReturnValue('session limit reached');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+        fireEvent.click(screen.getByText('Changelog'));
+
+        expect(screen.queryByText('Agent Output')).not.toBeInTheDocument();
+      });
+
+      it('Retry button on changelog clears rate-limit and starts new generation', async () => {
+        mockStartChangelogGeneration.mockResolvedValue('sess-cl-retry');
+        mockExtractText.mockReturnValue('session limit reached');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+        fireEvent.click(screen.getByText('Changelog'));
+
+        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        });
+
+        expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+        expect(mockStartChangelogGeneration).toHaveBeenCalledTimes(1);
+      });
+
+      it('shows ⏳ icon in the changelog rate-limit banner', () => {
+        mockExtractText.mockReturnValue('session limit');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        renderView(false);
+        fireEvent.click(screen.getByText('Changelog'));
+
+        expect(screen.getByText('⏳')).toBeInTheDocument();
+      });
+    });
+  });
 });
