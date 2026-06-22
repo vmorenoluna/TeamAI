@@ -271,6 +271,134 @@ describe('IdeationScanner', () => {
     });
   });
 
+  // ── Rate-limit detection ─────────────────────────────────────────────
+
+  describe('rate-limit detection', () => {
+    const RATE_EVENT = (text: string) =>
+      ev({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+
+    it('shows rate-limit banner when stream contains "session limit" text', () => {
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('session limit reached. Try again later.'),
+      ]);
+
+      renderComponent();
+
+      expect(screen.getByText(/session limit reached/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    });
+
+    it('detects "rate limit" as rate-limit', () => {
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('Rate limit exceeded. Please wait.'),
+      ]);
+
+      renderComponent();
+
+      expect(screen.getByText(/Rate limit exceeded/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    });
+
+    it('detects "too many requests" as rate-limit', () => {
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('Too many requests. Slow down.'),
+      ]);
+
+      renderComponent();
+
+      expect(screen.getByText(/Too many requests/)).toBeInTheDocument();
+    });
+
+    it('detects "usage limit" as rate-limit', () => {
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('Your usage limit has been exceeded.'),
+      ]);
+
+      renderComponent();
+
+      expect(screen.getByText(/usage limit/)).toBeInTheDocument();
+    });
+
+    it('extracts reset time from the rate-limit text', () => {
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('Session limit hit — resets 3:45 pm UTC'),
+      ]);
+
+      renderComponent();
+
+      expect(
+        screen.getByText('Session limit hit — resets 3:45 pm UTC')
+      ).toBeInTheDocument();
+    });
+
+    it('shows truncated error text when no reset time is present', () => {
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('Too many requests. Please wait before sending another message.'),
+      ]);
+
+      renderComponent();
+
+      // Falls back to text.slice(0, 200) — the full text is under 200 chars
+      expect(
+        screen.getByText('Too many requests. Please wait before sending another message.')
+      ).toBeInTheDocument();
+    });
+
+    it('sets running to false when rate-limited', () => {
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('session limit'),
+      ]);
+
+      renderComponent();
+
+      // Running is false → button shows "Run Scan" not "Scanning…"
+      expect(screen.getByRole('button', { name: 'Run Scan' })).toBeInTheDocument();
+      expect(screen.queryByText('Scanning…')).not.toBeInTheDocument();
+    });
+
+    it('hides the streaming output when rate-limited', () => {
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('session limit reached'),
+      ]);
+
+      renderComponent();
+
+      // The full-text output div is hidden when rateLimited=true
+      expect(screen.queryByText('Agent Output')).not.toBeInTheDocument();
+    });
+
+    it('Retry button clears rate-limit state and starts a new scan', async () => {
+      mockStartIdeationScan.mockResolvedValue('sess-post-retry');
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('session limit reached'),
+      ]);
+
+      renderComponent();
+
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      });
+
+      // Rate-limit banner should disappear (Retry button gone); rate-limit
+      // text may still appear in the full-output div since running=true.
+      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+      // Should have started a new scan
+      expect(mockStartIdeationScan).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows ⏳ icon in the rate-limit banner', () => {
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('session limit'),
+      ]);
+
+      renderComponent();
+
+      expect(screen.getByText('⏳')).toBeInTheDocument();
+    });
+  });
+
   // ── Cancel race condition (rapid start/stop) ─────────────────────────
 
   describe('cancel race condition', () => {
