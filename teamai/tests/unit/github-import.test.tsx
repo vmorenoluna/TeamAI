@@ -548,4 +548,110 @@ describe('GitHubImport', () => {
       });
     });
   });
+
+  // ── Rate-limit detection ────────────────────────────────────────────
+
+  describe('rate-limit detection', () => {
+    const AE = (text: string) =>
+      ev({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+
+    it('shows rate-limit banner when stream contains "session limit" text', () => {
+      mockExtractText.mockReturnValue('session limit reached. Try again later.');
+      mockUseSessionStream.mockReturnValue([AE('session limit reached. Try again later.')]);
+
+      renderComponent();
+
+      expect(screen.getByText(/session limit reached/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    });
+
+    it('detects "rate limit" as rate-limit', () => {
+      mockExtractText.mockReturnValue('Rate limit exceeded. Please wait.');
+      mockUseSessionStream.mockReturnValue([AE('Rate limit exceeded. Please wait.')]);
+
+      renderComponent();
+
+      expect(screen.getByText(/Rate limit exceeded/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    });
+
+    it('detects "too many requests" as rate-limit', () => {
+      mockExtractText.mockReturnValue('Too many requests. Slow down.');
+      mockUseSessionStream.mockReturnValue([AE('Too many requests. Slow down.')]);
+
+      renderComponent();
+
+      expect(screen.getByText(/Too many requests/)).toBeInTheDocument();
+    });
+
+    it('detects "usage limit" as rate-limit', () => {
+      mockExtractText.mockReturnValue('Your usage limit has been exceeded.');
+      mockUseSessionStream.mockReturnValue([AE('Your usage limit has been exceeded.')]);
+
+      renderComponent();
+
+      expect(screen.getByText(/usage limit/)).toBeInTheDocument();
+    });
+
+    it('shows the error text in the rate-limit banner', () => {
+      mockExtractText.mockReturnValue(
+        'Too many requests. Please wait before sending another message.'
+      );
+      mockUseSessionStream.mockReturnValue([AE('Too many requests. Please wait before sending another message.')]);
+
+      renderComponent();
+
+      expect(
+        screen.getByText(
+          'Too many requests. Please wait before sending another message.'
+        )
+      ).toBeInTheDocument();
+    });
+
+    it('sets running to false when rate-limited', () => {
+      mockExtractText.mockReturnValue('session limit');
+      mockUseSessionStream.mockReturnValue([AE('session limit')]);
+
+      renderComponent();
+
+      // Running is false → button shows "List Open Issues" not "✕ Stop"
+      expect(screen.getByRole('button', { name: 'List Open Issues' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '✕ Stop' })).not.toBeInTheDocument();
+    });
+
+    it('Retry button clears rate-limit state and resets to idle', async () => {
+      mockExtractText.mockReturnValue('session limit reached');
+      mockUseSessionStream.mockReturnValue([AE('session limit reached')]);
+
+      renderComponent();
+
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      });
+
+      // Rate-limit banner should be gone (Retry button is banner-only)
+      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+      // Should return to idle: List Open Issues button visible
+      expect(screen.getByRole('button', { name: 'List Open Issues' })).toBeInTheDocument();
+      // Empty state message visible (running=false, issues=[])
+      expect(
+        screen.getByText('Click "List Open Issues" to fetch GitHub issues.')
+      ).toBeInTheDocument();
+    });
+
+    it('hides streaming output when rate-limited', () => {
+      mockExtractText.mockReturnValue('session limit reached');
+      mockUseSessionStream.mockReturnValue([AE('session limit reached')]);
+
+      renderComponent();
+
+      // running=false after rate-limit → streaming output div is hidden
+      // The idle empty state shows instead
+      expect(
+        screen.getByText('Click "List Open Issues" to fetch GitHub issues.')
+      ).toBeInTheDocument();
+    });
+  });
 });
