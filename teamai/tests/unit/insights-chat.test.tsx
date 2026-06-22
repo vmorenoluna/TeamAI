@@ -180,23 +180,30 @@ describe('InsightsChat', () => {
 
     it('displays assistant streaming text from stream events', async () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('sess-asst');
-      // Return empty on mount, then streaming events after send
-      let callCount = 0;
-      mockUseSessionStream.mockImplementation(() => {
-        callCount++;
-        if (callCount <= 2) return []; // mount + initial session set render
-        return [
-          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'This is a response' }] } }),
-        ];
-      });
+      // Use stable constants to prevent infinite React re-render loops
+      // (new array literals in mockImplementation change references
+      // every call, retriggering useEffect dependencies indefinitely).
+      const EMPTY: SessionEvent[] = [];
+      const RESPONSE: SessionEvent[] = [
+        ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'This is a response' }] } }),
+      ];
 
-      renderComponent();
+      mockUseSessionStream.mockReturnValue(EMPTY);
+      const { rerender } = render(<InsightsChat />);
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
       });
 
-      await sendMessage('Hello');
+      // Send while stream is EMPTY (Send button available), then switch
+      // to RESPONSE and rerender to trigger the messages effect.
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'Hello' } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      });
+      mockUseSessionStream.mockReturnValue(RESPONSE);
+      rerender(<InsightsChat />);
 
       await waitFor(() => {
         expect(screen.getByText('This is a response')).toBeInTheDocument();
@@ -388,8 +395,11 @@ describe('InsightsChat', () => {
 
       renderComponent();
 
+      // Text appears in both banner and message bubble — getAllByText avoids
+      // the "Found multiple elements" error from getByText.
       await waitFor(() => {
-        expect(screen.getByText(/session limit reached/)).toBeInTheDocument();
+        const matches = screen.getAllByText(/session limit reached/);
+        expect(matches.length).toBeGreaterThanOrEqual(1);
       });
       expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
     });
@@ -406,7 +416,8 @@ describe('InsightsChat', () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(screen.getByText(/Too many requests/)).toBeInTheDocument();
+        const matches = screen.getAllByText(/Too many requests/);
+        expect(matches.length).toBeGreaterThanOrEqual(1);
       });
     });
 
@@ -422,7 +433,8 @@ describe('InsightsChat', () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(screen.getByText(/usage limit/)).toBeInTheDocument();
+        const matches = screen.getAllByText(/usage limit/);
+        expect(matches.length).toBeGreaterThanOrEqual(1);
       });
     });
 
@@ -446,8 +458,9 @@ describe('InsightsChat', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
       });
 
-      // Rate-limit banner should disappear
-      expect(screen.queryByText(/session limit/)).not.toBeInTheDocument();
+      // Rate-limit banner should disappear (Retry button gone); session-limit
+      // text may remain in the message bubble from the stream events.
+      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
       // Should reconnect
       expect(mockGetOrCreateInsightsSession).toHaveBeenCalledTimes(2);
     });
@@ -459,16 +472,19 @@ describe('InsightsChat', () => {
     it('removes the streaming cursor when result event arrives', async () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('sess-final');
 
+      const EMPTY: SessionEvent[] = [];
+      const STREAMING: SessionEvent[] = [
+        ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Streaming message' }] } }),
+      ];
+      const RESULT: SessionEvent[] = [
+        ev({ type: 'result' }),
+      ];
       let callCount = 0;
       mockUseSessionStream.mockImplementation(() => {
         callCount++;
-        if (callCount <= 2) return [];
-        if (callCount <= 3) return [
-          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Streaming message' }] } }),
-        ];
-        return [
-          ev({ type: 'result' }),
-        ];
+        if (callCount <= 2) return EMPTY;
+        if (callCount <= 3) return STREAMING;
+        return RESULT;
       });
 
       renderComponent();
@@ -586,30 +602,47 @@ describe('InsightsChat', () => {
     it('renders multiple user and assistant messages', async () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('sess-multi');
 
-      let callCount = 0;
-      mockUseSessionStream.mockImplementation(() => {
-        callCount++;
-        if (callCount <= 2) return [];
-        if (callCount <= 4) return [
-          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Response 1' }] } }),
-        ];
-        return [
-          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Response 2' }] } }),
-        ];
-      });
+      const EMPTY: SessionEvent[] = [];
+      const RESP1: SessionEvent[] = [
+        ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Response 1' }] } }),
+      ];
+      const RESP2: SessionEvent[] = [
+        ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Response 2' }] } }),
+      ];
 
-      renderComponent();
+      mockUseSessionStream.mockReturnValue(EMPTY);
+      const { rerender } = render(<InsightsChat />);
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
       });
 
-      await sendMessage('Question 1');
+      // Message 1: send while EMPTY (Send button available), then switch to RESP1
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'Question 1' } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      });
+      mockUseSessionStream.mockReturnValue(RESP1);
+      rerender(<InsightsChat />);
       await waitFor(() => {
         expect(screen.getByText('Response 1')).toBeInTheDocument();
       });
 
-      await sendMessage('Question 2');
+      // Reset stream so running goes false and Send button reappears
+      mockUseSessionStream.mockReturnValue(EMPTY);
+      rerender(<InsightsChat />);
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+      });
+
+      // Message 2: send while EMPTY, then switch to RESP2
+      fireEvent.change(textarea, { target: { value: 'Question 2' } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      });
+      mockUseSessionStream.mockReturnValue(RESP2);
+      rerender(<InsightsChat />);
       await waitFor(() => {
         expect(screen.getByText('Response 2')).toBeInTheDocument();
       });
@@ -621,30 +654,44 @@ describe('InsightsChat', () => {
     it('updates streaming message in-place rather than appending duplicate', async () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('sess-update');
 
-      let callCount = 0;
-      mockUseSessionStream.mockImplementation(() => {
-        callCount++;
-        if (callCount <= 2) return [];
-        if (callCount === 3) return [
-          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Part' }] } }),
-        ];
-        return [
-          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Part one' }] } }),
-          ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Part two' }] } }),
-        ];
-      });
+      const EMPTY: SessionEvent[] = [];
+      const PART: SessionEvent[] = [
+        ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Part' }] } }),
+      ];
+      const FULL: SessionEvent[] = [
+        ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Part one' }] } }),
+        ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Part two' }] } }),
+      ];
 
-      renderComponent();
+      mockUseSessionStream.mockReturnValue(EMPTY);
+      const { rerender } = render(<InsightsChat />);
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
       });
 
-      await sendMessage('Go');
+      // Send while EMPTY (Send button available), then switch to PART
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'Go' } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      });
+      mockUseSessionStream.mockReturnValue(PART);
+      rerender(<InsightsChat />);
+      await waitFor(() => {
+        expect(screen.getByText('Part')).toBeInTheDocument();
+      });
 
+      // Phase 2: updated stream replaces in-place (latest event replaces
+      // previous streaming message with same role)
+      mockUseSessionStream.mockReturnValue(FULL);
+      rerender(<InsightsChat />);
       await waitFor(() => {
         expect(screen.getByText('Part two')).toBeInTheDocument();
       });
+
+      // Original partial text replaced by the updated streaming content
+      expect(screen.queryByText('Part')).not.toBeInTheDocument();
     });
   });
 });
