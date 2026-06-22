@@ -1546,7 +1546,17 @@ export class Orchestrator {
             : a
         );
         const remoteUser = readContainerRemoteUser(this.projectRoot);
-        execFileSync('docker', ['exec', '-u', remoteUser, '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
+        try {
+          execFileSync('docker', ['exec', '-u', remoteUser, '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
+        } finally {
+          // Always restore host paths after docker exec so the worktree .git file is
+          // left in host-resolvable state for subsequent host-side operations.
+          // Without this, a prior _patchWorktreeGitFile call leaves container paths in
+          // the file; if a caller's own restore attempt then fails silently (e.g. a
+          // brief Windows file lock from the docker process), host git sees the stale
+          // container path and fails with "not a git repository".
+          this._restoreWorktreeGitFileToHostPaths(hostCwd);
+        }
         return;
       }
     }

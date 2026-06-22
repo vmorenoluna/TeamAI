@@ -424,7 +424,7 @@ describe('_execGit — worktree patching integration', () => {
       } as any);
     });
 
-    it('calls _patchWorktreeGitFile before docker exec', () => {
+    it('patches .git to container paths for docker exec, then restores host paths on return', () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
 
@@ -435,15 +435,43 @@ describe('_execGit — worktree patching integration', () => {
 
       (orch as AnyOrch)._execGit(['status'], env.worktreePath);
 
-      // Verify the .git file was patched to container paths
-      const content = readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim();
-      expect(content).toBe('gitdir: /workspaces/project/.git/worktrees/my-feature');
+      // After _execGit returns, the .git file must be restored to host-resolvable paths
+      // so subsequent host-side operations (e.g. _commitArtifactsToWorktree) work correctly.
+      const hostRoot = env.root.replace(/\\/g, '/');
+      const expectedGitdir = `${hostRoot}/.git/worktrees/my-feature`;
+      expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
 
       // docker exec should have been called
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'docker',
         expect.arrayContaining(['exec', '-u', 'node', '-w', expect.any(String), 'cont-test', 'git', 'status']),
       );
+    });
+
+    it('restores host paths even when docker exec throws (e.g. rebase conflict)', () => {
+      env = setupTestEnv();
+      const orch = makeOrch(env.root);
+
+      const hostRoot = env.root.replace(/\\/g, '/');
+      const hostGitdir = `${hostRoot}/.git/worktrees/my-feature`;
+      writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${hostGitdir}\n`);
+
+      // Create the worktrees metadata dir so _restoreWorktreeGitFileToHostPaths can
+      // validate back-reference existence check
+      mkdirSync(join(env.root, '.git', 'worktrees', 'my-feature'), { recursive: true });
+
+      // docker exec throws (simulate rebase conflict)
+      mockExecFileSync.mockImplementation((cmd: string) => {
+        if (cmd === 'docker') throw new Error('rebase conflict');
+        return '';
+      });
+
+      // The docker exec error should propagate to the caller
+      expect(() => (orch as AnyOrch)._execGit(['rebase', 'origin/master'], env.worktreePath)).toThrow('rebase conflict');
+
+      // But the .git file must be restored to host paths (via finally block)
+      // so _commitArtifactsToWorktree can run host git successfully afterwards
+      expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${hostGitdir}`);
     });
 
     it('does not call docker exec for worktree commands (routes to host)', () => {
