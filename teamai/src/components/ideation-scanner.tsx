@@ -32,11 +32,12 @@ export function IdeationScanner() {
     if (streamEvents.length === 0) return;
     for (const e of streamEvents) {
       const text = extractText(e.event);
-      if (text && /session.?limit/i.test(text)) {
+      if (text && /(session.?limit|rate.?limit|too many requests|usage.?limit)/i.test(text)) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setRateLimited(true);
+        setRunning(false);
         const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
-        setRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : 'Session limit hit — retry later');
+        setRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : text.slice(0, 200));
         return;
       }
     }
