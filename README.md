@@ -35,10 +35,12 @@ git clone <repo-url>
 cd TeamAI/teamai
 npm install
 
-# Set the git hooks path (required for pre-commit checks)
+# Set the git hooks path from the project root (required for pre-commit checks)
+cd ..
 git config core.hooksPath .husky
 
-# Start development server
+# Start development server (run from teamai/)
+cd teamai
 npm run dev
 ```
 
@@ -48,6 +50,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ```
 TeamAI/
+├── README.md                  # Project overview and quick start (this file)
+├── CLAUDE.md                  # Claude Code guidance
 ├── .husky/                    # Git hooks (pre-commit lint/typecheck)
 ├── .teamai/                   # Per-project state (tasks, roadmap, pipeline config)
 │   ├── providers.json         # LLM provider configuration
@@ -77,11 +81,15 @@ TeamAI/
 │   │   ├── commands/          # Command templates (spec, plan, implement, etc.)
 │   │   ├── roles/             # Role persona definitions (planner, coder, etc.)
 │   │   └── pipeline.json      # Default pipeline phases
+│   │   ├── commands/          # Command templates (spec, plan, implement, etc.)
+│   │   ├── roles/             # Role persona definitions (planner, coder, etc.)
+│   │   └── pipeline.json      # Default pipeline phases
 │   ├── scripts/               # Utility scripts
 │   ├── tests/                 # Unit and E2E tests (Vitest + Playwright)
 │   ├── server.ts              # Custom HTTP + WebSocket server
 │   └── package.json
-└── CLAUDE.md                  # Claude Code guidance
+├── docs/                      # Supplementary documentation
+└── .mcp.json                  # MCP (Model Context Protocol) configuration
 ```
 
 ## Architecture
