@@ -1,6 +1,6 @@
 'use server';
 
-import { processManager } from '@/lib/process-manager';
+import { processManager, containerSessionOpts } from '@/lib/process-manager';
 import { getActiveProjectPath } from './projects';
 
 // Global sessions: projectPath → sessionId (shared across module contexts)
@@ -22,8 +22,7 @@ export async function getOrCreateInsightsSession(): Promise<string> {
     taskId: `insights::${projectPath}`,
     role: 'general',
     cwd: projectPath,
-    projectRoot: projectPath,
-    permissionMode: 'bypassPermissions',
+    ...containerSessionOpts(projectPath),
   });
   sessions.set(projectPath, sessionId);
   return sessionId;

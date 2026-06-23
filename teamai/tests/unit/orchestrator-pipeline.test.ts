@@ -81,7 +81,7 @@ vi.mock('../../src/lib/process-manager', () => {
     getStaleSessions: vi.fn(() => []),
     removeStaleSession: vi.fn(),
   };
-  return { processManager: pm };
+  return { processManager: pm, containerSessionOpts: (projectRoot: string) => ({ projectRoot, permissionMode: 'bypassPermissions' as const }) };
 });
 
 // ── Imports (after mocks) ──
