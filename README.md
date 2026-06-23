@@ -52,14 +52,33 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 TeamAI/
 ├── README.md                  # Project overview and quick start (this file)
 ├── CLAUDE.md                  # Claude Code guidance
+├── .gitignore
+├── .mcp.json                  # MCP (Model Context Protocol) configuration
+├── .github/                   # CI/CD workflows
+│   └── workflows/
 ├── .husky/                    # Git hooks (pre-commit lint/typecheck)
-├── .teamai/                   # Per-project state (tasks, roadmap, pipeline config)
+├── .teamai/                   # Per-project pipeline state (tasks, configs)
+│   ├── container.json         # Devcontainer sandboxing config
 │   ├── providers.json         # LLM provider configuration
 │   ├── pipeline.json          # Pipeline phase configuration
 │   └── <task-slug>/           # Per-task directory (spec.md, plan.json, qa_report.json)
-├── teamai/
+├── docs/                      # Supplementary documentation
+│   ├── packaging-options.md
+│   ├── teamai-implementation-plan.md
+│   └── teamai-ui-spec.md
+├── teamai/                    # Next.js application
+│   ├── package.json
+│   ├── server.ts              # Custom HTTP + WebSocket server
+│   ├── tsconfig.json
+│   ├── eslint.config.mjs
+│   ├── next.config.ts
+│   ├── vitest.config.ts
+│   ├── playwright.config.ts
 │   ├── src/
 │   │   ├── app/               # Next.js App Router pages
+│   │   │   ├── layout.tsx
+│   │   │   ├── page.tsx
+│   │   │   ├── globals.css
 │   │   │   ├── actions/       # Server actions (tasks, pipeline, providers, etc.)
 │   │   │   ├── ideation/      # Ideation scanner page
 │   │   │   ├── insights/      # Insights/chat page
@@ -67,29 +86,23 @@ TeamAI/
 │   │   │   ├── settings/      # Provider/pipeline configuration page
 │   │   │   ├── task/[id]/     # Task detail page
 │   │   │   └── terminals/     # Interactive terminal page
-│   │   ├── components/        # React components (kanban, task panel, streaming output, rate-limit banners, etc.)
+│   │   ├── components/        # React components (kanban, task panel, etc.)
 │   │   ├── hooks/             # Custom hooks (useAgentStream, usePhaseSync, etc.)
 │   │   ├── lib/               # Core business logic
-│   │   │   ├── orchestrator.ts    # Multi-agent pipeline orchestrator
-│   │   │   ├── process-manager.ts # Claude CLI subprocess management
-│   │   │   ├── task-store.ts      # Task persistence (JSON file store)
-│   │   │   ├── providers.ts       # LLM provider configuration resolver
-│   │   │   ├── recovery.ts        # Crash recovery (stale sessions, orphaned worktrees)
-│   │   │   └── container-manager.ts # Devcontainer lifecycle management
-│   │   └── app/globals.css    # Global styles + Tailwind CSS v4
+│   │   │   ├── orchestrator.ts
+│   │   │   ├── process-manager.ts
+│   │   │   ├── task-store.ts
+│   │   │   ├── providers.ts
+│   │   │   ├── recovery.ts
+│   │   │   └── container-manager.ts
+│   │   └── constants/         # Shared constants (phase labels, colors)
 │   ├── defaults/              # Default pipeline configuration
 │   │   ├── commands/          # Command templates (spec, plan, implement, etc.)
 │   │   ├── roles/             # Role persona definitions (planner, coder, etc.)
-│   │   └── pipeline.json      # Default pipeline phases
-│   │   ├── commands/          # Command templates (spec, plan, implement, etc.)
-│   │   ├── roles/             # Role persona definitions (planner, coder, etc.)
-│   │   └── pipeline.json      # Default pipeline phases
+│   │   └── pipeline.json
 │   ├── scripts/               # Utility scripts
-│   ├── tests/                 # Unit and E2E tests (Vitest + Playwright)
-│   ├── server.ts              # Custom HTTP + WebSocket server
-│   └── package.json
-├── docs/                      # Supplementary documentation
-└── .mcp.json                  # MCP (Model Context Protocol) configuration
+│   └── tests/                 # Unit, integration, and E2E tests
+└── .devcontainer/             # Dev container configuration
 ```
 
 ## Architecture
