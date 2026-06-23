@@ -21,8 +21,8 @@ import {
   type RoadmapReport,
 } from '@/app/actions/roadmap';
 import { useSessionStream } from '@/hooks/use-session-stream';
-import { extractText, extractProgressText } from '@/lib/stream-types';
-import { parseSessionLimitReset, formatCountdown } from '@/lib/rate-limit';
+import { useRateLimitAutoResume } from '@/hooks/use-rate-limit-auto-resume';
+import { useStreamProgress } from '@/hooks/use-stream-progress';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskPanel, type FullData } from './task-panel';
 import { PHASE_BADGE, PHASE_LABELS as TASK_PHASE_LABELS, PRIORITY_COLORS } from '@/constants/phases';
@@ -551,15 +551,6 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     filename: string;
   } | null>(null);
 
-  // Rate-limit state
-  const [rmRateLimited, setRmRateLimited] = useState(false);
-  const [rmRateLimitMessage, setRmRateLimitMessage] = useState('');
-  const [rmAutoResumeAt, setRmAutoResumeAt] = useState<number | null>(null);
-  const [rmCountdown, setRmCountdown] = useState('');
-  const [clRateLimited, setClRateLimited] = useState(false);
-  const [clRateLimitMessage, setClRateLimitMessage] = useState('');
-  const [clAutoResumeAt, setClAutoResumeAt] = useState<number | null>(null);
-  const [clCountdown, setClCountdown] = useState('');
   // Cancel pending state
   const [rmCancelling, setRmCancelling] = useState(false);
   const [clCancelling, setClCancelling] = useState(false);
@@ -568,131 +559,31 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
   const taskCacheRef = useRef<Map<string, { data: FullData }>>(new Map());
   // Cancel-requested signals to handle rapid start/stop race (Bug 2)
   const rmCancelRequestedRef = useRef(false);
-  const clCancelRequestedRef = useRef(false);
-
-  const rmStream = useSessionStream(rmSessionId);
+  const clCancelRequestedRef = useRef(false);  const rmStream = useSessionStream(rmSessionId);
   const clStream = useSessionStream(clSessionId);
 
-  // Accumulate full progress text from all stream events for terminal view.
-  // Uses extractProgressText so tool names (▶ bash, ▶ read_file) and
-  // system events (◆ Session started) are shown — not just assistant text.
-  const rmFullText = useMemo(() => {
-    if (rmStream.length === 0) return '';
-    let allText = '';
-    for (const e of rmStream) {
-      const t = extractProgressText(e.event);
-      if (t) allText += (allText ? '\n' : '') + t;
-    }
-    return allText;
-  }, [rmStream]);
+  // Rate-limit detection + auto-resume for roadmap and changelog
+  const {
+    rateLimited: rmRateLimited,
+    rateLimitMessage: rmRateLimitMessage,
+    autoResumeAt: rmAutoResumeAt,
+    countdown: rmCountdown,
+    resetRateLimit: rmResetRateLimit,
+    handleCancelAutoResume: handleCancelRmAutoResume,
+  } = useRateLimitAutoResume(rmStream, handleGenerateRoadmap, () => setRmRunning(false), () => setRmRunning(false));
 
-  const clFullText = useMemo(() => {
-    if (clStream.length === 0) return '';
-    let allText = '';
-    for (const e of clStream) {
-      const t = extractProgressText(e.event);
-      if (t) allText += (allText ? '\n' : '') + t;
-    }
-    return allText;
-  }, [clStream]);
+  const {
+    rateLimited: clRateLimited,
+    rateLimitMessage: clRateLimitMessage,
+    autoResumeAt: clAutoResumeAt,
+    countdown: clCountdown,
+    resetRateLimit: clResetRateLimit,
+    handleCancelAutoResume: handleCancelClAutoResume,
+  } = useRateLimitAutoResume(clStream, handleGenerateChangelog, () => setClRunning(false), () => setClRunning(false));
 
-  // Detect rate-limit events in the stream and compute auto-resume timestamp
-  useEffect(() => {
-    if (rmStream.length === 0) return;
-    for (const e of rmStream) {
-      const text = extractText(e.event);
-      if (text && /(session.?limit|rate.?limit|too many requests|usage.?limit)/i.test(text)) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setRmRateLimited(true);
-        setRmRunning(false);
-        const resetsAt = parseSessionLimitReset(text);
-        if (resetsAt) {
-          setRmAutoResumeAt(resetsAt);
-          setRmCountdown(formatCountdown(resetsAt));
-          setRmRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(resetsAt)}`);
-        } else {
-          const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
-          setRmRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : text.slice(0, 200));
-        }
-        return;
-      }
-    }
-  }, [rmStream]);
-
-  useEffect(() => {
-    if (clStream.length === 0) return;
-    for (const e of clStream) {
-      const text = extractText(e.event);
-      if (text && /(session.?limit|rate.?limit|too many requests|usage.?limit)/i.test(text)) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setClRateLimited(true);
-        setClRunning(false);
-        const resetsAt = parseSessionLimitReset(text);
-        if (resetsAt) {
-          setClAutoResumeAt(resetsAt);
-          setClCountdown(formatCountdown(resetsAt));
-          setClRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(resetsAt)}`);
-        } else {
-          const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
-          setClRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : text.slice(0, 200));
-        }
-        return;
-      }
-    }
-  }, [clStream]);
-
-  // ── Auto-resume countdown for roadmap ────────────────────────────────────
-  useEffect(() => {
-    if (rmAutoResumeAt === null) return;
-    const timer = setInterval(() => {
-      const remaining = rmAutoResumeAt - Math.floor(Date.now() / 1000);
-      if (remaining <= 0) {
-        clearInterval(timer);
-        setRmAutoResumeAt(null);
-        setRmCountdown('');
-        handleGenerateRoadmap();
-      } else {
-        setRmCountdown(formatCountdown(rmAutoResumeAt));
-        setRmRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(rmAutoResumeAt)}`);
-      }
-    }, 1000);
-    return () => clearInterval(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rmAutoResumeAt]);
-
-  // ── Auto-resume countdown for changelog ──────────────────────────────────
-  useEffect(() => {
-    if (clAutoResumeAt === null) return;
-    const timer = setInterval(() => {
-      const remaining = clAutoResumeAt - Math.floor(Date.now() / 1000);
-      if (remaining <= 0) {
-        clearInterval(timer);
-        setClAutoResumeAt(null);
-        setClCountdown('');
-        handleGenerateChangelog();
-      } else {
-        setClCountdown(formatCountdown(clAutoResumeAt));
-        setClRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(clAutoResumeAt)}`);
-      }
-    }, 1000);
-    return () => clearInterval(timer);
-   
-  }, [clAutoResumeAt]);
-
-  // Cancel auto-resume
-  function handleCancelRmAutoResume() {
-    setRmAutoResumeAt(null);
-    setRmCountdown('');
-    setRmRateLimited(false);
-    setRmRateLimitMessage('');
-  }
-
-  function handleCancelClAutoResume() {
-    setClAutoResumeAt(null);
-    setClCountdown('');
-    setClRateLimited(false);
-    setClRateLimitMessage('');
-  }
+  // Accumulate progress text for terminal view
+  const rmFullText = useStreamProgress(rmStream);
+  const clFullText = useStreamProgress(clStream);
 
   const rmDone = rmStream.some(e => e.event.type === 'result');
   const clDone = clStream.some(e => e.event.type === 'result');
@@ -855,10 +746,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     setRmRunning(true);
     setRmSessionId(null);
     setRmReport(null);
-    setRmRateLimited(false);
-    setRmRateLimitMessage('');
-    setRmAutoResumeAt(null);
-    setRmCountdown('');
+    rmResetRateLimit();
     startTransition(async () => {
       const id = await startRoadmapGeneration(skipCompetitors);
       if (rmCancelRequestedRef.current) {
@@ -879,10 +767,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     } catch { /* best-effort */ }
     setRmRunning(false);
     setRmSessionId(null);
-    setRmRateLimited(false);
-    setRmRateLimitMessage('');
-    setRmAutoResumeAt(null);
-    setRmCountdown('');
+    rmResetRateLimit();
     try { sessionStorage.removeItem('roadmap-session'); } catch { /* noop */ }
     setRmCancelling(false);
   }
@@ -892,10 +777,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     setClRunning(true);
     setClSessionId(null);
     setClMarkdown(null);
-    setClRateLimited(false);
-    setClRateLimitMessage('');
-    setClAutoResumeAt(null);
-    setClCountdown('');
+    clResetRateLimit();
     startTransition(async () => {
       const id = await startChangelogGeneration();
       if (clCancelRequestedRef.current) {
@@ -916,10 +798,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     } catch { /* best-effort */ }
     setClRunning(false);
     setClSessionId(null);
-    setClRateLimited(false);
-    setClRateLimitMessage('');
-    setClAutoResumeAt(null);
-    setClCountdown('');
+    clResetRateLimit();
     try { sessionStorage.removeItem('changelog-session'); } catch { /* noop */ }
     setClCancelling(false);
   }

@@ -4,15 +4,20 @@ TeamAI is a Next.js web application that orchestrates multi-agent [Claude Code](
 
 ## Features
 
-- **Multi-Agent Pipeline** — Run spec, plan, implement, QA review, and merge phases with role-specialized Claude agents (planner, coder, qa-reviewer, qa-fixer, merger)
-- **Kanban Board** — Drag-and-drop task management with real-time phase tracking
-- **Roadmap View** — Product roadmap with ideation scanner and competitor analysis
+- **Multi-Agent Pipeline** — Run spec, plan, implement, QA review, and merge phases with role-specialized Claude agents (analyst, planner, coder, qa-reviewer, merger)
+- **Kanban Board** — Drag-and-drop task management with real-time phase tracking and QA report summaries
+- **Roadmap View** — Product roadmap with phased kanban columns, competitor analysis, changelog generation, and ticket conversion
+- **Ideation Scanner** — Analyse your codebase for feature opportunities and improvement suggestions
+- **GitHub Issues Import** — Fetch and import open GitHub issues as kanban tasks via MCP integration
+- **Insights Chat** — Interactive AI chat for codebase questions with streaming responses
 - **Interactive Terminals** — Open PTY-based Claude sessions pre-loaded with role personas
 - **Dark Mode UI** — Full dark mode with shadcn/ui components and Tailwind CSS v4
 - **Multi-Provider Support** — Anthropic, Bedrock, Vertex, OpenAI, Gemini, and Ollama backends
 - **Container Isolation** — Optional devcontainer sandboxing for agent sessions
 - **Session Recovery** — Auto-detect interrupted tasks and stale sessions on server restart
-- **Real-time Streaming** — WebSocket-based agent event streaming to the browser
+- **Rate-Limit Auto-Resume** — Detects Claude Code session limits and auto-resumes with a countdown timer
+- **Real-time Streaming** — WebSocket-based agent event streaming with tool-call visibility
+- **Spec Revision Workflow** — Human-gated spec revision when QA identifies specification-level issues
 
 ## Prerequisites
 

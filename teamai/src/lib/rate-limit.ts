@@ -1,8 +1,11 @@
+/** Regex matching common rate-limit / session-limit messages from Claude Code. */
+export const RATE_LIMIT_PATTERN = /(session.?limit|rate.?limit|too many requests|usage.?limit)/i;
+
 /**
  * Parse "resets 4:30pm (UTC)" from Claude Code's session-limit message.
  * Returns a Unix timestamp (seconds) for the reset time, or null if unparseable.
  *
- * Used by both the orchestrator (server) and roadmap-view (client) for
+ * Used by both the orchestrator (server) and components (client) for
  * consistent rate-limit auto-resume logic.
  */
 export function parseSessionLimitReset(line: string): number | null {
