@@ -138,6 +138,8 @@ describe('GitHub server actions', () => {
         taskId: `github::${root}`,
         role: 'general',
         cwd: root,
+        projectRoot: root,
+        permissionMode: 'bypassPermissions',
       });
     });
 

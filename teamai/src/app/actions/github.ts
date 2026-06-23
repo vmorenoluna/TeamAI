@@ -36,6 +36,8 @@ export async function startIssueList(): Promise<string> {
     taskId: `github::${projectPath}`,
     role: 'general',
     cwd: projectPath,
+    projectRoot: projectPath,
+    permissionMode: 'bypassPermissions',
   });
   sessions.set(projectPath, sessionId);
 

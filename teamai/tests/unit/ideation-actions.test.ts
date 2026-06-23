@@ -76,6 +76,8 @@ describe('ideation server actions', () => {
         role: 'general',
         cwd: root,
         model: undefined,
+        projectRoot: root,
+        permissionMode: 'bypassPermissions',
       });
       expect(mockSendMessage).toHaveBeenCalledWith('session-ideation', '/ideation');
     });
