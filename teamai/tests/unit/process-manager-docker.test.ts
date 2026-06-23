@@ -40,7 +40,7 @@ vi.mock('crypto', () => ({
 
 // ── Imports ──
 
-import { ProcessManager } from '../../src/lib/process-manager';
+import { ProcessManager, containerSessionOpts } from '../../src/lib/process-manager';
 
 // ── Helpers ──
 
@@ -227,5 +227,23 @@ describe('ProcessManager createSession — Docker container mode', () => {
       expect.arrayContaining(['--model', 'deepseek/deepseek-v4']),
       expect.any(Object),
     );
+  });
+});
+
+// ── containerSessionOpts ────────────────────────────────────────────────
+
+describe('containerSessionOpts', () => {
+  it('returns projectRoot and permissionMode: bypassPermissions', () => {
+    const result = containerSessionOpts('/my/project');
+    expect(result).toEqual({
+      projectRoot: '/my/project',
+      permissionMode: 'bypassPermissions',
+    });
+  });
+
+  it('returns bypassPermissions regardless of project path', () => {
+    const result = containerSessionOpts('/some/other/path');
+    expect(result.permissionMode).toBe('bypassPermissions');
+    expect(result.projectRoot).toBe('/some/other/path');
   });
 });
