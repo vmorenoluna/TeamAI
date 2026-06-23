@@ -22,6 +22,7 @@ export function RecoveryBanner({ tasks }: { tasks: InterruptedTask[] }) {
   const [hidden, setHidden] = useState(false);
 
   useLayoutEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (isDismissed()) setHidden(true);
   }, []);
 
