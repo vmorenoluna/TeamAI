@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractText,
+  extractProgressText,
   type AssistantMessage,
   type SystemEvent,
   type ResultEvent,
@@ -146,6 +147,161 @@ describe('extractText', () => {
       message: { content: [] },
     };
     expect(extractText(msg)).toBe('');
+  });
+});
+
+// ── extractProgressText ──────────────────────────────────────────────────────
+
+describe('extractProgressText', () => {
+  it('returns empty string for unknown event types', () => {
+    const unknownEvent: StreamEvent = { type: 'unknown' } as unknown as StreamEvent;
+    expect(extractProgressText(unknownEvent)).toBe('');
+  });
+
+  it('returns session started for system init event', () => {
+    const initEvent: StreamEvent = {
+      type: 'system',
+      subtype: 'init',
+      model: 'claude-sonnet-4-20250514',
+    };
+    expect(extractProgressText(initEvent)).toBe(
+      '◆ Session started — claude-sonnet-4-20250514'
+    );
+  });
+
+  it('returns session started with fallback for system init without model', () => {
+    const initEvent: StreamEvent = { type: 'system', subtype: 'init' };
+    expect(extractProgressText(initEvent)).toBe('◆ Session started — claude');
+  });
+
+  it('returns empty for non-init system events', () => {
+    const sysEvent: StreamEvent = { type: 'system', subtype: 'other' };
+    expect(extractProgressText(sysEvent)).toBe('');
+  });
+
+  it('extracts text from assistant event with single text block', () => {
+    const msg: StreamEvent = {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'Analyzing codebase…' } as TextContentBlock],
+      },
+    };
+    expect(extractProgressText(msg)).toBe('Analyzing codebase…');
+  });
+
+  it('includes tool_use names with ▶ prefix, separated by newlines', () => {
+    const msg: StreamEvent = {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'text', text: 'Reading files' } as TextContentBlock,
+          { type: 'tool_use', id: '1', name: 'read_file', input: {} } as ToolUseContentBlock,
+          { type: 'tool_use', id: '2', name: 'bash', input: {} } as ToolUseContentBlock,
+        ],
+      },
+    };
+    expect(extractProgressText(msg)).toBe('Reading files\n▶ read_file\n▶ bash');
+  });
+
+  it('handles assistant message with only tool_use blocks (no text)', () => {
+    const msg: StreamEvent = {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: '1', name: 'grep', input: {} } as ToolUseContentBlock,
+        ],
+      },
+    };
+    expect(extractProgressText(msg)).toBe('▶ grep');
+  });
+
+  it('skips tool_result content blocks', () => {
+    const msg: StreamEvent = {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'text', text: 'Done' } as TextContentBlock,
+          { type: 'tool_result', tool_use_id: '1', content: 'output' } as ToolResultContentBlock,
+        ],
+      },
+    };
+    expect(extractProgressText(msg)).toBe('Done');
+  });
+
+  it('returns success result with cost and duration', () => {
+    const result: StreamEvent = {
+      type: 'result',
+      subtype: 'success',
+      total_cost_usd: 0.042,
+      duration_ms: 12345,
+    };
+    expect(extractProgressText(result)).toBe('✓ Done — $0.0420 (12345ms)');
+  });
+
+  it('returns success result without cost when missing', () => {
+    const result: StreamEvent = {
+      type: 'result',
+      subtype: 'success',
+      duration_ms: 5000,
+    };
+    expect(extractProgressText(result)).toBe('✓ Done (5000ms)');
+  });
+
+  it('returns success result without duration when missing', () => {
+    const result: StreamEvent = {
+      type: 'result',
+      subtype: 'success',
+    };
+    expect(extractProgressText(result)).toBe('✓ Done (?ms)');
+  });
+
+  it('returns failure result', () => {
+    const result: StreamEvent = {
+      type: 'result',
+      subtype: 'error',
+      result: 'permission denied',
+    };
+    expect(extractProgressText(result)).toBe('✗ Failed: permission denied');
+  });
+
+  it('returns failure result with fallback when result field is missing', () => {
+    const result: StreamEvent = { type: 'result', subtype: 'error' };
+    expect(extractProgressText(result)).toBe('✗ Failed: unknown error');
+  });
+
+  it('returns error message for error events', () => {
+    const err: StreamEvent = { type: 'error', error: 'connection lost' };
+    expect(extractProgressText(err)).toBe('⚠ connection lost');
+  });
+
+  it('returns fallback for error events without error field', () => {
+    const err: StreamEvent = { type: 'error' } as StreamEvent;
+    expect(extractProgressText(err)).toBe('⚠ unknown error');
+  });
+
+  it('handles assistant message with empty content block', () => {
+    const msg: StreamEvent = {
+      type: 'assistant',
+      message: { content: [] },
+    };
+    expect(extractProgressText(msg)).toBe('');
+  });
+
+  it('handles assistant message with missing message field', () => {
+    const msg = { type: 'assistant' } as unknown as StreamEvent;
+    expect(extractProgressText(msg)).toBe('');
+  });
+
+  it('handles tool_use with non-string name gracefully', () => {
+    const msg: StreamEvent = {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: '1', name: 123, input: {} } as unknown as ToolUseContentBlock,
+        ],
+      },
+    };
+    expect(extractProgressText(msg)).toBe('▶ tool');
   });
 });
 

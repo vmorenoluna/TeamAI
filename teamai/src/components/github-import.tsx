@@ -11,7 +11,8 @@ import {
   cancelGithubIssueListing,
 } from '@/app/actions/github';
 import { useSessionStream } from '@/hooks/use-session-stream';
-import { extractText } from '@/lib/stream-types';
+import { extractText, extractProgressText } from '@/lib/stream-types';
+import { parseSessionLimitReset, formatCountdown } from '@/lib/rate-limit';
 import type { GitHubIssue } from '@/app/actions/github';
 
 export function GitHubImport() {
@@ -27,6 +28,8 @@ export function GitHubImport() {
   const [error, setError] = useState<string | null>(null);
   const [rateLimited, setRateLimited] = useState(false);
   const [rateLimitMessage, setRateLimitMessage] = useState('');
+  const [autoResumeAt, setAutoResumeAt] = useState<number | null>(null);
+  const [countdown, setCountdown] = useState('');
   const parsedRef = useRef(false);
   const cancelRequestedRef = useRef(false);
   const streamEvents = useSessionStream(sessionId);
@@ -54,19 +57,55 @@ export function GitHubImport() {
       ) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setRateLimited(true);
-        setRateLimitMessage(text.slice(0, 500));
         setRunning(false);
+        const resetsAt = parseSessionLimitReset(text);
+        if (resetsAt) {
+          setAutoResumeAt(resetsAt);
+          setCountdown(formatCountdown(resetsAt));
+          setRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(resetsAt)}`);
+        } else {
+          const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
+          setRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : text.slice(0, 200));
+        }
         return;
       }
     }
   }, [streamEvents]);
 
-  // Accumulate streaming text for display
+  // ── Auto-resume countdown ───────────────────────────────────────────────
+  useEffect(() => {
+    if (autoResumeAt === null) return;
+    const timer = setInterval(() => {
+      const remaining = autoResumeAt - Math.floor(Date.now() / 1000);
+      if (remaining <= 0) {
+        clearInterval(timer);
+        setAutoResumeAt(null);
+        setCountdown('');
+        handleListIssues();
+      } else {
+        setCountdown(formatCountdown(autoResumeAt));
+        setRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(autoResumeAt)}`);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+   
+  }, [autoResumeAt]);
+
+  // Cancel auto-resume
+  function handleCancelAutoResume() {
+    setAutoResumeAt(null);
+    setCountdown('');
+    setRateLimited(false);
+    setRateLimitMessage('');
+  }
+
+  // Accumulate streaming text for display using extractProgressText for tool visibility
   useEffect(() => {
     if (!running || !sessionId) return;
     let text = '';
     for (const e of streamEvents) {
-      text += extractText(e.event);
+      const t = extractProgressText(e.event);
+      if (t) text += (text ? '\n' : '') + t;
     }
     if (text) {
       startTransition(() => {
@@ -132,6 +171,8 @@ export function GitHubImport() {
     setError(null);
     setRateLimited(false);
     setRateLimitMessage('');
+    setAutoResumeAt(null);
+    setCountdown('');
     startTransition(async () => {
       try {
         const id = await startIssueList();
@@ -152,13 +193,18 @@ export function GitHubImport() {
     setSessionId(null);
     setRateLimited(false);
     setRateLimitMessage('');
+    setAutoResumeAt(null);
+    setCountdown('');
   }, []);
 
-  const handleRetry = useCallback(() => {
+  const handleRetryNow = useCallback(() => {
     setRateLimited(false);
     setRateLimitMessage('');
     setRunning(false);
     setSessionId(null);
+    setAutoResumeAt(null);
+    setCountdown('');
+    handleListIssues();
   }, []);
 
   function toggleIssue(number: number) {
@@ -213,16 +259,34 @@ export function GitHubImport() {
 
       {/* Rate-limit banner */}
       {rateLimited && (
-        <div className="shrink-0 bg-amber-950/60 border border-amber-800 rounded-lg text-amber-200 px-4 py-2.5 text-xs flex items-center justify-between">
-          <span className="truncate mr-2">
-            {rateLimitMessage || 'Rate limit reached. Please wait and try again.'}
-          </span>
-          <button
-            onClick={handleRetry}
-            className="shrink-0 px-3 py-1 text-xs font-medium bg-amber-700 hover:bg-amber-600 text-amber-100 rounded transition-colors"
-          >
-            Retry
-          </button>
+        <div className="shrink-0 bg-amber-950/30 border border-amber-800 rounded-lg p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-amber-400 text-lg shrink-0">⏳</span>
+              <span className="text-sm text-amber-300">{rateLimitMessage || 'Rate limit reached. Please wait and try again.'}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {autoResumeAt && (
+                <>
+                  <span className="text-xs text-amber-400 font-mono tabular-nums">
+                    {countdown}
+                  </span>
+                  <button
+                    onClick={handleCancelAutoResume}
+                    className="px-3 py-2 text-sm font-medium text-slate-400 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </>
+              )}
+              <button
+                onClick={handleRetryNow}
+                className="px-4 py-2 text-sm font-medium bg-amber-700 text-amber-100 rounded-lg hover:bg-amber-600 transition-colors"
+              >
+                Retry Now
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -303,12 +367,28 @@ export function GitHubImport() {
         </div>
       )}
 
-      {/* Streaming output */}
-      {running && !done && streamText && (
+      {/* Streaming output — show full accumulated text while running */}
+      {running && !rateLimited && !done && streamEvents.length > 0 && (
         <div className="flex-1 overflow-y-auto bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 min-h-[100px]">
-          <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
-            {streamText}
-          </pre>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Agent Output</span>
+            <span className="text-[10px] text-slate-600">{streamEvents.length} event{streamEvents.length !== 1 ? 's' : ''}</span>
+          </div>
+          {streamText ? (
+            <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+              {streamText}
+            </pre>
+          ) : (
+            <p className="text-xs text-slate-500 animate-pulse">Initialising…</p>
+          )}
+        </div>
+      )}
+
+      {/* Show "Running..." indicator when streaming but no events yet */}
+      {running && !rateLimited && !done && streamEvents.length === 0 && (
+        <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 flex items-center gap-3">
+          <div className="w-4 h-4 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
+          <span className="text-sm text-slate-400">Starting issue listing…</span>
         </div>
       )}
 
