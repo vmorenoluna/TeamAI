@@ -9,9 +9,10 @@ import type { SessionEvent } from './use-session-stream';
  * Shared hook for rate-limit detection and auto-resume countdown.
  *
  * - Watches stream events for rate-limit messages
- * - When detected, parses the reset time and starts a countdown
+ * - When detected, parses the reset time, starts a countdown, and calls `onRateLimitChange`
  * - Auto-resumes by calling `onRetry` when the countdown completes
  * - Provides `resetRateLimit()` to clear all rate-limit state (call in cancel/send handlers)
+ * - `handleCancelAutoResume()` also calls `onRateLimitChange`
  *
  * Callbacks are stored in refs so the detection useEffect only re-runs
  * when streamEvents change — not on every render from new callback references.
@@ -19,8 +20,7 @@ import type { SessionEvent } from './use-session-stream';
 export function useRateLimitAutoResume(
   streamEvents: SessionEvent[],
   onRetry: () => void,
-  onRateLimitDetected?: () => void,
-  onCancelAutoResume?: () => void,
+  onRateLimitChange?: () => void,
 ): {
   rateLimited: boolean;
   rateLimitMessage: string;
@@ -35,15 +35,13 @@ export function useRateLimitAutoResume(
   const [countdown, setCountdown] = useState('');
 
   // Keep callback refs current without triggering effect re-runs
-  const onRateLimitDetectedRef = useRef(onRateLimitDetected);
+  const onRateLimitChangeRef = useRef(onRateLimitChange);
   const onRetryRef = useRef(onRetry);
-  const onCancelAutoResumeRef = useRef(onCancelAutoResume);
 
   // Sync refs in an effect to avoid "Cannot update ref during render" in StrictMode
   useEffect(() => {
-    onRateLimitDetectedRef.current = onRateLimitDetected;
+    onRateLimitChangeRef.current = onRateLimitChange;
     onRetryRef.current = onRetry;
-    onCancelAutoResumeRef.current = onCancelAutoResume;
   });
 
   // Detect rate-limit in stream events — only re-runs when streamEvents change
@@ -53,7 +51,7 @@ export function useRateLimitAutoResume(
       if (text && RATE_LIMIT_PATTERN.test(text)) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setRateLimited(true);
-        onRateLimitDetectedRef.current?.();
+        onRateLimitChangeRef.current?.();
         const resetsAt = parseSessionLimitReset(text);
         if (resetsAt) {
           setAutoResumeAt(resetsAt);
@@ -100,7 +98,7 @@ export function useRateLimitAutoResume(
     setCountdown('');
     setRateLimited(false);
     setRateLimitMessage('');
-    onCancelAutoResumeRef.current?.();
+    onRateLimitChangeRef.current?.();
   };
 
   return {

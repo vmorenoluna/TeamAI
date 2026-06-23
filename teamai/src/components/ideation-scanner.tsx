@@ -22,7 +22,7 @@ export function IdeationScanner() {
     countdown,
     resetRateLimit,
     handleCancelAutoResume,
-  } = useRateLimitAutoResume(streamEvents, handleScan, () => setRunning(false), () => setRunning(false));
+  } = useRateLimitAutoResume(streamEvents, handleScan, () => setRunning(false));
 
   // Accumulate progress text from all stream events
   const fullText = useStreamProgress(streamEvents);
