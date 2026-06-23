@@ -15,11 +15,14 @@ const eslintConfig = defineConfig([
     // Playwright output
     "test-results/**",
   ]),
-  // Test files mock private internals and need `any` for type casting
+  // Test files mock private internals and need `any` for type casting.
+  // expect.any(), (obj as any).privateMethod, and mock (...args: any[]) signatures
+  // are intentional test patterns — disabling the rule prevents 244 warnings
+  // that would block CI if --max-warnings 0 is ever added.
   {
     files: ["tests/**/*.{ts,tsx}"],
     rules: {
-      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-explicit-any": "off",
     },
   },
   // Allow underscore-prefixed unused variables (intentionally ignored)
