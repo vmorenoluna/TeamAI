@@ -380,7 +380,7 @@ export function WorkflowView({ workflowTasks }: Props) {
       : 0;
 
     setPopoverStyle({ top, left });
-  }, [hoveredPhase]);
+  }, [hoveredPhase, otherTasks.length, tasksByPhase]);
 
   return (
     <div className="flex flex-col h-full bg-[#11131b]">
