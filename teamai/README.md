@@ -11,6 +11,7 @@ TeamAI is a Next.js web application that orchestrates multi-agent [Claude Code](
 - **GitHub Issues Import** — Fetch and import open GitHub issues as kanban tasks via MCP integration
 - **Insights Chat** — Interactive AI chat for codebase questions with streaming responses
 - **Interactive Terminals** — Open PTY-based Claude sessions pre-loaded with role personas
+- **Reusable UI Components** — Shared RateLimitBanner, StreamingOutput, LoadingSpinner, and phased RoadmapCard/PhasedKanban for consistent UX
 - **Dark Mode UI** — Full dark mode with shadcn/ui components and Tailwind CSS v4
 - **Multi-Provider Support** — Anthropic, Bedrock, Vertex, OpenAI, Gemini, and Ollama backends
 - **Container Isolation** — Optional devcontainer sandboxing for agent sessions
@@ -62,7 +63,7 @@ TeamAI/
 │   │   │   ├── settings/      # Provider/pipeline configuration page
 │   │   │   ├── task/[id]/     # Task detail page
 │   │   │   └── terminals/     # Interactive terminal page
-│   │   ├── components/        # React components (kanban, task panel, terminals, etc.)
+│   │   ├── components/        # React components (kanban, task panel, streaming output, rate-limit banners, etc.)
 │   │   ├── hooks/             # Custom hooks (useAgentStream, usePhaseSync, etc.)
 │   │   ├── lib/               # Core business logic
 │   │   │   ├── orchestrator.ts    # Multi-agent pipeline orchestrator
