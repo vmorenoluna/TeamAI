@@ -5,6 +5,7 @@ import { startIdeationScan, cancelIdeationScan } from '@/app/actions/ideation';
 import { useSessionStream } from '@/hooks/use-session-stream';
 import { useRateLimitAutoResume } from '@/hooks/use-rate-limit-auto-resume';
 import { useStreamProgress } from '@/hooks/use-stream-progress';
+import { RateLimitBanner } from './rate-limit-banner';
 
 export function IdeationScanner() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -96,36 +97,14 @@ export function IdeationScanner() {
 
       {/* Rate-limit indicator */}
       {rateLimited && (
-        <div className="bg-amber-950/30 border border-amber-800 rounded-lg p-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-amber-400 text-lg">⏳</span>
-              <span className="text-sm text-amber-300">{rateLimitMessage}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {autoResumeAt && (
-                <>
-                  <span className="text-xs text-amber-400 font-mono tabular-nums">
-                    {countdown}
-                  </span>
-                  <button
-                    onClick={handleCancelAutoResume}
-                    className="px-3 py-2 text-sm font-medium text-slate-400 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </>
-              )}
-              <button
-                onClick={handleScan}
-                disabled={isPending}
-                className="px-4 py-2 text-sm font-medium bg-amber-700 text-amber-100 rounded-lg hover:bg-amber-600 disabled:opacity-40 transition-colors"
-              >
-                Retry Now
-              </button>
-            </div>
-          </div>
-        </div>
+        <RateLimitBanner
+          message={rateLimitMessage}
+          autoResumeAt={autoResumeAt}
+          countdown={countdown}
+          onCancelAutoResume={handleCancelAutoResume}
+          onRetry={handleScan}
+          disabled={isPending}
+        />
       )}
 
       {/* Full accumulated output while running */}

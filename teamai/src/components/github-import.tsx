@@ -15,6 +15,7 @@ import { extractText } from '@/lib/stream-types';
 import { useRateLimitAutoResume } from '@/hooks/use-rate-limit-auto-resume';
 import { useStreamProgress } from '@/hooks/use-stream-progress';
 import { useStreamingState } from '@/hooks/use-streaming-state';
+import { RateLimitBanner } from './rate-limit-banner';
 import type { GitHubIssue } from '@/app/actions/github';
 
 export function GitHubImport() {
@@ -183,35 +184,13 @@ export function GitHubImport() {
 
       {/* Rate-limit banner */}
       {rateLimited && (
-        <div className="shrink-0 bg-amber-950/30 border border-amber-800 rounded-lg p-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-amber-400 text-lg shrink-0">⏳</span>
-              <span className="text-sm text-amber-300">{rateLimitMessage || 'Rate limit reached. Please wait and try again.'}</span>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              {autoResumeAt && (
-                <>
-                  <span className="text-xs text-amber-400 font-mono tabular-nums">
-                    {countdown}
-                  </span>
-                  <button
-                    onClick={handleCancelAutoResume}
-                    className="px-3 py-2 text-sm font-medium text-slate-400 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </>
-              )}
-              <button
-                onClick={handleListIssues}
-                className="px-4 py-2 text-sm font-medium bg-amber-700 text-amber-100 rounded-lg hover:bg-amber-600 transition-colors"
-              >
-                Retry Now
-              </button>
-            </div>
-          </div>
-        </div>
+        <RateLimitBanner
+          message={rateLimitMessage}
+          autoResumeAt={autoResumeAt}
+          countdown={countdown}
+          onCancelAutoResume={handleCancelAutoResume}
+          onRetry={handleListIssues}
+        />
       )}
 
       {/* Actions bar */}
