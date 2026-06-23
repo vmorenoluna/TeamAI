@@ -86,6 +86,8 @@ describe('insights server actions', () => {
         taskId: `insights::${root}`,
         role: 'general',
         cwd: root,
+        projectRoot: root,
+        permissionMode: 'bypassPermissions',
       });
     });
 

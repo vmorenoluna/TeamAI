@@ -22,6 +22,8 @@ export async function startIdeationScan(): Promise<string> {
     role: 'general',
     cwd: projectPath,
     model: explorationModel,
+    projectRoot: projectPath,
+    permissionMode: 'bypassPermissions',
   });
   sessions.set(projectPath, sessionId);
   processManager.sendMessage(sessionId, '/ideation');

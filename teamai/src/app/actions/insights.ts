@@ -22,6 +22,8 @@ export async function getOrCreateInsightsSession(): Promise<string> {
     taskId: `insights::${projectPath}`,
     role: 'general',
     cwd: projectPath,
+    projectRoot: projectPath,
+    permissionMode: 'bypassPermissions',
   });
   sessions.set(projectPath, sessionId);
   return sessionId;

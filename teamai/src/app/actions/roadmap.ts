@@ -78,6 +78,8 @@ export async function startRoadmapGeneration(skipCompetitors: boolean = false): 
     role: 'general',
     cwd: projectPath,
     model: explorationModel,
+    projectRoot: projectPath,
+    permissionMode: 'bypassPermissions',
   });
   const key = `roadmap::${projectPath}`;
   sessions.set(key, sessionId);
@@ -96,6 +98,8 @@ export async function startChangelogGeneration(): Promise<string> {
     taskId: `changelog::${projectPath}`,
     role: 'general',
     cwd: projectPath,
+    projectRoot: projectPath,
+    permissionMode: 'bypassPermissions',
   });
   const key = `changelog::${projectPath}`;
   sessions.set(key, sessionId);
