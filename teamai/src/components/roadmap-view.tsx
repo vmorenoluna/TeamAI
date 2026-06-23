@@ -21,7 +21,8 @@ import {
   type RoadmapReport,
 } from '@/app/actions/roadmap';
 import { useSessionStream } from '@/hooks/use-session-stream';
-import { extractText } from '@/lib/stream-types';
+import { extractText, extractProgressText } from '@/lib/stream-types';
+import { parseSessionLimitReset, formatCountdown } from '@/lib/rate-limit';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskPanel, type FullData } from './task-panel';
 import { PHASE_BADGE, PHASE_LABELS as TASK_PHASE_LABELS, PRIORITY_COLORS } from '@/constants/phases';
@@ -553,8 +554,12 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
   // Rate-limit state
   const [rmRateLimited, setRmRateLimited] = useState(false);
   const [rmRateLimitMessage, setRmRateLimitMessage] = useState('');
+  const [rmAutoResumeAt, setRmAutoResumeAt] = useState<number | null>(null);
+  const [rmCountdown, setRmCountdown] = useState('');
   const [clRateLimited, setClRateLimited] = useState(false);
   const [clRateLimitMessage, setClRateLimitMessage] = useState('');
+  const [clAutoResumeAt, setClAutoResumeAt] = useState<number | null>(null);
+  const [clCountdown, setClCountdown] = useState('');
   // Cancel pending state
   const [rmCancelling, setRmCancelling] = useState(false);
   const [clCancelling, setClCancelling] = useState(false);
@@ -568,12 +573,14 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
   const rmStream = useSessionStream(rmSessionId);
   const clStream = useSessionStream(clSessionId);
 
-  // Accumulate full text from all stream events for terminal view
+  // Accumulate full progress text from all stream events for terminal view.
+  // Uses extractProgressText so tool names (▶ bash, ▶ read_file) and
+  // system events (◆ Session started) are shown — not just assistant text.
   const rmFullText = useMemo(() => {
     if (rmStream.length === 0) return '';
     let allText = '';
     for (const e of rmStream) {
-      const t = extractText(e.event);
+      const t = extractProgressText(e.event);
       if (t) allText += (allText ? '\n' : '') + t;
     }
     return allText;
@@ -583,13 +590,13 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     if (clStream.length === 0) return '';
     let allText = '';
     for (const e of clStream) {
-      const t = extractText(e.event);
+      const t = extractProgressText(e.event);
       if (t) allText += (allText ? '\n' : '') + t;
     }
     return allText;
   }, [clStream]);
 
-  // Detect rate-limit events in the stream
+  // Detect rate-limit events in the stream and compute auto-resume timestamp
   useEffect(() => {
     if (rmStream.length === 0) return;
     for (const e of rmStream) {
@@ -598,8 +605,15 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setRmRateLimited(true);
         setRmRunning(false);
-        const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
-        setRmRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : text.slice(0, 200));
+        const resetsAt = parseSessionLimitReset(text);
+        if (resetsAt) {
+          setRmAutoResumeAt(resetsAt);
+          setRmCountdown(formatCountdown(resetsAt));
+          setRmRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(resetsAt)}`);
+        } else {
+          const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
+          setRmRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : text.slice(0, 200));
+        }
         return;
       }
     }
@@ -613,12 +627,72 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setClRateLimited(true);
         setClRunning(false);
-        const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
-        setClRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : text.slice(0, 200));
+        const resetsAt = parseSessionLimitReset(text);
+        if (resetsAt) {
+          setClAutoResumeAt(resetsAt);
+          setClCountdown(formatCountdown(resetsAt));
+          setClRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(resetsAt)}`);
+        } else {
+          const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
+          setClRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : text.slice(0, 200));
+        }
         return;
       }
     }
   }, [clStream]);
+
+  // ── Auto-resume countdown for roadmap ────────────────────────────────────
+  useEffect(() => {
+    if (rmAutoResumeAt === null) return;
+    const timer = setInterval(() => {
+      const remaining = rmAutoResumeAt - Math.floor(Date.now() / 1000);
+      if (remaining <= 0) {
+        clearInterval(timer);
+        setRmAutoResumeAt(null);
+        setRmCountdown('');
+        handleGenerateRoadmap();
+      } else {
+        setRmCountdown(formatCountdown(rmAutoResumeAt));
+        setRmRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(rmAutoResumeAt)}`);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rmAutoResumeAt]);
+
+  // ── Auto-resume countdown for changelog ──────────────────────────────────
+  useEffect(() => {
+    if (clAutoResumeAt === null) return;
+    const timer = setInterval(() => {
+      const remaining = clAutoResumeAt - Math.floor(Date.now() / 1000);
+      if (remaining <= 0) {
+        clearInterval(timer);
+        setClAutoResumeAt(null);
+        setClCountdown('');
+        handleGenerateChangelog();
+      } else {
+        setClCountdown(formatCountdown(clAutoResumeAt));
+        setClRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(clAutoResumeAt)}`);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+   
+  }, [clAutoResumeAt]);
+
+  // Cancel auto-resume
+  function handleCancelRmAutoResume() {
+    setRmAutoResumeAt(null);
+    setRmCountdown('');
+    setRmRateLimited(false);
+    setRmRateLimitMessage('');
+  }
+
+  function handleCancelClAutoResume() {
+    setClAutoResumeAt(null);
+    setClCountdown('');
+    setClRateLimited(false);
+    setClRateLimitMessage('');
+  }
 
   const rmDone = rmStream.some(e => e.event.type === 'result');
   const clDone = clStream.some(e => e.event.type === 'result');
@@ -783,6 +857,8 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     setRmReport(null);
     setRmRateLimited(false);
     setRmRateLimitMessage('');
+    setRmAutoResumeAt(null);
+    setRmCountdown('');
     startTransition(async () => {
       const id = await startRoadmapGeneration(skipCompetitors);
       if (rmCancelRequestedRef.current) {
@@ -805,6 +881,8 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     setRmSessionId(null);
     setRmRateLimited(false);
     setRmRateLimitMessage('');
+    setRmAutoResumeAt(null);
+    setRmCountdown('');
     try { sessionStorage.removeItem('roadmap-session'); } catch { /* noop */ }
     setRmCancelling(false);
   }
@@ -816,6 +894,8 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     setClMarkdown(null);
     setClRateLimited(false);
     setClRateLimitMessage('');
+    setClAutoResumeAt(null);
+    setClCountdown('');
     startTransition(async () => {
       const id = await startChangelogGeneration();
       if (clCancelRequestedRef.current) {
@@ -838,6 +918,8 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
     setClSessionId(null);
     setClRateLimited(false);
     setClRateLimitMessage('');
+    setClAutoResumeAt(null);
+    setClCountdown('');
     try { sessionStorage.removeItem('changelog-session'); } catch { /* noop */ }
     setClCancelling(false);
   }
@@ -978,31 +1060,63 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
             {/* Rate-limit indicator */}
             {rmRateLimited && (
-              <div className="bg-amber-950/30 border border-amber-800 rounded-lg p-4 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-amber-400 text-lg">⏳</span>
-                  <span className="text-sm text-amber-300">{rmRateLimitMessage}</span>
+              <div className="bg-amber-950/30 border border-amber-800 rounded-lg p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-amber-400 text-lg">⏳</span>
+                    <span className="text-sm text-amber-300">{rmRateLimitMessage}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {/* Auto-resuming: show countdown */}
+                    {rmAutoResumeAt && (
+                      <>
+                        <span className="text-xs text-amber-400 font-mono tabular-nums">
+                          {rmCountdown}
+                        </span>
+                        <button
+                          onClick={handleCancelRmAutoResume}
+                          className="px-3 py-2 text-sm font-medium text-slate-400 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
+                    {/* Manual retry (shown when no auto-resume or as override) */}
+                    <button
+                      onClick={handleGenerateRoadmap}
+                      disabled={isPending}
+                      className="px-4 py-2 text-sm font-medium bg-amber-700 text-amber-100 rounded-lg hover:bg-amber-600 disabled:opacity-40 transition-colors"
+                    >
+                      Retry Now
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={handleGenerateRoadmap}
-                  disabled={isPending}
-                  className="px-4 py-2 text-sm font-medium bg-amber-700 text-amber-100 rounded-lg hover:bg-amber-600 disabled:opacity-40 transition-colors"
-                >
-                  Retry
-                </button>
               </div>
             )}
 
             {/* Streaming output — show full accumulated text while running */}
-            {rmRunning && rmFullText && !rmRateLimited && (
+            {/* Also show when running but no text yet — indicates agent is starting up */}
+            {rmRunning && !rmRateLimited && rmStream.length > 0 && (
               <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-80 overflow-y-auto">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Agent Output</span>
                   <span className="text-[10px] text-slate-600">{rmStream.length} event{rmStream.length !== 1 ? 's' : ''}</span>
                 </div>
-                <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
-                  {rmFullText}
-                </pre>
+                {rmFullText ? (
+                  <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                    {rmFullText}
+                  </pre>
+                ) : (
+                  <p className="text-xs text-slate-500 animate-pulse">Initialising…</p>
+                )}
+              </div>
+            )}
+
+            {/* Show "Running..." indicator when streaming but no events yet */}
+            {rmRunning && !rmRateLimited && rmStream.length === 0 && (
+              <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 flex items-center gap-3">
+                <div className="w-4 h-4 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
+                <span className="text-sm text-slate-400">Starting roadmap generation…</span>
               </div>
             )}
 
@@ -1070,31 +1184,60 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
             {/* Rate-limit indicator */}
             {clRateLimited && (
-              <div className="bg-amber-950/30 border border-amber-800 rounded-lg p-4 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-amber-400 text-lg">⏳</span>
-                  <span className="text-sm text-amber-300">{clRateLimitMessage}</span>
+              <div className="bg-amber-950/30 border border-amber-800 rounded-lg p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-amber-400 text-lg">⏳</span>
+                    <span className="text-sm text-amber-300">{clRateLimitMessage}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {clAutoResumeAt && (
+                      <>
+                        <span className="text-xs text-amber-400 font-mono tabular-nums">
+                          {clCountdown}
+                        </span>
+                        <button
+                          onClick={handleCancelClAutoResume}
+                          className="px-3 py-2 text-sm font-medium text-slate-400 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
+                    <button
+                      onClick={handleGenerateChangelog}
+                      disabled={isPending}
+                      className="px-4 py-2 text-sm font-medium bg-amber-700 text-amber-100 rounded-lg hover:bg-amber-600 disabled:opacity-40 transition-colors"
+                    >
+                      Retry Now
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={handleGenerateChangelog}
-                  disabled={isPending}
-                  className="px-4 py-2 text-sm font-medium bg-amber-700 text-amber-100 rounded-lg hover:bg-amber-600 disabled:opacity-40 transition-colors"
-                >
-                  Retry
-                </button>
               </div>
             )}
 
             {/* Streaming output — show full accumulated text while running */}
-            {clRunning && clFullText && !clRateLimited && (
+            {clRunning && !clRateLimited && clStream.length > 0 && (
               <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-80 overflow-y-auto">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Agent Output</span>
                   <span className="text-[10px] text-slate-600">{clStream.length} event{clStream.length !== 1 ? 's' : ''}</span>
                 </div>
-                <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
-                  {clFullText}
-                </pre>
+                {clFullText ? (
+                  <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                    {clFullText}
+                  </pre>
+                ) : (
+                  <p className="text-xs text-slate-500 animate-pulse">Initialising…</p>
+                )}
+              </div>
+            )}
+
+            {/* Show "Running..." indicator when streaming but no events yet */}
+            {clRunning && !clRateLimited && clStream.length === 0 && (
+              <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 flex items-center gap-3">
+                <div className="w-4 h-4 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
+                <span className="text-sm text-slate-400">Starting changelog generation…</span>
               </div>
             )}
 

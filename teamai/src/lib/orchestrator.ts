@@ -1384,7 +1384,9 @@ export class Orchestrator {
 
   private handleRateLimit(pipeline: TaskPipeline, resetsAt: number): void {
     const resetsAtMs = resetsAt * 1000;
-    const waitMs = Math.max(resetsAtMs - Date.now(), 0);
+    const MAX_DELAY_MS = 2_147_483_647; // 32-bit signed int max (~24.8 days)
+    const rawWaitMs = Math.max(resetsAtMs - Date.now(), 0);
+    const waitMs = Math.min(rawWaitMs, MAX_DELAY_MS);
     const resetsAtISO = new Date(resetsAtMs).toISOString();
 
     this.taskStore.update(pipeline.taskId, { rateLimitedUntil: resetsAtISO });

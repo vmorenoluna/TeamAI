@@ -48,8 +48,11 @@ describe('ProviderConfigEditor', () => {
   // ── Rendering ───────────────────────────────────────────────────────
 
   it('renders default section and role overrides section', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     expect(screen.getByText('Default (all roles)')).toBeInTheDocument();
@@ -57,8 +60,11 @@ describe('ProviderConfigEditor', () => {
   });
 
   it('renders label for each role', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     expect(screen.getByText('Default')).toBeInTheDocument();
@@ -70,8 +76,11 @@ describe('ProviderConfigEditor', () => {
   });
 
   it('calls getAvailableModels on mount with the default provider', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => {
       expect(mockGetAvailableModels).toHaveBeenCalledWith('anthropic', false);
@@ -81,8 +90,11 @@ describe('ProviderConfigEditor', () => {
   // ── Model select ────────────────────────────────────────────────────
 
   it('shows model select with options after models load', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => {
       const comboboxes = screen.getAllByRole('combobox');
@@ -94,8 +106,11 @@ describe('ProviderConfigEditor', () => {
   });
 
   it('selects the current model in the dropdown', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => {
       const comboboxes = screen.getAllByRole('combobox');
@@ -112,8 +127,11 @@ describe('ProviderConfigEditor', () => {
       default: { model: 'my-custom-model-v1', provider: 'anthropic' },
       roles: {},
     };
-    act(() => {
-      render(<ProviderConfigEditor config={configWithCustomModel} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={configWithCustomModel}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     const customInput = await screen.findByPlaceholderText('Type a model name…');
     expect(customInput).toHaveValue('my-custom-model-v1');
@@ -122,8 +140,11 @@ describe('ProviderConfigEditor', () => {
   // ── Provider select ─────────────────────────────────────────────────
 
   it('renders provider select with all providers', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     expect(screen.getAllByRole('option', { name: 'anthropic' }).length).toBeGreaterThanOrEqual(1);
@@ -137,8 +158,11 @@ describe('ProviderConfigEditor', () => {
   // ── Refresh button ──────────────────────────────────────────────────
 
   it('calls getAvailableModels with refresh=true when refresh button is clicked', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
 
     // Wait for initial load to complete so the refresh button is enabled
@@ -159,8 +183,11 @@ describe('ProviderConfigEditor', () => {
   // ── Custom model input ──────────────────────────────────────────────
 
   it('shows custom model input when "Custom…" is selected', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
 
     // Wait for models to load and model select with __custom__ to appear
@@ -178,8 +205,11 @@ describe('ProviderConfigEditor', () => {
   });
 
   it('updates model when custom input is blurred', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
 
     // Wait for models to finish loading so the select renders with the current value
@@ -218,8 +248,11 @@ describe('ProviderConfigEditor', () => {
       .mockResolvedValueOnce({ models: CURATED_MODELS_ANTHROPIC, error: undefined })
       .mockResolvedValue({ models: ['gpt-4o', 'gpt-4o-mini'], error: undefined });
 
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
 
     await waitFor(() => {
@@ -254,8 +287,11 @@ describe('ProviderConfigEditor', () => {
       error: 'ANTHROPIC_API_KEY not set',
     });
 
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
 
     await waitFor(() => expect(mockGetAvailableModels).toHaveBeenCalled());
@@ -268,16 +304,22 @@ describe('ProviderConfigEditor', () => {
   // ── Save button ─────────────────────────────────────────────────────
 
   it('renders save button', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     expect(screen.getByText('Save Provider Config')).toBeInTheDocument();
   });
 
   it('calls saveProvidersConfig when save button is clicked', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     const saveButton = screen.getByText('Save Provider Config');
@@ -288,8 +330,11 @@ describe('ProviderConfigEditor', () => {
   });
 
   it('shows "Saved!" text after saving', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     const saveButton = screen.getByText('Save Provider Config');
@@ -312,15 +357,20 @@ describe('ProviderConfigEditor', () => {
 
     mockGetAvailableModels.mockImplementation(() => loadingPromise);
 
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
 
     const indicators = screen.getAllByText('Loading models…');
     expect(indicators).toHaveLength(7); // default + 5 roles + exploration
 
     // Resolve the loading so inflightFetches cleans up
-    resolveLoading({ models: CURATED_MODELS_ANTHROPIC, error: undefined });
+    await act(async () => {
+      resolveLoading({ models: CURATED_MODELS_ANTHROPIC, error: undefined });
+    });
     await vi.waitFor(() => {
       expect(screen.queryByText('Loading models…')).toBeNull();
     });
@@ -329,8 +379,11 @@ describe('ProviderConfigEditor', () => {
   // ── Exploration model section ───────────────────────────────────────
 
   it('renders exploration section with model picker', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     expect(screen.getByText('Exploration (ideation & roadmap)')).toBeInTheDocument();
@@ -342,8 +395,11 @@ describe('ProviderConfigEditor', () => {
       roles: {},
       exploration: { model: 'claude-haiku-4-5-20251001' },
     };
-    act(() => {
-      render(<ProviderConfigEditor config={configWithExploration} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={configWithExploration}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => {
       // The exploration row should have the model selector showing the exploration model
@@ -361,8 +417,11 @@ describe('ProviderConfigEditor', () => {
       roles: {},
       exploration: { model: 'gemini-2.0-flash' },
     };
-    act(() => {
-      render(<ProviderConfigEditor config={configWithExploration} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={configWithExploration}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     const saveButton = screen.getByText('Save Provider Config');
@@ -373,8 +432,11 @@ describe('ProviderConfigEditor', () => {
   });
 
   it('falls back to default model in exploration row when not set', async () => {
-    act(() => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
     });
     await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     // The exploration row label should be visible

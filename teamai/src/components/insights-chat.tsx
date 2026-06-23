@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState, useTransition, useMemo, useCallback } from 'react';
 import { getOrCreateInsightsSession, sendInsightsMessage, cancelInsightsSession } from '@/app/actions/insights';
 import { useSessionStream } from '@/hooks/use-session-stream';
-import { extractText } from '@/lib/stream-types';
+import { extractText, extractProgressText } from '@/lib/stream-types';
+import { parseSessionLimitReset, formatCountdown } from '@/lib/rate-limit';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -20,6 +21,8 @@ export function InsightsChat() {
   const [running, setRunning] = useState(false);
   const [rateLimited, setRateLimited] = useState(false);
   const [rateLimitMessage, setRateLimitMessage] = useState('');
+  const [autoResumeAt, setAutoResumeAt] = useState<number | null>(null);
+  const [countdown, setCountdown] = useState('');
   const cancelRequestedRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const streamEvents = useSessionStream(sessionId);
@@ -28,6 +31,17 @@ export function InsightsChat() {
   useEffect(() => {
     getOrCreateInsightsSession().then(setSessionId);
   }, []);
+
+  // Compute progress indicator text (tool names, status) while the agent works
+  const progressText = useMemo(() => {
+    if (streamEvents.length === 0) return '';
+    const lines: string[] = [];
+    for (const e of streamEvents) {
+      const t = extractProgressText(e.event);
+      if (t) lines.push(t);
+    }
+    return lines[lines.length - 1] ?? '';
+  }, [streamEvents]);
 
   // Compute whether assistant is currently streaming from stream events
   const isStreaming = useMemo(() => {
@@ -43,6 +57,47 @@ export function InsightsChat() {
     setRunning(isStreaming);
   }, [isStreaming]);
 
+  // Must be declared before auto-resume useEffect that references it
+  const handleRetryNow = useCallback(() => {
+    setRateLimited(false);
+    setRateLimitMessage('');
+    setRunning(false);
+    setSessionId(null);
+    setAutoResumeAt(null);
+    setCountdown('');
+    startTransition(async () => {
+      const newId = await getOrCreateInsightsSession();
+      setSessionId(newId);
+    });
+  }, []);
+
+  // ── Auto-resume countdown ───────────────────────────────────────────────
+  useEffect(() => {
+    if (autoResumeAt === null) return;
+    const timer = setInterval(() => {
+      const remaining = autoResumeAt - Math.floor(Date.now() / 1000);
+      if (remaining <= 0) {
+        clearInterval(timer);
+        setAutoResumeAt(null);
+        setCountdown('');
+        handleRetryNow();
+      } else {
+        setCountdown(formatCountdown(autoResumeAt));
+        setRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(autoResumeAt)}`);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoResumeAt]);
+
+  // Cancel auto-resume
+  function handleCancelAutoResume() {
+    setAutoResumeAt(null);
+    setCountdown('');
+    setRateLimited(false);
+    setRateLimitMessage('');
+  }
+
   // Detect rate-limit in stream events
   useEffect(() => {
     for (const e of streamEvents) {
@@ -53,10 +108,16 @@ export function InsightsChat() {
       ) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setRateLimited(true);
-         
-        setRateLimitMessage(text.slice(0, 500));
-         
         setRunning(false);
+        const resetsAt = parseSessionLimitReset(text);
+        if (resetsAt) {
+          setAutoResumeAt(resetsAt);
+          setCountdown(formatCountdown(resetsAt));
+          setRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(resetsAt)}`);
+        } else {
+          const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
+          setRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : text.slice(0, 200));
+        }
         return;
       }
     }
@@ -106,6 +167,8 @@ export function InsightsChat() {
     setRunning(true);
     setRateLimited(false);
     setRateLimitMessage('');
+    setAutoResumeAt(null);
+    setCountdown('');
     startTransition(async () => {
       try {
         await sendInsightsMessage(sessionId, text);
@@ -124,21 +187,12 @@ export function InsightsChat() {
     setSessionId(null);
     setRateLimited(false);
     setRateLimitMessage('');
+    setAutoResumeAt(null);
+    setCountdown('');
     // Auto-reconnect: get a fresh session for follow-up messages
     const newId = await getOrCreateInsightsSession();
     setSessionId(newId);
     cancelRequestedRef.current = false;
-  }, []);
-
-  const handleRetry = useCallback(() => {
-    setRateLimited(false);
-    setRateLimitMessage('');
-    setRunning(false);
-    setSessionId(null);
-    startTransition(async () => {
-      const newId = await getOrCreateInsightsSession();
-      setSessionId(newId);
-    });
   }, []);
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -152,16 +206,34 @@ export function InsightsChat() {
     <div className="flex flex-col h-full">
       {/* Rate-limit banner */}
       {rateLimited && (
-        <div className="shrink-0 bg-amber-950/60 border-b border-amber-800 text-amber-200 px-4 py-2.5 text-xs flex items-center justify-between">
-          <span className="truncate mr-2">
-            {rateLimitMessage || 'Rate limit reached. Please wait and try again.'}
-          </span>
-          <button
-            onClick={handleRetry}
-                        className="shrink-0 px-3 py-1 text-xs font-medium bg-amber-700 hover:bg-amber-600 text-amber-100 rounded transition-colors"
-          >
-            Retry
-          </button>
+        <div className="shrink-0 bg-amber-950/60 border-b border-amber-800 text-amber-200 px-4 py-2.5 text-xs flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-amber-400 text-lg shrink-0">⏳</span>
+            <span className="truncate">
+              {rateLimitMessage || 'Rate limit reached. Please wait and try again.'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {autoResumeAt && (
+              <>
+                <span className="text-xs text-amber-400 font-mono tabular-nums">
+                  {countdown}
+                </span>
+                <button
+                  onClick={handleCancelAutoResume}
+                  className="px-2 py-1 text-xs font-medium text-slate-400 border border-slate-700 rounded hover:bg-slate-800 transition-colors"
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+            <button
+              onClick={handleRetryNow}
+              className="shrink-0 px-3 py-1 text-xs font-medium bg-amber-700 hover:bg-amber-600 text-amber-100 rounded transition-colors"
+            >
+              Retry Now
+            </button>
+          </div>
         </div>
       )}
 
@@ -173,8 +245,12 @@ export function InsightsChat() {
           </p>
         )}
         {messages.length === 0 && running && (
-          <p className="text-sm text-slate-400 text-center mt-8 animate-pulse">
-            Thinking…
+          <p className="text-sm text-slate-400 text-center mt-8">
+            {progressText ? (
+              <span className="animate-pulse">{progressText}</span>
+            ) : (
+              <span className="animate-pulse">Thinking…</span>
+            )}
           </p>
         )}
         {messages.map((msg, i) => (

@@ -109,3 +109,46 @@ export function extractText(event: StreamEvent): string {
     .map(b => b.text)
     .join('');
 }
+
+/**
+ * Extract rich progress text from any stream event, including tool names
+ * and system events. Use this for streaming output where the user needs
+ * to see what the agent is doing (not just its thinking text).
+ *
+ * Produces lines like:
+ *   ◆ Session started — claude-sonnet-4-20250514
+ *   I'll analyze the codebase...
+ *   ▶ bash
+ *   ▶ read_file
+ *   ✓ Done — $0.0420 (12345ms)
+ */
+export function extractProgressText(event: StreamEvent): string {
+  if (event.type === 'system' && event.subtype === 'init') {
+    return `◆ Session started — ${event.model ?? 'claude'}`;
+  }
+  if (event.type === 'assistant') {
+    const blocks = (event.message?.content ?? []) as ContentBlock[];
+    const parts: string[] = [];
+    for (const b of blocks) {
+      if (b.type === 'text' && b.text) {
+        parts.push(b.text);
+      } else if (b.type === 'tool_use') {
+        const label = typeof b.name === 'string' ? b.name : 'tool';
+        parts.push(`▶ ${label}`);
+      }
+    }
+    return parts.join('\n');
+  }
+  if (event.type === 'result') {
+    const cost = typeof event.total_cost_usd === 'number'
+      ? ` — $${event.total_cost_usd.toFixed(4)}`
+      : '';
+    return event.subtype === 'success'
+      ? `✓ Done${cost} (${event.duration_ms ?? '?'}ms)`
+      : `✗ Failed: ${event.result ?? 'unknown error'}`;
+  }
+  if (event.type === 'error') {
+    return `⚠ ${event.error ?? 'unknown error'}`;
+  }
+  return '';
+}

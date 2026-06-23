@@ -16,7 +16,7 @@
  * React's useTransition is mocked (isPending=false, synchronous callback).
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { SessionEvent } from '@/hooks/use-session-stream';
@@ -48,12 +48,25 @@ vi.mock('@/hooks/use-session-stream', () => ({
   useSessionStream: (() => mockUseSessionStream()) as typeof import('@/hooks/use-session-stream').useSessionStream,
 }));
 
-vi.mock('@/lib/stream-types', () => ({
-  extractText: vi.fn((event: Record<string, unknown>) => {
+const mockExtractText = vi.hoisted(() =>
+  vi.fn((event: Record<string, unknown>) => {
     const msg = event.message as Record<string, unknown> | undefined;
     const content = msg?.content as Array<Record<string, unknown>> | undefined;
     return (content?.[0]?.text as string) ?? '';
-  }),
+  })
+);
+const mockExtractProgressText = vi.hoisted(() => vi.fn().mockReturnValue(''));
+const mockParseSessionLimitReset = vi.hoisted(() => vi.fn().mockReturnValue(null));
+const mockFormatCountdown = vi.hoisted(() => vi.fn().mockReturnValue(''));
+
+vi.mock('@/lib/stream-types', () => ({
+  extractText: mockExtractText,
+  extractProgressText: mockExtractProgressText,
+}));
+
+vi.mock('@/lib/rate-limit', () => ({
+  parseSessionLimitReset: ((...args: unknown[]) => mockParseSessionLimitReset(...args)) as typeof import('@/lib/rate-limit').parseSessionLimitReset,
+  formatCountdown: ((...args: unknown[]) => mockFormatCountdown(...args)) as typeof import('@/lib/rate-limit').formatCountdown,
 }));
 
 const mockStartTransition = vi.hoisted(() => vi.fn((cb: () => void) => cb()));
@@ -72,8 +85,13 @@ import { InsightsChat } from '@/components/insights-chat';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function renderComponent() {
-  render(<InsightsChat />);
+async function renderComponent() {
+  await act(async () => {
+    render(<InsightsChat />);
+    if (!vi.isFakeTimers()) {
+      await new Promise(r => setTimeout(r, 0));
+    }
+  });
 }
 
 function ev(event: StreamEvent): SessionEvent {
@@ -97,47 +115,55 @@ describe('InsightsChat', () => {
     mockUseSessionStream.mockReturnValue([]);
     mockGetOrCreateInsightsSession.mockResolvedValue('session-init');
     mockCancelInsightsSession.mockResolvedValue(undefined);
+    mockExtractText.mockImplementation((event: Record<string, unknown>) => {
+      const msg = event.message as Record<string, unknown> | undefined;
+      const content = msg?.content as Array<Record<string, unknown>> | undefined;
+      return (content?.[0]?.text as string) ?? '';
+    });
+    mockExtractProgressText.mockReturnValue('');
+    mockParseSessionLimitReset.mockReturnValue(null);
+    mockFormatCountdown.mockReturnValue('');
   });
 
   // ── Initial state ────────────────────────────────────────────────────
 
   describe('initial state', () => {
     it('creates a session on mount', async () => {
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalledTimes(1);
       });
     });
 
-    it('shows the empty state placeholder when no messages exist', () => {
-      renderComponent();
+    it('shows the empty state placeholder when no messages exist', async () => {
+      await    await renderComponent();
 
       expect(
         screen.getByText('Ask anything about the codebase.')
       ).toBeInTheDocument();
     });
 
-    it('shows Send button (not ✕ Stop) initially', () => {
-      renderComponent();
+    it('shows Send button (not ✕ Stop) initially', async () => {
+      await    await renderComponent();
 
       expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
       expect(screen.queryByText('✕ Stop')).not.toBeInTheDocument();
     });
 
-    it('shows "Connecting…" placeholder when session is not yet ready', () => {
+    it('shows "Connecting…" placeholder when session is not yet ready', async () => {
       // Use a deferred promise that we never resolve (doesn't hang because
       // there's no sendMessage → act() awaiting the deferred promise)
       const { promise } = deferred<string>();
       mockGetOrCreateInsightsSession.mockReturnValue(promise);
-      renderComponent();
+      await    await renderComponent();
 
       expect(screen.getByPlaceholderText('Connecting…')).toBeInTheDocument();
     });
 
     it('shows "Ask about the codebase…" placeholder once session is ready', async () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('session-ready');
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(
@@ -152,7 +178,7 @@ describe('InsightsChat', () => {
   describe('chat flow', () => {
     it('sends a message and displays the user bubble', async () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('sess-chat');
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -166,7 +192,7 @@ describe('InsightsChat', () => {
 
     it('clears the textarea after sending', async () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('sess-clear');
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -189,7 +215,13 @@ describe('InsightsChat', () => {
       ];
 
       mockUseSessionStream.mockReturnValue(EMPTY);
-      const { rerender } = render(<InsightsChat />);
+      const { rerender } = await act(async () => {
+        const result = render(<InsightsChat />);
+        if (!vi.isFakeTimers()) {
+          await new Promise(r => setTimeout(r, 0));
+        }
+        return result;
+      });
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -212,7 +244,7 @@ describe('InsightsChat', () => {
 
     it('does not send when input is empty', async () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('sess-empty');
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -228,10 +260,10 @@ describe('InsightsChat', () => {
       expect(mockSendInsightsMessage).not.toHaveBeenCalled();
     });
 
-    it('does not send when sessionId is null', () => {
+    it('does not send when sessionId is null', async () => {
       const { promise } = deferred<string>();
       mockGetOrCreateInsightsSession.mockReturnValue(promise);
-      renderComponent();
+      await    await renderComponent();
 
       expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     });
@@ -247,7 +279,7 @@ describe('InsightsChat', () => {
       mockSendInsightsMessage.mockReturnValue(promise);
       mockUseSessionStream.mockReturnValue([]);
 
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -268,7 +300,7 @@ describe('InsightsChat', () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('sess-disabled');
       mockSendInsightsMessage.mockReturnValue(promise);
 
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -287,7 +319,7 @@ describe('InsightsChat', () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('sess-placeholder');
       mockSendInsightsMessage.mockReturnValue(promise);
 
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -312,7 +344,7 @@ describe('InsightsChat', () => {
       mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-reconnect');
       mockSendInsightsMessage.mockReturnValue(sendPromise);
 
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -338,7 +370,7 @@ describe('InsightsChat', () => {
       mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-reconnect');
       mockSendInsightsMessage.mockReturnValue(sendPromise);
 
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -361,7 +393,7 @@ describe('InsightsChat', () => {
       mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-reconnect2');
       mockSendInsightsMessage.mockReturnValue(sendPromise);
 
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -393,7 +425,7 @@ describe('InsightsChat', () => {
         }),
       ]);
 
-      renderComponent();
+      await    await renderComponent();
 
       // Text appears in both banner and message bubble — getAllByText avoids
       // the "Found multiple elements" error from getByText.
@@ -401,7 +433,7 @@ describe('InsightsChat', () => {
         const matches = screen.getAllByText(/session limit reached/);
         expect(matches.length).toBeGreaterThanOrEqual(1);
       });
-      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
     });
 
     it('detects "too many requests" as rate-limit', async () => {
@@ -413,7 +445,7 @@ describe('InsightsChat', () => {
         }),
       ]);
 
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         const matches = screen.getAllByText(/Too many requests/);
@@ -430,7 +462,7 @@ describe('InsightsChat', () => {
         }),
       ]);
 
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         const matches = screen.getAllByText(/usage limit/);
@@ -438,7 +470,7 @@ describe('InsightsChat', () => {
       });
     });
 
-    it('Retry button clears rate-limit state and reconnects', async () => {
+    it('Retry Now button clears rate-limit state and reconnects', async () => {
       mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-rate-retry');
       mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-post-retry');
       mockUseSessionStream.mockReturnValue([
@@ -448,21 +480,172 @@ describe('InsightsChat', () => {
         }),
       ]);
 
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
       });
 
       await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Retry Now' }));
       });
 
-      // Rate-limit banner should disappear (Retry button gone); session-limit
-      // text may remain in the message bubble from the stream events.
-      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+      // Rate-limit banner should disappear (Retry Now button gone)
+      expect(screen.queryByRole('button', { name: 'Retry Now' })).not.toBeInTheDocument();
       // Should reconnect
       expect(mockGetOrCreateInsightsSession).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ── Auto-resume ────────────────────────────────────────────────────
+
+  describe('auto-resume', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('timer triggers handleRetryNow when countdown reaches 0', async () => {
+      vi.useFakeTimers();
+      const NOW_MS = 1719000000 * 1000;
+      const RESET_SECS = 1719000005;
+      vi.setSystemTime(NOW_MS);
+
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-init');
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-reconnect');
+      mockParseSessionLimitReset.mockReturnValue(RESET_SECS);
+      mockFormatCountdown.mockReturnValue('0:05');
+      mockUseSessionStream.mockReturnValue([
+        ev({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'session limit resets 3:45 pm UTC' }] },
+        }),
+      ]);
+
+      await    await renderComponent();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(screen.getByText('Cancel')).toBeInTheDocument();
+      // getOrCreateInsightsSession should have been called once (mount) but not by timer yet
+      expect(mockGetOrCreateInsightsSession).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6000);
+      });
+
+      // handleRetryNow calls getOrCreateInsightsSession to reconnect (second call)
+      expect(mockGetOrCreateInsightsSession).toHaveBeenCalledTimes(2);
+    });
+
+    it('shows auto-resume countdown and Cancel when reset time is parseable', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-ar');
+      mockParseSessionLimitReset.mockReturnValue(1719000000);
+      mockFormatCountdown.mockReturnValue('2:30');
+      mockUseSessionStream.mockReturnValue([
+        ev({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'session limit resets 3:45 pm UTC' }] },
+        }),
+      ]);
+
+      await    await renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByText('2:30')).toBeInTheDocument();
+        expect(screen.getByText('Cancel')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
+      });
+    });
+
+    it('shows auto-resuming message when reset time is parseable', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-msg');
+      mockParseSessionLimitReset.mockReturnValue(1719000000);
+      mockFormatCountdown.mockReturnValue('5:00');
+      mockUseSessionStream.mockReturnValue([
+        ev({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'session limit resets 3:45 pm UTC' }] },
+        }),
+      ]);
+
+      await    await renderComponent();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('Session limit hit — auto-resuming 5:00')
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('Cancel button clears auto-resume countdown and rate-limit banner', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-cancelar');
+      mockParseSessionLimitReset.mockReturnValue(1719000000);
+      mockFormatCountdown.mockReturnValue('1:00');
+      mockUseSessionStream.mockReturnValue([
+        ev({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'session limit resets 3:45 pm UTC' }] },
+        }),
+      ]);
+
+      await    await renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByText('Cancel')).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Cancel'));
+      });
+
+      // After Cancel: auto-resume cancelled, rate-limit banner gone
+      await waitFor(() => {
+        expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
+      });
+      // Rate-limit banner elements should be gone
+      expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Retry Now' })).not.toBeInTheDocument();
+      // Send button should be visible (component returned to functional state)
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+      });
+    });
+
+    it('does not show Cancel or countdown when reset time is unparseable', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-noparse');
+      mockParseSessionLimitReset.mockReturnValue(null);
+      mockUseSessionStream.mockReturnValue([
+        ev({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'Rate limit exceeded. Please wait.' }] },
+        }),
+      ]);
+
+      await    await renderComponent();
+
+      await waitFor(() => {
+        expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
+        expect(screen.getByText('⏳')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
+      });
+    });
+
+    it('shows progress text (tool name) instead of Thinking… when agent runs tools', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-progress');
+      mockExtractProgressText.mockReturnValue('▶ bash');
+      mockUseSessionStream.mockReturnValue([
+        ev({ type: 'assistant', message: { content: [] } }),
+      ]);
+
+      await    await renderComponent();
+
+      await waitFor(() => {
+        // progressText shows "▶ bash" instead of "Thinking…"
+        expect(screen.getByText('▶ bash')).toBeInTheDocument();
+        expect(screen.queryByText('Thinking…')).not.toBeInTheDocument();
+      });
     });
   });
 
@@ -487,7 +670,7 @@ describe('InsightsChat', () => {
         return RESULT;
       });
 
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -509,7 +692,7 @@ describe('InsightsChat', () => {
   describe('Enter key', () => {
     it('sends message on Enter (without Shift)', async () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('sess-enter');
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -526,9 +709,9 @@ describe('InsightsChat', () => {
       expect(screen.getByText('Quick question')).toBeInTheDocument();
     });
 
-    it('does not send on Shift+Enter', () => {
+    it('does not send on Shift+Enter', async () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('sess-shift');
-      renderComponent();
+      await    await renderComponent();
 
       const textarea = screen.getByRole('textbox');
       fireEvent.change(textarea, { target: { value: 'Not sent' } });
@@ -546,7 +729,7 @@ describe('InsightsChat', () => {
       mockGetOrCreateInsightsSession.mockResolvedValue('sess-err');
       mockSendInsightsMessage.mockRejectedValue(new Error('send failed'));
 
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -571,7 +754,7 @@ describe('InsightsChat', () => {
       mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-reconnect');
       mockSendInsightsMessage.mockReturnValue(sendPromise);
 
-      renderComponent();
+      await    await renderComponent();
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -611,7 +794,13 @@ describe('InsightsChat', () => {
       ];
 
       mockUseSessionStream.mockReturnValue(EMPTY);
-      const { rerender } = render(<InsightsChat />);
+      const { rerender } = await act(async () => {
+        const result = render(<InsightsChat />);
+        if (!vi.isFakeTimers()) {
+          await new Promise(r => setTimeout(r, 0));
+        }
+        return result;
+      });
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();
@@ -664,7 +853,13 @@ describe('InsightsChat', () => {
       ];
 
       mockUseSessionStream.mockReturnValue(EMPTY);
-      const { rerender } = render(<InsightsChat />);
+      const { rerender } = await act(async () => {
+        const result = render(<InsightsChat />);
+        if (!vi.isFakeTimers()) {
+          await new Promise(r => setTimeout(r, 0));
+        }
+        return result;
+      });
 
       await waitFor(() => {
         expect(mockGetOrCreateInsightsSession).toHaveBeenCalled();

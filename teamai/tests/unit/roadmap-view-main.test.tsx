@@ -11,7 +11,7 @@
  * following the project's established pattern.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { SessionEvent } from '@/hooks/use-session-stream';
@@ -58,9 +58,18 @@ vi.mock('@/hooks/use-session-stream', () => ({
 }));
 
 const mockExtractText = vi.hoisted(() => vi.fn());
+const mockExtractProgressText = vi.hoisted(() => vi.fn().mockReturnValue(''));
+const mockParseSessionLimitReset = vi.hoisted(() => vi.fn().mockReturnValue(null));
+const mockFormatCountdown = vi.hoisted(() => vi.fn().mockReturnValue(''));
 
 vi.mock('@/lib/stream-types', () => ({
   extractText: ((event: Record<string, unknown>) => mockExtractText(event)) as typeof import('@/lib/stream-types').extractText,
+  extractProgressText: ((event: Record<string, unknown>) => mockExtractProgressText(event)) as typeof import('@/lib/stream-types').extractProgressText,
+}));
+
+vi.mock('@/lib/rate-limit', () => ({
+  parseSessionLimitReset: ((...args: unknown[]) => mockParseSessionLimitReset(...args)) as typeof import('@/lib/rate-limit').parseSessionLimitReset,
+  formatCountdown: ((...args: unknown[]) => mockFormatCountdown(...args)) as typeof import('@/lib/rate-limit').formatCountdown,
 }));
 
 vi.mock('@/hooks/use-phase-sync', () => ({
@@ -124,9 +133,12 @@ import { RoadmapView } from '@/components/roadmap-view';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function renderView(noProject = false) {
-  act(() => {
+async function renderView(noProject = false) {
+  await act(async () => {
     render(<RoadmapView noProject={noProject} />);
+    if (!vi.isFakeTimers()) {
+      await new Promise(r => setTimeout(r, 0));
+    }
   });
 }
 
@@ -148,26 +160,29 @@ describe('RoadmapView', () => {
     mockGetChangelogReports.mockResolvedValue([]);
     mockGetActiveRoadmapSession.mockResolvedValue(null);
     mockExtractText.mockReturnValue('');
+    mockExtractProgressText.mockReturnValue('');
+    mockParseSessionLimitReset.mockReturnValue(null);
+    mockFormatCountdown.mockReturnValue('');
   });
 
   // ── No-project empty state ───────────────────────────────────────────
 
   describe('no-project empty state', () => {
-    it('shows the empty state message when noProject is true', () => {
-      renderView(true);
+    it('shows the empty state message when noProject is true', async () => {
+      await renderView(true);
       expect(
         screen.getByText('Select or add a project from the sidebar to get started.')
       ).toBeInTheDocument();
     });
 
-    it('still renders the Roadmap and Changelog tabs when noProject is true', () => {
-      renderView(true);
+    it('still renders the Roadmap and Changelog tabs when noProject is true', async () => {
+      await renderView(true);
       expect(screen.getByText('Roadmap')).toBeInTheDocument();
       expect(screen.getByText('Changelog')).toBeInTheDocument();
     });
 
-    it('does not show Generate Roadmap button when noProject is true', () => {
-      renderView(true);
+    it('does not show Generate Roadmap button when noProject is true', async () => {
+      await renderView(true);
       expect(screen.queryByText('Generate Roadmap')).not.toBeInTheDocument();
     });
   });
@@ -175,34 +190,34 @@ describe('RoadmapView', () => {
   // ── Tab switching ────────────────────────────────────────────────────
 
   describe('tab switching', () => {
-    it('renders the Roadmap tab as active by default', () => {
-      renderView(false);
+    it('renders the Roadmap tab as active by default', async () => {
+      await renderView(false);
       const roadmapTab = screen.getByText('Roadmap');
       expect(roadmapTab.className).toContain('border-[#2563eb]');
     });
 
-    it('switches to Changelog tab on click', () => {
-      renderView(false);
+    it('switches to Changelog tab on click', async () => {
+      await renderView(false);
       fireEvent.click(screen.getByText('Changelog'));
 
       const changelogTab = screen.getByText('Changelog');
       expect(changelogTab.className).toContain('border-[#2563eb]');
     });
 
-    it('shows Generate Changelog button on the changelog tab', () => {
-      renderView(false);
+    it('shows Generate Changelog button on the changelog tab', async () => {
+      await renderView(false);
       fireEvent.click(screen.getByText('Changelog'));
 
       expect(screen.getByText('Generate Changelog')).toBeInTheDocument();
     });
 
-    it('shows Generate Roadmap button on the roadmap tab', () => {
-      renderView(false);
+    it('shows Generate Roadmap button on the roadmap tab', async () => {
+      await renderView(false);
       expect(screen.getByText('Generate Roadmap')).toBeInTheDocument();
     });
 
-    it('persists tab selection in sessionStorage', () => {
-      renderView(false);
+    it('persists tab selection in sessionStorage', async () => {
+      await renderView(false);
       fireEvent.click(screen.getByText('Changelog'));
 
       expect(mockSessionStorage.getItem('roadmap-tab')).toBe('changelog');
@@ -214,7 +229,7 @@ describe('RoadmapView', () => {
   describe('Generate Roadmap button', () => {
     it('calls startRoadmapGeneration with skipCompetitors=false by default', async () => {
       mockStartRoadmapGeneration.mockResolvedValue('sess-rm-1');
-      renderView(false);
+      await renderView(false);
 
       await act(async () => {
         fireEvent.click(screen.getByText('Generate Roadmap'));
@@ -225,7 +240,7 @@ describe('RoadmapView', () => {
 
     it('calls startRoadmapGeneration with skipCompetitors=true when checkbox is checked', async () => {
       mockStartRoadmapGeneration.mockResolvedValue('sess-rm-2');
-      renderView(false);
+      await renderView(false);
 
       // Check the "Skip competitor research" checkbox
       const checkbox = screen.getByLabelText('Skip competitor research');
@@ -242,7 +257,7 @@ describe('RoadmapView', () => {
       mockStartRoadmapGeneration.mockResolvedValue('sess-rm-3');
       mockUseSessionStream.mockReturnValue([]); // not done yet
 
-      renderView(false);
+      await renderView(false);
 
       await act(async () => {
         fireEvent.click(screen.getByText('Generate Roadmap'));
@@ -257,7 +272,7 @@ describe('RoadmapView', () => {
       // Return a 'result' event to signal completion
       mockUseSessionStream.mockReturnValue([ev('result')]);
 
-      renderView(false);
+      await renderView(false);
 
       await act(async () => {
         fireEvent.click(screen.getByText('Generate Roadmap'));
@@ -273,19 +288,19 @@ describe('RoadmapView', () => {
   // ── Skip-competitors checkbox ────────────────────────────────────────
 
   describe('skip-competitors checkbox', () => {
-    it('renders the skip-competitors checkbox', () => {
-      renderView(false);
+    it('renders the skip-competitors checkbox', async () => {
+      await renderView(false);
       expect(screen.getByLabelText('Skip competitor research')).toBeInTheDocument();
     });
 
-    it('checkbox is unchecked by default', () => {
-      renderView(false);
+    it('checkbox is unchecked by default', async () => {
+      await renderView(false);
       const cb = screen.getByLabelText('Skip competitor research') as HTMLInputElement;
       expect(cb.checked).toBe(false);
     });
 
-    it('checkbox can be toggled on and off', () => {
-      renderView(false);
+    it('checkbox can be toggled on and off', async () => {
+      await renderView(false);
       const cb = screen.getByLabelText('Skip competitor research') as HTMLInputElement;
 
       fireEvent.click(cb);
@@ -302,68 +317,84 @@ describe('RoadmapView', () => {
     it('renders streaming text when roadmap is running and text is available', async () => {
       mockStartRoadmapGeneration.mockResolvedValue('sess-stream');
       mockUseSessionStream.mockReturnValue([ev('assistant', 'Analysing codebase…')]);
-      mockExtractText.mockReturnValue('Analysing codebase…');
+      mockExtractProgressText.mockReturnValue('Analysing codebase…');
 
-      renderView(false);
+      await renderView(false);
 
       await act(async () => {
         fireEvent.click(screen.getByText('Generate Roadmap'));
       });
 
-      // rmFullText is set via useEffect — wait for it
+      // rmFullText is set via useMemo — wait for it
       await waitFor(() => {
         expect(screen.getByText('Analysing codebase…')).toBeInTheDocument();
       });
     });
 
-    it('does not show streaming block when no text is available', async () => {
+    it('shows Initialising… when running but no text extracted yet', async () => {
       mockStartRoadmapGeneration.mockResolvedValue('sess-stream');
       mockUseSessionStream.mockReturnValue([ev('assistant', '')]);
-      mockExtractText.mockReturnValue('');
+      mockExtractProgressText.mockReturnValue('');
 
-      renderView(false);
+      await renderView(false);
 
       await act(async () => {
         fireEvent.click(screen.getByText('Generate Roadmap'));
       });
 
-      // rmFullText stays empty, so the Agent Output block doesn't render
+      // rmFullText stays empty, but rmStream.length > 0 so Agent Output shows "Initialising…"
       await waitFor(() => {
-        expect(screen.queryByText('Agent Output')).not.toBeInTheDocument();
+        expect(screen.getByText('Initialising…')).toBeInTheDocument();
       });
     });
 
     it('shows streaming text on the changelog tab too', async () => {
       mockStartChangelogGeneration.mockResolvedValue('sess-cl');
       mockUseSessionStream.mockReturnValue([ev('assistant', 'Building changelog…')]);
-      mockExtractText.mockReturnValue('Building changelog…');
+      mockExtractProgressText.mockReturnValue('Building changelog…');
 
-      renderView(false);
+      await renderView(false);
       fireEvent.click(screen.getByText('Changelog'));
 
       await act(async () => {
         fireEvent.click(screen.getByText('Generate Changelog'));
       });
 
-      // clFullText is set via useEffect — wait for it
+      // clFullText is set via useMemo — wait for it
       await waitFor(() => {
         expect(screen.getByText('Building changelog…')).toBeInTheDocument();
       });
+    });
+
+    it('shows Starting indicator when running but no events yet', async () => {
+      mockStartRoadmapGeneration.mockResolvedValue('sess-stream');
+      mockUseSessionStream.mockReturnValue([]);
+
+      await renderView(false);
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Generate Roadmap'));
+      });
+
+      // rmRunning=true, rmStream empty → shows "Starting roadmap generation…"
+      expect(
+        screen.getByText('Starting roadmap generation…')
+      ).toBeInTheDocument();
     });
   });
 
   // ── Empty state message ──────────────────────────────────────────────
 
   describe('empty state message', () => {
-    it('shows empty roadmap message when no report and not running', () => {
-      renderView(false);
+    it('shows empty roadmap message when no report and not running', async () => {
+      await renderView(false);
       expect(
         screen.getByText("No roadmap generated yet. Click 'Generate Roadmap' to start.")
       ).toBeInTheDocument();
     });
 
-    it('shows empty changelog message on changelog tab', () => {
-      renderView(false);
+    it('shows empty changelog message on changelog tab', async () => {
+      await renderView(false);
       fireEvent.click(screen.getByText('Changelog'));
 
       expect(
@@ -381,7 +412,7 @@ describe('RoadmapView', () => {
       ]);
       mockGetLatestChangelog.mockResolvedValue('# Changelog\n\n- Fixed bug A');
 
-      renderView(false);
+      await renderView(false);
 
       // Markdown is loaded into state by the useEffect regardless of tab,
       // but DOM rendering requires the Changelog tab to be active.
@@ -396,7 +427,7 @@ describe('RoadmapView', () => {
       mockStartChangelogGeneration.mockResolvedValue('sess-cl-2');
       mockUseSessionStream.mockReturnValue([]);
 
-      renderView(false);
+      await renderView(false);
       fireEvent.click(screen.getByText('Changelog'));
 
       await act(async () => {
@@ -416,7 +447,7 @@ describe('RoadmapView', () => {
         { filename: 'roadmap-2026-01-10.json', date: '2026-01-10' },
       ]);
 
-      renderView(false);
+      await renderView(false);
 
       await waitFor(() => {
         expect(screen.getByText('History:')).toBeInTheDocument();
@@ -426,7 +457,7 @@ describe('RoadmapView', () => {
     it('does not show history dropdown when no reports exist', async () => {
       mockGetRoadmapReports.mockResolvedValue([]);
 
-      renderView(false);
+      await renderView(false);
 
       await waitFor(() => {
         expect(screen.queryByText('History:')).not.toBeInTheDocument();
@@ -443,7 +474,7 @@ describe('RoadmapView', () => {
       const deferredStart = new Promise<string>(resolve => { resolveStart = resolve; });
       mockStartRoadmapGeneration.mockReturnValue(deferredStart);
 
-      renderView(false);
+      await renderView(false);
 
       // Click "Generate Roadmap" — triggers handleGenerateRoadmap
       await act(async () => {
@@ -489,7 +520,7 @@ describe('RoadmapView', () => {
       const deferredStart = new Promise<string>(resolve => { resolveStart = resolve; });
       mockStartChangelogGeneration.mockReturnValue(deferredStart);
 
-      renderView(false);
+      await renderView(false);
       fireEvent.click(screen.getByText('Changelog'));
 
       await act(async () => {
@@ -537,7 +568,7 @@ describe('RoadmapView', () => {
         phases: { now: [], next: [], later: [], icebox: [] },
       });
 
-      renderView(false);
+      await renderView(false);
 
       // Wait for mount effect to complete (load history, check reconnect)
       await waitFor(() => {
@@ -565,7 +596,7 @@ describe('RoadmapView', () => {
       ]);
       mockGetLatestChangelog.mockResolvedValue('# Changelog June 2026');
 
-      renderView(false);
+      await renderView(false);
 
       await waitFor(() => {
         expect(mockSessionStorage.getItem('changelog-session')).toBeNull();
@@ -590,7 +621,7 @@ describe('RoadmapView', () => {
       mockIsRoadmapSessionAlive.mockResolvedValue(true);
       mockGetRoadmapReports.mockResolvedValue([]);
 
-      renderView(false);
+      await renderView(false);
 
       await waitFor(() => {
         // Should reconnect: show "Generating…" since rmRunning is set to true
@@ -608,62 +639,62 @@ describe('RoadmapView', () => {
     // ── Roadmap rate-limit ────────────────────────────────────────────
 
     describe('roadmap rate-limit', () => {
-      it('shows rate-limit banner when stream contains "session limit" text', () => {
+      it('shows rate-limit banner when stream contains "session limit" text', async () => {
         mockExtractText.mockReturnValue('session limit reached. Try again later.');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
 
         expect(screen.getByText(/session limit reached/)).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
       });
 
-      it('detects "rate limit" as rate-limit', () => {
+      it('detects "rate limit" as rate-limit', async () => {
         mockExtractText.mockReturnValue('Rate limit exceeded. Please wait.');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
 
         expect(screen.getByText(/Rate limit exceeded/)).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
       });
 
-      it('detects "too many requests" as rate-limit', () => {
+      it('detects "too many requests" as rate-limit', async () => {
         mockExtractText.mockReturnValue('Too many requests. Slow down.');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
 
         expect(screen.getByText(/Too many requests/)).toBeInTheDocument();
       });
 
-      it('detects "usage limit" as rate-limit', () => {
+      it('detects "usage limit" as rate-limit', async () => {
         mockExtractText.mockReturnValue('Your usage limit has been exceeded.');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
 
         expect(screen.getByText(/usage limit/)).toBeInTheDocument();
       });
 
-      it('extracts reset time from the rate-limit text', () => {
+      it('extracts reset time from the rate-limit text', async () => {
         mockExtractText.mockReturnValue('Session limit hit — resets 3:45 pm UTC');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
 
         expect(
           screen.getByText('Session limit hit — resets 3:45 pm UTC')
         ).toBeInTheDocument();
       });
 
-      it('shows truncated error text when no reset time is present', () => {
+      it('shows truncated error text when no reset time is present', async () => {
         mockExtractText.mockReturnValue(
           'Too many requests. Please wait before sending another message.'
         );
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
 
         expect(
           screen.getByText(
@@ -672,108 +703,247 @@ describe('RoadmapView', () => {
         ).toBeInTheDocument();
       });
 
-      it('sets running to false when rate-limited', () => {
+      it('sets running to false when rate-limited', async () => {
         mockExtractText.mockReturnValue('session limit');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
 
         // Running is false → button shows "Generate Roadmap" not "Generating…"
         expect(screen.getByText('Generate Roadmap')).toBeInTheDocument();
         expect(screen.queryByText('Generating…')).not.toBeInTheDocument();
       });
 
-      it('hides the streaming output when rate-limited', () => {
+      it('hides the streaming output when rate-limited', async () => {
         mockExtractText.mockReturnValue('session limit reached');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
 
-        // rmRunning=true → rmRateLimited=true hides the Agent Output div
-        // But rmRunning is false after rate-limit, so Agent Output is hidden anyway
+        // rmRateLimited=true hides the Agent Output div
         expect(screen.queryByText('Agent Output')).not.toBeInTheDocument();
       });
 
-      it('Retry button clears rate-limit state and starts a new generation', async () => {
+      it('Retry Now button clears rate-limit state and starts a new generation', async () => {
         mockStartRoadmapGeneration.mockResolvedValue('sess-rm-retry');
         mockExtractText.mockReturnValue('session limit reached');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
 
-        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
 
         await act(async () => {
-          fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+          fireEvent.click(screen.getByRole('button', { name: 'Retry Now' }));
         });
 
-        // Rate-limit banner should disappear (Retry button gone); rate-limit
-        // text may still appear in the full-output div since running=true.
-        expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+        // Rate-limit banner should disappear (Retry Now button gone)
+        expect(screen.queryByRole('button', { name: 'Retry Now' })).not.toBeInTheDocument();
         // Should have started a new roadmap generation
         expect(mockStartRoadmapGeneration).toHaveBeenCalledTimes(1);
       });
 
-      it('shows ⏳ icon in the rate-limit banner', () => {
+      it('shows ⏳ icon in the rate-limit banner', async () => {
         mockExtractText.mockReturnValue('session limit');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
 
         expect(screen.getByText('⏳')).toBeInTheDocument();
+      });
+    });
+
+    // ── Roadmap auto-resume ──────────────────────────────────────────
+
+    describe('roadmap auto-resume', () => {
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it('timer triggers handleGenerateRoadmap when countdown reaches 0', async () => {
+        vi.useFakeTimers();
+        const NOW_MS = 1719000000 * 1000;
+        const RESET_SECS = 1719000005; // 5 seconds in the future
+        vi.setSystemTime(NOW_MS);
+
+        mockStartRoadmapGeneration.mockResolvedValue('sess-auto-resume');
+        mockExtractText.mockReturnValue('session limit resets 3:45 pm UTC');
+        mockParseSessionLimitReset.mockReturnValue(RESET_SECS);
+        mockFormatCountdown.mockReturnValue('0:05');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        await renderView(false);
+
+        // Wait for rate-limit detection to set autoResumeAt and start the interval
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(screen.getByText('Cancel')).toBeInTheDocument();
+        // startRoadmapGeneration should NOT have been called yet (timer hasn't fired)
+        expect(mockStartRoadmapGeneration).not.toHaveBeenCalled();
+
+        // Advance past the reset time (5+ seconds)
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(6000);
+        });
+
+        // The auto-resume timer should have called handleGenerateRoadmap,
+        // which calls startRoadmapGeneration
+        expect(mockStartRoadmapGeneration).toHaveBeenCalled();
+      });
+      it('shows auto-resume countdown and Cancel when reset time is parseable', async () => {
+        mockExtractText.mockReturnValue('session limit resets 3:45 pm UTC');
+        mockParseSessionLimitReset.mockReturnValue(1719000000); // some future timestamp
+        mockFormatCountdown.mockReturnValue('2:30');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        await renderView(false);
+
+        // Countdown is displayed
+        expect(screen.getByText('2:30')).toBeInTheDocument();
+        // Cancel button is shown
+        expect(screen.getByText('Cancel')).toBeInTheDocument();
+        // Retry Now still appears
+        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
+      });
+
+      it('shows auto-resuming message when reset time is parseable', async () => {
+        mockExtractText.mockReturnValue('session limit resets 3:45 pm UTC');
+        mockParseSessionLimitReset.mockReturnValue(1719000000);
+        mockFormatCountdown.mockReturnValue('5:00');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        await renderView(false);
+
+        expect(
+          screen.getByText('Session limit hit — auto-resuming 5:00')
+        ).toBeInTheDocument();
+      });
+
+      it('Cancel button clears auto-resume and rate-limit state', async () => {
+        mockExtractText.mockReturnValue('session limit resets 3:45 pm UTC');
+        mockParseSessionLimitReset.mockReturnValue(1719000000);
+        mockFormatCountdown.mockReturnValue('1:00');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        await renderView(false);
+
+        expect(screen.getByText('Cancel')).toBeInTheDocument();
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('Cancel'));
+        });
+
+        // After cancel: rate-limit banner should be gone entirely
+        expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Retry Now' })).not.toBeInTheDocument();
+        // Should show the empty state again
+        expect(
+          screen.getByText("No roadmap generated yet. Click 'Generate Roadmap' to start.")
+        ).toBeInTheDocument();
+      });
+
+      it('does not show Cancel or countdown when reset time is unparseable', async () => {
+        mockExtractText.mockReturnValue('Rate limit exceeded. Please wait.');
+        mockParseSessionLimitReset.mockReturnValue(null);
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        await renderView(false);
+
+        expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
+        expect(screen.getByText('⏳')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
+      });
+    });
+
+    // ── Changelog auto-resume ────────────────────────────────────────
+
+    describe('changelog auto-resume', () => {
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it('timer triggers handleGenerateChangelog when countdown reaches 0', async () => {
+        vi.useFakeTimers();
+        const NOW_MS = 1719000000 * 1000;
+        const RESET_SECS = 1719000005;
+        vi.setSystemTime(NOW_MS);
+
+        mockStartChangelogGeneration.mockResolvedValue('sess-cl-auto-resume');
+        mockExtractText.mockReturnValue('session limit resets 3:45 pm UTC');
+        mockParseSessionLimitReset.mockReturnValue(RESET_SECS);
+        mockFormatCountdown.mockReturnValue('0:05');
+        mockUseSessionStream.mockReturnValue([ev('assistant')]);
+
+        await renderView(false);
+        fireEvent.click(screen.getByText('Changelog'));
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(screen.getByText('Cancel')).toBeInTheDocument();
+        expect(mockStartChangelogGeneration).not.toHaveBeenCalled();
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(6000);
+        });
+
+        expect(mockStartChangelogGeneration).toHaveBeenCalled();
       });
     });
 
     // ── Changelog rate-limit ──────────────────────────────────────────
 
     describe('changelog rate-limit', () => {
-      it('shows rate-limit banner on changelog tab when stream contains "session limit" text', () => {
+      it('shows rate-limit banner on changelog tab when stream contains "session limit" text', async () => {
         mockExtractText.mockReturnValue('session limit reached. Try again later.');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
         fireEvent.click(screen.getByText('Changelog'));
 
         expect(screen.getByText(/session limit reached/)).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
       });
 
-      it('detects "rate limit" as rate-limit on changelog tab', () => {
+      it('detects "rate limit" as rate-limit on changelog tab', async () => {
         mockExtractText.mockReturnValue('Rate limit exceeded. Please wait.');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
         fireEvent.click(screen.getByText('Changelog'));
 
         expect(screen.getByText(/Rate limit exceeded/)).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
       });
 
-      it('detects "too many requests" as rate-limit on changelog tab', () => {
+      it('detects "too many requests" as rate-limit on changelog tab', async () => {
         mockExtractText.mockReturnValue('Too many requests. Slow down.');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
         fireEvent.click(screen.getByText('Changelog'));
 
         expect(screen.getByText(/Too many requests/)).toBeInTheDocument();
       });
 
-      it('detects "usage limit" as rate-limit on changelog tab', () => {
+      it('detects "usage limit" as rate-limit on changelog tab', async () => {
         mockExtractText.mockReturnValue('Your usage limit has been exceeded.');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
         fireEvent.click(screen.getByText('Changelog'));
 
         expect(screen.getByText(/usage limit/)).toBeInTheDocument();
       });
 
-      it('sets running to false when changelog is rate-limited', () => {
+      it('sets running to false when changelog is rate-limited', async () => {
         mockExtractText.mockReturnValue('session limit');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
         fireEvent.click(screen.getByText('Changelog'));
 
         // clRunning=false → button shows "Generate Changelog" not "Generating…"
@@ -781,39 +951,39 @@ describe('RoadmapView', () => {
         expect(screen.queryByText('Generating…')).not.toBeInTheDocument();
       });
 
-      it('hides changelog streaming output when rate-limited', () => {
+      it('hides changelog streaming output when rate-limited', async () => {
         mockExtractText.mockReturnValue('session limit reached');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
         fireEvent.click(screen.getByText('Changelog'));
 
         expect(screen.queryByText('Agent Output')).not.toBeInTheDocument();
       });
 
-      it('Retry button on changelog clears rate-limit and starts new generation', async () => {
+      it('Retry Now button on changelog clears rate-limit and starts new generation', async () => {
         mockStartChangelogGeneration.mockResolvedValue('sess-cl-retry');
         mockExtractText.mockReturnValue('session limit reached');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
         fireEvent.click(screen.getByText('Changelog'));
 
-        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
 
         await act(async () => {
-          fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+          fireEvent.click(screen.getByRole('button', { name: 'Retry Now' }));
         });
 
-        expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Retry Now' })).not.toBeInTheDocument();
         expect(mockStartChangelogGeneration).toHaveBeenCalledTimes(1);
       });
 
-      it('shows ⏳ icon in the changelog rate-limit banner', () => {
+      it('shows ⏳ icon in the changelog rate-limit banner', async () => {
         mockExtractText.mockReturnValue('session limit');
         mockUseSessionStream.mockReturnValue([ev('assistant')]);
 
-        renderView(false);
+        await renderView(false);
         fireEvent.click(screen.getByText('Changelog'));
 
         expect(screen.getByText('⏳')).toBeInTheDocument();

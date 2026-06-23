@@ -14,7 +14,7 @@
  * does not invoke its onClick handler.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { SessionEvent } from '@/hooks/use-session-stream';
@@ -36,12 +36,25 @@ vi.mock('@/hooks/use-session-stream', () => ({
   useSessionStream: (() => mockUseSessionStream()) as typeof import('@/hooks/use-session-stream').useSessionStream,
 }));
 
-vi.mock('@/lib/stream-types', () => ({
-  extractText: vi.fn((event: Record<string, unknown>) => {
+const mockExtractText = vi.hoisted(() =>
+  vi.fn((event: Record<string, unknown>) => {
     const msg = event.message as Record<string, unknown> | undefined;
     const content = msg?.content as Array<Record<string, unknown>> | undefined;
     return (content?.[0]?.text as string) ?? '';
-  }),
+  })
+);
+const mockExtractProgressText = vi.hoisted(() => vi.fn().mockReturnValue(''));
+const mockParseSessionLimitReset = vi.hoisted(() => vi.fn().mockReturnValue(null));
+const mockFormatCountdown = vi.hoisted(() => vi.fn().mockReturnValue(''));
+
+vi.mock('@/lib/stream-types', () => ({
+  extractText: mockExtractText,
+  extractProgressText: mockExtractProgressText,
+}));
+
+vi.mock('@/lib/rate-limit', () => ({
+  parseSessionLimitReset: ((...args: unknown[]) => mockParseSessionLimitReset(...args)) as typeof import('@/lib/rate-limit').parseSessionLimitReset,
+  formatCountdown: ((...args: unknown[]) => mockFormatCountdown(...args)) as typeof import('@/lib/rate-limit').formatCountdown,
 }));
 
 const mockStartTransition = vi.hoisted(() => vi.fn((cb: () => void) => cb()));
@@ -75,6 +88,14 @@ describe('IdeationScanner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseSessionStream.mockReturnValue([]);
+    mockExtractText.mockImplementation((event: Record<string, unknown>) => {
+      const msg = event.message as Record<string, unknown> | undefined;
+      const content = msg?.content as Array<Record<string, unknown>> | undefined;
+      return (content?.[0]?.text as string) ?? '';
+    });
+    mockExtractProgressText.mockReturnValue('');
+    mockParseSessionLimitReset.mockReturnValue(null);
+    mockFormatCountdown.mockReturnValue('');
   });
 
   // ── Initial state ────────────────────────────────────────────────────
@@ -228,6 +249,7 @@ describe('IdeationScanner', () => {
 
     it('shows streaming output when text is available', async () => {
       mockStartIdeationScan.mockResolvedValue('sess-out');
+      mockExtractProgressText.mockReturnValue('Sample output');
       mockUseSessionStream.mockReturnValue([
         ev({ type: 'assistant', message: { content: [{ type: 'text', text: 'Sample output' }] } }),
       ]);
@@ -285,7 +307,7 @@ describe('IdeationScanner', () => {
       renderComponent();
 
       expect(screen.getByText(/session limit reached/)).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
     });
 
     it('detects "rate limit" as rate-limit', () => {
@@ -296,7 +318,7 @@ describe('IdeationScanner', () => {
       renderComponent();
 
       expect(screen.getByText(/Rate limit exceeded/)).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
     });
 
     it('detects "too many requests" as rate-limit', () => {
@@ -367,7 +389,7 @@ describe('IdeationScanner', () => {
       expect(screen.queryByText('Agent Output')).not.toBeInTheDocument();
     });
 
-    it('Retry button clears rate-limit state and starts a new scan', async () => {
+    it('Retry Now button clears rate-limit state and starts a new scan', async () => {
       mockStartIdeationScan.mockResolvedValue('sess-post-retry');
       mockUseSessionStream.mockReturnValue([
         RATE_EVENT('session limit reached'),
@@ -375,15 +397,14 @@ describe('IdeationScanner', () => {
 
       renderComponent();
 
-      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
 
       await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Retry Now' }));
       });
 
-      // Rate-limit banner should disappear (Retry button gone); rate-limit
-      // text may still appear in the full-output div since running=true.
-      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+      // Rate-limit banner should disappear (Retry Now button gone)
+      expect(screen.queryByRole('button', { name: 'Retry Now' })).not.toBeInTheDocument();
       // Should have started a new scan
       expect(mockStartIdeationScan).toHaveBeenCalledTimes(1);
     });
@@ -396,6 +417,110 @@ describe('IdeationScanner', () => {
       renderComponent();
 
       expect(screen.getByText('⏳')).toBeInTheDocument();
+    });
+  });
+
+  // ── Auto-resume ────────────────────────────────────────────────────
+
+  describe('auto-resume', () => {
+    const RATE_EVENT = (text: string) =>
+      ev({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('timer triggers handleScan when countdown reaches 0', async () => {
+      vi.useFakeTimers();
+      const NOW_MS = 1719000000 * 1000;
+      const RESET_SECS = 1719000005;
+      vi.setSystemTime(NOW_MS);
+
+      mockStartIdeationScan.mockResolvedValue('sess-auto-resume');
+      mockParseSessionLimitReset.mockReturnValue(RESET_SECS);
+      mockFormatCountdown.mockReturnValue('0:05');
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('session limit resets 3:45 pm UTC'),
+      ]);
+
+      renderComponent();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(screen.getByText('Cancel')).toBeInTheDocument();
+      expect(mockStartIdeationScan).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6000);
+      });
+
+      expect(mockStartIdeationScan).toHaveBeenCalled();
+    });
+
+    it('shows auto-resume countdown and Cancel when reset time is parseable', () => {
+      mockParseSessionLimitReset.mockReturnValue(1719000000);
+      mockFormatCountdown.mockReturnValue('2:30');
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('session limit resets 3:45 pm UTC'),
+      ]);
+
+      renderComponent();
+
+      expect(screen.getByText('2:30')).toBeInTheDocument();
+      expect(screen.getByText('Cancel')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
+    });
+
+    it('shows auto-resuming message when reset time is parseable', () => {
+      mockParseSessionLimitReset.mockReturnValue(1719000000);
+      mockFormatCountdown.mockReturnValue('5:00');
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('session limit resets 3:45 pm UTC'),
+      ]);
+
+      renderComponent();
+
+      expect(
+        screen.getByText('Session limit hit — auto-resuming 5:00')
+      ).toBeInTheDocument();
+    });
+
+    it('Cancel button clears auto-resume and rate-limit state', async () => {
+      mockParseSessionLimitReset.mockReturnValue(1719000000);
+      mockFormatCountdown.mockReturnValue('1:00');
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('session limit resets 3:45 pm UTC'),
+      ]);
+
+      renderComponent();
+
+      expect(screen.getByText('Cancel')).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Cancel'));
+      });
+
+      expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Retry Now' })).not.toBeInTheDocument();
+      // Should show idle state
+      expect(
+        screen.getByText('Click "Run Scan" to analyse the codebase.')
+      ).toBeInTheDocument();
+    });
+
+    it('does not show Cancel or countdown when reset time is unparseable', () => {
+      mockParseSessionLimitReset.mockReturnValue(null);
+      mockUseSessionStream.mockReturnValue([
+        RATE_EVENT('Rate limit exceeded. Please wait.'),
+      ]);
+
+      renderComponent();
+
+      expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
+      expect(screen.getByText('⏳')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
     });
   });
 
