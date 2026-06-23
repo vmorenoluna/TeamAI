@@ -25,6 +25,8 @@ export { PhasedKanban };
 import { TaskPanel, type FullData } from './task-panel';
 import { PRIORITY_COLORS } from '@/constants/phases';
 import { RateLimitBanner } from './rate-limit-banner';
+import { StreamingOutput } from './streaming-output';
+import { LoadingSpinner } from './loading-spinner';
 
 
 // ── Main component ───────────────────────────────────────────────────────────
@@ -459,29 +461,13 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
             )}
 
             {/* Streaming output — show full accumulated text while running */}
-            {/* Also show when running but no text yet — indicates agent is starting up */}
             {rmRunning && !rmRateLimited && rmStream.length > 0 && (
-              <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-80 overflow-y-auto">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Agent Output</span>
-                  <span className="text-[10px] text-slate-600">{rmStream.length} event{rmStream.length !== 1 ? 's' : ''}</span>
-                </div>
-                {rmFullText ? (
-                  <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
-                    {rmFullText}
-                  </pre>
-                ) : (
-                  <p className="text-xs text-slate-500 animate-pulse">Initialising…</p>
-                )}
-              </div>
+              <StreamingOutput text={rmFullText} eventCount={rmStream.length} className="max-h-80" />
             )}
 
             {/* Show "Running..." indicator when streaming but no events yet */}
             {rmRunning && !rmRateLimited && rmStream.length === 0 && (
-              <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 flex items-center gap-3">
-                <div className="w-4 h-4 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
-                <span className="text-sm text-slate-400">Starting roadmap generation…</span>
-              </div>
+              <LoadingSpinner label="roadmap generation" />
             )}
 
             {/* Phased kanban view */}
@@ -560,27 +546,12 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
             {/* Streaming output — show full accumulated text while running */}
             {clRunning && !clRateLimited && clStream.length > 0 && (
-              <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-80 overflow-y-auto">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Agent Output</span>
-                  <span className="text-[10px] text-slate-600">{clStream.length} event{clStream.length !== 1 ? 's' : ''}</span>
-                </div>
-                {clFullText ? (
-                  <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
-                    {clFullText}
-                  </pre>
-                ) : (
-                  <p className="text-xs text-slate-500 animate-pulse">Initialising…</p>
-                )}
-              </div>
+              <StreamingOutput text={clFullText} eventCount={clStream.length} className="max-h-80" />
             )}
 
             {/* Show "Running..." indicator when streaming but no events yet */}
             {clRunning && !clRateLimited && clStream.length === 0 && (
-              <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 flex items-center gap-3">
-                <div className="w-4 h-4 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
-                <span className="text-sm text-slate-400">Starting changelog generation…</span>
-              </div>
+              <LoadingSpinner label="changelog generation" />
             )}
 
             {/* Changelog result */}

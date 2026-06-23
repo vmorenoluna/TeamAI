@@ -16,6 +16,8 @@ import { useRateLimitAutoResume } from '@/hooks/use-rate-limit-auto-resume';
 import { useStreamProgress } from '@/hooks/use-stream-progress';
 import { useStreamingState } from '@/hooks/use-streaming-state';
 import { RateLimitBanner } from './rate-limit-banner';
+import { StreamingOutput } from './streaming-output';
+import { LoadingSpinner } from './loading-spinner';
 import type { GitHubIssue } from '@/app/actions/github';
 
 export function GitHubImport() {
@@ -272,27 +274,12 @@ export function GitHubImport() {
 
       {/* Streaming output — show full accumulated text while running */}
       {running && !rateLimited && !done && streamEvents.length > 0 && (
-        <div className="flex-1 overflow-y-auto bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 min-h-[100px]">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Agent Output</span>
-            <span className="text-[10px] text-slate-600">{streamEvents.length} event{streamEvents.length !== 1 ? 's' : ''}</span>
-          </div>
-          {streamText ? (
-            <pre className="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
-              {streamText}
-            </pre>
-          ) : (
-            <p className="text-xs text-slate-500 animate-pulse">Initialising…</p>
-          )}
-        </div>
+        <StreamingOutput text={streamText} eventCount={streamEvents.length} className="min-h-[100px]" />
       )}
 
       {/* Show "Running..." indicator when streaming but no events yet */}
       {running && !rateLimited && !done && streamEvents.length === 0 && (
-        <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 flex items-center gap-3">
-          <div className="w-4 h-4 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
-          <span className="text-sm text-slate-400">Starting issue listing…</span>
-        </div>
+        <LoadingSpinner label="issue listing" />
       )}
 
       {/* Issue list */}
