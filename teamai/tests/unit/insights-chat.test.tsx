@@ -65,6 +65,7 @@ vi.mock('@/lib/stream-types', () => ({
 }));
 
 vi.mock('@/lib/rate-limit', () => ({
+  RATE_LIMIT_PATTERN: /(session.?limit|rate.?limit|too many requests|usage.?limit)/i,
   parseSessionLimitReset: ((...args: unknown[]) => mockParseSessionLimitReset(...args)) as typeof import('@/lib/rate-limit').parseSessionLimitReset,
   formatCountdown: ((...args: unknown[]) => mockFormatCountdown(...args)) as typeof import('@/lib/rate-limit').formatCountdown,
 }));

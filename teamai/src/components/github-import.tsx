@@ -11,8 +11,9 @@ import {
   cancelGithubIssueListing,
 } from '@/app/actions/github';
 import { useSessionStream } from '@/hooks/use-session-stream';
-import { extractText, extractProgressText } from '@/lib/stream-types';
-import { parseSessionLimitReset, formatCountdown } from '@/lib/rate-limit';
+import { extractText } from '@/lib/stream-types';
+import { useRateLimitAutoResume } from '@/hooks/use-rate-limit-auto-resume';
+import { useStreamProgress } from '@/hooks/use-stream-progress';
 import type { GitHubIssue } from '@/app/actions/github';
 
 export function GitHubImport() {
@@ -26,10 +27,6 @@ export function GitHubImport() {
   const [importing, setImporting] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [rateLimited, setRateLimited] = useState(false);
-  const [rateLimitMessage, setRateLimitMessage] = useState('');
-  const [autoResumeAt, setAutoResumeAt] = useState<number | null>(null);
-  const [countdown, setCountdown] = useState('');
   const parsedRef = useRef(false);
   const cancelRequestedRef = useRef(false);
   const streamEvents = useSessionStream(sessionId);
@@ -47,72 +44,23 @@ export function GitHubImport() {
     setRunning(isStreaming);
   }, [isStreaming]);
 
-  // Detect rate-limit in stream events
-  useEffect(() => {
-    for (const e of streamEvents) {
-      const text = extractText(e.event);
-      if (
-        text &&
-        /(session.?limit|rate.?limit|too many requests|usage.?limit)/i.test(text)
-      ) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setRateLimited(true);
-        setRunning(false);
-        const resetsAt = parseSessionLimitReset(text);
-        if (resetsAt) {
-          setAutoResumeAt(resetsAt);
-          setCountdown(formatCountdown(resetsAt));
-          setRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(resetsAt)}`);
-        } else {
-          const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
-          setRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : text.slice(0, 200));
-        }
-        return;
-      }
-    }
-  }, [streamEvents]);
+  // Rate-limit detection + auto-resume
+  const {
+    rateLimited,
+    rateLimitMessage,
+    autoResumeAt,
+    countdown,
+    resetRateLimit,
+    handleCancelAutoResume,
+  } = useRateLimitAutoResume(streamEvents, handleListIssues, () => setRunning(false), () => setRunning(false));
 
-  // ── Auto-resume countdown ───────────────────────────────────────────────
+  // Accumulate streaming text for display
+  const progressText = useStreamProgress(streamEvents);
   useEffect(() => {
-    if (autoResumeAt === null) return;
-    const timer = setInterval(() => {
-      const remaining = autoResumeAt - Math.floor(Date.now() / 1000);
-      if (remaining <= 0) {
-        clearInterval(timer);
-        setAutoResumeAt(null);
-        setCountdown('');
-        handleListIssues();
-      } else {
-        setCountdown(formatCountdown(autoResumeAt));
-        setRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(autoResumeAt)}`);
-      }
-    }, 1000);
-    return () => clearInterval(timer);
-   
-  }, [autoResumeAt]);
-
-  // Cancel auto-resume
-  function handleCancelAutoResume() {
-    setAutoResumeAt(null);
-    setCountdown('');
-    setRateLimited(false);
-    setRateLimitMessage('');
-  }
-
-  // Accumulate streaming text for display using extractProgressText for tool visibility
-  useEffect(() => {
-    if (!running || !sessionId) return;
-    let text = '';
-    for (const e of streamEvents) {
-      const t = extractProgressText(e.event);
-      if (t) text += (text ? '\n' : '') + t;
+    if (progressText && running && sessionId) {
+      startTransition(() => setStreamText(progressText));
     }
-    if (text) {
-      startTransition(() => {
-        setStreamText(text);
-      });
-    }
-  }, [streamEvents, running, sessionId]);
+  }, [progressText, running, sessionId]);
 
   const done = streamEvents.some(e => e.event.type === 'result');
 
@@ -169,10 +117,7 @@ export function GitHubImport() {
     setSelectedNumbers(new Set());
     setImportedCount(0);
     setError(null);
-    setRateLimited(false);
-    setRateLimitMessage('');
-    setAutoResumeAt(null);
-    setCountdown('');
+    resetRateLimit();
     startTransition(async () => {
       try {
         const id = await startIssueList();
@@ -191,21 +136,8 @@ export function GitHubImport() {
     } catch { /* best-effort */ }
     setRunning(false);
     setSessionId(null);
-    setRateLimited(false);
-    setRateLimitMessage('');
-    setAutoResumeAt(null);
-    setCountdown('');
-  }, []);
-
-  const handleRetryNow = useCallback(() => {
-    setRateLimited(false);
-    setRateLimitMessage('');
-    setRunning(false);
-    setSessionId(null);
-    setAutoResumeAt(null);
-    setCountdown('');
-    handleListIssues();
-  }, []);
+    resetRateLimit();
+  }, [resetRateLimit]);
 
   function toggleIssue(number: number) {
     setSelectedNumbers(prev => {
@@ -280,7 +212,7 @@ export function GitHubImport() {
                 </>
               )}
               <button
-                onClick={handleRetryNow}
+                onClick={handleListIssues}
                 className="px-4 py-2 text-sm font-medium bg-amber-700 text-amber-100 rounded-lg hover:bg-amber-600 transition-colors"
               >
                 Retry Now

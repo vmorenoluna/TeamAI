@@ -1,86 +1,31 @@
 'use client';
 
-import { useState, useEffect, useTransition, useMemo, useRef } from 'react';
+import { useState, useEffect, useTransition, useRef } from 'react';
 import { startIdeationScan, cancelIdeationScan } from '@/app/actions/ideation';
 import { useSessionStream } from '@/hooks/use-session-stream';
-import { extractText, extractProgressText } from '@/lib/stream-types';
-import { parseSessionLimitReset, formatCountdown } from '@/lib/rate-limit';
+import { useRateLimitAutoResume } from '@/hooks/use-rate-limit-auto-resume';
+import { useStreamProgress } from '@/hooks/use-stream-progress';
 
 export function IdeationScanner() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-  const [rateLimited, setRateLimited] = useState(false);
-  const [rateLimitMessage, setRateLimitMessage] = useState('');
-  const [autoResumeAt, setAutoResumeAt] = useState<number | null>(null);
-  const [countdown, setCountdown] = useState('');
+  const [isPending, startTransition] = useTransition();  const cancelRequestedRef = useRef(false);
   const [cancelling, setCancelling] = useState(false);
-  const cancelRequestedRef = useRef(false);
   const streamEvents = useSessionStream(sessionId);
 
-  // Accumulate full progress text from all stream events.
-  // Uses extractProgressText so tool names (▶ bash, ▶ read_file) and
-  // system events (◆ Session started) are shown — not just assistant text.
-  const fullText = useMemo(() => {
-    if (streamEvents.length === 0) return '';
-    let allText = '';
-    for (const e of streamEvents) {
-      const t = extractProgressText(e.event);
-      if (t) allText += (allText ? '\n' : '') + t;
-    }
-    return allText;
-  }, [streamEvents]);
+  // Rate-limit detection + auto-resume
+  const {
+    rateLimited,
+    rateLimitMessage,
+    autoResumeAt,
+    countdown,
+    resetRateLimit,
+    handleCancelAutoResume,
+  } = useRateLimitAutoResume(streamEvents, handleScan, () => setRunning(false), () => setRunning(false));
 
-  // Detect rate-limit events in the stream and compute auto-resume timestamp
-  useEffect(() => {
-    if (streamEvents.length === 0) return;
-    for (const e of streamEvents) {
-      const text = extractText(e.event);
-      if (text && /(session.?limit|rate.?limit|too many requests|usage.?limit)/i.test(text)) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setRateLimited(true);
-        setRunning(false);
-        const resetsAt = parseSessionLimitReset(text);
-        if (resetsAt) {
-          setAutoResumeAt(resetsAt);
-          setCountdown(formatCountdown(resetsAt));
-          setRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(resetsAt)}`);
-        } else {
-          const match = text.match(/resets\s+(\d+:\d+\s*[ap]m)/i);
-          setRateLimitMessage(match ? `Session limit hit — resets ${match[1]} UTC` : text.slice(0, 200));
-        }
-        return;
-      }
-    }
-  }, [streamEvents]);
-
-  // ── Auto-resume countdown ───────────────────────────────────────────────
-  useEffect(() => {
-    if (autoResumeAt === null) return;
-    const timer = setInterval(() => {
-      const remaining = autoResumeAt - Math.floor(Date.now() / 1000);
-      if (remaining <= 0) {
-        clearInterval(timer);
-        setAutoResumeAt(null);
-        setCountdown('');
-        handleScan();
-      } else {
-        setCountdown(formatCountdown(autoResumeAt));
-        setRateLimitMessage(`Session limit hit — auto-resuming ${formatCountdown(autoResumeAt)}`);
-      }
-    }, 1000);
-    return () => clearInterval(timer);
-   
-  }, [autoResumeAt]);
-
-  // Cancel auto-resume
-  function handleCancelAutoResume() {
-    setAutoResumeAt(null);
-    setCountdown('');
-    setRateLimited(false);
-    setRateLimitMessage('');
-  }
+  // Accumulate progress text from all stream events
+  const fullText = useStreamProgress(streamEvents);
 
   const done = streamEvents.some(e => e.event.type === 'result');
 
@@ -95,10 +40,7 @@ export function IdeationScanner() {
     setRunning(true);
     setSessionId(null);
     setError(null);
-    setRateLimited(false);
-    setRateLimitMessage('');
-    setAutoResumeAt(null);
-    setCountdown('');
+    resetRateLimit();
     startTransition(async () => {
       try {
         const id = await startIdeationScan();
@@ -123,10 +65,7 @@ export function IdeationScanner() {
     } catch { /* best-effort */ }
     setRunning(false);
     setSessionId(null);
-    setRateLimited(false);
-    setRateLimitMessage('');
-    setAutoResumeAt(null);
-    setCountdown('');
+    resetRateLimit();
     setCancelling(false);
   }
 
