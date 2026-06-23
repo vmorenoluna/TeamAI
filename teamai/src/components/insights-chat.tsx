@@ -7,6 +7,7 @@ import { extractText } from '@/lib/stream-types';
 import { useRateLimitAutoResume } from '@/hooks/use-rate-limit-auto-resume';
 import { useStreamProgress } from '@/hooks/use-stream-progress';
 import { useStreamingState } from '@/hooks/use-streaming-state';
+import { RateLimitBanner } from './rate-limit-banner';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -134,43 +135,22 @@ export function InsightsChat() {
     <div className="flex flex-col h-full">
       {/* Rate-limit banner */}
       {rateLimited && (
-        <div className="shrink-0 bg-amber-950/60 border-b border-amber-800 text-amber-200 px-4 py-2.5 text-xs flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-amber-400 text-lg shrink-0">⏳</span>
-            <span className="truncate">
-              {rateLimitMessage || 'Rate limit reached. Please wait and try again.'}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {autoResumeAt && (
-              <>
-                <span className="text-xs text-amber-400 font-mono tabular-nums">
-                  {countdown}
-                </span>
-                <button
-                  onClick={handleCancelAutoResume}
-                  className="px-2 py-1 text-xs font-medium text-slate-400 border border-slate-700 rounded hover:bg-slate-800 transition-colors"
-                >
-                  Cancel
-                </button>
-              </>
-            )}
-            <button
-              onClick={() => {
-                resetRateLimit();
-                setRunning(false);
-                setSessionId(null);
-                startTransition(async () => {
-                  const newId = await getOrCreateInsightsSession();
-                  setSessionId(newId);
-                });
-              }}
-              className="shrink-0 px-3 py-1 text-xs font-medium bg-amber-700 hover:bg-amber-600 text-amber-100 rounded transition-colors"
-            >
-              Retry Now
-            </button>
-          </div>
-        </div>
+        <RateLimitBanner
+          message={rateLimitMessage}
+          autoResumeAt={autoResumeAt}
+          countdown={countdown}
+          onCancelAutoResume={handleCancelAutoResume}
+          onRetry={() => {
+            resetRateLimit();
+            setRunning(false);
+            setSessionId(null);
+            startTransition(async () => {
+              const newId = await getOrCreateInsightsSession();
+              setSessionId(newId);
+            });
+          }}
+          variant="inline"
+        />
       )}
 
       {/* Messages */}

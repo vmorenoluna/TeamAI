@@ -24,6 +24,7 @@ import { PhasedKanban } from './phased-kanban';
 export { PhasedKanban };
 import { TaskPanel, type FullData } from './task-panel';
 import { PRIORITY_COLORS } from '@/constants/phases';
+import { RateLimitBanner } from './rate-limit-banner';
 
 
 // ── Main component ───────────────────────────────────────────────────────────
@@ -447,38 +448,14 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
             {/* Rate-limit indicator */}
             {rmRateLimited && (
-              <div className="bg-amber-950/30 border border-amber-800 rounded-lg p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-amber-400 text-lg">⏳</span>
-                    <span className="text-sm text-amber-300">{rmRateLimitMessage}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {/* Auto-resuming: show countdown */}
-                    {rmAutoResumeAt && (
-                      <>
-                        <span className="text-xs text-amber-400 font-mono tabular-nums">
-                          {rmCountdown}
-                        </span>
-                        <button
-                          onClick={handleCancelRmAutoResume}
-                          className="px-3 py-2 text-sm font-medium text-slate-400 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    )}
-                    {/* Manual retry (shown when no auto-resume or as override) */}
-                    <button
-                      onClick={handleGenerateRoadmap}
-                      disabled={isPending}
-                      className="px-4 py-2 text-sm font-medium bg-amber-700 text-amber-100 rounded-lg hover:bg-amber-600 disabled:opacity-40 transition-colors"
-                    >
-                      Retry Now
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <RateLimitBanner
+                message={rmRateLimitMessage}
+                autoResumeAt={rmAutoResumeAt}
+                countdown={rmCountdown}
+                onCancelAutoResume={handleCancelRmAutoResume}
+                onRetry={handleGenerateRoadmap}
+                disabled={isPending}
+              />
             )}
 
             {/* Streaming output — show full accumulated text while running */}
@@ -571,36 +548,14 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
 
             {/* Rate-limit indicator */}
             {clRateLimited && (
-              <div className="bg-amber-950/30 border border-amber-800 rounded-lg p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-amber-400 text-lg">⏳</span>
-                    <span className="text-sm text-amber-300">{clRateLimitMessage}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {clAutoResumeAt && (
-                      <>
-                        <span className="text-xs text-amber-400 font-mono tabular-nums">
-                          {clCountdown}
-                        </span>
-                        <button
-                          onClick={handleCancelClAutoResume}
-                          className="px-3 py-2 text-sm font-medium text-slate-400 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    )}
-                    <button
-                      onClick={handleGenerateChangelog}
-                      disabled={isPending}
-                      className="px-4 py-2 text-sm font-medium bg-amber-700 text-amber-100 rounded-lg hover:bg-amber-600 disabled:opacity-40 transition-colors"
-                    >
-                      Retry Now
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <RateLimitBanner
+                message={clRateLimitMessage}
+                autoResumeAt={clAutoResumeAt}
+                countdown={clCountdown}
+                onCancelAutoResume={handleCancelClAutoResume}
+                onRetry={handleGenerateChangelog}
+                disabled={isPending}
+              />
             )}
 
             {/* Streaming output — show full accumulated text while running */}
