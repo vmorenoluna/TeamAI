@@ -1,2 +1,26 @@
 # Playwright output
 test-results/
+
+# TypeScript build artifacts
+*.tsbuildinfo
+
+# Server logs
+dev_server.log
+orchestrator_*.txt
+
+# Coverage output
+cov.txt
+coverage_output.txt
+coverage_verbose.txt
+full_coverage.txt
+full_coverage2.txt
+
+# Test artifacts
+.teamai-test-*
+.teamai-e2e-seed
+
+# Git worktrees (generated at runtime)
+worktrees/
+
+# OS
+.DS_Store
