@@ -1,14 +1,14 @@
 /**
- * Tests for worktree .git path-patching — _patchWorktreeGitFile,
- * _restoreWorktreeGitFileToHostPaths, and their integration with
- * _execGit and _commitArtifactsToWorktree.
+ * Tests for worktree git-env helpers — _patchWorktreeGitFile,
+ * _restoreWorktreeGitFileToHostPaths, _worktreeGitEnv — and their
+ * integration with _execGit and _commitArtifactsToWorktree.
  *
  * Design principle: No OS assumptions are hardcoded. The container
  * workspace path comes from docker inspect at runtime; the host project
  * root is the actual value passed to the orchestrator. Tests verify
- * both methods are idempotent no-ops when paths are already correct,
- * and that they correctly rewrite paths when the execution context
- * changes (host git ↔ container git via docker exec).
+ * idempotency, correct path forms per execution context (host vs.
+ * container), and that git operations bypass the .git pointer file
+ * via GIT_DIR / GIT_WORK_TREE env vars.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'fs';
@@ -105,13 +105,17 @@ function setupTestEnv() {
 
   const worktreeName = 'my-feature';
 
+  // Create the worktree metadata dir so _worktreeGitEnv can detect the linked worktree.
+  const worktreeMetaDir = join(root, '.git', 'worktrees', worktreeName);
+  mkdirSync(worktreeMetaDir, { recursive: true });
+
   const clean = () => {
     onHandlers.clear();
     vi.clearAllMocks();
     if (existsSync(root)) rmSync(root, { recursive: true, force: true });
   };
 
-  return { root, worktreePath, worktreeName, clean };
+  return { root, worktreePath, worktreeName, worktreeMetaDir, clean };
 }
 
 function makeOrch(root: string): any {
@@ -119,6 +123,21 @@ function makeOrch(root: string): any {
   (orch as any).pipelines.clear();
   (orch as any).activeTasks.clear();
   return orch;
+}
+
+/** Extract -e KEY=VALUE flags from a docker exec call's argument array. */
+function extractDockerEnvVars(dockerArgs: string[]): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (let i = 0; i < dockerArgs.length; i++) {
+    if (dockerArgs[i] === '-e' && i + 1 < dockerArgs.length) {
+      const eq = dockerArgs[i + 1].indexOf('=');
+      if (eq > 0) {
+        env[dockerArgs[i + 1].slice(0, eq)] = dockerArgs[i + 1].slice(eq + 1);
+      }
+      i++;
+    }
+  }
+  return env;
 }
 
 // ── Tests ──
@@ -168,10 +187,7 @@ describe('_restoreWorktreeGitFileToHostPaths', () => {
     const hostRoot = env.root.replace(/\\/g, '/');
     const hostGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${hostGitdir}\n`);
-    // Create the back-reference dir so the method can find it
-    const worktreeMetaDir = join(env.root, '.git', 'worktrees', env.worktreeName);
-    mkdirSync(worktreeMetaDir, { recursive: true });
-    writeFileSync(join(worktreeMetaDir, 'gitdir'), `${hostRoot}/.worktrees/my-feature/.git\n`);
+    writeFileSync(join(env.worktreeMetaDir, 'gitdir'), `${hostRoot}/.worktrees/my-feature/.git\n`);
 
     (orch as AnyOrch)._restoreWorktreeGitFileToHostPaths(env.worktreePath);
 
@@ -184,38 +200,26 @@ describe('_restoreWorktreeGitFileToHostPaths', () => {
     const orch = makeOrch(env.root);
     const containerGitdir = `/workspaces/project/.git/worktrees/${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${containerGitdir}\n`);
-
-    // Create the back-reference metadata directory
-    const worktreeMetaDir = join(env.root, '.git', 'worktrees', env.worktreeName);
-    mkdirSync(worktreeMetaDir, { recursive: true });
-    writeFileSync(join(worktreeMetaDir, 'gitdir'), `/workspaces/project/.worktrees/my-feature/.git\n`);
+    writeFileSync(join(env.worktreeMetaDir, 'gitdir'), `/workspaces/project/.worktrees/my-feature/.git\n`);
 
     (orch as AnyOrch)._restoreWorktreeGitFileToHostPaths(env.worktreePath);
 
-    // .git file should now contain host-style path
     const hostRoot = env.root.replace(/\\/g, '/');
     const expectedGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
     expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
 
-    // Back-reference should also be rewritten to host path
     const expectedBackRef = `${env.worktreePath.replace(/\\/g, '/')}/.git`;
-    expect(readFileSync(join(worktreeMetaDir, 'gitdir'), 'utf-8').trim()).toBe(expectedBackRef);
+    expect(readFileSync(join(env.worktreeMetaDir, 'gitdir'), 'utf-8').trim()).toBe(expectedBackRef);
   });
 
   it('rewrites a Windows-style gitdir (backslashes) to forward-slash host path', () => {
     env = setupTestEnv();
     const orch = makeOrch(env.root);
-    // Simulate a Windows host path with backslashes in the gitdir
     const windowsGitdir = `C:\\\\Users\\\\test\\\\project\\.git\\worktrees\\${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${windowsGitdir}\n`);
 
-    // Create the back-reference metadata directory
-    const worktreeMetaDir = join(env.root, '.git', 'worktrees', env.worktreeName);
-    mkdirSync(worktreeMetaDir, { recursive: true });
-
     (orch as AnyOrch)._restoreWorktreeGitFileToHostPaths(env.worktreePath);
 
-    // .git file should now contain host-style path with forward slashes
     const hostRoot = env.root.replace(/\\/g, '/');
     const expectedGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
     expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
@@ -227,13 +231,11 @@ describe('_restoreWorktreeGitFileToHostPaths', () => {
     const containerGitdir = `/workspaces/project/.git/worktrees/${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${containerGitdir}\n`);
 
-    // Do NOT create the back-reference metadata directory — simulate
-    // a scenario where the metadata was pruned but the .git file still
-    // has a container path
+    // Remove the meta dir so back-reference does not exist
+    rmSync(env.worktreeMetaDir, { recursive: true, force: true });
 
     expect(() => (orch as AnyOrch)._restoreWorktreeGitFileToHostPaths(env.worktreePath)).not.toThrow();
 
-    // .git file should still be rewritten (the main fix)
     const hostRoot = env.root.replace(/\\/g, '/');
     const expectedGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
     expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
@@ -249,7 +251,6 @@ describe('_patchWorktreeGitFile', () => {
     vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
     vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
     vi.mocked(readContainerRemoteUser).mockReturnValue('node');
-    // Default: hostToContainerPath is identity
     vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
   });
 
@@ -287,11 +288,7 @@ describe('_patchWorktreeGitFile', () => {
     const containerWorkspace = '/workspaces/project';
     const correctGitdir = `${containerWorkspace}/.git/worktrees/${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${correctGitdir}\n`);
-
-    // Create the back-reference metadata
-    const worktreeMetaDir = join(env.root, '.git', 'worktrees', env.worktreeName);
-    mkdirSync(worktreeMetaDir, { recursive: true });
-    writeFileSync(join(worktreeMetaDir, 'gitdir'), `${containerWorkspace}/.worktrees/my-feature/.git\n`);
+    writeFileSync(join(env.worktreeMetaDir, 'gitdir'), `${containerWorkspace}/.worktrees/my-feature/.git\n`);
 
     (orch as AnyOrch)._patchWorktreeGitFile(env.worktreePath, containerWorkspace);
 
@@ -304,27 +301,19 @@ describe('_patchWorktreeGitFile', () => {
     const orch = makeOrch(env.root);
     const containerWorkspace = '/workspaces/project';
 
-    // Write a host-style gitdir
     const hostRoot = env.root.replace(/\\/g, '/');
     const hostGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${hostGitdir}\n`);
+    writeFileSync(join(env.worktreeMetaDir, 'gitdir'), `${env.worktreePath.replace(/\\/g, '/')}/.git\n`);
 
-    // Create the back-reference metadata
-    const worktreeMetaDir = join(env.root, '.git', 'worktrees', env.worktreeName);
-    mkdirSync(worktreeMetaDir, { recursive: true });
-    writeFileSync(join(worktreeMetaDir, 'gitdir'), `${env.worktreePath.replace(/\\/g, '/')}/.git\n`);
-
-    // hostToContainerPath should translate the worktree path
     vi.mocked(hostToContainerPath).mockReturnValue(`${containerWorkspace}/.worktrees/my-feature`);
 
     (orch as AnyOrch)._patchWorktreeGitFile(env.worktreePath, containerWorkspace);
 
-    // .git file should now contain the container path
     const expectedGitdir = `${containerWorkspace}/.git/worktrees/${env.worktreeName}`;
     expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
 
-    // Back-reference should be rewritten to container path
-    expect(readFileSync(join(worktreeMetaDir, 'gitdir'), 'utf-8').trim()).toBe(
+    expect(readFileSync(join(env.worktreeMetaDir, 'gitdir'), 'utf-8').trim()).toBe(
       `${containerWorkspace}/.worktrees/my-feature/.git`
     );
   });
@@ -334,19 +323,13 @@ describe('_patchWorktreeGitFile', () => {
     const orch = makeOrch(env.root);
     const containerWorkspace = '/workspaces/project';
 
-    // Write a Windows-style gitdir with backslashes
     const windowsGitdir = `C:\\\\Users\\\\test\\\\project\\.git\\worktrees\\${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${windowsGitdir}\n`);
-
-    // Create the back-reference metadata
-    const worktreeMetaDir = join(env.root, '.git', 'worktrees', env.worktreeName);
-    mkdirSync(worktreeMetaDir, { recursive: true });
 
     vi.mocked(hostToContainerPath).mockReturnValue(`${containerWorkspace}/.worktrees/my-feature`);
 
     (orch as AnyOrch)._patchWorktreeGitFile(env.worktreePath, containerWorkspace);
 
-    // Should still work — the backslash normalisation in the regex handles it
     const expectedGitdir = `${containerWorkspace}/.git/worktrees/${env.worktreeName}`;
     expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
   });
@@ -360,13 +343,12 @@ describe('_patchWorktreeGitFile', () => {
     const hostGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${hostGitdir}\n`);
 
-    // Do NOT create the back-reference metadata dir
+    rmSync(env.worktreeMetaDir, { recursive: true, force: true });
 
     expect(() =>
       (orch as AnyOrch)._patchWorktreeGitFile(env.worktreePath, containerWorkspace)
     ).not.toThrow();
 
-    // .git file should still be rewritten
     const expectedGitdir = `${containerWorkspace}/.git/worktrees/${env.worktreeName}`;
     expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
   });
@@ -379,18 +361,13 @@ describe('_patchWorktreeGitFile', () => {
     const hostRoot = env.root.replace(/\\/g, '/');
     const hostGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${hostGitdir}\n`);
-
-    const worktreeMetaDir = join(env.root, '.git', 'worktrees', env.worktreeName);
-    mkdirSync(worktreeMetaDir, { recursive: true });
-    writeFileSync(join(worktreeMetaDir, 'gitdir'), 'old content\n');
+    writeFileSync(join(env.worktreeMetaDir, 'gitdir'), 'old content\n');
 
     const htcpSpy = vi.mocked(hostToContainerPath);
     htcpSpy.mockReturnValue('/workspaces/project/.worktrees/my-feature');
 
     (orch as AnyOrch)._patchWorktreeGitFile(env.worktreePath, containerWorkspace);
 
-    // hostToContainerPath should have been called with the worktree path,
-    // project root, and container workspace
     expect(htcpSpy).toHaveBeenCalledWith(
       env.worktreePath,
       env.root,
@@ -399,7 +376,103 @@ describe('_patchWorktreeGitFile', () => {
   });
 });
 
-describe('_execGit — worktree patching integration', () => {
+describe('_worktreeGitEnv', () => {
+  let env: ReturnType<typeof setupTestEnv>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    onHandlers.clear();
+    vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
+    vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+    vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
+  });
+
+  afterEach(() => {
+    if (env) env.clean();
+  });
+
+  it('returns {} when the worktree metadata dir does not exist (non-worktree cwd)', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+
+    // projectRoot itself has no worktrees/<basename> — returns empty
+    const result = (orch as AnyOrch)._worktreeGitEnv(env.root);
+    expect(result).toEqual({});
+  });
+
+  it('returns {} for an arbitrary directory not under .git/worktrees', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+
+    const unknownDir = join(env.root, '.worktrees', 'nonexistent');
+    const result = (orch as AnyOrch)._worktreeGitEnv(unknownDir);
+    expect(result).toEqual({});
+  });
+
+  it('returns host-path GIT_DIR and GIT_WORK_TREE when containerWs is omitted', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+
+    const result = (orch as AnyOrch)._worktreeGitEnv(env.worktreePath);
+
+    const hostRoot = env.root.replace(/\\/g, '/');
+    expect(result.GIT_DIR).toBe(`${hostRoot}/.git/worktrees/${env.worktreeName}`);
+    expect(result.GIT_WORK_TREE).toBe(env.worktreePath.replace(/\\/g, '/'));
+  });
+
+  it('uses forward slashes in host paths (Windows normalisation)', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+
+    const result = (orch as AnyOrch)._worktreeGitEnv(env.worktreePath);
+
+    // Both values must use forward slashes only
+    expect(result.GIT_DIR).not.toContain('\\');
+    expect(result.GIT_WORK_TREE).not.toContain('\\');
+  });
+
+  it('returns container-path GIT_DIR and GIT_WORK_TREE when containerWs is provided', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+    const containerWs = '/workspaces/project';
+    const containerWorktreePath = `${containerWs}/.worktrees/${env.worktreeName}`;
+    vi.mocked(hostToContainerPath).mockReturnValue(containerWorktreePath);
+
+    const result = (orch as AnyOrch)._worktreeGitEnv(env.worktreePath, containerWs);
+
+    expect(result.GIT_DIR).toBe(`${containerWs}/.git/worktrees/${env.worktreeName}`);
+    expect(result.GIT_WORK_TREE).toBe(containerWorktreePath);
+  });
+
+  it('calls hostToContainerPath for GIT_WORK_TREE in container context', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+    const containerWs = '/workspaces/project';
+    vi.mocked(hostToContainerPath).mockReturnValue(`${containerWs}/.worktrees/my-feature`);
+
+    (orch as AnyOrch)._worktreeGitEnv(env.worktreePath, containerWs);
+
+    expect(vi.mocked(hostToContainerPath)).toHaveBeenCalledWith(
+      env.worktreePath,
+      env.root,
+      containerWs,
+    );
+  });
+
+  it('works for Linux host paths (no backslashes, forward slashes preserved)', () => {
+    // Simulate a Linux host root — tmpdir on Linux uses /tmp/...
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+
+    const result = (orch as AnyOrch)._worktreeGitEnv(env.worktreePath);
+
+    // On any OS, the result must use forward slashes and include the worktree name
+    expect(result.GIT_DIR).toContain(`/worktrees/${env.worktreeName}`);
+    expect(result.GIT_WORK_TREE).toContain(env.worktreeName);
+  });
+});
+
+describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
   let env: ReturnType<typeof setupTestEnv>;
 
   beforeEach(() => {
@@ -424,116 +497,93 @@ describe('_execGit — worktree patching integration', () => {
       } as any);
     });
 
-    it('patches .git to container paths for docker exec, then restores host paths on return', () => {
+    it('passes GIT_DIR and GIT_WORK_TREE as -e flags to docker exec for worktree operations', () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
+      mockExecFileSync.mockReturnValue('');
 
-      // Create the worktree .git file with host paths — should trigger patching
-      writeFileSync(join(env.worktreePath, '.git'), 'gitdir: /some/host/path/.git/worktrees/my-feature\n');
+      (orch as AnyOrch)._execGit(['rebase', 'origin/master'], env.worktreePath);
 
+      const dockerCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === 'docker');
+      expect(dockerCall).toBeDefined();
+      const envVars = extractDockerEnvVars(dockerCall![1] as string[]);
+      expect(envVars['GIT_DIR']).toBe(`/workspaces/project/.git/worktrees/${env.worktreeName}`);
+      expect(envVars['GIT_WORK_TREE']).toBeDefined();
+    });
+
+    it('does not modify the .git file — git resolves via env vars only', () => {
+      env = setupTestEnv();
+      const orch = makeOrch(env.root);
+      const hostRoot = env.root.replace(/\\/g, '/');
+      const originalContent = `gitdir: ${hostRoot}/.git/worktrees/${env.worktreeName}\n`;
+      writeFileSync(join(env.worktreePath, '.git'), originalContent);
       mockExecFileSync.mockReturnValue('');
 
       (orch as AnyOrch)._execGit(['status'], env.worktreePath);
 
-      // After _execGit returns, the .git file must be restored to host-resolvable paths
-      // so subsequent host-side operations (e.g. _commitArtifactsToWorktree) work correctly.
-      const hostRoot = env.root.replace(/\\/g, '/');
-      const expectedGitdir = `${hostRoot}/.git/worktrees/my-feature`;
-      expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
-
-      // docker exec should have been called
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'docker',
-        expect.arrayContaining(['exec', '-u', 'node', '-w', expect.any(String), 'cont-test', 'git', 'status']),
-      );
+      // .git file must be completely unchanged
+      expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8')).toBe(originalContent);
     });
 
-    it('restores host paths even when docker exec throws (e.g. rebase conflict)', () => {
+    it('docker exec error propagates to caller without touching the .git file', () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
-
       const hostRoot = env.root.replace(/\\/g, '/');
-      const hostGitdir = `${hostRoot}/.git/worktrees/my-feature`;
-      writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${hostGitdir}\n`);
+      const originalContent = `gitdir: ${hostRoot}/.git/worktrees/${env.worktreeName}\n`;
+      writeFileSync(join(env.worktreePath, '.git'), originalContent);
 
-      // Create the worktrees metadata dir so _restoreWorktreeGitFileToHostPaths can
-      // validate back-reference existence check
-      mkdirSync(join(env.root, '.git', 'worktrees', 'my-feature'), { recursive: true });
-
-      // docker exec throws (simulate rebase conflict)
       mockExecFileSync.mockImplementation((cmd: string) => {
         if (cmd === 'docker') throw new Error('rebase conflict');
         return '';
       });
 
-      // The docker exec error should propagate to the caller
-      expect(() => (orch as AnyOrch)._execGit(['rebase', 'origin/master'], env.worktreePath)).toThrow('rebase conflict');
+      expect(() => (orch as AnyOrch)._execGit(['rebase', 'origin/master'], env.worktreePath))
+        .toThrow('rebase conflict');
 
-      // But the .git file must be restored to host paths (via finally block)
-      // so _commitArtifactsToWorktree can run host git successfully afterwards
-      expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${hostGitdir}`);
+      // .git file must still be unchanged after the error
+      expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8')).toBe(originalContent);
     });
 
-    it('does not call docker exec for worktree commands (routes to host)', () => {
+    it('does not call docker exec for worktree subcommands (routes to host git)', () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
-
-      writeFileSync(join(env.worktreePath, '.git'), 'gitdir: /some/host/path/.git/worktrees/my-feature\n');
-
       mockExecFileSync.mockReturnValue('');
 
       (orch as AnyOrch)._execGit(['worktree', 'add', env.worktreePath], env.root);
 
-      // Should call host git directly (not docker exec) — worktree add/remove
-      // always runs on host
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
         expect.arrayContaining(['worktree', 'add']),
         expect.any(Object),
       );
+      const dockerCalls = mockExecFileSync.mock.calls.filter((c: unknown[]) => c[0] === 'docker');
+      expect(dockerCalls.length).toBe(0);
     });
 
-    it('restores container paths to host paths when worktree command bypasses docker exec', () => {
+    it('does not inject GIT_DIR for worktree subcommands on host git', () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
-
-      // Write a container-style gitdir in the worktree .git file
-      writeFileSync(join(env.worktreePath, '.git'), 'gitdir: /workspaces/project/.git/worktrees/my-feature\n');
-
       mockExecFileSync.mockReturnValue('');
 
-      // Worktree commands skip docker exec and fall through to host git.
-      // Use the worktree path as cwd (common for commands like rebase/status).
-      (orch as AnyOrch)._execGit(['worktree', 'remove', env.worktreePath], env.worktreePath);
+      // worktree commands fall through to host git — should not have GIT_DIR
+      (orch as AnyOrch)._execGit(['worktree', 'remove', env.worktreePath], env.root);
 
-      // .git file should have been restored to host paths by the fallback
-      const hostRoot = env.root.replace(/\\/g, '/');
-      const expectedGitdir = `${hostRoot}/.git/worktrees/my-feature`;
-      expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
-
-      // Host git should have been called (not docker exec)
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['worktree', 'remove']),
-        expect.any(Object),
-      );
+      const gitCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === 'git');
+      expect(gitCall).toBeDefined();
+      const opts = gitCall![2] as { env?: Record<string, string> };
+      expect(opts.env?.GIT_DIR).toBeUndefined();
     });
 
     it('maps absolute project-root-prefixed args to container paths', () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
 
-      writeFileSync(join(env.worktreePath, '.git'), 'gitdir: /some/host/path/.git/worktrees/my-feature\n');
-
       const mapSpy = vi.mocked(hostToContainerPath);
-      mapSpy.mockClear(); // Reset previous call count from _patchWorktreeGitFile
-
       mockExecFileSync.mockReturnValue('');
 
       const absoluteFilePath = join(env.root, 'src', 'main.ts');
       (orch as AnyOrch)._execGit(['add', absoluteFilePath], env.worktreePath);
 
-      // hostToContainerPath should have been called for the file arg
       expect(mapSpy).toHaveBeenCalledWith(
         absoluteFilePath,
         env.root,
@@ -544,78 +594,97 @@ describe('_execGit — worktree patching integration', () => {
     it('uses readContainerRemoteUser for the docker exec -u flag', () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
-
-      writeFileSync(join(env.worktreePath, '.git'), 'gitdir: /some/host/path/.git/worktrees/my-feature\n');
       vi.mocked(readContainerRemoteUser).mockReturnValue('customuser');
-
       mockExecFileSync.mockReturnValue('');
 
       (orch as AnyOrch)._execGit(['status'], env.worktreePath);
 
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'docker',
-        expect.arrayContaining(['exec', '-u', 'customuser', '-w', expect.any(String), 'cont-test', 'git', 'status']),
+        expect.arrayContaining(['-u', 'customuser']),
       );
+    });
+
+    it('passes no env flags when hostCwd is not a linked worktree (non-worktree docker exec)', () => {
+      env = setupTestEnv();
+      const orch = makeOrch(env.root);
+      mockExecFileSync.mockReturnValue('');
+
+      // env.root has no matching .git/worktrees/<basename> entry
+      // (the tmp dir name isn't a registered worktree)
+      (orch as AnyOrch)._execGit(['fetch', 'origin'], env.root);
+
+      const dockerCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === 'docker');
+      if (dockerCall) {
+        const envVars = extractDockerEnvVars(dockerCall![1] as string[]);
+        expect(envVars['GIT_DIR']).toBeUndefined();
+      }
+      // If no docker call was made (host fallback), that is also acceptable
     });
   });
 
   describe('host git fallback path', () => {
-    it('calls _restoreWorktreeGitFileToHostPaths before host git execution', () => {
+    it('injects GIT_DIR and GIT_WORK_TREE env vars for linked-worktree operations', () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
-
-      // Write a container-style gitdir — should trigger restoration
-      writeFileSync(join(env.worktreePath, '.git'), 'gitdir: /workspaces/project/.git/worktrees/my-feature\n');
-
       mockExecFileSync.mockReturnValue('');
 
       (orch as AnyOrch)._execGit(['status'], env.worktreePath);
 
-      // .git file should have been restored to host paths
-      const hostRoot = env.root.replace(/\\/g, '/');
-      const expectedGitdir = `${hostRoot}/.git/worktrees/my-feature`;
-      expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
-
-      // Host git should have been called
-      expect(mockExecFileSync).toHaveBeenCalledWith('git', ['status'], { cwd: env.worktreePath });
+      const gitCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === 'git');
+      expect(gitCall).toBeDefined();
+      const opts = gitCall![2] as { cwd: string; env?: Record<string, string> };
+      expect(opts.env?.GIT_DIR).toContain(`/worktrees/${env.worktreeName}`);
+      expect(opts.env?.GIT_WORK_TREE).toBeDefined();
     });
 
-    it('falls back to host git: restores worktree .git to host paths when container enabled but not running', () => {
+    it('does not modify the .git file — env vars bypass file lookup', () => {
+      env = setupTestEnv();
+      const orch = makeOrch(env.root);
+      // Write a container-style gitdir — should NOT be changed by host git path
+      const containerContent = 'gitdir: /workspaces/project/.git/worktrees/my-feature\n';
+      writeFileSync(join(env.worktreePath, '.git'), containerContent);
+      mockExecFileSync.mockReturnValue('');
+
+      (orch as AnyOrch)._execGit(['status'], env.worktreePath);
+
+      // .git file unchanged
+      expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8')).toBe(containerContent);
+    });
+
+    it('falls back to host git when container enabled but container not running, with GIT_DIR injected', () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
 
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(containerManager.getRunningContainer).mockReturnValue(null); // no running container
-
-      writeFileSync(join(env.worktreePath, '.git'), 'gitdir: /workspaces/project/.git/worktrees/my-feature\n');
+      vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
 
       mockExecFileSync.mockReturnValue('');
 
       (orch as AnyOrch)._execGit(['status'], env.worktreePath);
 
-      // Should still have restored to host paths via the fallback path
-      const hostRoot = env.root.replace(/\\/g, '/');
-      const expectedGitdir = `${hostRoot}/.git/worktrees/my-feature`;
-      expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
+      const gitCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === 'git');
+      expect(gitCall).toBeDefined();
+      const opts = gitCall![2] as { cwd: string; env?: Record<string, string> };
+      expect(opts.env?.GIT_DIR).toContain(`/worktrees/${env.worktreeName}`);
     });
 
-    it('calls direct host git when container is disabled', () => {
+    it('calls host git without env override when cwd is not a linked worktree', () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
-
-      vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
-
       mockExecFileSync.mockReturnValue('');
 
-      (orch as AnyOrch)._execGit(['status'], env.worktreePath);
+      // env.root is the main project root — no worktree metadata for it
+      (orch as AnyOrch)._execGit(['fetch', 'origin'], env.root);
 
-      expect(mockExecFileSync).toHaveBeenCalledWith('git', ['status'], { cwd: env.worktreePath });
+      const gitCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === 'git');
+      expect(gitCall).toBeDefined();
+      const opts = gitCall![2] as { cwd: string; env?: Record<string, string> };
+      // env should be absent (no GIT_DIR override for the main repo)
+      expect(opts.env?.GIT_DIR).toBeUndefined();
     });
 
     it('does not throw when cwd has no .git file (non-worktree directory like projectRoot)', () => {
-      // _execGit is sometimes called with this.projectRoot (e.g. in removeWorktree),
-      // which may not have a worktree-style .git file. Both patching methods
-      // gracefully return when no .git file exists in the cwd.
       env = setupTestEnv();
       const orch = makeOrch(env.root);
 
@@ -625,10 +694,6 @@ describe('_execGit — worktree patching integration', () => {
         remoteWorkspaceFolder: '/workspaces/project',
       } as any);
 
-      // env.root has a real .git directory (not a worktree .git file),
-      // so existsSync(join(env.root, '.git')) is true (it's a dir) but
-      // readFileSync on it would fail (it's a directory). The patching
-      // methods should handle this gracefully.
       mockExecFileSync.mockReturnValue('');
 
       expect(() =>
@@ -638,7 +703,7 @@ describe('_execGit — worktree patching integration', () => {
   });
 });
 
-describe('_commitArtifactsToWorktree — host git path patching', () => {
+describe('_commitArtifactsToWorktree — GIT_DIR bypass', () => {
   let env: ReturnType<typeof setupTestEnv>;
 
   beforeEach(() => {
@@ -654,63 +719,80 @@ describe('_commitArtifactsToWorktree — host git path patching', () => {
     if (env) env.clean();
   });
 
-  it('calls _restoreWorktreeGitFileToHostPaths before committing with host git', () => {
-    env = setupTestEnv();
-    const orch = makeOrch(env.root);
-
-    // Set up the task directory with artifact files
-    const taskDir = join(env.root, '.teamai', randomUUID().slice(0, 8));
-    mkdirSync(taskDir, { recursive: true });
-    writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
-      id: 'test-task',
-      title: 'Test Task',
-      description: 'test-description',
-      phase: 'merge',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }));
-    writeFileSync(join(taskDir, 'spec.md'), '# Spec');
-
-    // Write a container-style gitdir in the worktree .git file
-    writeFileSync(join(env.worktreePath, '.git'), 'gitdir: /workspaces/project/.git/worktrees/my-feature\n');
-
-    mockExecFileSync.mockReturnValue('');
-
-    const pipeline = {
+  function makePipeline(taskDir: string, worktreePath: string) {
+    return {
       taskId: 'test-task',
-      description: 'test-description',
+      description: 'my-feature',
       phase: 'merge',
       specPath: taskDir,
-      worktreePath: env.worktreePath,
-      branch: 'feat/test',
+      worktreePath,
+      branch: 'feat/my-feature',
       qaAttempt: 0,
       maxQaAttempts: 3,
     };
+  }
 
-    (orch as AnyOrch)._commitArtifactsToWorktree(pipeline);
+  it('injects GIT_DIR and GIT_WORK_TREE for git add and commit', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
 
-    // .git file should have been restored to host paths BEFORE git add was called
-    const hostRoot = env.root.replace(/\\/g, '/');
-    const expectedGitdir = `${hostRoot}/.git/worktrees/my-feature`;
-    expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
+    const taskDir = join(env.root, '.teamai', randomUUID().slice(0, 8));
+    mkdirSync(taskDir, { recursive: true });
+    writeFileSync(join(taskDir, 'spec.md'), '# Spec');
+    writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
+      id: 'test-task', title: 'T', description: 'my-feature',
+      phase: 'merge', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }));
 
-    // git add and commit should use host git (not docker exec)
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'git',
-      expect.arrayContaining(['add', '.teamai/']),
-      expect.objectContaining({ cwd: env.worktreePath }),
-    );
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'git',
-      expect.arrayContaining(['commit', '-m', expect.stringContaining('TeamAI pipeline artifacts')]),
-      expect.objectContaining({ cwd: env.worktreePath }),
-    );
+    mockExecFileSync.mockReturnValue('');
+
+    (orch as AnyOrch)._commitArtifactsToWorktree(makePipeline(taskDir, env.worktreePath));
+
+    const gitCalls = mockExecFileSync.mock.calls.filter((c: unknown[]) => c[0] === 'git');
+    expect(gitCalls.length).toBeGreaterThanOrEqual(2);
+
+    for (const call of gitCalls) {
+      const opts = call[2] as { env?: Record<string, string> };
+      expect(opts.env?.GIT_DIR).toContain(`/worktrees/${env.worktreeName}`);
+      expect(opts.env?.GIT_WORK_TREE).toBeDefined();
+    }
   });
 
-  it('handles container-mode artifact commit: restores host paths first, then commits via host git', () => {
-    // Even when container mode is enabled, _commitArtifactsToWorktree
-    // writes files via Node.js on the host filesystem, so it must
-    // restore host paths and use host git.
+  it('works even when .git file contains container-style paths', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+
+    // Simulate state left by _patchWorktreeGitFile (before agent session)
+    writeFileSync(
+      join(env.worktreePath, '.git'),
+      `gitdir: /workspaces/project/.git/worktrees/${env.worktreeName}\n`,
+    );
+
+    const taskDir = join(env.root, '.teamai', randomUUID().slice(0, 8));
+    mkdirSync(taskDir, { recursive: true });
+    writeFileSync(join(taskDir, 'spec.md'), '# Spec');
+    writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
+      id: 'test-task', title: 'T', description: 'my-feature',
+      phase: 'merge', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }));
+
+    mockExecFileSync.mockReturnValue('');
+
+    // Should not throw even with stale container paths in .git
+    expect(() =>
+      (orch as AnyOrch)._commitArtifactsToWorktree(makePipeline(taskDir, env.worktreePath))
+    ).not.toThrow();
+
+    // git add must use GIT_DIR (bypasses the stale .git file)
+    const addCall = mockExecFileSync.mock.calls.find(
+      (c: unknown[]) => c[0] === 'git' && (c[1] as string[]).includes('add')
+    );
+    expect(addCall).toBeDefined();
+    const opts = addCall![2] as { env?: Record<string, string> };
+    expect(opts.env?.GIT_DIR).toContain(`/worktrees/${env.worktreeName}`);
+  });
+
+  it('must use host git, NOT docker exec, even in container mode', () => {
     env = setupTestEnv();
     const orch = makeOrch(env.root);
 
@@ -722,52 +804,53 @@ describe('_commitArtifactsToWorktree — host git path patching', () => {
 
     const taskDir = join(env.root, '.teamai', randomUUID().slice(0, 8));
     mkdirSync(taskDir, { recursive: true });
-    writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
-      id: 'test-task',
-      title: 'Test Task',
-      description: 'test-description',
-      phase: 'merge',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }));
     writeFileSync(join(taskDir, 'spec.md'), '# Spec');
-
-    // Write a container-style gitdir — _commitArtifactsToWorktree should
-    // restore it to host paths before running host git
-    writeFileSync(join(env.worktreePath, '.git'), 'gitdir: /workspaces/project/.git/worktrees/my-feature\n');
+    writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
+      id: 'test-task', title: 'T', description: 'my-feature',
+      phase: 'merge', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }));
 
     mockExecFileSync.mockReturnValue('');
 
-    const pipeline = {
-      taskId: 'test-task',
-      description: 'test-description',
-      phase: 'merge',
-      specPath: taskDir,
-      worktreePath: env.worktreePath,
-      branch: 'feat/test',
-      qaAttempt: 0,
-      maxQaAttempts: 3,
-    };
+    (orch as AnyOrch)._commitArtifactsToWorktree(makePipeline(taskDir, env.worktreePath));
 
-    (orch as AnyOrch)._commitArtifactsToWorktree(pipeline);
+    // Must not have called docker exec
+    const dockerCalls = mockExecFileSync.mock.calls.filter((c: unknown[]) => c[0] === 'docker');
+    expect(dockerCalls.length).toBe(0);
 
-    // .git file must be restored to host paths — artifact commit always
-    // runs on host git, even in container mode
-    const hostRoot = env.root.replace(/\\/g, '/');
-    const expectedGitdir = `${hostRoot}/.git/worktrees/my-feature`;
-    expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
-
-    // Must use host git, NOT docker exec
+    // Must have called host git
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
       expect.arrayContaining(['add', '.teamai/']),
       expect.any(Object),
     );
-    // Should NOT have called docker exec
-    const dockerCalls = mockExecFileSync.mock.calls.filter(
-      (c: unknown[]) => c[0] === 'docker'
+  });
+
+  it('best-effort restores .git file to host paths for external tooling', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+
+    writeFileSync(
+      join(env.worktreePath, '.git'),
+      `gitdir: /workspaces/project/.git/worktrees/${env.worktreeName}\n`,
     );
-    expect(dockerCalls.length).toBe(0);
+
+    const taskDir = join(env.root, '.teamai', randomUUID().slice(0, 8));
+    mkdirSync(taskDir, { recursive: true });
+    writeFileSync(join(taskDir, 'spec.md'), '# Spec');
+    writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
+      id: 'test-task', title: 'T', description: 'my-feature',
+      phase: 'merge', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }));
+
+    mockExecFileSync.mockReturnValue('');
+
+    (orch as AnyOrch)._commitArtifactsToWorktree(makePipeline(taskDir, env.worktreePath));
+
+    // .git file should have been restored to host paths as a best-effort cleanup
+    const hostRoot = env.root.replace(/\\/g, '/');
+    const content = readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim();
+    expect(content).toBe(`gitdir: ${hostRoot}/.git/worktrees/${env.worktreeName}`);
   });
 });
 
@@ -791,22 +874,16 @@ describe('_patchWorktreeGitFile and _restoreWorktreeGitFileToHostPaths — idemp
     const orch = makeOrch(env.root);
     const containerWorkspace = '/workspaces/project';
 
-    // Write a host-style gitdir
     const hostRoot = env.root.replace(/\\/g, '/');
     const hostGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${hostGitdir}\n`);
 
-    const worktreeMetaDir = join(env.root, '.git', 'worktrees', env.worktreeName);
-    mkdirSync(worktreeMetaDir, { recursive: true });
-
     vi.mocked(hostToContainerPath).mockReturnValue(`${containerWorkspace}/.worktrees/my-feature`);
 
-    // Patch to container (first call)
     (orch as AnyOrch)._patchWorktreeGitFile(env.worktreePath, containerWorkspace);
     const afterFirst = readFileSync(join(env.worktreePath, '.git'), 'utf-8');
     expect(afterFirst).toContain(containerWorkspace);
 
-    // Patch to container AGAIN (should be no-op)
     (orch as AnyOrch)._patchWorktreeGitFile(env.worktreePath, containerWorkspace);
     const afterSecond = readFileSync(join(env.worktreePath, '.git'), 'utf-8');
     expect(afterSecond).toBe(afterFirst);
@@ -819,17 +896,12 @@ describe('_patchWorktreeGitFile and _restoreWorktreeGitFileToHostPaths — idemp
     const hostRoot = env.root.replace(/\\/g, '/');
     const hostGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${hostGitdir}\n`);
+    writeFileSync(join(env.worktreeMetaDir, 'gitdir'), `${env.worktreePath.replace(/\\/g, '/')}/.git\n`);
 
-    const worktreeMetaDir = join(env.root, '.git', 'worktrees', env.worktreeName);
-    mkdirSync(worktreeMetaDir, { recursive: true });
-    writeFileSync(join(worktreeMetaDir, 'gitdir'), `${env.worktreePath.replace(/\\/g, '/')}/.git\n`);
-
-    // Restore to host (first call)
     (orch as AnyOrch)._restoreWorktreeGitFileToHostPaths(env.worktreePath);
     const afterFirst = readFileSync(join(env.worktreePath, '.git'), 'utf-8');
     expect(afterFirst).toContain(hostGitdir);
 
-    // Restore to host AGAIN (should be no-op)
     (orch as AnyOrch)._restoreWorktreeGitFileToHostPaths(env.worktreePath);
     const afterSecond = readFileSync(join(env.worktreePath, '.git'), 'utf-8');
     expect(afterSecond).toBe(afterFirst);
@@ -844,25 +916,19 @@ describe('_patchWorktreeGitFile and _restoreWorktreeGitFileToHostPaths — idemp
     const hostGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${hostGitdir}\n`);
 
-    const worktreeMetaDir = join(env.root, '.git', 'worktrees', env.worktreeName);
-    mkdirSync(worktreeMetaDir, { recursive: true });
     const hostBackRef = `${env.worktreePath.replace(/\\/g, '/')}/.git`;
-    writeFileSync(join(worktreeMetaDir, 'gitdir'), `${hostBackRef}\n`);
+    writeFileSync(join(env.worktreeMetaDir, 'gitdir'), `${hostBackRef}\n`);
 
     const containerWorktreePath = `${containerWorkspace}/.worktrees/my-feature`;
     vi.mocked(hostToContainerPath).mockReturnValue(containerWorktreePath);
 
-    // Step 1: Patch to container
     (orch as AnyOrch)._patchWorktreeGitFile(env.worktreePath, containerWorkspace);
     expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8')).toContain(containerWorkspace);
-    // Back-reference should be rewritten to container path
-    expect(readFileSync(join(worktreeMetaDir, 'gitdir'), 'utf-8').trim()).toBe(`${containerWorktreePath}/.git`);
+    expect(readFileSync(join(env.worktreeMetaDir, 'gitdir'), 'utf-8').trim()).toBe(`${containerWorktreePath}/.git`);
 
-    // Step 2: Restore to host
     (orch as AnyOrch)._restoreWorktreeGitFileToHostPaths(env.worktreePath);
     expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${hostGitdir}`);
-    // Back-reference should be restored to host path
-    expect(readFileSync(join(worktreeMetaDir, 'gitdir'), 'utf-8').trim()).toBe(hostBackRef);
+    expect(readFileSync(join(env.worktreeMetaDir, 'gitdir'), 'utf-8').trim()).toBe(hostBackRef);
   });
 });
 
@@ -887,14 +953,10 @@ describe('_isWorktreeHealthy — container-mode path detection', () => {
 
     vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
 
-    // Write a container-style gitdir in the worktree
     const containerGitdir = `/workspaces/project/.git/worktrees/${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${containerGitdir}\n`);
 
-    // Create the host-side gitdir (worktree metadata directory) so the check passes
-    const hostGitdir = join(env.root, '.git', 'worktrees', env.worktreeName);
-    mkdirSync(hostGitdir, { recursive: true });
-
+    // worktreeMetaDir already created by setupTestEnv
     expect((orch as AnyOrch)._isWorktreeHealthy(env.worktreePath)).toBe(true);
   });
 
@@ -907,7 +969,7 @@ describe('_isWorktreeHealthy — container-mode path detection', () => {
     const containerGitdir = `/workspaces/project/.git/worktrees/${env.worktreeName}`;
     writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${containerGitdir}\n`);
 
-    // Do NOT create the host gitdir
+    rmSync(env.worktreeMetaDir, { recursive: true, force: true });
 
     expect((orch as AnyOrch)._isWorktreeHealthy(env.worktreePath)).toBe(false);
   });

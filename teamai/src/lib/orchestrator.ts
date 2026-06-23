@@ -1533,12 +1533,6 @@ export class Orchestrator {
     if (readContainerConfig(this.projectRoot).enabled && args[0] !== 'worktree') {
       const info = containerManager.getRunningContainer(this.projectRoot);
       if (info) {
-        // Ensure the worktree .git file (if any) uses paths resolvable inside the
-        // container before running docker exec. The current content might be host-style
-        // paths (e.g. from a prior host-side git op or a server restart), which the
-        // container cannot resolve. Both methods compare current vs expected and are
-        // no-ops when already correct, so this is safe to call unconditionally.
-        this._patchWorktreeGitFile(hostCwd, info.remoteWorkspaceFolder);
         const containerCwd = hostToContainerPath(hostCwd, this.projectRoot, info.remoteWorkspaceFolder);
         const mappedArgs = args.map(a =>
           path.isAbsolute(a) && a.startsWith(this.projectRoot)
@@ -1546,25 +1540,63 @@ export class Orchestrator {
             : a
         );
         const remoteUser = readContainerRemoteUser(this.projectRoot);
-        try {
-          execFileSync('docker', ['exec', '-u', remoteUser, '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
-        } finally {
-          // Always restore host paths after docker exec so the worktree .git file is
-          // left in host-resolvable state for subsequent host-side operations.
-          // Without this, a prior _patchWorktreeGitFile call leaves container paths in
-          // the file; if a caller's own restore attempt then fails silently (e.g. a
-          // brief Windows file lock from the docker process), host git sees the stale
-          // container path and fails with "not a git repository".
-          this._restoreWorktreeGitFileToHostPaths(hostCwd);
-        }
+        // Inject GIT_DIR + GIT_WORK_TREE so the container git resolves the gitdir
+        // directly, bypassing the .git pointer file. The .git file holds host paths
+        // (as written by git worktree add); the container cannot resolve host paths.
+        // Using env vars is OS-agnostic and never requires modifying the .git file.
+        const gitEnv = this._worktreeGitEnv(hostCwd, info.remoteWorkspaceFolder);
+        const envFlags = Object.entries(gitEnv).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+        execFileSync('docker', ['exec', '-u', remoteUser, ...envFlags, '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
         return;
       }
     }
-    // Host git fallback: ensure the worktree .git file (if any) uses host-style paths.
-    // The container path patch may have been applied earlier; undo it so host git can
-    // resolve the worktree correctly.
-    this._restoreWorktreeGitFileToHostPaths(hostCwd);
-    execFileSync('git', args, { cwd: hostCwd });
+    // Host git: inject GIT_DIR + GIT_WORK_TREE for linked-worktree operations so
+    // host git resolves the gitdir directly, bypassing the .git pointer file.
+    // This works regardless of whether the .git file currently holds host or
+    // container paths. Skip for 'git worktree' subcommands — these operate on
+    // the main repo and must not have GIT_DIR overridden.
+    const gitEnv = args[0] !== 'worktree' ? this._worktreeGitEnv(hostCwd) : {};
+    execFileSync('git', args, { cwd: hostCwd, ...(Object.keys(gitEnv).length ? { env: { ...process.env, ...gitEnv } } : {}) });
+  }
+
+  /**
+   * Returns GIT_DIR and GIT_WORK_TREE environment variables for git commands
+   * running inside a linked worktree, bypassing the .git pointer file entirely.
+   *
+   * Looks up the worktree metadata at
+   * <projectRoot>/.git/worktrees/<basename(hostCwd)>. Returns {} when that
+   * directory does not exist (e.g. hostCwd is the main project root), so
+   * standard git path resolution applies for non-worktree invocations.
+   *
+   * This is safe across all host/container OS combinations: each execution
+   * context receives paths in its own format — host paths for host git,
+   * container paths (via hostToContainerPath) for docker exec git — so there
+   * is never a cross-OS path mismatch.
+   *
+   * @param hostCwd     Host-side working directory for the git command.
+   * @param containerWs Container workspace root. When provided, paths are
+   *                    expressed in container form for docker exec use and
+   *                    must use POSIX forward slashes.
+   */
+  private _worktreeGitEnv(hostCwd: string, containerWs?: string): Record<string, string> {
+    const worktreeName = path.basename(hostCwd);
+    const hostGitDir = path.join(this.projectRoot, '.git', 'worktrees', worktreeName);
+    if (!existsSync(hostGitDir)) return {};
+
+    if (containerWs) {
+      // Container context: both paths must be container-resolvable (POSIX slashes).
+      return {
+        GIT_DIR: `${containerWs}/.git/worktrees/${worktreeName}`,
+        GIT_WORK_TREE: hostToContainerPath(hostCwd, this.projectRoot, containerWs),
+      };
+    }
+
+    // Host context: normalise to forward slashes — git accepts them on all
+    // platforms (Linux, macOS, Windows/git-for-windows).
+    return {
+      GIT_DIR: hostGitDir.replace(/\\/g, '/'),
+      GIT_WORK_TREE: hostCwd.replace(/\\/g, '/'),
+    };
   }
 
   private restorePipeline(taskId: string, requiredPhase: PipelinePhase): TaskPipeline {
@@ -1973,13 +2005,23 @@ export class Orchestrator {
 
     // Artifact files are written by the host-side Node.js process, so we always
     // commit using HOST git (execFileSync directly) — no docker exec needed.
-    // In container mode, a prior _patchWorktreeGitFile call may have left container
-    // paths in the .git file; restore host paths first so host git can resolve the repo.
+    // Use _worktreeGitEnv to bypass the .git pointer file: _patchWorktreeGitFile
+    // is called before every agent session and leaves container paths in the file;
+    // setting GIT_DIR/GIT_WORK_TREE makes git immune to whatever the file contains.
+    //
+    // Best-effort restore of the .git file so external tools (VS Code, user
+    // terminal) that look up the worktree via the .git file continue to work.
     this._restoreWorktreeGitFileToHostPaths(pipeline.worktreePath);
-    execFileSync('git', ['add', '.teamai/'], { cwd: pipeline.worktreePath });
+
+    const gitEnv = this._worktreeGitEnv(pipeline.worktreePath);
+    const gitOpts = Object.keys(gitEnv).length
+      ? { cwd: pipeline.worktreePath, env: { ...process.env, ...gitEnv } }
+      : { cwd: pipeline.worktreePath };
+
+    execFileSync('git', ['add', '.teamai/'], gitOpts);
 
     try {
-      execFileSync('git', ['commit', '-m', `Add TeamAI pipeline artifacts for "${pipeline.description}"`], { cwd: pipeline.worktreePath });
+      execFileSync('git', ['commit', '-m', `Add TeamAI pipeline artifacts for "${pipeline.description}"`], gitOpts);
     } catch (gitErr) {
       const msg = gitErr instanceof Error ? gitErr.message : String(gitErr);
       // "nothing to commit, working tree clean" — artifacts already committed
