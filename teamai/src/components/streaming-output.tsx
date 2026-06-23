@@ -15,7 +15,7 @@ export function StreamingOutput({
   className?: string;
 }) {
   return (
-    <div className={`flex-1 overflow-y-auto bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 ${className}`}>
+    <div className={`flex-1 overflow-y-auto bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 ${className}`} data-testid="streaming-output">
       <div className="flex items-center justify-between mb-2">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Agent Output</span>
         <span className="text-[10px] text-slate-600">
