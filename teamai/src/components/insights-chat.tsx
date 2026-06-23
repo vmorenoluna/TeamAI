@@ -6,6 +6,7 @@ import { useSessionStream } from '@/hooks/use-session-stream';
 import { extractText } from '@/lib/stream-types';
 import { useRateLimitAutoResume } from '@/hooks/use-rate-limit-auto-resume';
 import { useStreamProgress } from '@/hooks/use-stream-progress';
+import { useStreamingState } from '@/hooks/use-streaming-state';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -19,10 +20,12 @@ export function InsightsChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isPending, startTransition] = useTransition();
-  const [running, setRunning] = useState(false);
   const cancelRequestedRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const streamEvents = useSessionStream(sessionId);
+
+  // Running state synced from stream events
+  const { running, setRunning } = useStreamingState(streamEvents);
 
   // Start session on mount
   useEffect(() => {
@@ -43,7 +46,7 @@ export function InsightsChat() {
       const newId = await getOrCreateInsightsSession();
       setSessionId(newId);
     });
-  }, () => setRunning(false), () => setRunning(false));
+  }, () => setRunning(false));
 
   // Compute progress indicator text (last tool/status line while the agent works)
   const fullProgressText = useStreamProgress(streamEvents);
@@ -51,20 +54,6 @@ export function InsightsChat() {
     if (!fullProgressText) return '';
     return fullProgressText.split('\n').pop() ?? '';
   }, [fullProgressText]);
-
-  // Compute whether assistant is currently streaming from stream events
-  const isStreaming = useMemo(() => {
-    if (streamEvents.length === 0) return false;
-    const lastType = streamEvents[streamEvents.length - 1].event.type;
-    // Streaming if the last event is an assistant response (not yet finalised)
-    return lastType === 'assistant';
-  }, [streamEvents]);
-
-  // Sync running state from stream events
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRunning(isStreaming);
-  }, [isStreaming]);
 
   // Process incoming stream events into messages
   useEffect(() => {
@@ -116,6 +105,7 @@ export function InsightsChat() {
         setRunning(false);
       }
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, sessionId, startTransition, resetRateLimit]);
 
   const handleCancel = useCallback(async () => {
@@ -130,6 +120,7 @@ export function InsightsChat() {
     const newId = await getOrCreateInsightsSession();
     setSessionId(newId);
     cancelRequestedRef.current = false;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetRateLimit]);
 
   function handleKeyDown(e: React.KeyboardEvent) {

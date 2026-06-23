@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useTransition, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   startIssueList,
@@ -14,13 +14,13 @@ import { useSessionStream } from '@/hooks/use-session-stream';
 import { extractText } from '@/lib/stream-types';
 import { useRateLimitAutoResume } from '@/hooks/use-rate-limit-auto-resume';
 import { useStreamProgress } from '@/hooks/use-stream-progress';
+import { useStreamingState } from '@/hooks/use-streaming-state';
 import type { GitHubIssue } from '@/app/actions/github';
 
 export function GitHubImport() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
   const [streamText, setStreamText] = useState('');
   const [issues, setIssues] = useState<GitHubIssue[]>([]);
   const [selectedNumbers, setSelectedNumbers] = useState<Set<number>>(new Set());
@@ -31,18 +31,8 @@ export function GitHubImport() {
   const cancelRequestedRef = useRef(false);
   const streamEvents = useSessionStream(sessionId);
 
-  // Compute whether the agent is currently streaming from stream events
-  const isStreaming = useMemo(() => {
-    if (streamEvents.length === 0) return false;
-    const lastType = streamEvents[streamEvents.length - 1].event.type;
-    return lastType === 'assistant';
-  }, [streamEvents]);
-
-  // Sync running state from stream events
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRunning(isStreaming);
-  }, [isStreaming]);
+  // Running state synced from stream events
+  const { running, setRunning } = useStreamingState(streamEvents);
 
   // Rate-limit detection + auto-resume
   const {
@@ -52,7 +42,7 @@ export function GitHubImport() {
     countdown,
     resetRateLimit,
     handleCancelAutoResume,
-  } = useRateLimitAutoResume(streamEvents, handleListIssues, () => setRunning(false), () => setRunning(false));
+  } = useRateLimitAutoResume(streamEvents, handleListIssues, () => setRunning(false));
 
   // Accumulate streaming text for display
   const progressText = useStreamProgress(streamEvents);
@@ -88,6 +78,7 @@ export function GitHubImport() {
         saveIssuesToFile(sid, parsed).catch(() => {});
       }
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [done, sessionId, streamEvents]);
 
   // On mount, check for reconnection (existing session or cached file)
@@ -137,6 +128,7 @@ export function GitHubImport() {
     setRunning(false);
     setSessionId(null);
     resetRateLimit();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetRateLimit]);
 
   function toggleIssue(number: number) {
