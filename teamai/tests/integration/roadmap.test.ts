@@ -575,7 +575,9 @@ describe('Roadmap Integration', () => {
       const { startRoadmapGeneration } = await import('@/app/actions/roadmap');
       const sessionId = await startRoadmapGeneration(true); // skipCompetitors=true
 
-      expect(mockCreateSession).toHaveBeenCalled();
+      expect(mockCreateSession).toHaveBeenCalledWith(
+        expect.objectContaining({ projectRoot: projectDir, permissionMode: 'bypassPermissions' }),
+      );
       expect(sessionId).toBe('sess-1');
       expect(mockSendMessage).toHaveBeenCalledWith('sess-1', expect.stringContaining('/roadmap'));
     });
@@ -607,7 +609,9 @@ describe('Roadmap Integration', () => {
       const { startChangelogGeneration } = await import('@/app/actions/roadmap');
       const sessionId = await startChangelogGeneration();
 
-      expect(mockCreateSession).toHaveBeenCalled();
+      expect(mockCreateSession).toHaveBeenCalledWith(
+        expect.objectContaining({ projectRoot: projectDir, permissionMode: 'bypassPermissions' }),
+      );
       expect(sessionId).toBe('sess-changelog');
       expect(mockSendMessage).toHaveBeenCalledWith('sess-changelog', '/changelog');
     });
