@@ -109,7 +109,6 @@ function mockChildProcess(): MockChild {
 }
 
 /** Access the ProcessManager singleton (created fresh per test by module init). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getPm(): any {
   const pm = (global as Record<string, unknown>).__processManager;
   if (!pm) throw new Error('ProcessManager not initialised — did the test import an action yet?');
