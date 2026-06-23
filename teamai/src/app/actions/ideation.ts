@@ -1,6 +1,6 @@
 'use server';
 
-import { processManager } from '@/lib/process-manager';
+import { processManager, containerSessionOpts } from '@/lib/process-manager';
 import { getActiveProjectPath } from './projects';
 import { getProvidersConfig } from './providers';
 import { readdirSync, existsSync } from 'fs';
@@ -22,8 +22,7 @@ export async function startIdeationScan(): Promise<string> {
     role: 'general',
     cwd: projectPath,
     model: explorationModel,
-    projectRoot: projectPath,
-    permissionMode: 'bypassPermissions',
+    ...containerSessionOpts(projectPath),
   });
   sessions.set(projectPath, sessionId);
   processManager.sendMessage(sessionId, '/ideation');

@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, statSync, rmSync, copyFileSync, mkdirSync, readdirSync } from 'fs';
 import path from 'path';
 import { warn as logWarn } from './logger';
-import { processManager, type AgentSession } from './process-manager';
+import { processManager, containerSessionOpts, type AgentSession } from './process-manager';
 import { readContainerConfig, readContainerRemoteUser, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache } from './container-manager';
 import { TaskStore } from './task-store';
 import { resolveProvider, providerToSessionOpts } from './providers';
@@ -1782,7 +1782,7 @@ export class Orchestrator {
   private sessionOpts(role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) {
     const providerCfg = resolveProvider(this.projectRoot, role);
     const providerOpts = providerToSessionOpts(providerCfg);
-    return { taskId, role, cwd, projectRoot: this.projectRoot, permissionMode: 'bypassPermissions', logFile, ...providerOpts };
+    return { taskId, role, cwd, ...containerSessionOpts(this.projectRoot), logFile, ...providerOpts };
   }
 
   /** Write QA feedback for bouncing back to implement */

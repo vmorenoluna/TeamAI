@@ -1,6 +1,6 @@
 'use server';
 
-import { processManager } from '@/lib/process-manager';
+import { processManager, containerSessionOpts } from '@/lib/process-manager';
 import { TaskStore } from '@/lib/task-store';
 import { getActiveProjectPath } from './projects';
 import { revalidatePath } from 'next/cache';
@@ -36,8 +36,7 @@ export async function startIssueList(): Promise<string> {
     taskId: `github::${projectPath}`,
     role: 'general',
     cwd: projectPath,
-    projectRoot: projectPath,
-    permissionMode: 'bypassPermissions',
+    ...containerSessionOpts(projectPath),
   });
   sessions.set(projectPath, sessionId);
 

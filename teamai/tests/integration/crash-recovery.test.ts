@@ -60,6 +60,7 @@ vi.mock('@/lib/process-manager', () => ({
     getStaleSessions: () => [],
     getAllSessions: () => [],
   },
+  containerSessionOpts: (projectRoot: string) => ({ projectRoot, permissionMode: 'bypassPermissions' as const }),
 }));
 
 vi.mock('@/lib/container-manager', () => ({

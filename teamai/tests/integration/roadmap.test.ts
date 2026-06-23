@@ -51,6 +51,7 @@ vi.mock('@/lib/process-manager', () => ({
     writeToSession: vi.fn(),
     terminateSession: vi.fn(),
   },
+  containerSessionOpts: (projectRoot: string) => ({ projectRoot, permissionMode: 'bypassPermissions' as const }),
 }));
 
 // ── Test Fixture Helpers ────────────────────────────────────────────────────

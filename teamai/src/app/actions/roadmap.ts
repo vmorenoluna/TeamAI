@@ -1,6 +1,6 @@
 'use server';
 
-import { processManager } from '@/lib/process-manager';
+import { processManager, containerSessionOpts } from '@/lib/process-manager';
 import { getActiveProjectPath } from './projects';
 import { getProvidersConfig } from './providers';
 import { readdirSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
@@ -78,8 +78,7 @@ export async function startRoadmapGeneration(skipCompetitors: boolean = false): 
     role: 'general',
     cwd: projectPath,
     model: explorationModel,
-    projectRoot: projectPath,
-    permissionMode: 'bypassPermissions',
+    ...containerSessionOpts(projectPath),
   });
   const key = `roadmap::${projectPath}`;
   sessions.set(key, sessionId);
@@ -98,8 +97,7 @@ export async function startChangelogGeneration(): Promise<string> {
     taskId: `changelog::${projectPath}`,
     role: 'general',
     cwd: projectPath,
-    projectRoot: projectPath,
-    permissionMode: 'bypassPermissions',
+    ...containerSessionOpts(projectPath),
   });
   const key = `changelog::${projectPath}`;
   sessions.set(key, sessionId);

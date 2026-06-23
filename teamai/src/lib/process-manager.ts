@@ -321,6 +321,24 @@ export class ProcessManager extends EventEmitter {
   }
 }
 
+/**
+ * Returns the container-related session options for createSession().
+ * When projectRoot is provided and container mode is enabled in
+ * .teamai/container.json, the session runs inside the devcontainer with
+ * --dangerously-skip-permissions. On the host, --permission-mode bypassPermissions
+ * tells Claude to skip interactive permission prompts.
+ *
+ * This is the single source of truth for container session configuration,
+ * used by both the orchestrator (ticket pipelines) and standalone commands
+ * (roadmap, ideation, changelog, insights, GitHub issues).
+ */
+export function containerSessionOpts(projectRoot: string): {
+  projectRoot: string;
+  permissionMode: 'bypassPermissions';
+} {
+  return { projectRoot, permissionMode: 'bypassPermissions' };
+}
+
 // Store on global so server.ts and Next.js server actions share the same instance
 // across module contexts (Next.js loads server actions in a separate module graph).
 declare global {
