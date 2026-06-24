@@ -12,9 +12,10 @@ import type { Task } from '@/lib/task-store';
 
 interface Props {
   tasks: Task[];
+  projectPath: string;
 }
 
-export function KanbanBoard({ tasks }: Props) {
+export function KanbanBoard({ tasks, projectPath }: Props) {
   const router = useRouter();
   const [showDialog, setShowDialog] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -65,6 +66,7 @@ export function KanbanBoard({ tasks }: Props) {
   }, []);
 
   usePhaseSync({
+    project: projectPath,
     onPhaseChange: (taskId) => clearOptimistic(taskId),
     onConnectionChange: (connected) => setWsStatus(connected ? 'connected' : 'disconnected'),
   });

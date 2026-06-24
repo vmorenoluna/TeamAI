@@ -15,5 +15,5 @@ export default async function WorkflowPage() {
 
   const workflowTasks = await getWorkflowTasks();
 
-  return <WorkflowView workflowTasks={workflowTasks} />;
+  return <WorkflowView workflowTasks={workflowTasks} projectPath={activeProject.path} />;
 }

@@ -168,7 +168,7 @@ describe('Orchestrator Pipeline Integration', () => {
       (orch as AnyOrch).advancePhase(pipeline, 'plan');
 
       expect(pipeline.phase).toBe('plan');
-      expect(mockEmit).toHaveBeenCalledWith('phase-change', { taskId, phase: 'plan' });
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({ taskId, phase: 'plan' }));
     });
 
     it('should emit for each phase in a full pipeline sequence', () => {

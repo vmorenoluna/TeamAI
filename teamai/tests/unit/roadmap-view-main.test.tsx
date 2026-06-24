@@ -136,7 +136,7 @@ import { RoadmapView } from '@/components/roadmap-view';
 
 async function renderView(noProject = false) {
   await act(async () => {
-    render(<RoadmapView noProject={noProject} />);
+    render(<RoadmapView noProject={noProject} projectPath="/test" />);
     if (!vi.isFakeTimers()) {
       await new Promise(r => setTimeout(r, 0));
     }

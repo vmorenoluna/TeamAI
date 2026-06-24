@@ -17,6 +17,7 @@ async function getStores() {
   return {
     taskStore: new TaskStore(projectPath),
     orchestrator: getOrchestrator(projectPath),
+    projectPath,
   };
 }
 
@@ -122,7 +123,7 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
 }
 
 export async function stopTask(taskId: string): Promise<{ success: boolean; error?: string }> {
-  const { taskStore, orchestrator } = await getStores();
+  const { taskStore, orchestrator, projectPath } = await getStores();
   const task = taskStore.getById(taskId);
   if (!task) return { success: false, error: 'Task not found' };
 
@@ -137,7 +138,7 @@ export async function stopTask(taskId: string): Promise<{ success: boolean; erro
 
   // Move to backlog
   taskStore.updatePhase(taskId, 'backlog');
-  processManager.emit('phase-change', { taskId, phase: 'backlog' });
+  processManager.emit('phase-change', { taskId, phase: 'backlog', projectRoot: projectPath });
   revalidatePath('/');
   revalidatePath(`/task/${taskId}`);
   return { success: true };

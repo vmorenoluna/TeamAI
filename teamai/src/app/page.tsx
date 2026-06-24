@@ -21,5 +21,5 @@ export default async function Home() {
     // Active project path may be stale
   }
 
-  return <KanbanBoard tasks={tasks} />;
+  return <KanbanBoard tasks={tasks} projectPath={activeProject.path} />;
 }

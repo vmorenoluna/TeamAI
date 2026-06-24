@@ -4,5 +4,5 @@ import { RoadmapView } from '@/components/roadmap-view';
 export default async function RoadmapPage() {
   const activeProject = await getActiveProject();
 
-  return <RoadmapView noProject={!activeProject} />;
+  return <RoadmapView noProject={!activeProject} projectPath={activeProject?.path ?? ''} />;
 }

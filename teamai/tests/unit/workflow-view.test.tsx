@@ -56,7 +56,7 @@ describe('WorkflowView', () => {
   // ── Phase nodes ────────────────────────────────────────────────────────
 
   it('renders all pipeline phase node labels', () => {
-    render(<WorkflowView workflowTasks={[
+    render(<WorkflowView projectPath="/test" workflowTasks={[
       makeWorkflowTask({ task: { id: 't', title: 'T', phase: 'backlog' } }),
     ]} />);
 
@@ -76,7 +76,7 @@ describe('WorkflowView', () => {
   // ── Header ────────────────────────────────────────────────────────────
 
   it('renders the header and subtitle', () => {
-    render(<WorkflowView workflowTasks={[
+    render(<WorkflowView projectPath="/test" workflowTasks={[
       makeWorkflowTask({ task: { id: 't', title: 'T', phase: 'backlog' } }),
     ]} />);
 
@@ -87,7 +87,7 @@ describe('WorkflowView', () => {
   // ── Empty state ───────────────────────────────────────────────────────
 
   it('shows empty state when no tasks', () => {
-    render(<WorkflowView workflowTasks={[]} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={[]} />);
 
     expect(screen.getByText('No tickets yet — create one from the Board.')).toBeInTheDocument();
   });
@@ -100,7 +100,7 @@ describe('WorkflowView', () => {
       makeWorkflowTask({ task: { id: 't2', title: 'Task B', phase: 'qa-review' } }),
     ];
 
-    render(<WorkflowView workflowTasks={tasks} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={tasks} />);
 
     const badges = screen.getAllByText('2');
     expect(badges.length).toBeGreaterThan(0);
@@ -113,7 +113,7 @@ describe('WorkflowView', () => {
       makeWorkflowTask({ task: { id: 't1', title: 'Fix login bug', phase: 'qa-review' } }),
     ];
 
-    render(<WorkflowView workflowTasks={tasks} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={tasks} />);
 
     const qaNode = screen.getByText('QA Review');
     fireEvent.mouseEnter(qaNode);
@@ -123,7 +123,7 @@ describe('WorkflowView', () => {
   });
 
   it('shows header subtitle with hover instructions', () => {
-    render(<WorkflowView workflowTasks={[
+    render(<WorkflowView projectPath="/test" workflowTasks={[
       makeWorkflowTask({ task: { id: 't', title: 'T', phase: 'backlog' } }),
     ]} />);
 
@@ -131,7 +131,7 @@ describe('WorkflowView', () => {
   });
 
   it('shows "no tickets" message when hovering an empty phase', async () => {
-    render(<WorkflowView workflowTasks={[
+    render(<WorkflowView projectPath="/test" workflowTasks={[
       makeWorkflowTask({ task: { id: 't', title: 'T', phase: 'backlog' } }),
     ]} />);
 
@@ -149,7 +149,7 @@ describe('WorkflowView', () => {
       makeWorkflowTask({ task: { id: 'task-1', title: 'Click me', phase: 'implement' } }),
     ];
 
-    render(<WorkflowView workflowTasks={tasks} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={tasks} />);
 
     fireEvent.mouseEnter(screen.getByText('Implement'));
     await act(() => { vi.advanceTimersByTime(180); });
@@ -164,7 +164,7 @@ describe('WorkflowView', () => {
       makeWorkflowTask({ task: { id: 'task-1', title: 'Click me', phase: 'implement' } }),
     ];
 
-    render(<WorkflowView workflowTasks={tasks} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={tasks} />);
 
     fireEvent.mouseEnter(screen.getByText('Implement'));
     await act(() => { vi.advanceTimersByTime(180); });
@@ -180,7 +180,7 @@ describe('WorkflowView', () => {
       makeWorkflowTask({ task: { id: 'task-1', title: 'Click me', phase: 'implement' } }),
     ];
 
-    render(<WorkflowView workflowTasks={tasks} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={tasks} />);
 
     fireEvent.mouseEnter(screen.getByText('Implement'));
     await act(() => { vi.advanceTimersByTime(180); });
@@ -201,7 +201,7 @@ describe('WorkflowView', () => {
       }),
     ];
 
-    render(<WorkflowView workflowTasks={tasks} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={tasks} />);
 
     fireEvent.mouseEnter(screen.getByText('Implement'));
     await act(() => { vi.advanceTimersByTime(180); });
@@ -218,7 +218,7 @@ describe('WorkflowView', () => {
       }),
     ];
 
-    render(<WorkflowView workflowTasks={tasks} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={tasks} />);
 
     fireEvent.mouseEnter(screen.getByText('Implement'));
     await act(() => { vi.advanceTimersByTime(180); });
@@ -238,7 +238,7 @@ describe('WorkflowView', () => {
       }),
     ];
 
-    render(<WorkflowView workflowTasks={tasks} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={tasks} />);
 
     fireEvent.mouseEnter(screen.getByText('Spec'));
     await act(() => { vi.advanceTimersByTime(180); });
@@ -254,7 +254,7 @@ describe('WorkflowView', () => {
       makeWorkflowTask({ task: { id: 'task-1', title: 'Weird phase', phase: 'some-unknown-phase' } }),
     ];
 
-    render(<WorkflowView workflowTasks={tasks} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={tasks} />);
 
     expect(screen.getByText('Other')).toBeInTheDocument();
   });
@@ -264,7 +264,7 @@ describe('WorkflowView', () => {
       makeWorkflowTask({ task: { id: 'task-1', title: 'Mystery', phase: 'some-unknown-phase' } }),
     ];
 
-    render(<WorkflowView workflowTasks={tasks} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={tasks} />);
 
     fireEvent.mouseEnter(screen.getByText('Other'));
     await act(() => { vi.advanceTimersByTime(180); });
@@ -282,7 +282,7 @@ describe('WorkflowView', () => {
       }),
     ];
 
-    render(<WorkflowView workflowTasks={tasks} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={tasks} />);
 
     // The Implement phase node should have the pulse glow class
     const implNode = screen.getByText('Implement');
@@ -298,7 +298,7 @@ describe('WorkflowView', () => {
       }),
     ];
 
-    render(<WorkflowView workflowTasks={tasks} />);
+    render(<WorkflowView projectPath="/test" workflowTasks={tasks} />);
 
     const implNode = screen.getByText('Implement');
     const parent = implNode.closest('[class*="animate-pulse-glow"]');

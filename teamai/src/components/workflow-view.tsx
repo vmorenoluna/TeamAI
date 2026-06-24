@@ -149,10 +149,11 @@ function PhasePopover({
 
 interface Props {
   workflowTasks: WorkflowTask[];
+  projectPath: string;
 }
 
-export function WorkflowView({ workflowTasks }: Props) {
-  usePhaseSync();
+export function WorkflowView({ workflowTasks, projectPath }: Props) {
+  usePhaseSync({ project: projectPath });
 
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);

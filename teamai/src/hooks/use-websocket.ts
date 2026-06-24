@@ -3,6 +3,8 @@ import { useEffect, useRef } from 'react';
 export interface UseWebSocketOptions {
   /** WebSocket URL. Defaults to `ws://${window.location.host}/ws`. */
   url?: string;
+  /** Active project path — appended as ?project=<encoded-path> so the server can filter broadcasts. */
+  project?: string;
   /** Called with the parsed JSON body of every message. */
   onMessage?: (data: Record<string, unknown>) => void;
   /** Called when the connection state changes. */
@@ -18,6 +20,7 @@ export interface UseWebSocketOptions {
 export function useWebSocket(opts?: UseWebSocketOptions) {
   const {
     url,
+    project,
     onMessage,
     onConnectionChange,
     maxReconnectAttempts = 10,
@@ -44,7 +47,8 @@ export function useWebSocket(opts?: UseWebSocketOptions) {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
 
-    const resolvedUrl = url ?? `ws://${window.location.host}/ws`;
+    const baseUrl = url ?? `ws://${window.location.host}/ws`;
+    const resolvedUrl = project ? `${baseUrl}?project=${encodeURIComponent(project)}` : baseUrl;
 
     function scheduleReconnect() {
       if (closed || reconnectAttempt >= maxReconnectAttempts) return;

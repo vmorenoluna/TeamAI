@@ -135,7 +135,7 @@ export class Orchestrator {
         this.removeWorktree(taskId);
       }
       this.taskStore.updatePhase(taskId, targetPhase);
-      processManager.emit('phase-change', { taskId, phase: targetPhase });
+      processManager.emit('phase-change', { taskId, phase: targetPhase, projectRoot: this.projectRoot });
       return;
     }
 
@@ -1134,7 +1134,7 @@ export class Orchestrator {
   async markTaskDone(taskId: string): Promise<void> {
     this.removeWorktree(taskId);
     this.taskStore.updatePhase(taskId, 'done');
-    processManager.emit('phase-change', { taskId, phase: 'done' });
+    processManager.emit('phase-change', { taskId, phase: 'done', projectRoot: this.projectRoot });
   }
 
   /** Scan the output log for a PR/MR URL created by the agent. */
@@ -1183,7 +1183,7 @@ export class Orchestrator {
    */
   private _persistAndEmitPhase(pipeline: TaskPipeline): void {
     this.taskStore.updatePhase(pipeline.taskId, pipeline.phase);
-    processManager.emit('phase-change', { taskId: pipeline.taskId, phase: pipeline.phase });
+    processManager.emit('phase-change', { taskId: pipeline.taskId, phase: pipeline.phase, projectRoot: this.projectRoot });
   }
 
   /**
@@ -1301,7 +1301,7 @@ export class Orchestrator {
   private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void {
     pipeline.phase = phase;
     this.taskStore.updatePhase(pipeline.taskId, phase);
-    processManager.emit('phase-change', { taskId: pipeline.taskId, phase, ...eventExtra });
+    processManager.emit('phase-change', { taskId: pipeline.taskId, phase, projectRoot: this.projectRoot, ...eventExtra });
   }
 
   // Parse "resets 4:30pm (UTC)" from Claude Code's session-limit message.
@@ -1401,6 +1401,7 @@ export class Orchestrator {
     processManager.emit('phase-change', {
       taskId: pipeline.taskId,
       phase: pipeline.phase,
+      projectRoot: this.projectRoot,
       rateLimitedUntil: resetsAtISO,
     });
 
