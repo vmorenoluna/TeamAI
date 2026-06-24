@@ -121,6 +121,10 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
 
   test('retry button navigates to retryTask action without error', async ({ page }) => {
     if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
+    // Skip in CI: retryTask() fires the orchestrator pipeline which requires
+    // Docker + Claude CLI not available on CI runners. The orchestrator crashes
+    // (devcontainer up failed), corrupting shared seed state for subsequent tests.
+    if (process.env.CI) { test.skip(true, 'Skipped in CI — orchestrator requires Docker/Claude CLI'); return; }
 
     await page.goto('/');
     await scrollKanbanRight(page);
@@ -158,11 +162,12 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
     const taskPath = join(SEED_DIR, '.teamai', SEARCH_CRASH_SLUG, 'task.json');
     try {
       const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
+      task.phase = 'failed';
       task.completionSummary = SEARCH_CRASH_COMPLETION_SUMMARY;
       writeFileSync(taskPath, JSON.stringify(task, null, 2));
-      console.log('[retry-button afterAll] Restored completionSummary for seed task');
+      console.log('[retry-button afterAll] Restored seed task state');
     } catch (e) {
-      console.log('[retry-button afterAll] Failed to restore completionSummary:', e);
+      console.log('[retry-button afterAll] Failed to restore seed state:', e);
     }
   });
 });
