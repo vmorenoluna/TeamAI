@@ -1,9 +1,34 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { ensureProjectSelected, requireSeedTaskId, SEED_DIR, scrollKanbanRight } from './helpers';
+import { ensureProjectSelected, getSeedTaskId, requireSeedTaskId, SEED_DIR, scrollKanbanRight } from './helpers';
 
 const SEARCH_CRASH_SLUG = 'fix-search-bar-crashes-on-empty-input';
+
+// Restored by afterAll if retry-click tests modify task state locally
+const SEARCH_CRASH_COMPLETION_SUMMARY = `# Completion Summary
+
+Task failed after reaching max QA attempts (3/3).
+
+## Plan Subtasks
+
+- [x] **Add empty guard clause** — COMPLETED
+- [ ] **Add validation test** — NOT COMPLETED
+
+## Last QA Report
+
+Overall: **FAIL**
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Empty input handled without crash | PASS | |
+| Shows helpful error message to user | FAIL | No user-facing message shown |
+| Edge cases covered (whitespace, special chars) | FAIL | Only basic empty string handled |
+
+## Issues
+
+- [warning] No toast/notification shown on empty submit
+- [warning] Whitespace-only input not handled`;
 
 // ── Template verification (filesystem only — no page interaction) ──
 
@@ -45,6 +70,9 @@ test.describe.serial('Spec Revision — Retry with Updated Templates', () => {
 
   test('retry on failed task card fires retryTask action without client error', async ({ page }) => {
     if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
+    // Skip in CI: retryTask() fires the orchestrator pipeline which requires
+    // Docker + Claude CLI not available on CI runners.
+    if (process.env.CI) { test.skip(true, 'Skipped in CI — orchestrator requires Docker/Claude CLI'); return; }
 
     requireSeedTaskId(SEARCH_CRASH_SLUG); // validate seed task exists
     await page.goto('/');
@@ -80,6 +108,9 @@ test.describe.serial('Spec Revision — Retry with Updated Templates', () => {
 
   test('retry from task detail panel fires retryTask without client error', async ({ page }) => {
     if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
+    // Skip in CI: retryTask() fires the orchestrator pipeline which requires
+    // Docker + Claude CLI not available on CI runners.
+    if (process.env.CI) { test.skip(true, 'Skipped in CI — orchestrator requires Docker/Claude CLI'); return; }
 
     const taskId = requireSeedTaskId(SEARCH_CRASH_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -127,6 +158,26 @@ test.describe.serial('Spec Revision — Retry with Updated Templates', () => {
     if (await doneCards.count() > 0) {
       const retryBtn = doneCards.first().locator('[data-testid="retry-button"]');
       await expect(retryBtn, 'done tasks should not have retry button').toHaveCount(0);
+    }
+  });
+
+  // ── Restore seed state after retry-click tests (local dev only) ────────
+  // In local development, the retry-click tests trigger retryTask() which clears
+  // completionSummary and may change the task phase. Restore the original seed
+  // state so subsequent test files see the expected data.
+  test.afterAll(() => {
+    const taskId = getSeedTaskId(SEARCH_CRASH_SLUG);
+    if (!taskId) return;
+
+    const taskPath = join(SEED_DIR, '.teamai', SEARCH_CRASH_SLUG, 'task.json');
+    try {
+      const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
+      task.phase = 'failed';
+      task.completionSummary = SEARCH_CRASH_COMPLETION_SUMMARY;
+      writeFileSync(taskPath, JSON.stringify(task, null, 2));
+      console.log('[spec-revision-retry afterAll] Restored seed task state');
+    } catch (e) {
+      console.log('[spec-revision-retry afterAll] Failed to restore state:', e);
     }
   });
 });
