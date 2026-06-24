@@ -63,3 +63,7 @@ coverage_output.txt
 coverage_verbose.txt
 full_coverage.txt
 full_coverage2.txt
+
+# TeamAI — exclude transient pipeline files
+.teamai/*/output.log
+.teamai/*/.pipeline_state.json
