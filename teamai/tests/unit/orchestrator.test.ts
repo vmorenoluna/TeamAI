@@ -1901,10 +1901,12 @@ describe('Orchestrator', () => {
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
       writeFileSync(join(testData.taskDir, 'output.log'), 'Created: https://github.com/owner/repo/pull/42\n');
 
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
-        branch: testData.branchName,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
       });
 
       mockCreateSession.mockResolvedValue('sess-pr');
@@ -1928,17 +1930,27 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
 
+      const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
-        branch: testData.branchName,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
       });
 
       mockCreateSession.mockResolvedValue('sess-pr');
-      mockExecFileSync
-        .mockReturnValueOnce('')
-        .mockReturnValueOnce('https://unknown.example.com/repo.git')
-        .mockReturnValueOnce('refs/remotes/origin/main');
+      // Use mockImplementation instead of mockReturnValueOnce — the now-executed
+      // _commitArtifactsToWorktree adds intermediate git calls that would consume
+      // the fixed-size chain and cause subsequent calls to return undefined.
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && Array.isArray(args) && args[0] === 'remote') {
+          return 'https://unknown.example.com/repo.git';
+        }
+        if (cmd === 'git' && Array.isArray(args) && args[0] === 'rev-parse') {
+          return 'refs/remotes/origin/main';
+        }
+        return '';
+      });
 
       const promise = (orch as AnyOrch).runCreatePR(pipeline);
       await new Promise(r => setTimeout(r, 10));
