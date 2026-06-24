@@ -1,9 +1,36 @@
 import { test, expect, type Page } from '@playwright/test';
-import { ensureProjectSelected, requireSeedTaskId, scrollKanbanRight } from './helpers';
+import { ensureProjectSelected, getSeedTaskId, requireSeedTaskId, scrollKanbanRight, SEED_DIR } from './helpers';
+import { readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
 
 let isSeeded = false;
 
 const SEARCH_CRASH_SLUG = 'fix-search-bar-crashes-on-empty-input';
+
+// Restored by afterAll if retry-click test clears it
+const SEARCH_CRASH_COMPLETION_SUMMARY = `# Completion Summary
+
+Task failed after reaching max QA attempts (3/3).
+
+## Plan Subtasks
+
+- [x] **Add empty guard clause** — COMPLETED
+- [ ] **Add validation test** — NOT COMPLETED
+
+## Last QA Report
+
+Overall: **FAIL**
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Empty input handled without crash | PASS | |
+| Shows helpful error message to user | FAIL | No user-facing message shown |
+| Edge cases covered (whitespace, special chars) | FAIL | Only basic empty string handled |
+
+## Issues
+
+- [warning] No toast/notification shown on empty submit
+- [warning] Whitespace-only input not handled`;
 
 test.describe.serial('Retry Button on Failed Tasks', () => {
   test.beforeEach(async ({ page }) => {
@@ -117,5 +144,25 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
     // Either way, the retry button still works, so verify no error popup appeared.
     const errorDialog = page.locator('text=Failed to retry task');
     await expect(errorDialog).toHaveCount(0, { timeout: 5_000 });
+  });
+
+  // ── Restore seed state after retry-click test ──────────────────────────
+  // The retry-click test triggers retryTask(), which clears completionSummary
+  // on the task. Subsequent test files (task-detail.spec.ts, completion-summary.spec.ts)
+  // read the same task and expect the completion summary banner to render.
+  // Restoring completionSummary in task.json prevents cascading failures.
+  test.afterAll(() => {
+    const taskId = getSeedTaskId(SEARCH_CRASH_SLUG);
+    if (!taskId) return;
+
+    const taskPath = join(SEED_DIR, '.teamai', SEARCH_CRASH_SLUG, 'task.json');
+    try {
+      const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
+      task.completionSummary = SEARCH_CRASH_COMPLETION_SUMMARY;
+      writeFileSync(taskPath, JSON.stringify(task, null, 2));
+      console.log('[retry-button afterAll] Restored completionSummary for seed task');
+    } catch (e) {
+      console.log('[retry-button afterAll] Failed to restore completionSummary:', e);
+    }
   });
 });
