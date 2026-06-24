@@ -62,8 +62,11 @@ test.describe('QA Failure Banner & Completion Summary', () => {
     await page.goto(`/task/${taskId}`);
     await expect(page.locator('body')).toBeVisible();
 
-    // Navigate to QA tab directly via URL hash
-    await page.goto(`/task/${taskId}#qa`);
+    // Click the QA tab directly — hash navigation (#qa) doesn't reliably
+    // trigger React's useEffect/hashchange on headless CI Chromium, leaving
+    // the Overview tab visible. Clicking the button forces an immediate state
+    // update that renders QAReportView with the full criteria notes.
+    await page.locator('button').filter({ hasText: /^QA/ }).click();
 
     await expect(page.locator('text=FAIL').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('text=Empty input handled without crash')).toBeVisible({ timeout: 5_000 });
