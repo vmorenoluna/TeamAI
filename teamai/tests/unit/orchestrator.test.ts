@@ -236,10 +236,10 @@ describe('Orchestrator', () => {
 
       await orch.moveTaskToPhase(testData.taskId, 'backlog');
 
-      expect(mockEmit).toHaveBeenCalledWith('phase-change', {
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId: testData.taskId,
         phase: 'backlog',
-      });
+      }));
     });
 
     it('moves to done without spawning', async () => {
@@ -248,10 +248,10 @@ describe('Orchestrator', () => {
 
       await orch.moveTaskToPhase(testData.taskId, 'done');
 
-      expect(mockEmit).toHaveBeenCalledWith('phase-change', {
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId: testData.taskId,
         phase: 'done',
-      });
+      }));
     });
 
     it('throws for nonexistent task', async () => {
@@ -605,10 +605,10 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).advancePhase(pipeline, 'plan');
 
       expect(pipeline.phase).toBe('plan');
-      expect(mockEmit).toHaveBeenCalledWith('phase-change', {
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId: testData.taskId,
         phase: 'plan',
-      });
+      }));
     });
 
     it('emits for all phase transitions', () => {
@@ -696,10 +696,10 @@ describe('Orchestrator', () => {
       mockEmit.mockClear();
       (orch as AnyOrch)._persistAndEmitPhase(pipeline);
 
-      expect(mockEmit).toHaveBeenCalledWith('phase-change', {
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId: testData.taskId,
         phase: 'implement',
-      });
+      }));
 
       const taskJson = JSON.parse(readFileSync(join(pipeline.specPath, 'task.json'), 'utf-8'));
       expect(taskJson.phase).toBe('implement');
@@ -722,10 +722,10 @@ describe('Orchestrator', () => {
       mockEmit.mockClear();
       (orch as AnyOrch)._persistAndEmitPhase(pipeline);
 
-      expect(mockEmit).toHaveBeenCalledWith('phase-change', {
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId: testData.taskId,
         phase: 'merge',
-      });
+      }));
 
       const taskJson = JSON.parse(readFileSync(join(pipeline.specPath, 'task.json'), 'utf-8'));
       expect(taskJson.phase).toBe('merge');
@@ -1972,10 +1972,10 @@ describe('Orchestrator', () => {
 
       await orch.markTaskDone(testData.taskId);
 
-      expect(mockEmit).toHaveBeenCalledWith('phase-change', {
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId: testData.taskId,
         phase: 'done',
-      });
+      }));
     });
   });
 

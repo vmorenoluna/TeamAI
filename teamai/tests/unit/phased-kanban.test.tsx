@@ -72,6 +72,7 @@ function renderComponent(
   report: RoadmapReport = makeReport(),
   overrides: {
     filename?: string;
+    projectPath?: string;
     onRefresh?: () => void;
     onSelectTask?: () => void;
     onOpenRoadmapItem?: () => void;
@@ -81,6 +82,7 @@ function renderComponent(
     <PhasedKanban
       report={report}
       filename={overrides.filename ?? 'roadmap-2025-01-01.json'}
+      projectPath={overrides.projectPath ?? '/test'}
       onRefresh={overrides.onRefresh ?? vi.fn()}
       onSelectTask={overrides.onSelectTask ?? vi.fn()}
       onOpenRoadmapItem={overrides.onOpenRoadmapItem ?? vi.fn()}

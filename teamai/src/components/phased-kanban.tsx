@@ -19,12 +19,14 @@ import { RoadmapCard, PHASE_LABELS } from './roadmap-card';
 export function PhasedKanban({
   report,
   filename,
+  projectPath,
   onRefresh,
   onSelectTask,
   onOpenRoadmapItem,
 }: {
   report: RoadmapReport;
   filename: string;
+  projectPath: string;
   onRefresh: () => void;
   onSelectTask: (taskId: string) => void;
   onOpenRoadmapItem: (item: RoadmapItem, phaseKey: string, itemIndex: number) => void;
@@ -131,6 +133,7 @@ export function PhasedKanban({
 
   // Real-time sync: update linked status when a kanban task phase changes
   usePhaseSync({
+    project: projectPath,
     onPhaseChange: (taskId, phase) => {
       if (allLinkedIds.includes(taskId)) {
         setLinkedStatuses(prev => {

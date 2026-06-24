@@ -95,13 +95,15 @@ function report(phases: Partial<RoadmapReport['phases']> = {}): RoadmapReport {
 
 async function renderKanban(
   rpt: RoadmapReport = report(),
-  filename = 'roadmap-2026-01-01.json'
+  filename = 'roadmap-2026-01-01.json',
+  projectPath = '/test'
 ) {
   await act(async () => {
     render(
       <PhasedKanban
         report={rpt}
         filename={filename}
+        projectPath={projectPath}
         onRefresh={vi.fn()}
         onSelectTask={vi.fn()}
         onOpenRoadmapItem={vi.fn()}

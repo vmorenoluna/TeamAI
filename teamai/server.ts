@@ -17,6 +17,25 @@ app.prepare().then(() => {
 
   // noServer: true so we handle upgrades manually and don't block Next.js HMR
   const wss = new WebSocketServer({ noServer: true });
+
+  // Augment WebSocket type with projectRoot for broadcast filtering
+  interface ProjectWebSocket extends WebSocket {
+    projectRoot?: string;
+  }
+
+  /** Helper: only send to clients that match the event's project, or have no project set (backwards compat). */
+  function broadcastToProject(event: { projectRoot?: string }, msg: string): void {
+    const eventProject = typeof event.projectRoot === 'string' ? event.projectRoot : undefined;
+    for (const client of wss.clients) {
+      const pws = client as ProjectWebSocket;
+      if (pws.readyState !== WebSocket.OPEN) continue;
+      // Send if no project filter on client (backwards compat), or client's project matches event
+      if (!pws.projectRoot || !eventProject || pws.projectRoot === eventProject) {
+        pws.send(msg);
+      }
+    }
+  }
+
   wss.on('connection', (ws) => {
     // Agent event streaming
     const agentHandler = ({ sessionId, event }: { sessionId: string; event: Record<string, unknown> }) => {
@@ -51,34 +70,32 @@ app.prepare().then(() => {
     });
   });
 
-  // Broadcast phase-change events from the Orchestrator to all connected clients
-  processManager.on('phase-change', (data: { taskId: string; phase: string; prUrl?: string; platform?: string }) => {
+  // Broadcast phase-change events from the Orchestrator to clients viewing the relevant project
+  processManager.on('phase-change', (data: { taskId: string; phase: string; projectRoot?: string; prUrl?: string; platform?: string }) => {
     const msg = JSON.stringify({ type: 'phase-change', taskId: data.taskId, phase: data.phase, prUrl: data.prUrl, platform: data.platform });
-    for (const client of wss.clients) {
-      if (client.readyState === WebSocket.OPEN) client.send(msg);
-    }
+    broadcastToProject(data, msg);
   });
 
-  // Broadcast container lifecycle state changes to all connected clients
+  // Broadcast container lifecycle state changes to clients viewing the relevant project
   containerManager.on('container-state', (data: { projectRoot: string; state: string }) => {
     const msg = JSON.stringify({ type: 'container-state', projectRoot: data.projectRoot, state: data.state });
-    for (const client of wss.clients) {
-      if (client.readyState === WebSocket.OPEN) client.send(msg);
-    }
+    broadcastToProject(data, msg);
   });
 
-  // Broadcast container startup log messages to all connected clients
+  // Broadcast container startup log messages to clients viewing the relevant project
   containerManager.on('container-log', (data: { projectRoot: string; message: string }) => {
     const msg = JSON.stringify({ type: 'container-log', projectRoot: data.projectRoot, message: data.message });
-    for (const client of wss.clients) {
-      if (client.readyState === WebSocket.OPEN) client.send(msg);
-    }
+    broadcastToProject(data, msg);
   });
 
   server.on('upgrade', (request, socket, head) => {
-    const { pathname } = parse(request.url!, true);
+    const { pathname, query } = parse(request.url!, true);
     if (pathname === '/ws') {
       wss.handleUpgrade(request, socket, head, (client) => {
+        // Store project association from query param so broadcasts can be filtered
+        if (typeof query?.project === 'string') {
+          (client as ProjectWebSocket).projectRoot = query.project;
+        }
         wss.emit('connection', client, request);
       });
     }

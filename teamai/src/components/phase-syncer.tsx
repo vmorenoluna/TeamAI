@@ -2,7 +2,7 @@
 
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 
-export function PhaseSyncer() {
-  usePhaseSync();
+export function PhaseSyncer({ projectPath }: { projectPath?: string }) {
+  usePhaseSync({ project: projectPath });
   return null;
 }

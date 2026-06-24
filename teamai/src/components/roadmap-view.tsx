@@ -33,7 +33,7 @@ import { LoadingSpinner } from './loading-spinner';
 
 type Tab = 'roadmap' | 'changelog';
 
-export function RoadmapView({ noProject }: { noProject: boolean }) {
+export function RoadmapView({ noProject, projectPath }: { noProject: boolean; projectPath: string }) {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     try { return (sessionStorage.getItem('roadmap-tab') as Tab) ?? 'roadmap'; }
     catch { return 'roadmap'; }
@@ -475,6 +475,7 @@ export function RoadmapView({ noProject }: { noProject: boolean }) {
               <PhasedKanban
                 report={rmReport}
                 filename={rmFilename}
+                projectPath={projectPath}
                 onRefresh={refreshRoadmapReport}
                 onSelectTask={handleSelectTask}
                 onOpenRoadmapItem={handleOpenRoadmapItem}

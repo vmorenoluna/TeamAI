@@ -100,7 +100,7 @@ function task(overrides: Partial<Task> = {}): Task {
 }
 
 function renderBoard(tasks: Task[] = []) {
-  render(<KanbanBoard tasks={tasks} />);
+  render(<KanbanBoard tasks={tasks} projectPath="/test" />);
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
