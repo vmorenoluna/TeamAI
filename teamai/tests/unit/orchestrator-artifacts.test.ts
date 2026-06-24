@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { join, basename } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 
@@ -166,7 +166,7 @@ describe('_commitArtifactsToWorktree', () => {
     (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
 
     // Verify target directory was created
-    const targetDir = join(worktreePath, '.teamai', testData.slug);
+    const targetDir = join(worktreePath, '.teamai', basename(pipeline.specPath as string));
     expect(existsSync(targetDir)).toBe(true);
 
     // Excluded files should NOT be copied
@@ -297,7 +297,7 @@ describe('_commitArtifactsToWorktree', () => {
     expect(logContent).toContain('appears to be gitignored');
 
     // Files should still have been copied
-    const targetDir = join(worktreePath, '.teamai', testData.slug);
+    const targetDir = join(worktreePath, '.teamai', basename(pipeline.specPath as string));
     expect(existsSync(join(targetDir, 'spec.md'))).toBe(true);
   });
 
@@ -436,7 +436,7 @@ describe('_commitArtifactsToWorktree', () => {
 
     (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
 
-    const targetDir = join(worktreePath, '.teamai', testData.slug);
+    const targetDir = join(worktreePath, '.teamai', basename(pipeline.specPath as string));
 
     // Excluded — should NOT be present
     expect(existsSync(join(targetDir, 'output.log'))).toBe(false);

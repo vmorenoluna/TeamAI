@@ -1967,7 +1967,10 @@ export class Orchestrator {
     const logFile = path.join(pipeline.specPath, 'output.log');
     this._phaseHeader(logFile, 'artifacts — commit to worktree');
 
-    const slug = slugify(pipeline.description);
+    // Use the task's actual directory name (derived from its title at creation time),
+    // not slugify(description) — these differ and produce a second orphan directory
+    // after merge, causing duplicate UUID entries in TaskStore.getAll().
+    const slug = path.basename(pipeline.specPath);
     const targetDir = path.join(pipeline.worktreePath, '.teamai', slug);
 
     if (!existsSync(targetDir)) {
