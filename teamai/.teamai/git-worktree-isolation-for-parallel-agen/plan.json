@@ -1,0 +1,63 @@
+{
+  "subtasks": [
+    {
+      "id": 1,
+      "title": "Create per-subtask worktrees for multi-subtask parallel groups",
+      "description": "In runImplement's group loop, when a group has 2+ subtasks: (a) create a git worktree named <task-worktree>-st<subtask-id> from the task's feature branch, (b) patch .git file for container mode if applicable, (c) pass the new worktree path as cwd to createSession. For single-subtask groups: use pipeline.worktreePath directly (AC2).",
+      "files": ["teamai/src/lib/orchestrator.ts"],
+      "acceptance_criteria": [
+        "Multi-subtask groups (length >= 2): each subtask gets its own worktree at <task-worktree>-st<subtask-id>",
+        "Single-subtask groups: subtask uses pipeline.worktreePath directly",
+        "createSession receives the correct cwd (either per-subtask worktree or main worktree)",
+        "Container mode: per-subtask worktree .git files are patched via _patchWorktreeGitFile",
+        "Subtasks in a single-subtask group skip worktree isolation entirely (no overhead)"
+      ],
+      "parallel_group": "implement"
+    },
+    {
+      "id": 2,
+      "title": "Cherry-pick successful commits back to main worktree after group completes",
+      "description": "After Promise.allSettled completes for a multi-subtask group: (a) for each successful subtask, cherry-pick its commits onto the main task worktree in subtask-ID order using 'git cherry-pick' from the per-subtask branch, (b) if cherry-pick fails, surface the error and fail the task (conflicts = planner error, out of scope).",
+      "files": ["teamai/src/lib/orchestrator.ts"],
+      "acceptance_criteria": [
+        "Successful subtask commits are cherry-picked onto the main worktree in subtask-ID order",
+        "Cherry-pick failure throws an error with details (which file conflicted)",
+        "Cherry-pick only runs for multi-subtask groups (single-subtask groups don't need it)"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Cleanup per-subtask worktrees after group completes",
+      "description": "After cherry-picks complete (or all subtasks fail): (a) remove each per-subtask worktree via 'git worktree remove --force', (b) delete the per-subtask branches, (c) prune git worktree metadata. Must run in a finally block so cleanup happens regardless of success/failure.",
+      "files": ["teamai/src/lib/orchestrator.ts"],
+      "acceptance_criteria": [
+        "Per-subtask worktrees are removed after group processing (success or failure)",
+        "Per-subtask branches are deleted",
+        "Cleanup runs in a finally block (guaranteed even on cherry-pick failure)",
+        "Full group failure: per-subtask worktrees are cleaned up, original error surfaced (AC8)"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Crash recovery: detect and remove stale per-subtask worktrees on resume",
+      "description": "At the start of runImplement (before the group loop), scan for stale per-subtask worktrees matching <worktree-base>/<task-worktree-name>-st* and remove them. Stale worktrees have no corresponding active session and their subtasks are not marked completed in plan.json.",
+      "files": ["teamai/src/lib/orchestrator.ts"],
+      "acceptance_criteria": [
+        "Stale per-subtask worktrees are detected and removed on pipeline resume (AC9)",
+        "Detection uses glob: <worktree-base>/<task-slug>-st*",
+        "Removal uses git worktree remove --force + branch -D + worktree prune"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Update existing tests for new worktree behavior",
+      "description": "Fix any failing tests in orchestrator.test.ts, orchestrator-artifacts.test.ts, orchestrator-pipeline.test.ts, and related test files that mock or assert worktree paths in the runImplement section. Tests that assert createSession receives pipeline.worktreePath must now account for per-subtask worktree paths.",
+      "files": ["teamai/tests/unit/orchestrator.test.ts", "teamai/tests/unit/orchestrator-pipeline.test.ts", "teamai/tests/unit/orchestrator-artifacts.test.ts"],
+      "acceptance_criteria": [
+        "All existing orchestrator tests pass with the new worktree behavior",
+        "Tests that assert createSession cwd are updated to match per-subtask worktree paths",
+        "New test(s) verify per-subtask worktree creation for multi-subtask groups"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "overall": "PASS",
+  "criteria": [
+    {
+      "criterion": "AC1: Phase-change only reaches relevant project",
+      "name": "AC1: Phase-change only reaches relevant project",
+      "status": "PASS",
+      "notes": "server.ts broadcastToProject() helper filters wss.clients by ws.projectRoot === event.projectRoot. When a client connects with ?project= query param, it only receives phase-change events for that project. Clients without the param receive all events (backwards compat). Container-state and container-log broadcasts use the same filter.",
+      "evidence": "server.ts lines 22-32: ProjectWebSocket interface; lines 26-31: broadcastToProject helper; lines 55-58: phase-change listener; lines 63-67: container-state listener; lines 71-75: container-log listener"
+    },
+    {
+      "criterion": "AC2: Container-state only reaches relevant project",
+      "name": "AC2: Container-state only reaches relevant project",
+      "status": "PASS",
+      "notes": "Container-state events already include projectRoot in their payload. The broadcastToProject helper now filters by matching projectRoot. Verified in server.ts line 65-67.",
+      "evidence": "server.ts line 65: broadcastToProject(data, msg) replaces the unconditional for-loop broadcast"
+    },
+    {
+      "criterion": "AC3: Container-log only reaches relevant project",
+      "name": "AC3: Container-log only reaches relevant project",
+      "status": "PASS",
+      "notes": "Container-log events already include projectRoot. Same filter applies. Verified in server.ts line 73-75.",
+      "evidence": "server.ts line 73: broadcastToProject(data, msg)"
+    },
+    {
+      "criterion": "AC4: Clients without project param receive all events (backwards compatible)",
+      "name": "AC4: Clients without project param receive all events (backwards compatible)",
+      "status": "PASS",
+      "notes": "broadcastToProject logic: if (!pws.projectRoot || !eventProject || pws.projectRoot === eventProject). When eventProject is undefined (old events without projectRoot), all clients receive it. When pws.projectRoot is undefined (client connected without ?project=), all events reach that client.",
+      "evidence": "server.ts line 31: broadcast condition"
+    },
+    {
+      "criterion": "AC5: Client reconnecting after project switch receives correct events",
+      "name": "AC5: Client reconnecting after project switch receives correct events",
+      "status": "PASS",
+      "notes": "WebSocket connection is recreated on project change since the URL changes (?project=newPath). The old connection is closed via useEffect cleanup. Verified in use-websocket.ts: the resolvedUrl includes the project param, so reconnecting with a different project uses a new URL.",
+      "evidence": "use-websocket.ts line 49: resolvedUrl = project ? `${baseUrl}?project=${encodeURIComponent(project)}` : baseUrl"
+    },
+    {
+      "criterion": "AC6: Agent event streaming is unaffected",
+      "name": "AC6: Agent event streaming is unaffected",
+      "status": "PASS",
+      "notes": "Agent events use per-connection handlers (not broadcastToProject). The per-connection agentHandler and terminalHandler are unchanged. Only the phase-change, container-state, and container-log broadcast loops were modified.",
+      "evidence": "server.ts lines 34-51: agentHandler and terminalHandler are unchanged"
+    }
+  ],
+  "additional_issues": []
+}

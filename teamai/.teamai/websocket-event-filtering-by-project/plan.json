@@ -1,0 +1,71 @@
+{
+  "taskId": "ed81fd7d-b834-43de-9573-9be3954e36d5",
+  "spec": "spec.md",
+  "subtasks": [
+    {
+      "id": 1,
+      "title": "Include projectRoot in phase-change events",
+      "description": "Add the orchestrator's project path to every phase-change event emission so the server can route broadcasts by project.",
+      "files": ["src/lib/orchestrator.ts"],
+      "acceptance_criteria": [
+        "All processManager.emit('phase-change', ...) calls include a projectRoot field",
+        "The projectRoot matches the project path the orchestrator was constructed with"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": 2,
+      "title": "Server-side project tracking and broadcast filtering",
+      "description": "Parse the 'project' query param from WebSocket upgrade URLs. Store ws.projectRoot. Filter phase-change, container-state, and container-log broadcast loops to only send to clients whose projectRoot matches the event's projectRoot.",
+      "files": ["server.ts"],
+      "acceptance_criteria": [
+        "WebSocket upgrade handler parses ?project=<path> query param",
+        "ws.projectRoot is set per client",
+        "Clients without ?project= param receive all events (backwards compatible)",
+        "Clients with ?project= only receive events for their project"
+      ],
+      "depends_on": [1]
+    },
+    {
+      "id": 3,
+      "title": "Client-side project declaration in useWebSocket",
+      "description": "Add optional 'project' parameter to useWebSocket. When provided, append ?project=<encoded-path> to the WebSocket URL so the server knows which project the client is viewing.",
+      "files": ["src/hooks/use-websocket.ts"],
+      "acceptance_criteria": [
+        "useWebSocket accepts optional project param",
+        "WebSocket URL becomes ws://host/ws?project=<encoded-path> when project is provided",
+        "No query param when project is not provided (backwards compatible)"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": 4,
+      "title": "Pass project path through usePhaseSync to useWebSocket",
+      "description": "Add optional 'project' parameter to usePhaseSync. Forward it to useWebSocket so the phase-sync connection declares its project scope.",
+      "files": ["src/hooks/use-phase-sync.ts"],
+      "acceptance_criteria": [
+        "usePhaseSync accepts optional project param",
+        "project param is passed through to useWebSocket"
+      ],
+      "depends_on": [3]
+    },
+    {
+      "id": 5,
+      "title": "Wire project path through frontend components",
+      "description": "Pass the active project path to usePhaseSync in KanbanBoard, PhasedKanban, WorkflowView, and PhaseSyncer. Each component receives the project path as a prop from its server-rendered parent page.",
+      "files": [
+        "src/components/kanban-board.tsx",
+        "src/components/phased-kanban.tsx",
+        "src/components/workflow-view.tsx",
+        "src/components/phase-syncer.tsx"
+      ],
+      "acceptance_criteria": [
+        "KanbanBoard passes projectPath to usePhaseSync",
+        "PhasedKanban passes filename-derived path to usePhaseSync",
+        "WorkflowView passes projectPath to usePhaseSync",
+        "PhaseSyncer passes projectPath to usePhaseSync"
+      ],
+      "depends_on": [4]
+    }
+  ]
+}

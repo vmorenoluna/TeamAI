@@ -1,0 +1,10 @@
+{
+  "id": "ed81fd7d-b834-43de-9573-9be3954e36d5",
+  "title": "WebSocket event filtering by project",
+  "description": "The server.ts broadcasts phase-change events to ALL connected WebSocket clients regardless of which project they're viewing. In multi-project setups, this wastes bandwidth and causes unnecessary re-renders. Filter events by project scope on the server side.",
+  "phase": "failed",
+  "source": "ideation",
+  "createdAt": "2026-06-24T20:50:44.777Z",
+  "updatedAt": "2026-06-24T21:53:20.081Z",
+  "branch": "feat/the-server-ts-broadcasts-phase-change-ev"
+}

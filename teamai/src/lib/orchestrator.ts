@@ -566,6 +566,9 @@ export class Orchestrator {
       this._patchWorktreeGitFile(pipeline.worktreePath, containerInfo.remoteWorkspaceFolder);
     }
 
+    // ── AC9: Crash recovery — clean up stale per-subtask worktrees from previous runs ──
+    this._cleanStaleSubtaskWorktrees(pipeline);
+
     const planPath = path.join(pipeline.specPath, 'plan.json');
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
 
@@ -627,136 +630,203 @@ export class Orchestrator {
       // Track completed subtask IDs in memory to avoid race conditions
       // when multiple subtasks complete near-simultaneously
       const completedIds: number[] = [];
-      const results = await Promise.allSettled(
-        subtasks.map(async (subtask: PlanSubtask) => {
-          this._phaseHeader(logFile, `implement — subtask ${subtask.id}: ${subtask.title}`);
-          let sessionId: string;
+
+      // ── AC1/AC2: Per-subtask worktree isolation for multi-subtask groups ──
+      const isMultiGroup = subtasks.length >= 2;
+      const subtaskWorktrees = new Map();
+      let containerWorkspace;
+
+      if (isMultiGroup) {
+        if (readContainerConfig(this.projectRoot).enabled) {
+          const info = containerManager.getRunningContainer(this.projectRoot);
+          containerWorkspace = info && info.remoteWorkspaceFolder;
+        }
+
+        for (const subtask of subtasks) {
+          const stWorktreePath = pipeline.worktreePath + '-st' + subtask.id;
+          const stBranch = pipeline.branch + '-st' + subtask.id;
+
+          // Clean up stale worktree from a previous crash
           try {
-            sessionId = await processManager.createSession(this.sessionOpts(coderRole, pipeline.worktreePath, pipeline.taskId, logFile));
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            appendFileSync(logFile, `\n[ERROR] Session creation failed: ${msg}\n`);
-            throw err;
+            this._execGit(['worktree', 'remove', '--force', stWorktreePath], this.projectRoot);
+          } catch { /* best-effort */ }
+          if (existsSync(stWorktreePath)) {
+            try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+            try { execFileSync('git', ['worktree', 'prune'], { cwd: this.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
           }
-          // QA feedback is prepended at the top so the coder reads it first.
-          // Plan.json acceptance criteria have already been patched with QA corrections.
+          try {
+            execFileSync('git', ['branch', '-D', stBranch], { cwd: this.projectRoot, stdio: 'pipe' });
+          } catch { /* best-effort */ }
 
-          // In QA rework mode, only send the QA-flagged criteria — the agent
-          // should focus exclusively on fixes, not re-validate passed criteria.
-          const qaOnlyCriteria = hasQaFeedback
-            ? subtask.acceptance_criteria.filter(
-                ac => ac.includes('[QA CORRECTION') || ac.includes('[QA ISSUE')
-              )
-            : subtask.acceptance_criteria;
-          const criteriaLine = hasQaFeedback
-            ? (qaOnlyCriteria.length > 0
-                ? `QA issues to fix: ${qaOnlyCriteria.join('; ')}`
-                : `No specific QA criteria for this subtask — see the QA feedback above for issues to address.`)
-            : `Acceptance criteria: ${subtask.acceptance_criteria.join('; ')}`;
+          // AC1: Create worktree from the task branch
+          this._execGit(['worktree', 'add', stWorktreePath, '-b', stBranch, pipeline.branch], this.projectRoot);
 
-          // Build per-subtask QA feedback — each agent only sees issues for its own subtask.
-          const subtaskFeedback = (() => {
-            if (!hasQaFeedback) return '';
-            const lines: string[] = [];
-            lines.push('## ⚠️ QA FEEDBACK — FIX THESE FIRST ⚠️');
-            lines.push('');
-            // Overall status from the QA report
+          // AC7: Container mode - patch .git file
+          if (containerWorkspace) {
+            this._patchWorktreeGitFile(stWorktreePath, containerWorkspace);
+          }
+
+          subtaskWorktrees.set(subtask.id, stWorktreePath);
+          appendFileSync(logFile, '\n[WORKTREE] Created isolated worktree for subtask ' + subtask.id + ' at ' + stWorktreePath + '\n');
+        }
+      }
+
+      try {
+        const results = await Promise.allSettled(
+          subtasks.map(async (subtask) => {
+            this._phaseHeader(logFile, 'implement — subtask ' + subtask.id + ': ' + subtask.title);
+            const cwd = isMultiGroup ? subtaskWorktrees.get(subtask.id) : pipeline.worktreePath;
+            let sessionId;
             try {
-              const reportPath = path.join(pipeline.specPath, 'qa_report.json');
-              if (existsSync(reportPath)) {
-                const report: QaReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
-                if (report.overall) lines.push(`Overall: **${report.overall}**`);
-              }
-            } catch { /* best-effort */ }
-            // Only this subtask's issues
-            if (qaOnlyCriteria.length > 0) {
+              sessionId = await processManager.createSession(this.sessionOpts(coderRole, cwd, pipeline.taskId, logFile));
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              appendFileSync(logFile, '\n[ERROR] Session creation failed: ' + msg + '\n');
+              throw err;
+            }
+
+            const qaOnlyCriteria = hasQaFeedback
+              ? subtask.acceptance_criteria.filter(
+                  ac => ac.includes('[QA CORRECTION') || ac.includes('[QA ISSUE')
+                )
+              : subtask.acceptance_criteria;
+            const criteriaLine = hasQaFeedback
+              ? (qaOnlyCriteria.length > 0
+                  ? 'QA issues to fix: ' + qaOnlyCriteria.join('; ')
+                  : 'No specific QA criteria for this subtask — see the QA feedback above for issues to address.')
+              : 'Acceptance criteria: ' + subtask.acceptance_criteria.join('; ');
+
+            const subtaskFeedback = (() => {
+              if (!hasQaFeedback) return '';
+              const lines = [];
+              lines.push('## ⚠️ QA FEEDBACK — FIX THESE FIRST ⚠️');
               lines.push('');
-              lines.push(`Issues in subtask ${subtask.id} **${subtask.title}**:`);
-              for (const c of qaOnlyCriteria) {
-                // Strip [QA CORRECTION: ...] / [QA ISSUE: ...] markers for readability
-                const cleaned = c
-                  .replace(/\s*\[QA CORRECTION:\s*/g, '[BLOCKER] ')
-                  .replace(/\s*\[QA ISSUE\s*\((\w*)\):\s*/g, '[$1] ')
-                  .replace(/\]$/, '');
-                lines.push(`- ${cleaned}`);
-              }
-            }
-            // Human feedback is task-level — include if present
-            if (hasHumanFeedback) {
               try {
-                const hf = readFileSync(humanFeedbackPath, 'utf-8');
-                lines.push('');
-                lines.push('---');
-                lines.push('');
-                lines.push(hf);
+                const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+                if (existsSync(reportPath)) {
+                  const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+                  if (report.overall) lines.push('Overall: **' + report.overall + '**');
+                }
               } catch { /* best-effort */ }
-            }
-            lines.push('');
-            return lines.join('\n');
-          })();
+              if (qaOnlyCriteria.length > 0) {
+                lines.push('');
+                lines.push('Issues in subtask ' + subtask.id + ' **' + subtask.title + '**:');
+                for (const c of qaOnlyCriteria) {
+                  const cleaned = c
+                    .replace(/\s*\[QA CORRECTION:\s*/g, '[BLOCKER] ')
+                    .replace(/\s*\[QA ISSUE\s*\((\w*)\):\s*/g, '[$1] ')
+                    .replace(/\]$/, '');
+                  lines.push('- ' + cleaned);
+                }
+              }
+              if (hasHumanFeedback) {
+                try {
+                  const hf = readFileSync(humanFeedbackPath, 'utf-8');
+                  lines.push('');
+                  lines.push('---');
+                  lines.push('');
+                  lines.push(hf);
+                } catch { /* best-effort */ }
+              }
+              lines.push('');
+              return lines.join('\n');
+            })();
 
-          const prompt =
-            (subtaskFeedback
-              ? subtaskFeedback + '\n---\n'
-              : '') +
-            `/implement Subtask ${subtask.id}: ${subtask.title}\n\n` +
-            `${subtask.description}\n\n` +
-            `Files: ${subtask.files.join(', ')}\n\n` +
-            `${criteriaLine}\n\n` +
-            (hasQaFeedback
-              ? `⚠️ Only fix the QA issues listed above. Do NOT re-validate criteria that QA already passed.\n` +
-                `After fixing all issues, run the FULL test suite to verify no regressions.\n`
-              : '');
-          processManager.sendMessage(sessionId, prompt);
-          await this.waitForCompletion(sessionId);
-          processManager.killSession(sessionId);
+            const prompt =
+              (subtaskFeedback
+                ? subtaskFeedback + '\n---\n'
+                : '') +
+              '/implement Subtask ' + subtask.id + ': ' + subtask.title + '\n\n' +
+              subtask.description + '\n\n' +
+              'Files: ' + subtask.files.join(', ') + '\n\n' +
+              criteriaLine + '\n\n' +
+              (hasQaFeedback
+                ? '⚠️ Only fix the QA issues listed above. Do NOT re-validate criteria that QA already passed.\n' +
+                  'After fixing all issues, run the FULL test suite to verify no regressions.\n'
+                : '');
+            processManager.sendMessage(sessionId, prompt);
+            await this.waitForCompletion(sessionId);
+            processManager.killSession(sessionId);
 
-          // Checkpoint: write plan.json immediately so completed subtasks
-          // survive a crash mid-group (#2). Uses a serialized promise chain
-          // to prevent concurrent write races from parallel subtasks.
-          completedIds.push(subtask.id);
-          this._planWriteLock = this._planWriteLock.then(() => {
+            completedIds.push(subtask.id);
+            this._planWriteLock = this._planWriteLock.then(() => {
+              try {
+                const cpPlanPath = path.join(pipeline.specPath, 'plan.json');
+                if (!existsSync(cpPlanPath)) return;
+                const cpPlan = JSON.parse(readFileSync(cpPlanPath, 'utf-8'));
+                if (cpPlan.subtasks) {
+                  for (const s of cpPlan.subtasks) {
+                    if (completedIds.includes(s.id)) {
+                      s.completed = true;
+                    }
+                  }
+                }
+                const tmpPath = cpPlanPath + '.tmp';
+                writeFileSync(tmpPath, JSON.stringify(cpPlan, null, 2));
+                renameSync(tmpPath, cpPlanPath);
+              } catch { /* best-effort checkpoint */ }
+            });
+          })
+        );
+
+        if (results.every(r => r.status === 'rejected')) {
+          const firstReason = results[0].reason;
+          throw firstReason instanceof Error ? firstReason : new Error(String(firstReason));
+        }
+
+        // ── AC4/AC5: Cherry-pick successful commits back to main worktree ──
+        if (isMultiGroup) {
+          for (let i = 0; i < results.length; i++) {
+            if (results[i].status !== 'fulfilled') continue;
+            const stBranch = pipeline.branch + '-st' + subtasks[i].id;
+            const range = pipeline.branch + '..' + stBranch;
             try {
-              const cpPlanPath = path.join(pipeline.specPath, 'plan.json');
-              if (!existsSync(cpPlanPath)) return;
-              const cpPlan = JSON.parse(readFileSync(cpPlanPath, 'utf-8'));
-              if (cpPlan.subtasks) {
-                for (const s of cpPlan.subtasks) {
+              appendFileSync(logFile, '\n[WORKTREE] Cherry-picking commits from ' + stBranch + ' onto ' + pipeline.branch + '\n');
+              this._execGit(['cherry-pick', range], pipeline.worktreePath);
+              appendFileSync(logFile, '[WORKTREE] Cherry-pick succeeded for subtask ' + subtasks[i].id + '\n');
+            } catch (cherryErr) {
+              const cherryMsg = cherryErr instanceof Error ? cherryErr.message : String(cherryErr);
+              try { this._execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+              appendFileSync(logFile, '[WORKTREE] Cherry-pick FAILED for subtask ' + subtasks[i].id + ': ' + cherryMsg + '\n');
+              throw new Error('Cherry-pick conflict for subtask ' + subtasks[i].id + ' — overlapping file changes detected. The planner should have prevented this.\n' + cherryMsg);
+            }
+          }
+        }
+
+        if (completedIds.length > 0) {
+          this._planWriteLock = this._planWriteLock.then(() => {
+            const planPath = path.join(pipeline.specPath, 'plan.json');
+            try {
+              const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+              if (plan.subtasks) {
+                for (const s of plan.subtasks) {
                   if (completedIds.includes(s.id)) {
                     s.completed = true;
                   }
                 }
               }
-              const tmpPath = cpPlanPath + '.tmp';
-              writeFileSync(tmpPath, JSON.stringify(cpPlan, null, 2));
-              renameSync(tmpPath, cpPlanPath);
-            } catch { /* best-effort checkpoint */ }
+              writeFileSync(planPath, JSON.stringify(plan, null, 2));
+            } catch { /* best-effort */ }
           });
-        })
-      );
-      // If every session in the group failed (e.g. container unavailable), surface the first
-      // error rather than silently advancing to QA on an empty diff.
-      if (results.every(r => r.status === 'rejected')) {
-        const firstReason = (results[0] as PromiseRejectedResult).reason;
-        throw firstReason instanceof Error ? firstReason : new Error(String(firstReason));
-      }
-      // Write all completions for this group at once to avoid read-modify-write races.
-      // Must go through _planWriteLock to avoid racing with per-subtask checkpoint writes.
-      if (completedIds.length > 0) {
-        this._planWriteLock = this._planWriteLock.then(() => {
-          const planPath = path.join(pipeline.specPath, 'plan.json');
-          try {
-            const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
-            if (plan.subtasks) {
-              for (const s of plan.subtasks) {
-                if (completedIds.includes(s.id)) {
-                  s.completed = true;
-                }
-              }
+        }
+      } finally {
+        // ── AC6: Clean up per-subtask worktrees ──
+        if (isMultiGroup) {
+          for (const stWorktreePath of subtaskWorktrees.values()) {
+            try {
+              this._execGit(['worktree', 'remove', '--force', stWorktreePath], this.projectRoot);
+            } catch {
+              try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+              try { execFileSync('git', ['worktree', 'prune'], { cwd: this.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
             }
-            writeFileSync(planPath, JSON.stringify(plan, null, 2));
-          } catch { /* best-effort */ }
-        });
+          }
+          for (const subtask of subtasks) {
+            try {
+              execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + subtask.id], { cwd: this.projectRoot, stdio: 'pipe' });
+            } catch { /* best-effort */ }
+          }
+          appendFileSync(logFile, '\n[WORKTREE] Cleaned up ' + subtaskWorktrees.size + ' per-subtask worktree(s)\n');
+        }
       }
     }
 
@@ -1726,6 +1796,43 @@ export class Orchestrator {
     this._restoreQaReportFromSnapshot(dir);
 
     await this.runTask(taskId, task.description, startPhase);
+  }
+
+  /**
+   * Clean up stale per-subtask worktrees from a previous crashed run (AC9).
+   * Scans for directories matching <worktree-base>/<task-slug>-st* and removes them
+   * along with their branches and git worktree metadata.
+   */
+  private _cleanStaleSubtaskWorktrees(pipeline: TaskPipeline): void {
+    const slug = path.basename(pipeline.worktreePath);
+    const prefix = slug + '-st';
+    const worktreeBase = this.getWorktreeBase();
+    if (!existsSync(worktreeBase)) return;
+
+    let entries;
+    try {
+      entries = readdirSync(worktreeBase, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry.name.startsWith(prefix)) continue;
+      if (!entry.name.slice(prefix.length).match(/^\d+$/)) continue;
+      const stPath = path.join(worktreeBase, entry.name);
+      const stBranch = pipeline.branch + entry.name.slice(slug.length);
+
+      try {
+        this._execGit(['worktree', 'remove', '--force', stPath], this.projectRoot);
+      } catch {
+        try { rmSync(stPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+        try { execFileSync('git', ['worktree', 'prune'], { cwd: this.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+      }
+
+      try {
+        execFileSync('git', ['branch', '-D', stBranch], { cwd: this.projectRoot, stdio: 'pipe' });
+      } catch { /* best-effort */ }
+    }
   }
 
   /** Get the filesystem path to this task's git worktree, or null if the task has no branch. */

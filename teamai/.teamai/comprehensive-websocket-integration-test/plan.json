@@ -1,0 +1,13 @@
+{
+  "subtasks": [
+    {
+      "id": 1,
+      "title": "Create WSS test harness with mocked processManager",
+      "description": "Set up an HTTP server + WSS replica of server.ts, with vi.mock processManager. Connect real ws clients for testing.",
+      "files": ["tests/integration/websocket-streaming.test.ts"],
+      "acceptance_criteria": ["AC1", "AC2", "AC3", "AC4", "AC5", "AC6", "AC7", "AC8", "AC9", "AC10", "AC11"],
+      "parallel_group": null
+    }
+  ],
+  "notes": "All 11 acceptance criteria are implemented in a single test file due to high setup cost (each test creates a real HTTP+WSS server). The core streaming paths (event, error, terminal-data), client→server terminal I/O, connection lifecycle, and error handling are tested in subsections within the file."
+}
