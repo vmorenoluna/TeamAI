@@ -47,8 +47,9 @@ tests/.vitest-state.json
 # Temp scripts
 *.js
 
-# Generated git worktrees
+# Generated git worktrees (runtime artifacts)
 worktrees/
+.worktrees/
 
 # Server logs
 dev_server.log
