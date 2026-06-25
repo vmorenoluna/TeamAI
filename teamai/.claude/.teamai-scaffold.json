@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "files": {
+    "commands/changelog.md": "sha256:c8e8cce787b8ffd9",
+    "commands/ideation.md": "sha256:469f9b70dc41929e",
+    "commands/implement.md": "sha256:5cc6beda6fe4cd4b",
+    "commands/merge.md": "sha256:14f3a8ca8514c625",
+    "commands/plan.md": "sha256:925d84a403eb44ee",
+    "commands/qa-review.md": "sha256:4c9373bd1ef12735",
+    "commands/roadmap.md": "sha256:c4fda27b0b4e2201",
+    "commands/spec.md": "sha256:3096b1637bea7bc1",
+    "teamai-workflow.md": "sha256:1897da88e9f721cf"
+  }
+}

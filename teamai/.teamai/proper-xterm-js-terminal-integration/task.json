@@ -1,0 +1,9 @@
+{
+  "id": "5948a108-5517-4e91-9e1e-d8affa48eb9b",
+  "title": "Proper xterm.js terminal integration",
+  "description": "The xterm.js dependency is installed but not wired into the Terminals page. Wire up xterm.js with the existing node-pty sessions so users get a full terminal experience with resize, scrollback, and copy/paste. The ProcessManager already emits terminal-data events — the frontend just needs the xterm component.",
+  "phase": "backlog",
+  "source": "ideation",
+  "createdAt": "2026-06-24T20:49:48.327Z",
+  "updatedAt": "2026-06-24T20:49:48.327Z"
+}

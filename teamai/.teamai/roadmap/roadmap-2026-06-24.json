@@ -1,0 +1,220 @@
+{
+  "generated_at": "2026-06-24T14:00:00.000Z",
+  "executive_summary": "TeamAI is a feature-rich multi-agent Claude Code orchestrator with a strong pipeline foundation. The top priorities are: (1) hardening production readiness with database persistence and authentication, (2) improving the developer experience with better terminal integration and unified styling, (3) closing competitive gaps with IDE extensions and collaborative features. The project is at an early-production stage with good test coverage and architecture but lacks multi-tenancy and persistence layers.",
+  "competitor_analysis_run": true,
+  "competitors": [
+    "Devin (Cognition)",
+    "Factory AI",
+    "Cursor",
+    "GitHub Copilot",
+    "Windsurf"
+  ],
+  "phases": {
+    "now": [
+      {
+        "title": "Database persistence layer for task state",
+        "priority": "P0",
+        "complexity": 4,
+        "category": "Infrastructure",
+        "description": "Current filesystem-based state (.teamai/ dirs) is fragile across server restarts. Add a proper database (SQLite or Postgres) with migration support so that tasks, pipeline state, and session history survive server crashes. This is a data-loss risk — any server restart loses all in-progress pipeline state.",
+        "affected_files": [
+          "src/lib/task-store.ts",
+          "src/lib/process-manager.ts",
+          "src/lib/orchestrator.ts",
+          "src/lib/recovery.ts"
+        ],
+        "source": "ideation"
+      },
+      {
+        "title": "User authentication and multi-tenancy",
+        "priority": "P1",
+        "complexity": 4,
+        "category": "Security",
+        "description": "TeamAI currently has no authentication — anyone with network access can control the pipeline. Add auth (OAuth2/OIDC) with project-scoped access so teams can self-serve without sharing a single instance. This is table-stakes for any team adoption beyond solo use.",
+        "affected_files": [
+          "server.ts",
+          "src/app/layout.tsx",
+          "src/app/actions/"
+        ],
+        "source": "ideation"
+      },
+      {
+        "title": "Unify frontend styling to Tailwind-only",
+        "priority": "P1",
+        "complexity": 2,
+        "category": "DX",
+        "description": "The codebase mixes inline styles, CSS modules, and Tailwind classes. Standardize all components to Tailwind CSS v4 utility classes to reduce bundle size and improve consistency. The Tailwind v4 setup is already in place (postcss.config.mjs, tailwind v4) but not universally adopted.",
+        "affected_files": [
+          "src/components/*.tsx",
+          "src/app/globals.css"
+        ],
+        "source": "ideation",
+        "linkedTaskId": "ba5886ce-93ed-45ba-af5f-a68b6d0dc88b"
+      },
+      {
+        "title": "Proper xterm.js terminal integration",
+        "priority": "P1",
+        "complexity": 2,
+        "category": "New Feature",
+        "description": "The xterm.js dependency is installed but not wired into the Terminals page. Wire up xterm.js with the existing node-pty sessions so users get a full terminal experience with resize, scrollback, and copy/paste. The ProcessManager already emits terminal-data events — the frontend just needs the xterm component.",
+        "affected_files": [
+          "src/app/terminals/page.tsx",
+          "src/components/terminal.tsx",
+          "src/hooks/"
+        ],
+        "source": "ideation",
+        "linkedTaskId": "5948a108-5517-4e91-9e1e-d8affa48eb9b"
+      }
+    ],
+    "next": [
+      {
+        "title": "Git worktree isolation for parallel agents",
+        "priority": "P1",
+        "complexity": 4,
+        "category": "Infrastructure",
+        "description": "The architecture document mentions git worktree isolation is 'planned, not yet implemented'. Without it, parallel coder agents in the implement phase can conflict on file edits. Implement worktree creation per task with automatic cleanup on completion.",
+        "affected_files": [
+          "src/lib/orchestrator.ts",
+          "src/lib/process-manager.ts",
+          "src/lib/recovery.ts"
+        ],
+        "source": "ideation",
+        "linkedTaskId": "7df62ede-868a-4a48-a769-aa521a2a8309"
+      },
+      {
+        "title": "VS Code extension for pipeline visibility",
+        "priority": "P2",
+        "complexity": 3,
+        "category": "Competitive Response",
+        "description": "Cursor, Copilot, and Windsurf all offer in-IDE experiences. Build a VS Code extension that shows pipeline status, task progress, and QA feedback directly in the editor. This bridges the gap between TeamAI's web UI and the developer's primary workspace. Competitors like Cursor have agent mode built into the editor — TeamAI should at minimum provide visibility there.",
+        "affected_files": [
+          "New: vscode-extension/"
+        ],
+        "source": "competitor-analysis",
+        "competitive_context": "Cursor and Copilot both offer in-IDE agent experiences. A VS Code extension keeps TeamAI visible where developers work."
+      },
+      {
+        "title": "WebSocket event filtering by project",
+        "priority": "P2",
+        "complexity": 2,
+        "category": "Performance",
+        "description": "The server.ts broadcasts phase-change events to ALL connected WebSocket clients regardless of which project they're viewing. In multi-project setups, this wastes bandwidth and causes unnecessary re-renders. Filter events by project scope on the server side.",
+        "affected_files": [
+          "server.ts",
+          "src/hooks/use-phase-sync.ts"
+        ],
+        "source": "ideation",
+        "linkedTaskId": "ed81fd7d-b834-43de-9573-9be3954e36d5"
+      },
+      {
+        "title": "Comprehensive WebSocket integration tests",
+        "priority": "P2",
+        "complexity": 3,
+        "category": "DX",
+        "description": "The test suite covers unit and E2E tests well but lacks dedicated WebSocket streaming integration tests. Add tests that verify real-time event delivery, reconnection behavior, and error handling for the `/ws` endpoint. The streaming path is critical and currently tested only indirectly through E2E tests.",
+        "affected_files": [
+          "tests/integration/",
+          "server.ts"
+        ],
+        "source": "ideation",
+        "linkedTaskId": "1cd16ac3-ea4c-4402-835c-87335271a1aa"
+      }
+    ],
+    "later": [
+      {
+        "title": "Pipeline analytics dashboard",
+        "priority": "P3",
+        "complexity": 3,
+        "category": "New Feature",
+        "description": "Add an analytics dashboard showing pipeline metrics: average task duration, QA pass rate, most common failure points, and agent session costs. This helps teams optimize their pipeline configurations and catch systemic issues. All the event data already flows through the system — it just needs aggregation and visualization.",
+        "affected_files": [
+          "src/app/analytics/",
+          "src/components/analytics/",
+          "src/lib/analytics.ts"
+        ],
+        "source": "ideation",
+        "linkedTaskId": "4ba8540e-80ef-487a-83fd-74a6ec966499"
+      },
+      {
+        "title": "Slack/Teams notifications for pipeline events",
+        "priority": "P3",
+        "complexity": 2,
+        "category": "New Feature",
+        "description": "Send notifications to Slack or Microsoft Teams when tasks complete, fail, or require human review. The awaiting-review phase already pauses for human input — notifications would ensure timely reviews. This is a low-effort, high-impact feature since webhook integrations are straightforward.",
+        "affected_files": [
+          "src/lib/notifications.ts",
+          "src/lib/orchestrator.ts"
+        ],
+        "source": "ideation"
+      },
+      {
+        "title": "Command editor in settings",
+        "priority": "P3",
+        "complexity": 2,
+        "category": "DX",
+        "description": "The settings page already has a RoleEditor for editing agent personas, but pipeline commands (spec, plan, implement, qa-review, merge, roadmap, ideation, changelog) can only be edited by hand in the .claude/commands/ directory. Add a CommandEditor component to the settings page — mirroring the existing RoleEditor pattern — so teams can customize command templates without touching raw Markdown.",
+        "affected_files": [
+          "src/app/settings/page.tsx",
+          "src/components/command-editor.tsx",
+          "src/app/actions/commands.ts"
+        ],
+        "source": "ideation"
+      },
+      {
+        "title": "Collaborative task assignment",
+        "priority": "P3",
+        "complexity": 4,
+        "category": "Competitive Response",
+        "description": "Factory and Devin both support team workflows where different team members review and approve pipeline outputs. Add user assignment, comments, and approval workflows so teams can collaborate on pipeline tasks. Depends on the authentication system being in place first.",
+        "affected_files": [
+          "src/lib/orchestrator.ts",
+          "src/components/task-panel.tsx",
+          "src/app/actions/tasks.ts"
+        ],
+        "source": "competitor-analysis",
+        "competitive_context": "Factory AI positions itself as the enterprise collaboration platform for AI coding. TeamAI needs team features to compete in that segment."
+      }
+    ],
+    "icebox": [
+      {
+        "title": "OpenTelemetry tracing for agent sessions",
+        "priority": "P3",
+        "complexity": 3,
+        "category": "Infrastructure",
+        "description": "Add distributed tracing to agent sessions so teams can debug slow pipelines, identify tool-call bottlenecks, and optimize model selection. Export traces to Jaeger or Datadog for integration with existing observability stacks.",
+        "affected_files": [
+          "src/lib/process-manager.ts",
+          "src/lib/orchestrator.ts",
+          "server.ts"
+        ],
+        "source": "ideation"
+      },
+      {
+        "title": "Built-in prompt library with versioning",
+        "priority": "P3",
+        "complexity": 2,
+        "category": "New Feature",
+        "description": "Teams can already edit roles in settings and will soon have command editing too. Add a prompt library that stores versioned templates with usage metrics so teams can share, iterate, and rollback prompts across projects. Tracks which custom prompts correlate with better QA pass rates.",
+        "affected_files": [
+          "src/lib/prompt-store.ts",
+          "src/app/prompts/"
+        ],
+        "source": "ideation"
+      },
+      {
+        "title": "Multi-repo pipeline orchestration",
+        "priority": "P3",
+        "complexity": 5,
+        "category": "New Feature",
+        "description": "Support pipeline workflows that span multiple repositories (e.g., frontend + backend changes in a single task). This is a major architectural undertaking but would differentiate TeamAI from single-repo competitors like Devin and Factory.",
+        "affected_files": [
+          "src/lib/orchestrator.ts",
+          "src/lib/task-store.ts",
+          "src/lib/process-manager.ts"
+        ],
+        "source": "competitor-analysis",
+        "competitive_context": "None of the major competitors (Devin, Factory, Cursor) handle cross-repo workflows natively. This is a potential category-defining feature."
+      }
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "id": "7df62ede-868a-4a48-a769-aa521a2a8309",
+  "title": "Git worktree isolation for parallel agents",
+  "description": "The architecture document mentions git worktree isolation is 'planned, not yet implemented'. Without it, parallel coder agents in the implement phase can conflict on file edits. Implement worktree creation per task with automatic cleanup on completion.",
+  "phase": "qa-review",
+  "source": "ideation",
+  "createdAt": "2026-06-24T20:50:18.604Z",
+  "updatedAt": "2026-06-24T20:50:18.604Z"
+}
