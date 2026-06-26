@@ -203,7 +203,7 @@ describe('_gitPush auto-refresh', () => {
       );
       // gh auth refresh called once
       expect(mockExecFileSync).toHaveBeenCalledWith(
-        'gh', ['auth', 'refresh', '-s', 'repo'],
+        'gh', ['auth', 'refresh', '-s', 'repo', '--hostname', 'github.com'],
         expect.objectContaining({ encoding: 'utf-8' }),
       );
       // git push called twice (original + retry)
