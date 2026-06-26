@@ -2229,30 +2229,49 @@ export class Orchestrator {
       }
     };
 
-    // Helper: build the url.insteadOf extraConfigArgs for a given token.
-    //
-    // url.insteadOf embeds credentials directly in the URL so git's credential
-    // system sees them before prompting.  http.extraheader would be too late —
-    // git still prompts for username/password first with that approach.
-    //
-    // credential.helper= disables the system credential helper so git never
-    // falls back to stored passwords if the token is rejected — the actual
-    // GitHub error surfaces clearly instead of being masked.
-    const _authArgs = (t: string): string[] => [
-      '-c', 'credential.helper=',
-      '-c', `url.https://x-access-token:${encodeURIComponent(t)}@github.com/.insteadOf=https://github.com/`,
-    ];
+        const token = _getToken();
 
-    const token = _getToken();
+    // Resolve the actual remote URL so we can embed the token directly.
+    // url.insteadOf doesn't work reliably on Windows git-for-windows, so
+    // we embed the token directly in the remote URL instead.
+    let _remoteUrl: string | null = null;
+    let _remoteIdx = -1;
+    if (token) {
+      try {
+        for (let i = 1; i < pushArgs.length; i++) {
+          if (!pushArgs[i].startsWith('-')) {
+            _remoteIdx = i;
+            _remoteUrl = execFileSync('git', ['remote', 'get-url', pushArgs[i]], {
+              encoding: 'utf-8', stdio: 'pipe', cwd: this.projectRoot,
+            }).trim();
+            break;
+          }
+        }
+      } catch {
+        // Remote resolution failed — fall back to pushArgs as-is
+      }
+    }
+
+    // Helper: inject the token via http.extraheader, keeping the remote name intact.
+    // Previously this embedded the token in the URL (replacing 'origin' with the full
+    // HTTPS URL). URL-embedding causes git to push to a raw URL rather than to the
+    // named remote, so git never updates refs/remotes/origin/* locally — making the
+    // post-push `git rev-parse origin/<branch>` verification fail even when the push
+    // to GitHub succeeded. Using http.extraheader preserves 'origin' as the remote
+    // name, so git correctly updates the local remote-tracking ref after the push.
+    const _buildInjectedArgs = (t: string): string[] | null => {
+      if (!t || _remoteIdx < 0 || !_remoteUrl?.startsWith('https://')) return null;
+      return ['-c', `http.extraheader=Authorization: Bearer ${t}`, ...pushArgs];
+    };
 
     // ── Execute the git command.  On the first auth failure with a gh token,
     //     attempt to refresh the token via `gh auth refresh` and retry once.
-    //     credential.helper= keeps the error surface clean — stale stored
-    //     passwords are never tried. ──
+    //     If the token is still rejected, falls back to the system credential
+    //     helper (Windows Credential Manager / macOS Keychain). ──
 
     const AUTH_RE = /invalid username or token|authentication failed|http basic: access denied|returned error: 401\b/i;
     const _exec = (t: string, attempt: number): void => {
-      const args = t ? [..._authArgs(t), ...pushArgs] : pushArgs;
+      const args = _buildInjectedArgs(t) ?? pushArgs;
       try {
         execFileSync('git', args, { cwd: this.projectRoot, stdio: 'pipe', env: noPromptEnv });
       } catch (err) {
@@ -2303,7 +2322,7 @@ export class Orchestrator {
 
     // Log token availability
     if (token) {
-      appendFileSync(logFile, '[GIT] Using gh OAuth token via url.insteadOf\n');
+      appendFileSync(logFile, '[GIT] Using gh OAuth token via http.extraheader\n');
     } else {
       appendFileSync(logFile,
         '[GIT] gh token not available — falling back to default credential helper\n');
