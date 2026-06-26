@@ -2288,7 +2288,8 @@ export class Orchestrator {
             '[GIT] gh token rejected by remote — attempting gh auth refresh\n');
           let freshToken = null;
           try {
-            execFileSync('gh', ['auth', 'refresh', '-s', 'repo'], {
+            const hostname = _remoteUrl ? new URL(_remoteUrl).hostname : 'github.com';
+            execFileSync('gh', ['auth', 'refresh', '-s', 'repo', '--hostname', hostname], {
               encoding: 'utf-8', stdio: 'pipe', timeout: 30_000,
             });
             freshToken = _getToken();
