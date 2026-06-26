@@ -2249,6 +2249,8 @@ export class Orchestrator {
     //     attempt to refresh the token via `gh auth refresh` and retry once.
     //     credential.helper= keeps the error surface clean — stale stored
     //     passwords are never tried. ──
+
+    const AUTH_RE = /invalid username or token|authentication failed|http basic: access denied|returned error: 401\b/i;
     const _exec = (t: string, attempt: number): void => {
       const args = t ? [..._authArgs(t), ...pushArgs] : pushArgs;
       try {
@@ -2257,26 +2259,42 @@ export class Orchestrator {
         const raw = err instanceof Error ? err.message : String(err);
         const safe = t ? raw.replaceAll(t, '[REDACTED]') : raw;
 
-        // On first auth failure with a gh token, refresh and retry once.
-        if (attempt === 0 && t && /invalid username or token|authentication failed|http basic: access denied|returned error: 401\b/i.test(raw)) {
+        // Tier 1: On first auth failure with a gh token, refresh and retry once.
+        // The try/catch only wraps the external CLI commands (gh auth refresh
+        // and _getToken) — NOT the retry.  If the retry throws, the error
+        // propagates up; if it were caught here Tier 2 would fire in the wrong
+        // scope (attempt 0 instead of 1), consuming the mock chain incorrectly.
+        if (attempt === 0 && t && AUTH_RE.test(raw)) {
+          appendFileSync(logFile,
+            '[GIT] gh token rejected by remote — attempting gh auth refresh\n');
+          let freshToken = null;
           try {
-            appendFileSync(logFile,
-              '[GIT] gh token rejected by remote — attempting gh auth refresh\n');
             execFileSync('gh', ['auth', 'refresh', '-s', 'repo'], {
               encoding: 'utf-8', stdio: 'pipe', timeout: 30_000,
             });
-            const freshToken = _getToken();
-            if (freshToken) {
-              appendFileSync(logFile, '[GIT] Token refreshed — retrying\n');
-              // On retry failure the original error is thrown (no infinite retry).
-              _exec(freshToken, 1);
-              return;
-            }
+            freshToken = _getToken();
           } catch (refreshErr) {
             const refreshMsg = refreshErr instanceof Error
               ? refreshErr.message : String(refreshErr);
             appendFileSync(logFile, `[GIT] gh auth refresh failed: ${refreshMsg}\n`);
           }
+
+          if (freshToken) {
+            appendFileSync(logFile, '[GIT] Token refreshed — retrying\n');
+            _exec(freshToken, 1);
+            return;
+          }
+        }
+
+        // Tier 2: gh token still rejected (even after refresh) — fall back
+        // to the system credential helper.  On Windows this is the Credential
+        // Manager; on macOS the Keychain.  credential.helper= is NOT used so
+        // git resolves credentials through its normal chain.
+        if (attempt <= 1 && t && AUTH_RE.test(raw)) {
+          appendFileSync(logFile,
+            '[GIT] gh token rejected — falling back to system credential helper\n');
+          _exec('', 2);
+          return;
         }
 
         throw new Error(safe);
