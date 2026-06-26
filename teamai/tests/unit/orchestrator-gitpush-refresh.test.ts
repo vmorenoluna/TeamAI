@@ -4,6 +4,10 @@
  * Verifies that when a gh OAuth token is rejected by the remote
  * ("Invalid username or token" / "Authentication failed"), the method
  * automatically runs `gh auth refresh` and retries once with a fresh token.
+ *
+ * Token injection uses git -c http.extraheader so the remote name ('origin')
+ * is preserved in the push command and git correctly updates
+ * refs/remotes/origin/* after a successful push.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
@@ -81,31 +85,38 @@ function setupTestDir(): { root: string; logFile: string; clean: () => void } {
 
 const FAKE_TOKEN = 'gho_test123';
 const FRESH_TOKEN = 'gho_fresh456';
+
+// The remote URL returned by `git remote get-url origin` — used to detect HTTPS remotes.
+const MOCK_REMOTE_URL = 'https://github.com/user/repo.git';
+// The http.extraheader value injected for FAKE_TOKEN and FRESH_TOKEN.
+const INJECTED_HEADER = `http.extraheader=Authorization: Bearer ${FAKE_TOKEN}`;
+const INJECTED_HEADER_FRESH = `http.extraheader=Authorization: Bearer ${FRESH_TOKEN}`;
+
 const AUTH_ERROR = new Error(`
-Command failed: git -c credential.helper= -c url.https://x-access-token:${FAKE_TOKEN}@github.com/.insteadOf=https://github.com/ push origin feat/test
+Command failed: git -c ${INJECTED_HEADER} push origin feat/test
 remote: Invalid username or token. Password authentication is not supported for Git operations.
 fatal: Authentication failed for 'https://github.com/user/repo.git/'
 `.trim());
 
 const AUTH_FAILED_ERROR = new Error(`
-Command failed: git push origin feat/test
+Command failed: git -c ${INJECTED_HEADER} push origin feat/test
 fatal: Authentication failed for 'https://github.com/user/repo.git/'
 `.trim());
 
 const GITLAB_AUTH_ERROR = new Error(`
-Command failed: git -c credential.helper= -c url.https://x-access-token:${FAKE_TOKEN}@gitlab.com/.insteadOf=https://gitlab.com/ push origin feat/test
+Command failed: git -c ${INJECTED_HEADER} push origin feat/test
 remote: HTTP Basic: Access denied. The provided password or token is incorrect or your account has 2FA enabled and you must use a personal access token in place of a password.
 fatal: Authentication failed for 'https://gitlab.com/user/repo.git/'
 `.trim());
 
 const HTTP_401_ERROR = new Error(`
-Command failed: git -c credential.helper= -c url.https://x-access-token:${FAKE_TOKEN}@github.com/.insteadOf=https://github.com/ push origin feat/test
+Command failed: git -c ${INJECTED_HEADER} push origin feat/test
 error: RPC failed; HTTP 401 curl 22 The requested URL returned error: 401
 fatal: the remote end hung up unexpectedly
 `.trim());
 
 const NON_AUTH_ERROR = new Error(`
-Command failed: git push origin feat/test
+Command failed: git -c ${INJECTED_HEADER} push origin feat/test
 ! [rejected] feat/test -> feat/test (non-fast-forward)
 `.trim());
 
@@ -131,10 +142,12 @@ describe('_gitPush auto-refresh', () => {
   describe('token available, first attempt succeeds', () => {
     it('does not call gh auth refresh', () => {
       // _getToken → returns FAKE_TOKEN
+      // git remote get-url → returns MOCK_REMOTE_URL
       // _exec git call → succeeds (no throw)
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)       // gh auth token
-        .mockImplementationOnce(() => '');               // git push succeeds
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)  // git remote get-url
+        .mockImplementationOnce(() => '');              // git push succeeds
 
       expect(() =>
         orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
@@ -144,10 +157,14 @@ describe('_gitPush auto-refresh', () => {
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'gh', ['auth', 'token'], expect.any(Object),
       );
-      // git push called once with auth args
+      // git remote get-url called once
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git', ['remote', 'get-url', 'origin'], expect.any(Object),
+      );
+      // git push called once with http.extraheader injection — remote name 'origin' preserved
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['-c', 'credential.helper=', 'push', 'origin', 'feat/test']),
+        expect.arrayContaining(['-c', INJECTED_HEADER, 'push', 'origin', 'feat/test']),
         expect.any(Object),
       );
       // gh auth refresh should NOT have been called
@@ -163,12 +180,14 @@ describe('_gitPush auto-refresh', () => {
   describe('auth failure triggers refresh and retry', () => {
     it('refreshes token and retries once on "Invalid username or token"', () => {
       // _getToken → FAKE_TOKEN
+      // git remote get-url → MOCK_REMOTE_URL
       // first git push → throws AUTH_ERROR
       // gh auth refresh → succeeds
       // _getToken (retry) → FRESH_TOKEN
       // second git push → succeeds
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)            // gh auth token
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)       // git remote get-url
         .mockImplementationOnce(() => { throw AUTH_ERROR; }) // git push (fails)
         .mockImplementationOnce(() => '')                    // gh auth refresh (succeeds)
         .mockImplementationOnce(() => FRESH_TOKEN)           // gh auth token (retry)
@@ -189,23 +208,24 @@ describe('_gitPush auto-refresh', () => {
       );
       // git push called twice (original + retry)
       const gitCalls = mockExecFileSync.mock.calls.filter(
-        (call: any[]) => call[0] === 'git',
+        (call: any[]) => call[0] === 'git' && !(call[1] as string[]).includes('remote'),
       );
       expect(gitCalls.length).toBe(2);
 
-      // Second git call uses the fresh token in the args
+      // Second git call uses the fresh token in the extraheader
       const retryArgs = gitCalls[1][1] as string[];
-      const urlArg = retryArgs.find((a: string) => a.includes(`x-access-token:${FRESH_TOKEN}`));
-      expect(urlArg).toBeDefined();
+      const headerArg = retryArgs.find((a: string) => a === INJECTED_HEADER_FRESH);
+      expect(headerArg).toBeDefined();
     });
 
     it('refreshes token and retries once on "Authentication failed"', () => {
       mockExecFileSync
-        .mockImplementationOnce(() => FAKE_TOKEN)               // gh auth token
+        .mockImplementationOnce(() => FAKE_TOKEN)                  // gh auth token
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)             // git remote get-url
         .mockImplementationOnce(() => { throw AUTH_FAILED_ERROR; }) // git push (fails)
-        .mockImplementationOnce(() => '')                       // gh auth refresh
-        .mockImplementationOnce(() => FRESH_TOKEN)              // gh auth token (retry)
-        .mockImplementationOnce(() => '');                      // git push (retry)
+        .mockImplementationOnce(() => '')                           // gh auth refresh
+        .mockImplementationOnce(() => FRESH_TOKEN)                  // gh auth token (retry)
+        .mockImplementationOnce(() => '');                          // git push (retry)
 
       expect(() =>
         orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
@@ -220,11 +240,12 @@ describe('_gitPush auto-refresh', () => {
 
     it('refreshes token and retries once on GitLab "HTTP Basic: Access denied"', () => {
       mockExecFileSync
-        .mockImplementationOnce(() => FAKE_TOKEN)                  // gh auth token
-        .mockImplementationOnce(() => { throw GITLAB_AUTH_ERROR; }) // git push (fails)
-        .mockImplementationOnce(() => '')                           // gh auth refresh
-        .mockImplementationOnce(() => FRESH_TOKEN)                  // gh auth token (retry)
-        .mockImplementationOnce(() => '');                          // git push (retry)
+        .mockImplementationOnce(() => FAKE_TOKEN)                     // gh auth token
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)                // git remote get-url
+        .mockImplementationOnce(() => { throw GITLAB_AUTH_ERROR; })    // git push (fails)
+        .mockImplementationOnce(() => '')                              // gh auth refresh
+        .mockImplementationOnce(() => FRESH_TOKEN)                     // gh auth token (retry)
+        .mockImplementationOnce(() => '');                             // git push (retry)
 
       expect(() =>
         orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
@@ -238,11 +259,12 @@ describe('_gitPush auto-refresh', () => {
 
     it('refreshes token and retries once on HTTP 401 error', () => {
       mockExecFileSync
-        .mockImplementationOnce(() => FAKE_TOKEN)               // gh auth token
-        .mockImplementationOnce(() => { throw HTTP_401_ERROR; }) // git push (fails)
-        .mockImplementationOnce(() => '')                        // gh auth refresh
-        .mockImplementationOnce(() => FRESH_TOKEN)               // gh auth token (retry)
-        .mockImplementationOnce(() => '');                       // git push (retry)
+        .mockImplementationOnce(() => FAKE_TOKEN)                  // gh auth token
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)             // git remote get-url
+        .mockImplementationOnce(() => { throw HTTP_401_ERROR; })    // git push (fails)
+        .mockImplementationOnce(() => '')                           // gh auth refresh
+        .mockImplementationOnce(() => FRESH_TOKEN)                  // gh auth token (retry)
+        .mockImplementationOnce(() => '');                          // git push (retry)
 
       expect(() =>
         orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
@@ -261,6 +283,7 @@ describe('_gitPush auto-refresh', () => {
     it('throws the redacted original error when refresh fails', () => {
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)               // gh auth token
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)          // git remote get-url
         .mockImplementationOnce(() => { throw AUTH_ERROR; })    // git push (fails)
         .mockImplementationOnce(() => {                         // gh auth refresh (fails)
           throw new Error('gh auth refresh: network error');
@@ -284,6 +307,7 @@ describe('_gitPush auto-refresh', () => {
     it('does not retry more than once', () => {
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)          // git remote get-url
         .mockImplementationOnce(() => { throw AUTH_ERROR; })
         .mockImplementationOnce(() => '')                       // refresh succeeds
         .mockImplementationOnce(() => FRESH_TOKEN)
@@ -309,6 +333,7 @@ describe('_gitPush auto-refresh', () => {
       // (not attempt=0, which was the bug before narrowing the try/catch).
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)            // gh auth token
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)       // git remote get-url
         .mockImplementationOnce(() => { throw AUTH_ERROR; }) // git push (fails) — Tier 1
         .mockImplementationOnce(() => '')                    // gh auth refresh (succeeds)
         .mockImplementationOnce(() => FRESH_TOKEN)           // gh auth token (retry)
@@ -332,16 +357,51 @@ describe('_gitPush auto-refresh', () => {
       );
       expect(refreshCalls.length).toBe(1);
 
-      // git was called 3 times: original, retry, Tier 2 credential helper
-      const gitCalls = mockExecFileSync.mock.calls.filter(
-        (call: any[]) => call[0] === 'git',
+      // git was called 4 times: remote get-url + original + retry + Tier 2
+      const gitPushCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'git' && !(call[1] as string[]).includes('remote'),
       );
-      expect(gitCalls.length).toBe(3);
+      expect(gitPushCalls.length).toBe(3);
 
-      // Tier 2 call (3rd git call) has no auth args
-      const tier2Args = gitCalls[2][1] as string[];
-      expect(tier2Args).not.toContain('credential.helper=');
-      expect(tier2Args.every((a: string) => !a.includes('x-access-token'))).toBe(true);
+      // Tier 2 call (3rd git push call) uses the remote name and has no auth header
+      const tier2Args = gitPushCalls[2][1] as string[];
+      expect(tier2Args).toContain('origin');
+      expect(tier2Args.every((a: string) => !a.includes('Authorization'))).toBe(true);
+    });
+
+    it('Tier 2 credential helper succeeds — push completes without gh token', () => {
+      // Happy path: gh token rejected, refresh succeeds, retry still rejected,
+      // but the system credential helper (Windows Credential Manager / macOS
+      // Keychain) has valid credentials — push succeeds without any gh token.
+      mockExecFileSync
+        .mockImplementationOnce(() => FAKE_TOKEN)            // gh auth token
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)       // git remote get-url
+        .mockImplementationOnce(() => { throw AUTH_ERROR; }) // git push (fails) — Tier 1
+        .mockImplementationOnce(() => '')                    // gh auth refresh (succeeds)
+        .mockImplementationOnce(() => FRESH_TOKEN)           // gh auth token (retry)
+        .mockImplementationOnce(() => { throw AUTH_ERROR; }) // retry fails — Tier 2 at attempt=1
+        .mockImplementationOnce(() => '');                   // Tier 2: credential helper succeeds
+
+      expect(() =>
+        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
+      ).not.toThrow();
+
+      // gh auth refresh called exactly once (only during Tier 1)
+      const refreshCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'gh' && (call[1] as string[]).includes('refresh'),
+      );
+      expect(refreshCalls.length).toBe(1);
+
+      // git push calls: original (Tier 1), retry (Tier 1), Tier 2 (credential helper)
+      const gitPushCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'git' && !(call[1] as string[]).includes('remote'),
+      );
+      expect(gitPushCalls.length).toBe(3);
+
+      // Tier 2 call (3rd git push) uses the remote name and has no auth header
+      const tier2Args = gitPushCalls[2][1] as string[];
+      expect(tier2Args).toContain('origin');
+      expect(tier2Args.every((a: string) => !a.includes('Authorization'))).toBe(true);
     });
   });
 
@@ -350,8 +410,9 @@ describe('_gitPush auto-refresh', () => {
   describe('non-auth error does not trigger refresh', () => {
     it('throws the error directly without calling gh auth refresh', () => {
       mockExecFileSync
-        .mockImplementationOnce(() => FAKE_TOKEN)               // gh auth token
-        .mockImplementationOnce(() => { throw NON_AUTH_ERROR; }); // git push (non-auth error)
+        .mockImplementationOnce(() => FAKE_TOKEN)                  // gh auth token
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)             // git remote get-url
+        .mockImplementationOnce(() => { throw NON_AUTH_ERROR; });   // git push (non-auth error)
 
       expect(() =>
         orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
@@ -368,7 +429,7 @@ describe('_gitPush auto-refresh', () => {
   // ── Scenario 5: No gh installed — fallback path ─────────────────
 
   describe('no gh installed — fallback to default credential helper', () => {
-    it('runs git without auth args when gh auth token fails', () => {
+    it('runs git without token injection when gh auth token fails', () => {
       mockExecFileSync
         .mockImplementationOnce(() => {                        // gh auth token fails
           throw new Error('gh: command not found');
@@ -381,14 +442,14 @@ describe('_gitPush auto-refresh', () => {
         orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
       ).toThrow('git push failed: no auth');
 
-      // git should have been called WITHOUT auth args (no url.insteadOf)
+      // git should have been called with the remote name (no extraheader, no token)
       const gitCalls = mockExecFileSync.mock.calls.filter(
         (call: any[]) => call[0] === 'git',
       );
       expect(gitCalls.length).toBe(1);
       const gitArgs = gitCalls[0][1] as string[];
-      expect(gitArgs).not.toContain('credential.helper=');
-      expect(gitArgs.every((a: string) => !a.includes('x-access-token'))).toBe(true);
+      expect(gitArgs).toContain('origin');
+      expect(gitArgs.every((a: string) => !a.includes('Authorization'))).toBe(true);
     });
 
     it('does not attempt gh auth refresh when no token available', () => {
@@ -422,12 +483,13 @@ fatal: Authentication failed for 'https://github.com/user/repo.git/'
       expect.hasAssertions();
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)               // gh auth token
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)          // git remote get-url
         .mockImplementationOnce(() => { throw AUTH_ERROR; })    // git push (fails)
         .mockImplementationOnce(() => '')                       // refresh succeeds
         .mockImplementationOnce(() => FRESH_TOKEN)              // gh auth token (retry)
         .mockImplementationOnce(() => {                         // retry fails with non-auth error — Tier 2
           throw new Error(                                      // does NOT fire, redacted error propagates
-            `Command failed: git -c url.https://x-access-token:${FRESH_TOKEN}@github.com/ push`);
+            `Command failed: git -c ${INJECTED_HEADER_FRESH} push origin feat/test`);
         });
 
       try {
