@@ -524,7 +524,7 @@ export class Orchestrator {
     // from up-to-date code, minimising conflicts at PR time.
     // (runPlan does the same pull; this covers the resume-directly-to-implement path.)
     // Uses _gitPush with 'pull' args so the OAuth token is injected — plain git pull
-    // fails silently on machines where HTTPS requires token auth (SSL cert issues),
+    // fails silently on machines where HTTPS requires token auth,
     // leaving local master stale and causing avoidable PR conflicts.
     try {
       this._gitPush(['pull', '--ff-only', 'origin', 'master'], path.join(pipeline.specPath, 'output.log'));
@@ -1545,7 +1545,52 @@ export class Orchestrator {
    * _patchWorktreeGitFile call may have written container-relative paths that the host
    * cannot resolve (the container workspace path doesn't exist on the host filesystem).
    * Both methods compare current content to expected and are no-ops when already correct.
+   *
+   * Also rewrites commondir to the relative path '../..' — correct on every OS since
+   * .git/worktrees/<name> is always two levels deep inside .git.
    */
+
+  /**
+   * Like writeFileSync but works around the Windows security descriptor git
+   * places on linked-worktree metadata files (.git, gitdir, commondir).
+   * Neither chmodSync nor attrib -R can clear it, but writing to a temp file
+   * and atomically renaming over the target bypasses the descriptor.
+   */
+  private _writeFileEnsuringWritable(filePath: string, content: string): void {
+    try {
+      writeFileSync(filePath, content);
+    } catch (e: unknown) {
+      if ((e as NodeJS.ErrnoException)?.code !== 'EPERM') throw e;
+      // Write to a temp file, then atomically rename over the locked file.
+      // renameSync uses MoveFileEx with REPLACE_EXISTING, which bypasses
+      // the security descriptor git places on linked-worktree metadata files.
+      const tmpPath = filePath + '.tmp';
+      writeFileSync(tmpPath, content);
+      try {
+        renameSync(tmpPath, filePath);
+      } catch (renameErr) {
+        // Clean up the temp file on rename failure so it doesn't leak.
+        try { unlinkSync(tmpPath); } catch { /* best-effort */ }
+        throw renameErr;
+      }
+    }
+  }
+
+  /**
+   * Rewrite .git/worktrees/<name>/commondir to the relative path '../..'.
+   * Since .git/worktrees/<name> is always two levels deep inside .git,
+   * this path resolves correctly on every OS. No-op if already correct.
+   */
+  private _patchCommondirToRelative(worktreeName: string): void {
+    const commondirFile = path.join(this.projectRoot, '.git', 'worktrees', worktreeName, 'commondir');
+    if (existsSync(commondirFile)) {
+      const current = readFileSync(commondirFile, 'utf-8').trim().replace(/\\/g, '/');
+      if (current !== '../..') {
+        this._writeFileEnsuringWritable(commondirFile, '../..\n');
+      }
+    }
+  }
+
   private _restoreWorktreeGitFileToHostPaths(hostWorktreePath: string): void {
     const gitFile = path.join(hostWorktreePath, '.git');
     if (!existsSync(gitFile)) return;
@@ -1560,13 +1605,14 @@ export class Orchestrator {
       const hostRoot = this.projectRoot.replace(/\\/g, '/');
       const hostGitdir = `${hostRoot}/.git/worktrees/${worktreeName}`;
       if (currentGitdir === hostGitdir) return; // already correct
-      writeFileSync(gitFile, `gitdir: ${hostGitdir}\n`);
+      this._writeFileEnsuringWritable(gitFile, `gitdir: ${hostGitdir}\n`);
       // Restore the back-reference so git worktree commands from the host work.
       const backRefFile = path.join(this.projectRoot, '.git', 'worktrees', worktreeName, 'gitdir');
       if (existsSync(backRefFile)) {
         const hostWorktreeGitFile = `${hostWorktreePath.replace(/\\/g, '/')}/.git`;
-        writeFileSync(backRefFile, `${hostWorktreeGitFile}\n`);
+        this._writeFileEnsuringWritable(backRefFile, `${hostWorktreeGitFile}\n`);
       }
+      this._patchCommondirToRelative(worktreeName);
     } catch { /* best-effort — don't break the pipeline on a patch failure */ }
   }
 
@@ -1575,6 +1621,9 @@ export class Orchestrator {
    * container-relative paths. Compares current file content to the expected value
    * derived from containerWorkspace (runtime value from docker inspect) and is a
    * no-op when already correct — safe to call unconditionally before any docker exec.
+   *
+   * Also rewrites commondir to the relative path '../..' — correct on every OS since
+   * .git/worktrees/<name> is always two levels deep inside .git.
    */
   private _patchWorktreeGitFile(hostWorktreePath: string, containerWorkspace: string): void {
     const gitFile = path.join(hostWorktreePath, '.git');
@@ -1589,13 +1638,14 @@ export class Orchestrator {
       const worktreeName = m[1];
       const correctGitdir = `${containerWorkspace}/.git/worktrees/${worktreeName}`;
       if (currentGitdir.replace(/\\/g, '/') === correctGitdir) return; // already correct
-      writeFileSync(gitFile, `gitdir: ${correctGitdir}\n`);
+      this._writeFileEnsuringWritable(gitFile, `gitdir: ${correctGitdir}\n`);
       // Patch the back-reference so git worktree commands from inside the container work.
       const backRefFile = path.join(this.projectRoot, '.git', 'worktrees', worktreeName, 'gitdir');
       if (existsSync(backRefFile)) {
         const containerWorktreePath = hostToContainerPath(hostWorktreePath, this.projectRoot, containerWorkspace);
-        writeFileSync(backRefFile, `${containerWorktreePath}/.git\n`);
+        this._writeFileEnsuringWritable(backRefFile, `${containerWorktreePath}/.git\n`);
       }
+      this._patchCommondirToRelative(worktreeName);
     } catch { /* best-effort — don't break the pipeline on a patch failure */ }
   }
 
@@ -2168,39 +2218,80 @@ export class Orchestrator {
    */
   private _gitPush(pushArgs: string[], logFile: string): void {
     const noPromptEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-    let extraConfigArgs: string[] = [];
-    let token = '';
-    try {
-      token = execFileSync('gh', ['auth', 'token'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
-      if (token) {
-        // Rewrite https://github.com/ URLs to embed credentials directly.
-        // git's credential layer runs before any HTTP request — http.extraheader
-        // is too late because git still prompts for a username/password first.
-        // url.insteadOf embeds credentials in the URL itself so git's credential
-        // system sees them before prompting. No spaces in the config key, so
-        // Windows command-line quoting is not an issue.
-        extraConfigArgs = [
-          '-c', 'http.sslVerify=false',
-          '-c', `url.https://x-access-token:${token}@github.com/.insteadOf=https://github.com/`,
-        ];
-        appendFileSync(logFile, '[GIT] Using gh OAuth token via url.insteadOf\n');
+
+    // Helper: obtain the gh OAuth token.  Returns '' when gh is not installed
+    // or not authenticated.
+    const _getToken = (): string => {
+      try {
+        return execFileSync('gh', ['auth', 'token'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
+      } catch {
+        return '';
       }
-    } catch {
-      // gh not installed or not authenticated — fall through to existing credential helper
-      appendFileSync(logFile, '[GIT] gh token not available — falling back to default credential helper\n');
+    };
+
+    // Helper: build the url.insteadOf extraConfigArgs for a given token.
+    //
+    // url.insteadOf embeds credentials directly in the URL so git's credential
+    // system sees them before prompting.  http.extraheader would be too late —
+    // git still prompts for username/password first with that approach.
+    //
+    // credential.helper= disables the system credential helper so git never
+    // falls back to stored passwords if the token is rejected — the actual
+    // GitHub error surfaces clearly instead of being masked.
+    const _authArgs = (t: string): string[] => [
+      '-c', 'credential.helper=',
+      '-c', `url.https://x-access-token:${encodeURIComponent(t)}@github.com/.insteadOf=https://github.com/`,
+    ];
+
+    const token = _getToken();
+
+    // ── Execute the git command.  On the first auth failure with a gh token,
+    //     attempt to refresh the token via `gh auth refresh` and retry once.
+    //     credential.helper= keeps the error surface clean — stale stored
+    //     passwords are never tried. ──
+    const _exec = (t: string, attempt: number): void => {
+      const args = t ? [..._authArgs(t), ...pushArgs] : pushArgs;
+      try {
+        execFileSync('git', args, { cwd: this.projectRoot, stdio: 'pipe', env: noPromptEnv });
+      } catch (err) {
+        const raw = err instanceof Error ? err.message : String(err);
+        const safe = t ? raw.replaceAll(t, '[REDACTED]') : raw;
+
+        // On first auth failure with a gh token, refresh and retry once.
+        if (attempt === 0 && t && /invalid username or token|authentication failed|http basic: access denied|returned error: 401\b/i.test(raw)) {
+          try {
+            appendFileSync(logFile,
+              '[GIT] gh token rejected by remote — attempting gh auth refresh\n');
+            execFileSync('gh', ['auth', 'refresh', '-s', 'repo'], {
+              encoding: 'utf-8', stdio: 'pipe', timeout: 30_000,
+            });
+            const freshToken = _getToken();
+            if (freshToken) {
+              appendFileSync(logFile, '[GIT] Token refreshed — retrying\n');
+              // On retry failure the original error is thrown (no infinite retry).
+              _exec(freshToken, 1);
+              return;
+            }
+          } catch (refreshErr) {
+            const refreshMsg = refreshErr instanceof Error
+              ? refreshErr.message : String(refreshErr);
+            appendFileSync(logFile, `[GIT] gh auth refresh failed: ${refreshMsg}\n`);
+          }
+        }
+
+        throw new Error(safe);
+      }
+    };
+
+    // Log token availability
+    if (token) {
+      appendFileSync(logFile, '[GIT] Using gh OAuth token via url.insteadOf\n');
+    } else {
+      appendFileSync(logFile,
+        '[GIT] gh token not available — falling back to default credential helper\n');
     }
-    try {
-      execFileSync('git', [...extraConfigArgs, ...pushArgs], {
-        cwd: this.projectRoot, stdio: 'pipe', env: noPromptEnv,
-      });
-    } catch (err) {
-      // Redact the token from the error message before it reaches the log file.
-      // execFileSync includes the full command string in the error, which would
-      // expose the token in output.log if not scrubbed.
-      const raw = err instanceof Error ? err.message : String(err);
-      const safe = token ? raw.replaceAll(token, '[REDACTED]') : raw;
-      throw new Error(safe);
-    }
+
+    _exec(token, 0);
   }
 }
 

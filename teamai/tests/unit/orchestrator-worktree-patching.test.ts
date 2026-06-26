@@ -240,6 +240,47 @@ describe('_restoreWorktreeGitFileToHostPaths', () => {
     const expectedGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
     expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${expectedGitdir}`);
   });
+
+  // ── commondir tests ──
+
+  it('rewrites commondir to ../.. when it contains an absolute host path', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+    const containerGitdir = `/workspaces/project/.git/worktrees/${env.worktreeName}`;
+    writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${containerGitdir}\n`);
+    writeFileSync(join(env.worktreeMetaDir, 'gitdir'), `/workspaces/project/.worktrees/my-feature/.git\n`);
+    writeFileSync(join(env.worktreeMetaDir, 'commondir'), '/workspaces/project/.git\n');
+
+    (orch as AnyOrch)._restoreWorktreeGitFileToHostPaths(env.worktreePath);
+
+    const commondirContent = readFileSync(join(env.worktreeMetaDir, 'commondir'), 'utf-8').trim();
+    expect(commondirContent).toBe('../..');
+  });
+
+  it('is a no-op when commondir is already ../..', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+    const hostRoot = env.root.replace(/\\/g, '/');
+    const hostGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
+    writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${hostGitdir}\n`);
+    writeFileSync(join(env.worktreeMetaDir, 'commondir'), '../..\n');
+
+    (orch as AnyOrch)._restoreWorktreeGitFileToHostPaths(env.worktreePath);
+
+    // Should still be ../.. — unchanged
+    const commondirContent = readFileSync(join(env.worktreeMetaDir, 'commondir'), 'utf-8').trim();
+    expect(commondirContent).toBe('../..');
+  });
+
+  it('handles missing commondir file gracefully (does not throw)', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+    const containerGitdir = `/workspaces/project/.git/worktrees/${env.worktreeName}`;
+    writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${containerGitdir}\n`);
+
+    // No commondir file — should not throw
+    expect(() => (orch as AnyOrch)._restoreWorktreeGitFileToHostPaths(env.worktreePath)).not.toThrow();
+  });
 });
 
 describe('_patchWorktreeGitFile', () => {
@@ -373,6 +414,56 @@ describe('_patchWorktreeGitFile', () => {
       env.root,
       containerWorkspace
     );
+  });
+
+  // ── commondir tests ──
+
+  it('rewrites commondir to ../.. when it contains a Windows absolute path', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+    const containerWorkspace = '/workspaces/project';
+
+    const hostRoot = env.root.replace(/\\/g, '/');
+    const hostGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
+    writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${hostGitdir}\n`);
+    writeFileSync(join(env.worktreeMetaDir, 'commondir'), `${hostRoot}/.git\n`);
+
+    vi.mocked(hostToContainerPath).mockReturnValue(`${containerWorkspace}/.worktrees/my-feature`);
+
+    (orch as AnyOrch)._patchWorktreeGitFile(env.worktreePath, containerWorkspace);
+
+    const commondirContent = readFileSync(join(env.worktreeMetaDir, 'commondir'), 'utf-8').trim();
+    expect(commondirContent).toBe('../..');
+  });
+
+  it('is a no-op when commondir is already ../..', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+    const containerWorkspace = '/workspaces/project';
+    const correctGitdir = `${containerWorkspace}/.git/worktrees/${env.worktreeName}`;
+    writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${correctGitdir}\n`);
+    writeFileSync(join(env.worktreeMetaDir, 'commondir'), '../..\n');
+
+    (orch as AnyOrch)._patchWorktreeGitFile(env.worktreePath, containerWorkspace);
+
+    // Should still be ../.. — unchanged
+    const commondirContent = readFileSync(join(env.worktreeMetaDir, 'commondir'), 'utf-8').trim();
+    expect(commondirContent).toBe('../..');
+  });
+
+  it('handles missing commondir file gracefully (does not throw)', () => {
+    env = setupTestEnv();
+    const orch = makeOrch(env.root);
+    const containerWorkspace = '/workspaces/project';
+
+    const hostRoot = env.root.replace(/\\/g, '/');
+    const hostGitdir = `${hostRoot}/.git/worktrees/${env.worktreeName}`;
+    writeFileSync(join(env.worktreePath, '.git'), `gitdir: ${hostGitdir}\n`);
+
+    // No commondir file — should not throw
+    expect(() =>
+      (orch as AnyOrch)._patchWorktreeGitFile(env.worktreePath, containerWorkspace)
+    ).not.toThrow();
   });
 });
 
@@ -918,6 +1009,9 @@ describe('_patchWorktreeGitFile and _restoreWorktreeGitFileToHostPaths — idemp
 
     const hostBackRef = `${env.worktreePath.replace(/\\/g, '/')}/.git`;
     writeFileSync(join(env.worktreeMetaDir, 'gitdir'), `${hostBackRef}\n`);
+    // Create commondir with an absolute host path — both patch and restore
+    // should converge it to ../.. (the universally-correct relative path).
+    writeFileSync(join(env.worktreeMetaDir, 'commondir'), `${hostRoot}/.git\n`);
 
     const containerWorktreePath = `${containerWorkspace}/.worktrees/my-feature`;
     vi.mocked(hostToContainerPath).mockReturnValue(containerWorktreePath);
@@ -929,6 +1023,10 @@ describe('_patchWorktreeGitFile and _restoreWorktreeGitFileToHostPaths — idemp
     (orch as AnyOrch)._restoreWorktreeGitFileToHostPaths(env.worktreePath);
     expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim()).toBe(`gitdir: ${hostGitdir}`);
     expect(readFileSync(join(env.worktreeMetaDir, 'gitdir'), 'utf-8').trim()).toBe(hostBackRef);
+
+    // commondir should stay ../.. through the entire round-trip
+    const commondirContent = readFileSync(join(env.worktreeMetaDir, 'commondir'), 'utf-8').trim();
+    expect(commondirContent).toBe('../..');
   });
 });
 
