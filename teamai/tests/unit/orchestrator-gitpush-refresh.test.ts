@@ -264,36 +264,84 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => { throw AUTH_ERROR; })    // git push (fails)
         .mockImplementationOnce(() => {                         // gh auth refresh (fails)
           throw new Error('gh auth refresh: network error');
+        })
+        .mockImplementationOnce(() => {                         // Tier 2: credential helper also fails
+          throw new Error('git push failed: no auth helper available');
         });
 
       try {
         orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile);
         expect.fail('should have thrown');
       } catch (e: any) {
-        expect(e.message).toContain('[REDACTED]');
-        expect(e.message).not.toContain(FAKE_TOKEN);
-        expect(e.message).toContain('Invalid username or token');
+        expect(e.message).toContain('no auth helper available');
       }
     });
+  });
 
+  // ── Scenario 3b: Refresh succeeds → retry fails → Tier 2 fallback ─
+
+  describe('refresh succeeds, retry fails, Tier 2 credential helper fallback', () => {
     it('does not retry more than once', () => {
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)
         .mockImplementationOnce(() => { throw AUTH_ERROR; })
         .mockImplementationOnce(() => '')                       // refresh succeeds
         .mockImplementationOnce(() => FRESH_TOKEN)
-        // Retry also fails with auth error — should NOT trigger another refresh
-        .mockImplementationOnce(() => { throw AUTH_ERROR; });
+        // Retry also fails with auth error — triggers Tier 2 credential helper fallback
+        .mockImplementationOnce(() => { throw AUTH_ERROR; })
+        .mockImplementationOnce(() => {                         // Tier 2: credential helper also fails
+          throw new Error('credential helper fallback failed');
+        });
 
       expect(() =>
         orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
-      ).toThrow();
+      ).toThrow('credential helper fallback failed');
 
-      // gh auth refresh called exactly once (only on first failure)
+      // gh auth refresh called exactly once (only on first failure, not Tier 2)
       const refreshCalls = mockExecFileSync.mock.calls.filter(
         (call: any[]) => call[0] === 'gh' && (call[1] as string[]).includes('refresh'),
       );
       expect(refreshCalls.length).toBe(1);
+    });
+
+    it('Tier 2 fires in correct scope (attempt=1) when retry fails with auth', () => {
+      // Verifies the fix: Tier 2 falls back to credential helper from attempt=1
+      // (not attempt=0, which was the bug before narrowing the try/catch).
+      mockExecFileSync
+        .mockImplementationOnce(() => FAKE_TOKEN)            // gh auth token
+        .mockImplementationOnce(() => { throw AUTH_ERROR; }) // git push (fails) — Tier 1
+        .mockImplementationOnce(() => '')                    // gh auth refresh (succeeds)
+        .mockImplementationOnce(() => FRESH_TOKEN)           // gh auth token (retry)
+        .mockImplementationOnce(() => { throw AUTH_ERROR; }) // retry fails with auth — Tier 2 at attempt=1
+        .mockImplementationOnce(() => {                      // Tier 2: credential helper fails
+          throw new Error('credential helper: no stored credentials');
+        });
+
+      try {
+        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile);
+        expect.fail('should have thrown');
+      } catch (e: any) {
+        // Tier 2 error propagates — no token in the message since _exec('', 2) has no token
+        expect(e.message).toContain('no stored credentials');
+        expect(e.message).not.toContain(FRESH_TOKEN);
+      }
+
+      // gh auth refresh called exactly once (Tier 2 does NOT refresh again)
+      const refreshCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'gh' && (call[1] as string[]).includes('refresh'),
+      );
+      expect(refreshCalls.length).toBe(1);
+
+      // git was called 3 times: original, retry, Tier 2 credential helper
+      const gitCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'git',
+      );
+      expect(gitCalls.length).toBe(3);
+
+      // Tier 2 call (3rd git call) has no auth args
+      const tier2Args = gitCalls[2][1] as string[];
+      expect(tier2Args).not.toContain('credential.helper=');
+      expect(tier2Args.every((a: string) => !a.includes('x-access-token'))).toBe(true);
     });
   });
 
@@ -377,14 +425,15 @@ fatal: Authentication failed for 'https://github.com/user/repo.git/'
         .mockImplementationOnce(() => { throw AUTH_ERROR; })    // git push (fails)
         .mockImplementationOnce(() => '')                       // refresh succeeds
         .mockImplementationOnce(() => FRESH_TOKEN)              // gh auth token (retry)
-        .mockImplementationOnce(() => {                         // retry fails with non-auth
-          throw new Error(`Command failed: git -c url.https://x-access-token:${FRESH_TOKEN}@github.com/ push`);
+        .mockImplementationOnce(() => {                         // retry fails with non-auth error — Tier 2
+          throw new Error(                                      // does NOT fire, redacted error propagates
+            `Command failed: git -c url.https://x-access-token:${FRESH_TOKEN}@github.com/ push`);
         });
 
       try {
         orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile);
       } catch (e: any) {
-        // Should NOT contain the fresh token
+        // The error propagates from attempt 1 — redacted with FRESH_TOKEN
         expect(e.message).not.toContain(FRESH_TOKEN);
         expect(e.message).toContain('[REDACTED]');
       }
