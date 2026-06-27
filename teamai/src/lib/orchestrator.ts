@@ -1146,10 +1146,24 @@ export class Orchestrator {
       this._execGit(['rebase', 'origin/master'], pipeline.worktreePath);
       appendFileSync(logFile, '\n[INFO] Feature branch rebased onto latest master — PR will be conflict-free\n');
     } catch {
-      // Rebase has conflicts — abort cleanly and continue; gh pr update-branch will
-      // attempt an automatic merge on GitHub's side after the PR is created.
+      // Rebase has conflicts — abort and use the merger agent to semantically
+      // merge origin/master into the feature branch. The merger resolves conflicts,
+      // runs tests, and commits — producing a clean, conflict-free PR.
       try { this._execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* ignore */ }
-      appendFileSync(logFile, '\n[WARN] Rebase onto master had conflicts — PR may require manual conflict resolution\n');
+      appendFileSync(logFile, '\n[INFO] Rebase had conflicts — spawning merger to resolve via git merge\n');
+      try {
+        const mergeSessionId = await processManager.createSession(
+          this.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, logFile)
+        );
+        processManager.sendMessage(mergeSessionId, `/merge origin/master`);
+        await this.waitForCompletion(mergeSessionId);
+        processManager.killSession(mergeSessionId);
+        appendFileSync(logFile, '\n[INFO] Merger resolved conflicts — PR will be conflict-free\n');
+      } catch (mergeErr) {
+        const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
+        appendFileSync(logFile, `\n[WARN] Merger could not resolve all conflicts: ${mergeMsg}\n`);
+        appendFileSync(logFile, '\n[WARN] PR may require manual conflict resolution\n');
+      }
     }
 
     // Commit TeamAI artifacts to the worktree so the PR includes the full
@@ -1180,19 +1194,8 @@ export class Orchestrator {
     await this.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
 
-    // Extract PR URL from the agent's output
+    // Extract PR URL from the agent’s output
     const prUrl = this._extractPrUrl(logFile);
-
-    // Bring the PR branch up-to-date with master so the PR has no conflicts.
-    // gh pr update-branch merges the base branch into the head branch on the remote.
-    if (prUrl) {
-      try {
-        execFileSync('gh', ['pr', 'update-branch', prUrl], { cwd: this.projectRoot, stdio: 'pipe' });
-        appendFileSync(logFile, '\n[INFO] Branch synced with master — PR is conflict-free\n');
-      } catch {
-        appendFileSync(logFile, '\n[WARN] Auto-sync with master failed — PR may have conflicts requiring manual resolution\n');
-      }
-    }
 
     this.taskStore.update(pipeline.taskId, {
       platform: platform !== 'unknown' ? platform : undefined,
