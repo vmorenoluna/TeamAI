@@ -1888,14 +1888,10 @@ describe('Orchestrator', () => {
       fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
       await promise;
 
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'gh',
-        expect.arrayContaining(['pr', 'update-branch']),
-        expect.any(Object),
-      );
+      expect(mockExecFileSync).toHaveBeenCalled();
     });
 
-    it('handles gh pr update-branch failure gracefully', async () => {
+    it('advances to pr-open after successful PR creation', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
@@ -1910,12 +1906,7 @@ describe('Orchestrator', () => {
       });
 
       mockCreateSession.mockResolvedValue('sess-pr');
-      let callCount = 0;
-      mockExecFileSync.mockImplementation((cmd: string) => {
-        callCount++;
-        if (cmd === 'gh' && callCount >= 7) throw new Error('gh command not found');
-        return '';
-      });
+      mockExecFileSync.mockReturnValue('');
 
       const promise = (orch as AnyOrch).runCreatePR(pipeline);
       await new Promise(r => setTimeout(r, 10));
@@ -1939,9 +1930,6 @@ describe('Orchestrator', () => {
       });
 
       mockCreateSession.mockResolvedValue('sess-pr');
-      // Use mockImplementation instead of mockReturnValueOnce — the now-executed
-      // _commitArtifactsToWorktree adds intermediate git calls that would consume
-      // the fixed-size chain and cause subsequent calls to return undefined.
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git' && Array.isArray(args) && args[0] === 'remote') {
           return 'https://unknown.example.com/repo.git';
@@ -1960,6 +1948,178 @@ describe('Orchestrator', () => {
       const taskStore = (orch as AnyOrch).taskStore;
       const updated = taskStore.getById(testData.taskId);
       expect(updated?.platform).toBeUndefined();
+    });
+
+    it('spawns merger agent when rebase has conflicts', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      let rebaseCalled = false;
+      let mergerSessionCreated = false;
+
+      // First session = merger (conflict path), second = PR creation
+      mockCreateSession.mockImplementation(() => {
+        if (!mergerSessionCreated) {
+          mergerSessionCreated = true;
+          return Promise.resolve('sess-merger');
+        }
+        return Promise.resolve('sess-pr');
+      });
+
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git') {
+          const argStr = Array.isArray(args) ? args.join(' ') : '';
+          // Simulate rebase conflict
+          if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+            rebaseCalled = true;
+            throw new Error('Rebase conflict');
+          }
+          if (argStr.includes('remote') && argStr.includes('get-url')) {
+            return 'https://github.com/owner/repo.git';
+          }
+          if (argStr.includes('symbolic-ref')) {
+            return 'refs/remotes/origin/main';
+          }
+        }
+        return '';
+      });
+
+      const promise = (orch as AnyOrch).runCreatePR(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      expect(rebaseCalled).toBe(true);
+
+      // Merger session should have been created and sent /merge origin/master
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', '/merge origin/master');
+
+      // Complete the merger session
+      fireEvent('event', { sessionId: 'sess-merger', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 10));
+
+      // Complete the PR creation session
+      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
+      await promise;
+
+      expect(mockKillSession).toHaveBeenCalledWith('sess-merger');
+      expect(mockKillSession).toHaveBeenCalledWith('sess-pr');
+      expect(pipeline.phase).toBe('pr-open');
+    });
+
+    it('falls back gracefully when merger agent cannot resolve conflicts', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      let mergerSessionCreated = false;
+
+      mockCreateSession.mockImplementation(() => {
+        if (!mergerSessionCreated) {
+          mergerSessionCreated = true;
+          return Promise.resolve('sess-merger');
+        }
+        return Promise.resolve('sess-pr');
+      });
+
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git') {
+          const argStr = Array.isArray(args) ? args.join(' ') : '';
+          if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+            throw new Error('Rebase conflict');
+          }
+          if (argStr.includes('remote') && argStr.includes('get-url')) {
+            return 'https://github.com/owner/repo.git';
+          }
+          if (argStr.includes('symbolic-ref')) {
+            return 'refs/remotes/origin/main';
+          }
+        }
+        return '';
+      });
+
+      const promise = (orch as AnyOrch).runCreatePR(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      // Merger session was created
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', '/merge origin/master');
+
+      // Simulate merger failure — exit with non-zero code
+      fireEvent('exit', { sessionId: 'sess-merger', code: 1 });
+      await new Promise(r => setTimeout(r, 10));
+
+      // PR creation should still proceed
+      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
+      await promise;
+
+      // Pipeline still advances to pr-open even though merger failed
+      expect(pipeline.phase).toBe('pr-open');
+    });
+
+    it('does not spawn merger agent when rebase succeeds (fast path)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      // Only one session — PR creation (no merger on fast path)
+      mockCreateSession.mockResolvedValue('sess-pr');
+
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git') {
+          const argStr = Array.isArray(args) ? args.join(' ') : '';
+          if (argStr.includes('remote') && argStr.includes('get-url')) {
+            return 'https://github.com/owner/repo.git';
+          }
+          if (argStr.includes('symbolic-ref')) {
+            return 'refs/remotes/origin/main';
+          }
+        }
+        return '';
+      });
+
+      const promise = (orch as AnyOrch).runCreatePR(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      // Should have created only the PR session (no merger)
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+
+      // Should NOT have sent /merge origin/master
+      const sendCalls = mockSendMessage.mock.calls;
+      const mergeCalls = sendCalls.filter(
+        (call: any[]) => call[1] && typeof call[1] === 'string' && call[1].includes('/merge origin/master')
+      );
+      expect(mergeCalls.length).toBe(0);
+
+      // Should have sent PR creation prompt
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-pr', expect.stringContaining('Pull Request'));
+
+      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
+      await promise;
+
+      expect(pipeline.phase).toBe('pr-open');
     });
   });
 
