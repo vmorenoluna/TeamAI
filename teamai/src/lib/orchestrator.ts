@@ -1159,7 +1159,11 @@ export class Orchestrator {
     // Always push from the host — container git push credentials are unreliable.
     // _gitPush injects the gh OAuth token via http.extraheader, bypassing the
     // credential-helper chain entirely (same technique as GitHub Actions).
-    this._gitPush(['push', '-u', '--force-with-lease', 'origin', pipeline.branch], logFile);
+    // Use --force, not --force-with-lease: the local remote-tracking ref may be stale
+    // (e.g. branch was pushed earlier via a raw URL, or the worktree was recreated
+    // without a fetch), causing --force-with-lease to reject the push with "stale info"
+    // even though the orchestrator is the sole writer to these feat/ branches.
+    this._gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
 
     // Run merger on the host — gh CLI needs host credentials (gh auth login); inside the
     // container only git HTTPS is wired (gh auth setup-git), not the full gh API token.
