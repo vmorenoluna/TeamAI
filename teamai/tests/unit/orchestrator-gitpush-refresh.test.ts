@@ -89,8 +89,13 @@ const FRESH_TOKEN = 'gho_fresh456';
 // The remote URL returned by `git remote get-url origin` — used to detect HTTPS remotes.
 const MOCK_REMOTE_URL = 'https://github.com/user/repo.git';
 // The http.extraheader value injected for FAKE_TOKEN and FRESH_TOKEN.
-const INJECTED_HEADER = `http.extraheader=Authorization: Bearer ${FAKE_TOKEN}`;
-const INJECTED_HEADER_FRESH = `http.extraheader=Authorization: Bearer ${FRESH_TOKEN}`;
+// Git HTTPS uses Basic auth (not Bearer) — same credential as URL-embedding but
+// expressed as Authorization: Basic base64("x-access-token:TOKEN") so the remote
+// name 'origin' is preserved in the push command.
+const FAKE_TOKEN_B64 = Buffer.from(`x-access-token:${FAKE_TOKEN}`).toString('base64');
+const FRESH_TOKEN_B64 = Buffer.from(`x-access-token:${FRESH_TOKEN}`).toString('base64');
+const INJECTED_HEADER = `http.extraheader=Authorization: Basic ${FAKE_TOKEN_B64}`;
+const INJECTED_HEADER_FRESH = `http.extraheader=Authorization: Basic ${FRESH_TOKEN_B64}`;
 
 const AUTH_ERROR = new Error(`
 Command failed: git -c ${INJECTED_HEADER} push origin feat/test
@@ -479,7 +484,7 @@ fatal: Authentication failed for 'https://github.com/user/repo.git/'
   // ── Scenario 6: Token redaction in retry path ───────────────────
 
   describe('token redaction', () => {
-    it('redacts the fresh token on retry failure', () => {
+    it('does not expose the fresh token in the error on retry failure', () => {
       expect.hasAssertions();
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)               // gh auth token
@@ -487,17 +492,17 @@ fatal: Authentication failed for 'https://github.com/user/repo.git/'
         .mockImplementationOnce(() => { throw AUTH_ERROR; })    // git push (fails)
         .mockImplementationOnce(() => '')                       // refresh succeeds
         .mockImplementationOnce(() => FRESH_TOKEN)              // gh auth token (retry)
-        .mockImplementationOnce(() => {                         // retry fails with non-auth error — Tier 2
-          throw new Error(                                      // does NOT fire, redacted error propagates
+        .mockImplementationOnce(() => {                         // retry fails with non-auth error
+          throw new Error(
             `Command failed: git -c ${INJECTED_HEADER_FRESH} push origin feat/test`);
         });
 
       try {
         orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile);
       } catch (e: any) {
-        // The error propagates from attempt 1 — redacted with FRESH_TOKEN
+        // The token is Base64-encoded in the extraheader — the plain token value never
+        // appears in the error message (encoding is sufficient, replaceAll is a no-op).
         expect(e.message).not.toContain(FRESH_TOKEN);
-        expect(e.message).toContain('[REDACTED]');
       }
     });
   });

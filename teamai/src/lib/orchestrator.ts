@@ -2259,9 +2259,15 @@ export class Orchestrator {
     // post-push `git rev-parse origin/<branch>` verification fail even when the push
     // to GitHub succeeded. Using http.extraheader preserves 'origin' as the remote
     // name, so git correctly updates the local remote-tracking ref after the push.
+    //
+    // Auth format: git HTTPS uses HTTP Basic auth (not Bearer/OAuth2). The token is
+    // the password with a dummy username — same credential as the old URL-embedded form
+    // (https://x-access-token:TOKEN@...) but expressed as a Base64-encoded header so
+    // the remote name is preserved.
     const _buildInjectedArgs = (t: string): string[] | null => {
       if (!t || _remoteIdx < 0 || !_remoteUrl?.startsWith('https://')) return null;
-      return ['-c', `http.extraheader=Authorization: Bearer ${t}`, ...pushArgs];
+      const encoded = Buffer.from(`x-access-token:${t}`).toString('base64');
+      return ['-c', `http.extraheader=Authorization: Basic ${encoded}`, ...pushArgs];
     };
 
     // ── Execute the git command.  On the first auth failure with a gh token,
