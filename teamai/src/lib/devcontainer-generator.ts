@@ -4,6 +4,9 @@ import { join, dirname } from 'path';
 export interface ProjectInfo {
   type: 'node' | 'python' | 'go' | 'rust' | 'generic';
   nodeVersion?: string;
+  pythonVersion?: string;
+  goVersion?: string;
+  rustVersion?: string;
   packageManager?: 'npm' | 'yarn' | 'pnpm' | 'bun';
   hasTypeScript?: boolean;
   /** Discovered from README/docs, or heuristic fallback */
@@ -90,9 +93,11 @@ function analyzeNodeProject(projectRoot: string, files: string[]): ProjectInfo {
 function analyzePythonProject(projectRoot: string, files: string[]): ProjectInfo {
   const hasPoetry = files.includes('pyproject.toml');
   const docCommands = parseDocs(projectRoot, files);
+  const pythonVersion = detectPythonVersion(projectRoot, files);
 
   return {
     type: 'python',
+    pythonVersion,
     installCommand: docCommands.install || (hasPoetry ? 'poetry install' : 'pip install -r requirements.txt'),
     buildCommand: docCommands.build || (hasPoetry ? 'poetry build' : 'python setup.py build'),
     testCommand: docCommands.test || 'python -m pytest',
@@ -101,8 +106,10 @@ function analyzePythonProject(projectRoot: string, files: string[]): ProjectInfo
 
 function analyzeGoProject(projectRoot: string, files: string[]): ProjectInfo {
   const docCommands = parseDocs(projectRoot, files);
+  const goVersion = detectGoVersion(projectRoot);
   return {
     type: 'go',
+    goVersion,
     installCommand: docCommands.install || 'go mod download',
     buildCommand: docCommands.build || 'go build ./...',
     testCommand: docCommands.test || 'go test ./...',
@@ -111,8 +118,10 @@ function analyzeGoProject(projectRoot: string, files: string[]): ProjectInfo {
 
 function analyzeRustProject(projectRoot: string, files: string[]): ProjectInfo {
   const docCommands = parseDocs(projectRoot, files);
+  const rustVersion = detectRustVersion(projectRoot);
   return {
     type: 'rust',
+    rustVersion,
     installCommand: docCommands.install || 'cargo fetch',
     buildCommand: docCommands.build || 'cargo build',
     testCommand: docCommands.test || 'cargo test',
@@ -257,6 +266,78 @@ function sanitizeCommand(cmd: string): string {
   return cmd.replace(/\s*#.*$/, '').replace(/\\\s*$/, '').trim();
 }
 
+// ── Version detection ─────────────────────────────────────────────────────
+
+/**
+ * Detect Python version from pyproject.toml or .python-version file.
+ * Returns the major.minor version string (e.g., "3.12"), or undefined.
+ */
+function detectPythonVersion(projectRoot: string, files: string[]): string | undefined {
+  // Check .python-version file (pyenv format)
+  if (files.includes('.python-version')) {
+    const raw = safeReadText(join(projectRoot, '.python-version'));
+    if (raw) {
+      const m = raw.trim().match(/^(\d+\.\d+)/);
+      if (m) return m[1];
+    }
+  }
+
+  // Check pyproject.toml: [project] requires-python or [tool.poetry.dependencies] python
+  if (files.includes('pyproject.toml')) {
+    const content = safeReadText(join(projectRoot, 'pyproject.toml'));
+    if (content) {
+      // TOML requires-python = ">=3.10" or requires-python = '>=3.10'
+      let m = content.match(/requires-python\s*=\s*["'][^"']*(\d+\.\d+)/);
+      if (m) return m[1];
+      // Poetry: python = "^3.10" or python = '^3.10'
+      m = content.match(/\[tool\.poetry\.dependencies\][\s\S]*?python\s*=\s*["'][^"']*(\d+\.\d+)/);
+      if (m) return m[1];
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Detect Go version from go.mod.
+ * Returns the version string (e.g., "1.22"), or undefined.
+ */
+function detectGoVersion(projectRoot: string): string | undefined {
+  const content = safeReadText(join(projectRoot, 'go.mod'));
+  if (content) {
+    const m = content.match(/^go\s+(\d+\.\d+)/m);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
+/**
+ * Detect Rust version from rust-toolchain.toml or rust-toolchain file.
+ * Returns the version string (e.g., "1.80"), or undefined.
+ */
+function detectRustVersion(projectRoot: string): string | undefined {
+  // Check rust-toolchain.toml: [toolchain] channel = "1.80" or channel = '1.80'
+  const tomlPath = join(projectRoot, 'rust-toolchain.toml');
+  if (existsSync(tomlPath)) {
+    const content = safeReadText(tomlPath);
+    if (content) {
+      const m = content.match(/channel\s*=\s*["'](\d+\.\d+)/);
+      if (m) return m[1];
+    }
+  }
+
+  // Check rust-toolchain file (plain text, just the version)
+  if (existsSync(join(projectRoot, 'rust-toolchain'))) {
+    const content = safeReadText(join(projectRoot, 'rust-toolchain'));
+    if (content) {
+      const m = content.trim().match(/^(\d+\.\d+)/);
+      if (m) return m[1];
+    }
+  }
+
+  return undefined;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function detectPackageManager(files: string[]): ProjectInfo['packageManager'] {
@@ -297,6 +378,9 @@ interface TemplateVars {
   REMOTE_USER: string;
   REMOTE_HOME: string;
   NODE_VERSION: string;
+  PYTHON_VERSION: string;
+  GO_VERSION: string;
+  RUST_VERSION: string;
   INSTALL_COMMAND: string;
   BUILD_COMMAND: string;
   TEST_COMMAND: string;
@@ -360,6 +444,9 @@ function buildTemplateVars(info: ProjectInfo): TemplateVars {
     REMOTE_USER: remoteUser,
     REMOTE_HOME: remoteHome,
     NODE_VERSION: info.nodeVersion || '20',
+    PYTHON_VERSION: info.pythonVersion || '3.12',
+    GO_VERSION: info.goVersion || '1',
+    RUST_VERSION: info.rustVersion || '1',
     INSTALL_COMMAND: info.installCommand,
     BUILD_COMMAND: info.buildCommand,
     TEST_COMMAND: info.testCommand,
