@@ -1,0 +1,18 @@
+{
+  "name": "Dev Container",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "remoteUser": "vscode",
+
+  "mounts": [
+    "source=${localEnv:USERPROFILE}\\.claude,target=/home/vscode/.claude,type=bind",
+    "source=${localEnv:USERPROFILE}\\.gitconfig,target=/home/vscode/.gitconfig,type=bind",
+    "source=${localEnv:USERPROFILE}\\.ssh,target=/home/vscode/.ssh,type=bind,readonly"
+  ],
+
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+    {{EXTRA_FEATURES}}
+  },
+
+  "postCreateCommand": "npm install -g @anthropic-ai/claude-code && sudo apt-get update -q && sudo apt-get install -y -q gh{{EXTRA_APT}} && sudo git config --system --add safe.directory '*'"
+}
