@@ -84,19 +84,21 @@ describe('getAvailableModels', () => {
     expect(result.error).toBe('ANTHROPIC_API_KEY not set — using curated model list');
   });
 
-  it('returns curated OpenAI models when no API key and no cache', async () => {
+  it('returns empty models for OpenAI when no API key and no curated default', async () => {
     vi.stubEnv('OPENAI_API_KEY', '');
     const result = await getAvailableModels('openai');
-    expect(result.models).toEqual(CURATED_MODELS.openai);
+    expect(result.models).toEqual([]);
+    expect(result.error).toBe('OPENAI_API_KEY not set — using curated model list');
   });
 
-  it('returns curated Gemini models when no API key and no cache', async () => {
+  it('returns empty models for Gemini when no API key and no curated default', async () => {
     vi.stubEnv('GOOGLE_API_KEY', '');
     const result = await getAvailableModels('gemini');
-    expect(result.models).toEqual(CURATED_MODELS.gemini);
+    expect(result.models).toEqual([]);
+    expect(result.error).toBe('GOOGLE_API_KEY not set — using curated model list');
   });
 
-  it('returns curated Bedrock models as fallback when CLI fails', async () => {
+  it('returns empty models for Bedrock when CLI fails and no curated default', async () => {
     const { execFile } = await import('child_process');
     (vi.mocked(execFile) as unknown as Mock).mockImplementation(
       (_cmd: string, _args: readonly string[] | null | undefined, _opts: object | null | undefined, callback: (err: Error | null) => void) => {
@@ -104,11 +106,11 @@ describe('getAvailableModels', () => {
       },
     );
     const result = await getAvailableModels('bedrock');
-    expect(result.models).toEqual(CURATED_MODELS.bedrock);
+    expect(result.models).toEqual([]);
     expect(result.error).toBe('AWS CLI not available');
   });
 
-  it('returns curated Vertex models as fallback when CLI fails', async () => {
+  it('returns empty models for Vertex when CLI fails and no curated default', async () => {
     const { execFile } = await import('child_process');
     (vi.mocked(execFile) as unknown as Mock).mockImplementation(
       (_cmd: string, _args: readonly string[] | null | undefined, _opts: object | null | undefined, callback: (err: Error | null) => void) => {
@@ -116,14 +118,14 @@ describe('getAvailableModels', () => {
       },
     );
     const result = await getAvailableModels('vertex');
-    expect(result.models).toEqual(CURATED_MODELS.vertex);
+    expect(result.models).toEqual([]);
     expect(result.error).toBe('gcloud CLI not available');
   });
 
-  it('returns curated Ollama models as fallback when not reachable', async () => {
+  it('returns empty models for Ollama when not reachable and no curated default', async () => {
     mockFetch.mockRejectedValueOnce(new Error('fetch failed'));
     const result = await getAvailableModels('ollama');
-    expect(result.models).toEqual(CURATED_MODELS.ollama);
+    expect(result.models).toEqual([]);
     expect(result.error).toBe('Ollama not running on localhost:11434');
   });
 
@@ -393,17 +395,10 @@ describe('getAvailableModels', () => {
     expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:11434/api/tags');
   });
 
-  it('returns curated Ollama models when local API is not reachable', async () => {
-    mockFetch.mockRejectedValueOnce(new Error('fetch failed'));
-    const result = await getAvailableModels('ollama');
-    expect(result.models).toEqual(CURATED_MODELS.ollama);
-    expect(result.error).toBe('Ollama not running on localhost:11434');
-  });
-
-  it('returns curated Ollama models when API returns error', async () => {
+  it('returns empty models for Ollama when API returns error and no curated default', async () => {
     mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
     const result = await getAvailableModels('ollama');
-    expect(result.models).toEqual(CURATED_MODELS.ollama);
+    expect(result.models).toEqual([]);
     expect(result.error).toBe('Ollama API returned 500');
   });
 
@@ -419,23 +414,23 @@ describe('getAvailableModels', () => {
     expect(result.error).toBe('Anthropic API returned 401');
   });
 
-  it('returns error on OpenAI API non-ok response', async () => {
+  it('returns error on OpenAI API non-ok response (no curated fallback)', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'sk-test-openai');
     mockFetch.mockResolvedValueOnce({ ok: false, status: 403 });
 
     const result = await getAvailableModels('openai');
 
-    expect(result.models).toEqual(CURATED_MODELS.openai);
+    expect(result.models).toEqual([]);
     expect(result.error).toBe('OpenAI API returned 403');
   });
 
-  it('returns error on Gemini API non-ok response', async () => {
+  it('returns error on Gemini API non-ok response (no curated fallback)', async () => {
     vi.stubEnv('GOOGLE_API_KEY', 'test-key');
     mockFetch.mockResolvedValueOnce({ ok: false, status: 400 });
 
     const result = await getAvailableModels('gemini');
 
-    expect(result.models).toEqual(CURATED_MODELS.gemini);
+    expect(result.models).toEqual([]);
     expect(result.error).toBe('Gemini API returned 400');
   });
 

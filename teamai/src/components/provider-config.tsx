@@ -5,7 +5,6 @@ import { saveProvidersConfig, getAvailableModels } from '@/app/actions/providers
 import type { ProvidersConfig } from '@/app/actions/providers';
 
 const ROLES = ['analyst', 'planner', 'coder', 'qa-reviewer', 'merger'] as const;
-const PROVIDERS = ['anthropic', 'bedrock', 'vertex', 'openai', 'gemini', 'ollama'] as const;
 
 /** Deduplicate concurrent fetch requests for the same provider on the client. */
 const inflightFetches = new Map<string, Promise<{ models: string[]; error?: string }>>();
@@ -45,15 +44,11 @@ function Spinner() {
 function ModelRow({
   label,
   model,
-  provider,
   onModel,
-  onProvider,
 }: {
   label: string;
   model: string;
-  provider: string;
   onModel: (v: string) => void;
-  onProvider: (v: string) => void;
 }) {
   const [models, setModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(true); // start as loading
@@ -61,6 +56,10 @@ function ModelRow({
   const [showCustom, setShowCustom] = useState(false);
   const [customValue, setCustomValue] = useState('');
   const fetchVersion = useRef(0); // increment to discard stale responses
+
+  // Provider is always Anthropic — hardcoded so the dropdown is removed
+  // but the backend ProviderConfig still stores it for future multi-provider support.
+  const provider = 'anthropic';
 
   const loadModels = useCallback(async (prov: string, refresh = false) => {
     const version = ++fetchVersion.current;
@@ -189,20 +188,12 @@ function ModelRow({
         <button
           onClick={handleRefresh}
           disabled={loading}
-          title={`Refresh ${provider} models`}
+          title="Refresh Anthropic models"
           className="p-1.5 text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors"
         >
           {loading ? <Spinner /> : <RefreshIcon />}
         </button>
       </div>
-
-      <select
-        value={provider}
-        onChange={e => onProvider(e.target.value)}
-        className="px-2 py-1 text-xs border border-[#334155] rounded bg-[#11131b] text-slate-300 focus:outline-none focus:ring-1 focus:ring-[#2563eb]"
-      >
-        {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
-      </select>
     </div>
   );
 }
@@ -212,14 +203,14 @@ export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
   const [saved, setSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
 
-  function setDefault(field: 'model' | 'provider', value: string) {
-    setCfg(c => ({ ...c, default: { ...c.default, [field]: value } }));
+  function setDefault(value: string) {
+    setCfg(c => ({ ...c, default: { ...c.default, model: value, provider: 'anthropic' } }));
   }
 
-  function setRole(role: string, field: 'model' | 'provider', value: string) {
+  function setRole(role: string, value: string) {
     setCfg(c => ({
       ...c,
-      roles: { ...c.roles, [role]: { ...(c.roles[role] ?? {}), [field]: value } },
+      roles: { ...c.roles, [role]: { ...(c.roles[role] ?? {}), model: value, provider: 'anthropic' } },
     }));
   }
 
@@ -245,9 +236,7 @@ export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
         <ModelRow
           label="Default"
           model={cfg.default.model}
-          provider={cfg.default.provider}
-          onModel={v => setDefault('model', v)}
-          onProvider={v => setDefault('provider', v)}
+          onModel={v => setDefault(v)}
         />
       </div>
       <div>
@@ -257,9 +246,7 @@ export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
             key={role}
             label={role}
             model={cfg.roles[role]?.model ?? ''}
-            provider={cfg.roles[role]?.provider ?? cfg.default.provider}
-            onModel={v => setRole(role, 'model', v)}
-            onProvider={v => setRole(role, 'provider', v)}
+            onModel={v => setRole(role, v)}
           />
         ))}
       </div>
@@ -271,9 +258,7 @@ export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
         <ModelRow
           label="Exploration"
           model={cfg.exploration?.model ?? ''}
-          provider={cfg.default.provider}
           onModel={setExplorationModel}
-          onProvider={() => {}}
         />
       </div>
       <button
