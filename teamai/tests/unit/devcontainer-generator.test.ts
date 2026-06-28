@@ -6,6 +6,7 @@
  *   - Template rendering: variable substitution, placeholder handling
  *   - Doc parsing: extracting install/build/test commands from README
  *   - Edge cases: missing files, invalid JSON, special characters in commands
+ *   - Real template loading: generateDevcontainer against actual .json templates
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -26,6 +27,7 @@ vi.mock('fs', () => ({
 // ── Imports ──
 
 import { analyzeProject, generateDevcontainer, ProjectInfo } from '../../src/lib/devcontainer-generator';
+import { join, dirname } from 'path';
 
 // ── Helpers ──
 
@@ -45,6 +47,46 @@ function mockProject(files: string[], fileContents: Record<string, string> = {})
     }
     return '{}';
   });
+}
+
+/** Resolve the defaults/devcontainers/ directory (mirrors the generator's DEFAULTS_DIR).
+ *  The test file is at teamai/tests/unit/, so 2 dirname calls reach teamai/. */
+const defaultsDir = join(dirname(dirname(__dirname)), 'defaults', 'devcontainers');
+
+/** Helper to verify a generated devcontainer is valid and has key fields */
+function assertValidDevcontainer(json: string, expectedImagePrefix: string, expectedRemoteUser: string) {
+  // Parseable JSON
+  const parsed = JSON.parse(json);
+
+  // No leftover template placeholders
+  expect(json).not.toContain('{{');
+  expect(json).not.toContain('}}');
+
+  // Core fields present
+  expect(parsed.name).toBe('Dev Container');
+  expect(parsed.image).toBeDefined();
+  expect(parsed.image).toContain(expectedImagePrefix);
+  expect(parsed.remoteUser).toBe(expectedRemoteUser);
+
+  // Credential mounts present
+  expect(parsed.mounts).toBeDefined();
+  const mountStr = JSON.stringify(parsed.mounts);
+  expect(mountStr).toContain('.claude');
+  expect(mountStr).toContain('.gitconfig');
+  expect(mountStr).toContain('.ssh');
+
+  // Agent tooling in features or postCreateCommand
+  const features = parsed.features || {};
+  const featureKeys = Object.keys(features);
+  const hasGhFeature = featureKeys.some((k: string) => k.includes('github-cli'));
+  expect(hasGhFeature).toBe(true);
+
+  // Claude CLI and git safe.directory in postCreateCommand
+  expect(parsed.postCreateCommand).toBeDefined();
+  expect(parsed.postCreateCommand).toContain('@anthropic-ai/claude-code');
+  expect(parsed.postCreateCommand).toContain("safe.directory '*'");
+
+  return parsed;
 }
 
 // ── Tests ──
@@ -532,5 +574,210 @@ describe('generateDevcontainer', () => {
     const result = generateDevcontainer('/test/project', info);
     const parsed = JSON.parse(result);
     expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/python:3.12');
+  });
+});
+
+// ── Real-template tests ──────────────────────────────────────────────────
+
+describe('generateDevcontainer with real templates', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+
+    // Use vi.importActual to read actual template files from disk,
+    // bypassing the vi.mock('fs', ...) that wraps readFileSync.
+    const realFS = await vi.importActual<typeof import('fs')>('fs');
+    const readTemplate = (name: string) =>
+      realFS.readFileSync(join(defaultsDir, name), 'utf-8');
+
+    const pythonTemplate = readTemplate('python.devcontainer.json');
+    const goTemplate = readTemplate('go.devcontainer.json');
+    const rustTemplate = readTemplate('rust.devcontainer.json');
+    const nodeTemplate = readTemplate('node.devcontainer.json');
+    const genericTemplate = readTemplate('generic.devcontainer.json');
+
+    mockExistsSync.mockImplementation((path: string) => {
+      if (path.includes('devcontainers')) return true;
+      return false;
+    });
+
+    mockReadFileSync.mockImplementation((path: string, _encoding?: string) => {
+      const p = path.replace(/\\/g, '/');
+      if (p.includes('python.devcontainer.json')) return pythonTemplate;
+      if (p.includes('go.devcontainer.json')) return goTemplate;
+      if (p.includes('rust.devcontainer.json')) return rustTemplate;
+      if (p.includes('node.devcontainer.json')) return nodeTemplate;
+      if (p.includes('generic.devcontainer.json')) return genericTemplate;
+      return '{}';
+    });
+  });
+
+  describe('Python template', () => {
+    it('generates valid devcontainer JSON with detected version', () => {
+      const info: ProjectInfo = {
+        type: 'python',
+        pythonVersion: '3.11',
+        installCommand: 'pip install -r requirements.txt',
+        buildCommand: 'python setup.py build',
+        testCommand: 'pytest',
+      };
+
+      const result = generateDevcontainer('/test/project', info);
+      const parsed = assertValidDevcontainer(
+        result,
+        'mcr.microsoft.com/devcontainers/python:',
+        'vscode'
+      );
+
+      expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/python:3.11');
+      expect(parsed.remoteEnv).toBeDefined();
+      expect(parsed.remoteEnv.PYTHONUNBUFFERED).toBe('1');
+    });
+
+    it('uses default version 3.12 when no version detected', () => {
+      const info: ProjectInfo = {
+        type: 'python',
+        installCommand: 'pip install',
+        buildCommand: 'python setup.py build',
+        testCommand: 'pytest',
+      };
+
+      const result = generateDevcontainer('/test/project', info);
+      const parsed = assertValidDevcontainer(
+        result,
+        'mcr.microsoft.com/devcontainers/python:',
+        'vscode'
+      );
+
+      expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/python:3.12');
+    });
+  });
+
+  describe('Go template', () => {
+    it('generates valid devcontainer JSON with detected version', () => {
+      const info: ProjectInfo = {
+        type: 'go',
+        goVersion: '1.22',
+        installCommand: 'go mod download',
+        buildCommand: 'go build ./...',
+        testCommand: 'go test ./...',
+      };
+
+      const result = generateDevcontainer('/test/project', info);
+      const parsed = assertValidDevcontainer(
+        result,
+        'mcr.microsoft.com/devcontainers/go:',
+        'vscode'
+      );
+
+      expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/go:1.22');
+      expect(parsed.remoteEnv).toBeDefined();
+      expect(parsed.remoteEnv.GO111MODULE).toBe('on');
+    });
+
+    it('uses default version 1 when no version detected', () => {
+      const info: ProjectInfo = {
+        type: 'go',
+        installCommand: 'go mod download',
+        buildCommand: 'go build ./...',
+        testCommand: 'go test ./...',
+      };
+
+      const result = generateDevcontainer('/test/project', info);
+      const parsed = assertValidDevcontainer(
+        result,
+        'mcr.microsoft.com/devcontainers/go:',
+        'vscode'
+      );
+
+      expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/go:1');
+    });
+  });
+
+  describe('Rust template', () => {
+    it('generates valid devcontainer JSON with detected version', () => {
+      const info: ProjectInfo = {
+        type: 'rust',
+        rustVersion: '1.80',
+        installCommand: 'cargo fetch',
+        buildCommand: 'cargo build',
+        testCommand: 'cargo test',
+      };
+
+      const result = generateDevcontainer('/test/project', info);
+      const parsed = assertValidDevcontainer(
+        result,
+        'mcr.microsoft.com/devcontainers/rust:',
+        'vscode'
+      );
+
+      expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/rust:1.80');
+      expect(parsed.remoteEnv).toBeDefined();
+      expect(parsed.remoteEnv.CARGO_TERM_COLOR).toBe('always');
+    });
+
+    it('uses default version 1 when no version detected', () => {
+      const info: ProjectInfo = {
+        type: 'rust',
+        installCommand: 'cargo fetch',
+        buildCommand: 'cargo build',
+        testCommand: 'cargo test',
+      };
+
+      const result = generateDevcontainer('/test/project', info);
+      const parsed = assertValidDevcontainer(
+        result,
+        'mcr.microsoft.com/devcontainers/rust:',
+        'vscode'
+      );
+
+      expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/rust:1');
+    });
+  });
+
+  describe('Cross-template safety', () => {
+    it('cleans all placeholder syntax from generated JSON', () => {
+      const info: ProjectInfo = {
+        type: 'python',
+        installCommand: 'pip install',
+        buildCommand: 'python setup.py build',
+        testCommand: 'pytest',
+      };
+
+      const result = generateDevcontainer('/test/project', info);
+      // Verify absolutely no {{ or }} remain after substitution
+      expect(result).not.toContain('{{');
+      expect(result).not.toContain('}}');
+    });
+
+    it('generates parseable JSON for all three language templates', () => {
+      const templates: { type: ProjectInfo['type']; info: Partial<ProjectInfo> }[] = [
+        {
+          type: 'python',
+          info: { installCommand: 'pip install', buildCommand: 'python -m build', testCommand: 'pytest' },
+        },
+        {
+          type: 'go',
+          info: { installCommand: 'go mod download', buildCommand: 'go build ./...', testCommand: 'go test ./...' },
+        },
+        {
+          type: 'rust',
+          info: { installCommand: 'cargo fetch', buildCommand: 'cargo build', testCommand: 'cargo test' },
+        },
+      ];
+
+      for (const t of templates) {
+        const fullInfo: ProjectInfo = {
+          type: t.type,
+          installCommand: t.info.installCommand!,
+          buildCommand: t.info.buildCommand!,
+          testCommand: t.info.testCommand!,
+        };
+        const result = generateDevcontainer('/test/project', fullInfo);
+        const parsed = JSON.parse(result);
+        expect(parsed.name).toBe('Dev Container');
+        expect(parsed.image).toBeTruthy();
+        expect(parsed.remoteUser).toBeTruthy();
+      }
+    });
   });
 });
