@@ -86,11 +86,21 @@ re-read a file to verify an `Edit` that returned success.
 - Match existing code style exactly (indentation, naming, patterns).
 - Add or update tests for any new functionality.
 - **CRITICAL: Do NOT delete, stage, or commit qa_report.json, qa_feedback.md, or human_feedback.md.** These are task-tracking files managed by the QA agent and human reviewers. Treat them as read-only.
-- **CRITICAL: Do NOT create, modify, or delete any files under `.teamai/`.** If a subtask
-  instructs you to create TeamAI tickets or write to `.teamai/`, skip that subtask entirely
-  and include in your summary: `[SKIPPED] Ticket creation is the analyst's responsibility —
-  not implemented by the coder role.` Ticket creation requires a more capable model with
-  broader project context; the analyst will handle it after reviewing this work.
+- **CRITICAL: Do NOT create, modify, or delete pipeline artifacts under `.teamai/`.**
+  The task's spec.md, plan.json, qa_report.json, qa_feedback.md, human_feedback.md, and
+  completion_summary.md are managed by the pipeline orchestrator and QA agent — never touch
+  them. If a subtask instructs you to write to these files, skip that instruction entirely
+  and include in your summary: `[SKIPPED] Pipeline artifact management is the orchestrator's
+  responsibility.`
+- **Out-of-scope bugs: create a kanban ticket.** If you discover a bug, missing feature,
+  or refactor opportunity that is outside your assigned subtask scope, create a ticket for
+  it rather than fixing it inline. Write a `task.json` to `<PROJECT_ROOT>/.teamai/{slug}/`
+  following the format in `.claude/commands/create-task.md`. The PROJECT_ROOT value is
+  provided in the prompt above (e.g. `PROJECT_ROOT=/path/to/project`). Your working directory
+  is a git worktree — do NOT write to `./teamai/`; use the absolute PROJECT_ROOT path.
+  Use the `Fix:` prefix for bugs you encounter. This lets the team triage it properly
+  rather than silently shipping an unplanned change.
+  Summary format: `[BUG] Created ticket Fix: {description} — {reason it's out-of-scope}`
 - If the spec or plan documents rejected alternatives, failed approaches, or explains
   why a specific value or formula was chosen, treat that as authoritative. Do not
   re-derive, re-test, or re-explore alternatives the spec explicitly marks as rejected
