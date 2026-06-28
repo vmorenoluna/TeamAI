@@ -739,7 +739,8 @@ export class Orchestrator {
               '/implement Subtask ' + subtask.id + ': ' + subtask.title + '\n\n' +
               subtask.description + '\n\n' +
               'Files: ' + subtask.files.join(', ') + '\n\n' +
-              criteriaLine + '\n\n' +
+              criteriaLine + '\n' +
+              'PROJECT_ROOT=' + this.projectRoot + '\n\n' +
               (hasQaFeedback
                 ? '⚠️ Only fix the QA issues listed above. Do NOT re-validate criteria that QA already passed.\n' +
                   'After fixing all issues, run the FULL test suite to verify no regressions.\n'
