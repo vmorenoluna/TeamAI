@@ -52,9 +52,9 @@ export default async function SettingsPage() {
 
         {/* Provider config */}
         <section>
-          <h2 className="text-sm font-semibold text-slate-200 mb-1">Providers</h2>
+          <h2 className="text-sm font-semibold text-slate-200 mb-1">Models</h2>
           <p className="text-xs text-slate-400 mb-4">
-            Configure which model and backend each agent role uses. Leave role fields blank to inherit the default.
+            Configure which Claude model each agent role uses. Leave role fields blank to inherit the default.
           </p>
           <ProviderConfigEditor config={providersConfig} />
         </section>

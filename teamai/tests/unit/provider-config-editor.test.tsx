@@ -139,7 +139,7 @@ describe('ProviderConfigEditor', () => {
 
   // ── Provider select ─────────────────────────────────────────────────
 
-  it('renders provider select with all providers', async () => {
+  it('does not render provider selects (provider is always Anthropic)', async () => {
     await act(async () => {
       render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
       if (!vi.isFakeTimers()) {
@@ -147,12 +147,15 @@ describe('ProviderConfigEditor', () => {
       }
     });
     await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
-    expect(screen.getAllByRole('option', { name: 'anthropic' }).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByRole('option', { name: 'openai' }).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByRole('option', { name: 'bedrock' }).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByRole('option', { name: 'vertex' }).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByRole('option', { name: 'gemini' }).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByRole('option', { name: 'ollama' }).length).toBeGreaterThanOrEqual(1);
+    // Provider dropdowns have been removed — only model comboboxes remain.
+    // All comboboxes should show model names, not provider values.
+    const comboboxes = screen.getAllByRole('combobox');
+    // Each row has exactly one combobox (the model selector), no provider select.
+    // 1 default + 5 roles + 1 exploration = 7 comboboxes total.
+    expect(comboboxes.length).toBe(7);
+    // No option elements with provider names like 'openai' or 'bedrock' should exist.
+    expect(screen.queryByRole('option', { name: 'openai' })).toBeNull();
+    expect(screen.queryByRole('option', { name: 'bedrock' })).toBeNull();
   });
 
   // ── Refresh button ──────────────────────────────────────────────────
@@ -170,7 +173,7 @@ describe('ProviderConfigEditor', () => {
       expect(screen.queryByText('Loading models…')).toBeNull();
     });
 
-    const refreshButtons = screen.getAllByTitle('Refresh anthropic models');
+    const refreshButtons = screen.getAllByTitle('Refresh Anthropic models');
     expect(refreshButtons.length).toBeGreaterThanOrEqual(1);
 
     await act(async () => {
@@ -241,43 +244,8 @@ describe('ProviderConfigEditor', () => {
     expect(customInput).toHaveValue('my-custom-model');
   });
 
-  // ── Provider change ─────────────────────────────────────────────────
-
-  it('reloads models when default provider is changed', async () => {
-    mockGetAvailableModels
-      .mockResolvedValueOnce({ models: CURATED_MODELS_ANTHROPIC, error: undefined })
-      .mockResolvedValue({ models: ['gpt-4o', 'gpt-4o-mini'], error: undefined });
-
-    await act(async () => {
-      render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
-      if (!vi.isFakeTimers()) {
-        await new Promise(r => setTimeout(r, 0));
-      }
-    });
-
-    await waitFor(() => {
-      expect(mockGetAvailableModels).toHaveBeenCalledWith('anthropic', false);
-    });
-
-    // Find default provider select (first select without model options)
-    const comboboxes = screen.getAllByRole('combobox');
-    const providerSelect = findSelect(comboboxes, opts =>
-      opts.every(o =>
-        ['anthropic', 'bedrock', 'vertex', 'openai', 'gemini', 'ollama'].includes(o.value),
-      ),
-    );
-    expect(providerSelect).toBeTruthy();
-
-    if (providerSelect) {
-      await act(async () => {
-        fireEvent.change(providerSelect, { target: { value: 'openai' } });
-      });
-    }
-
-    await waitFor(() => {
-      expect(mockGetAvailableModels).toHaveBeenCalledWith('openai', false);
-    });
-  });
+  // Provider dropdown removed — provider is always Anthropic.
+  // Provider change tests are removed since there's no UI for switching providers.
 
   // ── Error state ─────────────────────────────────────────────────────
 
@@ -431,7 +399,7 @@ describe('ProviderConfigEditor', () => {
     expect(mockSaveProvidersConfig).toHaveBeenCalledWith(configWithExploration);
   });
 
-  it('falls back to default model in exploration row when not set', async () => {
+  it('shows empty exploration model picker when not set', async () => {
     await act(async () => {
       render(<ProviderConfigEditor config={DEFAULT_CONFIG}      />);
       if (!vi.isFakeTimers()) {
@@ -441,14 +409,10 @@ describe('ProviderConfigEditor', () => {
     await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
     // The exploration row label should be visible
     expect(screen.getByText('Exploration')).toBeInTheDocument();
-    // The exploration row provider should be the default provider
-    const explorationProviderSelects = screen.getAllByRole('combobox').filter(
-      s => {
-        const opts = Array.from((s as HTMLSelectElement).options);
-        return opts.some(o => o.value === 'anthropic') && opts.some(o => o.value === 'openai');
-      },
-    );
-    expect(explorationProviderSelects.length).toBeGreaterThanOrEqual(1);
+    // Exploration row exists and renders a model selector (no provider dropdowns)
+    const comboboxes = screen.getAllByRole('combobox');
+    // One combobox per row: default + 5 roles + exploration = 7
+    expect(comboboxes.length).toBe(7);
   });
 
 

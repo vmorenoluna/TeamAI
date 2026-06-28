@@ -219,7 +219,7 @@ describe('getAvailableModels Integration', () => {
       expect(result.models).toEqual(['llama3.2:3b', 'mistral:7b']);
     });
 
-    it('falls back gracefully when API key is missing (returns curated models)', async () => {
+    it('returns empty models when API key is missing and no curated default', async () => {
       writeProvidersConfig({
         default: { model: 'gpt-4o', provider: 'openai' },
         roles: {},
@@ -230,9 +230,8 @@ describe('getAvailableModels Integration', () => {
       const { getAvailableModels } = await import('@/app/actions/providers');
       const result = await getAvailableModels('openai');
 
-      // Returns curated defaults instead of empty array
-      expect(result.models.length).toBeGreaterThan(0);
-      expect(result.models).toContain('gpt-4o');
+      // No curated fallback for non-Anthropic providers — returns empty with error
+      expect(result.models).toEqual([]);
       expect(result.error).toBe('OPENAI_API_KEY not set — using curated model list');
     });
 
@@ -338,7 +337,7 @@ describe('getAvailableModels Integration', () => {
       expect(result.models).toEqual(['codellama', 'llama3.2']);
     });
 
-    it('saves config with OpenAI, then falls back to curated models without API key', async () => {
+    it('saves config with OpenAI, returns empty models without API key (no curated fallback)', async () => {
       const { saveProvidersConfig, getAvailableModels } = await import('@/app/actions/providers');
 
       vi.stubEnv('OPENAI_API_KEY', '');
@@ -354,10 +353,9 @@ describe('getAvailableModels Integration', () => {
       expect(config.default.provider).toBe('openai');
       expect(config.roles.coder.provider).toBe('openai');
 
-      // Falls back to curated models gracefully
+      // No curated fallback for non-Anthropic providers — returns empty with error
       const result = await getAvailableModels('openai');
-      expect(result.models.length).toBeGreaterThan(0);
-      expect(result.models).toContain('gpt-4o');
+      expect(result.models).toEqual([]);
       expect(result.error).toBe('OPENAI_API_KEY not set — using curated model list');
     });
   });
