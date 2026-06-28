@@ -151,6 +151,40 @@ describe('analyzeProject', () => {
       expect(info.installCommand).toBe('poetry install');
       expect(info.buildCommand).toBe('poetry build');
     });
+
+    it('detects python version from .python-version file', () => {
+      mockProject(['requirements.txt', '.python-version'], {
+        '.python-version': '3.11.5\n',
+      });
+
+      const info = analyzeProject('/test/project');
+      expect(info.pythonVersion).toBe('3.11');
+    });
+
+    it('detects python version from pyproject.toml requires-python', () => {
+      mockProject(['pyproject.toml'], {
+        'pyproject.toml': '[project]\nname = "test"\nrequires-python = ">=3.10"',
+      });
+
+      const info = analyzeProject('/test/project');
+      expect(info.pythonVersion).toBe('3.10');
+    });
+
+    it('detects python version from Poetry dependencies', () => {
+      mockProject(['pyproject.toml'], {
+        'pyproject.toml': '[tool.poetry.dependencies]\npython = "^3.9"',
+      });
+
+      const info = analyzeProject('/test/project');
+      expect(info.pythonVersion).toBe('3.9');
+    });
+
+    it('falls back to undefined python version when no version files', () => {
+      mockProject(['requirements.txt']);
+
+      const info = analyzeProject('/test/project');
+      expect(info.pythonVersion).toBeUndefined();
+    });
   });
 
   describe('Go detection', () => {
@@ -163,6 +197,24 @@ describe('analyzeProject', () => {
       expect(info.buildCommand).toBe('go build ./...');
       expect(info.testCommand).toBe('go test ./...');
     });
+
+    it('detects go version from go.mod', () => {
+      mockProject(['go.mod'], {
+        'go.mod': 'module example.com/project\n\ngo 1.22\n\nrequire (\n) ',
+      });
+
+      const info = analyzeProject('/test/project');
+      expect(info.goVersion).toBe('1.22');
+    });
+
+    it('falls back to undefined go version when go.mod has no version', () => {
+      mockProject(['go.mod'], {
+        'go.mod': 'module example.com/project',
+      });
+
+      const info = analyzeProject('/test/project');
+      expect(info.goVersion).toBeUndefined();
+    });
   });
 
   describe('Rust detection', () => {
@@ -174,6 +226,41 @@ describe('analyzeProject', () => {
       expect(info.installCommand).toBe('cargo fetch');
       expect(info.buildCommand).toBe('cargo build');
       expect(info.testCommand).toBe('cargo test');
+    });
+
+    it('detects rust version from rust-toolchain.toml', () => {
+      mockProject(['Cargo.toml', 'rust-toolchain.toml'], {
+        'rust-toolchain.toml': '[toolchain]\nchannel = "1.80"',
+      });
+
+      const info = analyzeProject('/test/project');
+      expect(info.rustVersion).toBe('1.80');
+    });
+
+    it('detects rust version from rust-toolchain file', () => {
+      mockProject(['Cargo.toml', 'rust-toolchain'], {
+        'rust-toolchain': '1.75.0\n',
+      });
+
+      const info = analyzeProject('/test/project');
+      expect(info.rustVersion).toBe('1.75');
+    });
+
+    it('prefers rust-toolchain.toml over rust-toolchain', () => {
+      mockProject(['Cargo.toml', 'rust-toolchain.toml', 'rust-toolchain'], {
+        'rust-toolchain.toml': '[toolchain]\nchannel = "1.80"',
+        'rust-toolchain': '1.75.0\n',
+      });
+
+      const info = analyzeProject('/test/project');
+      expect(info.rustVersion).toBe('1.80');
+    });
+
+    it('falls back to undefined rust version when no toolchain files', () => {
+      mockProject(['Cargo.toml']);
+
+      const info = analyzeProject('/test/project');
+      expect(info.rustVersion).toBeUndefined();
     });
   });
 
@@ -370,5 +457,80 @@ describe('generateDevcontainer', () => {
     const result = generateDevcontainer('/test/project', info);
     const parsed = JSON.parse(result);
     expect(parsed.postCreateCommand).toBe('echo $HOME && npm install');
+  });
+
+  it('substitutes python version template variable', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(
+      '{"name":"Test","image":"mcr.microsoft.com/devcontainers/python:{{PYTHON_VERSION}}"}'
+    );
+
+    const info: ProjectInfo = {
+      type: 'python',
+      pythonVersion: '3.11',
+      installCommand: 'pip install -r requirements.txt',
+      buildCommand: 'python setup.py build',
+      testCommand: 'pytest',
+    };
+
+    const result = generateDevcontainer('/test/project', info);
+    const parsed = JSON.parse(result);
+    expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/python:3.11');
+  });
+
+  it('substitutes go version template variable', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(
+      '{"name":"Test","image":"mcr.microsoft.com/devcontainers/go:{{GO_VERSION}}"}'
+    );
+
+    const info: ProjectInfo = {
+      type: 'go',
+      goVersion: '1.22',
+      installCommand: 'go mod download',
+      buildCommand: 'go build ./...',
+      testCommand: 'go test ./...',
+    };
+
+    const result = generateDevcontainer('/test/project', info);
+    const parsed = JSON.parse(result);
+    expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/go:1.22');
+  });
+
+  it('substitutes rust version template variable', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(
+      '{"name":"Test","image":"mcr.microsoft.com/devcontainers/rust:{{RUST_VERSION}}"}'
+    );
+
+    const info: ProjectInfo = {
+      type: 'rust',
+      rustVersion: '1.80',
+      installCommand: 'cargo fetch',
+      buildCommand: 'cargo build',
+      testCommand: 'cargo test',
+    };
+
+    const result = generateDevcontainer('/test/project', info);
+    const parsed = JSON.parse(result);
+    expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/rust:1.80');
+  });
+
+  it('uses default versions when none detected', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(
+      '{"name":"Test","image":"mcr.microsoft.com/devcontainers/python:{{PYTHON_VERSION}}"}'
+    );
+
+    const info: ProjectInfo = {
+      type: 'python',
+      installCommand: 'pip install',
+      buildCommand: 'python setup.py build',
+      testCommand: 'pytest',
+    };
+
+    const result = generateDevcontainer('/test/project', info);
+    const parsed = JSON.parse(result);
+    expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/python:3.12');
   });
 });

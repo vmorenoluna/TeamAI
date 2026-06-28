@@ -1,6 +1,6 @@
 {
   "name": "Dev Container",
-  "image": "mcr.microsoft.com/devcontainers/rust:1",
+  "image": "mcr.microsoft.com/devcontainers/rust:{{RUST_VERSION}}",
   "remoteUser": "vscode",
 
   "mounts": [
