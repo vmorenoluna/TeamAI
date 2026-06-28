@@ -1,10 +1,18 @@
 import { spawn, execFileSync, ChildProcess } from 'child_process';
-import { existsSync, readFileSync, appendFileSync } from 'fs';
+import { existsSync, readFileSync, appendFileSync, writeFileSync, mkdirSync } from 'fs';
 import { EventEmitter } from 'events';
 import path from 'path';
-import { warn as logWarn } from './logger';
+import { warn as logWarn, log } from './logger';
 
-export type ContainerState = 'stopped' | 'starting' | 'running' | 'restarting';
+export type ContainerState = 'stopped' | 'starting' | 'running' | 'restarting' | 'generating' | 'validating';
+
+export interface ValidationStep {
+  name: string;
+  command: string;
+  status: 'pending' | 'running' | 'passed' | 'failed';
+  output?: string;
+  error?: string;
+}
 
 interface ContainerRecord {
   projectRoot: string;
@@ -13,6 +21,8 @@ interface ContainerRecord {
   remoteWorkspaceFolder: string | null;
   startPromise: Promise<void> | null;
   eventWatcher: ChildProcess | null;
+  validationSteps: ValidationStep[];
+  validationPromise: Promise<boolean> | null;
 }
 
 export interface ContainerInfo {
@@ -86,6 +96,15 @@ export function hostToContainerPath(
 export class ContainerManager extends EventEmitter {
   private records = new Map<string, ContainerRecord>();
 
+  private _newRecord(projectRoot: string, state: ContainerState): ContainerRecord {
+    return {
+      projectRoot, state,
+      containerId: null, remoteWorkspaceFolder: null,
+      startPromise: null, eventWatcher: null,
+      validationSteps: [], validationPromise: null,
+    };
+  }
+
   async ensureContainer(projectRoot: string, logFile?: string): Promise<ContainerInfo> {
     let record = this.records.get(projectRoot);
 
@@ -94,25 +113,15 @@ export class ContainerManager extends EventEmitter {
       // (e.g. after a server restart that cleared the in-memory record)
       const existing = this._findRunningContainerSync(projectRoot);
       if (existing) {
-        record = {
-          projectRoot, state: 'running',
-          containerId: existing.containerId,
-          remoteWorkspaceFolder: existing.remoteWorkspaceFolder,
-          startPromise: null, eventWatcher: null,
-        };
+        record = this._newRecord(projectRoot, 'running');
+        record.containerId = existing.containerId;
+        record.remoteWorkspaceFolder = existing.remoteWorkspaceFolder;
         this.records.set(projectRoot, record);
         this._watchEvents(record);
         return existing;
       }
 
-      record = {
-        projectRoot,
-        state: 'starting',
-        containerId: null,
-        remoteWorkspaceFolder: null,
-        startPromise: null,
-        eventWatcher: null,
-      };
+      record = this._newRecord(projectRoot, 'starting');
       this.records.set(projectRoot, record);
       this._emit(record, 'starting');
       record.startPromise = this._doStart(record, logFile);
@@ -187,12 +196,10 @@ export class ContainerManager extends EventEmitter {
     const info = this._findRunningContainerSync(projectRoot);
     if (info) {
       // Populate the record so subsequent calls skip the Docker scan
-      this.records.set(projectRoot, {
-        projectRoot, state: 'running',
-        containerId: info.containerId,
-        remoteWorkspaceFolder: info.remoteWorkspaceFolder,
-        startPromise: null, eventWatcher: null,
-      });
+      const record = this._newRecord(projectRoot, 'running');
+      record.containerId = info.containerId;
+      record.remoteWorkspaceFolder = info.remoteWorkspaceFolder;
+      this.records.set(projectRoot, record);
     }
     return info;
   }
@@ -317,6 +324,151 @@ export class ContainerManager extends EventEmitter {
     record.startPromise = this._doStart(record).catch(() => {
       // _doStart sets state = 'stopped' on failure
     });
+  }
+
+  // ── Bootstrap & Validation ─────────────────────────────────────────────────
+
+  /**
+   * Bootstrap a container for a project: generate devcontainer.json if missing,
+   * start the container, and validate it by building + testing the project inside.
+   * Called asynchronously from saveContainerConfig when the user enables containers.
+   */
+  async bootstrapContainer(projectRoot: string): Promise<void> {
+    const { analyzeProject, generateDevcontainer } = await import('./devcontainer-generator');
+
+    // ── Step 1: Generate devcontainer.json if missing ────────────────────
+    const devCfgPath = path.join(projectRoot, '.devcontainer', 'devcontainer.json');
+    if (!existsSync(devCfgPath)) {
+      // Emit state directly (no record needed — ensureContainer creates one later)
+      this.emit('container-state', { projectRoot, state: 'generating' });
+
+      try {
+        const info = analyzeProject(projectRoot);
+        this._emitLog(projectRoot, `Detected project type: ${info.type}${info.packageManager ? ` (${info.packageManager})` : ''}`);
+        this._emitLog(projectRoot, `Build commands from docs: install="${info.installCommand}" build="${info.buildCommand}" test="${info.testCommand}"`);
+
+        const devCfgDir = path.join(projectRoot, '.devcontainer');
+        if (!existsSync(devCfgDir)) mkdirSync(devCfgDir, { recursive: true });
+        writeFileSync(devCfgPath, generateDevcontainer(projectRoot, info));
+        log('container', `Generated devcontainer.json for ${projectRoot} (type=${info.type})`);
+        this._emitLog(projectRoot, `Generated .devcontainer/devcontainer.json for ${info.type} project`);
+      } catch (err) {
+        logWarn('container', 'Failed to generate devcontainer.json', err);
+        this.emit('container-state', { projectRoot, state: 'stopped' });
+        return;
+      }
+    }
+
+    // ── Step 2: Start the container ──────────────────────────────────────
+    try {
+      await this.ensureContainer(projectRoot);
+    } catch (err) {
+      logWarn('container', 'Container startup failed during bootstrap', err);
+      return;
+    }
+
+    // ── Step 3: Validate ─────────────────────────────────────────────────
+    await this.validateContainer(projectRoot);
+  }
+
+  /**
+   * Validate a running container by executing install, build, and test
+   * commands inside it via docker exec. Progress streams via container-log
+   * events. If validation fails, the UI can retry with an agent.
+   */
+  async validateContainer(projectRoot: string): Promise<boolean> {
+    const record = this.records.get(projectRoot);
+    if (!record || !record.containerId) {
+      logWarn('container', 'Cannot validate — container not running');
+      return false;
+    }
+
+    record.state = 'validating';
+    this._emit(record, 'validating');
+    this._emitLog(projectRoot, 'Validating container — running build and tests…');
+
+    // Discover commands from the generated devcontainer or docs
+    const info = await this._getValidationCommands(projectRoot);
+
+    const steps: ValidationStep[] = [
+      { name: 'Agent tooling', command: 'claude --version && gh --version && git --version', status: 'pending' },
+      { name: 'Install dependencies', command: info.installCommand, status: 'pending' },
+      { name: 'Build', command: info.buildCommand, status: 'pending' },
+      { name: 'Tests', command: info.testCommand, status: 'pending' },
+    ];
+    record.validationSteps = steps;
+
+    let allPassed = true;
+    for (const step of steps) {
+      step.status = 'running';
+      this._emitValidation(projectRoot, step);
+      this._emitLog(projectRoot, `  ▶ ${step.name}…`);
+
+      try {
+        const output = execFileSync('docker', [
+          'exec', '-i', '-w', record.remoteWorkspaceFolder!,
+          record.containerId,
+          'sh', '-c', step.command,
+        ], { encoding: 'utf-8', timeout: 300_000, maxBuffer: 10 * 1024 * 1024 });
+        step.status = 'passed';
+        step.output = output.slice(-2000); // keep last 2KB for display
+        this._emitValidation(projectRoot, step);
+        this._emitLog(projectRoot, `  ✓ ${step.name} passed`);
+      } catch (err: any) {
+        step.status = 'failed';
+        step.error = err.stderr || err.stdout || err.message || String(err);
+        step.output = err.stdout?.slice(-2000) || '';
+        this._emitValidation(projectRoot, step);
+        this._emitLog(projectRoot, `  ✗ ${step.name} FAILED`);
+        allPassed = false;
+        break; // stop on first failure
+      }
+    }
+
+    if (allPassed) {
+      record.state = 'running';
+      this._emit(record, 'running');
+      this._emitLog(projectRoot, '✓ Container validation complete — all steps passed');
+    } else {
+      record.state = 'running'; // container is still usable even if validation fails
+      this._emit(record, 'running');
+      this._emitLog(projectRoot, '✗ Container validation failed — check the logs above for details. The container is running and can be used, but you may need to adjust .devcontainer/devcontainer.json.');
+    }
+
+    return allPassed;
+  }
+
+  /** Get validation state for the UI to display */
+  getValidationSteps(projectRoot: string): ValidationStep[] {
+    return this.records.get(projectRoot)?.validationSteps ?? [];
+  }
+
+  private async _getValidationCommands(projectRoot: string): Promise<{ installCommand: string; buildCommand: string; testCommand: string }> {
+    try {
+      const { analyzeProject } = await import('./devcontainer-generator');
+      const info = analyzeProject(projectRoot);
+      return {
+        installCommand: info.installCommand,
+        buildCommand: info.buildCommand,
+        testCommand: info.testCommand,
+      };
+    } catch {
+      return {
+        installCommand: 'npm install',
+        buildCommand: 'npm run build',
+        testCommand: 'npm test',
+      };
+    }
+  }
+
+  /** Emit a log line to the container-log channel */
+  private _emitLog(projectRoot: string, message: string): void {
+    this.emit('container-log', { projectRoot, message });
+  }
+
+  /** Emit a validation step update */
+  private _emitValidation(projectRoot: string, step: ValidationStep): void {
+    this.emit('container-validation', { projectRoot, step });
   }
 
   private _emit(record: ContainerRecord, state: ContainerState): void {

@@ -88,6 +88,12 @@ app.prepare().then(() => {
     broadcastToProject(data, msg);
   });
 
+  // Broadcast container validation step updates
+  containerManager.on('container-validation', (data: { projectRoot: string; step: unknown }) => {
+    const msg = JSON.stringify({ type: 'container-validation', projectRoot: data.projectRoot, step: data.step });
+    broadcastToProject(data, msg);
+  });
+
   server.on('upgrade', (request, socket, head) => {
     const { pathname, query } = parse(request.url!, true);
     if (pathname === '/ws') {
