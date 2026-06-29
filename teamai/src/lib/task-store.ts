@@ -43,6 +43,8 @@ export interface Task {
   mergeStrategy?: MergeStrategy; // chosen merge strategy for awaiting-review tasks
   completionSummary?: string;   // summary of what was completed when task fails
   subtaskProgress?: { completed: number; total: number } | null;  // computed at load time from plan.json
+  autoProcessed?: boolean;      // set to true when auto mode marks the task as done (PR auto-merged)
+  autoReviewed?: boolean;       // set to true when user marks the auto-done task as manually reviewed
   createdAt: string;
   updatedAt: string;
 }

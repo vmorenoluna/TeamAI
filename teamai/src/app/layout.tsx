@@ -6,6 +6,7 @@ import { Sidebar } from '@/components/sidebar';
 import { ProjectSelector } from '@/components/project-selector';
 import { DefaultsUpdater } from '@/components/defaults-updater';
 import { RecoveryBanner } from '@/components/recovery-banner';
+import { AutoModeButton } from '@/components/auto-mode-button';
 import { getInterruptedTasks } from '@/app/actions/recovery';
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
@@ -28,7 +29,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <Sidebar projects={projects} activeProjectPath={activeProject?.path ?? null} />
         <div className="flex-1 min-w-0 overflow-auto flex flex-col">
           {/* Project tabs row - moved above main content */}
-          <ProjectSelector projects={projects} activeProjectPath={activeProject?.path ?? null} />
+          <div className="flex items-center justify-between">
+            <div className="flex-1 min-w-0">
+              <ProjectSelector projects={projects} activeProjectPath={activeProject?.path ?? null} />
+            </div>
+            <div className="pr-4 shrink-0">
+              <AutoModeButton />
+            </div>
+          </div>
           {/* Defaults update banner — shows when projects have outdated copies of TeamAI defaults */}
           <DefaultsUpdater initialStale={staleDefaults} />
           {/* Recovery banner — shows when interrupted tasks are detected from previous session */}

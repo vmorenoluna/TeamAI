@@ -7,6 +7,7 @@ import { AgentPanel } from './agent-panel';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
 import { addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, restartCurrentPhase } from '@/app/actions/tasks';
+import { markAutoReviewed } from '@/app/actions/auto-mode';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, PlanSubtask, QAReportData, QACriterion } from '@/lib/stream-types';
 import { PHASE_BADGE, PHASE_LABELS } from '@/constants/phases';
@@ -335,6 +336,14 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
     });
   }
 
+  function handleMarkReviewed() {
+    if (!confirm(`Mark "${task.title}" as manually reviewed? This will remove the auto-processed highlight.`)) return;
+    startTransition(async () => {
+      await markAutoReviewed(task.id);
+      router.refresh();
+    });
+  }
+
   const otherTasks = allTasks.filter(t => t.id !== task.id);
   const dependencyIds = dependencies.map(t => t.id);
   const dependentIds = dependents.map(t => t.id);
@@ -409,9 +418,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
           <p className="mb-2 text-sm text-slate-400">
             {task.description}
           </p>
-        )}
-
-        {/* Rate-limit banner */}
+        )}            {/* Rate-limit banner */}
         {!readonly && task.rateLimitedUntil && (
           <div className="mt-2 mb-1 flex items-center gap-2 text-xs bg-amber-950/30 border border-amber-800/50 text-amber-300 rounded-md px-3 py-1.5">
             <span>⏳</span>
@@ -420,6 +427,23 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
               <strong>{new Date(task.rateLimitedUntil).toLocaleTimeString()}</strong>
               {' '}({new Date(task.rateLimitedUntil).toLocaleDateString()}).
             </span>
+          </div>
+        )}
+
+        {/* Auto-processed banner — shown for auto-done tasks not yet manually reviewed */}
+        {!readonly && task.autoProcessed && !task.autoReviewed && task.phase === 'done' && (
+          <div className="mt-2 mb-1 flex items-center gap-2 text-xs bg-amber-950/30 border border-amber-800/50 text-amber-300 rounded-md px-3 py-1.5">
+            <span>🤖</span>
+            <span>
+              This task was auto-processed by Auto mode — the PR was merged automatically.
+            </span>
+            <button
+              onClick={handleMarkReviewed}
+              disabled={isPending}
+              className="ml-auto shrink-0 text-[11px] font-medium px-2 py-0.5 rounded bg-amber-700/40 text-amber-200 hover:bg-amber-600/50 transition-colors disabled:opacity-50"
+            >
+              ✓ Mark Reviewed
+            </button>
           </div>
         )}
 
