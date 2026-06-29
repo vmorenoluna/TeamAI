@@ -110,7 +110,9 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
       className={`relative bg-[#1e2333] rounded-lg p-3 border transition-all cursor-pointer group ${
         isMoving
           ? 'border-[#2563eb]/60 shadow-lg shadow-blue-500/10 pointer-events-none opacity-90'
-          : 'border-[#1e293b] hover:border-[#334155]'
+          : task.autoProcessed && !task.autoReviewed
+            ? 'border-amber-500/50 bg-amber-950/10 shadow-[0_0_8px_rgba(245,158,11,0.08)]'
+            : 'border-[#1e293b] hover:border-[#334155]'
       }`}
     >
       {/* Moving indicator */}
@@ -118,6 +120,14 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
         <div className="absolute top-2 right-2 flex items-center gap-1">
           <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
           <span className="text-[10px] text-blue-500 font-medium">moving</span>
+        </div>
+      )}
+      {/* Auto-processed indicator — shown for auto-done tasks not yet manually reviewed */}
+      {task.autoProcessed && !task.autoReviewed && task.phase === 'done' && (
+        <div className="absolute top-2 right-2" title="Auto-processed — not yet manually reviewed">
+          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-400 border border-amber-700/40">
+            Auto
+          </span>
         </div>
       )}
       {/* Spinning circle indicator — shows for active phases */}

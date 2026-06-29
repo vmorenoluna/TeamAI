@@ -7,12 +7,13 @@ import type { PipelineConfig } from '@/app/actions/pipeline';
 export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
   const [maxQa, setMaxQa] = useState(config.maxQaAttempts);
   const [parallel, setParallel] = useState(config.parallelSubtasks);
+  const [autoParallel, setAutoParallel] = useState(config.autoModeMaxParallel);
   const [saved, setSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   function handleSave() {
     startTransition(async () => {
-      await savePipelineConfig({ maxQaAttempts: maxQa, parallelSubtasks: parallel });
+      await savePipelineConfig({ maxQaAttempts: maxQa, parallelSubtasks: parallel, autoModeMaxParallel: autoParallel });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     });
@@ -20,7 +21,7 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-wrap">
         <div>
           <label className="text-xs font-medium text-slate-400 block mb-1">
             Max QA attempts
@@ -43,6 +44,19 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
           />
           <span className="text-sm text-slate-300">Parallel subtasks</span>
         </label>
+        <div>
+          <label className="text-xs font-medium text-slate-400 block mb-1">
+            Auto mode max parallel tasks
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={10}
+            value={autoParallel}
+            onChange={e => setAutoParallel(Number(e.target.value))}
+            className="w-20 px-2 py-1 text-sm border border-[#334155] rounded bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb]"
+          />
+        </div>
       </div>
 
       <button

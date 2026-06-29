@@ -8,11 +8,13 @@ import { getActiveProjectPath } from './projects';
 export interface PipelineConfig {
   maxQaAttempts: number;
   parallelSubtasks: boolean;
+  autoModeMaxParallel: number;
 }
 
 const DEFAULT_CONFIG: PipelineConfig = {
   maxQaAttempts: 3,
   parallelSubtasks: true,
+  autoModeMaxParallel: 1,
 };
 
 export async function getPipelineConfig(): Promise<PipelineConfig> {

@@ -58,6 +58,7 @@ import { PipelineConfigEditor } from '@/components/pipeline-config';
 const defaultConfig: PipelineConfig = {
   maxQaAttempts: 3,
   parallelSubtasks: true,
+  autoModeMaxParallel: 1,
 };
 
 function renderComponent(config: PipelineConfig = defaultConfig) {
@@ -82,7 +83,7 @@ describe('PipelineConfigEditor', () => {
     it('renders the Max QA attempts label and input', () => {
       renderComponent();
       expect(screen.getByText('Max QA attempts')).toBeInTheDocument();
-      const input = screen.getByRole('spinbutton');
+      const input = screen.getAllByRole('spinbutton')[0];
       expect(input).toBeInTheDocument();
       expect(input).toHaveValue(3);
     });
@@ -103,8 +104,8 @@ describe('PipelineConfigEditor', () => {
     });
 
     it('renders with custom config values from props', () => {
-      renderComponent({ maxQaAttempts: 5, parallelSubtasks: false });
-      expect(screen.getByRole('spinbutton')).toHaveValue(5);
+      renderComponent({ maxQaAttempts: 5, parallelSubtasks: false, autoModeMaxParallel: 1 });
+      expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(5);
       expect(screen.getByRole('checkbox')).not.toBeChecked();
     });
 
@@ -120,13 +121,13 @@ describe('PipelineConfigEditor', () => {
   describe('input interactions', () => {
     it('updates maxQaAttempts when the number input changes', () => {
       renderComponent();
-      const input = screen.getByRole('spinbutton');
+      const input = screen.getAllByRole('spinbutton')[0];
       fireEvent.change(input, { target: { value: '7' } });
       expect(input).toHaveValue(7);
     });
 
     it('toggles parallelSubtasks when the checkbox is clicked', () => {
-      renderComponent({ maxQaAttempts: 3, parallelSubtasks: true });
+      renderComponent({ maxQaAttempts: 3, parallelSubtasks: true, autoModeMaxParallel: 1 });
       const checkbox = screen.getByRole('checkbox');
       fireEvent.click(checkbox);
       expect(checkbox).not.toBeChecked();
@@ -135,7 +136,7 @@ describe('PipelineConfigEditor', () => {
     });
 
     it('defaults parallelSubtasks to unchecked when config says false', () => {
-      renderComponent({ maxQaAttempts: 3, parallelSubtasks: false });
+      renderComponent({ maxQaAttempts: 3, parallelSubtasks: false, autoModeMaxParallel: 1 });
       expect(screen.getByRole('checkbox')).not.toBeChecked();
     });
   });
@@ -147,7 +148,7 @@ describe('PipelineConfigEditor', () => {
       renderComponent();
 
       // Change values to non-defaults
-      fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '4' } });
+      fireEvent.change(screen.getAllByRole('spinbutton')[0], { target: { value: '4' } });
       fireEvent.click(screen.getByRole('checkbox'));
 
       await act(async () => {
@@ -157,6 +158,7 @@ describe('PipelineConfigEditor', () => {
       expect(mockSavePipelineConfig).toHaveBeenCalledWith({
         maxQaAttempts: 4,
         parallelSubtasks: false,
+        autoModeMaxParallel: 1,
       });
     });
 
@@ -296,21 +298,21 @@ describe('PipelineConfigEditor', () => {
     it('initializes state from props on first render', () => {
       // Render with non-default values
       const { rerender } = render(
-        <PipelineConfigEditor config={{ maxQaAttempts: 1, parallelSubtasks: false }} />
+        <PipelineConfigEditor config={{ maxQaAttempts: 1, parallelSubtasks: false, autoModeMaxParallel: 1 }} />
       );
 
-      expect(screen.getByRole('spinbutton')).toHaveValue(1);
+      expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(1);
       expect(screen.getByRole('checkbox')).not.toBeChecked();
 
       // NOTE: The component uses useState(config.maxQaAttempts) without
       // a useEffect to re-sync, so prop changes after initial render don't
       // update the input values — this is the expected behaviour.
       rerender(
-        <PipelineConfigEditor config={{ maxQaAttempts: 8, parallelSubtasks: true }} />
+        <PipelineConfigEditor config={{ maxQaAttempts: 8, parallelSubtasks: true, autoModeMaxParallel: 1 }} />
       );
 
       // Values remain at the initial render values, not the new props.
-      expect(screen.getByRole('spinbutton')).toHaveValue(1);
+      expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(1);
       expect(screen.getByRole('checkbox')).not.toBeChecked();
     });
   });
@@ -319,17 +321,17 @@ describe('PipelineConfigEditor', () => {
 
   describe('edge cases', () => {
     it('handles maxQaAttempts at the minimum boundary (1)', () => {
-      renderComponent({ maxQaAttempts: 1, parallelSubtasks: true });
-      expect(screen.getByRole('spinbutton')).toHaveValue(1);
+      renderComponent({ maxQaAttempts: 1, parallelSubtasks: true, autoModeMaxParallel: 1 });
+      expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(1);
     });
 
     it('handles maxQaAttempts at the maximum boundary (10)', () => {
-      renderComponent({ maxQaAttempts: 10, parallelSubtasks: true });
-      expect(screen.getByRole('spinbutton')).toHaveValue(10);
+      renderComponent({ maxQaAttempts: 10, parallelSubtasks: true, autoModeMaxParallel: 1 });
+      expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(10);
     });
 
     it('saves immediately after toggling parallelSubtasks', async () => {
-      renderComponent({ maxQaAttempts: 2, parallelSubtasks: true });
+      renderComponent({ maxQaAttempts: 2, parallelSubtasks: true, autoModeMaxParallel: 1 });
 
       fireEvent.click(screen.getByRole('checkbox'));
 
@@ -340,6 +342,7 @@ describe('PipelineConfigEditor', () => {
       expect(mockSavePipelineConfig).toHaveBeenCalledWith({
         maxQaAttempts: 2,
         parallelSubtasks: false,
+        autoModeMaxParallel: 1,
       });
     });
 
