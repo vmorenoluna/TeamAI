@@ -595,11 +595,38 @@ export class Orchestrator {
       ? plan.subtasks.filter((s: PlanSubtask) => s.qa_flagged)
       : plan.subtasks.filter((s: PlanSubtask) => !s.completed);
 
-    // Safety fallback: if QA feedback exists but no subtasks were flagged
-    // (e.g., QA report criteria didn't match any subtask), run all subtasks.
-    const effectiveSubtasks = hasQaFeedback && subtasksToRun.length === 0
-      ? plan.subtasks
-      : subtasksToRun;
+    // Safety fallback: if QA feedback exists but criterion matching flagged no subtasks,
+    // synthesise a targeted rework subtask from qa_feedback.md content rather than
+    // re-running all original subtasks. Re-running all subtasks sends the engineer back
+    // to stale "add X" descriptions for features that already exist, causing it to mark
+    // them complete without making any code changes.
+    let effectiveSubtasks: PlanSubtask[];
+    if (hasQaFeedback && subtasksToRun.length === 0) {
+      const allFiles: string[] = [...new Set<string>(
+        plan.subtasks.flatMap((s: PlanSubtask) => s.files ?? [])
+      )];
+      let qaContent = '';
+      try { qaContent = readFileSync(qaFeedbackPath, 'utf-8'); } catch { /* best-effort */ }
+      const logFile = path.join(pipeline.specPath, 'output.log');
+      appendFileSync(logFile, '\n[QA-FALLBACK] Criterion matching flagged no subtasks — synthesising targeted rework subtask from qa_feedback.md\n');
+      effectiveSubtasks = [{
+        id: 9999,
+        title: 'QA Rework: fix failing criteria (criterion matching found no flagged subtasks)',
+        description:
+          `QA found failures that could not be automatically mapped to specific plan subtasks. ` +
+          `The original plan subtasks are already implemented — do NOT re-read or re-implement them. ` +
+          `Instead, read the QA feedback below and fix every listed issue in the codebase.\n\n` +
+          `**QA feedback (source of truth):**\n\n${qaContent}`,
+        files: allFiles,
+        depends_on: [],
+        acceptance_criteria: ['All criteria listed in the QA feedback above are satisfied'],
+        parallel_group: 'QA-REWORK',
+        qa_flagged: true,
+        completed: false,
+      } as unknown as PlanSubtask];
+    } else {
+      effectiveSubtasks = subtasksToRun;
+    }
 
     // Guard: if every subtask is already completed and we're not in QA rework,
     // skip implement entirely — advance directly to QA review.

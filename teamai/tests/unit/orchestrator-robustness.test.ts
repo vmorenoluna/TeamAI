@@ -182,7 +182,11 @@ describe('runQaReview — Gap 3: locked / manual override QA reports', () => {
 
     // Don't await — runQaReview will call waitForCompletion and hang
     const promise = (orch as AnyOrch).runQaReview(pipeline);
-    await new Promise(r => setTimeout(r, 20));
+    // Wait for sendMessage (synchronous call right before waitForCompletion)
+    // so the event listener is registered before we fire the result event.
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
 
     expect(mockCreateSession).toHaveBeenCalled();
     // Clean up by resolving the session
@@ -201,7 +205,11 @@ describe('runQaReview — Gap 3: locked / manual override QA reports', () => {
     mockCreateSession.mockResolvedValue('sess-qa-malformed');
 
     const promise = (orch as AnyOrch).runQaReview(pipeline);
-    await new Promise(r => setTimeout(r, 20));
+    // Wait for sendMessage (synchronous call right before waitForCompletion)
+    // so the event listener is registered before we fire the result event.
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
 
     // Should still create a QA session (malformed JSON doesn't block)
     expect(mockCreateSession).toHaveBeenCalled();
@@ -328,7 +336,11 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 1 });
 
     const promise = (orch as AnyOrch).runQaReview(pipeline);
-    await new Promise(r => setTimeout(r, 20));
+    // Wait for sendMessage (synchronous call right before waitForCompletion)
+    // so the event listener is registered before we fire the result event.
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
 
     // QA session should be created since auto-push succeeded
     expect(mockCreateSession).toHaveBeenCalled();
@@ -375,7 +387,11 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 1 });
 
     const promise = (orch as AnyOrch).runQaReview(pipeline);
-    await new Promise(r => setTimeout(r, 20));
+    // Wait for sendMessage (synchronous call right before waitForCompletion)
+    // so the event listener is registered before we fire the result event.
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
 
     expect(mockCreateSession).toHaveBeenCalled();
 
@@ -398,7 +414,11 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 1 });
 
     const promise = (orch as AnyOrch).runQaReview(pipeline);
-    await new Promise(r => setTimeout(r, 20));
+    // Wait for sendMessage (synchronous call right before waitForCompletion)
+    // so the event listener is registered before we fire the result event.
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
 
     // Should proceed with QA normally (first push — no remote to compare against)
     expect(mockCreateSession).toHaveBeenCalled();
@@ -447,7 +467,11 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
 
     try {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       expect(mockCreateSession).toHaveBeenCalled();
 
@@ -511,7 +535,11 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
     const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 1 });
 
     const promise = (orch as AnyOrch).runQaReview(pipeline);
-    await new Promise(r => setTimeout(r, 20));
+    // Wait for sendMessage (synchronous call right before waitForCompletion)
+    // so the event listener is registered before we fire the result event.
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
 
     expect(mockCreateSession).toHaveBeenCalled();
 
@@ -545,7 +573,11 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
     const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 3, maxQaAttempts: 3 });
 
     const promise = (orch as AnyOrch).runQaReview(pipeline);
-    await new Promise(r => setTimeout(r, 20));
+    // Wait for sendMessage (synchronous call right before waitForCompletion)
+    // so the event listener is registered before we fire the result event.
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
 
     expect(mockCreateSession).toHaveBeenCalled();
 
@@ -619,7 +651,11 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       // qa_report.json should now exist (restored from snapshot)
       const reportPath = join(project.taskDir, 'qa_report.json');
@@ -667,7 +703,11 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       // qa_report.json should now exist (restored from bounce snapshot)
       const reportPath = join(project.taskDir, 'qa_report.json');
@@ -702,7 +742,11 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       // qa_report.json should NOT have been created
       expect(existsSync(join(project.taskDir, 'qa_report.json'))).toBe(false);
@@ -742,7 +786,11 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       // qa_report.json should still contain the original PASS content (not overwritten)
       const reportPath = join(project.taskDir, 'qa_report.json');
@@ -776,7 +824,11 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       // The implement subtask should still be started (guard didn't block)
       expect(mockCreateSession).toHaveBeenCalled();
@@ -823,7 +875,11 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       const reportPath = join(project.taskDir, 'qa_report.json');
       expect(existsSync(reportPath)).toBe(true);
@@ -934,7 +990,11 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
     try {
       // Start QA — it'll create a session, wait for completion
       const qaPromise = (orch as AnyOrch).runQaReview(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       expect(mockCreateSession).toHaveBeenCalled();
 
@@ -983,6 +1043,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       // Reset mocks for the implement phase
       mockExecFileSync.mockReset();
       mockCreateSession.mockReset();
+      mockSendMessage.mockClear();
       onHandlers.clear(); // prevent stale event handlers from Phase 1 leaking into Phase 2
       mockExecFileSync.mockReturnValue('abc123\n'); // for git push/rev-parse
       mockCreateSession.mockResolvedValue('sess-e2e-impl');
@@ -993,7 +1054,11 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
 
       try {
         const implPromise = (orch as AnyOrch).runImplement(pipeline);
-        await new Promise(r => setTimeout(r, 20));
+        // Wait for sendMessage (synchronous call right before waitForCompletion)
+        // so the event listener is registered before we fire the result event.
+        await vi.waitFor(() => {
+          expect(mockSendMessage).toHaveBeenCalled();
+        });
 
         // ── Assert Phase 2 results ──
         // qa_report.json should be restored from the bounce snapshot
@@ -1051,7 +1116,11 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
 
     try {
       const qaPromise = (orch as AnyOrch).runQaReview(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       const originalReport = {
         overall: 'FAIL',
@@ -1077,6 +1146,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       // ── Phase 2: runImplement — Gap 4b should NOT overwrite existing report ──
       mockExecFileSync.mockReset();
       mockCreateSession.mockReset();
+      mockSendMessage.mockClear();
       mockExecFileSync.mockReturnValue('abc123\n');
       mockCreateSession.mockResolvedValue('sess-e2e-impl2');
 
@@ -1086,7 +1156,11 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
 
       try {
         const implPromise = (orch as AnyOrch).runImplement(pipeline);
-        await new Promise(r => setTimeout(r, 20));
+        // Wait for sendMessage (synchronous call right before waitForCompletion)
+        // so the event listener is registered before we fire the result event.
+        await vi.waitFor(() => {
+          expect(mockSendMessage).toHaveBeenCalled();
+        });
 
         // The existing qa_report.json should be UNCHANGED (not overwritten by snapshot)
         const existing = JSON.parse(readFileSync(reportPath, 'utf-8'));
@@ -1164,7 +1238,11 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
 
       try {
         const implPromise = (orch as AnyOrch).runImplement(pipeline);
-        await new Promise(r => setTimeout(r, 20));
+        // Wait for sendMessage (synchronous call right before waitForCompletion)
+        // so the event listener is registered before we fire the result event.
+        await vi.waitFor(() => {
+          expect(mockSendMessage).toHaveBeenCalled();
+        });
 
         // qa_report.json restored from Gap 1 bounce snapshot
         expect(existsSync(reportPath)).toBe(true);
@@ -1268,7 +1346,11 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
 
     try {
       const implPromise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       // qa_report.json restored with locked:true preserved
       const reportPath = join(project.taskDir, 'qa_report.json');
@@ -1351,7 +1433,11 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
 
     try {
       const qaPromise = (orch as AnyOrch).runQaReview(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       expect(mockCreateSession).toHaveBeenCalled();
 
@@ -1403,7 +1489,11 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
 
       try {
         const implPromise = (orch as AnyOrch).runImplement(pipeline);
-        await new Promise(r => setTimeout(r, 20));
+        // Wait for sendMessage (synchronous call right before waitForCompletion)
+        // so the event listener is registered before we fire the result event.
+        await vi.waitFor(() => {
+          expect(mockSendMessage).toHaveBeenCalled();
+        });
 
         // Resolve all 3 flagged subtasks sequentially (groups loop is sequential)
         fireEvent('event', { sessionId: 'sess-e2e-impl-2', event: { type: 'result' } });
@@ -1450,6 +1540,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       // ── Phase 3: runQaReview — QA PASS → awaiting-review → done ──
       mockExecFileSync.mockReset();
       mockCreateSession.mockReset();
+      mockSendMessage.mockClear();
       onHandlers.clear();
       mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
         if (args && args[0] === 'fetch') return '';
@@ -1463,7 +1554,11 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       expect(currentReport.locked).toBeUndefined();
 
       const qa2Promise = (orch as AnyOrch).runQaReview(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       expect(mockCreateSession).toHaveBeenCalled(); // QA ran again
 
@@ -1543,7 +1638,11 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
       // Start runImplement asynchronously — the implement subtask's waitForCompletion
       // hangs until we fire the result event from outside.
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       // The implement subtask should have been started
       expect(mockCreateSession).toHaveBeenCalled();
@@ -1596,7 +1695,11 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     });
 
     const promise = (orch as AnyOrch).runImplement(pipeline);
-    await new Promise(r => setTimeout(r, 20));
+    // Wait for sendMessage (synchronous call right before waitForCompletion)
+    // so the event listener is registered before we fire the result event.
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
 
     // Fire event to resolve the implement subtask
     fireEvent('event', { sessionId: 'sess-impl-pushfail', event: { type: 'result' } });
@@ -1647,7 +1750,11 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     });
 
     const promise = (orch as AnyOrch).runImplement(pipeline);
-    await new Promise(r => setTimeout(r, 20));
+    // Wait for sendMessage (synchronous call right before waitForCompletion)
+    // so the event listener is registered before we fire the result event.
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
 
     fireEvent('event', { sessionId: 'sess-impl-divergent', event: { type: 'result' } });
     await new Promise(r => setTimeout(r, 50));
@@ -1716,7 +1823,11 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       // Only ONE subtask should be run (subtask 2 — the flagged one)
       expect(mockCreateSession).toHaveBeenCalledTimes(1);
@@ -1765,7 +1876,11 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       // Resolve subtask 1 so the loop can proceed to subtask 2
       fireEvent('event', { sessionId: 'sess-full-1', event: { type: 'result' } });
@@ -1788,9 +1903,12 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
     }
   });
 
-  it('falls back to running all subtasks when QA feedback exists but no subtasks are flagged', async () => {
-    // Scenario: QA feedback exists, but somehow no subtasks got qa_flagged.
-    // This is a safety fallback — better to re-run everything than skip QA feedback.
+  it('synthesises a targeted rework subtask when QA feedback exists but no subtasks are flagged', async () => {
+    // Scenario: QA feedback exists, but criterion matching flagged no subtasks.
+    // The orchestrator synthesises a single targeted rework subtask from the
+    // qa_feedback.md content rather than re-running all original subtasks.
+    // Re-running all subtasks sends the engineer back to stale "add X" descriptions
+    // for features that already exist, causing no-op implementations.
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
         { id: 1, title: 'Add login', description: 'Build login page', files: ['src/login.ts'], acceptance_criteria: ['Works'], completed: true },
@@ -1798,12 +1916,10 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       ],
     }));
 
-    // QA feedback exists but no subtask has qa_flagged — safety fallback
+    // QA feedback exists but no subtask has qa_flagged — synthetic rework path
     writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nAuth module broken');
 
-    mockCreateSession
-      .mockResolvedValueOnce('sess-fallback-1')
-      .mockResolvedValueOnce('sess-fallback-2');
+    mockCreateSession.mockResolvedValue('sess-synthetic');
 
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
 
@@ -1816,18 +1932,24 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
-      // Resolve subtask 1
-      fireEvent('event', { sessionId: 'sess-fallback-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 20));
+      // Only ONE session should be created — the synthetic rework subtask
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
 
-      // Resolve subtask 2
-      fireEvent('event', { sessionId: 'sess-fallback-2', event: { type: 'result' } });
+      // Verify the prompt contains the QA feedback content (source of truth)
+      const prompt = mockSendMessage.mock.calls[0][1];
+      expect(prompt).toContain('Auth module broken');
+      expect(prompt).toContain('QA Rework');
+      expect(prompt).toContain('QA feedback (source of truth)');
+
+      // Resolve the synthetic subtask
+      fireEvent('event', { sessionId: 'sess-synthetic', event: { type: 'result' } });
       await new Promise(r => setTimeout(r, 30));
-
-      // BOTH subtasks should be started (safety fallback)
-      expect(mockCreateSession).toHaveBeenCalledTimes(2);
 
       await promise;
     } finally {
@@ -1859,11 +1981,18 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
 
-      // Resolve the subtask
+      // Wait for sendMessage to be called before firing the result event.
+      // sendMessage happens right before waitForCompletion, so by the time
+      // this resolves, the orchestrator has registered its event listener.
+      // Waiting for mockCreateSession is too early — createSession is async
+      // and the orchestrator hasn't reached waitForCompletion yet.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
+
+      // Now it's safe — the orchestrator is in waitForCompletion
       fireEvent('event', { sessionId: 'sess-cleanup', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
       await promise;
 
       // qa_flagged should be removed from plan.json
@@ -1906,7 +2035,11 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       // Resolve both subtasks so the groups loop can complete
       fireEvent('event', { sessionId: 'sess-multi-1', event: { type: 'result' } });
@@ -1996,7 +2129,11 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      // Wait for sendMessage (synchronous call right before waitForCompletion)
+      // so the event listener is registered before we fire the result event.
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
 
       // Only ONE subtask should run — the flagged one (subtask 1).
       // SubTask 2 is in the same parallel_group but not flagged — skip it.
