@@ -740,6 +740,44 @@ describe('Auto Mode Integration', () => {
       );
     });
 
+    it('persists autoProcessed: true to task.json after CI auto-merge', async () => {
+      vi.useFakeTimers();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      // Simulate CI passing → auto-merge → _finishTask → autoProcessed: true
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({
+            state: 'OPEN',
+            statusCheckRollup: [{ conclusion: 'SUCCESS' }],
+          });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'merge') {
+          return 'Merged pull request #42';
+        }
+        return '';
+      });
+
+      const { TaskStore } = await import('@/lib/task-store');
+      const store = new TaskStore(testDir);
+      store.updatePhase(taskId, 'pr-open');
+      fireEvent('phase-change', { taskId, phase: 'pr-open', projectRoot: testDir });
+
+      // Advance 30s to trigger CI poll → all checks pass → merge → _finishTask
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      // Wait for _finishTask .then() callback to persist autoProcessed
+      await vi.waitFor(() => {
+        const taskData = store.getById(taskId);
+        expect(taskData?.autoProcessed).toBe(true);
+      });
+    });
+
     it('does NOT merge when CI checks are failing', async () => {
       vi.useFakeTimers();
 
