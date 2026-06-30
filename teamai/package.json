@@ -6,7 +6,7 @@
     "dev": "tsx watch server.ts",
     "build": "next build",
     "start": "cross-env NODE_ENV=production tsx server.ts",
-    "lint": "eslint",
+    "lint": "eslint --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -49,6 +49,6 @@
     "vitest": "^1.6.1"
   },
   "lint-staged": {
-    "*.{ts,tsx,mts}": "eslint --fix"
+    "*.{ts,tsx,mts}": ["eslint --fix", "eslint --max-warnings 0"]
   }
 }
