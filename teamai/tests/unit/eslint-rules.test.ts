@@ -95,6 +95,20 @@ ruleTester.run(
           },
         ],
       },
+      // Aliased import: useRouter as foo (imported.name is still 'useRouter')
+      {
+        code: `
+          import { useTransition } from 'react';
+          import { useRouter as foo } from 'next/navigation';
+          function Foo() { return null; }
+        `,
+        errors: [
+          {
+            message:
+              'useTransition + useRouter detected — use the useServerMutation hook instead.',
+          },
+        ],
+      },
     ],
   },
 );
@@ -145,6 +159,18 @@ ruleTester.run(
           }
         `,
       },
+      // Destructured refresh() — known limitation, rule only catches router.refresh()
+      {
+        code: `
+          import { useRouter } from 'next/navigation';
+
+          function Foo() {
+            const { refresh } = useRouter();
+            refresh();
+            return null;
+          }
+        `,
+      },
     ],
     invalid: [
       // router.refresh() WITHOUT useServerMutation
@@ -154,6 +180,26 @@ ruleTester.run(
 
           function Foo() {
             const router = useRouter();
+            router.refresh();
+            return null;
+          }
+        `,
+        errors: [
+          {
+            message:
+              'router.refresh() called outside useServerMutation — use the useServerMutation hook instead.',
+          },
+        ],
+      },
+      // Multiple router.refresh() calls — still fires (reports the last call)
+      {
+        code: `
+          import { useRouter } from 'next/navigation';
+
+          function Foo() {
+            const router = useRouter();
+            router.refresh();
+            router.refresh();
             router.refresh();
             return null;
           }
