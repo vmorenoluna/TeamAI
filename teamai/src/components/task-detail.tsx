@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useTransition, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useServerMutation } from '@/hooks/use-server-mutation';
 import { AgentPanel } from './agent-panel';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
@@ -256,13 +257,9 @@ const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
 
 export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, onClose, readonly = false }: Props) {
   const router = useRouter();
+  const { run, isPending } = useServerMutation();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
 
-  // Accept initial tab from URL hash (e.g. /task/:id#plan) so e2e tests
-  // can navigate directly to a specific tab without unreliable click simulation.
-  // Must use useEffect+hashchange to handle both the initial page load AND
-  // same-document hash navigations (Playwright's page.goto with a hash only
-  // changes the fragment, it doesn't remount the component).
   useEffect(() => {
     const syncFromHash = () => {
       const hash = window.location.hash.replace(/^#/, '');
@@ -274,7 +271,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
     window.addEventListener('hashchange', syncFromHash);
     return () => window.removeEventListener('hashchange', syncFromHash);
   }, []);
-  const [isPending, startTransition] = useTransition();
   const [specVersion, setSpecVersion] = useState<string | null>(null); // null = current spec
   const [compareMode, setCompareMode] = useState(false);
   const [leftVersion, setLeftVersion] = useState<string | null>(null);
@@ -295,52 +291,46 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   ];
 
   function handleDepToggle(depId: string, checked: boolean) {
-    startTransition(async () => {
+    run(async () => {
       if (checked) await addDependency(task.id, depId);
       else await removeDependency(task.id, depId);
-      router.refresh();
     });
   }
 
   function handleBlockToggle(blockedId: string, checked: boolean) {
-    startTransition(async () => {
+    run(async () => {
       if (checked) await addBlock(task.id, blockedId);
       else await removeBlock(task.id, blockedId);
-      router.refresh();
     });
   }
 
   function handleDelete() {
     if (!confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
-    startTransition(async () => {
+    run(async () => {
       await deleteTask(task.id);
       if (onClose) {
         onClose();
-        router.refresh();
       } else {
         router.push('/');
-        router.refresh();
       }
     });
   }
 
   function handleRestart() {
     if (!confirm(`Restart "${task.title}" from scratch? This will clear the current phase's work and re-run it.`)) return;
-    startTransition(async () => {
+    run(async () => {
       const result = await restartCurrentPhase(task.id);
-      if (result.success) {
-        router.refresh();
-      } else {
+      if (!result.success) {
         alert(`Failed to restart task: ${result.error}`);
+        throw new Error(result.error); // prevent refresh on failure
       }
     });
   }
 
   function handleMarkReviewed() {
     if (!confirm(`Mark "${task.title}" as manually reviewed? This will remove the auto-processed highlight.`)) return;
-    startTransition(async () => {
+    run(async () => {
       await markAutoReviewed(task.id);
-      router.refresh();
     });
   }
 
@@ -524,11 +514,9 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                     <button
                       onClick={async (e) => {
                         e.stopPropagation();
-                        startTransition(async () => {
+                        run(async () => {
                           const result = await retryTask(task.id);
-                          if (result.success) {
-                            router.refresh();
-                          }
+                          if (!result.success) throw new Error(result.error);
                         });
                       }}
                       disabled={isPending}

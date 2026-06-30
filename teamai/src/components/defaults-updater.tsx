@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useServerMutation } from '@/hooks/use-server-mutation';
 import { getOutdatedProjects, syncProjectDefaults } from '@/app/actions/projects';
 import type { StaleDefaults } from '@/lib/project-store';
 
@@ -11,7 +12,8 @@ interface Props {
 }
 
 export function DefaultsUpdater({ initialStale }: Props) {
-  const router = useRouter();
+  const router = useRouter(); // for handleCheck's plain refresh
+  const { run } = useServerMutation();
   // Client-fetched stale data — only used when initialStale is not provided.
   // When initialStale IS provided, it's the source of truth (always fresh from server).
   const [clientStale, setClientStale] = useState<StaleDefaults[]>([]);
@@ -66,11 +68,8 @@ export function DefaultsUpdater({ initialStale }: Props) {
       }));
     } finally {
       setSyncing(null);
-      // router.refresh() triggers a server re-render with fresh initialStale.
-      // Since stale is derived from initialStale (when provided), it updates
-      // automatically — no need to manually filter the local state.
-      router.refresh();
     }
+    run(async () => {}); // trigger router.refresh() for server re-render
   }
 
   // Filter out already-synced projects (tracked locally via results)

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition, useEffect, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useServerMutation } from '@/hooks/use-server-mutation';
 import {
   startIssueList,
   parseIssuesFromText,
@@ -21,8 +21,8 @@ import { LoadingSpinner } from './loading-spinner';
 import type { GitHubIssue } from '@/app/actions/github';
 
 export function GitHubImport() {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const { run } = useServerMutation();
+  const [isPending, startTransition] = useTransition(); // for streaming text + reconnect
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [streamText, setStreamText] = useState('');
   const [issues, setIssues] = useState<GitHubIssue[]>([]);
@@ -156,14 +156,14 @@ export function GitHubImport() {
     if (toImport.length === 0) return;
     setImporting(true);
     setError(null);
-    startTransition(async () => {
+    run(async () => {
       try {
         const result = await importIssues(toImport);
         setImportedCount(result.taskIds.length);
         setSelectedNumbers(new Set());
-        router.refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to import issues');
+        throw err; // prevent refresh on failure
       } finally {
         setImporting(false);
       }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useTransition } from 'react';
+import { useTransition, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 
 /**
@@ -31,7 +31,7 @@ export function useServerMutation() {
   const router = useRouter();
 
   /** Run an async action, then refresh the router. Errors are silently caught. */
-  function run(action: () => Promise<unknown>): void {
+  const run = useCallback((action: () => Promise<unknown>): void => {
     startTransition(async () => {
       try {
         await action();
@@ -40,16 +40,16 @@ export function useServerMutation() {
         // Caller handles errors via their own state; skip refresh on failure
       }
     });
-  }
+  }, [startTransition, router]);
 
   /**
    * Convenience: call a server action with args, then refresh.
    * Errors are silently caught.
    */
-  function mutate<Args extends unknown[]>(
+  const mutate = useCallback(<Args extends unknown[]>(
     action: (...args: Args) => Promise<unknown>,
     ...args: Args
-  ): void {
+  ): void => {
     startTransition(async () => {
       try {
         await action(...args);
@@ -58,7 +58,7 @@ export function useServerMutation() {
         // Caller handles errors via their own state; skip refresh on failure
       }
     });
-  }
+  }, [startTransition, router]);
 
   return { run, mutate, isPending };
 }
