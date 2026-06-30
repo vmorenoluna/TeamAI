@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useServerMutation } from '@/hooks/use-server-mutation';
 import {
   getAllProjectsSyncStatus,
   syncProjectDefaults,
@@ -9,7 +9,7 @@ import {
 import type { ProjectSyncStatus } from '@/app/actions/projects';
 
 export function ProjectsSettings() {
-  const router = useRouter();
+  const { run } = useServerMutation();
   const [projects, setProjects] = useState<ProjectSyncStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState<string | null>(null);
@@ -39,7 +39,6 @@ export function ProjectsSettings() {
       try {
         const updated = await syncProjectDefaults(projectPath);
         setSyncResults(prev => ({ ...prev, [projectPath]: { updated } }));
-        // Update the project's status in-place
         setProjects(prev =>
           prev.map(p =>
             p.projectPath === projectPath ? { ...p, upToDate: true, outdatedFiles: [] } : p,
@@ -52,7 +51,7 @@ export function ProjectsSettings() {
         }));
       } finally {
         setSyncing(null);
-        router.refresh();
+        run(async () => {}); // trigger router.refresh()
       }
     })();
   }
@@ -80,7 +79,7 @@ export function ProjectsSettings() {
         }
       }
       setSyncing(null);
-      router.refresh();
+      run(async () => {}); // trigger router.refresh()
     })();
   }
 

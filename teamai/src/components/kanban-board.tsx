@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useTransition, useCallback, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { createTask, moveTask, bulkDeleteTasks } from '@/app/actions/tasks';
+import { useServerMutation } from '@/hooks/use-server-mutation';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskCard } from './task-card';
 import { TaskPanel } from './task-panel';
@@ -16,9 +16,7 @@ interface Props {
 }
 
 export function KanbanBoard({ tasks, projectPath }: Props) {
-  const router = useRouter();
-  const [showDialog, setShowDialog] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const { run, isPending } = useServerMutation();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [dragOverPhase, setDragOverPhase] = useState<string | null>(null);
@@ -40,6 +38,7 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  const [showDialog, setShowDialog] = useState(false);
 
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -172,23 +171,21 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   }
 
   function handleBulkMove(targetPhase: string) {
-    startTransition(async () => {
+    run(async () => {
       for (const id of selectedIds) {
         const task = tasks.find(t => t.id === id);
         const actualPhase = resolveTargetPhase(targetPhase, task?.phase);
         await moveTask(id, actualPhase);
       }
       clearSelection();
-      router.refresh();
     });
   }
 
   function handleBulkDelete() {
     if (!confirm(`Delete ${selectedIds.size} task(s)? This cannot be undone.`)) return;
-    startTransition(async () => {
+    run(async () => {
       await bulkDeleteTasks([...selectedIds]);
       clearSelection();
-      router.refresh();
     });
   }
 
@@ -202,12 +199,11 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   const handleUndo = useCallback(() => {
     const action = undoStackRef.current.pop();
     if (!action) return;
-    startTransition(async () => {
+    run(async () => {
       await moveTask(action.taskId, action.previousPhase);
       showToast(`Undone: moved "${action.taskTitle}" back to ${action.previousPhase}`);
-      router.refresh();
     });
-  }, [showToast, router]);
+  }, [showToast, run]);
 
   // Ctrl+Z listener — stable ref pattern avoids re-attaching on every keystroke
   const toastUndoRef = useRef(toast?.undoAction);
@@ -226,11 +222,10 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   }, [handleUndo]);
 
   function handleCreate(formData: FormData) {
-    startTransition(async () => {
+    run(async () => {
       await createTask(formData);
       setShowDialog(false);
       clearTemplate();
-      router.refresh();
     });
   }
 
@@ -286,9 +281,8 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
 
     // Resolve the actual phase for the moveTask call (e.g. analysis → spec)
     const actualPhase = resolveTargetPhase(targetPhase, task.phase);
-    startTransition(async () => {
+    run(async () => {
       await moveTask(draggingTaskId, actualPhase);
-      router.refresh();
     });
   }
 
