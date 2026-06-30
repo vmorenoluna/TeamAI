@@ -414,10 +414,11 @@ export class ContainerManager extends EventEmitter {
         step.output = output.slice(-2000); // keep last 2KB for display
         this._emitValidation(projectRoot, step);
         this._emitLog(projectRoot, `  ✓ ${step.name} passed`);
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const execErr = err as { stderr?: string; stdout?: string; message?: string };
         step.status = 'failed';
-        step.error = err.stderr || err.stdout || err.message || String(err);
-        step.output = err.stdout?.slice(-2000) || '';
+        step.error = execErr.stderr || execErr.stdout || execErr.message || String(err);
+        step.output = execErr.stdout?.slice(-2000) || '';
         this._emitValidation(projectRoot, step);
         this._emitLog(projectRoot, `  ✗ ${step.name} FAILED`);
         allPassed = false;
