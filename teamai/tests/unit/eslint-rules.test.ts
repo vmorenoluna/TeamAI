@@ -159,13 +159,13 @@ ruleTester.run(
           }
         `,
       },
-      // Destructured refresh() — known limitation, rule only catches router.refresh()
+      // Bare refresh() without destructuring from useRouter — not flagged
       {
         code: `
           import { useRouter } from 'next/navigation';
 
           function Foo() {
-            const { refresh } = useRouter();
+            const refresh = () => {};
             refresh();
             return null;
           }
@@ -181,6 +181,24 @@ ruleTester.run(
           function Foo() {
             const router = useRouter();
             router.refresh();
+            return null;
+          }
+        `,
+        errors: [
+          {
+            message:
+              'router.refresh() called outside useServerMutation — use the useServerMutation hook instead.',
+          },
+        ],
+      },
+      // Destructured refresh() from useRouter() — now caught by VariableDeclarator visitor
+      {
+        code: `
+          import { useRouter } from 'next/navigation';
+
+          function Foo() {
+            const { refresh } = useRouter();
+            refresh();
             return null;
           }
         `,
