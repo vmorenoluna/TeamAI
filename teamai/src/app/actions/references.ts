@@ -12,7 +12,8 @@ export async function uploadTaskReference(taskId: string, formData: FormData): P
   const dir = join(taskStore.getDirById(taskId), 'references');
   mkdirSync(dir, { recursive: true });
 
-  const file = formData.get('file') as File;
+  const file = formData.get('file') as File | null;
+  if (!file) throw new Error('Missing file in form data');
   const ext = extname(file.name) || '.png';
   const dest = join(dir, `ref-${Date.now()}${ext}`);
   const buffer = Buffer.from(await file.arrayBuffer());
