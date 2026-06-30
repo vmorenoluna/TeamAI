@@ -25,6 +25,18 @@ import { useRouter } from 'next/navigation';
  * Errors are silently swallowed inside startTransition — callers handle
  * failures through their own state (setError, etc.). If the action throws,
  * router.refresh() is skipped (no point refreshing on failure).
+ *
+ * ### When NOT to use this hook
+ *
+ * Use plain `useTransition` instead when the async operation only updates
+ * local component state and does NOT need a server cache refresh:
+ * - Async operations that show an inline success indicator (e.g. "Saved!")
+ * - Data fetching that populates a dropdown, directory listing, or search result
+ * - Streaming / WebSocket sessions where UI updates arrive via events rather
+ *   than cache invalidation
+ *
+ * In those cases, `useServerMutation` would trigger an unnecessary
+ * `router.refresh()` that could wipe local UI state or cause a flicker.
  */
 export function useServerMutation() {
   const [isPending, startTransition] = useTransition();
