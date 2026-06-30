@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { approveTask, rejectTask, markTaskDone, reviseSpec } from '@/app/actions/tasks';
+import { useServerMutation } from '@/hooks/use-server-mutation';
 
 interface SpecConcern {
   issue: string;
@@ -58,7 +58,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 type PendingAction = 'approve-local' | 'approve-pr' | 'reject' | 'mark-done' | 'revise-spec' | null;
 
 export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase }: Props) {
-  const router = useRouter();
+  const { run } = useServerMutation();
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [showReject, setShowReject] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -66,45 +66,49 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
 
   async function handleApprove(strategy: 'local-merge' | 'pull-request') {
     setPendingAction(strategy === 'local-merge' ? 'approve-local' : 'approve-pr');
-    try {
-      await approveTask(taskId, strategy);
-      router.refresh();
-    } finally {
-      setPendingAction(null);
-    }
+    run(async () => {
+      try {
+        await approveTask(taskId, strategy);
+      } finally {
+        setPendingAction(null);
+      }
+    });
   }
 
   async function handleReject() {
     if (!feedback.trim()) return;
     setPendingAction('reject');
-    try {
-      await rejectTask(taskId, feedback);
-      setShowReject(false);
-      setFeedback('');
-      router.refresh();
-    } finally {
-      setPendingAction(null);
-    }
+    run(async () => {
+      try {
+        await rejectTask(taskId, feedback);
+      } finally {
+        setShowReject(false);
+        setFeedback('');
+        setPendingAction(null);
+      }
+    });
   }
 
   async function handleReviseSpec() {
     setPendingAction('revise-spec');
-    try {
-      await reviseSpec(taskId);
-      router.refresh();
-    } finally {
-      setPendingAction(null);
-    }
+    run(async () => {
+      try {
+        await reviseSpec(taskId);
+      } finally {
+        setPendingAction(null);
+      }
+    });
   }
 
   async function handleMarkDone() {
     setPendingAction('mark-done');
-    try {
-      await markTaskDone(taskId);
-      router.refresh();
-    } finally {
-      setPendingAction(null);
-    }
+    run(async () => {
+      try {
+        await markTaskDone(taskId);
+      } finally {
+        setPendingAction(null);
+      }
+    });
   }
 
   return (

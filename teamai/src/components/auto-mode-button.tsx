@@ -1,33 +1,40 @@
 'use client';
 
-import { useState, useEffect, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
 import { getAutoModeStateAction, toggleAutoMode } from '@/app/actions/auto-mode';
+import { useServerMutation } from '@/hooks/use-server-mutation';
 
-export function AutoModeButton() {
-  const router = useRouter();
+interface Props {
+  /** When null, no project is selected — button is disabled and no fetch is made. */
+  activeProjectPath?: string | null;
+}
+
+export function AutoModeButton({ activeProjectPath }: Props) {
+  const { run, isPending } = useServerMutation();
+  const noProject = activeProjectPath === null;
   const [enabled, setEnabled] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!noProject);
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
+    if (noProject) return; // loading already starts as false when noProject is true
     getAutoModeStateAction()
       .then(state => { setEnabled(state.enabled); setLoading(false); })
       .catch(() => { setLoading(false); });
-  }, []);
+  }, [noProject]);
 
   function handleToggle() {
+    if (noProject) return;
     const next = !enabled;
     setEnabled(next); // optimistic
     setError(null);
-    startTransition(async () => {
+    run(async () => {
       try {
         await toggleAutoMode(next);
-        router.refresh();
       } catch (e) {
         setEnabled(!next); // revert
         setError(e instanceof Error ? e.message : 'Failed to toggle auto mode');
+        throw e; // prevent router.refresh() on failure
       }
     });
   }
@@ -47,8 +54,8 @@ export function AutoModeButton() {
       )}
       <button
         onClick={handleToggle}
-        disabled={isPending}
-        title={enabled ? 'Stop Auto mode' : 'Start Auto mode'}
+        disabled={isPending || noProject}
+        title={noProject ? 'No project selected' : enabled ? 'Stop Auto mode' : 'Start Auto mode'}
         className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
           enabled
             ? 'border-emerald-700/60 bg-emerald-950/40 text-emerald-400 hover:bg-emerald-900/50 hover:text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.15)]'
