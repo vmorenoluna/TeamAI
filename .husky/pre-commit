@@ -1,3 +1,21 @@
 #!/bin/sh
+# Check if lockfile is in sync when package.json changes
+if git diff --cached --name-only | grep -qx "teamai/package.json"; then
+  cd teamai
+  echo "▸ package.json staged — verifying package-lock.json is in sync..."
+  if ! npm install --package-lock-only --ignore-scripts --silent 2>/dev/null; then
+    echo "✗ npm install --package-lock-only failed"
+    exit 1
+  fi
+  if ! git diff --exit-code package-lock.json >/dev/null 2>&1; then
+    echo "✗ package-lock.json is out of date — run: cd teamai && npm install"
+    echo "  Then stage package-lock.json before committing."
+    git checkout package-lock.json 2>/dev/null
+    exit 1
+  fi
+  echo "✓ package-lock.json is up to date"
+  cd ..
+fi
+
 # Run typecheck, lint, then tests on every commit
 cd teamai && npx tsc --noEmit && npx lint-staged && npx vitest run --exclude 'tests/integration/**'
