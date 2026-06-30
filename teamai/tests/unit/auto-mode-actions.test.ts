@@ -213,6 +213,23 @@ describe('auto-mode server actions', () => {
       await expect(markAutoReviewed('task-123')).rejects.toThrow('no project selected');
     });
 
+    it('rejects empty string taskId immediately (before any async work)', async () => {
+      const { markAutoReviewed } = await import('@/app/actions/auto-mode');
+      await expect(markAutoReviewed('')).rejects.toThrow('Invalid taskId');
+
+      // Should NOT have called getActiveProjectPath or TaskStore
+      expect(mockGetActiveProjectPath).not.toHaveBeenCalled();
+      expect(mockTaskStoreUpdate).not.toHaveBeenCalled();
+      expect(mockRevalidatePath).not.toHaveBeenCalled();
+    });
+
+    it('rejects whitespace-only taskId immediately', async () => {
+      const { markAutoReviewed } = await import('@/app/actions/auto-mode');
+      await expect(markAutoReviewed('   ')).rejects.toThrow('Invalid taskId');
+
+      expect(mockGetActiveProjectPath).not.toHaveBeenCalled();
+    });
+
     it('propagates error when TaskStore.update throws', async () => {
       mockTaskStoreUpdate.mockImplementation(() => {
         throw new Error('task not found');
