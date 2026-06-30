@@ -24,6 +24,10 @@ export async function toggleAutoMode(enabled: boolean): Promise<void> {
 }
 
 export async function markAutoReviewed(taskId: string): Promise<void> {
+  if (!taskId?.trim()) {
+    throw new Error('Invalid taskId: must be a non-empty string');
+  }
+
   const projectPath = await getActiveProjectPath();
   const taskStore = new TaskStore(projectPath);
   taskStore.update(taskId, { autoReviewed: true });

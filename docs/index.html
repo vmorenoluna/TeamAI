@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TeamAI — Multi-Agent Claude Code Orchestration</title>
+  <meta name="description" content="TeamAI orchestrates multi-agent Claude Code CLI workflows through a browser UI. Parallel AI agents — analyst, planner, coder, QA reviewer — collaborate on automated software development pipelines.">
+  <meta property="og:title" content="TeamAI — Multi-Agent Claude Code Orchestration">
+  <meta property="og:description" content="Orchestrate parallel Claude Code CLI agents through a browser UI. From feature request to reviewed pull request — automatically.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://raw.githubusercontent.com/vmorenoluna/TeamAI/main/docs/images/og-image.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230b0f19'/><text x='16' y='22' text-anchor='middle' font-size='20' font-weight='800' fill='%2338bdf8' font-family='system-ui'>T</text></svg>">
+  <style>
+    /* ========== Reset & Base ========== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      background: #0b0f19;
+      color: #cbd5e1;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+    a { color: #38bdf8; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    img { max-width: 100%; height: auto; display: block; }
+
+    /* ========== Layout ========== */
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+    section { padding: 100px 0; }
+    section:nth-child(even) { background: #0f172a; }
+
+    /* ========== Typography ========== */
+    h1 { font-size: clamp(2.4rem, 5vw, 3.8rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
+    h2 { font-size: clamp(1.6rem, 3vw, 2.2rem); font-weight: 700; letter-spacing: -0.01em; margin-bottom: 16px; }
+    h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; }
+    .section-label {
+      display: inline-block;
+      font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.1em; color: #38bdf8; margin-bottom: 12px;
+    }
+    .section-desc {
+      font-size: 1.1rem; color: #94a3b8; max-width: 640px; margin-bottom: 48px;
+    }
+
+    /* ========== Hero ========== */
+    .hero {
+      text-align: center;
+      padding: 140px 0 100px;
+      background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(56,189,248,0.08) 0%, transparent 60%),
+                  linear-gradient(180deg, #0b0f19 0%, #0f172a 100%);
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.2);
+      border-radius: 100px; padding: 6px 16px; font-size: 0.85rem; color: #38bdf8;
+      margin-bottom: 32px;
+    }
+    .hero-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: #38bdf8; }
+    .hero h1 {
+      background: linear-gradient(135deg, #e2e8f0 0%, #38bdf8 50%, #818cf8 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .hero .subtitle {
+      font-size: 1.2rem; color: #94a3b8; max-width: 600px; margin: 20px auto 40px;
+    }
+    .hero-cta {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: linear-gradient(135deg, #2563eb, #7c3aed);
+      color: #fff; border: none; border-radius: 8px; padding: 14px 32px;
+      font-size: 1rem; font-weight: 600; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
+      text-decoration: none;
+    }
+    .hero-cta:hover { transform: translateY(-1px); box-shadow: 0 8px 30px rgba(37,99,235,0.3); text-decoration: none; }
+    .hero-cta-secondary {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: transparent; color: #cbd5e1; border: 1px solid #334155;
+      border-radius: 8px; padding: 14px 32px; font-size: 1rem; font-weight: 600;
+      margin-left: 12px; cursor: pointer; text-decoration: none;
+    }
+    .hero-cta-secondary:hover { border-color: #64748b; text-decoration: none; }
+
+    /* ========== Feature Cards ========== */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px;
+    }
+    .feature-card {
+      background: #111827; border: 1px solid #1e293b;
+      border-radius: 12px; padding: 32px; transition: border-color 0.2s;
+    }
+    .feature-card:hover { border-color: #334155; }
+    .feature-card .icon {
+      width: 44px; height: 44px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem; margin-bottom: 20px;
+    }
+    .feature-card p { color: #94a3b8; font-size: 0.95rem; }
+    .icon-blue    { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
+    .icon-purple  { background: rgba(129, 140, 248, 0.12); color: #818cf8; }
+    .icon-emerald { background: rgba(52, 211, 153, 0.12); color: #34d399; }
+    .icon-amber   { background: rgba(251, 191, 36, 0.12); color: #fbbf24; }
+    .icon-rose    { background: rgba(251, 113, 133, 0.12); color: #fb7185; }
+    .icon-cyan    { background: rgba(6, 182, 212, 0.12); color: #06b6d4; }
+
+    /* ========== Pipeline Diagram ========== */
+    .pipeline-flow {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+      gap: 0; margin: 48px 0;
+    }
+    .pipeline-node {
+      background: #111827; border: 1px solid #1e293b; border-radius: 12px;
+      padding: 20px 24px; text-align: center; min-width: 120px;
+    }
+    .pipeline-node .role { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #38bdf8; margin-bottom: 4px; }
+    .pipeline-node .phase { font-weight: 700; font-size: 1.05rem; }
+    .pipeline-arrow { font-size: 1.5rem; color: #334155; padding: 0 8px; }
+
+    /* ========== Screenshot slot ========== */
+    .screenshot-slot {
+      background: #111827; border: 2px dashed #1e293b; border-radius: 12px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      margin: 36px 0; transition: border-color 0.2s;
+    }
+    .screenshot-slot:hover { border-color: #334155; }
+    .screenshot-slot .placeholder { color: #475569; font-size: 0.9rem; text-align: center; }
+    .screenshot-slot .placeholder .label { font-weight: 600; margin-bottom: 4px; color: #64748b; }
+    .screenshot-slot img { border-radius: 10px; }
+    .screenshot-slot.full  { min-height: 300px; }
+    .screenshot-slot.side  { min-height: 260px; margin: 0; }
+
+    /* ========== Highlight banner ========== */
+    .highlight-banner {
+      background: linear-gradient(135deg, rgba(56,189,248,0.06) 0%, rgba(129,140,248,0.06) 100%);
+      border: 1px solid rgba(56,189,248,0.15); border-radius: 12px;
+      padding: 32px; text-align: center; margin: 48px 0;
+    }
+    .highlight-banner h3 { font-size: 1.2rem; color: #e2e8f0; }
+    .highlight-banner p { color: #94a3b8; margin: 8px 0 0; }
+
+    /* ========== Two-column layout ========== */
+    .two-col {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center;
+    }
+    .two-col .text h2 { margin-bottom: 12px; }
+    .two-col .text ul { list-style: none; padding: 0; }
+    .two-col .text li {
+      padding: 8px 0; color: #94a3b8; font-size: 0.95rem;
+      border-bottom: 1px solid #1e293b;
+    }
+    .two-col .text li::before { content: '→ '; color: #38bdf8; }
+    .two-col.reversed .col-image { order: -1; }
+
+    /* ========== Footer ========== */
+    footer {
+      text-align: center; padding: 48px 0;
+      color: #475569; font-size: 0.85rem; border-top: 1px solid #1e293b;
+    }
+
+    /* ========== Nav ========== */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(11, 15, 25, 0.85); backdrop-filter: blur(10px);
+      border-bottom: 1px solid #1e293b;
+    }
+    nav .container { display: flex; align-items: center; justify-content: space-between; padding-top: 14px; padding-bottom: 14px; }
+    nav .logo { font-weight: 700; font-size: 1.1rem; color: #e2e8f0; }
+    nav .logo span { color: #38bdf8; }
+    nav .nav-links { display: flex; align-items: center; gap: 6px; }
+    nav a.nav-link { color: #94a3b8; font-size: 0.85rem; margin-left: 18px; text-decoration: none; }
+    nav a.nav-link:hover { color: #cbd5e1; }
+    /* Mobile hamburger */
+    .nav-toggle { display: none; background: none; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer; padding: 4px 8px; }
+    .nav-links.open { display: flex !important; }
+
+    /* ========== Architecture ========== */
+    .arch-flow {
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 16px;
+      align-items: center; font-size: 0.85rem;
+    }
+    .arch-node {
+      background: #111827; border: 1px solid #1e293b; border-radius: 10px;
+      padding: 16px 20px; text-align: center;
+    }
+    .arch-node.highlight { border-color: #38bdf8; }
+    .arch-node .title { font-weight: 700; }
+    .arch-node .sub   { color: #64748b; font-size: 0.75rem; }
+    .arch-arrow { color: #334155; font-size: 1.5rem; }
+
+    /* ========== Responsive ========== */
+    @media (max-width: 768px) {
+      section { padding: 64px 0; }
+      .two-col { grid-template-columns: 1fr; gap: 24px; }
+      .two-col.reversed .col-image { order: 0; }
+      .pipeline-flow { gap: 8px; }
+      .pipeline-arrow { display: none; }
+      .hero { padding: 110px 0 64px; }
+      .hero-cta-secondary { margin-left: 0; margin-top: 12px; }
+      /* Mobile nav */
+      .nav-links { display: none; flex-direction: column; position: absolute; top: 100%; left: 0; right: 0;
+        background: rgba(11, 15, 25, 0.95); backdrop-filter: blur(10px); padding: 12px 24px 20px;
+        border-bottom: 1px solid #1e293b; }
+      .nav-links a.nav-link { margin: 8px 0; font-size: 1rem; }
+      .nav-toggle { display: block; }
+      .arch-flow { flex-direction: column; }
+      .arch-arrow { transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ==================== Nav ==================== -->
+<nav>
+  <div class="container">
+    <a href="#" class="logo" style="text-decoration:none;">Team<span>AI</span></a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')" aria-label="Toggle navigation">☰</button>
+    <div class="nav-links">
+      <a href="#pipeline" class="nav-link">Pipeline</a>
+      <a href="#kanban" class="nav-link">Kanban</a>
+      <a href="#auto" class="nav-link">Auto Mode</a>
+      <a href="#review" class="nav-link">Review</a>
+      <a href="#streaming" class="nav-link">Streaming</a>
+      <a href="#extras" class="nav-link">More</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ==================== Hero ==================== -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-badge"><span class="dot"></span> CLI-based — not the API</div>
+    <h1>Multi-Agent Software<br>Development, Automated</h1>
+    <p class="subtitle">
+      TeamAI orchestrates parallel Claude Code CLI agents — analyst, planner, coder, QA reviewer, merger — through a browser UI, turning feature requests into reviewed pull requests with zero API keys.
+    </p>
+    <a href="https://github.com/vmorenoluna/TeamAI" class="hero-cta">View on GitHub</a>
+    <a href="#pipeline" class="hero-cta-secondary">How it works ↓</a>
+  </div>
+</section>
+
+<!-- ==================== Quick Highlights ==================== -->
+<section>
+  <div class="container">
+    <span class="section-label">Why TeamAI</span>
+    <h2>Not another AI coding tool</h2>
+    <p class="section-desc">TeamAI is different — it orchestrates the actual <code>claude</code> CLI binary, not the API. Each agent gets its own Claude subprocess, its own git worktree, and its own role persona. No API keys, no token limits, no vendor lock-in.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="icon icon-blue">🖥️</div>
+        <h3>CLI-Native</h3>
+        <p>Spawns real <code>claude</code> CLI subprocesses with stream-json I/O. Full access to the filesystem, git, and shell — no API abstraction layer.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-purple">🐳</div>
+        <h3>Container Isolation</h3>
+        <p>Each agent runs inside a Docker devcontainer with VS Code devcontainer.json support, ensuring reproducible, sandboxed execution environments.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-emerald">⚡</div>
+        <h3>Parallel Agents</h3>
+        <p>Multiple agent sessions run simultaneously with git worktree isolation — planner and coder work in parallel without conflicts.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-amber">🌐</div>
+        <h3>Multi-Project</h3>
+        <p>Manage multiple codebases from a single UI. Each project has its own <code>.teamai/</code> state and <code>.claude/</code> configuration.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-rose">🔌</div>
+        <h3>WebSocket Streaming</h3>
+        <p>Real-time agent output streams to the browser via WebSocket. Watch each agent think, plan, and code in real time.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-cyan">🔧</div>
+        <h3>Customizable Roles</h3>
+        <p>Define your own agent roles and command templates — analyst, planner, coder, QA reviewer, merger — or create new ones.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Multi-Agent Pipeline ==================== -->
+<section id="pipeline">
+  <div class="container">
+    <span class="section-label">Multi-Agent Pipeline</span>
+    <h2>From idea to merged PR — automatically</h2>
+    <p class="section-desc">Each task flows through a chain of specialized AI agents. Each agent adopts a role persona, reads the previous agent's output, and advances the task to the next phase.</p>
+
+    <div class="pipeline-flow" aria-label="Pipeline phases: Spec, Plan, Implement, QA Review, Merge PR">
+      <div class="pipeline-node"><div class="role">Analyst</div><div class="phase">📋 Spec</div></div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-node"><div class="role">Planner</div><div class="phase">📐 Plan</div></div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-node"><div class="role">Coder</div><div class="phase">⚙️ Implement</div></div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-node"><div class="role">QA Reviewer</div><div class="phase">🔍 QA Review</div></div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-node"><div class="role">Merger</div><div class="phase">🔀 Merge PR</div></div>
+    </div>
+    <p style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:8px;">
+      QA failures automatically loop back to Implement with structured feedback including severity levels (critical, error, warning, suggestion).
+    </p>
+
+    <div class="screenshot-slot full">
+      <div class="placeholder">
+        <div class="label">📸 Screenshot: Pipeline view</div>
+        <div>Replace this with <code>images/pipeline-view.png</code></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== CLI-Native highlight ==================== -->
+<section style="padding: 80px 0;">
+  <div class="container">
+    <div class="highlight-banner">
+      <h3>💡 Powered by the Claude CLI, not the API</h3>
+      <p>TeamAI spawns real <code style="background:#1e293b;padding:2px 6px;border-radius:4px;">claude -p --input-format stream-json --output-format stream-json</code> subprocesses. Each agent has full filesystem access, runs shell commands, and uses the same Claude Code you use in your terminal. No API keys. No rate limits. No context window truncation.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Kanban Board ==================== -->
+<section id="kanban">
+  <div class="container">
+    <span class="section-label">Kanban Board</span>
+    <h2>Phased workflow, visualized</h2>
+    <p class="section-desc">Tasks move through columns representing pipeline phases — Backlog, Spec, Plan, Implement, QA Review, Awaiting Review, and Done. Drag-and-drop with guardrails prevents invalid transitions.</p>
+
+    <div class="screenshot-slot full">
+      <div class="placeholder">
+        <div class="label">📸 Screenshot: Kanban board</div>
+        <div>Replace this with <code>images/kanban-board.png</code></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Auto Mode ==================== -->
+<section id="auto">
+  <div class="container">
+    <div class="two-col">
+      <div class="text">
+        <span class="section-label">Auto Mode</span>
+        <h2>Hands-off pipeline execution</h2>
+        <p style="color:#94a3b8;margin-bottom:16px;">Enable Auto Mode and TeamAI autonomously picks tasks from the backlog, respects dependency ordering, runs them through the pipeline, auto-approves at the review stage, creates PRs, polls CI, and auto-merges when all checks pass.</p>
+        <ul>
+          <li>Configurable max parallel tasks</li>
+          <li>Dependency-aware task selection (blocks incomplete deps)</li>
+          <li>Auto-approve at awaiting-review → create PR</li>
+          <li>CI polling via <code>gh pr view</code> → auto-merge on green</li>
+          <li>Auto-done tasks highlighted for later manual review</li>
+        </ul>
+      </div>
+      <div class="screenshot-slot side">
+        <div class="placeholder">
+          <div class="label">📸 Screenshot: Auto Mode</div>
+          <div>Replace with <code>images/auto-mode.png</code></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Review Panel ==================== -->
+<section id="review">
+  <div class="container">
+    <div class="two-col reversed">
+      <div class="text">
+        <span class="section-label">Review Panel</span>
+        <h2>Human-gated quality checks</h2>
+        <p style="color:#94a3b8;margin-bottom:16px;">When QA detects issues, the task pauses for human review. The review panel shows the full QA report with pass/fail criteria, severity-graded additional issues, and a diff viewer.</p>
+        <ul>
+          <li>Pass/Fail per spec acceptance criterion</li>
+          <li>Severity-graded issues: critical, error, warning, suggestion</li>
+          <li>Spec concerns detection — QA flags when the spec itself is wrong</li>
+          <li>Revise Spec workflow: preserves original spec, re-runs pipeline from scratch</li>
+          <li>Merge Locally / Open Pull Request / Request Changes actions</li>
+        </ul>
+      </div>
+      <div class="screenshot-slot side col-image">
+        <div class="placeholder">
+          <div class="label">📸 Screenshot: Review panel</div>
+          <div>Replace with <code>images/review-panel.png</code></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Streaming / Terminal ==================== -->
+<section id="streaming">
+  <div class="container">
+    <span class="section-label">Real-Time Streaming</span>
+    <h2>Watch agents think and code in real time</h2>
+    <p class="section-desc">Each agent's Claude CLI output streams to the browser via WebSocket with NDJSON parsing. Watch analysis, planning, implementation, and QA happen live — every thought, every file edit, every command.</p>
+
+    <div class="screenshot-slot full">
+      <div class="placeholder">
+        <div class="label">📸 Screenshot: Streaming output / Terminal view</div>
+        <div>Replace this with <code>images/streaming-output.png</code></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Roadmap & Insights ==================== -->
+<section id="extras">
+  <div class="container">
+    <span class="section-label">Roadmap &amp; Insights</span>
+    <h2>Strategic planning, not just execution</h2>
+    <p class="section-desc">TeamAI goes beyond task execution with roadmap planning, ideation scanning, and project insights.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="icon icon-purple">🗺️</div>
+        <h3>Roadmap</h3>
+        <p>Generate multi-phase roadmaps from ideation reports. View tasks grouped by phase with linked dependencies and status tracking.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-blue">💡</div>
+        <h3>Ideation Scanner</h3>
+        <p>Scan your codebase for improvement opportunities. AI analyzes architecture, identifies tech debt, and proposes feature ideas.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-emerald">📊</div>
+        <h3>Insights Chat</h3>
+        <p>Ask natural-language questions about your project's state. "What tasks are blocked?" "Show me recent QA failures."</p>
+      </div>
+    </div>
+
+    <div class="screenshot-slot full">
+      <div class="placeholder">
+        <div class="label">📸 Screenshot: Roadmap view</div>
+        <div>Replace this with <code>images/roadmap-view.png</code></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Container Support ==================== -->
+<section>
+  <div class="container">
+    <span class="section-label">Container Support</span>
+    <h2>Sandboxed agent execution</h2>
+    <p class="section-desc">Every agent can run inside an isolated Docker container using VS Code devcontainer configuration. TeamAI auto-generates devcontainer specs based on your project's language and toolchain.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="icon icon-cyan">🐳</div>
+        <h3>Devcontainer Integration</h3>
+        <p>Auto-detects Python, Go, Rust, Node.js — generates appropriate devcontainer.json with language-specific tooling.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-emerald">🔒</div>
+        <h3>Filesystem Isolation</h3>
+        <p>Agents operate within container boundaries. Combined with git worktree isolation, no cross-contamination between tasks.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-blue">⚙️</div>
+        <h3>Per-Project Configuration</h3>
+        <p>Each project specifies its own container config in <code>.teamai/container.json</code>. Switch between host and container modes per agent.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Agent Customization ==================== -->
+<section>
+  <div class="container">
+    <span class="section-label">Agent Customization</span>
+    <h2>Define your own agents</h2>
+    <p class="section-desc">TeamAI ships with default roles and commands, but everything is customizable per project. Override any role persona or command template in your project's <code>.claude/</code> directory.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="icon icon-rose">👤</div>
+        <h3>Role Personas</h3>
+        <p>Define agent behavior with markdown role files. Each agent reads its role at session start: "You are a senior QA engineer...".</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-purple">📝</div>
+        <h3>Command Templates</h3>
+        <p>Customize pipeline commands per phase. Inject project-specific context, rules, and guardrails into each agent's prompt.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-amber">🔄</div>
+        <h3>Pipeline Workflow Rules</h3>
+        <p>14 cross-cutting guardrails prevent anti-patterns: no delegated analysis, no mathematical substitution for empirical evidence, spec authority enforcement, and more.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Architecture ==================== -->
+<section>
+  <div class="container" style="text-align: center;">
+    <span class="section-label">Architecture</span>
+    <h2>How it fits together</h2>
+    <p class="section-desc" style="margin:12px auto 40px;">
+      A custom Node.js server wraps Next.js with WebSocket support. The ProcessManager spawns and manages Claude CLI subprocesses. The orchestrator coordinates the multi-agent pipeline.
+    </p>
+
+    <div class="arch-flow">
+      <div class="arch-node"><div class="title">🌐 Browser</div><div class="sub">Next.js + Tailwind</div></div>
+      <span class="arch-arrow">⇄</span>
+      <div class="arch-node"><div class="title">🔌 WebSocket</div><div class="sub">ws + NDJSON stream</div></div>
+      <span class="arch-arrow">⇄</span>
+      <div class="arch-node"><div class="title">⚙️ Server</div><div class="sub">tsx server.ts</div></div>
+      <span class="arch-arrow">⇄</span>
+      <div class="arch-node highlight"><div class="title">🤖 Claude CLI</div><div class="sub">Multiple subprocesses</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Get Started ==================== -->
+<section style="text-align: center;">
+  <div class="container">
+    <span class="section-label">Get Started</span>
+    <h2>Ready to automate your pipeline?</h2>
+    <p class="section-desc" style="margin:16px auto 32px;">
+      TeamAI is open source. Clone the repo, install dependencies, and start orchestrating AI agents from your browser.
+    </p>
+    <a href="https://github.com/vmorenoluna/TeamAI" class="hero-cta">View on GitHub</a>
+    <a href="https://github.com/vmorenoluna/TeamAI#readme" class="hero-cta-secondary">Read the docs</a>
+  </div>
+</section>
+
+<!-- ==================== Footer ==================== -->
+<footer>
+  <div class="container">
+    <p>TeamAI — Multi-Agent Claude Code Orchestration</p>
+    <p style="margin-top: 4px;">Built with TypeScript, Next.js, React 19, Tailwind CSS 4, and the Claude CLI</p>
+  </div>
+</footer>
+
+</body>
+</html>

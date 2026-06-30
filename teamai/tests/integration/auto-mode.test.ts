@@ -778,6 +778,45 @@ describe('Auto Mode Integration', () => {
       });
     });
 
+    it('does NOT set autoProcessed when markTaskDone fails (.catch() path)', async () => {
+      vi.useFakeTimers();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      // PR is already externally merged → triggers _finishTask
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({ state: 'MERGED', statusCheckRollup: [] });
+        }
+        return '';
+      });
+
+      // markTaskDone fails — the .catch() path in _finishTask should run
+      mockOrch.markTaskDone.mockRejectedValue(new Error('mark-as-done failed'));
+
+      const { TaskStore } = await import('@/lib/task-store');
+      const store = new TaskStore(testDir);
+      store.updatePhase(taskId, 'pr-open');
+      fireEvent('phase-change', { taskId, phase: 'pr-open', projectRoot: testDir });
+
+      // Advance 30s to trigger CI poll → MERGED → _finishTask → markTaskDone rejects
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      // markTaskDone WAS called (so we know _finishTask ran)
+      await vi.waitFor(() => {
+        expect(mockOrch.markTaskDone).toHaveBeenCalledWith(taskId);
+      });
+
+      // autoProcessed should NOT have been set — the .catch() path logs the error
+      // but does not write autoProcessed: true
+      const taskData = store.getById(taskId);
+      expect(taskData?.autoProcessed).toBe(false);
+    });
+
     it('does NOT merge when CI checks are failing', async () => {
       vi.useFakeTimers();
 
