@@ -68,6 +68,51 @@ describe('AutoModeButton', () => {
     mockToggleAutoMode.mockResolvedValue(undefined);
   });
 
+  // ── No project selected ─────────────────────────────────────────────
+
+  describe('no project selected', () => {
+    it('shows disabled button when activeProjectPath is null', () => {
+      render(<AutoModeButton activeProjectPath={null} />);
+
+      const button = screen.getByRole('button');
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute('title', 'No project selected');
+    });
+
+    it('does NOT show loading text when no project (skips fetch)', () => {
+      mockGetAutoModeStateAction.mockImplementation(() => new Promise(() => {}));
+
+      render(<AutoModeButton activeProjectPath={null} />);
+
+      // Should NOT show loading, should immediately render disabled button
+      expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
+      expect(screen.getByRole('button')).toBeInTheDocument();
+    });
+
+    it('does NOT call getAutoModeStateAction when no project', () => {
+      render(<AutoModeButton activeProjectPath={null} />);
+
+      expect(mockGetAutoModeStateAction).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call toggleAutoMode when clicked with no project', async () => {
+      mockGetAutoModeStateAction.mockResolvedValue({
+        enabled: false,
+        maxParallel: 2,
+        activeCount: 0,
+        trackedCount: 0,
+      });
+
+      render(<AutoModeButton activeProjectPath={null} />);
+
+      const button = screen.getByRole('button');
+      fireEvent.click(button);
+
+      // The button is disabled, so the click handler should not fire
+      expect(mockToggleAutoMode).not.toHaveBeenCalled();
+    });
+  });
+
   // ── Loading state ───────────────────────────────────────────────────
 
   describe('loading state', () => {

@@ -2,6 +2,7 @@
 
 import { mkdirSync, writeFileSync, readdirSync, existsSync } from 'fs';
 import { join, extname } from 'path';
+import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
 import { TaskStore } from '@/lib/task-store';
 
@@ -16,6 +17,8 @@ export async function uploadTaskReference(taskId: string, formData: FormData): P
   const dest = join(dir, `ref-${Date.now()}${ext}`);
   const buffer = Buffer.from(await file.arrayBuffer());
   writeFileSync(dest, buffer);
+  revalidatePath('/');
+  revalidatePath(`/task/${taskId}`);
   return dest;
 }
 

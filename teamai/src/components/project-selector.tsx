@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { setActiveProject, addProject, removeProject } from '@/app/actions/projects';
+import { useServerMutation } from '@/hooks/use-server-mutation';
 import { DirectoryBrowser } from './directory-browser';
 import type { Project } from '@/lib/project-store';
 
@@ -13,40 +13,32 @@ interface Props {
 }
 
 export function ProjectSelector({ projects, activeProjectPath, collapsed = false }: Props) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const { isPending, run, mutate } = useServerMutation();
   const [showDialog, setShowDialog] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
   const [pathValue, setPathValue] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
 
   function handleSelect(path: string) {
-    startTransition(async () => {
-      await setActiveProject(path);
-      router.refresh();
-    });
+    mutate(setActiveProject, path);
   }
 
   function handleAdd(formData: FormData) {
     setAddError(null);
-    startTransition(async () => {
+    run(async () => {
       const result = await addProject(formData);
       if ('error' in result) {
         setAddError(result.error);
-      } else {
-        setShowDialog(false);
-        setPathValue('');
-        router.refresh();
+        throw new Error(result.error); // prevent router.refresh() on error
       }
+      setShowDialog(false);
+      setPathValue('');
     });
   }
 
   function handleRemove(e: React.MouseEvent, path: string) {
     e.stopPropagation();
-    startTransition(async () => {
-      await removeProject(path);
-      router.refresh();
-    });
+    mutate(removeProject, path);
   }
 
   function handleBrowseSelect(path: string) {
