@@ -45,9 +45,11 @@ const localPlugin = {
         let hasRefreshCall = false;
         let refreshNode = null;
         let hasUseServerMutation = false;
+        let refreshFromUseRouter = false;
 
         return {
           CallExpression(node) {
+            // router.refresh() member expression
             if (
               node.callee.type === 'MemberExpression' &&
               node.callee.object.type === 'Identifier' &&
@@ -57,6 +59,35 @@ const localPlugin = {
             ) {
               hasRefreshCall = true;
               refreshNode = node;
+            }
+            // destructured refresh() from useRouter()
+            if (
+              refreshFromUseRouter &&
+              node.callee.type === 'Identifier' &&
+              node.callee.name === 'refresh'
+            ) {
+              hasRefreshCall = true;
+              if (!refreshNode) refreshNode = node;
+            }
+          },
+          // Detect const { refresh } = useRouter()
+          VariableDeclarator(node) {
+            if (
+              node.id.type === 'ObjectPattern' &&
+              node.init &&
+              node.init.type === 'CallExpression' &&
+              node.init.callee.type === 'Identifier' &&
+              node.init.callee.name === 'useRouter'
+            ) {
+              for (const prop of node.id.properties) {
+                if (
+                  prop.type === 'Property' &&
+                  prop.key.type === 'Identifier' &&
+                  prop.key.name === 'refresh'
+                ) {
+                  refreshFromUseRouter = true;
+                }
+              }
             }
           },
           ImportDeclaration(node) {
