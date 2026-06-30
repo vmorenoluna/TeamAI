@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useServerMutation } from '@/hooks/use-server-mutation';
 import { checkTaskWorktree, deleteTaskWorktree, retryTask, stopTask, playTask } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 import { PHASE_BADGE, PHASE_LABELS } from '@/constants/phases';
@@ -27,14 +27,14 @@ interface Props {
 const EXCLUDED_SPINNER_PHASES = new Set(['backlog', 'failed', 'merge', 'create-pr', 'done']);
 
 export function TaskCard({ task, onSelect, isMoving }: Props) {
-  const router = useRouter();
+  const { run: runRetry, isPending: isRetrying } = useServerMutation();
+  const { run: runStop, isPending: isStopping } = useServerMutation();
+  const { run: runPlay, isPending: isStarting } = useServerMutation();
+  const { run: runWtDelete } = useServerMutation(); // isolated — uses wtDeleting for UI state
   const [expanded, setExpanded] = useState(false);
   const [wtStatus, setWtStatus] = useState<{ exists: boolean; path: string | null }>({ exists: false, path: null });
   const [wtChecking, setWtChecking] = useState(!!task.branch);
   const [wtDeleting, setWtDeleting] = useState(false);
-  const [isRetrying, startRetryTransition] = useTransition();
-  const [isStopping, startStopTransition] = useTransition();
-  const [isStarting, startStartTransition] = useTransition();
 
   useEffect(() => {
     if (!task.branch) {
@@ -50,14 +50,19 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
     e.stopPropagation();
     if (!confirm('Delete the git worktree for this task? This cannot be undone.')) return;
     setWtDeleting(true);
-    const result = await deleteTaskWorktree(task.id);
-    if (result.success) {
-      setWtStatus({ exists: false, path: null });
-      router.refresh();
-    } else {
-      alert(`Failed to delete worktree: ${result.error}`);
-    }
-    setWtDeleting(false);
+    runWtDelete(async () => {
+      try {
+        const result = await deleteTaskWorktree(task.id);
+        if (result.success) {
+          setWtStatus({ exists: false, path: null });
+        } else {
+          alert(`Failed to delete worktree: ${result.error}`);
+          throw new Error(result.error); // skip refresh on failure
+        }
+      } finally {
+        setWtDeleting(false);
+      }
+    });
   }
 
   const showSpinner = !EXCLUDED_SPINNER_PHASES.has(task.phase);
@@ -69,36 +74,33 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
 
   async function handleRetry(e: React.MouseEvent) {
     e.stopPropagation();
-    startRetryTransition(async () => {
+    runRetry(async () => {
       const result = await retryTask(task.id);
-      if (result.success) {
-        router.refresh();
-      } else {
+      if (!result.success) {
         alert(`Failed to retry task: ${result.error}`);
+        throw new Error(result.error); // skip refresh on failure
       }
     });
   }
 
   async function handleStop(e: React.MouseEvent) {
     e.stopPropagation();
-    startStopTransition(async () => {
+    runStop(async () => {
       const result = await stopTask(task.id);
-      if (result.success) {
-        router.refresh();
-      } else {
+      if (!result.success) {
         alert(`Failed to stop task: ${result.error}`);
+        throw new Error(result.error); // skip refresh on failure
       }
     });
   }
 
   async function handlePlay(e: React.MouseEvent) {
     e.stopPropagation();
-    startStartTransition(async () => {
+    runPlay(async () => {
       const result = await playTask(task.id);
-      if (result.success) {
-        router.refresh();
-      } else {
+      if (!result.success) {
         alert(`Failed to start task: ${result.error}`);
+        throw new Error(result.error); // skip refresh on failure
       }
     });
   }
