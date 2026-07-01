@@ -7,11 +7,11 @@ import { readContainerConfig, containerManager, hostToContainerPath, dockerAvail
 import { TaskStore } from './task-store';
 import { resolveProvider, providerToSessionOpts } from './providers';
 import { slugify } from './utils';
-import { detectGitPlatform, buildPlatformPrompt } from './git-platform';
 import { runSensors, readPipelineSensors, sensorRunSummary, type SensorsConfig } from './sensors';
 import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit } from './orchestrator/worktree-utils';
 import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelineState, pipelineAdvancePhase } from './orchestrator/pipeline-state';
 import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedback';
+import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './orchestrator/phase-runners';
 import type { PipelinePhase } from '@/constants/phases';
 
 interface PlanSubtask {
@@ -431,87 +431,37 @@ export class Orchestrator {
   }
 
   private async runSpec(pipeline: TaskPipeline): Promise<void> {
-    const logFile = path.join(pipeline.specPath, 'output.log');
-    this._rotateOutputLog(logFile);
-    this._phaseHeader(logFile, 'spec');
-    // Phase committed only AFTER execution actually starts
-    this._persistAndEmitPhase(pipeline);
-    const sessionId = await processManager.createSession(this.sessionOpts('analyst', this.projectRoot, pipeline.taskId, logFile));
-    pipeline.sessionId = sessionId;
-    this._savePipelineState(pipeline);
-    // Pass the explicit output path so the agent writes spec.md to the task's directory,
-    // not a new directory derived from the description slug.
-    const agentSpecPath = this._toAgentPath(pipeline.specPath);
-
-    // Check for revision mode — spec_revision_feedback.md is written by reviseSpec()
-    const revisionFeedbackPath = path.join(pipeline.specPath, 'spec_revision_feedback.md');
-    const isRevision = existsSync(revisionFeedbackPath);
-
-    if (isRevision) {
-      processManager.sendMessage(sessionId,
-        `REVISION: ${pipeline.description}\n\n` +
-        `Read the existing spec at: \`${agentSpecPath}/spec.md\`\n` +
-        `Read the spec revision feedback at: \`${agentSpecPath}/spec_revision_feedback.md\`\n` +
-        `Revise the spec to address ALL concerns in the feedback.\n` +
-        `Preserve parts of the spec that are still valid — only change what the feedback asks for.\n` +
-        `IMPORTANT: Write the revised spec to \`${agentSpecPath}/spec.md\` (overwrite the existing file).`);
-    } else {
-      processManager.sendMessage(sessionId,
-        `/spec ${pipeline.description}\n\nIMPORTANT: Write the spec file to \`${agentSpecPath}/spec.md\` (use this exact path, not a new subdirectory).`);
-    }
-    await this.waitForCompletion(sessionId);
-    processManager.killSession(sessionId);
-    // Clean up revision feedback after spec revision is complete
-    if (isRevision && existsSync(revisionFeedbackPath)) {
-      unlinkSync(revisionFeedbackPath);
-    }
-    this.advancePhase(pipeline, 'plan');
-    await this.executePhase(pipeline);
+    await runSpecPhase(pipeline, {
+      projectRoot: this.projectRoot,
+      taskStore: this.taskStore,
+      rotateOutputLog: logFile => this._rotateOutputLog(logFile),
+      phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
+      persistAndEmitPhase: p => this._persistAndEmitPhase(p),
+      savePipelineState: p => this._savePipelineState(p),
+      sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
+      toAgentPath: hostPath => this._toAgentPath(hostPath),
+      waitForCompletion: sessionId => this.waitForCompletion(sessionId),
+      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
+      executePhase: p => this.executePhase(p),
+    });
   }
 
   private async runPlan(pipeline: TaskPipeline): Promise<void> {
-    const logFile = path.join(pipeline.specPath, 'output.log');
-    this._rotateOutputLog(logFile);
-    this._phaseHeader(logFile, 'plan');
-    // Phase committed only AFTER execution actually starts
-    this._persistAndEmitPhase(pipeline);
-    const sessionId = await processManager.createSession(this.sessionOpts('planner', this.projectRoot, pipeline.taskId, logFile));
-    pipeline.sessionId = sessionId;
-    this._savePipelineState(pipeline);
-    processManager.sendMessage(sessionId, `/plan ${this._toAgentPath(pipeline.specPath)}/spec.md`);
-    await this.waitForCompletion(sessionId);
-    processManager.killSession(sessionId);
-
-    // Pull latest master from remote before branching so the feature branch starts
-    // from up-to-date code, minimising conflicts at PR time.
-    // Uses _gitPush with 'pull' args so the OAuth token is injected — same reason
-    // as the identical pull in runImplement (see comment there).
-    try {
-      this._gitPush(['pull', '--ff-only', 'origin', 'master'], path.join(pipeline.specPath, 'output.log'));
-    } catch { /* non-fast-forward or offline — proceed with local master */ }
-
-    if (!existsSync(pipeline.worktreePath)) {
-      // ── Gap 5a: Safety guard — never rmSync the project root ──
-      if (path.resolve(pipeline.worktreePath) === path.resolve(this.projectRoot)) {
-        throw new Error('Refusing to create worktree at project root — this would destroy the repository');
-      }
-      try {
-        this._execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], this.projectRoot);
-      } catch {
-        // If the directory still exists after worktree remove (e.g. metadata was already
-        // pruned and git doesn't know about this path), delete it directly so the
-        // subsequent worktree add can succeed.
-        if (existsSync(pipeline.worktreePath)) {
-          try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-          try { execFileSync('git', ['worktree', 'prune'], { cwd: this.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
-        }
-        // Branch already exists (e.g. from a previous failed attempt) — reuse it
-        this._execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], this.projectRoot);
-      }
-    }
-
-    this.advancePhase(pipeline, 'implement');
-    await this.executePhase(pipeline);
+    await runPlanPhase(pipeline, {
+      projectRoot: this.projectRoot,
+      taskStore: this.taskStore,
+      rotateOutputLog: logFile => this._rotateOutputLog(logFile),
+      phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
+      persistAndEmitPhase: p => this._persistAndEmitPhase(p),
+      savePipelineState: p => this._savePipelineState(p),
+      sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
+      toAgentPath: hostPath => this._toAgentPath(hostPath),
+      waitForCompletion: sessionId => this.waitForCompletion(sessionId),
+      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
+      executePhase: p => this.executePhase(p),
+      gitPush: (pushArgs, logFile) => this._gitPush(pushArgs, logFile),
+      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
+    });
   }
 
   private async runImplement(pipeline: TaskPipeline): Promise<void> {
@@ -1248,122 +1198,41 @@ export class Orchestrator {
   }
 
   private async runMerge(pipeline: TaskPipeline): Promise<void> {
-    // Persist phase on disk now that work is actually starting (#5)
-    this._persistAndEmitPhase(pipeline);
-    const logFile = path.join(pipeline.specPath, 'output.log');
-    this._phaseHeader(logFile, 'merge');
-
-    // Commit TeamAI artifacts to the worktree so the merge includes the full
-    // implementation story (spec, plan, QA, events, etc.).
-    this._commitArtifactsToWorktree(pipeline);
-
-    // ── Sensor: pre_merge hook ──
-    const pipelineConfig = this.getPipelineConfig();
-    if (pipelineConfig.sensors?.pre_merge?.length) {
-      // Collect all files from the plan for the sensors
-      const planPath = path.join(pipeline.specPath, 'plan.json');
-      let allFiles: string[] = [];
-      if (existsSync(planPath)) {
-        try {
-          const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
-          allFiles = (plan.subtasks || []).flatMap((s: PlanSubtask) => s.files || []);
-        } catch { /* best-effort */ }
-      }
-      const mergeResult = await runSensors(pipelineConfig.sensors.pre_merge, 'pre_merge', {
-        cwd: pipeline.worktreePath,
-        specPath: pipeline.specPath,
-        files: allFiles,
-        logFile,
-      });
-      appendFileSync(logFile, sensorRunSummary(mergeResult));
-      if (!mergeResult.allPassed) {
-        const failMsg = mergeResult.reports.filter(r => !r.passed).map(r => r.sensor + ': ' + (r.error || 'exit ' + r.exitCode)).join('; ');
-        throw new Error('Pre-merge sensors failed: ' + failMsg);
-      }
-    }
-
-    const sessionId = await processManager.createSession(this.sessionOpts('merger', this.projectRoot, pipeline.taskId, logFile));
-    pipeline.sessionId = sessionId;
-    processManager.sendMessage(sessionId, `/merge ${pipeline.branch}`);
-    await this.waitForCompletion(sessionId);
-    processManager.killSession(sessionId);
-
-    this.removeWorktree(pipeline.taskId);
-
-    this.advancePhase(pipeline, 'done');
+    await runMergePhase(pipeline, {
+      projectRoot: this.projectRoot,
+      taskStore: this.taskStore,
+      rotateOutputLog: logFile => this._rotateOutputLog(logFile),
+      phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
+      persistAndEmitPhase: p => this._persistAndEmitPhase(p),
+      savePipelineState: p => this._savePipelineState(p),
+      sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
+      toAgentPath: hostPath => this._toAgentPath(hostPath),
+      waitForCompletion: sessionId => this.waitForCompletion(sessionId),
+      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
+      executePhase: p => this.executePhase(p),
+      commitArtifactsToWorktree: p => this._commitArtifactsToWorktree(p),
+      getPipelineConfig: () => this.getPipelineConfig(),
+      removeWorktree: taskId => this.removeWorktree(taskId),
+    });
   }
 
   private async runCreatePR(pipeline: TaskPipeline): Promise<void> {
-    // Persist phase on disk now that work is actually starting (#5)
-    this._persistAndEmitPhase(pipeline);
-    // Rebase the feature branch onto the latest master before pushing so the PR is
-    // created without conflicts. This handles the common case where master advanced
-    // while the implement/QA phases were running.
-    const logFile = path.join(pipeline.specPath, 'output.log');
-    try {
-      execFileSync('git', ['fetch', 'origin', 'master'], { cwd: this.projectRoot, stdio: 'pipe' });
-      this._execGit(['rebase', 'origin/master'], pipeline.worktreePath);
-      appendFileSync(logFile, '\n[INFO] Feature branch rebased onto latest master — PR will be conflict-free\n');
-    } catch {
-      // Rebase has conflicts — abort and use the merger agent to semantically
-      // merge origin/master into the feature branch. The merger resolves conflicts,
-      // runs tests, and commits — producing a clean, conflict-free PR.
-      try { this._execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* ignore */ }
-      appendFileSync(logFile, '\n[INFO] Rebase had conflicts — spawning merger to resolve via git merge\n');
-      try {
-        const mergeSessionId = await processManager.createSession(
-          this.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, logFile)
-        );
-        processManager.sendMessage(mergeSessionId, `/merge origin/master`);
-        await this.waitForCompletion(mergeSessionId);
-        processManager.killSession(mergeSessionId);
-        appendFileSync(logFile, '\n[INFO] Merger resolved conflicts — PR will be conflict-free\n');
-      } catch (mergeErr) {
-        const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
-        appendFileSync(logFile, `\n[WARN] Merger could not resolve all conflicts: ${mergeMsg}\n`);
-        appendFileSync(logFile, '\n[WARN] PR may require manual conflict resolution\n');
-      }
-    }
-
-    // Commit TeamAI artifacts to the worktree so the PR includes the full
-    // implementation story (spec, plan, QA, events, etc.).
-    this._commitArtifactsToWorktree(pipeline);
-
-    // Always push from the host — container git push credentials are unreliable.
-    // _gitPush injects the gh OAuth token via http.extraheader, bypassing the
-    // credential-helper chain entirely (same technique as GitHub Actions).
-    // Use --force, not --force-with-lease: the local remote-tracking ref may be stale
-    // (e.g. branch was pushed earlier via a raw URL, or the worktree was recreated
-    // without a fetch), causing --force-with-lease to reject the push with "stale info"
-    // even though the orchestrator is the sole writer to these feat/ branches.
-    this._gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
-
-    // Run merger on the host — gh CLI needs host credentials (gh auth login); inside the
-    // container only git HTTPS is wired (gh auth setup-git), not the full gh API token.
-    const sessionId = await processManager.createSession({
-      ...this.sessionOpts('merger', this.projectRoot, pipeline.taskId, logFile),
-      projectRoot: undefined,
-    });
-    pipeline.sessionId = sessionId;
-
-    const specContent = readFileSync(path.join(pipeline.specPath, 'spec.md'), 'utf-8');
-    const platform = detectGitPlatform(this.projectRoot);
-    const platformMsg = buildPlatformPrompt(platform, pipeline.branch, pipeline.description, specContent, this.projectRoot);
-    processManager.sendMessage(sessionId, platformMsg);
-    await this.waitForCompletion(sessionId);
-    processManager.killSession(sessionId);
-
-    // Extract PR URL from the agent’s output
-    const prUrl = this._extractPrUrl(logFile);
-
-    this.taskStore.update(pipeline.taskId, {
-      platform: platform !== 'unknown' ? platform : undefined,
-      ...(prUrl ? { prUrl } : {}),
-    });
-
-    this.advancePhase(pipeline, 'pr-open', {
-      ...(prUrl ? { prUrl } : {}),
-      ...(platform !== 'unknown' ? { platform } : {}),
+    await runCreatePRPhase(pipeline, {
+      projectRoot: this.projectRoot,
+      taskStore: this.taskStore,
+      rotateOutputLog: logFile => this._rotateOutputLog(logFile),
+      phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
+      persistAndEmitPhase: p => this._persistAndEmitPhase(p),
+      savePipelineState: p => this._savePipelineState(p),
+      sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
+      toAgentPath: hostPath => this._toAgentPath(hostPath),
+      waitForCompletion: sessionId => this.waitForCompletion(sessionId),
+      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
+      executePhase: p => this.executePhase(p),
+      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
+      commitArtifactsToWorktree: p => this._commitArtifactsToWorktree(p),
+      gitPush: (pushArgs, logFile) => this._gitPush(pushArgs, logFile),
+      extractPrUrl: logFile => this._extractPrUrl(logFile),
     });
   }
 
