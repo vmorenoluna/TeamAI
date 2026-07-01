@@ -24,6 +24,7 @@ const mockKillSession = vi.hoisted(() => vi.fn());
 const mockExecFileSync = vi.hoisted(() => vi.fn());
 
 vi.mock('child_process', () => ({
+  execFile: vi.fn(),
   execFileSync: mockExecFileSync,
 }));
 

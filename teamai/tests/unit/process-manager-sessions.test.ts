@@ -22,6 +22,7 @@ const { mockSpawn, mockExecFileSync, mockPtySpawn, mockAppendFileSync, mockReadF
 
 vi.mock('child_process', () => ({
   spawn: mockSpawn,
+  execFile: vi.fn(),
   execFileSync: mockExecFileSync,
   ChildProcess: class MockChildProcess {},
 }));

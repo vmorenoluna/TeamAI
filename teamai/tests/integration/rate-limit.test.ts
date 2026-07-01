@@ -31,6 +31,7 @@ const mockExecFileSync = vi.hoisted(() => vi.fn());
 const onHandlers = vi.hoisted(() => new Map<string, Array<(...args: unknown[]) => void>>());
 
 vi.mock('child_process', () => ({
+  execFile: vi.fn(),
   execFileSync: mockExecFileSync,
 }));
 
