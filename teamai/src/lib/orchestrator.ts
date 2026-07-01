@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, statSync, rmSync, copyFileSync, mkdirSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, rmSync, copyFileSync, mkdirSync, readdirSync } from 'fs';
 import path from 'path';
 import { warn as logWarn } from './logger';
 import { processManager, containerSessionOpts, type AgentSession } from './process-manager';
@@ -10,6 +10,7 @@ import { slugify } from './utils';
 import { detectGitPlatform, buildPlatformPrompt } from './git-platform';
 import { runSensors, readPipelineSensors, sensorRunSummary, type SensorsConfig } from './sensors';
 import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit } from './orchestrator/worktree-utils';
+import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelineState, pipelineAdvancePhase } from './orchestrator/pipeline-state';
 import type { PipelinePhase } from '@/constants/phases';
 
 interface PlanSubtask {
@@ -1394,68 +1395,13 @@ export class Orchestrator {
   // per-subtask checkpointing in runImplement (#2).
   private _planWriteLock: Promise<void> = Promise.resolve();
 
-  /** Rotate output log: keep last ~50KB when log exceeds ~100KB (#6) */
-  private _rotateOutputLog(logFile: string): void {
-    try {
-      if (!existsSync(logFile)) return;
-      const MAX_SIZE = 100_000;
-      const KEEP_SIZE = 50_000;
-      const stat = statSync(logFile);
-      if (stat.size > MAX_SIZE) {
-        const content = readFileSync(logFile, 'utf-8');
-        const truncated = content.slice(-KEEP_SIZE);
-        writeFileSync(logFile, truncated);
-        appendFileSync(logFile, `\n── LOG TRUNCATED (${stat.size} → ${KEEP_SIZE} bytes) ──\n`);
-      }
-    } catch { /* best-effort */ }
-  }
+  private _rotateOutputLog(logFile: string): void { rotateOutputLog(logFile); }
 
-  /**
-   * Persist phase to disk atomically and emit phase-change event.
-   * Called when phase work actually starts — NOT before (#5).
-   * This ensures a crash before work starts leaves the task at the previous phase.
-   */
-  private _persistAndEmitPhase(pipeline: TaskPipeline): void {
-    this.taskStore.updatePhase(pipeline.taskId, pipeline.phase);
-    processManager.emit('phase-change', { taskId: pipeline.taskId, phase: pipeline.phase, projectRoot: this.projectRoot });
-  }
+  private _persistAndEmitPhase(pipeline: TaskPipeline): void { persistAndEmitPhase(pipeline, this.taskStore, this.projectRoot); }
 
-  /**
-   * Save pipeline state to disk for crash recovery (#7).
-   * On resume, _restorePipelineState reads this to recover sessionId, mergeStrategy, etc.
-   */
-  private _savePipelineState(pipeline: TaskPipeline): void {
-    try {
-      const statePath = path.join(pipeline.specPath, '.pipeline_state.json');
-      const state = {
-        taskId: pipeline.taskId,
-        phase: pipeline.phase,
-        sessionId: pipeline.sessionId,
-        mergeStrategy: pipeline.mergeStrategy,
-        qaAttempt: pipeline.qaAttempt,
-        branch: pipeline.branch,
-        worktreePath: pipeline.worktreePath,
-        updatedAt: new Date().toISOString(),
-      };
-      const tmpPath = statePath + '.tmp';
-      writeFileSync(tmpPath, JSON.stringify(state, null, 2));
-      renameSync(tmpPath, statePath);
-    } catch { /* best-effort */ }
-  }
+  private _savePipelineState(pipeline: TaskPipeline): void { savePipelineState(pipeline); }
 
-  /**
-   * Restore pipeline state from disk after a crash.
-   * Returns null if no saved state exists.
-   */
-  private _restorePipelineState(_taskId: string, specPath: string): Partial<TaskPipeline> | null {
-    try {
-      const statePath = path.join(specPath, '.pipeline_state.json');
-      if (!existsSync(statePath)) return null;
-      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
-      unlinkSync(statePath); // clean up after reading
-      return state;
-    } catch { return null; }
-  }
+  private _restorePipelineState(_taskId: string, specPath: string): Partial<TaskPipeline> | null { return restorePipelineState(_taskId, specPath); }
 
   /**
    * Verify the worktree is a valid git worktree (#4).
@@ -1511,11 +1457,7 @@ export class Orchestrator {
     }
   }
 
-  private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void {
-    pipeline.phase = phase;
-    this.taskStore.updatePhase(pipeline.taskId, phase);
-    processManager.emit('phase-change', { taskId: pipeline.taskId, phase, projectRoot: this.projectRoot, ...eventExtra });
-  }
+  private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void { pipelineAdvancePhase(pipeline, phase, this.taskStore, this.projectRoot, eventExtra); }
 
   // Parse "resets 4:30pm (UTC)" from Claude Code's session-limit message.
   // Returns a Unix timestamp (seconds) for the reset time, or null if unparseable.
