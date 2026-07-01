@@ -31,6 +31,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 
 vi.mock('child_process', () => ({
   spawn: mockSpawn,
+  execFile: vi.fn(),
   execFileSync: vi.fn(),
 }));
 

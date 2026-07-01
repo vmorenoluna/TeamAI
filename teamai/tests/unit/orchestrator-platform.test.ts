@@ -20,6 +20,7 @@ const { mockWarn } = vi.hoisted(() => ({
 
 // Mock child_process globally so all modules see the mock execFileSync
 vi.mock('child_process', () => ({
+  execFile: vi.fn(),
   execFileSync: mockExecFileSync,
   spawn: vi.fn(),
   ChildProcess: class MockCP {},

@@ -12,6 +12,7 @@ const { mockExecFileSync } = vi.hoisted(() => ({
 }));
 
 vi.mock('child_process', () => ({
+  execFile: vi.fn(),
   execFileSync: mockExecFileSync,
   spawn: vi.fn(),
   ChildProcess: class MockCP {},

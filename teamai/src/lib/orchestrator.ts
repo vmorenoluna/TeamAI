@@ -8,6 +8,7 @@ import { TaskStore } from './task-store';
 import { resolveProvider, providerToSessionOpts } from './providers';
 import { slugify } from './utils';
 import { detectGitPlatform, buildPlatformPrompt } from './git-platform';
+import { runSensors, readPipelineSensors, sensorRunSummary, type SensorsConfig } from './sensors';
 import type { PipelinePhase } from '@/constants/phases';
 
 interface PlanSubtask {
@@ -99,12 +100,24 @@ export class Orchestrator {
     return this.activeTasks.has(taskId);
   }
 
-  private getPipelineConfig(): { maxQaAttempts: number; parallelSubtasks: boolean } {
+  private _pipelineConfigCache: { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig } | null = null;
+  private getPipelineConfig(): { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig } {
+    if (this._pipelineConfigCache) return this._pipelineConfigCache;
     const cfgPath = path.join(this.projectRoot, '.teamai', 'pipeline.json');
     if (existsSync(cfgPath)) {
-      try { return JSON.parse(readFileSync(cfgPath, 'utf-8')); } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
+      try {
+        const raw = JSON.parse(readFileSync(cfgPath, 'utf-8'));
+        const sensors = readPipelineSensors(raw);
+        this._pipelineConfigCache = {
+          maxQaAttempts: typeof raw.maxQaAttempts === 'number' ? raw.maxQaAttempts : 3,
+          parallelSubtasks: typeof raw.parallelSubtasks === 'boolean' ? raw.parallelSubtasks : true,
+          ...(sensors ? { sensors } : {}),
+        };
+        return this._pipelineConfigCache;
+      } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
     }
-    return { maxQaAttempts: 3, parallelSubtasks: true };
+    this._pipelineConfigCache = { maxQaAttempts: 3, parallelSubtasks: true };
+    return this._pipelineConfigCache;
   }
 
   // Cancel a running pipeline for a task — kills the active session and removes
@@ -192,6 +205,7 @@ export class Orchestrator {
     }
 
     // Cancel any currently running pipeline for this task before starting a new one
+    this._pipelineConfigCache = null; // invalidate cache so pipeline.json changes take effect
     this.cancelPipeline(taskId);
     this.activeTasks.add(taskId);
 
@@ -703,6 +717,27 @@ export class Orchestrator {
           subtasks.map(async (subtask) => {
             this._phaseHeader(logFile, 'implement — subtask ' + subtask.id + ': ' + subtask.title);
             const cwd = isMultiGroup ? subtaskWorktrees.get(subtask.id) : pipeline.worktreePath;
+            // ── Sensor: pre_subtask hook ──
+            try {
+              const pipelineConfig = this.getPipelineConfig();
+              if (pipelineConfig.sensors?.pre_subtask?.length) {
+                const preResult = await runSensors(pipelineConfig.sensors.pre_subtask, 'pre_subtask', {
+                  cwd,
+                  specPath: pipeline.specPath,
+                  files: subtask.files || [],
+                  subtaskId: subtask.id,
+                  logFile,
+                });
+                if (!preResult.allPassed) {
+                  appendFileSync(logFile, sensorRunSummary(preResult));
+                }
+              }
+            } catch (preSensorErr) {
+              // pre_subtask failures are warnings — they don't block the session
+              const msg = preSensorErr instanceof Error ? preSensorErr.message : String(preSensorErr);
+              appendFileSync(logFile, '\n[SENSOR:pre_subtask] pre-subtask sensors failed (non-blocking): ' + msg + '\n');
+            }
+
             let sessionId;
             try {
               sessionId = await processManager.createSession(this.sessionOpts(coderRole, cwd, pipeline.taskId, logFile));
@@ -775,6 +810,37 @@ export class Orchestrator {
             processManager.sendMessage(sessionId, prompt);
             await this.waitForCompletion(sessionId);
             processManager.killSession(sessionId);
+
+            // ── Sensor: post_subtask hook ──
+            try {
+              const pipelineConfig = this.getPipelineConfig();
+              if (pipelineConfig.sensors?.post_subtask?.length) {
+                const postResult = await runSensors(pipelineConfig.sensors.post_subtask, 'post_subtask', {
+                  cwd,
+                  specPath: pipeline.specPath,
+                  files: subtask.files || [],
+                  subtaskId: subtask.id,
+                  logFile,
+                });
+                appendFileSync(logFile, sensorRunSummary(postResult));
+                if (!postResult.allPassed) {
+                  // Write sensor failures to sensor_report.json (separate from QA's qa_report.json)
+                  const sensorReportPath = path.join(pipeline.specPath, `sensor_report-st${subtask.id}.json`);
+                  const failMsg = postResult.reports.filter(r => !r.passed).map(r => r.sensor + ': ' + (r.error || 'exit ' + r.exitCode)).join('; ');
+                  const failures = postResult.reports.filter(r => !r.passed).map(r => ({
+                    subtask: subtask.title,
+                    sensor: r.sensor,
+                    error: r.error || `exit code ${r.exitCode}`,
+                    fix_needed: `Fix sensor failures: ${failMsg}. Run the sensor locally to reproduce.`,
+                  }));
+                  const sensorReport = { failures, overall: 'FAIL' };
+                  writeFileSync(sensorReportPath, JSON.stringify(sensorReport, null, 2));
+                }
+              }
+            } catch (postSensorErr) {
+              const msg = postSensorErr instanceof Error ? postSensorErr.message : String(postSensorErr);
+              appendFileSync(logFile, '\n[SENSOR:post_subtask] post-subtask sensors error: ' + msg + '\n');
+            }
 
             completedIds.push(subtask.id);
             this._planWriteLock = this._planWriteLock.then(() => {
@@ -935,6 +1001,43 @@ export class Orchestrator {
       };
       writeFileSync(reportPath, JSON.stringify(failReport, null, 2));
       this.advancePhase(pipeline, 'failed');
+      return;
+    }
+
+    // ── Sensor gate: check per-subtask sensor reports before advancing to QA ──
+    // Each subtask writes sensor_report-st{id}.json (no race: per-subtask filename)
+    const allSensorFailures: { subtask: string; sensor: string; error: string; fix_needed: string }[] = [];
+    if (existsSync(planPath)) {
+      try {
+        const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+        for (const s of (plan.subtasks || [])) {
+          const srPath = path.join(pipeline.specPath, `sensor_report-st${s.id}.json`);
+          if (existsSync(srPath)) {
+            try {
+              const report = JSON.parse(readFileSync(srPath, 'utf-8'));
+              if (report.failures) allSensorFailures.push(...report.failures);
+            } catch { /* best-effort */ }
+            try { unlinkSync(srPath); } catch { /* best-effort */ }
+          }
+        }
+      } catch { /* best-effort */ }
+    }
+    if (allSensorFailures.length > 0) {
+      appendFileSync(logFile, `\n[SENSOR-GATE] post_subtask sensors failed (${allSensorFailures.length} failure(s)) — bouncing to implement for sensor fixes\n`);
+      this._writeQaFeedback(pipeline, {
+        overall: 'FAIL',
+        fail_type: 'cleanup',
+        criteria: allSensorFailures.map(f => ({
+          name: `Sensor: ${f.subtask} — ${f.sensor}`,
+          criterion: `Sensor: ${f.subtask} — ${f.sensor}`,
+          status: 'FAIL' as const,
+          notes: f.error,
+          fix_needed: f.fix_needed,
+        })),
+      });
+      this.advancePhase(pipeline, 'implement');
+      this._savePipelineState(pipeline);
+      await this.executePhase(pipeline);
       return;
     }
 
@@ -1150,6 +1253,31 @@ export class Orchestrator {
     // Commit TeamAI artifacts to the worktree so the merge includes the full
     // implementation story (spec, plan, QA, events, etc.).
     this._commitArtifactsToWorktree(pipeline);
+
+    // ── Sensor: pre_merge hook ──
+    const pipelineConfig = this.getPipelineConfig();
+    if (pipelineConfig.sensors?.pre_merge?.length) {
+      // Collect all files from the plan for the sensors
+      const planPath = path.join(pipeline.specPath, 'plan.json');
+      let allFiles: string[] = [];
+      if (existsSync(planPath)) {
+        try {
+          const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+          allFiles = (plan.subtasks || []).flatMap((s: PlanSubtask) => s.files || []);
+        } catch { /* best-effort */ }
+      }
+      const mergeResult = await runSensors(pipelineConfig.sensors.pre_merge, 'pre_merge', {
+        cwd: pipeline.worktreePath,
+        specPath: pipeline.specPath,
+        files: allFiles,
+        logFile,
+      });
+      appendFileSync(logFile, sensorRunSummary(mergeResult));
+      if (!mergeResult.allPassed) {
+        const failMsg = mergeResult.reports.filter(r => !r.passed).map(r => r.sensor + ': ' + (r.error || 'exit ' + r.exitCode)).join('; ');
+        throw new Error('Pre-merge sensors failed: ' + failMsg);
+      }
+    }
 
     const sessionId = await processManager.createSession(this.sessionOpts('merger', this.projectRoot, pipeline.taskId, logFile));
     pipeline.sessionId = sessionId;
