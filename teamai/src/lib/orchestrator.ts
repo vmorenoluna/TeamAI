@@ -11,6 +11,7 @@ import { detectGitPlatform, buildPlatformPrompt } from './git-platform';
 import { runSensors, readPipelineSensors, sensorRunSummary, type SensorsConfig } from './sensors';
 import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit } from './orchestrator/worktree-utils';
 import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelineState, pipelineAdvancePhase } from './orchestrator/pipeline-state';
+import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedback';
 import type { PipelinePhase } from '@/constants/phases';
 
 interface PlanSubtask {
@@ -1899,162 +1900,9 @@ export class Orchestrator {
     return { taskId, role, cwd, ...containerSessionOpts(this.projectRoot), logFile, ...providerOpts };
   }
 
-  /** Write QA feedback for bouncing back to implement */
-  private _writeQaFeedback(pipeline: TaskPipeline, report: QaReport): void {
-    const feedbackPath = path.join(pipeline.specPath, 'qa_feedback.md');
-    let content = `# QA Feedback\n\n`;
-    content += `## ⚠️ IMPORTANT: QA Feedback OVERRIDES the plan\n\n`;
-    content += `The issues listed below represent the latest requirements. `;
-    content += `Where QA feedback and the plan's acceptance criteria conflict, **follow the QA feedback**. `;
-    content += `The plan may be outdated — QA findings are the ground truth.\n\n`;
-    content += `## Overall: ${report.overall}\n\n`;
-    if (report.fail_type) {
-      content += `**fail_type**: ${report.fail_type}\n\n`;
-    }
-    if (report.criteria) {
-      content += `## Failed Criteria\n\n`;
-      for (const c of report.criteria) {
-        if (c.status === 'FAIL') {
-          const name = c.criterion || c.name || 'Unknown criterion';
-          const fix = c.fix_needed ? ` → Fix: ${c.fix_needed}` : '';
-          content += `- **${name}**: ${c.notes || c.evidence || 'No details provided'}${fix}\n`;
-        }
-      }
-    }
-    if (report.additional_issues || report.issues) {
-      const issues = (report.additional_issues ?? report.issues)!;
-      content += `\n## Additional Issues\n\n`;
-      for (const issue of issues) {
-        const desc = issue.description || issue.message || JSON.stringify(issue);
-        const file = issue.file ? ` (${issue.file})` : '';
-        const fix = issue.fix_needed ? ` → Fix: ${issue.fix_needed}` : '';
-        content += `- [${issue.severity || 'error'}] ${desc}${file}${fix}\n`;
-      }
-    }
-    writeFileSync(feedbackPath, content);
+  private _writeQaFeedback(pipeline: TaskPipeline, report: QaReport): void { writeQaFeedback(pipeline.specPath, report); }
 
-    // Patch plan.json subtask acceptance criteria from QA findings
-    // Marks subtasks with qa_flagged:true so runImplement only re-runs those
-    const planPath = path.join(pipeline.specPath, 'plan.json');
-    if (existsSync(planPath)) {
-      try {
-        const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
-        if (plan.subtasks) {
-          let modified = false;
-          // Patch failed criteria into matching subtasks
-          if (report.criteria) {
-            for (const c of report.criteria) {
-              if (c.status === 'FAIL' && c.fix_needed) {
-                const criterionName = c.criterion || c.name || '';
-                for (const subtask of plan.subtasks) {
-                  if (!subtask.acceptance_criteria) continue;
-                  const idx = subtask.acceptance_criteria.findIndex(
-                    (ac: string) => {
-                      const acLower = ac.toLowerCase();
-                      const critLower = criterionName.toLowerCase();
-                      // Try exact match first, then whole-word, then prefix substring
-                      return (
-                        acLower.includes(critLower) ||
-                        acLower.split(/\s+/).some((w: string) => critLower.split(/\s+/).every((cw: string) => w.includes(cw)))
-                      );
-                    }
-                  );
-                  if (idx >= 0) {
-                    subtask.acceptance_criteria[idx] += ` [QA CORRECTION: ${c.fix_needed}]`;
-                    subtask.qa_flagged = true;
-                    modified = true;
-                    // Don't break — one criterion may apply to multiple subtasks
-                  }
-                }
-              }
-            }
-          }
-          // Append additional_issues as new criteria to relevant subtasks
-          const issues = report.additional_issues || report.issues;
-          if (issues) {
-            for (const issue of issues) {
-              const desc = issue.description || issue.message || '';
-              const fix = issue.fix_needed || '';
-              if (!desc && !fix) continue;
-              for (const subtask of plan.subtasks) {
-                if (!subtask.files || !Array.isArray(subtask.files)) continue;
-                // Match file by basename or suffix to avoid overly broad matches
-          if (issue.file && subtask.files.some((f: string) => {
-            const issueBase = issue.file!.replace(/^.*[\\/]/, '');
-            const fileBase = f.replace(/^.*[\\/]/, '');
-            return fileBase === issueBase || f.endsWith(issue.file!) || issue.file!.endsWith(f);
-          })) {
-                  if (!subtask.acceptance_criteria) subtask.acceptance_criteria = [];
-                  subtask.acceptance_criteria.push(`[QA ISSUE (${issue.severity || 'unknown'}): ${desc}${fix ? ` → Fix: ${fix}` : ''}]`);
-                  subtask.qa_flagged = true;
-                  modified = true;
-                  // Don't break — same file may appear in multiple subtasks
-                }
-              }
-            }
-          }
-          if (modified) {
-            writeFileSync(planPath, JSON.stringify(plan, null, 2));
-          }
-        }
-      } catch { /* best-effort */ }
-    }
-  }
-
-  /** Write a completion summary when the task fails (max QA attempts reached) */
-  private _writeCompletionSummary(pipeline: TaskPipeline): void {
-    const summaryPath = path.join(pipeline.specPath, 'completion_summary.md');
-    let content = `# Completion Summary\n\n`;
-    content += `Task failed after ${pipeline.qaAttempt} QA attempts.\n\n`;
-
-    // Read plan.json for subtask status
-    const planPath = path.join(pipeline.specPath, 'plan.json');
-    if (existsSync(planPath)) {
-      try {
-        const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
-        if (plan.subtasks) {
-          content += `## Plan Subtasks\n\n`;
-          for (const s of plan.subtasks) {
-            const done = s.completed ? 'COMPLETED' : 'NOT COMPLETED';
-            content += `- [${s.completed ? 'x' : ' '}] **${s.title}** — ${done}\n`;
-          }
-        }
-      } catch { /* skip */ }
-    }
-
-    // Read last QA report
-    const reportPath = path.join(pipeline.specPath, 'qa_report.json');
-    if (existsSync(reportPath)) {
-      try {
-        const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
-        content += `\n## Last QA Report\n\n`;
-        content += `Overall: **${report.overall}**\n\n`;
-        if (report.criteria) {
-          content += `| Criterion | Status | Notes |\n`;
-          content += `|-----------|--------|-------|\n`;
-          for (const c of report.criteria) {
-            const name = c.criterion || c.name || '-';
-            content += `| ${name} | ${c.status} | ${c.notes || c.evidence || '-'} |\n`;
-          }
-        }
-        if (report.additional_issues || report.issues) {
-          const issues = report.additional_issues || report.issues;
-          content += `\n### Issues\n\n`;
-          for (const issue of issues) {
-            const desc = issue.description || issue.message || JSON.stringify(issue);
-            content += `- ${issue.severity ? `[${issue.severity}] ` : ''}${desc}\n`;
-          }
-        }
-      } catch { /* skip */ }
-    }
-
-    content += `\n---\n*Generated automatically on ${new Date().toISOString()}*\n`;
-
-    writeFileSync(summaryPath, content);
-
-    // Store summary on the task
-    this.taskStore.update(pipeline.taskId, { completionSummary: content });
-  }
+  private _writeCompletionSummary(pipeline: TaskPipeline): void { writeCompletionSummary(pipeline.specPath, pipeline.qaAttempt, pipeline.taskId, this.taskStore); }
 
   private _phaseHeader(logFile: string, phase: string): void {
     try {
