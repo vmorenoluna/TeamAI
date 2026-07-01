@@ -3,12 +3,13 @@ import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, re
 import path from 'path';
 import { warn as logWarn } from './logger';
 import { processManager, containerSessionOpts, type AgentSession } from './process-manager';
-import { readContainerConfig, readContainerRemoteUser, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache } from './container-manager';
+import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache } from './container-manager';
 import { TaskStore } from './task-store';
 import { resolveProvider, providerToSessionOpts } from './providers';
 import { slugify } from './utils';
 import { detectGitPlatform, buildPlatformPrompt } from './git-platform';
 import { runSensors, readPipelineSensors, sensorRunSummary, type SensorsConfig } from './sensors';
+import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit } from './orchestrator/worktree-utils';
 import type { PipelinePhase } from '@/constants/phases';
 
 interface PlanSubtask {
@@ -1467,28 +1468,7 @@ export class Orchestrator {
    * directory — if it exists the worktree is healthy and _patchWorktreeGitFile
    * will update the pointer before the agent session starts.
    */
-  private _isWorktreeHealthy(worktreePath: string): boolean {
-    try {
-      const gitFile = path.join(worktreePath, '.git');
-      if (!existsSync(gitFile)) return false;
-      const content = readFileSync(gitFile, 'utf-8').trim();
-      if (!content.startsWith('gitdir:')) return false;
-      const gitdir = content.slice('gitdir:'.length).trim();
-      // Direct check: gitdir exists at the stated path (host mode or already-patched container path).
-      if (existsSync(gitdir)) return true;
-      // Container mode: gitdir is a Linux container path — translate to host and check.
-      if (readContainerConfig(this.projectRoot).enabled) {
-        const m = gitdir.replace(/\\/g, '/').match(/\/worktrees\/([^/]+)$/);
-        if (m) {
-          const hostGitdir = path.join(this.projectRoot, '.git', 'worktrees', m[1]);
-          if (existsSync(hostGitdir)) return true;
-        }
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  }
+  private _isWorktreeHealthy(worktreePath: string): boolean { return isWorktreeHealthy(worktreePath, this.projectRoot); }
 
   /**
    * Restore qa_report.json from a snapshot if the report was deleted (Gap 4b).
@@ -1719,132 +1699,9 @@ export class Orchestrator {
    * Neither chmodSync nor attrib -R can clear it, but writing to a temp file
    * and atomically renaming over the target bypasses the descriptor.
    */
-  private _writeFileEnsuringWritable(filePath: string, content: string): void {
-    try {
-      writeFileSync(filePath, content);
-    } catch (e: unknown) {
-      if ((e as NodeJS.ErrnoException)?.code !== 'EPERM') throw e;
-      // Write to a temp file, then atomically rename over the locked file.
-      // renameSync uses MoveFileEx with REPLACE_EXISTING, which bypasses
-      // the security descriptor git places on linked-worktree metadata files.
-      const tmpPath = filePath + '.tmp';
-      writeFileSync(tmpPath, content);
-      try {
-        renameSync(tmpPath, filePath);
-      } catch (renameErr) {
-        // Clean up the temp file on rename failure so it doesn't leak.
-        try { unlinkSync(tmpPath); } catch { /* best-effort */ }
-        throw renameErr;
-      }
-    }
-  }
 
-  /**
-   * Rewrite .git/worktrees/<name>/commondir to the relative path '../..'.
-   * Since .git/worktrees/<name> is always two levels deep inside .git,
-   * this path resolves correctly on every OS. No-op if already correct.
-   */
-  private _patchCommondirToRelative(worktreeName: string): void {
-    const commondirFile = path.join(this.projectRoot, '.git', 'worktrees', worktreeName, 'commondir');
-    if (existsSync(commondirFile)) {
-      const current = readFileSync(commondirFile, 'utf-8').trim().replace(/\\/g, '/');
-      if (current !== '../..') {
-        this._writeFileEnsuringWritable(commondirFile, '../..\n');
-      }
-    }
-  }
 
-  private _restoreWorktreeGitFileToHostPaths(hostWorktreePath: string): void {
-    const gitFile = path.join(hostWorktreePath, '.git');
-    if (!existsSync(gitFile)) return;
-    try {
-      const content = readFileSync(gitFile, 'utf-8').trim();
-      if (!content.startsWith('gitdir:')) return;
-      const currentGitdir = content.slice('gitdir:'.length).trim().replace(/\\/g, '/');
-      const m = currentGitdir.match(/\/worktrees\/([^/]+)$/);
-      if (!m) return;
-      const worktreeName = m[1];
-      // Normalise the host project root to forward slashes so git on Windows can read it.
-      const hostRoot = this.projectRoot.replace(/\\/g, '/');
-      const hostGitdir = `${hostRoot}/.git/worktrees/${worktreeName}`;
-      if (currentGitdir === hostGitdir) return; // already correct
-      this._writeFileEnsuringWritable(gitFile, `gitdir: ${hostGitdir}\n`);
-      // Restore the back-reference so git worktree commands from the host work.
-      const backRefFile = path.join(this.projectRoot, '.git', 'worktrees', worktreeName, 'gitdir');
-      if (existsSync(backRefFile)) {
-        const hostWorktreeGitFile = `${hostWorktreePath.replace(/\\/g, '/')}/.git`;
-        this._writeFileEnsuringWritable(backRefFile, `${hostWorktreeGitFile}\n`);
-      }
-      this._patchCommondirToRelative(worktreeName);
-    } catch { /* best-effort — don't break the pipeline on a patch failure */ }
-  }
-
-  /**
-   * Rewrite the worktree's .git file and its back-reference so both point to
-   * container-relative paths. Compares current file content to the expected value
-   * derived from containerWorkspace (runtime value from docker inspect) and is a
-   * no-op when already correct — safe to call unconditionally before any docker exec.
-   *
-   * Also rewrites commondir to the relative path '../..' — correct on every OS since
-   * .git/worktrees/<name> is always two levels deep inside .git.
-   */
-  private _patchWorktreeGitFile(hostWorktreePath: string, containerWorkspace: string): void {
-    const gitFile = path.join(hostWorktreePath, '.git');
-    if (!existsSync(gitFile)) return;
-    try {
-      const content = readFileSync(gitFile, 'utf-8').trim();
-      if (!content.startsWith('gitdir:')) return;
-      const currentGitdir = content.slice('gitdir:'.length).trim();
-      // Extract worktree name — the segment after /worktrees/ in the gitdir path.
-      const m = currentGitdir.replace(/\\/g, '/').match(/\/worktrees\/([^/]+)$/);
-      if (!m) return;
-      const worktreeName = m[1];
-      const correctGitdir = `${containerWorkspace}/.git/worktrees/${worktreeName}`;
-      if (currentGitdir.replace(/\\/g, '/') === correctGitdir) return; // already correct
-      this._writeFileEnsuringWritable(gitFile, `gitdir: ${correctGitdir}\n`);
-      // Patch the back-reference so git worktree commands from inside the container work.
-      const backRefFile = path.join(this.projectRoot, '.git', 'worktrees', worktreeName, 'gitdir');
-      if (existsSync(backRefFile)) {
-        const containerWorktreePath = hostToContainerPath(hostWorktreePath, this.projectRoot, containerWorkspace);
-        this._writeFileEnsuringWritable(backRefFile, `${containerWorktreePath}/.git\n`);
-      }
-      this._patchCommondirToRelative(worktreeName);
-    } catch { /* best-effort — don't break the pipeline on a patch failure */ }
-  }
-
-  private _execGit(args: string[], hostCwd: string): void {
-    // git worktree add/remove must always run on the host filesystem — worktrees are
-    // host-side directories accessed by the container via volume mount. Running them
-    // via docker exec would target a container path where the .worktrees/ directory
-    // doesn't exist, causing "could not create leading directories" failures.
-    if (readContainerConfig(this.projectRoot).enabled && args[0] !== 'worktree') {
-      const info = containerManager.getRunningContainer(this.projectRoot);
-      if (info) {
-        const containerCwd = hostToContainerPath(hostCwd, this.projectRoot, info.remoteWorkspaceFolder);
-        const mappedArgs = args.map(a =>
-          path.isAbsolute(a) && a.startsWith(this.projectRoot)
-            ? hostToContainerPath(a, this.projectRoot, info.remoteWorkspaceFolder)
-            : a
-        );
-        const remoteUser = readContainerRemoteUser(this.projectRoot);
-        // Inject GIT_DIR + GIT_WORK_TREE so the container git resolves the gitdir
-        // directly, bypassing the .git pointer file. The .git file holds host paths
-        // (as written by git worktree add); the container cannot resolve host paths.
-        // Using env vars is OS-agnostic and never requires modifying the .git file.
-        const gitEnv = this._worktreeGitEnv(hostCwd, info.remoteWorkspaceFolder);
-        const envFlags = Object.entries(gitEnv).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-        execFileSync('docker', ['exec', '-u', remoteUser, ...envFlags, '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
-        return;
-      }
-    }
-    // Host git: inject GIT_DIR + GIT_WORK_TREE for linked-worktree operations so
-    // host git resolves the gitdir directly, bypassing the .git pointer file.
-    // This works regardless of whether the .git file currently holds host or
-    // container paths. Skip for 'git worktree' subcommands — these operate on
-    // the main repo and must not have GIT_DIR overridden.
-    const gitEnv = args[0] !== 'worktree' ? this._worktreeGitEnv(hostCwd) : {};
-    execFileSync('git', args, { cwd: hostCwd, ...(Object.keys(gitEnv).length ? { env: { ...process.env, ...gitEnv } } : {}) });
-  }
+  private _execGit(args: string[], hostCwd: string): void { execGit(args, hostCwd, this.projectRoot); }
 
   /**
    * Returns GIT_DIR and GIT_WORK_TREE environment variables for git commands
@@ -1865,27 +1722,21 @@ export class Orchestrator {
    *                    expressed in container form for docker exec use and
    *                    must use POSIX forward slashes.
    */
-  private _worktreeGitEnv(hostCwd: string, containerWs?: string): Record<string, string> {
-    const worktreeName = path.basename(hostCwd);
-    const hostGitDir = path.join(this.projectRoot, '.git', 'worktrees', worktreeName);
-    if (!existsSync(hostGitDir)) return {};
+  private _worktreeGitEnv(hostCwd: string, containerWs?: string): Record<string, string> { return worktreeGitEnv(hostCwd, this.projectRoot, containerWs); }
 
-    if (containerWs) {
-      // Container context: both paths must be container-resolvable (POSIX slashes).
-      return {
-        GIT_DIR: `${containerWs}/.git/worktrees/${worktreeName}`,
-        GIT_WORK_TREE: hostToContainerPath(hostCwd, this.projectRoot, containerWs),
-      };
-    }
 
-    // Host context: normalise to forward slashes — git accepts them on all
-    // platforms (Linux, macOS, Windows/git-for-windows).
-    return {
-      GIT_DIR: hostGitDir.replace(/\\/g, '/'),
-      GIT_WORK_TREE: hostCwd.replace(/\\/g, '/'),
-    };
-  }
+  /**
+   * Rewrite the worktree's .git file and its back-reference so both point to
+   * container-relative paths. Compares current file content to the expected value
+   * derived from containerWorkspace (runtime value from docker inspect) and is a
+   * no-op when already correct — safe to call unconditionally before any docker exec.
+   *
+   * Also rewrites commondir to the relative path '../..' — correct on every OS since
+   * .git/worktrees/<name> is always two levels deep inside .git.
+   */
+  private _patchWorktreeGitFile(hostWorktreePath: string, containerWorkspace: string): void { patchWorktreeGitFile(hostWorktreePath, containerWorkspace, this.projectRoot); }
 
+  private _restoreWorktreeGitFileToHostPaths(hostWorktreePath: string): void { restoreWorktreeGitFileToHostPaths(hostWorktreePath, this.projectRoot); }
   private restorePipeline(taskId: string, requiredPhase: PipelinePhase): TaskPipeline {
     const task = this.taskStore.getById(taskId);
     if (!task || task.phase !== requiredPhase) {

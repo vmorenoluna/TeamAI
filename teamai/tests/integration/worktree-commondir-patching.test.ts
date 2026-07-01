@@ -79,6 +79,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Import after mocks ──
 
 import { getOrchestrator } from '../../src/lib/orchestrator';
+import { patchCommondirToRelative } from '../../src/lib/orchestrator/worktree-utils';
 
 type AnyOrch = any;
 
@@ -309,11 +310,10 @@ suite('worktree commondir patching — integration', () => {
 
   describe('_patchCommondirToRelative', () => {
     it('directly rewrites commondir to ../..', () => {
-      const orch = getOrchestrator(repoPath) as AnyOrch;
       const worktreeName = path.basename(worktreePath);
 
       // Call the helper directly
-      orch._patchCommondirToRelative(worktreeName);
+      patchCommondirToRelative(worktreeName, repoPath);
 
       const commondirPath = path.join(repoPath, '.git', 'worktrees', worktreeName, 'commondir');
       const content = readFileSync(commondirPath, 'utf-8').trim();
@@ -321,7 +321,6 @@ suite('worktree commondir patching — integration', () => {
     });
 
     it('is a no-op when commondir is already ../..', () => {
-      const orch = getOrchestrator(repoPath) as AnyOrch;
       const worktreeName = path.basename(worktreePath);
       const commondirPath = path.join(repoPath, '.git', 'worktrees', worktreeName, 'commondir');
 
@@ -329,7 +328,7 @@ suite('worktree commondir patching — integration', () => {
       writeFileSync(commondirPath, '../..\n');
 
       // Should not throw
-      orch._patchCommondirToRelative(worktreeName);
+      patchCommondirToRelative(worktreeName, repoPath);
 
       const content = readFileSync(commondirPath, 'utf-8').trim();
       expect(content).toBe('../..');
