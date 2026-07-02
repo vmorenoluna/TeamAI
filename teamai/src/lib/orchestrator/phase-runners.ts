@@ -44,15 +44,18 @@ interface SessionOptsFn {
 
 interface BasePhaseDeps {
   projectRoot: string;
-  taskStore: TaskStore;
-  rotateOutputLog: (logFile: string) => void;
-  phaseHeader: (logFile: string, phase: string) => void;
   persistAndEmitPhase: (pipeline: PhaseRunnerPipeline) => void;
-  savePipelineState: (pipeline: PhaseRunnerPipeline) => void;
   sessionOpts: SessionOptsFn;
-  toAgentPath: (hostPath: string) => string;
   waitForCompletion: (sessionId: string) => Promise<void>;
   advancePhase: (pipeline: PhaseRunnerPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
+}
+
+/** Shared callbacks for spec and plan — phases that cascade to the next phase. */
+interface CascadePhaseDeps extends BasePhaseDeps {
+  rotateOutputLog: (logFile: string) => void;
+  phaseHeader: (logFile: string, phase: string) => void;
+  savePipelineState: (pipeline: PhaseRunnerPipeline) => void;
+  toAgentPath: (hostPath: string) => string;
   executePhase: (pipeline: PhaseRunnerPipeline) => Promise<void>;
 }
 
@@ -62,7 +65,7 @@ interface BasePhaseDeps {
 
 export async function runSpecPhase(
   pipeline: PhaseRunnerPipeline,
-  deps: BasePhaseDeps,
+  deps: CascadePhaseDeps,
 ): Promise<void> {
   const logFile = path.join(pipeline.specPath, 'output.log');
   deps.rotateOutputLog(logFile);
@@ -103,7 +106,7 @@ export async function runSpecPhase(
 //  runPlan — planner creates the plan and worktree
 // ─────────────────────────────────────────────────────────────────────
 
-interface PlanPhaseDeps extends BasePhaseDeps {
+interface PlanPhaseDeps extends CascadePhaseDeps {
   gitPush: (pushArgs: string[], logFile: string) => void;
   execGit: (args: string[], hostCwd: string) => void;
 }
@@ -153,6 +156,7 @@ export async function runPlanPhase(
 // ─────────────────────────────────────────────────────────────────────
 
 interface MergePhaseDeps extends BasePhaseDeps {
+  phaseHeader: (logFile: string, phase: string) => void;
   commitArtifactsToWorktree: (pipeline: PhaseRunnerPipeline) => void;
   getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig };
   removeWorktree: (taskId: string) => void;
@@ -208,6 +212,7 @@ export async function runMergePhase(
 // ─────────────────────────────────────────────────────────────────────
 
 interface CreatePRDeps extends BasePhaseDeps {
+  taskStore: TaskStore;
   execGit: (args: string[], hostCwd: string) => void;
   commitArtifactsToWorktree: (pipeline: PhaseRunnerPipeline) => void;
   gitPush: (pushArgs: string[], logFile: string) => void;
