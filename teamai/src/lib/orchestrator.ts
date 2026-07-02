@@ -1,17 +1,19 @@
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, rmSync, copyFileSync, mkdirSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, rmSync } from 'fs';
 import path from 'path';
-import { warn as logWarn } from './logger';
-import { processManager, containerSessionOpts, type AgentSession } from './process-manager';
+import { processManager, type AgentSession } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache } from './container-manager';
 import { TaskStore } from './task-store';
-import { resolveProvider, providerToSessionOpts } from './providers';
 import { slugify } from './utils';
-import { runSensors, readPipelineSensors, sensorRunSummary, type SensorsConfig } from './sensors';
+import { runSensors, sensorRunSummary, type SensorsConfig } from './sensors';
 import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit } from './orchestrator/worktree-utils';
 import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelineState, pipelineAdvancePhase } from './orchestrator/pipeline-state';
 import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedback';
 import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './orchestrator/phase-runners';
+import { parseSessionLimitReset, extractPrUrl, phaseHeader, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, computePipelineConfig, buildSessionOpts } from './orchestrator/helpers';
+import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn, getWorktreePath as getWorktreePathFn } from './orchestrator/worktree-ops';
+import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
+import { gitPush } from './orchestrator/git-push';
 import type { PipelinePhase } from '@/constants/phases';
 
 interface PlanSubtask {
@@ -105,21 +107,9 @@ export class Orchestrator {
 
   private _pipelineConfigCache: { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig } | null = null;
   private getPipelineConfig(): { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig } {
-    if (this._pipelineConfigCache) return this._pipelineConfigCache;
-    const cfgPath = path.join(this.projectRoot, '.teamai', 'pipeline.json');
-    if (existsSync(cfgPath)) {
-      try {
-        const raw = JSON.parse(readFileSync(cfgPath, 'utf-8'));
-        const sensors = readPipelineSensors(raw);
-        this._pipelineConfigCache = {
-          maxQaAttempts: typeof raw.maxQaAttempts === 'number' ? raw.maxQaAttempts : 3,
-          parallelSubtasks: typeof raw.parallelSubtasks === 'boolean' ? raw.parallelSubtasks : true,
-          ...(sensors ? { sensors } : {}),
-        };
-        return this._pipelineConfigCache;
-      } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
+    if (!this._pipelineConfigCache) {
+      this._pipelineConfigCache = computePipelineConfig(this.projectRoot);
     }
-    this._pipelineConfigCache = { maxQaAttempts: 3, parallelSubtasks: true };
     return this._pipelineConfigCache;
   }
 
@@ -1243,23 +1233,7 @@ export class Orchestrator {
   }
 
   /** Scan the output log for a PR/MR URL created by the agent. */
-  private _extractPrUrl(logFile: string): string | null {
-    try {
-      if (!existsSync(logFile)) return null;
-      const content = readFileSync(logFile, 'utf-8');
-      // Match GitHub PR, GitLab MR, or Bitbucket PR URLs
-      const patterns = [
-        /https?:\/\/github\.com\/[^\s<>"')\]]+\/pull\/\d+/gi,
-        /https?:\/\/gitlab\.com\/[^\s<>"')\]]+\/-\/merge_requests\/\d+/gi,
-        /https?:\/\/bitbucket\.org\/[^\s<>"')\]]+\/pull-requests\/\d+/gi,
-      ];
-      for (const pattern of patterns) {
-        const match = content.match(pattern);
-        if (match) return match[0];
-      }
-    } catch { /* best-effort */ }
-    return null;
-  }
+  private _extractPrUrl(logFile: string): string | null { return extractPrUrl(logFile); }
 
   // Serializes writes to plan.json to prevent race conditions during
   // per-subtask checkpointing in runImplement (#2).
@@ -1292,59 +1266,19 @@ export class Orchestrator {
    * qa_report_before_bounce.json (mid-pipeline QA→implement bounce snapshot).
    * Uses the first available snapshot. Best-effort — never blocks the pipeline.
    */
-  private _restoreQaReportFromSnapshot(specPath: string): void {
-    const reportPath = path.join(specPath, 'qa_report.json');
-    if (existsSync(reportPath)) return;
-    for (const snapName of ['qa_report_before_failed.json', 'qa_report_before_bounce.json']) {
-      const snapshotPath = path.join(specPath, snapName);
-      if (existsSync(snapshotPath)) {
-        try {
-          const snapshot = readFileSync(snapshotPath, 'utf-8');
-          writeFileSync(reportPath, snapshot);
-          const logFile = path.join(specPath, 'output.log');
-          appendFileSync(logFile, `\n[GUARD] Restored qa_report.json from ${snapName} — file was deleted\n`);
-          break; // use the first available snapshot
-        } catch { /* best-effort — don't block the pipeline on snapshot restore failure */ }
-      }
-    }
-  }
+  private _restoreQaReportFromSnapshot(specPath: string): void { restoreQaReportFromSnapshot(specPath); }
 
   /**
    * Restore human_feedback.md from snapshot if the file was deleted (Gap 4b).
    * Only checks human_feedback_before_bounce.md. Best-effort.
    */
-  private _restoreHumanFeedbackFromSnapshot(specPath: string): void {
-    const feedbackPath = path.join(specPath, 'human_feedback.md');
-    if (existsSync(feedbackPath)) return;
-    const snapshotPath = path.join(specPath, 'human_feedback_before_bounce.md');
-    if (existsSync(snapshotPath)) {
-      try {
-        const snapshot = readFileSync(snapshotPath, 'utf-8');
-        writeFileSync(feedbackPath, snapshot);
-        const logFile = path.join(specPath, 'output.log');
-        appendFileSync(logFile, `\n[GUARD] Restored human_feedback.md from human_feedback_before_bounce.md — file was deleted\n`);
-      } catch { /* best-effort */ }
-    }
-  }
+  private _restoreHumanFeedbackFromSnapshot(specPath: string): void { restoreHumanFeedbackFromSnapshot(specPath); }
 
   private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void { pipelineAdvancePhase(pipeline, phase, this.taskStore, this.projectRoot, eventExtra); }
 
   // Parse "resets 4:30pm (UTC)" from Claude Code's session-limit message.
   // Returns a Unix timestamp (seconds) for the reset time, or null if unparseable.
-  private _parseSessionLimitReset(line: string): number | null {
-    const m = line.match(/resets\s+(\d+):(\d+)\s*(am|pm)\s*(?:\(UTC\))?/i);
-    if (!m) return null;
-    let hours = parseInt(m[1], 10);
-    const minutes = parseInt(m[2], 10);
-    const ampm = m[3].toLowerCase();
-    if (ampm === 'pm' && hours !== 12) hours += 12;
-    if (ampm === 'am' && hours === 12) hours = 0;
-    const now = new Date();
-    const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hours, minutes, 0));
-    // If the reset time is already in the past today, it must be tomorrow
-    if (reset.getTime() <= Date.now()) reset.setUTCDate(reset.getUTCDate() + 1);
-    return Math.floor(reset.getTime() / 1000);
-  }
+  private _parseSessionLimitReset(line: string): number | null { return parseSessionLimitReset(line); }
 
   private waitForCompletion(sessionId: string): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -1571,11 +1505,7 @@ export class Orchestrator {
     return pipeline;
   }
 
-  private getWorktreeBase(): string {
-    return readContainerConfig(this.projectRoot).enabled
-      ? path.join(this.projectRoot, '.worktrees')
-      : path.join(this.projectRoot, '..', 'worktrees');
-  }
+  private getWorktreeBase(): string { return getWorktreeBase(this.projectRoot); }
 
   /**
    * Clean up artifacts from the given phase and beyond (inclusive).
@@ -1680,43 +1610,15 @@ export class Orchestrator {
    * along with their branches and git worktree metadata.
    */
   private _cleanStaleSubtaskWorktrees(pipeline: TaskPipeline): void {
-    const slug = path.basename(pipeline.worktreePath);
-    const prefix = slug + '-st';
-    const worktreeBase = this.getWorktreeBase();
-    if (!existsSync(worktreeBase)) return;
-
-    let entries;
-    try {
-      entries = readdirSync(worktreeBase, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      if (!entry.name.startsWith(prefix)) continue;
-      if (!entry.name.slice(prefix.length).match(/^\d+$/)) continue;
-      const stPath = path.join(worktreeBase, entry.name);
-      const stBranch = pipeline.branch + entry.name.slice(slug.length);
-
-      try {
-        this._execGit(['worktree', 'remove', '--force', stPath], this.projectRoot);
-      } catch {
-        try { rmSync(stPath, { recursive: true, force: true }); } catch { /* best-effort */ }
-        try { execFileSync('git', ['worktree', 'prune'], { cwd: this.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
-      }
-
-      try {
-        execFileSync('git', ['branch', '-D', stBranch], { cwd: this.projectRoot, stdio: 'pipe' });
-      } catch { /* best-effort */ }
-    }
+    cleanStaleSubtaskWorktrees(pipeline, {
+      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
+      projectRoot: this.projectRoot,
+    });
   }
 
   /** Get the filesystem path to this task's git worktree, or null if the task has no branch. */
   public getWorktreePath(taskId: string): string | null {
-    const task = this.taskStore.getById(taskId);
-    if (!task || !task.branch) return null;
-    const slug = slugify(task.description);
-    return path.join(this.getWorktreeBase(), slug);
+    return getWorktreePathFn(taskId, this.taskStore, getWorktreeBase(this.projectRoot));
   }
 
   /**
@@ -1725,28 +1627,11 @@ export class Orchestrator {
    * Always cleans up the branch and updates the task record so no stale state lingers.
    */
   private removeWorktree(taskId: string): void {
-    const wtPath = this.getWorktreePath(taskId);
-    if (!wtPath || !existsSync(wtPath)) return;
-    try {
-      this._execGit(['worktree', 'remove', wtPath], this.projectRoot);
-    } catch {
-      // Normal remove failed (e.g. uncommitted changes) — force it
-      try {
-        this._execGit(['worktree', 'remove', '--force', wtPath], this.projectRoot);
-      } catch {
-        // Worktree is stuck (e.g. files locked by another process).
-        // Delete the worktree directory manually, then prune the stale git metadata.
-        try { rmSync(wtPath, { recursive: true, force: true }); } catch { /* best-effort */ }
-        try { execFileSync('git', ['worktree', 'prune'], { cwd: this.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
-      }
-    }
-    const task = this.taskStore.getById(taskId);
-    if (task?.branch) {
-      // Force-delete the branch — worktree removal prunes the worktree metadata but
-      // the branch may still linger if the worktree had uncommitted changes.
-      try { execFileSync('git', ['branch', '-D', task.branch], { cwd: this.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
-    }
-    this.taskStore.update(taskId, { branch: undefined });
+    removeWorktreeFn(taskId, {
+      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
+      projectRoot: this.projectRoot,
+      taskStore: this.taskStore,
+    });
   }
 
   /** Force-remove the git worktree (discards uncommitted changes). Delegates to removeWorktree. */
@@ -1756,34 +1641,22 @@ export class Orchestrator {
 
   /** Discard all uncommitted changes in the worktree. Works on both host and container. */
   private _cleanWorktree(taskId: string): void {
-    const wtPath = this.getWorktreePath(taskId);
-    if (!wtPath || !existsSync(wtPath)) return;
-    try {
-      this._execGit(['checkout', 'HEAD', '--', '.'], wtPath);
-    } catch { /* best-effort */ }
+    cleanWorktreeFn(taskId, {
+      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
+      projectRoot: this.projectRoot,
+      taskStore: this.taskStore,
+    });
   }
 
   private sessionOpts(role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) {
-    const providerCfg = resolveProvider(this.projectRoot, role);
-    const providerOpts = providerToSessionOpts(providerCfg);
-    return { taskId, role, cwd, ...containerSessionOpts(this.projectRoot), logFile, ...providerOpts };
+    return buildSessionOpts(this.projectRoot, role, cwd, taskId, logFile);
   }
 
   private _writeQaFeedback(pipeline: TaskPipeline, report: QaReport): void { writeQaFeedback(pipeline.specPath, report); }
 
   private _writeCompletionSummary(pipeline: TaskPipeline): void { writeCompletionSummary(pipeline.specPath, pipeline.qaAttempt, pipeline.taskId, this.taskStore); }
 
-  private _phaseHeader(logFile: string, phase: string): void {
-    try {
-      appendFileSync(logFile, `\n${'─'.repeat(40)}\n▶ ${phase.toUpperCase()}\n${'─'.repeat(40)}\n`);
-    } catch (err) { logWarn('orchestrator', 'Failed to write phase header to log file', err); }
-  }
-
-  /** Files excluded from artifact commit — internal/transient orchestrator state. */
-  private static readonly ARTIFACT_EXCLUDE = new Set([
-    'output.log',
-    '.pipeline_state.json',
-  ]);
+  private _phaseHeader(logFile: string, phase: string): void { phaseHeader(logFile, phase); }
 
   /**
    * Copy the task's TeamAI artifacts into the worktree and commit them
@@ -1794,89 +1667,10 @@ export class Orchestrator {
    * artifacts.  The caller (`runTask`) catches and advances to 'failed'.
    */
   private _commitArtifactsToWorktree(pipeline: TaskPipeline): void {
-    const logFile = path.join(pipeline.specPath, 'output.log');
-    this._phaseHeader(logFile, 'artifacts — commit to worktree');
-
-    // Use the task's actual directory name (derived from its title at creation time),
-    // not slugify(description) — these differ and produce a second orphan directory
-    // after merge, causing duplicate UUID entries in TaskStore.getAll().
-    const slug = path.basename(pipeline.specPath);
-    const targetDir = path.join(pipeline.worktreePath, '.teamai', slug);
-
-    if (!existsSync(targetDir)) {
-      mkdirSync(targetDir, { recursive: true });
-    }
-
-    // Copy all files except excluded ones
-    const sourceDir = pipeline.specPath;
-    let copied = 0;
-    if (existsSync(sourceDir)) {
-      const entries = readdirSync(sourceDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isFile()) continue;
-        if (Orchestrator.ARTIFACT_EXCLUDE.has(entry.name)) continue;
-        copyFileSync(path.join(sourceDir, entry.name), path.join(targetDir, entry.name));
-        copied++;
-      }
-    }
-
-    // ── Rewrite task.json phase to "done" in the committed copy ──
-    // The live pipeline workspace still has the current phase (merge/create-pr),
-    // but by the time this branch is merged and pulled into main, the task will
-    // be done.  Committing "done" prevents a stale kanban entry (TaskStore scans
-    // every .teamai/ subdirectory for task.json to discover tasks).
-    const committedTaskJson = path.join(targetDir, 'task.json');
-    if (existsSync(committedTaskJson)) {
-      try {
-        const t = JSON.parse(readFileSync(committedTaskJson, 'utf-8'));
-        t.phase = 'done';
-        t.updatedAt = new Date().toISOString();
-        writeFileSync(committedTaskJson, JSON.stringify(t, null, 2));
-      } catch { /* best-effort — commit what we have */ }
-    }
-
-    if (copied === 0) {
-      appendFileSync(logFile, '[ARTIFACTS] No artifacts to commit\n');
-      return;
-    }
-
-    // Artifact files are written by the host-side Node.js process, so we always
-    // commit using HOST git (execFileSync directly) — no docker exec needed.
-    // Use _worktreeGitEnv to bypass the .git pointer file: _patchWorktreeGitFile
-    // is called before every agent session and leaves container paths in the file;
-    // setting GIT_DIR/GIT_WORK_TREE makes git immune to whatever the file contains.
-    //
-    // Best-effort restore of the .git file so external tools (VS Code, user
-    // terminal) that look up the worktree via the .git file continue to work.
-    this._restoreWorktreeGitFileToHostPaths(pipeline.worktreePath);
-
-    const gitEnv = this._worktreeGitEnv(pipeline.worktreePath);
-    const gitOpts = Object.keys(gitEnv).length
-      ? { cwd: pipeline.worktreePath, env: { ...process.env, ...gitEnv } }
-      : { cwd: pipeline.worktreePath };
-
-    execFileSync('git', ['add', '.teamai/'], gitOpts);
-
-    try {
-      execFileSync('git', ['commit', '-m', `Add TeamAI pipeline artifacts for "${pipeline.description}"`], gitOpts);
-    } catch (gitErr) {
-      const msg = gitErr instanceof Error ? gitErr.message : String(gitErr);
-      // "nothing to commit, working tree clean" — artifacts already committed
-      // (e.g. re-running create-pr after a reject-bounce cycle). No-op.
-      if (/nothing\s+to\s+commit.*working\s+tree\s+clean/i.test(msg)) {
-        appendFileSync(logFile, '[ARTIFACTS] Already committed — no new changes\n');
-        return;
-      }
-      // "nothing added to commit" — .teamai-artifacts/ is gitignored.
-      // Respect the user's choice; log a warning and continue without artifacts.
-      if (/nothing\s+added\s+to\s+commit/i.test(msg)) {
-        appendFileSync(logFile, '[ARTIFACTS] Warning: .teamai/ appears to be gitignored — skipping artifact commit\n');
-        return;
-      }
-      throw gitErr;
-    }
-
-    appendFileSync(logFile, `[ARTIFACTS] Committed ${copied} artifact file(s) to worktree\n`);
+    commitArtifactsToWorktree(pipeline, {
+      restoreWorktreeGitFileToHostPaths: hostWorktreePath => this._restoreWorktreeGitFileToHostPaths(hostWorktreePath),
+      worktreeGitEnv: (hostCwd, containerWs) => this._worktreeGitEnv(hostCwd, containerWs),
+    });
   }
 
   /**
@@ -1889,127 +1683,7 @@ export class Orchestrator {
    * Falls back to a plain git push (relying on whatever credential helper is already
    * registered) when gh is not installed or not authenticated.
    */
-  private _gitPush(pushArgs: string[], logFile: string): void {
-    const noPromptEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-
-    // Helper: obtain the gh OAuth token.  Returns '' when gh is not installed
-    // or not authenticated.
-    const _getToken = (): string => {
-      try {
-        return execFileSync('gh', ['auth', 'token'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
-      } catch {
-        return '';
-      }
-    };
-
-        const token = _getToken();
-
-    // Resolve the actual remote URL so we can embed the token directly.
-    // url.insteadOf doesn't work reliably on Windows git-for-windows, so
-    // we embed the token directly in the remote URL instead.
-    let _remoteUrl: string | null = null;
-    let _remoteIdx = -1;
-    if (token) {
-      try {
-        for (let i = 1; i < pushArgs.length; i++) {
-          if (!pushArgs[i].startsWith('-')) {
-            _remoteIdx = i;
-            _remoteUrl = execFileSync('git', ['remote', 'get-url', pushArgs[i]], {
-              encoding: 'utf-8', stdio: 'pipe', cwd: this.projectRoot,
-            }).trim();
-            break;
-          }
-        }
-      } catch {
-        // Remote resolution failed — fall back to pushArgs as-is
-      }
-    }
-
-    // Helper: inject the token via http.extraheader, keeping the remote name intact.
-    // Previously this embedded the token in the URL (replacing 'origin' with the full
-    // HTTPS URL). URL-embedding causes git to push to a raw URL rather than to the
-    // named remote, so git never updates refs/remotes/origin/* locally — making the
-    // post-push `git rev-parse origin/<branch>` verification fail even when the push
-    // to GitHub succeeded. Using http.extraheader preserves 'origin' as the remote
-    // name, so git correctly updates the local remote-tracking ref after the push.
-    //
-    // Auth format: git HTTPS uses HTTP Basic auth (not Bearer/OAuth2). The token is
-    // the password with a dummy username — same credential as the old URL-embedded form
-    // (https://x-access-token:TOKEN@...) but expressed as a Base64-encoded header so
-    // the remote name is preserved.
-    const _buildInjectedArgs = (t: string): string[] | null => {
-      if (!t || _remoteIdx < 0 || !_remoteUrl?.startsWith('https://')) return null;
-      const encoded = Buffer.from(`x-access-token:${t}`).toString('base64');
-      return ['-c', `http.extraheader=Authorization: Basic ${encoded}`, ...pushArgs];
-    };
-
-    // ── Execute the git command.  On the first auth failure with a gh token,
-    //     attempt to refresh the token via `gh auth refresh` and retry once.
-    //     If the token is still rejected, falls back to the system credential
-    //     helper (Windows Credential Manager / macOS Keychain). ──
-
-    const AUTH_RE = /invalid username or token|authentication failed|http basic: access denied|returned error: 401\b/i;
-    const _exec = (t: string, attempt: number): void => {
-      const args = _buildInjectedArgs(t) ?? pushArgs;
-      try {
-        execFileSync('git', args, { cwd: this.projectRoot, stdio: 'pipe', env: noPromptEnv });
-      } catch (err) {
-        const raw = err instanceof Error ? err.message : String(err);
-        const safe = t ? raw.replaceAll(t, '[REDACTED]') : raw;
-
-        // Tier 1: On first auth failure with a gh token, refresh and retry once.
-        // The try/catch only wraps the external CLI commands (gh auth refresh
-        // and _getToken) — NOT the retry.  If the retry throws, the error
-        // propagates up; if it were caught here Tier 2 would fire in the wrong
-        // scope (attempt 0 instead of 1), consuming the mock chain incorrectly.
-        if (attempt === 0 && t && AUTH_RE.test(raw)) {
-          appendFileSync(logFile,
-            '[GIT] gh token rejected by remote — attempting gh auth refresh\n');
-          let freshToken = null;
-          try {
-            const hostname = _remoteUrl ? new URL(_remoteUrl).hostname : 'github.com';
-            execFileSync('gh', ['auth', 'refresh', '-s', 'repo', '--hostname', hostname], {
-              encoding: 'utf-8', stdio: 'pipe', timeout: 30_000,
-            });
-            freshToken = _getToken();
-          } catch (refreshErr) {
-            const refreshMsg = refreshErr instanceof Error
-              ? refreshErr.message : String(refreshErr);
-            appendFileSync(logFile, `[GIT] gh auth refresh failed: ${refreshMsg}\n`);
-          }
-
-          if (freshToken) {
-            appendFileSync(logFile, '[GIT] Token refreshed — retrying\n');
-            _exec(freshToken, 1);
-            return;
-          }
-        }
-
-        // Tier 2: gh token still rejected (even after refresh) — fall back
-        // to the system credential helper.  On Windows this is the Credential
-        // Manager; on macOS the Keychain.  credential.helper= is NOT used so
-        // git resolves credentials through its normal chain.
-        if (attempt <= 1 && t && AUTH_RE.test(raw)) {
-          appendFileSync(logFile,
-            '[GIT] gh token rejected — falling back to system credential helper\n');
-          _exec('', 2);
-          return;
-        }
-
-        throw new Error(safe);
-      }
-    };
-
-    // Log token availability
-    if (token) {
-      appendFileSync(logFile, '[GIT] Using gh OAuth token via http.extraheader\n');
-    } else {
-      appendFileSync(logFile,
-        '[GIT] gh token not available — falling back to default credential helper\n');
-    }
-
-    _exec(token, 0);
-  }
+  private _gitPush(pushArgs: string[], logFile: string): void { gitPush(this.projectRoot, pushArgs, logFile); }
 }
 
 

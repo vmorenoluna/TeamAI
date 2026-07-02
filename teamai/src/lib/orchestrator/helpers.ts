@@ -1,0 +1,165 @@
+/**
+ * Pure helpers and simple utilities extracted from Orchestrator class.
+ *
+ * These functions have no `this` dependencies — they take all context
+ * as parameters and import external modules directly.
+ */
+import { existsSync, readFileSync, writeFileSync, appendFileSync } from 'fs';
+import path from 'path';
+import { warn as logWarn } from '../logger';
+import { readContainerConfig } from '../container-manager';
+import { resolveProvider, providerToSessionOpts } from '../providers';
+import { containerSessionOpts, type AgentSession } from '../process-manager';
+import { readPipelineSensors, type SensorsConfig } from '../sensors';
+
+// ── Types ─────────────────────────────────────────────────────────────────
+
+export interface PipelineConfig {
+  maxQaAttempts: number;
+  parallelSubtasks: boolean;
+  sensors?: SensorsConfig;
+}
+
+// ── Pure: session-limit parsing ───────────────────────────────────────────
+
+/**
+ * Parse a Claude Code session-limit reset time from a log line like
+ * "resets 4:30pm (UTC)".  Returns a Unix timestamp (seconds) or null.
+ */
+export function parseSessionLimitReset(line: string): number | null {
+  const m = line.match(/resets\s+(\d+):(\d+)\s*(am|pm)\s*(?:\(UTC\))?/i);
+  if (!m) return null;
+  let hours = parseInt(m[1], 10);
+  const minutes = parseInt(m[2], 10);
+  const ampm = m[3].toLowerCase();
+  if (ampm === 'pm' && hours !== 12) hours += 12;
+  if (ampm === 'am' && hours === 12) hours = 0;
+  const now = new Date();
+  const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hours, minutes, 0));
+  // If the reset time is already in the past today, it must be tomorrow
+  if (reset.getTime() <= Date.now()) reset.setUTCDate(reset.getUTCDate() + 1);
+  return Math.floor(reset.getTime() / 1000);
+}
+
+// ── Pure: PR URL extraction ───────────────────────────────────────────────
+
+/**
+ * Scan a log file for a PR/MR URL created by an agent.
+ * Supports GitHub, GitLab, and Bitbucket URLs.
+ */
+export function extractPrUrl(logFile: string): string | null {
+  try {
+    if (!existsSync(logFile)) return null;
+    const content = readFileSync(logFile, 'utf-8');
+    const patterns = [
+      /https?:\/\/github\.com\/[^\s<>"')\]]+\/pull\/\d+/gi,
+      /https?:\/\/gitlab\.com\/[^\s<>"')\]]+\/-\/merge_requests\/\d+/gi,
+      /https?:\/\/bitbucket\.org\/[^\s<>"')\]]+\/pull-requests\/\d+/gi,
+    ];
+    for (const pattern of patterns) {
+      const match = content.match(pattern);
+      if (match) return match[0];
+    }
+  } catch { /* best-effort */ }
+  return null;
+}
+
+// ── Pure: phase header ────────────────────────────────────────────────────
+
+/** Write a phase separator header to the log file. */
+export function phaseHeader(logFile: string, phase: string): void {
+  try {
+    appendFileSync(logFile, `\n${'─'.repeat(40)}\n▶ ${phase.toUpperCase()}\n${'─'.repeat(40)}\n`);
+  } catch (err) { logWarn('orchestrator', 'Failed to write phase header to log file', err); }
+}
+
+// ── Snapshot restoration ──────────────────────────────────────────────────
+
+/**
+ * Restore qa_report.json from a snapshot if the report was deleted (Gap 4b).
+ * Checks qa_report_before_failed.json and qa_report_before_bounce.json.
+ * Best-effort — never blocks the pipeline.
+ */
+export function restoreQaReportFromSnapshot(specPath: string): void {
+  const reportPath = path.join(specPath, 'qa_report.json');
+  if (existsSync(reportPath)) return;
+  for (const snapName of ['qa_report_before_failed.json', 'qa_report_before_bounce.json']) {
+    const snapshotPath = path.join(specPath, snapName);
+    if (existsSync(snapshotPath)) {
+      try {
+        const snapshot = readFileSync(snapshotPath, 'utf-8');
+        writeFileSync(reportPath, snapshot);
+        const logFile = path.join(specPath, 'output.log');
+        appendFileSync(logFile, `\n[GUARD] Restored qa_report.json from ${snapName} — file was deleted\n`);
+        break; // use the first available snapshot
+      } catch { /* best-effort */ }
+    }
+  }
+}
+
+/**
+ * Restore human_feedback.md from snapshot if the file was deleted (Gap 4b).
+ * Checks human_feedback_before_bounce.md. Best-effort.
+ */
+export function restoreHumanFeedbackFromSnapshot(specPath: string): void {
+  const feedbackPath = path.join(specPath, 'human_feedback.md');
+  if (existsSync(feedbackPath)) return;
+  const snapshotPath = path.join(specPath, 'human_feedback_before_bounce.md');
+  if (existsSync(snapshotPath)) {
+    try {
+      const snapshot = readFileSync(snapshotPath, 'utf-8');
+      writeFileSync(feedbackPath, snapshot);
+      const logFile = path.join(specPath, 'output.log');
+      appendFileSync(logFile, `\n[GUARD] Restored human_feedback.md from human_feedback_before_bounce.md — file was deleted\n`);
+    } catch { /* best-effort */ }
+  }
+}
+
+// ── Worktree base path ────────────────────────────────────────────────────
+
+/** Compute the worktree base directory for the project. */
+export function getWorktreeBase(projectRoot: string): string {
+  return readContainerConfig(projectRoot).enabled
+    ? path.join(projectRoot, '.worktrees')
+    : path.join(projectRoot, '..', 'worktrees');
+}
+
+// ── Pipeline config ───────────────────────────────────────────────────────
+
+/**
+ * Compute pipeline configuration from pipeline.json.
+ * Does NOT cache — the caller (orchestrator) handles caching via a delegate.
+ */
+export function computePipelineConfig(projectRoot: string): PipelineConfig {
+  const cfgPath = path.join(projectRoot, '.teamai', 'pipeline.json');
+  if (existsSync(cfgPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(cfgPath, 'utf-8'));
+      const sensors = readPipelineSensors(raw);
+      return {
+        maxQaAttempts: typeof raw.maxQaAttempts === 'number' ? raw.maxQaAttempts : 3,
+        parallelSubtasks: typeof raw.parallelSubtasks === 'boolean' ? raw.parallelSubtasks : true,
+        ...(sensors ? { sensors } : {}),
+      };
+    } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
+  }
+  return { maxQaAttempts: 3, parallelSubtasks: true };
+}
+
+// ── Session options ───────────────────────────────────────────────────────
+
+/**
+ * Build session creation options for processManager.createSession().
+ * Resolves the provider config and merges container-session and provider opts.
+ */
+export function buildSessionOpts(
+  projectRoot: string,
+  role: AgentSession['role'],
+  cwd: string,
+  taskId: string,
+  logFile?: string,
+) {
+  const providerCfg = resolveProvider(projectRoot, role);
+  const providerOpts = providerToSessionOpts(providerCfg);
+  return { taskId, role, cwd, ...containerSessionOpts(projectRoot), logFile, ...providerOpts };
+}
