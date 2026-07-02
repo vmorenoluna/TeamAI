@@ -522,31 +522,13 @@ export class Orchestrator {
 
   private _restorePipelineState(_taskId: string, specPath: string): Partial<TaskPipeline> | null { return restorePipelineState(_taskId, specPath); }
 
-  /**
-   * Verify the worktree is a valid git worktree (#4).
-   * Checks that .git file exists inside the worktree and points to a valid gitdir.
-   * Returns true if the worktree is healthy, false if it needs to be recreated.
-   *
-   * Container mode: the .git file may contain a Linux container path (e.g.
-   * /workspaces/…) that doesn't resolve on the Windows host. In that case we
-   * extract the worktree name from the path and check the host-side git metadata
-   * directory — if it exists the worktree is healthy and _patchWorktreeGitFile
-   * will update the pointer before the agent session starts.
-   */
+  // Delegates to worktree-utils.isWorktreeHealthy
   private _isWorktreeHealthy(worktreePath: string): boolean { return isWorktreeHealthy(worktreePath, this.projectRoot); }
 
-  /**
-   * Restore qa_report.json from a snapshot if the report was deleted (Gap 4b).
-   * Checks both qa_report_before_failed.json (retryTask snapshot) and
-   * qa_report_before_bounce.json (mid-pipeline QA→implement bounce snapshot).
-   * Uses the first available snapshot. Best-effort — never blocks the pipeline.
-   */
+  // Delegates to helpers.restoreQaReportFromSnapshot
   private _restoreQaReportFromSnapshot(specPath: string): void { restoreQaReportFromSnapshot(specPath); }
 
-  /**
-   * Restore human_feedback.md from snapshot if the file was deleted (Gap 4b).
-   * Only checks human_feedback_before_bounce.md. Best-effort.
-   */
+  // Delegates to helpers.restoreHumanFeedbackFromSnapshot
   private _restoreHumanFeedbackFromSnapshot(specPath: string): void { restoreHumanFeedbackFromSnapshot(specPath); }
 
   private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void { pipelineAdvancePhase(pipeline, phase, this.taskStore, this.projectRoot, eventExtra); }
@@ -567,8 +549,6 @@ export class Orchestrator {
     });
   }
 
-  // Run a git command either directly on the host or via docker exec inside the container.
-  // Any arg that is a subpath of projectRoot is automatically translated to the container path.
   // Translate a host absolute path to the container-relative equivalent when
   // container mode is enabled. Used so message content sent to agents inside
   // the container references paths that actually exist there.
@@ -580,58 +560,13 @@ export class Orchestrator {
     return hostPath;
   }
 
-  /**
-   * Rewrite the worktree's .git file and its back-reference to use host-side paths.
-   * Needed before running host-side git in the worktree when a prior
-   * _patchWorktreeGitFile call may have written container-relative paths that the host
-   * cannot resolve (the container workspace path doesn't exist on the host filesystem).
-   * Both methods compare current content to expected and are no-ops when already correct.
-   *
-   * Also rewrites commondir to the relative path '../..' — correct on every OS since
-   * .git/worktrees/<name> is always two levels deep inside .git.
-   */
-
-  /**
-   * Like writeFileSync but works around the Windows security descriptor git
-   * places on linked-worktree metadata files (.git, gitdir, commondir).
-   * Neither chmodSync nor attrib -R can clear it, but writing to a temp file
-   * and atomically renaming over the target bypasses the descriptor.
-   */
-
-
   private _execGit(args: string[], hostCwd: string): void { execGit(args, hostCwd, this.projectRoot); }
 
-  /**
-   * Returns GIT_DIR and GIT_WORK_TREE environment variables for git commands
-   * running inside a linked worktree, bypassing the .git pointer file entirely.
-   *
-   * Looks up the worktree metadata at
-   * <projectRoot>/.git/worktrees/<basename(hostCwd)>. Returns {} when that
-   * directory does not exist (e.g. hostCwd is the main project root), so
-   * standard git path resolution applies for non-worktree invocations.
-   *
-   * This is safe across all host/container OS combinations: each execution
-   * context receives paths in its own format — host paths for host git,
-   * container paths (via hostToContainerPath) for docker exec git — so there
-   * is never a cross-OS path mismatch.
-   *
-   * @param hostCwd     Host-side working directory for the git command.
-   * @param containerWs Container workspace root. When provided, paths are
-   *                    expressed in container form for docker exec use and
-   *                    must use POSIX forward slashes.
-   */
+  // Delegates to worktree-utils.worktreeGitEnv
   private _worktreeGitEnv(hostCwd: string, containerWs?: string): Record<string, string> { return worktreeGitEnv(hostCwd, this.projectRoot, containerWs); }
 
 
-  /**
-   * Rewrite the worktree's .git file and its back-reference so both point to
-   * container-relative paths. Compares current file content to the expected value
-   * derived from containerWorkspace (runtime value from docker inspect) and is a
-   * no-op when already correct — safe to call unconditionally before any docker exec.
-   *
-   * Also rewrites commondir to the relative path '../..' — correct on every OS since
-   * .git/worktrees/<name> is always two levels deep inside .git.
-   */
+  // Delegates to worktree-utils.patchWorktreeGitFile
   private _patchWorktreeGitFile(hostWorktreePath: string, containerWorkspace: string): void { patchWorktreeGitFile(hostWorktreePath, containerWorkspace, this.projectRoot); }
 
   private _restoreWorktreeGitFileToHostPaths(hostWorktreePath: string): void { restoreWorktreeGitFileToHostPaths(hostWorktreePath, this.projectRoot); }
@@ -810,14 +745,7 @@ export class Orchestrator {
 
   private _phaseHeader(logFile: string, phase: string): void { phaseHeader(logFile, phase); }
 
-  /**
-   * Copy the task's TeamAI artifacts into the worktree and commit them
-   * so the PR includes the full story of the implementation (spec, plan,
-   * QA report, spec revisions, events timeline, etc.).
-   *
-   * Throws on failure — the pipeline must not create a PR or merge without
-   * artifacts.  The caller (`runTask`) catches and advances to 'failed'.
-   */
+  // Delegates to artifact-commit.commitArtifactsToWorktree
   private _commitArtifactsToWorktree(pipeline: TaskPipeline): void {
     commitArtifactsToWorktree(pipeline, {
       restoreWorktreeGitFileToHostPaths: hostWorktreePath => this._restoreWorktreeGitFileToHostPaths(hostWorktreePath),
@@ -825,16 +753,7 @@ export class Orchestrator {
     });
   }
 
-  /**
-   * Push a branch to origin, injecting a GitHub OAuth token via http.extraheader
-   * when the gh CLI is available. This is the same technique GitHub Actions uses
-   * internally — it bypasses the git credential-helper chain entirely, so it works
-   * reliably in non-interactive Node.js-spawned processes regardless of how the
-   * global ~/.gitconfig credential section is configured.
-   *
-   * Falls back to a plain git push (relying on whatever credential helper is already
-   * registered) when gh is not installed or not authenticated.
-   */
+  // Delegates to git-push.gitPush
   private _gitPush(pushArgs: string[], logFile: string): void { gitPush(this.projectRoot, pushArgs, logFile); }
 }
 
