@@ -423,7 +423,6 @@ export class Orchestrator {
   private async runSpec(pipeline: TaskPipeline): Promise<void> {
     await runSpecPhase(pipeline, {
       projectRoot: this.projectRoot,
-      taskStore: this.taskStore,
       rotateOutputLog: logFile => this._rotateOutputLog(logFile),
       phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
       persistAndEmitPhase: p => this._persistAndEmitPhase(p),
@@ -439,7 +438,6 @@ export class Orchestrator {
   private async runPlan(pipeline: TaskPipeline): Promise<void> {
     await runPlanPhase(pipeline, {
       projectRoot: this.projectRoot,
-      taskStore: this.taskStore,
       rotateOutputLog: logFile => this._rotateOutputLog(logFile),
       phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
       persistAndEmitPhase: p => this._persistAndEmitPhase(p),
@@ -1190,16 +1188,11 @@ export class Orchestrator {
   private async runMerge(pipeline: TaskPipeline): Promise<void> {
     await runMergePhase(pipeline, {
       projectRoot: this.projectRoot,
-      taskStore: this.taskStore,
-      rotateOutputLog: logFile => this._rotateOutputLog(logFile),
       phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
       persistAndEmitPhase: p => this._persistAndEmitPhase(p),
-      savePipelineState: p => this._savePipelineState(p),
       sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
-      toAgentPath: hostPath => this._toAgentPath(hostPath),
       waitForCompletion: sessionId => this.waitForCompletion(sessionId),
       advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
-      executePhase: p => this.executePhase(p),
       commitArtifactsToWorktree: p => this._commitArtifactsToWorktree(p),
       getPipelineConfig: () => this.getPipelineConfig(),
       removeWorktree: taskId => this.removeWorktree(taskId),
@@ -1210,15 +1203,10 @@ export class Orchestrator {
     await runCreatePRPhase(pipeline, {
       projectRoot: this.projectRoot,
       taskStore: this.taskStore,
-      rotateOutputLog: logFile => this._rotateOutputLog(logFile),
-      phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
       persistAndEmitPhase: p => this._persistAndEmitPhase(p),
-      savePipelineState: p => this._savePipelineState(p),
       sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
-      toAgentPath: hostPath => this._toAgentPath(hostPath),
       waitForCompletion: sessionId => this.waitForCompletion(sessionId),
       advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
-      executePhase: p => this.executePhase(p),
       execGit: (args, hostCwd) => this._execGit(args, hostCwd),
       commitArtifactsToWorktree: p => this._commitArtifactsToWorktree(p),
       gitPush: (pushArgs, logFile) => this._gitPush(pushArgs, logFile),
