@@ -14,6 +14,7 @@ import { parseSessionLimitReset, extractPrUrl, phaseHeader, restoreQaReportFromS
 import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn, getWorktreePath as getWorktreePathFn } from './orchestrator/worktree-ops';
 import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
 import { gitPush } from './orchestrator/git-push';
+import { RateLimitError, NO_RESUME_PHASES, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
 import type { PipelinePhase } from '@/constants/phases';
 
 interface PlanSubtask {
@@ -25,11 +26,6 @@ interface PlanSubtask {
   parallel_group?: string;
   completed?: boolean;
   qa_flagged?: boolean;
-}
-
-interface RateLimitInfo {
-  status: string;
-  resetsAt?: number;
 }
 
 interface QaCriterion {
@@ -65,15 +61,6 @@ interface SpecConcern {
   suggested_fix?: string;
 }
 
-
-class RateLimitError extends Error {
-  constructor(public resetsAt: number) {
-    super(`Rate limited until ${new Date(resetsAt * 1000).toISOString()}`);
-  }
-}
-
-/** Phases where a rate-limited task should NOT auto-resume */
-const NO_RESUME_PHASES = new Set(['backlog', 'done', 'failed', 'awaiting-review', 'pr-open']);
 
 type MergeStrategy = 'local-merge' | 'pull-request';
 
@@ -1264,143 +1251,20 @@ export class Orchestrator {
 
   private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void { pipelineAdvancePhase(pipeline, phase, this.taskStore, this.projectRoot, eventExtra); }
 
-  // Parse "resets 4:30pm (UTC)" from Claude Code's session-limit message.
-  // Returns a Unix timestamp (seconds) for the reset time, or null if unparseable.
-  private _parseSessionLimitReset(line: string): number | null { return parseSessionLimitReset(line); }
-
   private waitForCompletion(sessionId: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      let rateLimitResetsAt: number | null = null;
-      // Tracks Claude Code's per-session usage limit (distinct from API rate limits).
-      // When hit, the session exits cleanly with code 0 and result.is_error=false, so
-      // the orchestrator would incorrectly treat it as success. Detecting it here lets
-      // handleRateLimit pause and retry the task after the usage window resets.
-      let sessionLimitResetsAt: number | null = null;
-
-      const cleanup = () => {
-        processManager.off('event', onEvent);
-        processManager.off('exit', onExit);
-        processManager.off('raw', onRaw);
-      };
-
-      // Claude Code prints "You've hit your session limit · resets H:MMam (UTC)" as
-      // plain text (not JSON) before emitting a clean result event. Capture it here.
-      const onRaw = ({ sessionId: sid, data }: { sessionId: string; data: string }) => {
-        if (sid !== sessionId) return;
-        if (/session.?limit/i.test(data)) {
-          sessionLimitResetsAt = this._parseSessionLimitReset(data) ?? Math.floor(Date.now() / 1000) + 3600;
-        }
-      };
-
-      const onEvent = ({ sessionId: sid, event }: { sessionId: string; event: Record<string, unknown> }) => {
-        if (sid !== sessionId) return;
-
-        // Capture rate-limit reset time if the limit is hit
-        if (event.type === 'rate_limit_event' && event.rate_limit_info) {
-          const info = event.rate_limit_info as RateLimitInfo;
-          if (info.status !== 'allowed' && info.resetsAt) {
-            rateLimitResetsAt = info.resetsAt as number;
-          }
-        }
-
-        if (event.type === 'result') {
-          cleanup();
-          // Session limit takes priority: exit is clean (is_error=false) but no work was done
-          if (sessionLimitResetsAt) {
-            reject(new RateLimitError(sessionLimitResetsAt));
-          } else if (event.is_error && rateLimitResetsAt) {
-            reject(new RateLimitError(rateLimitResetsAt));
-          } else {
-            resolve();
-          }
-        }
-      };
-      const onExit = ({ sessionId: sid, code }: { sessionId: string; code: number | null }) => {
-        if (sid !== sessionId) return;
-        cleanup();
-        if (sessionLimitResetsAt) reject(new RateLimitError(sessionLimitResetsAt));
-        else if (code === 0 || code === null) resolve();
-        else if (rateLimitResetsAt) reject(new RateLimitError(rateLimitResetsAt));
-        else reject(new Error(`Session exited with code ${code}`));
-      };
-
-      processManager.on('event', onEvent);
-      processManager.on('exit', onExit);
-      processManager.on('raw', onRaw);
-    });
+    return waitForCompletion(sessionId, { parseSessionLimitReset });
   }
 
   private handleRateLimit(pipeline: TaskPipeline, resetsAt: number): void {
-    const resetsAtMs = resetsAt * 1000;
-    const MAX_DELAY_MS = 2_147_483_647; // 32-bit signed int max (~24.8 days)
-    const rawWaitMs = Math.max(resetsAtMs - Date.now(), 0);
-    const waitMs = Math.min(rawWaitMs, MAX_DELAY_MS);
-    const resetsAtISO = new Date(resetsAtMs).toISOString();
-
-    this.taskStore.update(pipeline.taskId, { rateLimitedUntil: resetsAtISO });
-
-    // Re-acquire the lock that was released in runTask's finally block
-    // so no other caller can start this task while we wait for the rate limit.
-    this.activeTasks.add(pipeline.taskId);
-    this.pipelines.set(pipeline.taskId, pipeline);
-
-    // Broadcast so the UI can show the countdown
-    processManager.emit('phase-change', {
-      taskId: pipeline.taskId,
-      phase: pipeline.phase,
+    handleRateLimitFn(pipeline, resetsAt, {
+      taskStore: this.taskStore,
       projectRoot: this.projectRoot,
-      rateLimitedUntil: resetsAtISO,
+      activeTasks: this.activeTasks,
+      pipelines: this.pipelines,
+      executePhase: p => this.executePhase(p),
+      advancePhase: (p, phase) => this.advancePhase(p, phase),
+      handleRateLimit: (p, r) => this.handleRateLimit(p, r),
     });
-
-    const mins = Math.ceil(waitMs / 60000);
-    console.log(`[rate-limit] Task ${pipeline.taskId} paused for ~${mins}min. Resuming at ${resetsAtISO}`);
-
-    setTimeout(async () => {
-      // Before resuming, check if the task was manually moved to a terminal phase
-      // (e.g. user dragged it to backlog to pause it). Respect the user's intent.
-      const task = this.taskStore.getById(pipeline.taskId);
-      if (!task || NO_RESUME_PHASES.has(task.phase)) {
-        console.log(`[rate-limit] Task ${pipeline.taskId} is in terminal phase "${task?.phase}" — skipping resume`);
-        this.taskStore.update(pipeline.taskId, { rateLimitedUntil: undefined });
-        this.pipelines.delete(pipeline.taskId);
-        this.activeTasks.delete(pipeline.taskId);
-        return;
-      }
-
-      // Before resuming, verify the pipeline object hasn't been replaced
-      // (e.g. user stopped and restarted the task while waiting). A different
-      // pipeline object means a new run is active — skip this stale one.
-      const currentPipeline = this.pipelines.get(pipeline.taskId);
-      if (currentPipeline !== pipeline) {
-        console.log(`[rate-limit] Task ${pipeline.taskId} pipeline was replaced — skipping stale resume`);
-        this.taskStore.update(pipeline.taskId, { rateLimitedUntil: undefined });
-        return;
-      }
-
-      console.log(`[rate-limit] Resuming task ${pipeline.taskId}`);
-      this.taskStore.update(pipeline.taskId, { rateLimitedUntil: undefined });
-      let wasRateLimited = false;
-      try {
-        await this.executePhase(pipeline);
-      } catch (e) {
-        if (e instanceof RateLimitError) {
-          wasRateLimited = true;
-          this.handleRateLimit(pipeline, e.resetsAt);
-        } else {
-          const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
-          appendFileSync(path.join(pipeline.specPath, 'output.log'), `\n[ERROR] Task failed after rate-limit retry: ${errMsg}\n`);
-          console.error(`[orchestrator] Task ${pipeline.taskId} failed after rate-limit retry:`, e);
-          this.advancePhase(pipeline, 'failed');
-        }
-      } finally {
-        // Clean up after rate-limit retry completes or fails permanently.
-        // When rate-limited again, handleRateLimit re-acquires the lock.
-        if (!wasRateLimited) {
-          this.pipelines.delete(pipeline.taskId);
-          this.activeTasks.delete(pipeline.taskId);
-        }
-      }
-    }, waitMs);
   }
 
   // Run a git command either directly on the host or via docker exec inside the container.
