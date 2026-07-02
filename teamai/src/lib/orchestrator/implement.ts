@@ -1,0 +1,543 @@
+/**
+ * runImplement phase runner — extracted from Orchestrator class.
+ *
+ * Handles the entire implement phase: Docker gate, worktree setup,
+ * per-subtask session creation, QA rework, sensor hooks, git push,
+ * and post-implement cleanup.
+ */
+import { execFileSync } from 'child_process';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, rmSync } from 'fs';
+import path from 'path';
+import { processManager, type AgentSession } from '../process-manager';
+import { readContainerConfig, containerManager, dockerAvailable, _resetDockerAvailableCache } from '../container-manager';
+import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
+import type { PipelinePhase } from '@/constants/phases';
+
+// ── Types ─────────────────────────────────────────────────────────────────
+
+interface PlanSubtask {
+  id: number;
+  title: string;
+  description: string;
+  files: string[];
+  acceptance_criteria: string[];
+  parallel_group?: string;
+  completed?: boolean;
+  qa_flagged?: boolean;
+}
+
+interface QaCriterion {
+  status?: string;
+  criterion?: string;
+  name?: string;
+  fix_needed?: string;
+  notes?: string;
+  evidence?: string;
+}
+
+interface QaReport {
+  overall?: string;
+  criteria?: QaCriterion[];
+  fail_type?: string;
+}
+
+interface ImplementPipeline {
+  taskId: string;
+  description: string;
+  phase: PipelinePhase;
+  specPath: string;
+  worktreePath: string;
+  branch: string;
+  qaAttempt: number;
+  maxQaAttempts: number;
+  specRevision: number;
+  sessionId?: string;
+}
+
+type SessionOptsResult = { taskId: string; role: AgentSession['role']; cwd: string; [key: string]: unknown };
+
+// ── Dependencies ──────────────────────────────────────────────────────────
+
+export interface ImplementDeps {
+  projectRoot: string;
+  persistAndEmitPhase: (pipeline: ImplementPipeline) => void;
+  advancePhase: (pipeline: ImplementPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
+  savePipelineState: (pipeline: ImplementPipeline) => void;
+  executePhase: (pipeline: ImplementPipeline) => Promise<void>;
+  sessionOpts: (role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) => SessionOptsResult;
+  waitForCompletion: (sessionId: string) => Promise<void>;
+  execGit: (args: string[], hostCwd: string) => void;
+  gitPush: (pushArgs: string[], logFile: string) => void;
+  patchWorktreeGitFile: (hostWorktreePath: string, containerWorkspace: string) => void;
+  isWorktreeHealthy: (worktreePath: string) => boolean;
+  cleanStaleSubtaskWorktrees: (pipeline: ImplementPipeline) => void;
+  restoreQaReportFromSnapshot: (specPath: string) => void;
+  restoreHumanFeedbackFromSnapshot: (specPath: string) => void;
+  writeQaFeedback: (pipeline: ImplementPipeline, report: QaReport) => void;
+  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig };
+  phaseHeader: (logFile: string, phase: string) => void;
+  /** Mutable reference to the plan-write serialization lock. */
+  planWriteLock: { current: Promise<void> };
+}
+
+// ── Main function ─────────────────────────────────────────────────────────
+
+export async function runImplement(
+  pipeline: ImplementPipeline,
+  deps: ImplementDeps,
+): Promise<void> {
+  // Persist phase on disk now that work is actually starting (#5)
+  deps.persistAndEmitPhase(pipeline);
+
+  // Fail fast if Docker is not available
+  const containerCfg = readContainerConfig(deps.projectRoot);
+  if (containerCfg.enabled && !containerCfg.explicit) {
+    _resetDockerAvailableCache();
+    if (!dockerAvailable()) {
+      throw new Error('Docker is not running. Start Docker Desktop and move the task back to In Progress to retry.');
+    }
+  }
+
+  // Gap 4b: restore snapshots if deleted
+  deps.restoreQaReportFromSnapshot(pipeline.specPath);
+  deps.restoreHumanFeedbackFromSnapshot(pipeline.specPath);
+
+  // Pull latest master (token-authed)
+  try {
+    deps.gitPush(['pull', '--ff-only', 'origin', 'master'], path.join(pipeline.specPath, 'output.log'));
+  } catch { /* non-fast-forward or offline */ }
+
+  // Ensure worktree exists and is healthy
+  if (!existsSync(pipeline.worktreePath) || !deps.isWorktreeHealthy(pipeline.worktreePath)) {
+    if (existsSync(pipeline.worktreePath)) {
+      if (path.resolve(pipeline.worktreePath) === path.resolve(deps.projectRoot)) {
+        throw new Error('Refusing to remove worktree at project root — this would destroy the repository');
+      }
+      try {
+        deps.execGit(['worktree', 'remove', '--force', pipeline.worktreePath], deps.projectRoot);
+      } catch { /* best-effort */ }
+      if (existsSync(pipeline.worktreePath)) {
+        try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+        try { execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+      }
+    }
+    try {
+      deps.execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], deps.projectRoot);
+    } catch {
+      deps.execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], deps.projectRoot);
+    }
+  }
+
+  // Container mode: patch worktree .git file
+  if (readContainerConfig(deps.projectRoot).enabled) {
+    const earlyLog = path.join(pipeline.specPath, 'output.log');
+    const containerInfo = await containerManager.ensureContainer(deps.projectRoot, earlyLog);
+    deps.patchWorktreeGitFile(pipeline.worktreePath, containerInfo.remoteWorkspaceFolder);
+  }
+
+  // AC9: clean stale per-subtask worktrees
+  deps.cleanStaleSubtaskWorktrees(pipeline);
+
+  const planPath = path.join(pipeline.specPath, 'plan.json');
+  const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+
+  const coderRole = 'coder' as AgentSession['role'];
+
+  const qaFeedbackPath = path.join(pipeline.specPath, 'qa_feedback.md');
+  const humanFeedbackPath = path.join(pipeline.specPath, 'human_feedback.md');
+  const hasQaFeedback = existsSync(qaFeedbackPath);
+  const hasHumanFeedback = existsSync(humanFeedbackPath);
+
+  if (hasHumanFeedback) {
+    const snapshotPath = path.join(pipeline.specPath, 'human_feedback_before_bounce.md');
+    if (!existsSync(snapshotPath)) {
+      try { writeFileSync(snapshotPath, readFileSync(humanFeedbackPath, 'utf-8')); } catch { /* best-effort */ }
+    }
+  }
+
+  // Only re-run QA-flagged subtasks on bounce-back
+  const subtasksToRun = hasQaFeedback
+    ? plan.subtasks.filter((s: PlanSubtask) => s.qa_flagged)
+    : plan.subtasks.filter((s: PlanSubtask) => !s.completed);
+
+  let effectiveSubtasks: PlanSubtask[];
+  if (hasQaFeedback && subtasksToRun.length === 0) {
+    const allFiles: string[] = [...new Set<string>(
+      plan.subtasks.flatMap((s: PlanSubtask) => s.files ?? [])
+    )];
+    let qaContent = '';
+    try { qaContent = readFileSync(qaFeedbackPath, 'utf-8'); } catch { /* best-effort */ }
+    const logFile = path.join(pipeline.specPath, 'output.log');
+    appendFileSync(logFile, '\n[QA-FALLBACK] Criterion matching flagged no subtasks — synthesising targeted rework subtask from qa_feedback.md\n');
+    effectiveSubtasks = [{
+      id: 9999,
+      title: 'QA Rework: fix failing criteria (criterion matching found no flagged subtasks)',
+      description:
+        `QA found failures that could not be automatically mapped to specific plan subtasks. ` +
+        `The original plan subtasks are already implemented — do NOT re-read or re-implement them. ` +
+        `Instead, read the QA feedback below and fix every listed issue in the codebase.\n\n` +
+        `**QA feedback (source of truth):**\n\n${qaContent}`,
+      files: allFiles,
+      depends_on: [],
+      acceptance_criteria: ['All criteria listed in the QA feedback above are satisfied'],
+      parallel_group: 'QA-REWORK',
+      qa_flagged: true,
+      completed: false,
+    } as unknown as PlanSubtask];
+  } else {
+    effectiveSubtasks = subtasksToRun;
+  }
+
+  // Skip implement if all subtasks complete and not in QA rework
+  if (!hasQaFeedback && effectiveSubtasks.length === 0 && plan.subtasks.length > 0) {
+    const logFile = path.join(pipeline.specPath, 'output.log');
+    appendFileSync(logFile, '\n[SKIP] All subtasks already completed — skipping implement, advancing to QA review\n');
+    deps.advancePhase(pipeline, 'qa-review');
+    await deps.executePhase(pipeline);
+    return;
+  }
+
+  if (hasQaFeedback) {
+    for (const s of effectiveSubtasks) s.completed = false;
+  }
+
+  const groups = new Map<string, PlanSubtask[]>();
+  for (const subtask of effectiveSubtasks) {
+    const group = subtask.parallel_group || String(subtask.id);
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group)!.push(subtask);
+  }
+
+  const logFile = path.join(pipeline.specPath, 'output.log');
+  for (const [, subtasks] of groups) {
+    const completedIds: number[] = [];
+    const isMultiGroup = subtasks.length >= 2;
+    const subtaskWorktrees = new Map();
+    let containerWorkspace: string | undefined;
+
+    // Per-subtask worktree isolation
+    if (isMultiGroup) {
+      if (readContainerConfig(deps.projectRoot).enabled) {
+        const info = containerManager.getRunningContainer(deps.projectRoot);
+        containerWorkspace = info?.remoteWorkspaceFolder || undefined;
+      }
+
+      for (const subtask of subtasks) {
+        const stWorktreePath = pipeline.worktreePath + '-st' + subtask.id;
+        const stBranch = pipeline.branch + '-st' + subtask.id;
+
+        try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch { /* best-effort */ }
+        if (existsSync(stWorktreePath)) {
+          try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+          try { execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+        }
+        try { execFileSync('git', ['branch', '-D', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+
+        deps.execGit(['worktree', 'add', stWorktreePath, '-b', stBranch, pipeline.branch], deps.projectRoot);
+
+        if (containerWorkspace) {
+          deps.patchWorktreeGitFile(stWorktreePath, containerWorkspace);
+        }
+
+        subtaskWorktrees.set(subtask.id, stWorktreePath);
+        appendFileSync(logFile, '\n[WORKTREE] Created isolated worktree for subtask ' + subtask.id + ' at ' + stWorktreePath + '\n');
+      }
+    }
+
+    try {
+      const results = await Promise.allSettled(
+        subtasks.map(async (subtask) => {
+          deps.phaseHeader(logFile, 'implement — subtask ' + subtask.id + ': ' + subtask.title);
+          const cwd = isMultiGroup ? subtaskWorktrees.get(subtask.id) : pipeline.worktreePath;
+
+          // pre_subtask sensor
+          try {
+            const pipelineConfig = deps.getPipelineConfig();
+            if (pipelineConfig.sensors?.pre_subtask?.length) {
+              const preResult = await runSensors(pipelineConfig.sensors.pre_subtask, 'pre_subtask', {
+                cwd, specPath: pipeline.specPath, files: subtask.files || [], subtaskId: subtask.id, logFile,
+              });
+              if (!preResult.allPassed) appendFileSync(logFile, sensorRunSummary(preResult));
+            }
+          } catch (preSensorErr) {
+            const msg = preSensorErr instanceof Error ? preSensorErr.message : String(preSensorErr);
+            appendFileSync(logFile, '\n[SENSOR:pre_subtask] pre-subtask sensors failed (non-blocking): ' + msg + '\n');
+          }
+
+          let sessionId: string;
+          try {
+            sessionId = await processManager.createSession(deps.sessionOpts(coderRole, cwd, pipeline.taskId, logFile));
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            appendFileSync(logFile, '\n[ERROR] Session creation failed: ' + msg + '\n');
+            throw err;
+          }
+
+          const qaOnlyCriteria = hasQaFeedback
+            ? subtask.acceptance_criteria.filter(ac => ac.includes('[QA CORRECTION') || ac.includes('[QA ISSUE'))
+            : subtask.acceptance_criteria;
+
+          const criteriaLine = hasQaFeedback
+            ? (qaOnlyCriteria.length > 0
+                ? 'QA issues to fix: ' + qaOnlyCriteria.join('; ')
+                : 'No specific QA criteria for this subtask — see the QA feedback above for issues to address.')
+            : 'Acceptance criteria: ' + subtask.acceptance_criteria.join('; ');
+
+          const subtaskFeedback = buildSubtaskFeedback(hasQaFeedback, qaOnlyCriteria, subtask, pipeline.specPath, humanFeedbackPath, hasHumanFeedback);
+
+          const prompt =
+            (subtaskFeedback ? subtaskFeedback + '\n---\n' : '') +
+            '/implement Subtask ' + subtask.id + ': ' + subtask.title + '\n\n' +
+            subtask.description + '\n\n' +
+            'Files: ' + subtask.files.join(', ') + '\n\n' +
+            criteriaLine + '\n' +
+            'PROJECT_ROOT=' + deps.projectRoot + '\n\n' +
+            (hasQaFeedback
+              ? '⚠️ Only fix the QA issues listed above. Do NOT re-validate criteria that QA already passed.\n' +
+                'After fixing all issues, run the FULL test suite to verify no regressions.\n'
+              : '');
+
+          processManager.sendMessage(sessionId, prompt);
+          await deps.waitForCompletion(sessionId);
+          processManager.killSession(sessionId);
+
+          // post_subtask sensor
+          try {
+            const pipelineConfig = deps.getPipelineConfig();
+            if (pipelineConfig.sensors?.post_subtask?.length) {
+              const postResult = await runSensors(pipelineConfig.sensors.post_subtask, 'post_subtask', {
+                cwd, specPath: pipeline.specPath, files: subtask.files || [], subtaskId: subtask.id, logFile,
+              });
+              appendFileSync(logFile, sensorRunSummary(postResult));
+              if (!postResult.allPassed) {
+                const sensorReportPath = path.join(pipeline.specPath, `sensor_report-st${subtask.id}.json`);
+                const failMsg = postResult.reports.filter(r => !r.passed).map(r => r.sensor + ': ' + (r.error || 'exit ' + r.exitCode)).join('; ');
+                const failures = postResult.reports.filter(r => !r.passed).map(r => ({
+                  subtask: subtask.title, sensor: r.sensor, error: r.error || `exit code ${r.exitCode}`,
+                  fix_needed: `Fix sensor failures: ${failMsg}. Run the sensor locally to reproduce.`,
+                }));
+                writeFileSync(sensorReportPath, JSON.stringify({ failures, overall: 'FAIL' }, null, 2));
+              }
+            }
+          } catch (postSensorErr) {
+            const msg = postSensorErr instanceof Error ? postSensorErr.message : String(postSensorErr);
+            appendFileSync(logFile, '\n[SENSOR:post_subtask] post-subtask sensors error: ' + msg + '\n');
+          }
+
+          completedIds.push(subtask.id);
+          deps.planWriteLock.current = deps.planWriteLock.current.then(() => {
+            try {
+              const cpPlanPath = path.join(pipeline.specPath, 'plan.json');
+              if (!existsSync(cpPlanPath)) return;
+              const cpPlan = JSON.parse(readFileSync(cpPlanPath, 'utf-8'));
+              if (cpPlan.subtasks) {
+                for (const s of cpPlan.subtasks) {
+                  if (completedIds.includes(s.id)) s.completed = true;
+                }
+              }
+              const tmpPath = cpPlanPath + '.tmp';
+              writeFileSync(tmpPath, JSON.stringify(cpPlan, null, 2));
+              renameSync(tmpPath, cpPlanPath);
+            } catch { /* best-effort */ }
+          });
+        })
+      );
+
+      if (results.every(r => r.status === 'rejected')) {
+        const firstReason = (results[0] as PromiseRejectedResult).reason;
+        throw firstReason instanceof Error ? firstReason : new Error(String(firstReason));
+      }
+
+      // Cherry-pick successful commits back to main worktree
+      if (isMultiGroup) {
+        for (let i = 0; i < results.length; i++) {
+          if (results[i].status !== 'fulfilled') continue;
+          const stBranch = pipeline.branch + '-st' + subtasks[i].id;
+          try {
+            appendFileSync(logFile, '\n[WORKTREE] Cherry-picking commits from ' + stBranch + ' onto ' + pipeline.branch + '\n');
+            deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
+            appendFileSync(logFile, '[WORKTREE] Cherry-pick succeeded for subtask ' + subtasks[i].id + '\n');
+          } catch (cherryErr) {
+            const cherryMsg = cherryErr instanceof Error ? cherryErr.message : String(cherryErr);
+            try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+            appendFileSync(logFile, '[WORKTREE] Cherry-pick FAILED for subtask ' + subtasks[i].id + ': ' + cherryMsg + '\n');
+            throw new Error('Cherry-pick conflict for subtask ' + subtasks[i].id + ' — overlapping file changes detected.\n' + cherryMsg);
+          }
+        }
+      }
+
+      if (completedIds.length > 0) {
+        deps.planWriteLock.current = deps.planWriteLock.current.then(() => {
+          const planPath2 = path.join(pipeline.specPath, 'plan.json');
+          try {
+            const p = JSON.parse(readFileSync(planPath2, 'utf-8'));
+            if (p.subtasks) {
+              for (const s of p.subtasks) {
+                if (completedIds.includes(s.id)) s.completed = true;
+              }
+            }
+            writeFileSync(planPath2, JSON.stringify(p, null, 2));
+          } catch { /* best-effort */ }
+        });
+      }
+    } finally {
+      // Clean up per-subtask worktrees
+      if (isMultiGroup) {
+        for (const stWorktreePath of subtaskWorktrees.values()) {
+          try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch {
+            try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+            try { execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+          }
+        }
+        for (const subtask of subtasks) {
+          try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + subtask.id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+        }
+        appendFileSync(logFile, '\n[WORKTREE] Cleaned up ' + subtaskWorktrees.size + ' per-subtask worktree(s)\n');
+      }
+    }
+  }
+
+  // Clean up feedback files
+  if (hasQaFeedback && existsSync(qaFeedbackPath)) unlinkSync(qaFeedbackPath);
+  if (hasHumanFeedback && existsSync(humanFeedbackPath)) unlinkSync(humanFeedbackPath);
+
+  // Clean up qa_flagged markers
+  if (hasQaFeedback) {
+    try {
+      const planAfter = JSON.parse(readFileSync(planPath, 'utf-8'));
+      let cleaned = false;
+      if (planAfter.subtasks) {
+        for (const s of planAfter.subtasks) {
+          if (s.qa_flagged) { delete s.qa_flagged; cleaned = true; }
+        }
+      }
+      if (cleaned) writeFileSync(planPath, JSON.stringify(planAfter, null, 2));
+    } catch { /* best-effort */ }
+  }
+
+  // Mandatory git push before QA
+  deps.phaseHeader(logFile, 'implement — push to remote');
+  try {
+    deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
+    appendFileSync(logFile, `[PUSH] Successfully pushed ${pipeline.branch} to origin\n`);
+
+    // Verify remote HEAD
+    try {
+      const localHead = execFileSync('git', ['rev-parse', pipeline.branch], {
+        cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
+      }).trim();
+      const remoteHead = execFileSync('git', ['rev-parse', `origin/${pipeline.branch}`], {
+        cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
+      }).trim();
+      if (localHead !== remoteHead) {
+        throw new Error(`Push succeeded but HEADs differ — local=${localHead} remote=${remoteHead}`);
+      }
+      appendFileSync(logFile, '[PUSH] Verified remote HEAD matches local HEAD\n');
+    } catch (verifyErr) {
+      const verifyMsg = verifyErr instanceof Error ? verifyErr.message : String(verifyErr);
+      appendFileSync(logFile, `[PUSH] Remote verification failed: ${verifyMsg}\n`);
+      throw verifyErr;
+    }
+  } catch (pushErr) {
+    const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+    appendFileSync(logFile, `[PUSH] Push failed: ${pushMsg}\n`);
+    appendFileSync(logFile, '[PUSH] Task cannot advance — engineer must be able to push before QA can verify\n');
+    const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+    writeFileSync(reportPath, JSON.stringify({
+      overall: 'FAIL',
+      criteria: [{
+        criterion: 'Git push verification',
+        name: 'Git push verification',
+        status: 'FAIL',
+        notes: `Git push failed: ${pushMsg}. The engineer must be able to push commits before QA can verify.`,
+      }],
+    }, null, 2));
+    deps.advancePhase(pipeline, 'failed');
+    return;
+  }
+
+  // Sensor gate: check per-subtask sensor reports
+  const allSensorFailures: { subtask: string; sensor: string; error: string; fix_needed: string }[] = [];
+  if (existsSync(planPath)) {
+    try {
+      const planFinal = JSON.parse(readFileSync(planPath, 'utf-8'));
+      for (const s of (planFinal.subtasks || [])) {
+        const srPath = path.join(pipeline.specPath, `sensor_report-st${s.id}.json`);
+        if (existsSync(srPath)) {
+          try {
+            const report = JSON.parse(readFileSync(srPath, 'utf-8'));
+            if (report.failures) allSensorFailures.push(...report.failures);
+          } catch { /* best-effort */ }
+          try { unlinkSync(srPath); } catch { /* best-effort */ }
+        }
+      }
+    } catch { /* best-effort */ }
+  }
+
+  if (allSensorFailures.length > 0) {
+    appendFileSync(logFile, `\n[SENSOR-GATE] post_subtask sensors failed (${allSensorFailures.length} failure(s)) — bouncing to implement for sensor fixes\n`);
+    deps.writeQaFeedback(pipeline, {
+      overall: 'FAIL',
+      fail_type: 'cleanup',
+      criteria: allSensorFailures.map(f => ({
+        name: `Sensor: ${f.subtask} — ${f.sensor}`,
+        criterion: `Sensor: ${f.subtask} — ${f.sensor}`,
+        status: 'FAIL' as const,
+        notes: f.error,
+        fix_needed: f.fix_needed,
+      })),
+    });
+    deps.advancePhase(pipeline, 'implement');
+    deps.savePipelineState(pipeline);
+    await deps.executePhase(pipeline);
+    return;
+  }
+
+  deps.advancePhase(pipeline, 'qa-review');
+  await deps.executePhase(pipeline);
+}
+
+// ── Helper ────────────────────────────────────────────────────────────────
+
+function buildSubtaskFeedback(
+  hasQaFeedback: boolean,
+  qaOnlyCriteria: string[],
+  subtask: PlanSubtask,
+  specPath: string,
+  humanFeedbackPath: string,
+  hasHumanFeedback: boolean,
+): string {
+  if (!hasQaFeedback) return '';
+  const lines: string[] = [];
+  lines.push('## ⚠️ QA FEEDBACK — FIX THESE FIRST ⚠️');
+  lines.push('');
+  try {
+    const reportPath = path.join(specPath, 'qa_report.json');
+    if (existsSync(reportPath)) {
+      const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+      if (report.overall) lines.push('Overall: **' + report.overall + '**');
+    }
+  } catch { /* best-effort */ }
+  if (qaOnlyCriteria.length > 0) {
+    lines.push('');
+    lines.push('Issues in subtask ' + subtask.id + ' **' + subtask.title + '**:');
+    for (const c of qaOnlyCriteria) {
+      const cleaned = c
+        .replace(/\s*\[QA CORRECTION:\s*/g, '[BLOCKER] ')
+        .replace(/\s*\[QA ISSUE\s*\((\w*)\):\s*/g, '[$1] ')
+        .replace(/\]$/, '');
+      lines.push('- ' + cleaned);
+    }
+  }
+  if (hasHumanFeedback) {
+    try {
+      const hf = readFileSync(humanFeedbackPath, 'utf-8');
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+      lines.push(hf);
+    } catch { /* best-effort */ }
+  }
+  lines.push('');
+  return lines.join('\n');
+}

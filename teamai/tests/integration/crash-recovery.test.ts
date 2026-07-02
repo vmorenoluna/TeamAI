@@ -199,10 +199,10 @@ function createPlan(specPath: string, subtaskOverrides: Partial<{
   writeFileSync(join(specPath, 'plan.json'), JSON.stringify({ subtasks }, null, 2));
 }
 
-/** Helper to chain a checkpoint write through the orchestrator's _planWriteLock */
+/** Helper to chain a checkpoint write through the orchestrator's _planWriteLockRef */
 async function checkpointSubtask(orch: unknown, specPath: string, completedIds: number[]): Promise<void> {
   const o = orch as AnyOrch;
-  o._planWriteLock = o._planWriteLock.then(() => {
+  o._planWriteLockRef.current = o._planWriteLockRef.current.then(() => {
     const planPath = join(specPath, 'plan.json');
     if (!existsSync(planPath)) return;
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
@@ -217,7 +217,7 @@ async function checkpointSubtask(orch: unknown, specPath: string, completedIds: 
     writeFileSync(tmpPath, JSON.stringify(plan, null, 2));
     renameSync(tmpPath, planPath);
   });
-  await o._planWriteLock;
+  await o._planWriteLockRef.current;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

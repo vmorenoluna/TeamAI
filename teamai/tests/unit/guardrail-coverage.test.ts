@@ -151,7 +151,7 @@ const CODE_ENFORCEMENT: CodeEnforcement[] = [
   {
     guardrailIds: [7, 11],
     description: 'orchestrator routes cleanup failures to implement',
-    file: 'src/lib/orchestrator.ts',
+    file: 'src/lib/orchestrator/qa-review.ts',
     signatures: ["fail_type === 'cleanup'"],
   },
   // Infrastructure: teamai-workflow.md is the canonical source for long-running
