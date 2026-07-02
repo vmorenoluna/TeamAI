@@ -16,6 +16,7 @@ import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, NO_RESUME_PHASES, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
 import { runImplement } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
+import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec } from './orchestrator/review-actions';
 import type { PipelinePhase } from '@/constants/phases';
 
 interface QaCriterion {
@@ -240,66 +241,25 @@ export class Orchestrator {
   }
 
   async approveTask(taskId: string, strategy: MergeStrategy): Promise<void> {
-    const task = this.taskStore.getById(taskId);
-    if (!task) throw new Error(`Task ${taskId} not found`);
-    const phase = task.phase;
-    if (phase !== 'awaiting-review') {
-      throw new Error(`cannot approve a task in ${phase} — must be awaiting-review`);
-    }
-    const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, 'awaiting-review');
-    pipeline.mergeStrategy = strategy;
-    // Persist the chosen strategy so recovery can restore it after a crash
-    this.taskStore.update(taskId, { mergeStrategy: strategy });
-    const next = strategy === 'local-merge' ? 'merge' : 'create-pr';
-    this.advancePhase(pipeline, next);
-    try {
-      await this.executePhase(pipeline);
-    } catch (err) {
-      this.advancePhase(pipeline, 'awaiting-review');
-      throw err;
-    }
+    await approveTaskFn(taskId, strategy, {
+      taskStore: this.taskStore,
+      pipelines: this.pipelines,
+      restorePipeline: (id, phase) => this.restorePipeline(id, phase),
+      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
+      executePhase: p => this.executePhase(p),
+      savePipelineState: p => this._savePipelineState(p),
+    });
   }
 
   async rejectTask(taskId: string, feedback: string): Promise<void> {
-    const task = this.taskStore.getById(taskId);
-    if (!task) throw new Error(`Task ${taskId} not found`);
-    const phase = task.phase;
-    if (phase !== 'awaiting-review' && phase !== 'pr-open') {
-      throw new Error(`cannot reject a task in ${phase} — must be awaiting-review or pr-open`);
-    }
-
-    const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, phase);
-    const feedbackPath = path.join(pipeline.specPath, 'human_feedback.md');
-    writeFileSync(feedbackPath, `# Human Review Feedback\n\n${feedback}\n`);
-
-    // ── Snapshot: preserve human_feedback before bouncing back to implement ──
-    // The feedback file is deleted after implement completes (cleanup at end of runImplement).
-    // If the pipeline later bounces back again (e.g. QA → implement → review → implement),
-    // this snapshot ensures the feedback survives repeated bounce cycles.
-    try {
-      const snapshotPath = path.join(pipeline.specPath, 'human_feedback_before_bounce.md');
-      writeFileSync(snapshotPath, readFileSync(feedbackPath, 'utf-8'));
-    } catch { /* best-effort */ }
-
-    // Update the QA report so the engineer can see what changes were requested
-    const reportPath = path.join(pipeline.specPath, 'qa_report.json');
-    if (existsSync(reportPath)) {
-      try {
-        const report: QaReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
-        if (!report.criteria) report.criteria = [];
-        report.overall = 'FAIL';
-        report.criteria.push({
-          name: 'Change Request',
-          status: 'FAIL',
-          notes: feedback,
-        });
-        writeFileSync(reportPath, JSON.stringify(report, null, 2));
-      } catch { /* best-effort: if qa_report.json is malformed, don't block the rejection */ }
-    }
-
-    pipeline.qaAttempt = 0;
-    this.advancePhase(pipeline, 'implement');
-    await this.executePhase(pipeline);
+    await rejectTaskFn(taskId, feedback, {
+      taskStore: this.taskStore,
+      pipelines: this.pipelines,
+      restorePipeline: (id, phase) => this.restorePipeline(id, phase),
+      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
+      executePhase: p => this.executePhase(p),
+      savePipelineState: p => this._savePipelineState(p),
+    });
   }
 
   async reviseSpec(taskId: string): Promise<void> {
@@ -309,79 +269,20 @@ export class Orchestrator {
     if (phase !== 'awaiting-review') {
       throw new Error(`cannot revise spec for a task in ${phase} — must be awaiting-review`);
     }
-
     const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, 'awaiting-review');
     await this._autoReviseSpec(pipeline);
   }
 
-  /**
-   * Auto-triggered spec revision when QA finds spec_concerns.
-   * Writes revision feedback, snapshots the old spec, clears downstream artifacts,
-   * and restarts the pipeline from the spec phase (analyst).
-   */
+  // Delegates to review-actions.autoReviseSpec
   private async _autoReviseSpec(pipeline: TaskPipeline): Promise<void> {
-    const specPath = pipeline.specPath;
-    const logFile = path.join(specPath, 'output.log');
-
-    // Guard: max 3 spec revisions before falling back to human review.
-    // Prevents infinite loops when the analyst produces the same flawed spec.
-    pipeline.specRevision++;
-    if (pipeline.specRevision > 3) {
-      try {
-        appendFileSync(logFile, `\n[REFINE] Max spec revisions (3) reached — pausing for human review\n`);
-      } catch { /* best-effort */ }
-      this.advancePhase(pipeline, 'awaiting-review');
-      return;
-    }
-
-    // Write spec_revision_feedback.md from QA report's spec_concerns
-    const reportPath = path.join(specPath, 'qa_report.json');
-    let feedbackContent = '# Spec Revision Feedback\n\n';
-    feedbackContent += 'The QA reviewer identified issues with the specification itself ';
-    feedbackContent += '(not the implementation). The spec needs to be revised to address these concerns.\n\n';
-    if (existsSync(reportPath)) {
-      try {
-        const report: QaReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
-        if (report.spec_concerns && report.spec_concerns.length > 0) {
-          for (const sc of report.spec_concerns) {
-            feedbackContent += `## ${sc.issue}\n\n`;
-            feedbackContent += `**Reasoning:** ${sc.reasoning}\n\n`;
-            if (sc.suggested_fix) {
-              feedbackContent += `**Suggested fix:** ${sc.suggested_fix}\n\n`;
-            }
-          }
-        }
-      } catch { /* best-effort — produce feedback from whatever we can read */ }
-    }
-    writeFileSync(path.join(specPath, 'spec_revision_feedback.md'), feedbackContent);
-
-    // Snapshot the current spec before revision (preserves history)
-    const specMdPath = path.join(specPath, 'spec.md');
-    if (existsSync(specMdPath)) {
-      try {
-        writeFileSync(path.join(specPath, `spec_v${pipeline.specRevision}.md`), readFileSync(specMdPath, 'utf-8'));
-      } catch { /* best-effort */ }
-    }
-
-    // Clear downstream artifacts — plan, QA, and feedback all need regeneration
-    // from the revised spec. clearArtifacts('plan') clears plan.json + qa_report.json.
-    this.taskStore.clearArtifacts(pipeline.taskId, 'plan');
-
-    // Also clear additional revision-related files that should not persist
-    const extraFiles = ['qa_feedback.md', 'completion_summary.md', 'human_feedback.md', 'human_feedback_before_bounce.md'];
-    for (const f of extraFiles) {
-      try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
-    }
-
-    // Reset QA attempt counter — the revised spec gets a fresh QA cycle
-    pipeline.qaAttempt = 0;
-    this._savePipelineState(pipeline);
-
-    try {
-      appendFileSync(logFile, `\n[REFINE] Spec concerns detected — auto-revising spec with analyst (revision ${pipeline.specRevision}/3)\n`);
-    } catch { /* best-effort */ }
-    this.advancePhase(pipeline, 'spec');
-    await this.executePhase(pipeline);
+    await autoReviseSpec(pipeline, {
+      taskStore: this.taskStore,
+      pipelines: this.pipelines,
+      restorePipeline: (id, phase) => this.restorePipeline(id, phase),
+      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
+      executePhase: p => this.executePhase(p),
+      savePipelineState: p => this._savePipelineState(p),
+    });
   }
 
   private async executePhase(pipeline: TaskPipeline): Promise<void> {
