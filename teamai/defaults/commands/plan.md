@@ -55,4 +55,10 @@ Rules:
   (c) the specific check to apply to the output (e.g. "section X shows fewer than N
   failures"). This makes the criterion independently verifiable by QA without relying
   on the engineer's self-report.
+- **`files_to_create` paths are relative to the repository root.** When populating
+  `files_to_create` for a subtask that must produce committed file artifacts
+  (benchmark output, sweep results, data pipeline output, generated documentation),
+  specify paths relative to the repository root (e.g. `docs/analysis.md`, not
+  `/absolute/path/to/docs/analysis.md`). The orchestrator resolves these against
+  the worktree root at verification time.
 ```

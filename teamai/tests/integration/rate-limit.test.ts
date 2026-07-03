@@ -836,8 +836,8 @@ describe('Rate Limit Integration', () => {
       // Phase should still be 'qa-review' (session never completed)
       expect(pipeline.phase).toBe('qa-review');
 
-      // qaAttempt should have been incremented by runQaReview before the session started
-      expect(pipeline.qaAttempt).toBe(1);
+      // qaAttempt should NOT have been incremented — rate limits are free retries
+      expect(pipeline.qaAttempt).toBe(0);
 
       // rateLimitedUntil should be set
       const task = orch.taskStore.getById(taskId);
@@ -885,7 +885,7 @@ describe('Rate Limit Integration', () => {
       orch.activeTasks.delete(taskId);
     });
 
-    it('qaAttempt increments on first qa-review resume and survives nested rate limit', async () => {
+    it('qaAttempt is NOT incremented on rate-limited qa-review (rate limits are free retries)', async () => {
       writeFileSync(join(taskDir, 'plan.json'), JSON.stringify({
         subtasks: [
           { id: 1, title: 'Retry', description: 'Needs retry', files: ['src/retry.ts'], acceptance_criteria: ['retry works'], completed: true },
@@ -899,13 +899,15 @@ describe('Rate Limit Integration', () => {
       orch.activeTasks.add(taskId);
       orch.taskStore.update(taskId, { phase: 'qa-review' });
 
-      // First resume: qaAttempt goes 0 → 1
+      // First resume: qaAttempt increments to 1 (at top of runQaReview)
       mockCreateSession.mockResolvedValue('sess-qa-a1');
       orch.handleRateLimit(pipeline, 0);
       await new Promise(r => setTimeout(r, 50));
+      // Still 1 here — incremented at top of runQaReview, rate limit hasn't fired yet
       expect(pipeline.qaAttempt).toBe(1);
 
       // Fire rate limit to trigger nested handleRateLimit
+      // runQaReview decrements qaAttempt back (rate limits are free retries)
       fireEvent('event', {
         sessionId: 'sess-qa-a1',
         event: {
@@ -919,8 +921,8 @@ describe('Rate Limit Integration', () => {
       });
       await new Promise(r => setTimeout(r, 50));
 
-      // Pipeline survived; qaAttempt should still be 1 (persisted before session)
-      expect(pipeline.qaAttempt).toBe(1);
+      // Pipeline survived; qaAttempt should be back to 0 (rate limit decremented it)
+      expect(pipeline.qaAttempt).toBe(0);
       expect(orch.pipelines.has(taskId)).toBe(true);
 
       // Clean up

@@ -7,14 +7,31 @@ $ARGUMENTS
 
 ## QA Rework Mode
 
-If the prompt includes "⚠️ QA FEEDBACK" at the top, you are in QA rework mode:
+If the prompt includes "⚠️ QA FEEDBACK" at the top, you are in QA rework mode.
 
-QA feedback represents the latest requirements. The plan may be stale — QA findings are
-the ground truth. Where QA feedback and the plan conflict, follow the QA feedback and
-note the deviation from the plan.
+> ⚠️ **CRITICAL: THERE IS STILL WORK TO DO.** QA found failures — that means
+> something is broken or missing, regardless of what `plan.json` says about
+> subtask completion status. QA findings are the ground truth. The plan may
+> be stale. If QA says something is wrong, it is — fix it.
 
-**Before reading the full QA feedback**, check if `fail_type` in the QA report is `"cleanup"`.
-If so, you are in **cleanup-only rework mode**:
+### When All Subtasks Are Already Completed
+
+If every plan subtask is marked `completed: true` but QA still found failures:
+
+- **Do NOT treat this as "nothing to do."** QA failures mean the implementation
+  is incomplete, even if every subtask was marked done.
+- Your job is **surgical rework**, not re-implementation. Do NOT re-read the
+  full spec or re-execute completed subtasks.
+- Read the QA feedback. Fix every listed issue. That's the entire scope.
+- A passing test suite does NOT mean the required code exists — it means
+  existing code is not broken. QA FAIL means something is MISSING. Add it.
+- If a FAIL criterion includes a `fix_needed` field, that field describes
+  exactly what must be ADDED or CHANGED.
+
+### Cleanup-Only Rework Mode
+
+**Before reading the full QA feedback**, check if `fail_type` in the QA report
+is `"cleanup"`. If so, you are in **cleanup-only rework mode**:
 - The QA issues require only mechanical operations with zero source code changes.
 - Do NOT re-read the full spec. Do NOT run the test suite (no source code will change).
 - Execute only the `fix_needed` operations from the failing criteria:
@@ -27,6 +44,8 @@ If so, you are in **cleanup-only rework mode**:
 
 If `fail_type` is `"code"` or absent, proceed with the standard QA rework steps below.
 
+### Standard QA Rework Steps
+
 1. Read the QA feedback FIRST. It takes priority over everything else.
 2. Address ONLY the QA issues listed. The acceptance criteria below are limited
    to items marked [QA CORRECTION] or [QA ISSUE] — fix those and nothing else.
@@ -34,13 +53,9 @@ If `fail_type` is `"code"` or absent, proceed with the standard QA rework steps 
    Those were verified by the QA agent and require no changes.
 4. For each QA issue:
    - Address it even if the current code already satisfies the original plan.
-   - If the issue requires a different approach than the plan, follow the QA feedback.
+   - If the issue requires a different approach than the plan, follow the QA feedback
+     and note the deviation in your summary.
 5. Do NOT skip an issue because the code "already matches the plan."
-   - If a FAIL criterion includes a `fix_needed` field, that field describes exactly
-     what must be ADDED or CHANGED. A passing test suite does NOT mean the required
-     code exists — it means existing code is not broken. QA FAIL means something is
-     MISSING. Add it even if all current tests pass and all plan subtasks are marked
-     `completed: true`.
 6. Do NOT mark the subtask as complete unless ALL QA issues are addressed.
    - Issues marked as **critical** or **error** severity are HARD BLOCKERS — they carry the same weight as FAIL criteria. You MUST fix them; they are not suggestions.
    - Only **suggestion** severity items are optional.
@@ -67,6 +82,9 @@ default opening move to re-locate information the description already provides. 
 re-read a file to verify an `Edit` that returned success.
 
 1. Read the subtask description and acceptance criteria carefully.
+   **If the subtask includes `files_to_create`**, note which files you MUST
+   create before ending your session — the orchestrator will verify their
+   existence and the subtask will re-run if any are missing.
 2. Read ALL files listed in the subtask before making any changes.
 3. Implement the changes. Follow existing code patterns and conventions.
 4. Run any existing tests related to the changed files. Run the command ONCE and wait —
@@ -163,6 +181,10 @@ If a long-running background script produces incremental output while running
    Do NOT restart or escalate because the script "feels slow" — use the math.
 
 ### When the sweep output is a committed artifact
+
+> **Note:** The `$TEAMAI_SPEC_DIR` environment variable is available to locate the
+> `.teamai/{taskId}/` directory from within the worktree. Use it when you need to
+> reference the spec directory (your cwd is the worktree, not the project root).
 
 If the subtask requires running a sweep that **produces files you will commit** (e.g.,
 `summary.jsonl`, `aggregate.md`, log directories):
