@@ -13,6 +13,8 @@ export interface InterruptedTask {
   phase: string;
   projectPath: string;
   projectName: string;
+  /** ISO timestamp — set when pipeline was paused by API rate limit. */
+  rateLimitedUntil?: string;
 }
 
 export interface OrphanedWorktree {
@@ -69,6 +71,7 @@ export function findInterruptedTasks(): InterruptedTask[] {
             phase: task.phase,
             projectPath: project.path,
             projectName: project.name,
+            rateLimitedUntil: task.rateLimitedUntil,
           });
         }
       } catch {
@@ -289,20 +292,34 @@ export async function autoResumeInterruptedTasks(): Promise<number> {
   // Dynamic import to avoid circular dependency at module load time
   const { getOrchestrator } = await import('./orchestrator');
   const interrupted = findInterruptedTasks();
+  let resumed = 0;
 
   for (const task of interrupted) {
     try {
       const orchestrator = getOrchestrator(task.projectPath);
+
+      // Skip tasks that are still within their rate-limit window —
+      // attempting to resume would just waste an API call.
+      if (task.rateLimitedUntil) {
+        const expiresAt = new Date(task.rateLimitedUntil).getTime();
+        if (expiresAt > Date.now()) {
+          console.log(`[auto-resume] Task ${task.taskId} "${task.title}" is still rate-limited until ${task.rateLimitedUntil} — skipping (will retry on expiry)`);
+          continue;
+        }
+        console.log(`[auto-resume] Task ${task.taskId} "${task.title}" rate limit expired (was ${task.rateLimitedUntil}) — resuming`);
+      }
+
       console.log(`[auto-resume] Resuming task ${task.taskId} "${task.title}" at phase ${task.phase} in ${task.projectName}`);
       orchestrator.resumeTask(task.taskId).catch(err => {
         logWarn('auto-resume', `Task ${task.taskId} "${task.title}" failed to resume:`, err);
       });
+      resumed++;
     } catch (err) {
       logWarn('auto-resume', `Failed to create orchestrator for ${task.projectPath}:`, err);
     }
   }
 
-  return interrupted.length;
+  return resumed;
 }
 
 export function startupCleanup(staleSessionCount: number): StartupRecoveryReport {

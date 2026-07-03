@@ -23,6 +23,7 @@ import type { GitHubIssue } from '@/app/actions/github';
 export function GitHubImport() {
   const { run } = useServerMutation();
   const [isPending, startTransition] = useTransition(); // for streaming text + reconnect
+  // eslint-disable-next-line local/no-async-fetch-on-mount -- sessionId is ephemeral session state, not persistent toggle
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [streamText, setStreamText] = useState('');
   const [issues, setIssues] = useState<GitHubIssue[]>([]);

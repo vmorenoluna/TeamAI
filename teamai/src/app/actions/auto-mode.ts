@@ -3,18 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
 import { getPipelineConfig } from './pipeline';
-import { getAutoModeState, setAutoModeState } from '@/lib/auto-mode';
+import { setAutoModeState } from '@/lib/auto-mode';
 import { TaskStore } from '@/lib/task-store';
-
-export async function getAutoModeStateAction(): Promise<{
-  enabled: boolean;
-  maxParallel: number;
-  activeCount: number;
-  trackedCount: number;
-}> {
-  const projectPath = await getActiveProjectPath();
-  return getAutoModeState(projectPath);
-}
 
 export async function toggleAutoMode(enabled: boolean): Promise<void> {
   const projectPath = await getActiveProjectPath();

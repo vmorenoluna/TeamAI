@@ -43,6 +43,30 @@ Each command template injects the role at runtime: the Claude subprocess is told
 ### Frontend
 Next.js App Router (`src/app/`). shadcn/ui components go in `src/components/ui/`. Path alias `@/*` maps to `src/*`. Tailwind CSS 4. Terminal output will render via xterm.js (dependency already installed, not yet wired up).
 
+### Data-Flow Pattern: Server Props, Not Async Fetch
+
+**Client components must never `useEffect` + async-fetch their own state on mount.** An ESLint rule (`local/no-async-fetch-on-mount`) enforces this.
+
+Antipattern (state resets on `router.refresh()`):
+```tsx
+const [enabled, setEnabled] = useState(false);
+useEffect(() => { fetchState().then(s => setEnabled(s.enabled)); }, []);
+```
+
+Correct pattern — pass initial state as a server prop:
+```tsx
+// Server Component (layout.tsx / page.tsx)
+const state = getSomeServerState();
+return <Button initialEnabled={state.enabled} />;
+
+// Client Component
+function Button({ initialEnabled }: { initialEnabled: boolean }) {
+  const [enabled, setEnabled] = useState(initialEnabled); // survives refresh
+}
+```
+
+Why: `usePhaseSync` calls `router.refresh()` on every phase-change WebSocket event (including rate-limit pauses). This re-renders the layout and re-mounts all client components. Any component using `useState(literal)` + async-fetch-on-mount will briefly show the wrong default on every refresh.
+
 ## Key Design Decisions
 
 - **NDJSON streaming**: Claude CLI outputs newline-delimited JSON; the buffer parser in ProcessManager handles chunks that split across multiple `data` events.
