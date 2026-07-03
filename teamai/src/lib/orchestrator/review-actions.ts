@@ -50,6 +50,7 @@ interface TaskPipeline {
   sessionId?: string;
   qaTimeoutCount?: number;
   deliverableFailCounts?: Record<number, number>;
+  wakeupAttemptCount?: number;
 }
 
 type MergeStrategy = 'local-merge' | 'pull-request';
@@ -150,6 +151,7 @@ export async function rejectTask(
   pipeline.qaAttempt = 0;
   pipeline.qaTimeoutCount = 0;
   pipeline.deliverableFailCounts = {};
+  pipeline.wakeupAttemptCount = 0;
   deps.advancePhase(pipeline, 'implement');
   await deps.executePhase(pipeline);
 }
@@ -223,6 +225,7 @@ export async function autoReviseSpec(
   pipeline.qaAttempt = 0;
   pipeline.qaTimeoutCount = 0;
   pipeline.deliverableFailCounts = {};
+  pipeline.wakeupAttemptCount = 0;
   deps.savePipelineState(pipeline);
 
   try {

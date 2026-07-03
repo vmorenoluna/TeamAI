@@ -18,6 +18,11 @@ interface TaskPipeline {
   sessionId?: string;
   qaTimeoutCount?: number;
   deliverableFailCounts?: Record<number, number>;
+  wakeupUntil?: string;
+  wakeupSubtaskId?: number;
+  wakeupCommand?: string;
+  wakeupArtifact?: string;
+  wakeupAttemptCount?: number;
 }
 
 /** Rotate output log: keep last ~50KB when log exceeds ~100KB (#6) */
@@ -61,6 +66,11 @@ export function savePipelineState(pipeline: TaskPipeline): void {
       qaAttempt: pipeline.qaAttempt,
       qaTimeoutCount: pipeline.qaTimeoutCount,
       deliverableFailCounts: pipeline.deliverableFailCounts,
+      wakeupUntil: pipeline.wakeupUntil,
+      wakeupSubtaskId: pipeline.wakeupSubtaskId,
+      wakeupCommand: pipeline.wakeupCommand,
+      wakeupArtifact: pipeline.wakeupArtifact,
+      wakeupAttemptCount: pipeline.wakeupAttemptCount,
       branch: pipeline.branch,
       worktreePath: pipeline.worktreePath,
       updatedAt: new Date().toISOString(),

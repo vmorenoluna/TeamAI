@@ -200,4 +200,41 @@ If the subtask requires running a sweep that **produces files you will commit** 
 7. **Never commit a partial sweep.** If the sweep was interrupted, delete the partial output
    and re-run from the beginning. A committed summary.jsonl with 1,431 of 3,000 expected
    records is harder to diagnose than no file at all.
+
+### When a background script won't finish before your session budget
+
+If a background script (benchmark, sweep, data pipeline) is still running and
+won't complete before your session ends, write a `subtask_wakeup.json` file
+to the spec directory so the orchestrator can re-enter this subtask later:
+
+Write to `$TEAMAI_SPEC_DIR/subtask_wakeup.json`:
+
+```json
+{
+  "subtask_id": 3,
+  "wakeup_at": "2026-07-03T23:20:00Z",
+  "background_command": "python sweep.py --output sweep-results/",
+  "expected_artifact": "sweep-results/summary.jsonl"
+}
+```
+
+- `subtask_id`: your current subtask ID
+- `wakeup_at`: ISO 8601 timestamp when the process should be done
+- `background_command`: the command you ran (informational)
+- `expected_artifact`: the file you expect the process to produce
+
+Then end your session normally. The orchestrator will re-enter this subtask
+after the wakeup time with a `⚠️ WAKEUP RE-ENTRY` header. When you re-enter:
+- Check if the artifact exists and is complete. If it is: verify it, git add,
+  commit, and mark the subtask done.
+- If the artifact is missing or incomplete, check whether the background
+  process is still running:
+  - **Still running**: estimate remaining time, write an updated
+    `subtask_wakeup.json` with a new `wakeup_at`, and end.
+  - **Crashed or exited with error**: do NOT write another wakeup file.
+    Report the failure immediately — the orchestrator will advance the task
+    to failed after 3 consecutive wakeup attempts without progress.
+
+Use `$TEAMAI_SPEC_DIR` to resolve the path — your cwd is the worktree, not
+the project root.
 ```
