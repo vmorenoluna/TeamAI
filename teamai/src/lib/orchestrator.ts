@@ -71,6 +71,16 @@ interface TaskPipeline {
   qaTimeoutCount?: number;
   /** Per-subtask counter of consecutive files_to_create failures. Key = subtask ID, value = count. */
   deliverableFailCounts?: Record<number, number>;
+  /** ISO timestamp — wakeup scheduled until this time (ADR 002) */
+  wakeupUntil?: string;
+  /** Subtask ID that triggered the wakeup (ADR 002) */
+  wakeupSubtaskId?: number;
+  /** Background command the engineer was running (informational) (ADR 002) */
+  wakeupCommand?: string;
+  /** Artifact the engineer should verify on re-entry (ADR 002) */
+  wakeupArtifact?: string;
+  /** Consecutive wakeup attempts for the current subtask (ADR 002) */
+  wakeupAttemptCount?: number;
 }
 
 export class Orchestrator {
@@ -217,6 +227,11 @@ export class Orchestrator {
       if (savedState.qaAttempt !== undefined) pipeline.qaAttempt = savedState.qaAttempt;
       if (savedState.qaTimeoutCount !== undefined) pipeline.qaTimeoutCount = savedState.qaTimeoutCount;
       if (savedState.deliverableFailCounts !== undefined) pipeline.deliverableFailCounts = savedState.deliverableFailCounts;
+      if (savedState.wakeupUntil !== undefined) pipeline.wakeupUntil = savedState.wakeupUntil;
+      if (savedState.wakeupSubtaskId !== undefined) pipeline.wakeupSubtaskId = savedState.wakeupSubtaskId;
+      if (savedState.wakeupCommand !== undefined) pipeline.wakeupCommand = savedState.wakeupCommand;
+      if (savedState.wakeupArtifact !== undefined) pipeline.wakeupArtifact = savedState.wakeupArtifact;
+      if (savedState.wakeupAttemptCount !== undefined) pipeline.wakeupAttemptCount = savedState.wakeupAttemptCount;
       if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;
     }
 
@@ -237,9 +252,10 @@ export class Orchestrator {
       }
     } finally {
       // Release lock after pipeline completes or fails.
-      // For rate-limited tasks the lock is re-acquired in handleRateLimit
-      // and must not be deleted here — the setTimeout callback owns cleanup.
-      if (!rateLimited) {
+      // For rate-limited or wakeup-paused tasks the lock is re-acquired
+      // in handleRateLimit / _scheduleWakeup and must not be deleted here —
+      // the setTimeout callback owns cleanup.
+      if (!rateLimited && !pipeline.wakeupUntil) {
         this.pipelines.delete(taskId);
         this.activeTasks.delete(taskId);
       }
@@ -356,6 +372,7 @@ export class Orchestrator {
       getPipelineConfig: () => this.getPipelineConfig(),
       phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
       planWriteLock: this._planWriteLockRef,
+      scheduleWakeup: (pipeline) => this._scheduleWakeup(pipeline),
     });
   }
 
@@ -661,6 +678,59 @@ export class Orchestrator {
   private _writeCompletionSummary(pipeline: TaskPipeline): void { writeCompletionSummary(pipeline.specPath, pipeline.qaAttempt, pipeline.taskId, this.taskStore); }
 
   private _phaseHeader(logFile: string, phase: string): void { phaseHeader(logFile, phase); }
+
+  /** Schedule a wakeup timer (ADR 002). Follows the handleRateLimit setTimeout pattern. */
+  private _scheduleWakeup(pipeline: TaskPipeline): void {
+    const wakeupAt = new Date(pipeline.wakeupUntil!).getTime();
+    let waitMs = Math.max(wakeupAt - Date.now(), 0);
+    // Minimum 5-minute delay for overly-past timestamps (prevents tight loops)
+    if (waitMs === 0 && (Date.now() - wakeupAt > 5 * 60 * 1000)) {
+      waitMs = 5 * 60 * 1000;
+    }
+    const MAX_DELAY_MS = 2_147_483_647;
+    waitMs = Math.min(waitMs, MAX_DELAY_MS);
+
+    this.taskStore.update(pipeline.taskId, { wakeupUntil: pipeline.wakeupUntil, wakeupSubtaskId: pipeline.wakeupSubtaskId });
+    processManager.emit('phase-change', { taskId: pipeline.taskId, phase: pipeline.phase, projectRoot: this.projectRoot, wakeupUntil: pipeline.wakeupUntil });
+
+    // Re-acquire pipeline lock before setTimeout — runTask's finally block
+    // deletes the pipeline from both maps. Without this re-acquire, the
+    // timer callback finds no pipeline and skips resumption.
+    // (Same pattern as handleRateLimit in rate-limit.ts)
+    this.activeTasks.add(pipeline.taskId);
+    this.pipelines.set(pipeline.taskId, pipeline);
+
+    const mins = Math.ceil(waitMs / 60000);
+    console.log(`[wakeup] Task ${pipeline.taskId} paused for ~${mins}min. Resuming at ${pipeline.wakeupUntil}`);
+
+    setTimeout(async () => {
+      const task = this.taskStore.getById(pipeline.taskId);
+      if (!task || NO_RESUME_PHASES.has(task.phase)) {
+        console.log(`[wakeup] Task ${pipeline.taskId} is in terminal phase "${task?.phase}" — skipping resume`);
+        this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
+        return;
+      }
+      const currentPipeline = this.pipelines.get(pipeline.taskId);
+      if (currentPipeline !== pipeline) {
+        console.log(`[wakeup] Task ${pipeline.taskId} pipeline was replaced — skipping stale resume`);
+        this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
+        return;
+      }
+      console.log(`[wakeup] Resuming task ${pipeline.taskId}`);
+      this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
+      try {
+        await this.executePhase(pipeline);
+      } catch (e) {
+        const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
+        appendFileSync(path.join(pipeline.specPath, 'output.log'), `\n[ERROR] Task failed after wakeup: ${errMsg}\n`);
+        console.error(`[orchestrator] Task ${pipeline.taskId} failed after wakeup:`, e);
+        this.advancePhase(pipeline, 'failed');
+      } finally {
+        this.pipelines.delete(pipeline.taskId);
+        this.activeTasks.delete(pipeline.taskId);
+      }
+    }, waitMs);
+  }
 
   // Delegates to artifact-commit.commitArtifactsToWorktree
   private _commitArtifactsToWorktree(pipeline: TaskPipeline): void {

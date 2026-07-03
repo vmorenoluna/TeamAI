@@ -1,0 +1,95 @@
+{
+  "complexity": 4,
+  "estimated_subtasks": 5,
+  "parallel_safe": true,
+  "subtasks": [
+    {
+      "id": 1,
+      "title": "Add wakeup pipeline state types + persistence across all interfaces",
+      "description": "Add the five new wakeup pipeline state fields to all TypeScript interfaces and update the persistence layer.\n\n**Type additions:**\n- `implement.ts` `ImplementPipeline`: add `wakeupUntil?: string`, `wakeupCommand?: string`, `wakeupArtifact?: string`, `wakeupAttemptCount?: number` (alongside existing `wakeupSubtaskId?: number`)\n- `orchestrator.ts` `TaskPipeline`: same five fields\n- `review-actions.ts` local `TaskPipeline`: add `wakeupAttemptCount?: number`\n\n**Persistence updates (`pipeline-state.ts`):**\n- `savePipelineState`: include `wakeupUntil`, `wakeupSubtaskId`, `wakeupCommand`, `wakeupArtifact`, `wakeupAttemptCount` in the saved state object\n- `restorePipelineState`: restore all five wakeup fields from `.pipeline_state.json`\n\n**Saved-state merge (`orchestrator.ts`):**\n- In `runTask`, update the `restorePipelineState` merge block to include all five wakeup fields alongside existing fields\n\n**Counter reset (`review-actions.ts`):**\n- In `autoReviseSpec` and `rejectTask`: add `pipeline.wakeupAttemptCount = 0` to the existing unified counter reset block",
+      "files": [
+        "teamai/src/lib/orchestrator.ts",
+        "teamai/src/lib/orchestrator/implement.ts",
+        "teamai/src/lib/orchestrator/pipeline-state.ts",
+        "teamai/src/lib/orchestrator/review-actions.ts"
+      ],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "AC 4: Pipeline state includes wakeupUntil, wakeupSubtaskId, wakeupCommand, wakeupArtifact, wakeupAttemptCount",
+        "AC 13: Crash recovery restores wakeup timer — pipeline_state.json has all wakeup fields",
+        "AC 8: wakeupAttemptCount resets to 0 on spec revision and human rejection"
+      ],
+      "parallel_group": "A"
+    },
+    {
+      "id": 2,
+      "title": "Implement wakeup file detection, timer, subtask isolation, and re-entry prompt",
+      "description": "Add the full wakeup lifecycle to `implement.ts`:\n\n**Wakeup file detection (after killSession, before files_to_create check):**\n- Check for `subtask_wakeup.json` at `path.join(pipeline.specPath, 'subtask_wakeup.json')`\n- If present:\n  1. Parse the JSON: `{ subtask_id, wakeup_at, background_command, expected_artifact }`\n  2. Validate: if malformed, log `[WAKEUP] Malformed subtask_wakeup.json — treating as missing` and skip wakeup handling\n  3. Store fields in pipeline state: `wakeupUntil`, `wakeupSubtaskId`, `wakeupCommand`, `wakeupArtifact`\n  4. Increment `wakeupAttemptCount` (initialize to 1 if absent)\n  5. Log `[WAKEUP] Subtask {id} wakeup scheduled for {wakeup_at} (attempt {attempt}) — background process: {command}`\n  6. Delete the file: `unlinkSync(wakeupPath)`\n  7. Do NOT add to `completedIds`\n  8. Skip `files_to_create` verification (already gated on `pipeline.wakeupSubtaskId != null`)\n  9. **Pause the entire implement phase** — after the session handler completes, the group loop should detect the wakeup and NOT advance to later subtasks. Return from the subtask handler normally but ensure `completedIds` is empty for this subtask.\n\n**Wakeup timer (after the group loop processes):**\n- After the groups loop, check if `pipeline.wakeupUntil` is set\n- If set, call a new deps function `scheduleWakeup(pipeline, executePhase, advancePhase)` that:\n  1. Calculates `waitMs = max(wakeupAt - Date.now(), 0)`, capped at 5 min minimum for past timestamps (if `wakeup_at` more than 5 min in past, set to 5 min)\n  2. Calls `deps.savePipelineState(pipeline)` to persist wakeup state\n  3. Updates the task record with `wakeupUntil` and `wakeupSubtaskId` (via a new deps function or processManager emit)\n  4. Uses `setTimeout` reusing the `handleRateLimit` pattern in `orchestrator.ts`\n  5. After timeout: checks `NO_RESUME_PHASES` guard, then re-enters `executePhase` at `implement`\n  6. `wakeupUntil` is persisted to the task record so the UI shows a countdown\n\n**Subtask isolation filter:**\n- After computing `subtasksToRun` (normal filter), if `pipeline.wakeupSubtaskId != null`:\n  - Filter `effectiveSubtasks` to only the subtask matching `wakeupSubtaskId`\n  - This prevents deferred subtasks (never started, also `!completed`) from being re-run\n\n**Wakeup re-entry prompt (before subtask prompt):**\n- When `pipeline.wakeupSubtaskId != null` and `pipeline.wakeupSubtaskId === subtask.id`, prepend:\n  ```text\n  ⚠️ WAKEUP RE-ENTRY\n  Your previous session was paused to wait for a background process.\n  Background command: {pipeline.wakeupCommand}\n  Expected artifact to verify: {pipeline.wakeupArtifact}\n\n  Check if the artifact exists and is complete. If it is: verify it, git add, commit,\n  and mark the subtask done. If it's missing or incomplete, first check whether the\n  background process is still running:\n  - If the process is still running: estimate remaining time, write an updated\n    subtask_wakeup.json with a new wakeup_at, and end.\n  - If the process has crashed or exited with an error: do NOT write another wakeup\n    file. Report the failure immediately so the task can advance to failed without\n    wasting the remaining wakeup attempts.\n  ```\n\n**After wakeup subtask completes:**\n- At the end of the subtask's session handler, if the subtask was a wakeup re-entry AND the subtask completed successfully (not skipCompletion):\n  - Clear `wakeupUntil`, `wakeupSubtaskId`, `wakeupCommand`, `wakeupArtifact` from pipeline\n  - Reset `wakeupAttemptCount = 0` (successful artifact commit)\n  - Bounce back to implement so remaining deferred subtasks are processed:\n    ```ts\n    deps.advancePhase(pipeline, 'implement');\n    await deps.executePhase(pipeline);\n    return;\n    ```\n\n**Circuit breaker for nested wakeups:**\n- If `wakeupAttemptCount >= 3`: task advances to `failed` with a clear message about the artifact never being produced after 3 wakeup attempts.\n- `wakeupAttemptCount` is incremented each time a new `subtask_wakeup.json` is detected for the same subtask\n- Resets to 0 on successful artifact commit",
+      "files": [
+        "teamai/src/lib/orchestrator/implement.ts"
+      ],
+      "depends_on": [1],
+      "acceptance_criteria": [
+        "AC 1: Engineer writes wakeup file before session end — implemented via implement.md template",
+        "AC 2: Orchestrator detects wakeup file after session — checks subtask_wakeup.json after killSession, does NOT add to completedIds",
+        "AC 3: Subtask stays incomplete — completed remains false, implement phase pauses",
+        "AC 5: Wakeup re-enters implement phase with isolation — filters effectiveSubtasks to ONLY wakeupSubtaskId, deferred subtasks excluded",
+        "AC 6: Engineer receives wakeup context in prompt — WAKEUP RE-ENTRY header with background command and expected artifact",
+        "AC 7: Artifact exists and is complete — engineer commits it, subtask marked done",
+        "AC 8: Artifact still missing — engineer checks process, writes updated wakeup file or reports failure. wakeupAttemptCount incremented, circuit breaker at 3",
+        "AC 9: Wakeup composes with rate limits — wakeup fields NOT cleared until subtask completes",
+        "AC 10: Wakeup composes with files_to_create — files_to_create verification SKIPPED when wakeupSubtaskId is set",
+        "AC 12: Wakeup file cleanup — deleted immediately after reading"
+      ],
+      "parallel_group": "B"
+    },
+    {
+      "id": 3,
+      "title": "Update implement.md template with subtask_wakeup.json writing instructions",
+      "description": "Update `defaults/commands/implement.md` to add guidance for writing `subtask_wakeup.json`.\n\n**Add to the Long-Running Verification Scripts section:**\n```markdown\n**When a background script won't finish before your session budget:**\n\nIf a background script (benchmark, sweep, data pipeline) is still running and\nwon't complete before your session ends, write a `subtask_wakeup.json` file to\n`$TEAMAI_SPEC_DIR/subtask_wakeup.json` (the `.teamai/{taskId}/` directory):\n\n```json\n{\n  \"subtask_id\": 3,\n  \"wakeup_at\": \"2026-07-03T23:20:00Z\",\n  \"background_command\": \"python sweep.py --output sweep-results/\",\n  \"expected_artifact\": \"sweep-results/summary.jsonl\"\n}\n```\n\n- `subtask_id`: your current subtask ID\n- `wakeup_at`: ISO 8601 timestamp when the process should be done\n- `background_command`: the command you ran (informational)\n- `expected_artifact`: the file you expect the process to produce\n\nThen end your session normally. The orchestrator will re-enter this subtask\nafter the wakeup time. Use `$TEAMAI_SPEC_DIR` to resolve the path — your cwd\nis the worktree, not the project root.\n```\n\n**No other template changes needed.** The existing implement.md structure already supports this addition.",
+      "files": [
+        "teamai/defaults/commands/implement.md"
+      ],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "AC 11: implement.md template updated — includes subtask_wakeup.json writing instructions in Long-Running Verification Scripts section"
+      ],
+      "parallel_group": "B"
+    },
+    {
+      "id": 4,
+      "title": "Add crash recovery for wakeup timers + task record persistence",
+      "description": "Wire up the wakeup timer and crash recovery in `orchestrator.ts`.\n\n**Part A — Wakeup timer wiring (orchestrator.ts `runImplement` call):**\n- Add a new deps function `scheduleWakeup` passed to `runImplement`\n- `scheduleWakeup` follows the `handleRateLimit` pattern:\n  1. Calculates `waitMs` from `wakeup_at`, caps at 5 min minimum for overly-past timestamps\n  2. Stores `wakeupUntil` + `wakeupSubtaskId` on the task record via `taskStore.update()`\n  3. Broadcasts `phase-change` event for UI countdown\n  4. Sets `setTimeout` to re-enter `executePhase` at `implement` after `waitMs`\n  5. Uses `NO_RESUME_PHASES` guard before resuming\n- The `runImplement` deps already have `savePipelineState` and `executePhase` — `scheduleWakeup` needs those too\n\n**Part B — Crash recovery (orchestrator.ts `autoResumeInterruptedTasks`):**\n- On startup, for each task with `wakeupUntil` set:\n  1. Read `wakeupUntil` from `taskStore.getById()`\n  2. If `wakeup_at` is already past: resume immediately\n  3. If `wakeup_at` is in the future: re-schedule the `setTimeout`\n  4. Same pattern as the existing `rateLimitedUntil` recovery\n- The task record (`task.json`) already supports arbitrary fields via `taskStore.update()` — `wakeupUntil` and `wakeupSubtaskId` are stored as extra fields",
+      "files": [
+        "teamai/src/lib/orchestrator.ts"
+      ],
+      "depends_on": [1],
+      "acceptance_criteria": [
+        "AC 4: Wakeup timer fires at scheduled time — setTimeout-based, UI shows countdown via wakeupUntil on task record",
+        "AC 13: Crash recovery restores wakeup timer — autoResumeInterruptedTasks reads wakeupUntil from task record and re-schedules on startup"
+      ],
+      "parallel_group": "B"
+    },
+    {
+      "id": 5,
+      "title": "Write all unit + integration tests for wakeup lifecycle",
+      "description": "Write comprehensive tests covering the wakeup lifecycle.\n\n**Part A — Unit tests (orchestrator-robustness.test.ts):**\n- Wakeup file detected after session: creates subtask_wakeup.json in specPath, fires result event, verifies wakeupSubtaskId/wakeupAttemptCount set, file deleted\n- Malformed wakeup file: logs warning, skips wakeup handling, falls through to normal verification\n- Subtask isolation filter: with wakeupSubtaskId=3, only subtask 3 runs even if 1-5 are all !completed\n- Wakeup re-entry prompt: contains WAKEUP RE-ENTRY header, background command, expected artifact\n- Wakeup file in the past: enforces minimum 5-minute delay for overly-past timestamps\n- Circuit breaker at 3: wakeupAttemptCount=3 → task fails with clear message\n- Wakeup during QA rework: logged warning, ignored\n\n**Part B — Integration tests (crash-recovery.test.ts):**\n- Crash recovery restores wakeup timer: wakeupUntil set on task record, process restarts, autoResumeInterruptedTasks re-schedules\n- Wakeup subtask completes → deferred subtasks 4+ run in the next implement pass\n- Nested wakeup: first wakeup fires, artifact still missing, engineer writes new wakeup file, attemptCount=2, second wakeup succeeds, counter resets\n\nFollow existing test patterns in orchestrator-robustness.test.ts and crash-recovery.test.ts.",
+      "files": [
+        "teamai/tests/unit/orchestrator-robustness.test.ts",
+        "teamai/tests/integration/crash-recovery.test.ts"
+      ],
+      "depends_on": [2, 3, 4],
+      "acceptance_criteria": [
+        "AC 1: Unit test — wakeup file created, detected, field set, file deleted",
+        "AC 2: Unit test — subtask stays incomplete after wakeup detection",
+        "AC 3: Unit test — effectiveSubtasks filtered to only wakeupSubtaskId",
+        "AC 5: Unit test — WAKEUP RE-ENTRY prompt injected with correct context",
+        "AC 6: Unit test — circuit breaker at 3 wakes up → task fails",
+        "AC 8: Integration test — nested wakeup with incrementing attemptCount",
+        "AC 10: Integration test — crash recovery restores wakeup timer",
+        "AC 11: Integration test — deferred subtasks run after wakeup completes"
+      ],
+      "parallel_group": "C"
+    }
+  ]
+}

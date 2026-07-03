@@ -36,6 +36,8 @@ export interface Task {
   branch?: string;
   dependencies?: string[];     // IDs of tasks this task depends on
   rateLimitedUntil?: string;   // ISO timestamp — set when pipeline is paused by API rate limit
+  wakeupUntil?: string;        // ISO timestamp — set when implement phase is paused for background process (ADR 002)
+  wakeupSubtaskId?: number;    // Subtask ID that triggered the wakeup (ADR 002)
   source?: string;             // 'ideation' | 'competitor-analysis' — source of roadmap item
   competitiveContext?: string; // competitor context from roadmap item
   platform?: string;            // platform info from PR creation

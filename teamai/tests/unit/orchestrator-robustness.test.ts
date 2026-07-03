@@ -3155,3 +3155,395 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
     expect(restored.qaAttempt).toBe(2);
   });
 });
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  ADR 002 — Wakeup lifecycle: detection, isolation, prompt, circuit breaker
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('runImplement — wakeup file detection (ADR 002)', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\\n';
+      }
+      return '';
+    });
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  it('detects subtask_wakeup.json after session ends, sets wakeup fields, and deletes the file', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 1,
+        title: 'Run benchmark sweep',
+        description: 'Execute benchmark and save results',
+        files: ['src/bench.ts'],
+        acceptance_criteria: ['Benchmark completes'],
+      }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-detect');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), JSON.stringify({
+        subtask_id: 1,
+        wakeup_at: '2026-07-04T12:00:00Z',
+        background_command: 'python sweep.py --output results/',
+        expected_artifact: 'results/summary.jsonl',
+      }));
+
+      fireEvent('event', { sessionId: 'sess-wakeup-detect', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+
+      // Wakeup file should be deleted after reading
+      expect(existsSync(join(project.taskDir, 'subtask_wakeup.json'))).toBe(false);
+
+      // Pipeline wakeup fields should be set
+      expect(pipeline.wakeupSubtaskId).toBe(1);
+      expect(pipeline.wakeupUntil).toBe('2026-07-04T12:00:00Z');
+      expect(pipeline.wakeupCommand).toBe('python sweep.py --output results/');
+      expect(pipeline.wakeupArtifact).toBe('results/summary.jsonl');
+      expect(pipeline.wakeupAttemptCount).toBe(1);
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('handles malformed subtask_wakeup.json gracefully', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{ id: 1, title: 'Normal subtask', description: 'Do work', files: ['src/work.ts'], acceptance_criteria: ['Works'] }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-malformed');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, { phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task') });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), 'not valid json {{{');
+
+      fireEvent('event', { sessionId: 'sess-wakeup-malformed', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(existsSync(join(project.taskDir, 'subtask_wakeup.json'))).toBe(false);
+      expect(pipeline.wakeupSubtaskId).toBeUndefined();
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+});
+
+describe('runImplement — wakeup subtask isolation (ADR 002)', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\\n';
+      }
+      return '';
+    });
+  });
+
+  afterEach(() => { project.clean(); });
+
+  it('only re-enters the wakeup subtask — deferred subtasks are excluded', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Install deps', description: 'Install dependencies', files: ['package.json'], acceptance_criteria: ['Deps installed'], completed: true },
+        { id: 2, title: 'Run benchmark', description: 'Execute benchmark', files: ['src/bench.ts'], acceptance_criteria: ['Benchmark runs'] },
+        { id: 3, title: 'Analyze results', description: 'Analyze benchmark data', files: ['src/analyze.ts'], acceptance_criteria: ['Analysis complete'] },
+        { id: 4, title: 'Generate report', description: 'Generate final report', files: ['src/report.ts'], acceptance_criteria: ['Report generated'] },
+        { id: 5, title: 'Clean up', description: 'Remove temp files', files: ['cleanup.sh'], acceptance_criteria: ['Temp files removed'] },
+      ],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-isolate');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+      wakeupSubtaskId: 3, wakeupCommand: 'python analyze.py', wakeupArtifact: 'results/analysis.json', wakeupAttemptCount: 1,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+      const prompt = mockSendMessage.mock.calls[0][1];
+      expect(prompt).toContain('Subtask 3');
+      expect(prompt).not.toContain('Subtask 1');
+
+      fireEvent('event', { sessionId: 'sess-wakeup-isolate', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 30));
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+});
+
+describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\\n';
+      }
+      return '';
+    });
+  });
+
+  afterEach(() => { project.clean(); });
+
+  it('injects WAKEUP RE-ENTRY header with background command and expected artifact', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{ id: 2, title: 'Run data sweep', description: 'Execute data analysis sweep', files: ['src/sweep.ts'], acceptance_criteria: ['Sweep completes'] }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-prompt');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+      wakeupSubtaskId: 2, wakeupCommand: 'python sweep.py --data large-dataset.csv', wakeupArtifact: 'output/sweep-results.json', wakeupAttemptCount: 1,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      const prompt = mockSendMessage.mock.calls[0][1];
+      expect(prompt).toContain('WAKEUP RE-ENTRY');
+      expect(prompt).toContain('python sweep.py --data large-dataset.csv');
+      expect(prompt).toContain('output/sweep-results.json');
+
+      fireEvent('event', { sessionId: 'sess-wakeup-prompt', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 30));
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+});
+
+describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\\n';
+      }
+      return '';
+    });
+  });
+
+  afterEach(() => { project.clean(); });
+
+  it('increments wakeupAttemptCount on each wakeup cycle', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{ id: 1, title: 'Long running task', description: 'Execute long process', files: ['src/long.ts'], acceptance_criteria: ['Process completes'] }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-increment');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, { phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'), wakeupAttemptCount: 0 });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), JSON.stringify({
+        subtask_id: 1, wakeup_at: '2026-07-04T12:00:00Z', background_command: 'npm run benchmark', expected_artifact: 'results/bench.json',
+      }));
+
+      fireEvent('event', { sessionId: 'sess-wakeup-increment', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(pipeline.wakeupAttemptCount).toBe(1);
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('fails task when wakeupAttemptCount reaches 3 (circuit breaker)', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{ id: 1, title: 'Run benchmark', description: 'Execute benchmark', files: ['src/bench.ts'], acceptance_criteria: ['Benchmark completes'] }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-cap');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    // Start at attempt 2 — writing a wakeup file pushes it to 3, tripping the circuit breaker
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+      wakeupSubtaskId: 1, wakeupAttemptCount: 2, wakeupArtifact: 'results/bench.json', wakeupCommand: 'npm run benchmark',
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      // Engineer writes a 3rd wakeup file — pushes counter 2→3
+      // wakeupDetected=true prevents wakeup completion, so post-groups circuit breaker fires
+      writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), JSON.stringify({
+        subtask_id: 1, wakeup_at: '2026-07-05T00:00:00Z',
+        background_command: 'npm run benchmark', expected_artifact: 'results/bench.json',
+      }));
+
+      fireEvent('event', { sessionId: 'sess-wakeup-cap', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+      await promise;
+
+      // Circuit breaker fires in post-groups: wakeupAttemptCount>=3 → failed
+      expect(pipeline.phase).toBe('failed');
+
+      const reportPath = join(project.taskDir, 'qa_report.json');
+      expect(existsSync(reportPath)).toBe(true);
+      const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+      expect(report.overall).toBe('FAIL');
+      expect(report.criteria[0].name).toBe('Wakeup attempt limit exceeded');
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('clears wakeup state and bounces back after successful wakeup completion', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{ id: 3, title: 'Generate artifact', description: 'Create the artifact file', files: ['src/gen.ts'], acceptance_criteria: ['Artifact created'] }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-success');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+      wakeupSubtaskId: 3, wakeupUntil: '2026-07-04T12:00:00Z', wakeupCommand: 'python generate.py', wakeupArtifact: 'output/artifact.json', wakeupAttemptCount: 2,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      expect(mockSendMessage.mock.calls[0][1]).toContain('WAKEUP RE-ENTRY');
+
+      fireEvent('event', { sessionId: 'sess-wakeup-success', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+
+      // Wakeup state should be cleared
+      expect(pipeline.wakeupUntil).toBeUndefined();
+      expect(pipeline.wakeupSubtaskId).toBeUndefined();
+      expect(pipeline.wakeupCommand).toBeUndefined();
+      expect(pipeline.wakeupArtifact).toBeUndefined();
+      expect(pipeline.wakeupAttemptCount).toBe(0);
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+});
+
+describe('runImplement — wakeup state persistence (ADR 002)', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+  });
+
+  afterEach(() => { project.clean(); });
+
+  it('wakeup fields are persisted in pipeline_state.json', () => {
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      wakeupSubtaskId: 2, wakeupUntil: '2026-07-04T15:00:00Z', wakeupCommand: 'npm run sweep', wakeupArtifact: 'data/output.jsonl', wakeupAttemptCount: 2,
+    });
+
+    (orch as AnyOrch)._savePipelineState(pipeline);
+
+    const statePath = join(project.taskDir, '.pipeline_state.json');
+    expect(existsSync(statePath)).toBe(true);
+    const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+    expect(state.wakeupSubtaskId).toBe(2);
+    expect(state.wakeupUntil).toBe('2026-07-04T15:00:00Z');
+    expect(state.wakeupCommand).toBe('npm run sweep');
+    expect(state.wakeupArtifact).toBe('data/output.jsonl');
+    expect(state.wakeupAttemptCount).toBe(2);
+  });
+
+  it('wakeup fields survive crash recovery', () => {
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      wakeupSubtaskId: 5, wakeupUntil: '2026-07-04T18:00:00Z', wakeupCommand: 'python long-script.py', wakeupArtifact: 'reports/final.md', wakeupAttemptCount: 1,
+    });
+
+    (orch as AnyOrch)._savePipelineState(pipeline);
+    (orch as AnyOrch).pipelines.delete(project.taskId);
+
+    const restored = (orch as AnyOrch)._restorePipelineState(project.taskId, project.taskDir);
+    expect(restored.wakeupSubtaskId).toBe(5);
+    expect(restored.wakeupUntil).toBe('2026-07-04T18:00:00Z');
+    expect(restored.wakeupCommand).toBe('python long-script.py');
+    expect(restored.wakeupArtifact).toBe('reports/final.md');
+    expect(restored.wakeupAttemptCount).toBe(1);
+  });
+});

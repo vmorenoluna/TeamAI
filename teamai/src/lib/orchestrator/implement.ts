@@ -61,6 +61,16 @@ interface ImplementPipeline {
   deliverableFailCounts?: Record<number, number>;
   /** Set when a subtask creates a wakeup file — skips files_to_create verification (ADR 002) */
   wakeupSubtaskId?: number;
+  /** ISO timestamp — wakeup scheduled until this time (ADR 002) */
+  wakeupUntil?: string;
+  /** Background command the engineer was running (informational) (ADR 002) */
+  wakeupCommand?: string;
+  /** Artifact the engineer should verify on re-entry (ADR 002) */
+  wakeupArtifact?: string;
+  /** Consecutive wakeup attempts for the current subtask (ADR 002) */
+  wakeupAttemptCount?: number;
+  /** Internal flag: set when wakeup completes during this run so post-groups code re-enters (ADR 002) */
+  _wakeupJustCompleted?: boolean;
 }
 
 type SessionOptsResult = { taskId: string; role: AgentSession['role']; cwd: string; [key: string]: unknown };
@@ -87,6 +97,8 @@ export interface ImplementDeps {
   phaseHeader: (logFile: string, phase: string) => void;
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
+  /** Schedule a wakeup timer (ADR 002). */
+  scheduleWakeup: (pipeline: ImplementPipeline) => void;
 }
 
 // ── Main function ─────────────────────────────────────────────────────────
@@ -193,6 +205,11 @@ export async function runImplement(
     effectiveSubtasks = subtasksToRun;
   }
 
+  // ADR 002: Wakeup isolation — only re-enter the wakeup-pending subtask
+  if (pipeline.wakeupSubtaskId != null) {
+    effectiveSubtasks = effectiveSubtasks.filter(s => s.id === pipeline.wakeupSubtaskId);
+  }
+
   // Skip implement if all subtasks complete and not in QA rework
   if (!hasQaFeedback && effectiveSubtasks.length === 0 && plan.subtasks.length > 0) {
     const logFile = path.join(pipeline.specPath, 'output.log');
@@ -290,21 +307,44 @@ export async function runImplement(
 
           const subtaskFeedback = buildSubtaskFeedback(hasQaFeedback, qaOnlyCriteria, subtask, pipeline.specPath, humanFeedbackPath, hasHumanFeedback);
 
-          // Deliverable re-verification prompt header
-          let deliverableHeader = '';
-          if (!hasQaFeedback && pipeline.deliverableFailCounts?.[subtask.id]) {
-            const attemptCount = pipeline.deliverableFailCounts[subtask.id];
-            deliverableHeader = `⚠️ DELIVERABLE RE-VERIFICATION (attempt ${attemptCount}/3)\n\n` +
-              `Your previous session for this subtask ended but the following required\n` +
-              `deliverable files were NOT created:\n\n` +
-              (subtask.files_to_create?.map(f => `  - ${f}`).join('\n') || '') + `\n\n` +
-              `You MUST create these files before ending your session. If you cannot\n` +
-              `create them (e.g., the task is impossible with the current spec), explain\n` +
-              `why and the orchestrator will advance the task to failed.\n\n`;
+          // ADR 002: Snapshot whether this subtask was a wakeup re-entry
+          // (wakeupSubtaskId was set BEFORE this session, not during)
+          const wasWakeupReentry = pipeline.wakeupSubtaskId === subtask.id;
+
+          // ADR 002: Wakeup re-entry prompt header (takes priority over deliverable)
+          let wakeupHeader = '';
+          if (!hasQaFeedback && pipeline.wakeupSubtaskId === subtask.id) {
+            wakeupHeader = '⚠️ WAKEUP RE-ENTRY\n\n' +
+              'Your previous session was paused to wait for a background process.\n' +
+              'Background command: ' + (pipeline.wakeupCommand || 'unknown') + '\n' +
+              'Expected artifact to verify: ' + (pipeline.wakeupArtifact || 'unknown') + '\n\n' +
+              'Check if the artifact exists and is complete. If it is: verify it, git add, commit,\n' +
+              'and mark the subtask done. If it\'s missing or incomplete, first check whether the\n' +
+              'background process is still running:\n' +
+              '- If the process is still running: estimate remaining time, write an updated\n' +
+              '  subtask_wakeup.json with a new wakeup_at, and end.\n' +
+              '- If the process has crashed or exited with an error: do NOT write another wakeup\n' +
+              '  file. Report the failure immediately so the task can advance to failed without\n' +
+              '  wasting the remaining wakeup attempts.\n\n';
           }
 
+          // Deliverable re-verification prompt header
+          let deliverableHeader = '';
+          if (!hasQaFeedback && !wakeupHeader && pipeline.deliverableFailCounts?.[subtask.id]) {
+            const attemptCount = pipeline.deliverableFailCounts[subtask.id];
+            deliverableHeader = '⚠️ DELIVERABLE RE-VERIFICATION (attempt ' + attemptCount + '/3)\n\n' +
+              'Your previous session for this subtask ended but the following required\n' +
+              'deliverable files were NOT created:\n\n' +
+              (subtask.files_to_create?.map(f => '  - ' + f).join('\n') || '') + '\n\n' +
+              'You MUST create these files before ending your session. If you cannot\n' +
+              'create them (e.g., the task is impossible with the current spec), explain\n' +
+              'why and the orchestrator will advance the task to failed.\n\n';
+          }
+
+          const promptHeader = wakeupHeader || deliverableHeader;
+
           const prompt =
-            deliverableHeader +
+            promptHeader +
             (subtaskFeedback ? subtaskFeedback + '\n---\n' : '') +
             '/implement Subtask ' + subtask.id + ': ' + subtask.title + '\n\n' +
             subtask.description + '\n\n' +
@@ -320,6 +360,30 @@ export async function runImplement(
           await deps.waitForCompletion(sessionId);
           processManager.killSession(sessionId);
 
+          // ADR 002: Check for wakeup file (engineer scheduled background work)
+          // Only active during first-pass implement — not during QA rework
+          let wakeupDetected = false;
+          if (!hasQaFeedback) {
+          const wakeupPath = path.join(pipeline.specPath, 'subtask_wakeup.json');
+          if (existsSync(wakeupPath)) {
+            try {
+              const wd = JSON.parse(readFileSync(wakeupPath, 'utf-8'));
+              if (wd.subtask_id != null && wd.wakeup_at) {
+                pipeline.wakeupSubtaskId = wd.subtask_id;
+                pipeline.wakeupUntil = wd.wakeup_at;
+                pipeline.wakeupCommand = wd.background_command;
+                pipeline.wakeupArtifact = wd.expected_artifact;
+                pipeline.wakeupAttemptCount = (pipeline.wakeupAttemptCount || 0) + 1;
+                wakeupDetected = true;
+                appendFileSync(logFile, '[WAKEUP] Subtask ' + wd.subtask_id + ' wakeup scheduled for ' + wd.wakeup_at + ' (attempt ' + pipeline.wakeupAttemptCount + ') — background process: ' + (wd.background_command || 'unknown') + '\n');
+              }
+            } catch {
+              appendFileSync(logFile, '[WAKEUP] Malformed subtask_wakeup.json — treating as missing\n');
+            }
+            try { unlinkSync(wakeupPath); } catch { /* best-effort */ }
+          }
+          } // end !hasQaFeedback gate for wakeup detection
+
           // Verify deliverable files exist before marking subtask complete
           let skipCompletion = false;
           // Wakeup takes priority — skip files_to_create verification entirely
@@ -328,7 +392,7 @@ export async function runImplement(
             for (const file of subtask.files_to_create) {
               if (!existsSync(path.join(cwd, file))) {
                 skipCompletion = true;
-                appendFileSync(logFile, `\n[VERIFY] Subtask ${subtask.id}: expected file/directory missing — ${file}\n`);
+                appendFileSync(logFile, '\n[VERIFY] Subtask ' + subtask.id + ': expected file/directory missing — ' + file + '\n');
               }
             }
             if (skipCompletion) {
@@ -337,7 +401,7 @@ export async function runImplement(
               const count = (pipeline.deliverableFailCounts[subtask.id] || 0) + 1;
               pipeline.deliverableFailCounts[subtask.id] = count;
               const missingFiles = subtask.files_to_create.filter(f => !existsSync(path.join(cwd, f))).join(', ');
-              appendFileSync(logFile, `[VERIFY] Subtask ${subtask.id} failed deliverable verification (attempt ${count}/3) — missing: ${missingFiles}\n`);
+              appendFileSync(logFile, '[VERIFY] Subtask ' + subtask.id + ' failed deliverable verification (attempt ' + count + '/3) — missing: ' + missingFiles + '\n');
               // Circuit breaker at 3
               if (count >= 3) {
                 const reportPath = path.join(pipeline.specPath, 'qa_report.json');
@@ -347,14 +411,19 @@ export async function runImplement(
                     criterion: 'Deliverable verification — missing files',
                     name: 'Deliverable verification',
                     status: 'FAIL',
-                    notes: `Subtask ${subtask.id} failed deliverable verification 3 times. Missing files: ${missingFiles}`,
+                    notes: 'Subtask ' + subtask.id + ' failed deliverable verification 3 times. Missing files: ' + missingFiles,
                   }],
                 }, null, 2));
-                appendFileSync(logFile, `[VERIFY] Subtask ${subtask.id} exceeded deliverable verification cap (3) — advancing to failed\n`);
+                appendFileSync(logFile, '[VERIFY] Subtask ' + subtask.id + ' exceeded deliverable verification cap (3) — advancing to failed\n');
                 deps.advancePhase(pipeline, 'failed');
                 return;
               }
             }
+          }
+
+          // Wakeup detection prevents completion — subtask must re-run
+          if (wakeupDetected) {
+            skipCompletion = true;
           }
 
           if (!skipCompletion) {
@@ -363,6 +432,21 @@ export async function runImplement(
               delete pipeline.deliverableFailCounts[subtask.id];
             }
             completedIds.push(subtask.id);
+          }
+
+          // ADR 002: After wakeup completes — only on re-entry with no new wakeup file
+          if (wasWakeupReentry && !wakeupDetected && !skipCompletion) {
+            pipeline.wakeupUntil = undefined;
+            pipeline.wakeupSubtaskId = undefined;
+            pipeline.wakeupCommand = undefined;
+            pipeline.wakeupArtifact = undefined;
+            pipeline.wakeupAttemptCount = 0;
+            pipeline._wakeupJustCompleted = true;
+            appendFileSync(logFile, '[WAKEUP] Subtask ' + subtask.id + ' completed after wakeup — clearing wakeup state\n');
+            // Don't call executePhase here — avoids race condition with the
+            // still-running groups loop. Post-groups code detects _wakeupJustCompleted
+            // and re-enters implement from there.
+            return;
           }
 
           // post_subtask sensor
@@ -374,11 +458,11 @@ export async function runImplement(
               });
               appendFileSync(logFile, sensorRunSummary(postResult));
               if (!postResult.allPassed) {
-                const sensorReportPath = path.join(pipeline.specPath, `sensor_report-st${subtask.id}.json`);
+                const sensorReportPath = path.join(pipeline.specPath, 'sensor_report-st' + subtask.id + '.json');
                 const failMsg = postResult.reports.filter(r => !r.passed).map(r => r.sensor + ': ' + (r.error || 'exit ' + r.exitCode)).join('; ');
                 const failures = postResult.reports.filter(r => !r.passed).map(r => ({
-                  subtask: subtask.title, sensor: r.sensor, error: r.error || `exit code ${r.exitCode}`,
-                  fix_needed: `Fix sensor failures: ${failMsg}. Run the sensor locally to reproduce.`,
+                  subtask: subtask.title, sensor: r.sensor, error: r.error || 'exit code ' + r.exitCode,
+                  fix_needed: 'Fix sensor failures: ' + failMsg + '. Run the sensor locally to reproduce.',
                 }));
                 writeFileSync(sensorReportPath, JSON.stringify({ failures, overall: 'FAIL' }, null, 2));
               }
@@ -460,10 +544,43 @@ export async function runImplement(
     }
   }
 
+  // ── Post-groups code (runs after ALL subtask groups complete) ──
+
   // If the deliverable verification circuit breaker fired, stop here.
   // The inner return only exits the subtask handler, so we need this guard
   // to prevent the phase from being overwritten back to qa-review below.
   if (pipeline.phase === 'failed') return;
+
+  // ADR 002: Wakeup just completed — re-enter implement for deferred subtasks
+  if (pipeline._wakeupJustCompleted) {
+    delete pipeline._wakeupJustCompleted;
+    deps.savePipelineState(pipeline);
+    deps.advancePhase(pipeline, 'implement');
+    await deps.executePhase(pipeline);
+    return;
+  }
+
+  // ADR 002: Wakeup timer — pause implement phase until wakeup time
+  if (pipeline.wakeupUntil) {
+    if ((pipeline.wakeupAttemptCount || 0) >= 3) {
+      appendFileSync(logFile, '[WAKEUP] Subtask ' + pipeline.wakeupSubtaskId + ' exceeded wakeup attempt cap (3) — advancing to failed\n');
+      const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+      writeFileSync(reportPath, JSON.stringify({
+        overall: 'FAIL',
+        criteria: [{
+          criterion: 'Wakeup attempt limit exceeded',
+          name: 'Wakeup attempt limit exceeded',
+          status: 'FAIL',
+          notes: 'Subtask ' + pipeline.wakeupSubtaskId + ' failed to produce artifact after 3 wakeup attempts. Expected artifact: ' + (pipeline.wakeupArtifact || 'unknown'),
+        }],
+      }, null, 2));
+      deps.advancePhase(pipeline, 'failed');
+      return;
+    }
+    deps.savePipelineState(pipeline);
+    deps.scheduleWakeup(pipeline);
+    return;
+  }
 
   // Clean up feedback files
   if (hasQaFeedback && existsSync(qaFeedbackPath)) unlinkSync(qaFeedbackPath);
@@ -487,28 +604,28 @@ export async function runImplement(
   deps.phaseHeader(logFile, 'implement — push to remote');
   try {
     deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
-    appendFileSync(logFile, `[PUSH] Successfully pushed ${pipeline.branch} to origin\n`);
+    appendFileSync(logFile, '[PUSH] Successfully pushed ' + pipeline.branch + ' to origin\n');
 
     // Verify remote HEAD
     try {
       const localHead = execFileSync('git', ['rev-parse', pipeline.branch], {
         cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
       }).trim();
-      const remoteHead = execFileSync('git', ['rev-parse', `origin/${pipeline.branch}`], {
+      const remoteHead = execFileSync('git', ['rev-parse', 'origin/' + pipeline.branch], {
         cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
       }).trim();
       if (localHead !== remoteHead) {
-        throw new Error(`Push succeeded but HEADs differ — local=${localHead} remote=${remoteHead}`);
+        throw new Error('Push succeeded but HEADs differ — local=' + localHead + ' remote=' + remoteHead);
       }
       appendFileSync(logFile, '[PUSH] Verified remote HEAD matches local HEAD\n');
     } catch (verifyErr) {
       const verifyMsg = verifyErr instanceof Error ? verifyErr.message : String(verifyErr);
-      appendFileSync(logFile, `[PUSH] Remote verification failed: ${verifyMsg}\n`);
+      appendFileSync(logFile, '[PUSH] Remote verification failed: ' + verifyMsg + '\n');
       throw verifyErr;
     }
   } catch (pushErr) {
     const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
-    appendFileSync(logFile, `[PUSH] Push failed: ${pushMsg}\n`);
+    appendFileSync(logFile, '[PUSH] Push failed: ' + pushMsg + '\n');
     appendFileSync(logFile, '[PUSH] Task cannot advance — engineer must be able to push before QA can verify\n');
     const reportPath = path.join(pipeline.specPath, 'qa_report.json');
     writeFileSync(reportPath, JSON.stringify({
@@ -517,7 +634,7 @@ export async function runImplement(
         criterion: 'Git push verification',
         name: 'Git push verification',
         status: 'FAIL',
-        notes: `Git push failed: ${pushMsg}. The engineer must be able to push commits before QA can verify.`,
+        notes: 'Git push failed: ' + pushMsg + '. The engineer must be able to push commits before QA can verify.',
       }],
     }, null, 2));
     deps.advancePhase(pipeline, 'failed');
@@ -530,7 +647,7 @@ export async function runImplement(
     try {
       const planFinal = JSON.parse(readFileSync(planPath, 'utf-8'));
       for (const s of (planFinal.subtasks || [])) {
-        const srPath = path.join(pipeline.specPath, `sensor_report-st${s.id}.json`);
+        const srPath = path.join(pipeline.specPath, 'sensor_report-st' + s.id + '.json');
         if (existsSync(srPath)) {
           try {
             const report = JSON.parse(readFileSync(srPath, 'utf-8'));
@@ -543,13 +660,13 @@ export async function runImplement(
   }
 
   if (allSensorFailures.length > 0) {
-    appendFileSync(logFile, `\n[SENSOR-GATE] post_subtask sensors failed (${allSensorFailures.length} failure(s)) — bouncing to implement for sensor fixes\n`);
+    appendFileSync(logFile, '\n[SENSOR-GATE] post_subtask sensors failed (' + allSensorFailures.length + ' failure(s)) — bouncing to implement for sensor fixes\n');
     deps.writeQaFeedback(pipeline, {
       overall: 'FAIL',
       fail_type: 'cleanup',
       criteria: allSensorFailures.map(f => ({
-        name: `Sensor: ${f.subtask} — ${f.sensor}`,
-        criterion: `Sensor: ${f.subtask} — ${f.sensor}`,
+        name: 'Sensor: ' + f.subtask + ' — ' + f.sensor,
+        criterion: 'Sensor: ' + f.subtask + ' — ' + f.sensor,
         status: 'FAIL' as const,
         notes: f.error,
         fix_needed: f.fix_needed,
@@ -571,11 +688,11 @@ export async function runImplement(
  *  This is exported so tests can verify the header is present. */
 export function buildSyntheticReworkDescription(qaContent: string): string {
   return (
-    `⚠️ ALL PLAN SUBTASKS ARE DONE — THIS IS TARGETED REWORK, NOT FRESH IMPLEMENTATION.\n\n` +
-    `QA found failures that could not be automatically mapped to specific plan subtasks. ` +
-    `The original plan subtasks are already implemented — do NOT re-read or re-implement them. ` +
-    `Do NOT re-read the spec. Your ONLY job is to fix the QA issues listed below.\n\n` +
-    `**QA feedback (source of truth):**\n\n${qaContent}`
+    '⚠️ ALL PLAN SUBTASKS ARE DONE — THIS IS TARGETED REWORK, NOT FRESH IMPLEMENTATION.\n\n' +
+    'QA found failures that could not be automatically mapped to specific plan subtasks. ' +
+    'The original plan subtasks are already implemented — do NOT re-read or re-implement them. ' +
+    'Do NOT re-read the spec. Your ONLY job is to fix the QA issues listed below.\n\n' +
+    '**QA feedback (source of truth):**\n\n' + qaContent
   );
 }
 
