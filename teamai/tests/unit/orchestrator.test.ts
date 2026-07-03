@@ -2380,7 +2380,95 @@ describe('Orchestrator', () => {
     });
   });
 
-  // ── restorePipeline ───────────────────────────────────────────────
+
+    it('resumes from qa-review phase when task is in qa-review (active phase)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      // Set up artifacts so the old artifact-detection path would pick 'implement'
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [], completed: true }],
+      }));
+
+      // Put the task in qa-review — an active pipeline phase (not in NO_RESUME_PHASES)
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'qa-review' });
+
+      // Spy on runTask to capture the startPhase argument
+      const runTaskSpy = vi.spyOn(orch as AnyOrch, 'runTask')
+        .mockRejectedValue(new Error('simulated abort'));
+
+      await orch.resumeTask(testData.taskId).catch(() => {});
+
+      // Should resume from qa-review, not from implement (the artifact-detection default)
+      expect(runTaskSpy).toHaveBeenCalledWith(
+        testData.taskId,
+        expect.any(String),
+        'qa-review',
+      );
+
+      runTaskSpy.mockRestore();
+    });
+
+    it('resumes from implement phase when task is in implement (active phase)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [], completed: true }],
+      }));
+
+      // Put the task in implement — an active pipeline phase
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'implement' });
+
+      const runTaskSpy = vi.spyOn(orch as AnyOrch, 'runTask')
+        .mockRejectedValue(new Error('simulated abort'));
+
+      await orch.resumeTask(testData.taskId).catch(() => {});
+
+      // Should resume from implement (the task's current phase), not detect from artifacts
+      expect(runTaskSpy).toHaveBeenCalledWith(
+        testData.taskId,
+        expect.any(String),
+        'implement',
+      );
+
+      runTaskSpy.mockRestore();
+    });
+
+    it('falls back to artifact detection (implement) when task is in backlog', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [], completed: true }],
+      }));
+
+      // Task is in backlog — a NO_RESUME_PHASE, so artifact detection should kick in
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'backlog' });
+
+      const runTaskSpy = vi.spyOn(orch as AnyOrch, 'runTask')
+        .mockRejectedValue(new Error('simulated abort'));
+
+      await orch.resumeTask(testData.taskId).catch(() => {});
+
+      // Should use artifact detection: plan.json exists → start from implement
+      expect(runTaskSpy).toHaveBeenCalledWith(
+        testData.taskId,
+        expect.any(String),
+        'implement',
+      );
+
+      runTaskSpy.mockRestore();
+    });
+
+
+// ── restorePipeline ───────────────────────────────────────────────
 
   describe('restorePipeline', () => {
     it('restores pipeline from task data with correct branch', () => {

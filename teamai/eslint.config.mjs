@@ -5,6 +5,163 @@ import nextTs from "eslint-config-next/typescript";
 /** Custom rules for useServerMutation migration enforcement. */
 const localPlugin = {
   rules: {
+    /**
+     * Detects the pattern `useState(false)` + `useEffect(() => {...}, [])`
+     * where the effect async-fetches the real state on mount.
+     *
+     * Antipattern:
+     *   const [enabled, setEnabled] = useState(false);
+     *   useEffect(() => { fetchState().then(s => setEnabled(s.enabled)); }, []);
+     *
+     * Correct pattern: pass initial state as a server prop.
+     *   // Server component: <Button initialEnabled={state.enabled} />
+     *   // Client component: const [enabled, setEnabled] = useState(initialEnabled);
+     */
+    "no-async-fetch-on-mount": {
+      meta: {
+        type: "suggestion",
+        docs: {
+          description:
+            "Prevent useState(false) + useEffect(() => ..., []) async-fetch-on-mount antipattern",
+        },
+      },
+      create(context) {
+        // Track useState calls with literal initializers: { setterName, node }
+        const stateDecls = [];
+        // Track mount effects that perform async work
+        const mountEffectsWithAsync = [];
+
+        function isLiteral(node) {
+          return (
+            node.type === "Literal" ||
+            node.type === "TemplateLiteral" ||
+            (node.type === "Identifier" &&
+              (node.name === "undefined" || node.name === "null"))
+          );
+        }
+
+        /** Check if a node or its descendants contain an async operation. */
+        function containsAsyncOperation(node) {
+          if (!node) return false;
+          // await expression
+          if (node.type === "AwaitExpression") return true;
+          // .then() / .catch() / .finally() calls
+          if (
+            node.type === "CallExpression" &&
+            node.callee.type === "MemberExpression" &&
+            (node.callee.property.name === "then" ||
+              node.callee.property.name === "catch" ||
+              node.callee.property.name === "finally")
+          ) {
+            return true;
+          }
+          // Generic recursion: only recurse into nodes that could contain async
+          // expressions (skip literals, identifiers to avoid O(n²))
+          for (const key of Object.keys(node)) {
+            if (key === "parent" || key === "range" || key === "loc") continue;
+            const child = node[key];
+            if (Array.isArray(child)) {
+              for (const c of child) {
+                if (c && typeof c.type === "string" && containsAsyncOperation(c))
+                  return true;
+              }
+            } else if (child && typeof child.type === "string") {
+              if (containsAsyncOperation(child)) return true;
+            }
+          }
+          return false;
+        }
+
+        /** Check if a node or its descendants call `name` as a function. */
+        function callsSetter(node, name) {
+          if (!node) return false;
+          if (
+            node.type === "CallExpression" &&
+            node.callee.type === "Identifier" &&
+            node.callee.name === name
+          ) {
+            return true;
+          }
+          for (const key of Object.keys(node)) {
+            if (key === "parent" || key === "range" || key === "loc") continue;
+            const child = node[key];
+            if (Array.isArray(child)) {
+              for (const c of child) {
+                if (c && typeof c.type === "string" && callsSetter(c, name))
+                  return true;
+              }
+            } else if (child && typeof child.type === "string") {
+              if (callsSetter(child, name)) return true;
+            }
+          }
+          return false;
+        }
+
+        return {
+          // Match: const [x, setX] = useState(literalValue)
+          VariableDeclarator(node) {
+            if (
+              node.init &&
+              node.init.type === "CallExpression" &&
+              node.init.callee.type === "Identifier" &&
+              node.init.callee.name === "useState" &&
+              node.init.arguments.length === 1 &&
+              isLiteral(node.init.arguments[0]) &&
+              node.id.type === "ArrayPattern" &&
+              node.id.elements.length === 2 &&
+              node.id.elements[1].type === "Identifier"
+            ) {
+              stateDecls.push({
+                setter: node.id.elements[1].name,
+                node,
+              });
+            }
+          },
+
+          // Match: useEffect(() => { ... }, [])
+          CallExpression(node) {
+            if (
+              node.callee.type === "Identifier" &&
+              node.callee.name === "useEffect" &&
+              node.arguments.length >= 2 &&
+              node.arguments[0].type === "ArrowFunctionExpression"
+            ) {
+              const deps = node.arguments[1];
+              // Empty dependency array: useEffect(..., [])
+              if (
+                deps &&
+                deps.type === "ArrayExpression" &&
+                deps.elements.length === 0
+              ) {
+                const body = node.arguments[0].body;
+                if (containsAsyncOperation(body)) {
+                  mountEffectsWithAsync.push({ node, body });
+                }
+              }
+            }
+          },
+
+          "Program:exit"() {
+            // Cross-reference: for each mount effect with async work,
+            // check if it calls any setter from a useState(literal)
+            for (const effect of mountEffectsWithAsync) {
+              for (const decl of stateDecls) {
+                if (callsSetter(effect.body, decl.setter)) {
+                  context.report({
+                    node: decl.node,
+                    message:
+                      `useState(literal) + useEffect(async, []) antipattern detected. ` +
+                      `The state "${decl.setter}" is initialised with a literal default then ` +
+                      `async-fetched in a mount effect — it will reset on router.refresh(). ` +
+                      `Pass the initial value as a server prop instead (e.g. <Comp initialX={val} />).`,
+                  });
+                }
+              }
+            }
+          },
+        };
+      },
+    },
     "no-useTransition-useRouter": {
       meta: { type: "suggestion" },
       create(context) {
@@ -125,6 +282,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Playwright output
     "test-results/**",
+    // One-off migration scripts use Node require() naturally
+    "scripts/**",
   ]),
   // Test files mock private internals and need `any` for type casting.
   // expect.any(), (obj as any).privateMethod, and mock (...args: any[]) signatures
@@ -160,6 +319,7 @@ const eslintConfig = defineConfig([
     rules: {
       "local/no-useTransition-useRouter": "warn",
       "local/no-raw-router-refresh": "warn",
+      "local/no-async-fetch-on-mount": "warn",
     },
   },
 ]);

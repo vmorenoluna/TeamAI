@@ -1,27 +1,21 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { getAutoModeStateAction, toggleAutoMode } from '@/app/actions/auto-mode';
+import { useState } from 'react';
+import { toggleAutoMode } from '@/app/actions/auto-mode';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 
 interface Props {
   /** When null, no project is selected — button is disabled and no fetch is made. */
   activeProjectPath?: string | null;
+  /** Server-side auto-mode enabled state, passed from layout to survive re-renders. */
+  initialEnabled: boolean;
 }
 
-export function AutoModeButton({ activeProjectPath }: Props) {
+export function AutoModeButton({ activeProjectPath, initialEnabled }: Props) {
   const { run, isPending } = useServerMutation();
   const noProject = activeProjectPath === null;
-  const [enabled, setEnabled] = useState(false);
-  const [loading, setLoading] = useState(!noProject);
+  const [enabled, setEnabled] = useState(initialEnabled);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (noProject) return; // loading already starts as false when noProject is true
-    getAutoModeStateAction()
-      .then(state => { setEnabled(state.enabled); setLoading(false); })
-      .catch(() => { setLoading(false); });
-  }, [noProject]);
 
   function handleToggle() {
     if (noProject) return;
@@ -37,14 +31,6 @@ export function AutoModeButton({ activeProjectPath }: Props) {
         throw e; // prevent router.refresh() on failure
       }
     });
-  }
-
-  if (loading) {
-    return (
-      <div className="shrink-0 px-3 py-1.5 text-xs text-slate-500">
-        Loading…
-      </div>
-    );
   }
 
   return (

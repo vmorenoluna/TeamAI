@@ -564,19 +564,29 @@ export class Orchestrator {
     if (!task) throw new Error(`Task ${taskId} not found`);
 
     const dir = this.taskStore.getDirById(taskId);
-    const hasSpec = existsSync(path.join(dir, 'spec.md'));
-    const hasPlan = existsSync(path.join(dir, 'plan.json'));
 
+    // Determine start phase:
+    // - Active pipeline phase (rate-limited / crash-recovered): resume from current phase
+    // - Backlog/stopped/done: detect phase from existing artifacts (spec.md, plan.json)
     let startPhase: PipelinePhase;
-    if (hasPlan) {
-      startPhase = 'implement';
-      // Subtask completions are preserved — runImplement skips already-completed
-      // subtasks. If the user wants a full re-run, they should stop the task
-      // (move to backlog) and restart it, which calls cleanupTaskArtifacts.
-    } else if (hasSpec) {
-      startPhase = 'plan';
+    if (!NO_RESUME_PHASES.has(task.phase)) {
+      // Task was mid-pipeline — resume from its actual phase instead of
+      // restarting from implement. This preserves the phase that handleRateLimit
+      // paused at, preventing unnecessary re-work.
+      startPhase = task.phase as PipelinePhase;
     } else {
-      startPhase = 'spec';
+      const hasSpec = existsSync(path.join(dir, 'spec.md'));
+      const hasPlan = existsSync(path.join(dir, 'plan.json'));
+      if (hasPlan) {
+        startPhase = 'implement';
+        // Subtask completions are preserved — runImplement skips already-completed
+        // subtasks. If the user wants a full re-run, they should stop the task
+        // (move to backlog) and restart it, which calls cleanupTaskArtifacts.
+      } else if (hasSpec) {
+        startPhase = 'plan';
+      } else {
+        startPhase = 'spec';
+      }
     }
 
     // Clear output.log for a fresh terminal view

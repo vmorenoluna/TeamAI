@@ -569,8 +569,8 @@ describe('Recovery Integration', () => {
       const { autoResumeInterruptedTasks } = await import('../../src/lib/recovery');
       const count = await autoResumeInterruptedTasks();
 
-      // Should still count interrupted tasks found on disk
-      expect(count).toBe(1);
+      // Task was found but orchestrator creation failed, so it wasn't queued for resume
+      expect(count).toBe(0);
       expect(mockGetOrchestrator).toHaveBeenCalledTimes(1);
       expect(mockOrchResumeTask).not.toHaveBeenCalled();
     });

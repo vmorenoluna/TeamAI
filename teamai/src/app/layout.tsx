@@ -8,6 +8,7 @@ import { DefaultsUpdater } from '@/components/defaults-updater';
 import { RecoveryBanner } from '@/components/recovery-banner';
 import { AutoModeButton } from '@/components/auto-mode-button';
 import { getInterruptedTasks } from '@/app/actions/recovery';
+import { getAutoModeState } from '@/lib/auto-mode';
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
@@ -22,6 +23,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const activeProject = await getActiveProject();
   const staleDefaults = await getOutdatedProjects();
   const interruptedTasks = await getInterruptedTasks();
+  const autoModeState = activeProject ? getAutoModeState(activeProject.path) : { enabled: false };
 
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full`}>
@@ -34,7 +36,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <ProjectSelector projects={projects} activeProjectPath={activeProject?.path ?? null} />
             </div>
             <div className="pr-4 shrink-0">
-              <AutoModeButton activeProjectPath={activeProject?.path ?? null} />
+              <AutoModeButton activeProjectPath={activeProject?.path ?? null} initialEnabled={autoModeState.enabled} />
             </div>
           </div>
           {/* Defaults update banner — shows when projects have outdated copies of TeamAI defaults */}

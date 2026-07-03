@@ -16,11 +16,9 @@ vi.mock('next/navigation', () => ({
   }),
 }));
 
-const mockGetAutoModeStateAction = vi.fn();
 const mockToggleAutoMode = vi.fn();
 
 vi.mock('@/app/actions/auto-mode', () => ({
-  getAutoModeStateAction: (...args: unknown[]) => mockGetAutoModeStateAction(...args),
   toggleAutoMode: (...args: unknown[]) => mockToggleAutoMode(...args),
 }));
 
@@ -58,13 +56,6 @@ vi.mock('react', async () => {
 describe('AutoModeButton', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: auto mode disabled, resolves immediately
-    mockGetAutoModeStateAction.mockResolvedValue({
-      enabled: false,
-      maxParallel: 2,
-      activeCount: 0,
-      trackedCount: 0,
-    });
     mockToggleAutoMode.mockResolvedValue(undefined);
   });
 
@@ -72,38 +63,22 @@ describe('AutoModeButton', () => {
 
   describe('no project selected', () => {
     it('shows disabled button when activeProjectPath is null', () => {
-      render(<AutoModeButton activeProjectPath={null} />);
+      render(<AutoModeButton activeProjectPath={null} initialEnabled={false} />);
 
       const button = screen.getByRole('button');
       expect(button).toBeDisabled();
       expect(button).toHaveAttribute('title', 'No project selected');
     });
 
-    it('does NOT show loading text when no project (skips fetch)', () => {
-      mockGetAutoModeStateAction.mockImplementation(() => new Promise(() => {}));
+    it('renders button immediately (no loading state)', () => {
+      render(<AutoModeButton activeProjectPath={null} initialEnabled={false} />);
 
-      render(<AutoModeButton activeProjectPath={null} />);
-
-      // Should NOT show loading, should immediately render disabled button
       expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
       expect(screen.getByRole('button')).toBeInTheDocument();
     });
 
-    it('does NOT call getAutoModeStateAction when no project', () => {
-      render(<AutoModeButton activeProjectPath={null} />);
-
-      expect(mockGetAutoModeStateAction).not.toHaveBeenCalled();
-    });
-
-    it('does NOT call toggleAutoMode when clicked with no project', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: false,
-        maxParallel: 2,
-        activeCount: 0,
-        trackedCount: 0,
-      });
-
-      render(<AutoModeButton activeProjectPath={null} />);
+    it('does NOT call toggleAutoMode when clicked with no project', () => {
+      render(<AutoModeButton activeProjectPath={null} initialEnabled={false} />);
 
       const button = screen.getByRole('button');
       fireEvent.click(button);
@@ -113,54 +88,26 @@ describe('AutoModeButton', () => {
     });
   });
 
-  // ── Loading state ───────────────────────────────────────────────────
+  // ── Initial enabled from server state ───────────────────────────
 
-  describe('loading state', () => {
-    it('shows "Loading…" while initial state is being fetched', () => {
-      // Never-resolving promise keeps loading state alive
-      mockGetAutoModeStateAction.mockImplementation(() => new Promise(() => {}));
+  describe('initial state from server', () => {
+    it('shows as enabled when initialEnabled is true', () => {
+      render(<AutoModeButton initialEnabled={true} />);
 
-      render(<AutoModeButton />);
-
-      expect(screen.getByText('Loading…')).toBeInTheDocument();
+      const button = screen.getByRole('button');
+      expect(button).toHaveTextContent('Auto');
+      expect(button).toHaveTextContent('■');
+      expect(button.querySelector('.animate-pulse')).toBeInTheDocument();
+      expect(button.querySelector('.bg-emerald-400')).toBeInTheDocument();
+      expect(screen.getByTitle('Stop Auto mode')).toBeInTheDocument();
     });
 
-    it('does NOT show the toggle button while loading', () => {
-      mockGetAutoModeStateAction.mockImplementation(() => new Promise(() => {}));
+    it('shows as disabled when initialEnabled is false', () => {
+      render(<AutoModeButton initialEnabled={false} />);
 
-      render(<AutoModeButton />);
-
-      expect(screen.queryByRole('button')).not.toBeInTheDocument();
-    });
-
-    it('hides loading text and renders button once state resolves', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: false,
-        maxParallel: 2,
-        activeCount: 0,
-        trackedCount: 0,
-      });
-
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
-
-      expect(screen.getByRole('button')).toBeInTheDocument();
-    });
-
-    it('hides loading text even when fetch fails (graceful degradation)', async () => {
-      mockGetAutoModeStateAction.mockRejectedValue(new Error('failed'));
-
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
-
-      // After fetch failure, the button still renders (in disabled state)
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const button = screen.getByRole('button');
+      expect(button).toHaveTextContent('▶');
+      expect(button).toHaveTextContent('Auto');
       expect(screen.getByTitle('Start Auto mode')).toBeInTheDocument();
     });
   });
@@ -168,35 +115,22 @@ describe('AutoModeButton', () => {
   // ── Disabled state UI ───────────────────────────────────────────────
 
   describe('disabled state UI', () => {
-    it('shows play icon (▶) and "Auto" label when disabled', async () => {
-      render(<AutoModeButton />);
+    it('shows play icon (▶) and "Auto" label when disabled', () => {
+      render(<AutoModeButton initialEnabled={false} />);
 
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
-
-      // The button contains "▶" and "Auto"
       const button = screen.getByRole('button');
       expect(button).toHaveTextContent('▶');
       expect(button).toHaveTextContent('Auto');
     });
 
-    it('shows correct title attribute when disabled', async () => {
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+    it('shows correct title attribute when disabled', () => {
+      render(<AutoModeButton initialEnabled={false} />);
 
       expect(screen.getByTitle('Start Auto mode')).toBeInTheDocument();
     });
 
-    it('uses slate border styling when disabled', async () => {
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+    it('uses slate border styling when disabled', () => {
+      render(<AutoModeButton initialEnabled={false} />);
 
       const button = screen.getByRole('button');
       expect(button.className).toContain('border-[#334155]');
@@ -206,58 +140,24 @@ describe('AutoModeButton', () => {
   // ── Enabled state UI ────────────────────────────────────────────────
 
   describe('enabled state UI', () => {
-    it('shows pulsing green dot and stop icon (■) when enabled', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: true,
-        maxParallel: 2,
-        activeCount: 1,
-        trackedCount: 1,
-      });
-
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+    it('shows pulsing green dot and stop icon (■) when enabled', () => {
+      render(<AutoModeButton initialEnabled={true} />);
 
       const button = screen.getByRole('button');
       expect(button).toHaveTextContent('Auto');
       expect(button).toHaveTextContent('■');
-      // Pulsing green dot
       expect(button.querySelector('.animate-pulse')).toBeInTheDocument();
       expect(button.querySelector('.bg-emerald-400')).toBeInTheDocument();
     });
 
-    it('shows correct title attribute when enabled', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: true,
-        maxParallel: 2,
-        activeCount: 1,
-        trackedCount: 1,
-      });
-
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+    it('shows correct title attribute when enabled', () => {
+      render(<AutoModeButton initialEnabled={true} />);
 
       expect(screen.getByTitle('Stop Auto mode')).toBeInTheDocument();
     });
 
-    it('uses emerald border and glow styling when enabled', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: true,
-        maxParallel: 2,
-        activeCount: 1,
-        trackedCount: 1,
-      });
-
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+    it('uses emerald border and glow styling when enabled', () => {
+      render(<AutoModeButton initialEnabled={true} />);
 
       const button = screen.getByRole('button');
       expect(button.className).toContain('border-emerald-700/60');
@@ -270,18 +170,7 @@ describe('AutoModeButton', () => {
 
   describe('toggle behavior', () => {
     it('calls toggleAutoMode(true) when clicked from disabled state', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: false,
-        maxParallel: 2,
-        activeCount: 0,
-        trackedCount: 0,
-      });
-
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+      render(<AutoModeButton initialEnabled={false} />);
 
       fireEvent.click(screen.getByRole('button'));
 
@@ -291,18 +180,7 @@ describe('AutoModeButton', () => {
     });
 
     it('calls toggleAutoMode(false) when clicked from enabled state', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: true,
-        maxParallel: 2,
-        activeCount: 1,
-        trackedCount: 1,
-      });
-
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+      render(<AutoModeButton initialEnabled={true} />);
 
       fireEvent.click(screen.getByRole('button'));
 
@@ -312,20 +190,10 @@ describe('AutoModeButton', () => {
     });
 
     it('refreshes the router after successful toggle', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: false,
-        maxParallel: 2,
-        activeCount: 0,
-        trackedCount: 0,
-      });
       mockToggleAutoMode.mockResolvedValue(undefined);
       mockRouterRefresh.mockClear();
 
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+      render(<AutoModeButton initialEnabled={false} />);
 
       fireEvent.click(screen.getByRole('button'));
 
@@ -339,21 +207,9 @@ describe('AutoModeButton', () => {
 
   describe('optimistic update', () => {
     it('updates UI to enabled immediately on click, before server responds', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: false,
-        maxParallel: 2,
-        activeCount: 0,
-        trackedCount: 0,
-      });
-
-      // Keep the toggle pending so we can observe optimistic state
       mockToggleAutoMode.mockImplementation(() => new Promise(() => {}));
 
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+      render(<AutoModeButton initialEnabled={false} />);
 
       // Initially disabled
       expect(screen.getByTitle('Start Auto mode')).toBeInTheDocument();
@@ -368,20 +224,9 @@ describe('AutoModeButton', () => {
     });
 
     it('updates UI to disabled immediately when toggling off', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: true,
-        maxParallel: 2,
-        activeCount: 1,
-        trackedCount: 1,
-      });
-
       mockToggleAutoMode.mockImplementation(() => new Promise(() => {}));
 
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+      render(<AutoModeButton initialEnabled={true} />);
 
       // Initially enabled
       expect(screen.getByTitle('Stop Auto mode')).toBeInTheDocument();
@@ -399,20 +244,9 @@ describe('AutoModeButton', () => {
 
   describe('error handling', () => {
     it('reverts optimistic update when toggleAutoMode fails', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: false,
-        maxParallel: 2,
-        activeCount: 0,
-        trackedCount: 0,
-      });
-
       mockToggleAutoMode.mockRejectedValue(new Error('Server error'));
 
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+      render(<AutoModeButton initialEnabled={false} />);
 
       fireEvent.click(screen.getByRole('button'));
 
@@ -423,20 +257,9 @@ describe('AutoModeButton', () => {
     });
 
     it('shows error message when toggleAutoMode fails', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: false,
-        maxParallel: 2,
-        activeCount: 0,
-        trackedCount: 0,
-      });
-
       mockToggleAutoMode.mockRejectedValue(new Error('Server error'));
 
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+      render(<AutoModeButton initialEnabled={false} />);
 
       fireEvent.click(screen.getByRole('button'));
 
@@ -446,20 +269,9 @@ describe('AutoModeButton', () => {
     });
 
     it('shows fallback error message when error is not an Error instance', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: false,
-        maxParallel: 2,
-        activeCount: 0,
-        trackedCount: 0,
-      });
-
       mockToggleAutoMode.mockRejectedValue('some string error');
 
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+      render(<AutoModeButton initialEnabled={false} />);
 
       fireEvent.click(screen.getByRole('button'));
 
@@ -469,21 +281,10 @@ describe('AutoModeButton', () => {
     });
 
     it('clears error message when toggling again', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: false,
-        maxParallel: 2,
-        activeCount: 0,
-        trackedCount: 0,
-      });
-
       // First toggle fails
       mockToggleAutoMode.mockRejectedValueOnce(new Error('First error'));
 
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+      render(<AutoModeButton initialEnabled={false} />);
 
       fireEvent.click(screen.getByRole('button'));
 
@@ -506,21 +307,9 @@ describe('AutoModeButton', () => {
 
   describe('disabled during pending transition', () => {
     it('disables the button while toggle is in progress', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: false,
-        maxParallel: 2,
-        activeCount: 0,
-        trackedCount: 0,
-      });
-
-      // Keep the toggle pending
       mockToggleAutoMode.mockImplementation(() => new Promise(() => {}));
 
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+      render(<AutoModeButton initialEnabled={false} />);
 
       fireEvent.click(screen.getByRole('button'));
 
@@ -530,26 +319,54 @@ describe('AutoModeButton', () => {
     });
 
     it('re-enables the button after toggle completes', async () => {
-      mockGetAutoModeStateAction.mockResolvedValue({
-        enabled: false,
-        maxParallel: 2,
-        activeCount: 0,
-        trackedCount: 0,
-      });
-
       mockToggleAutoMode.mockResolvedValue(undefined);
 
-      render(<AutoModeButton />);
-
-      await waitFor(() => {
-        expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      });
+      render(<AutoModeButton initialEnabled={false} />);
 
       fireEvent.click(screen.getByRole('button'));
 
       await waitFor(() => {
         expect(screen.getByRole('button')).not.toBeDisabled();
       });
+    });
+  });
+
+  // ── Survives router.refresh() ─────────────────────────────────────
+
+  describe('survives router.refresh()', () => {
+    it('retains enabled state after unmount and remount (simulating router.refresh)', () => {
+      // When router.refresh() fires, the layout re-renders, which unmounts
+      // and remounts AutoModeButton. The initialEnabled prop from the server
+      // must restore the enabled state correctly.
+
+      const { unmount } = render(<AutoModeButton initialEnabled={true} />);
+
+      // Initially enabled
+      expect(screen.getByTitle('Stop Auto mode')).toBeInTheDocument();
+      expect(screen.getByRole('button').querySelector('.animate-pulse')).toBeInTheDocument();
+
+      // Simulate router.refresh() — unmount and remount with same props
+      unmount();
+      render(<AutoModeButton initialEnabled={true} />);
+
+      // Should still be enabled after remount — state comes from the server prop,
+      // not from a volatile async fetch
+      expect(screen.getByTitle('Stop Auto mode')).toBeInTheDocument();
+      expect(screen.getByRole('button').querySelector('.animate-pulse')).toBeInTheDocument();
+    });
+
+    it('retains disabled state after unmount and remount', () => {
+      const { unmount } = render(<AutoModeButton initialEnabled={false} />);
+
+      // Initially disabled
+      expect(screen.getByTitle('Start Auto mode')).toBeInTheDocument();
+
+      // Simulate router.refresh()
+      unmount();
+      render(<AutoModeButton initialEnabled={false} />);
+
+      // Should still be disabled after remount
+      expect(screen.getByTitle('Start Auto mode')).toBeInTheDocument();
     });
   });
 });

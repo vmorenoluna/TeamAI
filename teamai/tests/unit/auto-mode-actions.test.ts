@@ -1,8 +1,7 @@
 /**
  * Unit tests for auto-mode server actions.
  *
- * Tests cover toggleAutoMode (enable/disable, revalidatePath, error propagation),
- * getAutoModeStateAction (delegates to engine, error propagation), and
+ * Tests cover toggleAutoMode (enable/disable, revalidatePath, error propagation), and
  * markAutoReviewed (writes autoReviewed:true, revalidates paths, error propagation).
  */
 
@@ -14,7 +13,6 @@ import { join } from 'path';
 
 const mockGetActiveProjectPath = vi.fn();
 const mockGetPipelineConfig = vi.fn();
-const mockGetAutoModeState = vi.fn();
 const mockSetAutoModeState = vi.fn();
 const mockRevalidatePath = vi.fn();
 const mockTaskStoreUpdate = vi.fn();
@@ -28,7 +26,6 @@ vi.mock('@/app/actions/pipeline', () => ({
 }));
 
 vi.mock('@/lib/auto-mode', () => ({
-  getAutoModeState: (...args: unknown[]) => mockGetAutoModeState(...args),
   setAutoModeState: (...args: unknown[]) => mockSetAutoModeState(...args),
   isAutoModeEnabled: vi.fn(),
 }));
@@ -72,59 +69,12 @@ describe('auto-mode server actions', () => {
       parallelSubtasks: true,
       autoModeMaxParallel: 4,
     });
-    mockGetAutoModeState.mockReturnValue({
-      enabled: true,
-      maxParallel: 4,
-      activeCount: 2,
-      trackedCount: 1,
-    });
   });
 
   afterEach(() => {
     clean();
     vi.clearAllMocks();
     vi.resetModules();
-  });
-
-  // ── getAutoModeStateAction ─────────────────────────────────────────────
-
-  describe('getAutoModeStateAction', () => {
-    it('delegates to getAutoModeState with the active project path', async () => {
-      const { getAutoModeStateAction } = await import('@/app/actions/auto-mode');
-      const result = await getAutoModeStateAction();
-
-      expect(mockGetActiveProjectPath).toHaveBeenCalledTimes(1);
-      expect(mockGetAutoModeState).toHaveBeenCalledWith(root);
-      expect(result).toEqual({
-        enabled: true,
-        maxParallel: 4,
-        activeCount: 2,
-        trackedCount: 1,
-      });
-    });
-
-    it('returns state when auto mode is disabled', async () => {
-      mockGetAutoModeState.mockReturnValue({
-        enabled: false,
-        maxParallel: 2,
-        activeCount: 0,
-        trackedCount: 0,
-      });
-
-      const { getAutoModeStateAction } = await import('@/app/actions/auto-mode');
-      const result = await getAutoModeStateAction();
-
-      expect(result.enabled).toBe(false);
-      expect(result.activeCount).toBe(0);
-      expect(result.trackedCount).toBe(0);
-    });
-
-    it('propagates error when getActiveProjectPath fails', async () => {
-      mockGetActiveProjectPath.mockRejectedValue(new Error('no project selected'));
-
-      const { getAutoModeStateAction } = await import('@/app/actions/auto-mode');
-      await expect(getAutoModeStateAction()).rejects.toThrow('no project selected');
-    });
   });
 
   // ── toggleAutoMode ─────────────────────────────────────────────────────

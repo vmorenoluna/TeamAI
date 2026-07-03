@@ -54,6 +54,7 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
   const termRef = useRef<{ terminal: Terminal; fitAddon: FitAddon } | null>(null);
   const writtenRef = useRef(0);           // index into live events array
   const initialOutputRef = useRef(initialOutput); // always holds the latest value for the init callback
+  // eslint-disable-next-line local/no-async-fetch-on-mount -- termReady is terminal init, not user-toggleable state
   const [termReady, setTermReady] = useState(false);
   const events = useAgentStream(taskId);
   const userScrolledRef = useRef(false);
