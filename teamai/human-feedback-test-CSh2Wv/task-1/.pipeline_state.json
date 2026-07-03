@@ -1,0 +1,8 @@
+{
+  "taskId": "task-1",
+  "phase": "implement",
+  "qaAttempt": 0,
+  "branch": "feat/test-task",
+  "worktreePath": "worktrees\\test-task",
+  "updatedAt": "2026-07-03T21:58:44.490Z"
+}
