@@ -58,6 +58,10 @@ interface QaReviewPipeline {
   maxQaAttempts: number;
   specRevision: number;
   sessionId?: string;
+  /** Consecutive QA session timeouts (separate from qaAttempt — timeouts are infrastructure failures) */
+  qaTimeoutCount?: number;
+  /** Per-subtask counter of consecutive files_to_create failures */
+  deliverableFailCounts?: Record<number, number>;
 }
 
 type SessionOptsResult = { taskId: string; role: AgentSession['role']; cwd: string; [key: string]: unknown };
@@ -192,7 +196,10 @@ export async function runQaReview(
   try {
     await Promise.race([deps.waitForCompletion(sessionId), timeoutPromise]);
   } catch (err) {
-    if (err instanceof RateLimitError) throw err;
+    if (err instanceof RateLimitError) {
+      pipeline.qaAttempt--; // rate limits are free retries — don't count against the failure budget
+      throw err;
+    }
     processManager.killSession(sessionId);
     const timeoutReport: QaReport = {
       overall: 'FAIL',
@@ -205,9 +212,15 @@ export async function runQaReview(
     };
     writeFileSync(reportPath, JSON.stringify(timeoutReport, null, 2));
     appendFileSync(logFile, `\n[QA-TIMEOUT] ${err instanceof Error ? err.message : String(err)}\n`);
-    if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
+    // Use separate timeout counter — timeouts don't consume quality budget
+    pipeline.qaTimeoutCount = (pipeline.qaTimeoutCount || 0) + 1;
+    pipeline.qaAttempt--; // net zero: was incremented at top of runQaReview
+    if (pipeline.qaTimeoutCount >= 3) {
       deps.writeCompletionSummary(pipeline);
-      deps.advancePhase(pipeline, 'failed');
+      deps.advancePhase(pipeline, 'failed', {
+        failReason: 'timeout',
+        timeoutCount: pipeline.qaTimeoutCount,
+      });
     } else {
       deps.advancePhase(pipeline, 'qa-review');
       deps.savePipelineState(pipeline);
@@ -227,6 +240,9 @@ export async function runQaReview(
     report.head_at_review = headSha;
     writeFileSync(reportPath, JSON.stringify(report, null, 2));
   } catch { /* best-effort */ }
+
+  // Reset timeout counter on successful QA completion (no timeout)
+  pipeline.qaTimeoutCount = 0;
 
   const hasSpecConcerns = report.spec_concerns && Array.isArray(report.spec_concerns) && report.spec_concerns.length > 0;
 

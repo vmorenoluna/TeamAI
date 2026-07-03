@@ -48,6 +48,8 @@ interface TaskPipeline {
   specRevision: number;
   mergeStrategy?: 'local-merge' | 'pull-request';
   sessionId?: string;
+  qaTimeoutCount?: number;
+  deliverableFailCounts?: Record<number, number>;
 }
 
 type MergeStrategy = 'local-merge' | 'pull-request';
@@ -144,7 +146,10 @@ export async function rejectTask(
     } catch { /* best-effort: if qa_report.json is malformed, don't block the rejection */ }
   }
 
+  // Reset all retry counters — rejection gets a clean budget
   pipeline.qaAttempt = 0;
+  pipeline.qaTimeoutCount = 0;
+  pipeline.deliverableFailCounts = {};
   deps.advancePhase(pipeline, 'implement');
   await deps.executePhase(pipeline);
 }
@@ -214,7 +219,10 @@ export async function autoReviseSpec(
   }
 
   // Reset QA attempt counter — the revised spec gets a fresh QA cycle
+  // Reset all retry counters — fresh spec gets a clean budget
   pipeline.qaAttempt = 0;
+  pipeline.qaTimeoutCount = 0;
+  pipeline.deliverableFailCounts = {};
   deps.savePipelineState(pipeline);
 
   try {

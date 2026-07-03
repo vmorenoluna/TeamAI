@@ -67,6 +67,10 @@ interface TaskPipeline {
   specRevision: number;
   mergeStrategy?: MergeStrategy;
   sessionId?: string;
+  /** Consecutive QA session timeouts (separate from qaAttempt — timeouts are infrastructure failures) */
+  qaTimeoutCount?: number;
+  /** Per-subtask counter of consecutive files_to_create failures. Key = subtask ID, value = count. */
+  deliverableFailCounts?: Record<number, number>;
 }
 
 export class Orchestrator {
@@ -211,6 +215,8 @@ export class Orchestrator {
     if (savedState) {
       if (savedState.mergeStrategy) pipeline.mergeStrategy = savedState.mergeStrategy;
       if (savedState.qaAttempt !== undefined) pipeline.qaAttempt = savedState.qaAttempt;
+      if (savedState.qaTimeoutCount !== undefined) pipeline.qaTimeoutCount = savedState.qaTimeoutCount;
+      if (savedState.deliverableFailCounts !== undefined) pipeline.deliverableFailCounts = savedState.deliverableFailCounts;
       if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;
     }
 

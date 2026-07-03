@@ -1,0 +1,132 @@
+{
+  "complexity": 3,
+  "estimated_subtasks": 7,
+  "parallel_safe": true,
+  "subtasks": [
+    {
+      "id": 1,
+      "title": "Add pipeline state type fields + persistence for deliverableFailCounts and qaTimeoutCount",
+      "description": "Add two new optional pipeline state fields across all TypeScript interfaces and update the persistence layer to read/write them.\n\n**Type additions:**\n- `orchestrator.ts` `TaskPipeline`: add `deliverableFailCounts?: Record<number, number>` and `qaTimeoutCount?: number`\n- `implement.ts` `ImplementPipeline`: add `deliverableFailCounts?: Record<number, number>` and `qaTimeoutCount?: number`\n- `qa-review.ts` `QaReviewPipeline`: add `qaTimeoutCount?: number`\n\n**Persistence updates (`pipeline-state.ts`):**\n- `savePipelineState`: include both `deliverableFailCounts` and `qaTimeoutCount` in the saved state object\n- `restorePipelineState`: restore both fields from `.pipeline_state.json`.\n  **CRITICAL:** `deliverableFailCounts` is `Record<number, number>` in TS. JSON serializes numeric keys as strings (e.g., `{\"3\": 2}`). When restoring, cast `Object.keys()` results to `Number` — `parseInt(k, 10)`. This is standard `JSON.parse` behavior but easy to miss in tests.\n\n**Saved-state merge (`orchestrator.ts`):**\n- In `runTask`, update the `restorePipelineState` merge block (around line 213) to include `deliverableFailCounts` and `qaTimeoutCount` alongside existing fields like `qaAttempt` and `sessionId`.",
+      "files": [
+        "teamai/src/lib/orchestrator.ts",
+        "teamai/src/lib/orchestrator/implement.ts",
+        "teamai/src/lib/orchestrator/qa-review.ts",
+        "teamai/src/lib/orchestrator/pipeline-state.ts"
+      ],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "AC 7: Crash recovery preserves deliverableFailCounts — persisted to .pipeline_state.json",
+        "AC 14: Crash recovery preserves qaTimeoutCount — persisted to .pipeline_state.json and restored on crash recovery",
+        "AC 16: Pipeline state persistence includes all new fields — savePipelineState writes qaTimeoutCount, deliverableFailCounts (and existing wakeupAttemptCount if present). restorePipelineState reads them back",
+        "AC 17: TypeScript types updated — TaskPipeline, ImplementPipeline, QaReviewPipeline, and .pipeline_state.json types all include the new optional fields"
+      ],
+      "parallel_group": "A"
+    },
+    {
+      "id": 2,
+      "title": "Implement deliverable verification circuit breaker + re-entry prompt injection",
+      "description": "Add the deliverable verification counter and circuit breaker to `implement.ts`.\n\n**Counter logic (after the files_to_create existsSync loop):**\n\nWhen `skipCompletion` is true (one or more files_to_create entries are missing):\n1. Initialize `pipeline.deliverableFailCounts` to `{}` if undefined.\n2. Increment `deliverableFailCounts[subtaskId]` (initialize to 1 if absent).\n3. Log: `[VERIFY] Subtask {id} failed deliverable verification (attempt {count}/3) — missing: {comma-separated file list}`.\n4. If `deliverableFailCounts[subtaskId] >= 3`:\n   - Write `qa_report.json` with `overall: \"FAIL\"` documenting the subtask ID and missing files.\n   - Log: `[VERIFY] Subtask {id} exceeded deliverable verification cap (3) — advancing to failed`.\n   - Advance pipeline to `failed` and return (do NOT continue to next subtask or group).\n\nWhen `skipCompletion` is false (all files found):\n- Delete `deliverableFailCounts[subtaskId]` entry (reset counter).\n\n**Wakeup composition:**\n- The counter increment is skipped when `pipeline.wakeupSubtaskId != null` (not `existsSync` on the file — the wakeup file is already deleted by the orchestrator when first processed). Wakeup takes priority per ADR 002 AC 10.\n- During QA rework (`hasQaFeedback` is true), the counter operates identically — it still tracks failures and `skipCompletion` still blocks `completedIds.push`.\n\n**Re-entry prompt injection:**\n\nWhen constructing the subtask prompt and `deliverableFailCounts[subtaskId] > 0`, prepend a header before the normal subtask prompt:\n```text\n⚠️ DELIVERABLE RE-VERIFICATION (attempt {count}/3)\n\nYour previous session for this subtask ended but the following required\ndeliverable files were NOT created:\n\n  - path/to/missing-file.md\n  - path/to/other-file.json\n\nYou MUST create these files before ending your session. If you cannot\ncreate them (e.g., the task is impossible with the current spec), explain\nwhy and the orchestrator will advance the task to failed.\n```\nThe missing file list is reconstructed from `subtask.files_to_create`.",
+      "files": [
+        "teamai/src/lib/orchestrator/implement.ts"
+      ],
+      "depends_on": [1],
+      "acceptance_criteria": [
+        "AC 1: Counter tracks per-subtask — deliverableFailCounts is a Record<number, number>. Each failed files_to_create check for subtask N increments deliverableFailCounts[N]",
+        "AC 2: Re-entry prompt identifies missing files — When a subtask re-runs and deliverableFailCounts[subtaskId] > 0, the prompt includes a ⚠️ DELIVERABLE RE-VERIFICATION header listing which files were missing",
+        "AC 3: Circuit breaker at 3 — After 3 consecutive files_to_create failures for the same subtask, the task advances to failed with a qa_report.json documenting which files were never created",
+        "AC 4: Counter resets on pass — When a subtask passes files_to_create verification, deliverableFailCounts[subtaskId] is deleted",
+        "AC 5: No counter interaction with wakeup — If subtask_wakeup.json exists, files_to_create verification is skipped entirely (gated on pipeline.wakeupSubtaskId != null)",
+        "AC 6: Deliverable verification operates identically during QA rework — the counter still tracks failures and skipCompletion still blocks completedIds.push"
+      ],
+      "parallel_group": "B"
+    },
+    {
+      "id": 3,
+      "title": "Implement QA timeout counter with separate cap of 3",
+      "description": "Replace the current `qaAttempt >= maxQaAttempts` timeout gate with a dedicated `qaTimeoutCount` counter in `qa-review.ts`.\n\n**Timeout catch block changes (in the `catch (err)` block after `Promise.race`):**\n\nAfter the `RateLimitError` check, replace the existing timeout handling:\n\n```ts\n// On timeout (not rate-limit):\npipeline.qaTimeoutCount = (pipeline.qaTimeoutCount || 0) + 1;\npipeline.qaAttempt--;  // timeouts don't consume quality budget\n\nif (pipeline.qaTimeoutCount >= 3) {\n  // Write timeout-specific completion summary\n  deps.writeCompletionSummary(pipeline);  // must include timeout context\n  deps.advancePhase(pipeline, 'failed', {\n    failReason: 'timeout',\n    timeoutCount: pipeline.qaTimeoutCount,\n  });\n} else {\n  deps.advancePhase(pipeline, 'qa-review');\n  deps.savePipelineState(pipeline);\n  await deps.executePhase(pipeline);\n}\nreturn;\n```\n\nKey points:\n- `qaAttempt` is incremented at the top of `runQaReview` (line 90), then decremented here — net zero. Same pattern as the rate-limit decrement at line 196.\n- The `qaTimeoutCount >= 3` check replaces the old `qaAttempt >= maxQaAttempts` check for timeouts.\n- **Evaluation order:** timeout cap is checked before quality cap. If `qaTimeoutCount` hits 3, the task fails with a timeout message even if `qaAttempt < maxQaAttempts`.\n\n**Counter reset at end of `runQaReview`:**\n- After the QA session completes (PASS or FAIL) without timing out, reset `qaTimeoutCount = 0` before the quality-cap check. This ensures the counter only tracks consecutive timeouts.\n\n**Completion summary update (`qa-feedback.ts`):**\n- `writeCompletionSummary` should detect `qaTimeoutCount >= 3` and produce a distinct message: \"Task failed after 3 QA timeouts — agent was unable to complete review within the session budget. Consider: increasing the session budget (currently 20 minutes), simplifying the spec, or running QA manually.\" This is distinct from the quality-failure message.",
+      "files": [
+        "teamai/src/lib/orchestrator/qa-review.ts",
+        "teamai/src/lib/orchestrator/qa-feedback.ts"
+      ],
+      "depends_on": [1],
+      "acceptance_criteria": [
+        "AC 9: Separate counter from qaAttempt — qaTimeoutCount is incremented on timeout, qaAttempt is decremented back to its pre-call value",
+        "AC 10: Cap of 3 timeouts — After 3 consecutive QA timeouts, the task advances to failed with a timeout-specific completion summary",
+        "AC 11: Evaluation order — timeout cap before quality cap. If qaTimeoutCount >= 3, task fails with timeout message even if qaAttempt < maxQaAttempts",
+        "AC 12: Counter resets on successful QA completion — When a QA session completes (PASS or FAIL) without timing out, qaTimeoutCount resets to 0"
+      ],
+      "parallel_group": "B"
+    },
+    {
+      "id": 4,
+      "title": "Add unified counter reset to spec revision and human rejection hooks",
+      "description": "In `review-actions.ts`, update both `autoReviseSpec` and `rejectTask` to reset ALL retry counters together in a single point.\n\nCurrently these functions reset `qaAttempt = 0`. Extend them to also reset:\n- `pipeline.qaTimeoutCount = 0`\n- `pipeline.deliverableFailCounts = {}` (empty object, not undefined)\n\nAlso verify that `wakeupAttemptCount` (from ADR 002) is reset at the same hook. If not yet added, add `pipeline.wakeupAttemptCount = 0` alongside the others.\n\n**Pattern (in both autoReviseSpec and rejectTask):**\n```ts\n// Reset all retry counters — fresh spec/rejection gets a clean budget\npipeline.qaAttempt = 0;\npipeline.qaTimeoutCount = 0;\npipeline.deliverableFailCounts = {};\npipeline.wakeupAttemptCount = 0;\n```\n\nThis ensures consistency per AC 15: all counters reset together on human intervention, not scattered across multiple files.",
+      "files": [
+        "teamai/src/lib/orchestrator/review-actions.ts"
+      ],
+      "depends_on": [1],
+      "acceptance_criteria": [
+        "AC 8: deliverableFailCounts resets on spec revision — resets to {} along with all other retry counters",
+        "AC 13: qaTimeoutCount resets on spec revision or human rejection — same reset hook as qaAttempt",
+        "AC 15: All counters reset together on human intervention — spec revision and human rejection reset qaAttempt, qaTimeoutCount, deliverableFailCounts, and wakeupAttemptCount in a single reset point"
+      ],
+      "parallel_group": "B"
+    },
+    {
+      "id": 5,
+      "title": "Update plan.md template: files_to_create path guidance",
+      "description": "Update `defaults/commands/plan.md` to add guidance that `files_to_create` paths must be relative to the repository root.\n\n**Add to the Rules section** (after the existing verification-script-dedicated-subtask rule):\n```markdown\n- **files_to_create paths are relative to the repository root.** When populating\n  `files_to_create` for a subtask that must produce committed file artifacts\n  (benchmark output, sweep results, data pipeline output, generated documentation),\n  specify paths relative to the repository root (e.g. `docs/analysis.md`, not\n  `/absolute/path/to/docs/analysis.md`). The orchestrator resolves these against\n  the worktree root at verification time.\n```\n\nThis aligns with the edge case documented in ADR 005: `existsSync(path.join(cwd, file))` expects relative paths.",
+      "files": [
+        "teamai/defaults/commands/plan.md"
+      ],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "AD005 edge case: files_to_create paths are relative to worktree root — plan.md explicitly states paths must be relative to repository root"
+      ],
+      "parallel_group": "B"
+    },
+    {
+      "id": 6,
+      "title": "Update implement.md template: mention files_to_create in subtask prompt",
+      "description": "Update `defaults/commands/implement.md` to make the engineer aware of expected deliverable files.\n\n**Add to the Instructions section** (after step 1, before step 2):\n```markdown\n1. Read the subtask description and acceptance criteria carefully.\n   **If the subtask includes `files_to_create`**, note which files you MUST\n   create before ending your session — the orchestrator will verify their\n   existence and the subtask will re-run if any are missing.\n```\n\n**Add $TEAMAI_SPEC_DIR reference** to the subtask prompt template worded for the engineer — they need to know where the `.teamai/` directory is relative to the worktree. Insert a note in the Long-Running Verification Scripts section about the `$TEAMAI_SPEC_DIR` environment variable being available for finding the spec directory from within the worktree.",
+      "files": [
+        "teamai/defaults/commands/implement.md"
+      ],
+      "depends_on": [],
+      "acceptance_criteria": [
+        "AD005: implement.md mentions files_to_create so the engineer sees expected deliverable files",
+        "AD005: $TEAMAI_SPEC_DIR variable reference added so engineer can locate spec directory from worktree"
+      ],
+      "parallel_group": "B"
+    },
+    {
+      "id": 7,
+      "title": "Write all unit + integration tests (deliverable verification, QA timeout, unified reset)",
+      "description": "Write comprehensive tests covering all three verification gate features. All tests go into existing test files — do NOT create new test files unless a test requires isolation from existing suites.\n\n**Part A — Deliverable verification tests:**\n\nUnit tests (in `tests/unit/orchestrator-robustness.test.ts`):\n- Counter increments when files_to_create check fails\n- Counter does NOT increment when all files exist\n- Counter is per-subtask (subtask 3 failing doesn't affect subtask 5)\n- Counter resets (entry deleted) on successful pass after previous failures\n- Counter does NOT increment when wakeupSubtaskId is set (wakeup takes priority)\n- Counter increments normally during QA rework (hasQaFeedback = true)\n- Re-entry prompt contains ⚠️ DELIVERABLE RE-VERIFICATION header\n- Re-entry prompt lists missing files from subtask.files_to_create\n- Re-entry prompt shows correct attempt count (e.g., attempt 2/3)\n\nIntegration tests (in `tests/integration/crash-recovery.test.ts`):\n- Subtask fails files_to_create 3 times → task advances to failed with correct qa_report.json message\n- Subtask fails files_to_create twice, then passes on third attempt → counter resets\n- Counter survives crash recovery (persisted in .pipeline_state.json)\n\n**Part B — QA timeout tests:**\n\nUnit tests (in `tests/unit/orchestrator-robustness.test.ts`):\n- qaTimeoutCount increments on timeout\n- qaAttempt is decremented on timeout (net zero)\n- qaTimeoutCount resets to 0 when QA completes without timeout\n- qaTimeoutCount does NOT reset on rate-limit (different catch path)\n\nIntegration tests (in `tests/integration/crash-recovery.test.ts`):\n- QA times out 3 consecutive times → task fails with timeout-specific message\n- QA times out once, then completes (PASS) → qaTimeoutCount resets to 0\n- QA times out once, then completes (FAIL) → qaTimeoutCount resets, qaAttempt increments\n- Timeout cap checked BEFORE quality cap: qaTimeoutCount=3, qaAttempt=1 fails with timeout message\n- qaTimeoutCount survives crash recovery\n\n**Part C — Unified counter reset + crash recovery tests:**\n\nIntegration tests (in `tests/integration/crash-recovery.test.ts`):\n- Spec revision resets ALL counters: qaAttempt→0, qaTimeoutCount→0, deliverableFailCounts→{}, wakeupAttemptCount→0\n- Human rejection resets ALL counters (same pattern)\n- Crash recovery restores deliverableFailCounts and qaTimeoutCount from .pipeline_state.json\n- Crash recovery does NOT restore deliverableFailCounts for already-passed subtask\n- Pipeline state JSON roundtrip: string keys ({\"3\":2}) → parsed back with Number() cast\n\nMock processManager and filesystem as needed. Follow existing patterns in orchestrator-robustness.test.ts and crash-recovery.test.ts.",
+      "files": [
+        "teamai/tests/unit/orchestrator-robustness.test.ts",
+        "teamai/tests/integration/crash-recovery.test.ts"
+      ],
+      "depends_on": [2, 3, 4],
+      "acceptance_criteria": [
+        "AC 1: Unit test verifies per-subtask counter independence",
+        "AC 2: Unit test verifies re-entry prompt header and missing file list",
+        "AC 3: Integration test verifies circuit breaker at 3 advances to failed",
+        "AC 4: Integration test verifies counter resets on pass after failures",
+        "AC 5: Unit test verifies counter not incremented during wakeup",
+        "AC 6: Unit test verifies counter operates during QA rework",
+        "AC 7: Integration test verifies crash recovery preserves deliverableFailCounts",
+        "AC 8: Integration test verifies deliverableFailCounts resets on spec revision",
+        "AC 9: Unit test verifies qaTimeoutCount increments, qaAttempt decrements",
+        "AC 10: Integration test verifies cap of 3 with timeout-specific message",
+        "AC 11: Integration test verifies evaluation order (timeout cap before quality cap)",
+        "AC 12: Integration test verifies counter resets when QA completes without timeout",
+        "AC 13: Integration test verifies qaTimeoutCount resets on spec revision and human rejection",
+        "AC 14: Integration test verifies crash recovery preserves qaTimeoutCount",
+        "AC 15: Integration test verifies ALL counters reset together on human intervention",
+        "AC 16: Integration test verifies crash recovery restores both new fields"
+      ],
+      "parallel_group": "C"
+    }
+  ]
+}

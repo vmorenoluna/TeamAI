@@ -24,6 +24,9 @@ interface PlanSubtask {
   parallel_group?: string;
   completed?: boolean;
   qa_flagged?: boolean;
+  /** Files or directories this subtask must create on disk.
+   *  Verified after the session ends — subtask stays incomplete if any are missing. */
+  files_to_create?: string[];
 }
 
 interface QaCriterion {
@@ -52,6 +55,12 @@ interface ImplementPipeline {
   maxQaAttempts: number;
   specRevision: number;
   sessionId?: string;
+  /** Consecutive QA session timeouts (separate from qaAttempt) */
+  qaTimeoutCount?: number;
+  /** Per-subtask counter of consecutive files_to_create failures */
+  deliverableFailCounts?: Record<number, number>;
+  /** Set when a subtask creates a wakeup file — skips files_to_create verification (ADR 002) */
+  wakeupSubtaskId?: number;
 }
 
 type SessionOptsResult = { taskId: string; role: AgentSession['role']; cwd: string; [key: string]: unknown };
@@ -172,11 +181,7 @@ export async function runImplement(
     effectiveSubtasks = [{
       id: 9999,
       title: 'QA Rework: fix failing criteria (criterion matching found no flagged subtasks)',
-      description:
-        `QA found failures that could not be automatically mapped to specific plan subtasks. ` +
-        `The original plan subtasks are already implemented — do NOT re-read or re-implement them. ` +
-        `Instead, read the QA feedback below and fix every listed issue in the codebase.\n\n` +
-        `**QA feedback (source of truth):**\n\n${qaContent}`,
+      description: buildSyntheticReworkDescription(qaContent),
       files: allFiles,
       depends_on: [],
       acceptance_criteria: ['All criteria listed in the QA feedback above are satisfied'],
@@ -285,7 +290,21 @@ export async function runImplement(
 
           const subtaskFeedback = buildSubtaskFeedback(hasQaFeedback, qaOnlyCriteria, subtask, pipeline.specPath, humanFeedbackPath, hasHumanFeedback);
 
+          // Deliverable re-verification prompt header
+          let deliverableHeader = '';
+          if (!hasQaFeedback && pipeline.deliverableFailCounts?.[subtask.id]) {
+            const attemptCount = pipeline.deliverableFailCounts[subtask.id];
+            deliverableHeader = `⚠️ DELIVERABLE RE-VERIFICATION (attempt ${attemptCount}/3)\n\n` +
+              `Your previous session for this subtask ended but the following required\n` +
+              `deliverable files were NOT created:\n\n` +
+              (subtask.files_to_create?.map(f => `  - ${f}`).join('\n') || '') + `\n\n` +
+              `You MUST create these files before ending your session. If you cannot\n` +
+              `create them (e.g., the task is impossible with the current spec), explain\n` +
+              `why and the orchestrator will advance the task to failed.\n\n`;
+          }
+
           const prompt =
+            deliverableHeader +
             (subtaskFeedback ? subtaskFeedback + '\n---\n' : '') +
             '/implement Subtask ' + subtask.id + ': ' + subtask.title + '\n\n' +
             subtask.description + '\n\n' +
@@ -300,6 +319,51 @@ export async function runImplement(
           processManager.sendMessage(sessionId, prompt);
           await deps.waitForCompletion(sessionId);
           processManager.killSession(sessionId);
+
+          // Verify deliverable files exist before marking subtask complete
+          let skipCompletion = false;
+          // Wakeup takes priority — skip files_to_create verification entirely
+          const hasWakeup = pipeline.wakeupSubtaskId != null;
+          if (!hasWakeup && subtask.files_to_create?.length) {
+            for (const file of subtask.files_to_create) {
+              if (!existsSync(path.join(cwd, file))) {
+                skipCompletion = true;
+                appendFileSync(logFile, `\n[VERIFY] Subtask ${subtask.id}: expected file/directory missing — ${file}\n`);
+              }
+            }
+            if (skipCompletion) {
+              // Increment deliverable failure counter
+              if (!pipeline.deliverableFailCounts) pipeline.deliverableFailCounts = {};
+              const count = (pipeline.deliverableFailCounts[subtask.id] || 0) + 1;
+              pipeline.deliverableFailCounts[subtask.id] = count;
+              const missingFiles = subtask.files_to_create.filter(f => !existsSync(path.join(cwd, f))).join(', ');
+              appendFileSync(logFile, `[VERIFY] Subtask ${subtask.id} failed deliverable verification (attempt ${count}/3) — missing: ${missingFiles}\n`);
+              // Circuit breaker at 3
+              if (count >= 3) {
+                const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+                writeFileSync(reportPath, JSON.stringify({
+                  overall: 'FAIL',
+                  criteria: [{
+                    criterion: 'Deliverable verification — missing files',
+                    name: 'Deliverable verification',
+                    status: 'FAIL',
+                    notes: `Subtask ${subtask.id} failed deliverable verification 3 times. Missing files: ${missingFiles}`,
+                  }],
+                }, null, 2));
+                appendFileSync(logFile, `[VERIFY] Subtask ${subtask.id} exceeded deliverable verification cap (3) — advancing to failed\n`);
+                deps.advancePhase(pipeline, 'failed');
+                return;
+              }
+            }
+          }
+
+          if (!skipCompletion) {
+            // Reset deliverable counter on successful pass
+            if (pipeline.deliverableFailCounts?.[subtask.id] !== undefined) {
+              delete pipeline.deliverableFailCounts[subtask.id];
+            }
+            completedIds.push(subtask.id);
+          }
 
           // post_subtask sensor
           try {
@@ -324,7 +388,6 @@ export async function runImplement(
             appendFileSync(logFile, '\n[SENSOR:post_subtask] post-subtask sensors error: ' + msg + '\n');
           }
 
-          completedIds.push(subtask.id);
           deps.planWriteLock.current = deps.planWriteLock.current.then(() => {
             try {
               const cpPlanPath = path.join(pipeline.specPath, 'plan.json');
@@ -396,6 +459,11 @@ export async function runImplement(
       }
     }
   }
+
+  // If the deliverable verification circuit breaker fired, stop here.
+  // The inner return only exits the subtask handler, so we need this guard
+  // to prevent the phase from being overwritten back to qa-review below.
+  if (pipeline.phase === 'failed') return;
 
   // Clean up feedback files
   if (hasQaFeedback && existsSync(qaFeedbackPath)) unlinkSync(qaFeedbackPath);
@@ -498,6 +566,18 @@ export async function runImplement(
 }
 
 // ── Helper ────────────────────────────────────────────────────────────────
+
+/** Build the description string for synthetic subtask 9999.
+ *  This is exported so tests can verify the header is present. */
+export function buildSyntheticReworkDescription(qaContent: string): string {
+  return (
+    `⚠️ ALL PLAN SUBTASKS ARE DONE — THIS IS TARGETED REWORK, NOT FRESH IMPLEMENTATION.\n\n` +
+    `QA found failures that could not be automatically mapped to specific plan subtasks. ` +
+    `The original plan subtasks are already implemented — do NOT re-read or re-implement them. ` +
+    `Do NOT re-read the spec. Your ONLY job is to fix the QA issues listed below.\n\n` +
+    `**QA feedback (source of truth):**\n\n${qaContent}`
+  );
+}
 
 function buildSubtaskFeedback(
   hasQaFeedback: boolean,
