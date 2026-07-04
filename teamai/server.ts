@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { processManager } from './src/lib/process-manager';
 import { containerManager } from './src/lib/container-manager';
 import { startupCleanup, autoResumeInterruptedTasks, sweepStalledTasks } from './src/lib/recovery';
+import { restoreAutoModeStates } from './src/lib/auto-mode';
 import { error as logError } from './src/lib/logger';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
@@ -169,6 +170,19 @@ app.prepare().then(() => {
       }).catch(err => {
         logError('auto-resume', 'Failed to auto-resume interrupted tasks', err);
       });
+    }
+
+    // ── Restore auto-mode state from disk (Bug 1) ──────────────────────
+    // Auto-mode state is persisted to .teamai/auto-mode.json so it survives
+    // server restarts (dev hot reload, crash, manual restart). Without this,
+    // a rate-limit pause that spans a restart would silently disable auto mode.
+    try {
+      const restored = restoreAutoModeStates();
+      if (restored > 0) {
+        console.log(`[auto-mode] Restored auto mode for ${restored} project(s) from disk`);
+      }
+    } catch (err) {
+      logError('auto-mode', 'Failed to restore auto-mode states from disk', err);
     }
 
     // ── Periodic stall-detection sweep ──────────────────────────────────

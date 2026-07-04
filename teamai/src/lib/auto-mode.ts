@@ -2,6 +2,9 @@ import { TaskStore } from './task-store';
 import { getOrchestrator } from './orchestrator';
 import { processManager } from './process-manager';
 import { execFileSync } from 'child_process';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { projectStore } from './project-store';
 
 interface AutoProjectState {
   enabled: boolean;
@@ -20,6 +23,33 @@ interface AutoProjectState {
 }
 
 const projectStates = new Map<string, AutoProjectState>();
+
+/** Path to the per-project auto-mode state file. */
+function autoModeStatePath(projectRoot: string): string {
+  return join(projectRoot, '.teamai', 'auto-mode.json');
+}
+
+/** Persist auto-mode state to disk so it survives server restarts (Bug 1).
+ *  Only `enabled` and `maxParallel` are persisted — the runtime Sets (tracking,
+ *  timers) are in-memory only and reconstructed by _adoptStalledTasks on restore. */
+function saveAutoModeState(projectRoot: string, state: AutoProjectState): void {
+  try {
+    mkdirSync(join(projectRoot, '.teamai'), { recursive: true });
+    writeFileSync(autoModeStatePath(projectRoot), JSON.stringify({
+      enabled: state.enabled,
+      maxParallel: state.maxParallel,
+    }, null, 2));
+  } catch { /* best-effort — don't block toggle on disk errors */ }
+}
+
+/** Read persisted auto-mode state from disk. Returns null if missing/invalid. */
+function loadAutoModeState(projectRoot: string): { enabled: boolean; maxParallel: number } | null {
+  try {
+    const p = autoModeStatePath(projectRoot);
+    if (!existsSync(p)) return null;
+    return JSON.parse(readFileSync(p, 'utf-8'));
+  } catch { return null; }
+}
 
 function getState(projectRoot: string): AutoProjectState {
   let state = projectStates.get(projectRoot);
@@ -78,6 +108,9 @@ export function setAutoModeState(projectRoot: string, enabled: boolean, maxParal
   } else {
     _stop(state);
   }
+
+  // Persist to disk so auto mode survives server restarts (Bug 1)
+  saveAutoModeState(projectRoot, state);
 }
 
 // ── Internal helpers ────────────────────────────────────────────────────────
@@ -132,10 +165,67 @@ function _start(projectRoot: string, state: AutoProjectState): void {
   // Start tick loop — runs every 5 seconds
   state.tickTimer = setInterval(() => _tick(projectRoot, state), 5000);
 
+  // Bug 2: Re-adopt tasks that stalled in paused phases while auto mode was off.
+  // Without this, tasks sitting in awaiting-review or pr-open are orphaned — the
+  // phase-change listener only auto-approves tasks in autoTrackedIds, but a fresh
+  // _start creates an empty set. Scan the task store and re-adopt them so the
+  // listener and tick loop will process them.
+  _adoptStalledTasks(projectRoot, state);
+
   // Run an immediate tick to pick up any backlog tasks right away
   _tick(projectRoot, state);
 
   console.log(`[auto-mode] Started for ${projectRoot} (max parallel: ${state.maxParallel})`);
+}
+
+/**
+ * Bug 2: Re-adopt tasks that stalled in paused phases (awaiting-review, pr-open)
+ * while auto mode was disabled. These tasks need orchestrator action (approve /
+ * CI poll) that only fires for tasks in autoTrackedIds. Without re-adoption,
+ * re-enabling auto mode only picks up future events — stalled tasks are orphaned.
+ *
+ * - awaiting-review: add to autoTrackedIds and immediately call approveTask
+ *   (the phase-change listener won't fire because the phase isn't changing).
+ * - pr-open: add to autoTrackedIds and start CI polling immediately.
+ */
+function _adoptStalledTasks(projectRoot: string, state: AutoProjectState): void {
+  let taskStore: TaskStore;
+  try {
+    taskStore = new TaskStore(projectRoot);
+  } catch {
+    return; // project not yet initialized
+  }
+
+  const allTasks = taskStore.getAll();
+  let adopted = 0;
+
+  for (const task of allTasks) {
+    if (task.phase === 'awaiting-review') {
+      // Re-adopt and auto-approve immediately — the phase-change event won't
+      // fire because the task is already in this phase.
+      // Mirror the onPhaseChange handler's transition: add to autoApprovedIds
+      // (not autoTrackedIds) so the pr-open handler can clean it up properly
+      // when approveTask succeeds and emits pr-open.
+      state.autoApprovedIds.add(task.id);
+      adopted++;
+      const orchestrator = getOrchestrator(projectRoot);
+      orchestrator.approveTask(task.id, 'pull-request')
+        .catch(err => {
+          console.error(`[auto-mode] Failed to auto-approve stalled task ${task.id}:`, err);
+          state.autoApprovedIds.delete(task.id);
+        });
+    } else if (task.phase === 'pr-open') {
+      // Re-adopt and restart CI polling — the pr-open phase-change event
+      // was missed while auto mode was off.
+      state.autoTrackedIds.add(task.id);
+      adopted++;
+      _startCIPolling(task.id, projectRoot, state);
+    }
+  }
+
+  if (adopted > 0) {
+    console.log(`[auto-mode] Re-adopted ${adopted} stalled task(s) in paused phases`);
+  }
 }
 
 function _stop(state: AutoProjectState): void {
@@ -311,4 +401,44 @@ function _finishTask(taskId: string, projectRoot: string, state: AutoProjectStat
   }).catch(err => {
     console.error(`[auto-mode] Failed to mark task ${taskId} as done:`, err);
   });
+}
+
+// ── Server startup restoration (Bug 1) ─────────────────────────────────────
+
+/**
+ * Scan all registered projects for persisted auto-mode state and re-enable
+ * auto mode for any project that had it enabled before the server restarted.
+ *
+ * This is the Bug 1 fix: previously, auto-mode state lived only in memory
+ * (the `projectStates` Map). A server restart — common during a long rate-limit
+ * pause, dev hot reload, or crash — silently lost the enabled state, forcing
+ * the user to manually re-enable auto mode in the UI. Now the state is
+ * persisted to `.teamai/auto-mode.json` and restored on startup.
+ *
+ * Call this once on server startup, after processManager is ready.
+ * @returns the number of projects that had auto mode re-enabled.
+ */
+export function restoreAutoModeStates(): number {
+  let projects: { name: string; path: string }[];
+  try {
+    projects = projectStore.getAll();
+  } catch {
+    return 0;
+  }
+  let restored = 0;
+
+  for (const project of projects) {
+    const saved = loadAutoModeState(project.path);
+    if (!saved || !saved.enabled) continue;
+
+    // Don't double-enable if already running (e.g. HMR in dev)
+    const existing = projectStates.get(project.path);
+    if (existing?.enabled) continue;
+
+    console.log(`[auto-mode] Restoring auto mode for ${project.name} (max parallel: ${saved.maxParallel})`);
+    setAutoModeState(project.path, true, saved.maxParallel);
+    restored++;
+  }
+
+  return restored;
 }
