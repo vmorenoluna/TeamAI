@@ -73,6 +73,27 @@ Why: `usePhaseSync` calls `router.refresh()` on every phase-change WebSocket eve
 - **Git worktree isolation**: Each pipeline task will run in its own git worktree so parallel agents don't conflict (planned, not yet implemented).
 - **node-pty** is installed for PTY support but not yet used — future terminal emulation feature.- **Multi-project**: The app manages multiple target codebases. Each has its own `.teamai/` state directory and `.claude/` config.
 
+### Auto Mode
+
+Auto mode (`src/lib/auto-mode.ts`) automatically advances tasks through the pipeline without manual intervention: picks backlog tasks, auto-approves at `awaiting-review`, creates PRs, polls CI, and auto-merges. Enabled per-project via the UI toggle (`AutoModeButton`).
+
+**State persistence:** Auto-mode state (`enabled`, `maxParallel`) is persisted to `.teamai/auto-mode.json` on every `setAutoModeState()` call. On server startup, `restoreAutoModeStates()` scans all registered projects via `projectStore.getAll()` and re-enables auto mode from disk for any project that had it on. This ensures auto mode survives server restarts — critical because rate-limit pauses can span a dev hot reload, crash, or manual restart. Without persistence, the user would have to manually re-enable auto mode in the UI after every restart.
+
+**Stalled task adoption:** When auto mode is re-enabled, `_adoptStalledTasks()` scans the task store for tasks already in paused phases (`awaiting-review` or `pr-open`) and re-adopts them:
+- **`awaiting-review`**: adds to `autoApprovedIds` and immediately calls `approveTask(taskId, 'pull-request')` — the phase-change listener won't fire because the phase isn't changing.
+- **`pr-open`**: adds to `autoTrackedIds` and immediately starts CI polling via `_startCIPolling()`.
+
+Without this, re-enabling auto mode only picks up *future* phase-change events — tasks that stalled while auto was off are orphaned because the `onPhaseChange` listener only auto-approves tasks in `autoTrackedIds`/`autoApprovedIds`, and the tick loop only picks `backlog` tasks.
+
+**Tracking sets:**
+- `autoTrackedIds` — tasks started by auto mode (for CI polling and done/failed cleanup)
+- `autoApprovedIds` — tasks that auto mode has called `approveTask` for but `pr-open` hasn't fired yet (bridges the timing gap)
+- `startingIds` — tasks between `resumeTask` call and phase change (prevents duplicate picks during tick loop)
+
+**Tick loop:** Runs every 5 seconds via `setInterval`. Picks oldest backlog tasks (FIFO by `createdAt`) whose dependencies are all `done`, up to `maxParallel` minus active task count. Paused-phase tasks (`awaiting-review`, `pr-open`) count as active slots.
+
+**CI polling:** After a PR is created (`pr-open` phase), auto mode polls `gh pr view` every 30 seconds. When all status checks pass, it auto-merges via `gh pr merge --merge`, calls `markTaskDone`, and sets `autoProcessed: true` on the task. The UI shows a "Mark Reviewed" button for auto-processed tasks so the user can acknowledge they reviewed the auto-merged PR.
+
 ### Retry Flow (`retryTask`)
 
 When a task fails (phase = `failed`), the user clicks **Retry** to restart the pipeline from where it left off. The retry logic lives in `src/app/actions/tasks.ts` → `retryTask()`.
