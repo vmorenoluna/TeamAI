@@ -12,16 +12,9 @@ import { detectGitPlatform, buildPlatformPrompt } from '../git-platform';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
-import type { TaskPipeline } from './types';
+import type { TaskPipeline, SessionOptsResult } from './types';
 
 // ── Dependency interfaces ──
-
-type SessionOptsResult = {
-  taskId: string;
-  role: AgentSession['role'];
-  cwd: string;
-  [key: string]: unknown;
-};
 
 interface SessionOptsFn {
   (role: AgentSession['role'], cwd: string, taskId: string, logFile?: string): SessionOptsResult;
