@@ -8,55 +8,7 @@
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } from 'fs';
 import path from 'path';
 import type { PipelinePhase } from '@/constants/phases';
-
-// ── Types ─────────────────────────────────────────────────────────────────
-
-interface QaCriterion {
-  status?: string;
-  criterion?: string;
-  name?: string;
-  fix_needed?: string;
-  notes?: string;
-  evidence?: string;
-}
-
-interface QaReport {
-  overall?: string;
-  criteria?: QaCriterion[];
-  additional_issues?: { description?: string; message?: string; file?: string; fix_needed?: string; severity?: string }[];
-  issues?: { description?: string; message?: string; file?: string; fix_needed?: string; severity?: string }[];
-  spec_concerns?: SpecConcern[];
-  head_at_review?: string;
-  fail_type?: string;
-}
-
-interface SpecConcern {
-  issue: string;
-  reasoning: string;
-  suggested_fix?: string;
-}
-
-interface TaskPipeline {
-  taskId: string;
-  description: string;
-  phase: PipelinePhase;
-  specPath: string;
-  worktreePath: string;
-  branch: string;
-  qaAttempt: number;
-  maxQaAttempts: number;
-  specRevision: number;
-  mergeStrategy?: 'local-merge' | 'pull-request';
-  sessionId?: string;
-  deliverableFailCounts?: Record<number, number>;
-  wakeupAttemptCount?: number;
-  wakeupUntil?: string;
-  wakeupSubtaskId?: number;
-  wakeupCommand?: string;
-  wakeupArtifact?: string;
-}
-
-type MergeStrategy = 'local-merge' | 'pull-request';
+import type { TaskPipeline, MergeStrategy, QaReport } from './types';
 
 // ── Dependencies ──────────────────────────────────────────────────────────
 

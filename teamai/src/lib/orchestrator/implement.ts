@@ -12,6 +12,7 @@ import { processManager, type AgentSession } from '../process-manager';
 import { readContainerConfig, containerManager, dockerAvailable, _resetDockerAvailableCache } from '../container-manager';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import type { PipelinePhase } from '@/constants/phases';
+import type { TaskPipeline, QaReport } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -29,47 +30,9 @@ interface PlanSubtask {
   files_to_create?: string[];
 }
 
-interface QaCriterion {
-  status?: string;
-  criterion?: string;
-  name?: string;
-  fix_needed?: string;
-  notes?: string;
-  evidence?: string;
-}
-
-interface QaReport {
-  overall?: string;
-  criteria?: QaCriterion[];
-  fail_type?: string;
-}
-
-interface ImplementPipeline {
-  taskId: string;
-  description: string;
-  phase: PipelinePhase;
-  specPath: string;
-  worktreePath: string;
-  branch: string;
-  qaAttempt: number;
-  maxQaAttempts: number;
-  specRevision: number;
-  sessionId?: string;
-  /** Per-subtask counter of consecutive files_to_create failures */
-  deliverableFailCounts?: Record<number, number>;
-  /** Set when a subtask creates a wakeup file — skips files_to_create verification (ADR 002) */
-  wakeupSubtaskId?: number;
-  /** ISO timestamp — wakeup scheduled until this time (ADR 002) */
-  wakeupUntil?: string;
-  /** Background command the engineer was running (informational) (ADR 002) */
-  wakeupCommand?: string;
-  /** Artifact the engineer should verify on re-entry (ADR 002) */
-  wakeupArtifact?: string;
-  /** Consecutive wakeup attempts for the current subtask (ADR 002) */
-  wakeupAttemptCount?: number;
+export interface ImplementPipeline extends TaskPipeline {
   /** Internal flag: set when wakeup completes during this run so post-groups code re-enters (ADR 002) */
   _wakeupJustCompleted?: boolean;
-
 }
 
 type SessionOptsResult = { taskId: string; role: AgentSession['role']; cwd: string; [key: string]: unknown };

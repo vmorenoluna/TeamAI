@@ -12,6 +12,7 @@ import { execFileSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, copyFileSync, readdirSync } from 'fs';
 import path from 'path';
 import { phaseHeader } from './helpers';
+import type { TaskPipeline } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -22,12 +23,7 @@ export interface CommitArtifactsDeps {
   worktreeGitEnv: (hostCwd: string, containerWs?: string) => Record<string, string>;
 }
 
-interface ArtifactPipeline {
-  taskId: string;
-  description: string;
-  specPath: string;
-  worktreePath: string;
-}
+type ArtifactPipeline = Pick<TaskPipeline, 'taskId' | 'description' | 'specPath' | 'worktreePath'>;
 
 // ── Exclude set ───────────────────────────────────────────────────────────
 
