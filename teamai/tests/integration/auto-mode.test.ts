@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -27,6 +27,7 @@ const mockSendMessage = vi.hoisted(() => vi.fn());
 const mockKillSession = vi.hoisted(() => vi.fn());
 const mockEmit = vi.hoisted(() => vi.fn());
 const mockExecFileSync = vi.hoisted(() => vi.fn());
+const mockProjectStoreGetAll = vi.hoisted(() => vi.fn().mockReturnValue([]));
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
@@ -93,6 +94,12 @@ vi.mock('@/lib/recovery', () => ({
   reconcileTaskArtifacts: () => [],
   autoResumeInterruptedTasks: vi.fn().mockResolvedValue(0),
   _resetAutoResumeDebounce: () => {},
+}));
+
+vi.mock('@/lib/project-store', () => ({
+  projectStore: {
+    getAll: mockProjectStoreGetAll,
+  },
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -167,6 +174,10 @@ function cleanup() {
   // Always restore real timers — prevents fake-timer leaks between describe blocks
   vi.useRealTimers();
   vi.clearAllMocks();
+  // Restore safe default — vi.clearAllMocks() does NOT reset implementations,
+  // so a mockImplementation(throw) from a prior test would leak. Reset to the
+  // default empty array so restoreAutoModeStates finds no projects by default.
+  mockProjectStoreGetAll.mockReturnValue([]);
   onHandlers.clear();
   // Clear module-level state by resetting the auto-mode module
   vi.resetModules();
@@ -1153,6 +1164,198 @@ describe('Auto Mode Integration', () => {
       await vi.waitFor(() => {
         expect(mockOrch.resumeTask).toHaveBeenCalledWith(tasks[2]);
       });
+    });
+  });
+
+  // ── Bug 1: Auto-mode state persistence across restarts ─────────────────
+
+  describe('Auto-mode state persistence (Bug 1)', () => {
+    afterEach(() => {
+      cleanup();
+    });
+
+    it('persists enabled state to .teamai/auto-mode.json on enable', async () => {
+      setupTestProject();
+      const autoMode = await setupAutoMode();
+
+      autoMode.setAutoModeState(testDir, true, 3);
+
+      const statePath = join(testDir, '.teamai', 'auto-mode.json');
+      expect(existsSync(statePath)).toBe(true);
+      const saved = JSON.parse(readFileSync(statePath, 'utf-8'));
+      expect(saved.enabled).toBe(true);
+      expect(saved.maxParallel).toBe(3);
+    });
+
+    it('persists disabled state to .teamai/auto-mode.json on disable', async () => {
+      setupTestProject();
+      const autoMode = await setupAutoMode();
+
+      autoMode.setAutoModeState(testDir, true, 2);
+      autoMode.setAutoModeState(testDir, false, 2);
+
+      const statePath = join(testDir, '.teamai', 'auto-mode.json');
+      const saved = JSON.parse(readFileSync(statePath, 'utf-8'));
+      expect(saved.enabled).toBe(false);
+    });
+
+    it('restoreAutoModeStates re-enables auto mode from disk for persisted projects', async () => {
+      setupTestProject();
+
+      // Simulate a previous session: write auto-mode.json with enabled=true
+      writeFileSync(
+        join(testDir, '.teamai', 'auto-mode.json'),
+        JSON.stringify({ enabled: true, maxParallel: 2 }, null, 2),
+      );
+
+      // Mock projectStore.getAll() to return the test project — avoids
+      // touching the real ~/.teamai/projects.json
+      mockProjectStoreGetAll.mockReturnValue([{ name: 'test-restore', path: testDir }]);
+
+      const autoMode = await setupAutoMode();
+
+      // Before restore: auto mode is off (fresh module state)
+      expect(autoMode.isAutoModeEnabled(testDir)).toBe(false);
+
+      const restored = autoMode.restoreAutoModeStates();
+      expect(restored).toBe(1);
+      expect(autoMode.isAutoModeEnabled(testDir)).toBe(true);
+
+      // Verify maxParallel was restored from disk
+      const state = autoMode.getAutoModeState(testDir);
+      expect(state.maxParallel).toBe(2);
+    });
+
+    it('restoreAutoModeStates does NOT re-enable projects that had auto mode off', async () => {
+      setupTestProject();
+
+      // Write auto-mode.json with enabled=false
+      writeFileSync(
+        join(testDir, '.teamai', 'auto-mode.json'),
+        JSON.stringify({ enabled: false, maxParallel: 1 }, null, 2),
+      );
+
+      // Mock projectStore.getAll() to return the test project
+      mockProjectStoreGetAll.mockReturnValue([{ name: 'test-no-restore', path: testDir }]);
+
+      const autoMode = await setupAutoMode();
+      const restored = autoMode.restoreAutoModeStates();
+      expect(restored).toBe(0);
+      expect(autoMode.isAutoModeEnabled(testDir)).toBe(false);
+    });
+
+    it('restoreAutoModeStates returns 0 when projectStore.getAll() throws', async () => {
+      setupTestProject();
+
+      // Simulate a corrupted/missing projects.json
+      mockProjectStoreGetAll.mockImplementation(() => {
+        throw new Error('projects.json not found');
+      });
+
+      const autoMode = await setupAutoMode();
+      const restored = autoMode.restoreAutoModeStates();
+      expect(restored).toBe(0);
+    });
+  });
+
+  // ── Bug 2: Stalled task adoption on re-enable ─────────────────────────
+
+  describe('Stalled task adoption on re-enable (Bug 2)', () => {
+    let autoMode: any;
+    let taskId: string;
+
+    beforeEach(async () => {
+      setupTestProject();
+      autoMode = await setupAutoMode();
+
+      const teamaiDir = join(testDir, '.teamai');
+      taskId = randomUUID();
+      const taskDir = join(teamaiDir, taskId);
+      mkdirSync(taskDir, { recursive: true });
+      // Task is already in awaiting-review (stalled while auto mode was off)
+      createTaskFile(taskDir, {
+        id: taskId,
+        title: 'Stalled Task',
+        description: 'stalled-task',
+        phase: 'awaiting-review',
+      });
+    });
+
+    afterEach(() => {
+      cleanup();
+    });
+
+    it('re-adopts awaiting-review tasks and auto-approves them on re-enable', async () => {
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      // _adoptStalledTasks should have immediately called approveTask
+      await vi.waitFor(() => {
+        expect(mockOrch.approveTask).toHaveBeenCalledWith(taskId, 'pull-request');
+      });
+    });
+
+    it('does NOT call resumeTask for stalled awaiting-review tasks (they need approve, not resume)', async () => {
+      mockOrch.resumeTask.mockClear();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await new Promise(r => setTimeout(r, 50));
+      expect(mockOrch.resumeTask).not.toHaveBeenCalledWith(taskId);
+    });
+
+    it('re-adopts pr-open tasks and starts CI polling on re-enable', async () => {
+      vi.useFakeTimers();
+
+      // Set the task to pr-open with a prUrl
+      const { TaskStore } = await import('@/lib/task-store');
+      const store = new TaskStore(testDir);
+      store.update(taskId, { phase: 'pr-open', prUrl: 'https://github.com/test/repo/pull/99' });
+
+      mockExecFileSync.mockClear();
+      mockExecFileSync.mockReturnValue(JSON.stringify({ state: 'OPEN', statusCheckRollup: [] }));
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      // CI polling should start immediately — advance 30s for first poll
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'gh',
+        expect.arrayContaining(['pr', 'view', '99']),
+        expect.any(Object),
+      );
+    });
+
+    it('does NOT re-adopt tasks in terminal or active phases', async () => {
+      // Change task to 'done' — should not be adopted
+      const { TaskStore } = await import('@/lib/task-store');
+      const store = new TaskStore(testDir);
+      store.updatePhase(taskId, 'done');
+
+      mockOrch.approveTask.mockClear();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await new Promise(r => setTimeout(r, 50));
+      expect(mockOrch.approveTask).not.toHaveBeenCalled();
+    });
+
+    it('removes task from autoApprovedIds if approveTask fails for stalled task', async () => {
+      mockOrch.approveTask.mockRejectedValue(new Error('approve failed'));
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      // Wait for the .catch() to fire
+      await vi.waitFor(() => {
+        expect(mockOrch.approveTask).toHaveBeenCalledWith(taskId, 'pull-request');
+      });
+
+      // Give the .catch() handler time to run
+      await new Promise(r => setTimeout(r, 50));
+
+      const state = autoMode.getAutoModeState(testDir);
+      // Task should not be tracked since approve failed
+      expect(state.trackedCount).toBe(0);
     });
   });
 });
