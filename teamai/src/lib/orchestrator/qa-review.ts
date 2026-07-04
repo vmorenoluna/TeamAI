@@ -58,8 +58,6 @@ interface QaReviewPipeline {
   maxQaAttempts: number;
   specRevision: number;
   sessionId?: string;
-  /** Consecutive QA session timeouts (separate from qaAttempt — timeouts are infrastructure failures) */
-  qaTimeoutCount?: number;
   /** Per-subtask counter of consecutive files_to_create failures */
   deliverableFailCounts?: Record<number, number>;
 }
@@ -187,46 +185,13 @@ export async function runQaReview(
     `IMPORTANT: Write the QA report to \`${agentSpecPath}/qa_report.json\` (use this exact absolute path, not a relative path).\n` +
     `The working directory is a git worktree — do NOT write to a .teamai/ subdirectory relative to the current directory.`);
 
-  // Session budget cap — 20 minutes
-  const QA_TIMEOUT_MS = 20 * 60 * 1000;
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('QA session timed out after 20 minutes')), QA_TIMEOUT_MS)
-  );
-
   try {
-    await Promise.race([deps.waitForCompletion(sessionId), timeoutPromise]);
+    await deps.waitForCompletion(sessionId);
   } catch (err) {
     if (err instanceof RateLimitError) {
       pipeline.qaAttempt--; // rate limits are free retries — don't count against the failure budget
-      throw err;
     }
-    processManager.killSession(sessionId);
-    const timeoutReport: QaReport = {
-      overall: 'FAIL',
-      criteria: [{
-        criterion: 'QA session timeout',
-        name: 'QA session timeout',
-        status: 'FAIL',
-        notes: 'QA agent did not complete within 20 minutes — session was killed. Re-run QA.',
-      }],
-    };
-    writeFileSync(reportPath, JSON.stringify(timeoutReport, null, 2));
-    appendFileSync(logFile, `\n[QA-TIMEOUT] ${err instanceof Error ? err.message : String(err)}\n`);
-    // Use separate timeout counter — timeouts don't consume quality budget
-    pipeline.qaTimeoutCount = (pipeline.qaTimeoutCount || 0) + 1;
-    pipeline.qaAttempt--; // net zero: was incremented at top of runQaReview
-    if (pipeline.qaTimeoutCount >= 3) {
-      deps.writeCompletionSummary(pipeline);
-      deps.advancePhase(pipeline, 'failed', {
-        failReason: 'timeout',
-        timeoutCount: pipeline.qaTimeoutCount,
-      });
-    } else {
-      deps.advancePhase(pipeline, 'qa-review');
-      deps.savePipelineState(pipeline);
-      await deps.executePhase(pipeline);
-    }
-    return;
+    throw err;
   }
   processManager.killSession(sessionId);
 
@@ -240,9 +205,6 @@ export async function runQaReview(
     report.head_at_review = headSha;
     writeFileSync(reportPath, JSON.stringify(report, null, 2));
   } catch { /* best-effort */ }
-
-  // Reset timeout counter on successful QA completion (no timeout)
-  pipeline.qaTimeoutCount = 0;
 
   const hasSpecConcerns = report.spec_concerns && Array.isArray(report.spec_concerns) && report.spec_concerns.length > 0;
 

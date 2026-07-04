@@ -16,13 +16,13 @@ interface TaskPipeline {
   specRevision: number;
   mergeStrategy?: 'local-merge' | 'pull-request';
   sessionId?: string;
-  qaTimeoutCount?: number;
   deliverableFailCounts?: Record<number, number>;
   wakeupUntil?: string;
   wakeupSubtaskId?: number;
   wakeupCommand?: string;
   wakeupArtifact?: string;
   wakeupAttemptCount?: number;
+
 }
 
 /** Rotate output log: keep last ~50KB when log exceeds ~100KB (#6) */
@@ -64,7 +64,6 @@ export function savePipelineState(pipeline: TaskPipeline): void {
       sessionId: pipeline.sessionId,
       mergeStrategy: pipeline.mergeStrategy,
       qaAttempt: pipeline.qaAttempt,
-      qaTimeoutCount: pipeline.qaTimeoutCount,
       deliverableFailCounts: pipeline.deliverableFailCounts,
       wakeupUntil: pipeline.wakeupUntil,
       wakeupSubtaskId: pipeline.wakeupSubtaskId,

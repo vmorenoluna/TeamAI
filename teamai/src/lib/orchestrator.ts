@@ -4,12 +4,11 @@ import { processManager, type AgentSession } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
 import { TaskStore } from './task-store';
 import { slugify } from './utils';
-import { type SensorsConfig } from './sensors';
 import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit } from './orchestrator/worktree-utils';
 import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelineState, pipelineAdvancePhase } from './orchestrator/pipeline-state';
 import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedback';
 import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './orchestrator/phase-runners';
-import { parseSessionLimitReset, extractPrUrl, phaseHeader, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, computePipelineConfig, buildSessionOpts } from './orchestrator/helpers';
+import { parseSessionLimitReset, extractPrUrl, phaseHeader, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, computePipelineConfig, buildSessionOpts, type PipelineConfig } from './orchestrator/helpers';
 import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn, getWorktreePath as getWorktreePathFn } from './orchestrator/worktree-ops';
 import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
 import { gitPush } from './orchestrator/git-push';
@@ -67,8 +66,6 @@ interface TaskPipeline {
   specRevision: number;
   mergeStrategy?: MergeStrategy;
   sessionId?: string;
-  /** Consecutive QA session timeouts (separate from qaAttempt — timeouts are infrastructure failures) */
-  qaTimeoutCount?: number;
   /** Per-subtask counter of consecutive files_to_create failures. Key = subtask ID, value = count. */
   deliverableFailCounts?: Record<number, number>;
   /** ISO timestamp — wakeup scheduled until this time (ADR 002) */
@@ -81,6 +78,7 @@ interface TaskPipeline {
   wakeupArtifact?: string;
   /** Consecutive wakeup attempts for the current subtask (ADR 002) */
   wakeupAttemptCount?: number;
+
 }
 
 export class Orchestrator {
@@ -97,8 +95,8 @@ export class Orchestrator {
     return this.activeTasks.has(taskId);
   }
 
-  private _pipelineConfigCache: { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig } | null = null;
-  private getPipelineConfig(): { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig } {
+  private _pipelineConfigCache: PipelineConfig | null = null;
+  private getPipelineConfig(): PipelineConfig {
     if (!this._pipelineConfigCache) {
       this._pipelineConfigCache = computePipelineConfig(this.projectRoot);
     }
@@ -225,7 +223,6 @@ export class Orchestrator {
     if (savedState) {
       if (savedState.mergeStrategy) pipeline.mergeStrategy = savedState.mergeStrategy;
       if (savedState.qaAttempt !== undefined) pipeline.qaAttempt = savedState.qaAttempt;
-      if (savedState.qaTimeoutCount !== undefined) pipeline.qaTimeoutCount = savedState.qaTimeoutCount;
       if (savedState.deliverableFailCounts !== undefined) pipeline.deliverableFailCounts = savedState.deliverableFailCounts;
       if (savedState.wakeupUntil !== undefined) pipeline.wakeupUntil = savedState.wakeupUntil;
       if (savedState.wakeupSubtaskId !== undefined) pipeline.wakeupSubtaskId = savedState.wakeupSubtaskId;

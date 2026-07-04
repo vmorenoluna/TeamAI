@@ -55,8 +55,6 @@ interface ImplementPipeline {
   maxQaAttempts: number;
   specRevision: number;
   sessionId?: string;
-  /** Consecutive QA session timeouts (separate from qaAttempt) */
-  qaTimeoutCount?: number;
   /** Per-subtask counter of consecutive files_to_create failures */
   deliverableFailCounts?: Record<number, number>;
   /** Set when a subtask creates a wakeup file — skips files_to_create verification (ADR 002) */
@@ -71,6 +69,7 @@ interface ImplementPipeline {
   wakeupAttemptCount?: number;
   /** Internal flag: set when wakeup completes during this run so post-groups code re-enters (ADR 002) */
   _wakeupJustCompleted?: boolean;
+
 }
 
 type SessionOptsResult = { taskId: string; role: AgentSession['role']; cwd: string; [key: string]: unknown };
@@ -93,7 +92,7 @@ export interface ImplementDeps {
   restoreQaReportFromSnapshot: (specPath: string) => void;
   restoreHumanFeedbackFromSnapshot: (specPath: string) => void;
   writeQaFeedback: (pipeline: ImplementPipeline, report: QaReport) => void;
-  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig };
+  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxDeliverableFails: number; maxWakeupAttempts: number };
   phaseHeader: (logFile: string, phase: string) => void;
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
@@ -332,7 +331,8 @@ export async function runImplement(
           let deliverableHeader = '';
           if (!hasQaFeedback && !wakeupHeader && pipeline.deliverableFailCounts?.[subtask.id]) {
             const attemptCount = pipeline.deliverableFailCounts[subtask.id];
-            deliverableHeader = '⚠️ DELIVERABLE RE-VERIFICATION (attempt ' + attemptCount + '/3)\n\n' +
+            const maxFails = deps.getPipelineConfig().maxDeliverableFails;
+            deliverableHeader = '⚠️ DELIVERABLE RE-VERIFICATION (attempt ' + attemptCount + '/' + maxFails + ')\n\n' +
               'Your previous session for this subtask ended but the following required\n' +
               'deliverable files were NOT created:\n\n' +
               (subtask.files_to_create?.map(f => '  - ' + f).join('\n') || '') + '\n\n' +
@@ -357,7 +357,9 @@ export async function runImplement(
               : '');
 
           processManager.sendMessage(sessionId, prompt);
+
           await deps.waitForCompletion(sessionId);
+
           processManager.killSession(sessionId);
 
           // ADR 002: Check for wakeup file (engineer scheduled background work)
@@ -398,12 +400,13 @@ export async function runImplement(
             if (skipCompletion) {
               // Increment deliverable failure counter
               if (!pipeline.deliverableFailCounts) pipeline.deliverableFailCounts = {};
+              const maxFails = deps.getPipelineConfig().maxDeliverableFails;
               const count = (pipeline.deliverableFailCounts[subtask.id] || 0) + 1;
               pipeline.deliverableFailCounts[subtask.id] = count;
               const missingFiles = subtask.files_to_create.filter(f => !existsSync(path.join(cwd, f))).join(', ');
-              appendFileSync(logFile, '[VERIFY] Subtask ' + subtask.id + ' failed deliverable verification (attempt ' + count + '/3) — missing: ' + missingFiles + '\n');
-              // Circuit breaker at 3
-              if (count >= 3) {
+              appendFileSync(logFile, '[VERIFY] Subtask ' + subtask.id + ' failed deliverable verification (attempt ' + count + '/' + maxFails + ') — missing: ' + missingFiles + '\n');
+              // Circuit breaker
+              if (count >= maxFails) {
                 const reportPath = path.join(pipeline.specPath, 'qa_report.json');
                 writeFileSync(reportPath, JSON.stringify({
                   overall: 'FAIL',
@@ -411,10 +414,10 @@ export async function runImplement(
                     criterion: 'Deliverable verification — missing files',
                     name: 'Deliverable verification',
                     status: 'FAIL',
-                    notes: 'Subtask ' + subtask.id + ' failed deliverable verification 3 times. Missing files: ' + missingFiles,
+                    notes: 'Subtask ' + subtask.id + ' failed deliverable verification ' + maxFails + ' times. Missing files: ' + missingFiles,
                   }],
                 }, null, 2));
-                appendFileSync(logFile, '[VERIFY] Subtask ' + subtask.id + ' exceeded deliverable verification cap (3) — advancing to failed\n');
+                appendFileSync(logFile, '[VERIFY] Subtask ' + subtask.id + ' exceeded deliverable verification cap (' + maxFails + ') — advancing to failed\n');
                 deps.advancePhase(pipeline, 'failed');
                 return;
               }
@@ -562,8 +565,8 @@ export async function runImplement(
 
   // ADR 002: Wakeup timer — pause implement phase until wakeup time
   if (pipeline.wakeupUntil) {
-    if ((pipeline.wakeupAttemptCount || 0) >= 3) {
-      appendFileSync(logFile, '[WAKEUP] Subtask ' + pipeline.wakeupSubtaskId + ' exceeded wakeup attempt cap (3) — advancing to failed\n');
+    if ((pipeline.wakeupAttemptCount || 0) >= deps.getPipelineConfig().maxWakeupAttempts) {
+      appendFileSync(logFile, '[WAKEUP] Subtask ' + pipeline.wakeupSubtaskId + ' exceeded wakeup attempt cap (' + deps.getPipelineConfig().maxWakeupAttempts + ') — advancing to failed\n');
       const reportPath = path.join(pipeline.specPath, 'qa_report.json');
       writeFileSync(reportPath, JSON.stringify({
         overall: 'FAIL',
@@ -571,7 +574,7 @@ export async function runImplement(
           criterion: 'Wakeup attempt limit exceeded',
           name: 'Wakeup attempt limit exceeded',
           status: 'FAIL',
-          notes: 'Subtask ' + pipeline.wakeupSubtaskId + ' failed to produce artifact after 3 wakeup attempts. Expected artifact: ' + (pipeline.wakeupArtifact || 'unknown'),
+          notes: 'Subtask ' + pipeline.wakeupSubtaskId + ' failed to produce artifact after ' + deps.getPipelineConfig().maxWakeupAttempts + ' wakeup attempts. Expected artifact: ' + (pipeline.wakeupArtifact || 'unknown'),
         }],
       }, null, 2));
       deps.advancePhase(pipeline, 'failed');

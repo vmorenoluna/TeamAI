@@ -18,6 +18,8 @@ export interface PipelineConfig {
   maxQaAttempts: number;
   parallelSubtasks: boolean;
   sensors?: SensorsConfig;
+  maxDeliverableFails: number;
+  maxWakeupAttempts: number;
 }
 
 // ── Pure: session-limit parsing ───────────────────────────────────────────
@@ -139,11 +141,13 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
       return {
         maxQaAttempts: typeof raw.maxQaAttempts === 'number' ? raw.maxQaAttempts : 3,
         parallelSubtasks: typeof raw.parallelSubtasks === 'boolean' ? raw.parallelSubtasks : true,
+        maxDeliverableFails: typeof raw.maxDeliverableFails === 'number' ? raw.maxDeliverableFails : 3,
+        maxWakeupAttempts: typeof raw.maxWakeupAttempts === 'number' ? raw.maxWakeupAttempts : 3,
         ...(sensors ? { sensors } : {}),
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
   }
-  return { maxQaAttempts: 3, parallelSubtasks: true };
+  return { maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 3 };
 }
 
 // ── Session options ───────────────────────────────────────────────────────
