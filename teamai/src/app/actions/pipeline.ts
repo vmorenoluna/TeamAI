@@ -31,6 +31,11 @@ export async function getPipelineConfig(): Promise<PipelineConfig> {
 export async function savePipelineConfig(config: PipelineConfig): Promise<void> {
   const projectPath = await getActiveProjectPath();
   const cfgPath = join(projectPath, '.teamai', 'pipeline.json');
-  writeFileSync(cfgPath, JSON.stringify(config, null, 2));
+  // Merge with existing config to preserve orchestrator-only fields
+  // (maxDeliverableFails, maxWakeupAttempts, sensors) that the UI doesn't know about.
+  const existing = existsSync(cfgPath)
+    ? JSON.parse(readFileSync(cfgPath, 'utf-8'))
+    : {};
+  writeFileSync(cfgPath, JSON.stringify({ ...existing, ...config }, null, 2));
   revalidatePath('/settings');
 }
