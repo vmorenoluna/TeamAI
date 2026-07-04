@@ -123,7 +123,6 @@ function makePipeline(taskId: string, specPath: string, overrides: Record<string
     qaAttempt: 1,
     maxQaAttempts: 3,
     specRevision: 0,
-    qaTimeoutCount: 0,
     deliverableFailCounts: undefined as Record<number, number> | undefined,
     ...overrides,
   };
@@ -2586,287 +2585,6 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-//  ADR 005 — QA timeout counter
-// ═══════════════════════════════════════════════════════════════════════
-
-describe('runQaReview — QA timeout counter (ADR 005)', () => {
-  let project: ReturnType<typeof setupProject>;
-  let orch: Orchestrator;
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    onHandlers.clear();
-    project = setupProject();
-    orch = new Orchestrator(project.root);
-
-    // Mock git to pass Gap 1 checks (no unpushed commits)
-    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-      if (args && args[0] === 'fetch') return '';
-      if (args && args[0] === 'log') return ''; // no unpushed commits
-      return '';
-    });
-  });
-
-  afterEach(() => {
-    project.clean();
-  });
-
-  it('increments qaTimeoutCount and decrements qaAttempt on QA session error', async () => {
-    mockCreateSession.mockResolvedValue('sess-qa-timeout');
-    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
-
-    const pipeline = makePipeline(project.taskId, project.taskDir, {
-      phase: 'qa-review',
-      qaAttempt: 1,
-      maxQaAttempts: 3,
-      worktreePath: join(project.root, 'worktrees', 'test-task'),
-    });
-
-    try {
-      const qaPromise = (orch as AnyOrch).runQaReview(pipeline);
-      // Wait for sendMessage so the session is set up
-      await vi.waitFor(() => {
-        expect(mockSendMessage).toHaveBeenCalled();
-      });
-
-      expect(mockCreateSession).toHaveBeenCalled();
-
-      // Fire an error event to make waitForCompletion reject (simulating timeout)
-      // The catch block treats non-RateLimitError errors as timeouts
-      fireEvent('exit', { sessionId: 'sess-qa-timeout', code: 1 });
-      await new Promise(r => setTimeout(r, 50));
-
-      // qaTimeoutCount should be incremented
-      expect(pipeline.qaTimeoutCount).toBe(1);
-
-      // qaAttempt should be decremented (net zero from the +1 at top of runQaReview)
-      // qaAttempt was 1, incremented to 2 at top, then decremented back to 1 by timeout handler
-      expect(pipeline.qaAttempt).toBe(1);
-
-      // Should bounce back to qa-review (qaTimeoutCount < 3)
-      expect(pipeline.phase).toBe('qa-review');
-
-      // A timeout report should be written
-      const reportPath = join(project.taskDir, 'qa_report.json');
-      expect(existsSync(reportPath)).toBe(true);
-      const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
-      expect(report.criteria[0].name).toBe('QA session timeout');
-
-      await qaPromise;
-    } finally {
-      executeSpy.mockRestore();
-    }
-  });
-
-  it('advances to failed after 3 consecutive QA timeouts with timeout-specific message', async () => {
-    mockCreateSession.mockResolvedValue('sess-qa-timeout3');
-
-    const pipeline = makePipeline(project.taskId, project.taskDir, {
-      phase: 'qa-review',
-      qaAttempt: 0,
-      maxQaAttempts: 3,
-      worktreePath: join(project.root, 'worktrees', 'test-task'),
-      qaTimeoutCount: 2,
-    });
-
-    const qaPromise = (orch as AnyOrch).runQaReview(pipeline);
-    await vi.waitFor(() => {
-      expect(mockSendMessage).toHaveBeenCalled();
-    });
-
-    expect(mockCreateSession).toHaveBeenCalled();
-
-    // Fire error to simulate 3rd timeout
-    fireEvent('exit', { sessionId: 'sess-qa-timeout3', code: 1 });
-    await new Promise(r => setTimeout(r, 50));
-
-    // Task should be failed
-    expect(pipeline.phase).toBe('failed');
-
-    // qaTimeoutCount reaches 3
-    expect(pipeline.qaTimeoutCount).toBe(3);
-
-    // qaAttempt was 0, incremented to 1 at top, then decremented back to 0
-    expect(pipeline.qaAttempt).toBe(0);
-
-    await qaPromise;
-  });
-
-  it('does NOT fail on quality budget exhaustion when timeouts are under cap', async () => {
-    // qaAttempt is high but timeouts are low — should NOT fail
-    mockCreateSession.mockResolvedValue('sess-qa-timeout-low');
-    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
-
-    const pipeline = makePipeline(project.taskId, project.taskDir, {
-      phase: 'qa-review',
-      qaAttempt: 5,  // way over maxQaAttempts
-      maxQaAttempts: 3,
-      worktreePath: join(project.root, 'worktrees', 'test-task'),
-      qaTimeoutCount: 0,
-    });
-
-    try {
-      const qaPromise = (orch as AnyOrch).runQaReview(pipeline);
-      await vi.waitFor(() => {
-        expect(mockSendMessage).toHaveBeenCalled();
-      });
-
-      fireEvent('exit', { sessionId: 'sess-qa-timeout-low', code: 1 });
-      await new Promise(r => setTimeout(r, 50));
-
-      // Should bounce back (qaTimeoutCount = 1, under cap of 3)
-      expect(pipeline.phase).toBe('qa-review');
-      expect(pipeline.qaTimeoutCount).toBe(1);
-
-      // qaAttempt was decremented by timeout handler (net effect of increment-decrement)
-      // Started at 5, incremented to 6, decremented to 5
-      expect(pipeline.qaAttempt).toBe(5);
-
-      await qaPromise;
-    } finally {
-      executeSpy.mockRestore();
-    }
-  });
-
-  it('resets qaTimeoutCount to 0 when QA session completes successfully without timeout', async () => {
-    mockCreateSession.mockResolvedValue('sess-qa-complete');
-
-    const pipeline = makePipeline(project.taskId, project.taskDir, {
-      phase: 'qa-review',
-      qaAttempt: 0,
-      maxQaAttempts: 3,
-      worktreePath: join(project.root, 'worktrees', 'test-task'),
-      qaTimeoutCount: 1,  // had one previous timeout
-    });
-
-    const qaPromise = (orch as AnyOrch).runQaReview(pipeline);
-    await vi.waitFor(() => {
-      expect(mockSendMessage).toHaveBeenCalled();
-    });
-
-    // QA completes normally (no timeout)
-    writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
-      overall: 'PASS',
-      criteria: [{ name: 'Feature X', status: 'PASS', notes: 'LGTM' }],
-    }));
-
-    fireEvent('event', { sessionId: 'sess-qa-complete', event: { type: 'result' } });
-    await qaPromise;
-
-    // Timeout counter should reset to 0 after successful completion
-    expect(pipeline.qaTimeoutCount).toBe(0);
-
-    // Task should advance past QA
-    expect(pipeline.phase).toBe('awaiting-review');
-  });
-
-  it('resets qaTimeoutCount to 0 even when QA FAILs (non-timeout completion)', async () => {
-    mockCreateSession.mockResolvedValue('sess-qa-fail-reset');
-    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
-
-    const pipeline = makePipeline(project.taskId, project.taskDir, {
-      phase: 'qa-review',
-      qaAttempt: 0,
-      maxQaAttempts: 3,
-      worktreePath: join(project.root, 'worktrees', 'test-task'),
-      qaTimeoutCount: 2,  // two previous timeouts
-    });
-
-    try {
-      const qaPromise = (orch as AnyOrch).runQaReview(pipeline);
-      await vi.waitFor(() => {
-        expect(mockSendMessage).toHaveBeenCalled();
-      });
-
-      // QA fails but completes (no timeout)
-      writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
-        overall: 'FAIL',
-        criteria: [{ name: 'Bug', status: 'FAIL', notes: 'Still broken', fix_needed: 'Fix it' }],
-      }));
-
-      fireEvent('event', { sessionId: 'sess-qa-fail-reset', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
-
-      // Timeout counter should reset even on FAIL
-      expect(pipeline.qaTimeoutCount).toBe(0);
-
-      // Bounces back to implement (qaAttempt < maxQaAttempts)
-      expect(pipeline.phase).toBe('implement');
-
-      await qaPromise;
-    } finally {
-      executeSpy.mockRestore();
-    }
-  });
-
-  it('evaluation order: timeout cap (3) checked before quality cap (maxQaAttempts)', async () => {
-    // If both caps would apply, the timeout one wins
-    mockCreateSession.mockResolvedValue('sess-timeout-first');
-
-    const pipeline = makePipeline(project.taskId, project.taskDir, {
-      phase: 'qa-review',
-      qaAttempt: 2,  // will become 3 at top (equals maxQaAttempts)
-      maxQaAttempts: 3,
-      worktreePath: join(project.root, 'worktrees', 'test-task'),
-      qaTimeoutCount: 2,  // will become 3 on timeout
-    });
-
-    const qaPromise = (orch as AnyOrch).runQaReview(pipeline);
-    await vi.waitFor(() => {
-      expect(mockSendMessage).toHaveBeenCalled();
-    });
-
-    // Timeout occurs
-    fireEvent('exit', { sessionId: 'sess-timeout-first', code: 1 });
-    await new Promise(r => setTimeout(r, 50));
-
-    // Timeout cap hit (3 >= 3) — task fails
-    expect(pipeline.phase).toBe('failed');
-    expect(pipeline.qaTimeoutCount).toBe(3);
-
-    // qaAttempt: started 2, incremented to 3, decremented to 2 by timeout handler
-    expect(pipeline.qaAttempt).toBe(2);
-
-    await qaPromise;
-  });
-
-  it('writes timeout-specific completion summary on timeout cap exceeded', async () => {
-    mockCreateSession.mockResolvedValue('sess-timeout-summary');
-
-    const pipeline = makePipeline(project.taskId, project.taskDir, {
-      phase: 'qa-review',
-      qaAttempt: 0,
-      maxQaAttempts: 3,
-      worktreePath: join(project.root, 'worktrees', 'test-task'),
-      qaTimeoutCount: 2,
-    });
-
-    const qaPromise = (orch as AnyOrch).runQaReview(pipeline);
-    await vi.waitFor(() => {
-      expect(mockSendMessage).toHaveBeenCalled();
-    });
-
-    fireEvent('exit', { sessionId: 'sess-timeout-summary', code: 1 });
-    await new Promise(r => setTimeout(r, 50));
-
-    // Task failed due to timeout
-    expect(pipeline.phase).toBe('failed');
-
-    // Check completion_summary.md was written
-    // Note: writeCompletionSummary in the orchestrator writes to the specPath
-    // In our test, specPath = project.taskDir
-
-    // writeCompletionSummary may not be mocked properly — best-effort check
-
-    await qaPromise;
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════
-//  ADR 005 — Unified counter reset (review actions)
-// ═══════════════════════════════════════════════════════════════════════
-
 describe('review-actions — unified counter reset (ADR 005)', () => {
   let project: ReturnType<typeof setupProject>;
   let orch: Orchestrator;
@@ -2882,7 +2600,7 @@ describe('review-actions — unified counter reset (ADR 005)', () => {
     project.clean();
   });
 
-  it('autoReviseSpec resets qaTimeoutCount and deliverableFailCounts alongside qaAttempt', async () => {
+  it('autoReviseSpec resets deliverableFailCounts alongside qaAttempt', async () => {
     writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
       overall: 'FAIL',
       spec_concerns: [{
@@ -2899,7 +2617,6 @@ describe('review-actions — unified counter reset (ADR 005)', () => {
       phase: 'qa-review',
       qaAttempt: 2,
       maxQaAttempts: 3,
-      qaTimeoutCount: 1,
       deliverableFailCounts: { 3: 2 },
     });
 
@@ -2908,7 +2625,6 @@ describe('review-actions — unified counter reset (ADR 005)', () => {
 
       // All counters should be reset
       expect(pipeline.qaAttempt).toBe(0);
-      expect(pipeline.qaTimeoutCount).toBe(0);
       expect(pipeline.deliverableFailCounts).toEqual({});
 
       // Spec revision should be incremented
@@ -2921,7 +2637,7 @@ describe('review-actions — unified counter reset (ADR 005)', () => {
     }
   });
 
-  it('rejectTask resets qaTimeoutCount and deliverableFailCounts alongside qaAttempt', async () => {
+  it('rejectTask resets deliverableFailCounts alongside qaAttempt', async () => {
     // Setup task in awaiting-review phase
     (orch as AnyOrch).taskStore.update(project.taskId, { phase: 'awaiting-review' });
 
@@ -2936,7 +2652,6 @@ describe('review-actions — unified counter reset (ADR 005)', () => {
       phase: 'awaiting-review',
       qaAttempt: 2,
       maxQaAttempts: 3,
-      qaTimeoutCount: 1,
       deliverableFailCounts: { 5: 2 },
     });
 
@@ -2948,7 +2663,6 @@ describe('review-actions — unified counter reset (ADR 005)', () => {
 
       // All counters should be reset
       expect(pipeline.qaAttempt).toBe(0);
-      expect(pipeline.qaTimeoutCount).toBe(0);
       expect(pipeline.deliverableFailCounts).toEqual({});
 
       // Should bounce back to implement
@@ -2981,7 +2695,6 @@ describe('review-actions — unified counter reset (ADR 005)', () => {
       phase: 'awaiting-review',
       qaAttempt: 1,
       maxQaAttempts: 3,
-      qaTimeoutCount: 2,
       deliverableFailCounts: { 1: 3 },
     });
     (orch as AnyOrch).pipelines.set(project.taskId, pipeline);
@@ -3021,12 +2734,11 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
     project.clean();
   });
 
-  it('savePipelineState includes qaTimeoutCount and deliverableFailCounts', () => {
+  it('savePipelineState includes deliverableFailCounts', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'qa-review',
       qaAttempt: 2,
       maxQaAttempts: 3,
-      qaTimeoutCount: 1,
       deliverableFailCounts: { 3: 2 },
     });
 
@@ -3037,17 +2749,15 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
     const state = JSON.parse(readFileSync(statePath, 'utf-8'));
 
     expect(state.qaAttempt).toBe(2);
-    expect(state.qaTimeoutCount).toBe(1);
     expect(state.deliverableFailCounts).toEqual({ 3: 2 });
   });
 
-  it('restorePipelineState recovers qaTimeoutCount and deliverableFailCounts after crash', () => {
+  it('restorePipelineState recovers deliverableFailCounts after crash', () => {
     // Simulate a crash: save state, then restore
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement',
       qaAttempt: 1,
       maxQaAttempts: 3,
-      qaTimeoutCount: 2,
       deliverableFailCounts: { 7: 1 },
     });
 
@@ -3061,7 +2771,6 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
     const restored = (orch as AnyOrch)._restorePipelineState(project.taskId, project.taskDir);
     expect(restored).not.toBeNull();
     expect(restored.qaAttempt).toBe(1);
-    expect(restored.qaTimeoutCount).toBe(2);
     expect(restored.deliverableFailCounts).toEqual({ 7: 1 });
 
     // State file should be deleted after restore
@@ -3135,12 +2844,11 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
     }
   });
 
-  it('qaTimeoutCount survives crash recovery', () => {
+  it('deliverableFailCounts survives crash recovery and restore', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'qa-review',
       qaAttempt: 2,
       maxQaAttempts: 3,
-      qaTimeoutCount: 2,
     });
 
     // Save
@@ -3151,11 +2859,9 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
 
     // Restore
     const restored = (orch as AnyOrch)._restorePipelineState(project.taskId, project.taskDir);
-    expect(restored.qaTimeoutCount).toBe(2);
     expect(restored.qaAttempt).toBe(2);
   });
 });
-
 
 // ═══════════════════════════════════════════════════════════════════════
 //  ADR 002 — Wakeup lifecycle: detection, isolation, prompt, circuit breaker

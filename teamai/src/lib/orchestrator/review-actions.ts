@@ -48,7 +48,6 @@ interface TaskPipeline {
   specRevision: number;
   mergeStrategy?: 'local-merge' | 'pull-request';
   sessionId?: string;
-  qaTimeoutCount?: number;
   deliverableFailCounts?: Record<number, number>;
   wakeupAttemptCount?: number;
 }
@@ -68,6 +67,16 @@ export interface ReviewActionsDeps {
   advancePhase: (pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
   savePipelineState: (pipeline: TaskPipeline) => void;
+}
+
+// ── Internal helpers ──────────────────────────────────────────────────────
+
+/** Reset all retry counters on the pipeline — used when the spec is revised
+ *  or the task is rejected, giving the next attempt a clean failure budget. */
+function resetAllCounters(pipeline: TaskPipeline): void {
+  pipeline.qaAttempt = 0;
+  pipeline.deliverableFailCounts = {};
+  pipeline.wakeupAttemptCount = 0;
 }
 
 // ── Public functions ──────────────────────────────────────────────────────
@@ -148,10 +157,7 @@ export async function rejectTask(
   }
 
   // Reset all retry counters — rejection gets a clean budget
-  pipeline.qaAttempt = 0;
-  pipeline.qaTimeoutCount = 0;
-  pipeline.deliverableFailCounts = {};
-  pipeline.wakeupAttemptCount = 0;
+  resetAllCounters(pipeline);
   deps.advancePhase(pipeline, 'implement');
   await deps.executePhase(pipeline);
 }
@@ -220,12 +226,8 @@ export async function autoReviseSpec(
     try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
   }
 
-  // Reset QA attempt counter — the revised spec gets a fresh QA cycle
   // Reset all retry counters — fresh spec gets a clean budget
-  pipeline.qaAttempt = 0;
-  pipeline.qaTimeoutCount = 0;
-  pipeline.deliverableFailCounts = {};
-  pipeline.wakeupAttemptCount = 0;
+  resetAllCounters(pipeline);
   deps.savePipelineState(pipeline);
 
   try {
