@@ -98,8 +98,7 @@ re-read a file to verify an `Edit` that returned success.
 8. Print a summary of what was changed and the test results.
 
 ## Rules
-- Only modify files listed in the subtask unless absolutely necessary.
-- If you must modify additional files, explain why.
+- **You may ONLY modify files explicitly listed in the subtask's `files` array.** This is a hard limit. If a change strictly requires touching unlisted files (e.g. implicitly affected tests), STOP and report the missing dependency rather than expanding your scope. The subtask must be replanned to include those files.
 - Do NOT modify files belonging to other subtasks.
 - Match existing code style exactly (indentation, naming, patterns).
 - Add or update tests for any new functionality.

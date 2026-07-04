@@ -210,6 +210,8 @@ export async function runImplement(
       }
     }
 
+    let retainWorktrees = false;
+    const scopeViolations = new Set<number>();
     try {
       const results = await Promise.allSettled(
         subtasks.map(async (subtask) => {
@@ -301,11 +303,46 @@ export async function runImplement(
                 'After fixing all issues, run the FULL test suite to verify no regressions.\n'
               : '');
 
+          // Snapshot HEAD before the agent session starts (for post-session scope check)
+          let preSessionHead = '';
+          try {
+            preSessionHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+              cwd, encoding: 'utf-8', stdio: 'pipe',
+            }).trim();
+          } catch { /* best-effort — scope check is skipped if snapshot fails */ }
+
           processManager.sendMessage(sessionId, prompt);
 
           await deps.waitForCompletion(sessionId);
 
           processManager.killSession(sessionId);
+
+          // Post-session scope check: verify agent only modified assigned files.
+          // Runs before wakeup/deliverable checks so scope violations are caught
+          // even when other checks would pass.
+          if (preSessionHead) {
+            try {
+              const changedFiles = execFileSync('git', ['diff', '--name-only', preSessionHead + '..HEAD'], {
+                cwd, encoding: 'utf-8', stdio: 'pipe',
+              }).trim().split('\n').filter(Boolean);
+
+              const assignedFiles = new Set(subtask.files || []);
+              const violations = changedFiles.filter(f => !assignedFiles.has(f));
+
+              if (violations.length > 0) {
+                scopeViolations.add(subtask.id);
+                appendFileSync(logFile,
+                  '\n[SCOPE] Subtask ' + subtask.id + ' modified files outside its assigned scope:\n' +
+                  violations.map(f => '  - ' + f).join('\n') + '\n' +
+                  '[SCOPE] Assigned files: ' + ((subtask.files || []).join(', ') || '(none)') + '\n'
+                );
+              }
+            } catch (scopeErr) {
+              // git diff failed — log but don't block
+              const scopeMsg = scopeErr instanceof Error ? scopeErr.message : String(scopeErr);
+              appendFileSync(logFile, '\n[SCOPE] Could not verify file scope (git diff failed: ' + scopeMsg + ')\n');
+            }
+          }
 
           // ADR 002: Check for wakeup file (engineer scheduled background work)
           // Only active during first-pass implement — not during QA rework
@@ -375,11 +412,17 @@ export async function runImplement(
           }
 
           if (!skipCompletion) {
-            // Reset deliverable counter on successful pass
-            if (pipeline.deliverableFailCounts?.[subtask.id] !== undefined) {
-              delete pipeline.deliverableFailCounts[subtask.id];
+            if (scopeViolations.has(subtask.id)) {
+              // Scope violation prevents completion — subtask must re-run
+              skipCompletion = true;
+              appendFileSync(logFile, '[SCOPE] Subtask ' + subtask.id + ' rejected — will re-run with scope enforcement\n');
+            } else {
+              // Reset deliverable counter on successful pass
+              if (pipeline.deliverableFailCounts?.[subtask.id] !== undefined) {
+                delete pipeline.deliverableFailCounts[subtask.id];
+              }
+              completedIds.push(subtask.id);
             }
-            completedIds.push(subtask.id);
           }
 
           // ADR 002: After wakeup completes — only on re-entry with no new wakeup file
@@ -445,18 +488,44 @@ export async function runImplement(
 
       // Cherry-pick successful commits back to main worktree
       if (isMultiGroup) {
+        // Pre-cherry-pick: auto-commit any uncommitted changes in the main worktree.
+        // These shouldn't exist (all work happens in isolated subtask worktrees),
+        // but if they do, committing is safer than stashing or failing.
+        try {
+          const statusOut = execFileSync('git', ['status', '--porcelain'], {
+            cwd: pipeline.worktreePath, encoding: 'utf-8', stdio: 'pipe',
+          }).trim();
+          if (statusOut) {
+            appendFileSync(logFile, '\n[WORKTREE] Main worktree has uncommitted changes — auto-committing before cherry-pick:\n' + statusOut + '\n');
+            execFileSync('git', ['add', '-A'], { cwd: pipeline.worktreePath, stdio: 'pipe' });
+            execFileSync('git', ['commit', '-m', 'chore: auto-save worktree state before cherry-pick'], {
+              cwd: pipeline.worktreePath, stdio: 'pipe',
+            });
+            appendFileSync(logFile, '[WORKTREE] Auto-committed uncommitted changes\n');
+          }
+        } catch (statusErr) {
+          // git command failed (e.g. container mode, git not available) —
+          // log a warning and proceed; cherry-pick will catch any real issues.
+          const errMsg = statusErr instanceof Error ? statusErr.message : String(statusErr);
+          appendFileSync(logFile, '\n[WORKTREE] Could not check/commit worktree status (git failed: ' + errMsg + '), proceeding with cherry-pick\n');
+        }
+
         for (let i = 0; i < results.length; i++) {
           if (results[i].status !== 'fulfilled') continue;
+          if (scopeViolations.has(subtasks[i].id)) {
+            appendFileSync(logFile, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' (scope violation)\n');
+            continue;
+          }
           const stBranch = pipeline.branch + '-st' + subtasks[i].id;
-          try {
-            appendFileSync(logFile, '\n[WORKTREE] Cherry-picking commits from ' + stBranch + ' onto ' + pipeline.branch + '\n');
-            deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
-            appendFileSync(logFile, '[WORKTREE] Cherry-pick succeeded for subtask ' + subtasks[i].id + '\n');
-          } catch (cherryErr) {
-            const cherryMsg = cherryErr instanceof Error ? cherryErr.message : String(cherryErr);
-            try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
-            appendFileSync(logFile, '[WORKTREE] Cherry-pick FAILED for subtask ' + subtasks[i].id + ': ' + cherryMsg + '\n');
-            throw new Error('Cherry-pick conflict for subtask ' + subtasks[i].id + ' — overlapping file changes detected.\n' + cherryMsg);
+          const cherrySuccess = await tryCherryPickWithRecovery(
+            pipeline, deps, logFile, stBranch, subtasks[i].id,
+          );
+          if (!cherrySuccess) {
+            retainWorktrees = true;
+            throw new Error(
+              'Cherry-pick recovery exhausted for subtask ' + subtasks[i].id +
+              ' — per-subtask branches have been preserved for manual recovery.'
+            );
           }
         }
       }
@@ -476,18 +545,23 @@ export async function runImplement(
         });
       }
     } finally {
-      // Clean up per-subtask worktrees
+      // Clean up per-subtask worktrees (skip if cherry-pick failed to preserve work)
       if (isMultiGroup) {
-        for (const stWorktreePath of subtaskWorktrees.values()) {
-          try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch {
-            try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-            try { execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+        if (retainWorktrees) {
+          appendFileSync(logFile, '\n[WORKTREE] Retained ' + subtaskWorktrees.size + ' per-subtask worktree(s) and branches for manual recovery (auto-recovery exhausted).\n');
+          appendFileSync(logFile, '[WORKTREE] Branches preserved: ' + subtasks.map(s => pipeline.branch + '-st' + s.id).join(', ') + '\n');
+        } else {
+          for (const stWorktreePath of subtaskWorktrees.values()) {
+            try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch {
+              try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+              try { execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+            }
           }
+          for (const subtask of subtasks) {
+            try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + subtask.id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+          }
+          appendFileSync(logFile, '\n[WORKTREE] Cleaned up ' + subtaskWorktrees.size + ' per-subtask worktree(s)\n');
         }
-        for (const subtask of subtasks) {
-          try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + subtask.id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
-        }
-        appendFileSync(logFile, '\n[WORKTREE] Cleaned up ' + subtaskWorktrees.size + ' per-subtask worktree(s)\n');
       }
     }
   }
@@ -630,7 +704,98 @@ export async function runImplement(
   await deps.executePhase(pipeline);
 }
 
-// ── Helper ────────────────────────────────────────────────────────────────
+// ── Cherry-pick recovery helpers ──────────────────────────────────────────
+
+/** Check whether a cherry-pick is currently in progress (CHERRY_PICK_HEAD exists). */
+function checkCherryPickInProgress(worktreePath: string): boolean {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', 'CHERRY_PICK_HEAD'], {
+      cwd: worktreePath, encoding: 'utf-8', stdio: 'pipe',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Attempt to cherry-pick a st-branch into the main worktree with auto-recovery.
+ *
+ * Tier 1: Normal `git cherry-pick`.
+ * Tier 2: If conflicts, spawn the merger agent to resolve them semantically.
+ *
+ * Returns true if the cherry-pick succeeded (cleanly or via agent recovery),
+ * false if recovery was exhausted and manual intervention is needed.
+ */
+async function tryCherryPickWithRecovery(
+  pipeline: ImplementPipeline,
+  deps: ImplementDeps,
+  logFile: string,
+  stBranch: string,
+  subtaskId: number,
+): Promise<boolean> {
+  // Tier 1: Normal cherry-pick
+  try {
+    appendFileSync(logFile, '\n[WORKTREE] Cherry-picking commits from ' + stBranch + ' onto ' + pipeline.branch + '\n');
+    deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
+    appendFileSync(logFile, '[WORKTREE] Cherry-pick succeeded for subtask ' + subtaskId + '\n');
+    return true;
+  } catch (firstErr) {
+    const firstMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+    appendFileSync(logFile, '[WORKTREE] Cherry-pick failed for subtask ' + subtaskId + ': ' + firstMsg + '\n');
+  }
+
+  // Check whether this is a recoverable conflict or a hard failure
+  if (!checkCherryPickInProgress(pipeline.worktreePath)) {
+    try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+    appendFileSync(logFile, '[WORKTREE] Cherry-pick hard-failed (not a conflict) — cannot auto-recover subtask ' + subtaskId + '\n');
+    return false;
+  }
+
+  // Tier 2: Spawn merger agent to resolve conflicts semantically
+  try {
+    const conflictedFiles = execFileSync('git', ['diff', '--name-only', '--diff-filter=U'], {
+      cwd: pipeline.worktreePath, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+    appendFileSync(logFile, '[WORKTREE] Conflicted files: ' + (conflictedFiles || '(none listed)') + '\n');
+  } catch { /* best-effort — proceed with merger */ }
+  appendFileSync(logFile, '[WORKTREE] Cherry-pick has conflicts — spawning merger agent for subtask ' + subtaskId + '\n');
+  try {
+    const mergeSessionId = await processManager.createSession(
+      deps.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, logFile),
+    );
+    processManager.sendMessage(mergeSessionId,
+      'Resolve cherry-pick conflicts\n\n' +
+      'A `git cherry-pick` from branch `' + stBranch + '` was attempted onto `' + pipeline.branch + '`\n' +
+      'but encountered merge conflicts. The conflict markers are already in the files.\n\n' +
+      'Your job:\n' +
+      '1. Read each conflicted file and understand the intent of both sides of each conflict\n' +
+      '2. Resolve all conflicts semantically — preserve the intent of BOTH sets of changes\n' +
+      '3. `git add` the resolved files\n' +
+      '4. Run `git cherry-pick --continue` to complete the cherry-pick\n' +
+      '5. Run the test suite to verify correctness (one attempt, wait for completion)\n' +
+      '6. Print a summary of conflicts resolved and test results'
+    );
+    await deps.waitForCompletion(mergeSessionId);
+    processManager.killSession(mergeSessionId);
+
+    if (checkCherryPickInProgress(pipeline.worktreePath)) {
+      appendFileSync(logFile, '[WORKTREE] Merger finished but cherry-pick still in progress for subtask ' + subtaskId + ' — aborting\n');
+      try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+      return false;
+    }
+
+    appendFileSync(logFile, '[WORKTREE] Merger agent resolved cherry-pick conflicts for subtask ' + subtaskId + '\n');
+    return true;
+  } catch (mergeErr) {
+    const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
+    appendFileSync(logFile, '[WORKTREE] Merger agent failed for subtask ' + subtaskId + ': ' + mergeMsg + '\n');
+    try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+    return false;
+  }
+}
+
+// ── Other helpers ────────────────────────────────────────────────────────
 
 /** Build the description string for synthetic subtask 9999.
  *  This is exported so tests can verify the header is present. */
