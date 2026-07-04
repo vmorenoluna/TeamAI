@@ -10,6 +10,7 @@ import path from 'path';
 import { slugify } from '../utils';
 import { TaskStore } from '../task-store';
 import { getWorktreeBase } from './helpers';
+import type { TaskPipeline } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -24,10 +25,7 @@ export interface RemoveWorktreeDeps extends WorktreeOpsDeps {
   taskStore: TaskStore;
 }
 
-interface SubtaskWorktreePipeline {
-  worktreePath: string;
-  branch: string;
-}
+type SubtaskWorktreePipeline = Pick<TaskPipeline, 'worktreePath' | 'branch'>;
 
 // ── Worktree path resolver ────────────────────────────────────────────────
 

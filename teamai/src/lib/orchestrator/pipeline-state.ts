@@ -3,27 +3,7 @@ import path from 'path';
 import { processManager } from '../process-manager';
 import type { TaskStore } from '../task-store';
 import type { PipelinePhase } from '@/constants/phases';
-
-interface TaskPipeline {
-  taskId: string;
-  description: string;
-  phase: PipelinePhase;
-  specPath: string;
-  worktreePath: string;
-  branch: string;
-  qaAttempt: number;
-  maxQaAttempts: number;
-  specRevision: number;
-  mergeStrategy?: 'local-merge' | 'pull-request';
-  sessionId?: string;
-  deliverableFailCounts?: Record<number, number>;
-  wakeupUntil?: string;
-  wakeupSubtaskId?: number;
-  wakeupCommand?: string;
-  wakeupArtifact?: string;
-  wakeupAttemptCount?: number;
-
-}
+import type { TaskPipeline } from './types';
 
 /** Rotate output log: keep last ~50KB when log exceeds ~100KB (#6) */
 export function rotateOutputLog(logFile: string): void {

@@ -11,56 +11,9 @@ import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
 import { RateLimitError } from './rate-limit';
 import type { PipelinePhase } from '@/constants/phases';
+import type { TaskPipeline, QaReport } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
-
-interface QaCriterion {
-  status?: string;
-  criterion?: string;
-  name?: string;
-  fix_needed?: string;
-  notes?: string;
-  evidence?: string;
-}
-
-interface QaIssue {
-  description?: string;
-  message?: string;
-  file?: string;
-  fix_needed?: string;
-  severity?: string;
-}
-
-interface SpecConcern {
-  issue: string;
-  reasoning: string;
-  suggested_fix?: string;
-}
-
-interface QaReport {
-  overall?: string;
-  criteria?: QaCriterion[];
-  additional_issues?: QaIssue[];
-  issues?: QaIssue[];
-  spec_concerns?: SpecConcern[];
-  head_at_review?: string;
-  fail_type?: string;
-}
-
-interface QaReviewPipeline {
-  taskId: string;
-  description: string;
-  phase: PipelinePhase;
-  specPath: string;
-  worktreePath: string;
-  branch: string;
-  qaAttempt: number;
-  maxQaAttempts: number;
-  specRevision: number;
-  sessionId?: string;
-  /** Per-subtask counter of consecutive files_to_create failures */
-  deliverableFailCounts?: Record<number, number>;
-}
 
 type SessionOptsResult = { taskId: string; role: AgentSession['role']; cwd: string; [key: string]: unknown };
 
@@ -68,24 +21,24 @@ type SessionOptsResult = { taskId: string; role: AgentSession['role']; cwd: stri
 
 export interface QaReviewDeps {
   projectRoot: string;
-  persistAndEmitPhase: (pipeline: QaReviewPipeline) => void;
-  advancePhase: (pipeline: QaReviewPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
-  savePipelineState: (pipeline: QaReviewPipeline) => void;
-  executePhase: (pipeline: QaReviewPipeline) => Promise<void>;
+  persistAndEmitPhase: (pipeline: TaskPipeline) => void;
+  advancePhase: (pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
+  savePipelineState: (pipeline: TaskPipeline) => void;
+  executePhase: (pipeline: TaskPipeline) => Promise<void>;
   sessionOpts: (role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) => SessionOptsResult;
   waitForCompletion: (sessionId: string) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
-  writeQaFeedback: (pipeline: QaReviewPipeline, report: QaReport) => void;
-  writeCompletionSummary: (pipeline: QaReviewPipeline) => void;
+  writeQaFeedback: (pipeline: TaskPipeline, report: QaReport) => void;
+  writeCompletionSummary: (pipeline: TaskPipeline) => void;
   phaseHeader: (logFile: string, phase: string) => void;
   toAgentPath: (hostPath: string) => string;
-  autoReviseSpec: (pipeline: QaReviewPipeline) => Promise<void>;
+  autoReviseSpec: (pipeline: TaskPipeline) => Promise<void>;
 }
 
 // ── Main function ─────────────────────────────────────────────────────────
 
 export async function runQaReview(
-  pipeline: QaReviewPipeline,
+  pipeline: TaskPipeline,
   deps: QaReviewDeps,
 ): Promise<void> {
   deps.persistAndEmitPhase(pipeline);

@@ -17,69 +17,7 @@ import { runImplement } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
 import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec } from './orchestrator/review-actions';
 import type { PipelinePhase } from '@/constants/phases';
-
-interface QaCriterion {
-  status?: string;
-  criterion?: string;
-  name?: string;
-  fix_needed?: string;
-  notes?: string;
-  evidence?: string;
-}
-
-interface QaIssue {
-  description?: string;
-  message?: string;
-  file?: string;
-  fix_needed?: string;
-  severity?: string;
-}
-
-interface QaReport {
-  overall?: string;
-  criteria?: QaCriterion[];
-  additional_issues?: QaIssue[];
-  issues?: QaIssue[];
-  spec_concerns?: SpecConcern[];
-  head_at_review?: string;
-  fail_type?: string;
-}
-
-interface SpecConcern {
-  issue: string;
-  reasoning: string;
-  suggested_fix?: string;
-}
-
-
-type MergeStrategy = 'local-merge' | 'pull-request';
-
-interface TaskPipeline {
-  taskId: string;
-  description: string;
-  phase: PipelinePhase;
-  specPath: string;
-  worktreePath: string;
-  branch: string;
-  qaAttempt: number;
-  maxQaAttempts: number;
-  specRevision: number;
-  mergeStrategy?: MergeStrategy;
-  sessionId?: string;
-  /** Per-subtask counter of consecutive files_to_create failures. Key = subtask ID, value = count. */
-  deliverableFailCounts?: Record<number, number>;
-  /** ISO timestamp — wakeup scheduled until this time (ADR 002) */
-  wakeupUntil?: string;
-  /** Subtask ID that triggered the wakeup (ADR 002) */
-  wakeupSubtaskId?: number;
-  /** Background command the engineer was running (informational) (ADR 002) */
-  wakeupCommand?: string;
-  /** Artifact the engineer should verify on re-entry (ADR 002) */
-  wakeupArtifact?: string;
-  /** Consecutive wakeup attempts for the current subtask (ADR 002) */
-  wakeupAttemptCount?: number;
-
-}
+import type { TaskPipeline, MergeStrategy, QaReport } from './orchestrator/types';
 
 export class Orchestrator {
   private pipelines: Map<string, TaskPipeline> = new Map();

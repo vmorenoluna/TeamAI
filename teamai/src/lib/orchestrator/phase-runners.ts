@@ -12,22 +12,7 @@ import { detectGitPlatform, buildPlatformPrompt } from '../git-platform';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
-
-// ── Pipeline shape (subset used by phase runners) ──
-
-export interface PhaseRunnerPipeline {
-  taskId: string;
-  description: string;
-  phase: PipelinePhase;
-  specPath: string;
-  worktreePath: string;
-  branch: string;
-  qaAttempt: number;
-  maxQaAttempts: number;
-  specRevision: number;
-  mergeStrategy?: 'local-merge' | 'pull-request';
-  sessionId?: string;
-}
+import type { TaskPipeline } from './types';
 
 // ── Dependency interfaces ──
 
@@ -44,19 +29,19 @@ interface SessionOptsFn {
 
 interface BasePhaseDeps {
   projectRoot: string;
-  persistAndEmitPhase: (pipeline: PhaseRunnerPipeline) => void;
+  persistAndEmitPhase: (pipeline: TaskPipeline) => void;
   sessionOpts: SessionOptsFn;
   waitForCompletion: (sessionId: string) => Promise<void>;
-  advancePhase: (pipeline: PhaseRunnerPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
+  advancePhase: (pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
 }
 
 /** Shared callbacks for spec and plan — phases that cascade to the next phase. */
 interface CascadePhaseDeps extends BasePhaseDeps {
   rotateOutputLog: (logFile: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
-  savePipelineState: (pipeline: PhaseRunnerPipeline) => void;
+  savePipelineState: (pipeline: TaskPipeline) => void;
   toAgentPath: (hostPath: string) => string;
-  executePhase: (pipeline: PhaseRunnerPipeline) => Promise<void>;
+  executePhase: (pipeline: TaskPipeline) => Promise<void>;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -64,7 +49,7 @@ interface CascadePhaseDeps extends BasePhaseDeps {
 // ─────────────────────────────────────────────────────────────────────
 
 export async function runSpecPhase(
-  pipeline: PhaseRunnerPipeline,
+  pipeline: TaskPipeline,
   deps: CascadePhaseDeps,
 ): Promise<void> {
   const logFile = path.join(pipeline.specPath, 'output.log');
@@ -112,7 +97,7 @@ interface PlanPhaseDeps extends CascadePhaseDeps {
 }
 
 export async function runPlanPhase(
-  pipeline: PhaseRunnerPipeline,
+  pipeline: TaskPipeline,
   deps: PlanPhaseDeps,
 ): Promise<void> {
   const logFile = path.join(pipeline.specPath, 'output.log');
@@ -157,13 +142,13 @@ export async function runPlanPhase(
 
 interface MergePhaseDeps extends BasePhaseDeps {
   phaseHeader: (logFile: string, phase: string) => void;
-  commitArtifactsToWorktree: (pipeline: PhaseRunnerPipeline) => void;
+  commitArtifactsToWorktree: (pipeline: TaskPipeline) => void;
   getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig };
   removeWorktree: (taskId: string) => void;
 }
 
 export async function runMergePhase(
-  pipeline: PhaseRunnerPipeline,
+  pipeline: TaskPipeline,
   deps: MergePhaseDeps,
 ): Promise<void> {
   deps.persistAndEmitPhase(pipeline);
@@ -214,13 +199,13 @@ export async function runMergePhase(
 interface CreatePRDeps extends BasePhaseDeps {
   taskStore: TaskStore;
   execGit: (args: string[], hostCwd: string) => void;
-  commitArtifactsToWorktree: (pipeline: PhaseRunnerPipeline) => void;
+  commitArtifactsToWorktree: (pipeline: TaskPipeline) => void;
   gitPush: (pushArgs: string[], logFile: string) => void;
   extractPrUrl: (logFile: string) => string | null;
 }
 
 export async function runCreatePRPhase(
-  pipeline: PhaseRunnerPipeline,
+  pipeline: TaskPipeline,
   deps: CreatePRDeps,
 ): Promise<void> {
   deps.persistAndEmitPhase(pipeline);

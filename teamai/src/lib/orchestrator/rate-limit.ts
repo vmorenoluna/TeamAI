@@ -11,6 +11,7 @@ import path from 'path';
 import { processManager } from '../process-manager';
 
 import type { TaskStore } from '../task-store';
+import type { TaskPipeline } from './types';
 import type { PipelinePhase } from '@/constants/phases';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -18,20 +19,6 @@ import type { PipelinePhase } from '@/constants/phases';
 interface RateLimitInfo {
   status: string;
   resetsAt?: number;
-}
-
-interface RateLimitPipeline {
-  taskId: string;
-  description: string;
-  specPath: string;
-  worktreePath: string;
-  branch: string;
-  phase: PipelinePhase;
-  qaAttempt: number;
-  maxQaAttempts: number;
-  specRevision: number;
-  mergeStrategy?: 'local-merge' | 'pull-request';
-  sessionId?: string;
 }
 
 // ── Error class ───────────────────────────────────────────────────────────
@@ -125,11 +112,11 @@ export interface HandleRateLimitDeps {
   /** Active-task lock set — prevents concurrent runs of the same task. */
   activeTasks: Set<string>;
   /** In-memory pipeline map. */
-  pipelines: Map<string, RateLimitPipeline>;
-  executePhase: (pipeline: RateLimitPipeline) => Promise<void>;
-  advancePhase: (pipeline: RateLimitPipeline, phase: PipelinePhase) => void;
+  pipelines: Map<string, TaskPipeline>;
+  executePhase: (pipeline: TaskPipeline) => Promise<void>;
+  advancePhase: (pipeline: TaskPipeline, phase: PipelinePhase) => void;
   /** Recursive call for nested rate limits — passes through the orchestrator so spies intercept it. */
-  handleRateLimit: (pipeline: RateLimitPipeline, resetsAt: number) => void;
+  handleRateLimit: (pipeline: TaskPipeline, resetsAt: number) => void;
 }
 
 /**
@@ -141,7 +128,7 @@ export interface HandleRateLimitDeps {
  * pipeline replaced during the wait).
  */
 export function handleRateLimit(
-  pipeline: RateLimitPipeline,
+  pipeline: TaskPipeline,
   resetsAt: number,
   deps: HandleRateLimitDeps,
 ): void {
