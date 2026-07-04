@@ -50,6 +50,10 @@ interface TaskPipeline {
   sessionId?: string;
   deliverableFailCounts?: Record<number, number>;
   wakeupAttemptCount?: number;
+  wakeupUntil?: string;
+  wakeupSubtaskId?: number;
+  wakeupCommand?: string;
+  wakeupArtifact?: string;
 }
 
 type MergeStrategy = 'local-merge' | 'pull-request';
@@ -76,7 +80,15 @@ export interface ReviewActionsDeps {
 function resetAllCounters(pipeline: TaskPipeline): void {
   pipeline.qaAttempt = 0;
   pipeline.deliverableFailCounts = {};
+  // Wakeup state — counters AND identity fields MUST reset together.
+  // Leaving wakeupSubtaskId set would cause incorrect subtask isolation
+  // on the next implement pass (ADR 002), and a lingering wakeupUntil
+  // would break runTask's lock-release guard in the finally block.
   pipeline.wakeupAttemptCount = 0;
+  pipeline.wakeupUntil = undefined;
+  pipeline.wakeupSubtaskId = undefined;
+  pipeline.wakeupCommand = undefined;
+  pipeline.wakeupArtifact = undefined;
 }
 
 // ── Public functions ──────────────────────────────────────────────────────
