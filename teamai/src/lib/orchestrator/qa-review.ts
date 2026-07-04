@@ -11,11 +11,7 @@ import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
 import { RateLimitError } from './rate-limit';
 import type { PipelinePhase } from '@/constants/phases';
-import type { TaskPipeline, QaReport } from './types';
-
-// ── Types ─────────────────────────────────────────────────────────────────
-
-type SessionOptsResult = { taskId: string; role: AgentSession['role']; cwd: string; [key: string]: unknown };
+import type { TaskPipeline, QaReport, SessionOptsResult } from './types';
 
 // ── Dependencies ──────────────────────────────────────────────────────────
 

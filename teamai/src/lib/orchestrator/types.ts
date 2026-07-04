@@ -5,6 +5,7 @@
  * duplication and type drift across the phase runners and helpers.
  */
 import type { PipelinePhase } from '@/constants/phases';
+import type { AgentSession } from '../process-manager';
 
 // ── Merge strategy ────────────────────────────────────────────────────────
 
@@ -72,3 +73,30 @@ export interface QaReport {
   head_at_review?: string;
   fail_type?: string;
 }
+
+// -- Plan subtask shape (plan.json) ------------------------------------
+
+export interface PlanSubtask {
+  id: number;
+  title: string;
+  description: string;
+  files: string[];
+  acceptance_criteria: string[];
+  parallel_group?: string;
+  completed?: boolean;
+  qa_flagged?: boolean;
+  depends_on?: number[];
+  /** Files or directories this subtask must create on disk.
+   *  Verified after the session ends -- subtask stays incomplete if any are missing. */
+  files_to_create?: string[];
+}
+
+// ── Session options ─────────────────────────────────────────────────────
+
+/** Return type for sessionOpts builder — used by processManager.createSession() */
+export type SessionOptsResult = {
+  taskId: string;
+  role: AgentSession['role'];
+  cwd: string;
+  [key: string]: unknown;
+};

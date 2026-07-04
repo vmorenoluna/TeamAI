@@ -12,30 +12,12 @@ import { processManager, type AgentSession } from '../process-manager';
 import { readContainerConfig, containerManager, dockerAvailable, _resetDockerAvailableCache } from '../container-manager';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import type { PipelinePhase } from '@/constants/phases';
-import type { TaskPipeline, QaReport } from './types';
-
-// ── Types ─────────────────────────────────────────────────────────────────
-
-interface PlanSubtask {
-  id: number;
-  title: string;
-  description: string;
-  files: string[];
-  acceptance_criteria: string[];
-  parallel_group?: string;
-  completed?: boolean;
-  qa_flagged?: boolean;
-  /** Files or directories this subtask must create on disk.
-   *  Verified after the session ends — subtask stays incomplete if any are missing. */
-  files_to_create?: string[];
-}
+import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
 
 export interface ImplementPipeline extends TaskPipeline {
   /** Internal flag: set when wakeup completes during this run so post-groups code re-enters (ADR 002) */
   _wakeupJustCompleted?: boolean;
 }
-
-type SessionOptsResult = { taskId: string; role: AgentSession['role']; cwd: string; [key: string]: unknown };
 
 // ── Dependencies ──────────────────────────────────────────────────────────
 
@@ -162,7 +144,7 @@ export async function runImplement(
       parallel_group: 'QA-REWORK',
       qa_flagged: true,
       completed: false,
-    } as unknown as PlanSubtask];
+    }];
   } else {
     effectiveSubtasks = subtasksToRun;
   }

@@ -1,31 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import type { TaskStore } from '../task-store';
-
-interface QaCriterion {
-  status?: string;
-  criterion?: string;
-  name?: string;
-  fix_needed?: string;
-  notes?: string;
-  evidence?: string;
-}
-
-interface QaIssue {
-  description?: string;
-  message?: string;
-  file?: string;
-  fix_needed?: string;
-  severity?: string;
-}
-
-interface QaReport {
-  overall?: string;
-  criteria?: QaCriterion[];
-  additional_issues?: QaIssue[];
-  issues?: QaIssue[];
-  fail_type?: string;
-}
+import type { QaReport } from './types';
 
 /** Write QA feedback for bouncing back to implement */
 export function writeQaFeedback(specPath: string, report: QaReport): void {
