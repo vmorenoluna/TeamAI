@@ -578,6 +578,41 @@ ruleTester.run(
           writeFileSync(join(homedir(), '.teamai', 'projects.json'), JSON.stringify([]));
         `,
       },
+      // fs.appendFileSync to projects.json WITH vi.mock('os') — safe
+      {
+        code: `
+          import * as fs from 'fs';
+          import { join } from 'path';
+          vi.mock('os', () => ({ homedir: () => '/tmp/test' }));
+          fs.appendFileSync(join('/tmp/test', '.teamai', 'projects.json'), '[]');
+        `,
+      },
+      // fs.promises.writeFile to projects.json WITH vi.mock('@/lib/project-store') — safe
+      {
+        code: `
+          import * as fs from 'fs';
+          vi.mock('@/lib/project-store', () => ({
+            projectStore: { getAll: () => [] },
+          }));
+          fs.promises.writeFile('/tmp/projects.json', '[]');
+        `,
+      },
+      // writeFile (bare identifier) WITH vi.mock('os') — safe
+      {
+        code: `
+          import { writeFile } from 'fs/promises';
+          vi.mock('os', () => ({ homedir: () => '/tmp/test' }));
+          writeFile('/tmp/test/.teamai/projects.json', '[]');
+        `,
+      },
+      // fs.writeSync to projects.json WITH vi.mock('os') — safe
+      {
+        code: `
+          import * as fs from 'fs';
+          vi.mock('os', () => ({ homedir: () => '/tmp/test' }));
+          fs.writeSync('/tmp/test/.teamai/projects.json', '[]');
+        `,
+      },
     ],
     invalid: [
       // Direct writeFileSync to a path containing 'projects.json' — no mock
@@ -591,9 +626,9 @@ ruleTester.run(
         errors: [
           {
             message:
-              "Test writes to projects.json without mocking 'os' or '@/lib/project-store' " +
-              "or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME env-var isolation. " +
-              "This can corrupt the real ~/.teamai/projects.json. " +
+              "Test writes to projects.json (via writeFileSync/appendFileSync/writeFile/writeSync) without " +
+              "mocking 'os' or '@/lib/project-store' or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME " +
+              "env-var isolation. This can corrupt the real ~/.teamai/projects.json. " +
               "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
           },
         ],
@@ -608,9 +643,9 @@ ruleTester.run(
         errors: [
           {
             message:
-              "Test writes to projects.json without mocking 'os' or '@/lib/project-store' " +
-              "or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME env-var isolation. " +
-              "This can corrupt the real ~/.teamai/projects.json. " +
+              "Test writes to projects.json (via writeFileSync/appendFileSync/writeFile/writeSync) without " +
+              "mocking 'os' or '@/lib/project-store' or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME " +
+              "env-var isolation. This can corrupt the real ~/.teamai/projects.json. " +
               "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
           },
         ],
@@ -624,9 +659,76 @@ ruleTester.run(
         errors: [
           {
             message:
-              "Test writes to projects.json without mocking 'os' or '@/lib/project-store' " +
-              "or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME env-var isolation. " +
-              "This can corrupt the real ~/.teamai/projects.json. " +
+              "Test writes to projects.json (via writeFileSync/appendFileSync/writeFile/writeSync) without " +
+              "mocking 'os' or '@/lib/project-store' or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME " +
+              "env-var isolation. This can corrupt the real ~/.teamai/projects.json. " +
+              "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
+          },
+        ],
+      },
+      // fs.appendFileSync to projects.json — no mock
+      {
+        code: `
+          import * as fs from 'fs';
+          import { homedir } from 'os';
+          fs.appendFileSync(homedir() + '/.teamai/projects.json', '[]');
+        `,
+        errors: [
+          {
+            message:
+              "Test writes to projects.json (via writeFileSync/appendFileSync/writeFile/writeSync) without " +
+              "mocking 'os' or '@/lib/project-store' or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME " +
+              "env-var isolation. This can corrupt the real ~/.teamai/projects.json. " +
+              "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
+          },
+        ],
+      },
+      // fs.promises.writeFile to projects.json — no mock
+      {
+        code: `
+          import * as fs from 'fs';
+          import { join } from 'path';
+          fs.promises.writeFile(join('/tmp', '.teamai', 'projects.json'), '{}');
+        `,
+        errors: [
+          {
+            message:
+              "Test writes to projects.json (via writeFileSync/appendFileSync/writeFile/writeSync) without " +
+              "mocking 'os' or '@/lib/project-store' or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME " +
+              "env-var isolation. This can corrupt the real ~/.teamai/projects.json. " +
+              "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
+          },
+        ],
+      },
+      // writeFile (bare identifier from fs/promises) — no mock
+      {
+        code: `
+          import { writeFile } from 'fs/promises';
+          writeFile('/home/user/.teamai/projects.json', '[]');
+        `,
+        errors: [
+          {
+            message:
+              "Test writes to projects.json (via writeFileSync/appendFileSync/writeFile/writeSync) without " +
+              "mocking 'os' or '@/lib/project-store' or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME " +
+              "env-var isolation. This can corrupt the real ~/.teamai/projects.json. " +
+              "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
+          },
+        ],
+      },
+      // fs.writeSync to projects.json — no mock
+      {
+        code: `
+          import * as fs from 'fs';
+          import { homedir } from 'os';
+          fs.writeSync(homedir() + '/.teamai/projects.json', '[]');
+        `,
+        errors: [
+          {
+            message:
+              "Test writes to projects.json (via writeFileSync/appendFileSync/writeFile/writeSync) without " +
+              "mocking 'os' or '@/lib/project-store' or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME " +
+              "env-var isolation. This can corrupt the real ~/.teamai/projects.json. " +
               "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
           },
         ],
