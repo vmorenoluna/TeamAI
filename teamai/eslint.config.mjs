@@ -267,6 +267,131 @@ const localPlugin = {
         };
       },
     },
+    /**
+     * Detects test files that write to the real ~/.teamai/projects.json
+     * without mocking 'os' (to redirect homedir) or '@/lib/project-store'
+     * (to intercept the project store), or without using env-var isolation
+     * (TEAMAI_CONFIG_DIR / TEAMAI_TEST_HOME).
+     *
+     * This prevents tests from accidentally corrupting the user's real
+     * project registry during a test run.
+     *
+     * Safe patterns:
+     *   vi.mock('os', () => ({ homedir: () => '/tmp/test' }))
+     *   vi.mock('@/lib/project-store', () => ({ projectStore: { getAll: vi.fn() } }))
+     *   const HOME = process.env.TEAMAI_TEST_HOME;
+     */
+    "no-real-projects-json": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "Prevent tests from writing to the real ~/.teamai/projects.json without a mock or env-var isolation",
+        },
+      },
+      create(context) {
+        let hasWriteFileSync = false;
+        let hasProjectsJsonString = false;
+        let projectsJsonNode = null;
+        let hasMockOrIsolation = false;
+
+        /** Recursively check if a node contains a string literal with substring. */
+        function containsStringWith(node, substring) {
+          if (!node) return false;
+          if (
+            node.type === "Literal" &&
+            typeof node.value === "string" &&
+            node.value.includes(substring)
+          ) {
+            return true;
+          }
+          if (
+            node.type === "TemplateLiteral" &&
+            node.quasis.some(q => q.value.raw.includes(substring))
+          ) {
+            return true;
+          }
+          for (const key of Object.keys(node)) {
+            if (key === "parent" || key === "range" || key === "loc") continue;
+            const child = node[key];
+            if (Array.isArray(child)) {
+              for (const c of child) {
+                if (c && typeof c.type === "string" && containsStringWith(c, substring))
+                  return true;
+              }
+            } else if (child && typeof child.type === "string") {
+              if (containsStringWith(child, substring)) return true;
+            }
+          }
+          return false;
+        }
+
+        return {
+          // Detect writeFileSync calls
+          CallExpression(node) {
+            const callee = node.callee;
+            // writeFileSync(...) or fs.writeFileSync(...)
+            const name =
+              callee.type === "Identifier" ? callee.name :
+              callee.type === "MemberExpression" && callee.property?.type === "Identifier" ? callee.property.name :
+              null;
+            if (name === "writeFileSync") {
+              hasWriteFileSync = true;
+              // Check if any argument contains a string with 'projects.json'
+              if (node.arguments.some(arg => containsStringWith(arg, "projects.json"))) {
+                hasProjectsJsonString = true;
+                projectsJsonNode = node;
+              }
+            }
+
+            // Detect vi.mock('os') or vi.mock('@/lib/project-store') or vi.doMock(...)
+            if (
+              callee.type === "MemberExpression" &&
+              callee.object?.type === "Identifier" &&
+              callee.object.name === "vi" &&
+              callee.property?.type === "Identifier" &&
+              (callee.property.name === "mock" || callee.property.name === "doMock") &&
+              node.arguments.length >= 1 &&
+              node.arguments[0].type === "Literal"
+            ) {
+              const mockTarget = node.arguments[0].value;
+              if (mockTarget === "os" || mockTarget === "@/lib/project-store") {
+                hasMockOrIsolation = true;
+              }
+            }
+          },
+
+          // Detect env-var isolation: TEAMAI_CONFIG_DIR or TEAMAI_TEST_HOME
+          MemberExpression(node) {
+            if (
+              node.object?.type === "MemberExpression" &&
+              node.object.object?.type === "Identifier" &&
+              node.object.object.name === "process" &&
+              node.object.property?.type === "Identifier" &&
+              node.object.property.name === "env" &&
+              node.property?.type === "Identifier" &&
+              (node.property.name === "TEAMAI_CONFIG_DIR" ||
+               node.property.name === "TEAMAI_TEST_HOME")
+            ) {
+              hasMockOrIsolation = true;
+            }
+          },
+
+          "Program:exit"() {
+            if (hasWriteFileSync && hasProjectsJsonString && !hasMockOrIsolation) {
+              context.report({
+                node: projectsJsonNode,
+                message:
+                  "Test writes to projects.json without mocking 'os' or '@/lib/project-store' " +
+                  "or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME env-var isolation. " +
+                  "This can corrupt the real ~/.teamai/projects.json. " +
+                  "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
+              });
+            }
+          },
+        };
+      },
+    },
   },
 };
 
@@ -293,6 +418,17 @@ const eslintConfig = defineConfig([
     files: ["tests/**/*.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
+  // Enforce no-real-projects-json on test files to prevent accidental writes
+  // to the user's real ~/.teamai/projects.json without a mock or env-var isolation.
+  {
+    files: ["tests/**/*.{ts,tsx}"],
+    plugins: {
+      local: localPlugin,
+    },
+    rules: {
+      "local/no-real-projects-json": "error",
     },
   },
   // Allow underscore-prefixed unused variables (intentionally ignored)
