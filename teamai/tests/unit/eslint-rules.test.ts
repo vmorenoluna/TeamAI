@@ -21,6 +21,8 @@ const noRawRouterRefreshRule = localPlugin.rules['no-raw-router-refresh'] as any
 
 const noAsyncFetchOnMountRule = localPlugin.rules['no-async-fetch-on-mount'] as any;
 
+const noRealProjectsJsonRule = localPlugin.rules['no-real-projects-json'] as any;
+
 ruleTester.run(
   'no-useTransition-useRouter',
   noTransitionUseRouterRule,
@@ -495,6 +497,137 @@ ruleTester.run(
               'The state "setEnabled" is initialised with a literal default then ' +
               'async-fetched in a mount effect — it will reset on router.refresh(). ' +
               'Pass the initial value as a server prop instead (e.g. <Comp initialX={val} />).',
+          },
+        ],
+      },
+    ],
+  },
+);
+
+// ---------------------------------------------------------------------------
+// no-real-projects-json
+// ---------------------------------------------------------------------------
+
+ruleTester.run(
+  'no-real-projects-json',
+  noRealProjectsJsonRule,
+  {
+    valid: [
+      // vi.mock('os') — redirects homedir to temp dir (safe)
+      {
+        code: `
+          import { writeFileSync } from 'fs';
+          import { join } from 'path';
+          vi.mock('os', () => ({ homedir: () => '/tmp/test-home' }));
+          writeFileSync(join('/tmp/test-home', '.teamai', 'projects.json'), '[]');
+        `,
+      },
+      // vi.mock('@/lib/project-store') — mocks the store entirely (safe)
+      {
+        code: `
+          vi.mock('@/lib/project-store', () => ({
+            projectStore: { getAll: () => [] },
+          }));
+        `,
+      },
+      // TEAMAI_CONFIG_DIR env-var isolation (safe)
+      {
+        code: `
+          import { writeFileSync } from 'fs';
+          const dir = process.env.TEAMAI_CONFIG_DIR;
+          writeFileSync(dir + '/projects.json', '[]');
+        `,
+      },
+      // TEAMAI_TEST_HOME env-var isolation (safe)
+      {
+        code: `
+          import { writeFileSync } from 'fs';
+          const home = process.env.TEAMAI_TEST_HOME;
+          writeFileSync(home + '/.teamai/projects.json', '[]');
+        `,
+      },
+      // vi.doMock('os') — also safe
+      {
+        code: `
+          import { writeFileSync } from 'fs';
+          vi.doMock('os', () => ({ homedir: () => '/tmp/test' }));
+          writeFileSync('/tmp/test/.teamai/projects.json', '[]');
+        `,
+      },
+      // writeFileSync to projects.json but no 'projects.json' in the args — not flagged
+      {
+        code: `
+          import { writeFileSync } from 'fs';
+          writeFileSync('/tmp/some-other.json', '[]');
+        `,
+      },
+      // No writeFileSync at all — just reads
+      {
+        code: `
+          import { readFileSync } from 'fs';
+          const data = readFileSync('projects.json', 'utf-8');
+        `,
+      },
+      // Both vi.mock('os') and writeFileSync to projects.json — safe
+      {
+        code: `
+          import { writeFileSync } from 'fs';
+          import { join } from 'path';
+          import { homedir } from 'os';
+          vi.mock('os', () => ({ homedir: () => '/tmp/mock-home' }));
+          writeFileSync(join(homedir(), '.teamai', 'projects.json'), JSON.stringify([]));
+        `,
+      },
+    ],
+    invalid: [
+      // Direct writeFileSync to a path containing 'projects.json' — no mock
+      {
+        code: `
+          import { writeFileSync } from 'fs';
+          import { join } from 'path';
+          import { homedir } from 'os';
+          writeFileSync(join(homedir(), '.teamai', 'projects.json'), JSON.stringify([]));
+        `,
+        errors: [
+          {
+            message:
+              "Test writes to projects.json without mocking 'os' or '@/lib/project-store' " +
+              "or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME env-var isolation. " +
+              "This can corrupt the real ~/.teamai/projects.json. " +
+              "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
+          },
+        ],
+      },
+      // fs.writeFileSync with template literal path
+      {
+        code: `
+          import * as fs from 'fs';
+          import { homedir } from 'os';
+          fs.writeFileSync(\`\${homedir()}/.teamai/projects.json\`, '[]');
+        `,
+        errors: [
+          {
+            message:
+              "Test writes to projects.json without mocking 'os' or '@/lib/project-store' " +
+              "or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME env-var isolation. " +
+              "This can corrupt the real ~/.teamai/projects.json. " +
+              "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
+          },
+        ],
+      },
+      // writeFileSync with string literal path containing 'projects.json'
+      {
+        code: `
+          import { writeFileSync } from 'fs';
+          writeFileSync('/home/user/.teamai/projects.json', '{}');
+        `,
+        errors: [
+          {
+            message:
+              "Test writes to projects.json without mocking 'os' or '@/lib/project-store' " +
+              "or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME env-var isolation. " +
+              "This can corrupt the real ~/.teamai/projects.json. " +
+              "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
           },
         ],
       },
