@@ -223,6 +223,7 @@
       <a href="#review" class="nav-link">Review</a>
       <a href="#streaming" class="nav-link">Streaming</a>
       <a href="#extras" class="nav-link">More</a>
+      <a href="#breakdown" class="nav-link">Internals</a>
     </div>
   </div>
 </nav>
@@ -509,6 +510,88 @@
       <span class="arch-arrow">⇄</span>
       <div class="arch-node highlight"><div class="title">🤖 Claude CLI</div><div class="sub">Multiple subprocesses</div></div>
     </div>
+  </div>
+</section>
+
+<!-- ==================== Agent vs. Code Breakdown ==================== -->
+<section id="breakdown">
+  <div class="container">
+    <span class="section-label">Pipeline Internals</span>
+    <h2>What agents do vs. what the orchestrator handles</h2>
+    <p class="section-desc">
+      Not every pipeline step needs an AI agent. The orchestrator handles mechanical operations directly
+      with coded logic — git operations, CLI commands, file checks — only spawning Claude agents where
+      semantic understanding is required.
+    </p>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="icon icon-blue">📋</div>
+        <h3>Spec Phase</h3>
+        <p><strong>Agent:</strong> Analyst writes <code>spec.md</code> from the task description.<br>
+        <strong>Code:</strong> Log rotation, phase headers, revision-mode detection.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-purple">📐</div>
+        <h3>Plan Phase</h3>
+        <p><strong>Agent:</strong> Planner reads the spec and produces <code>plan.json</code>.<br>
+        <strong>Code:</strong> Worktree creation, git pull, phase cascading.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-emerald">⚙️</div>
+        <h3>Implement Phase</h3>
+        <p><strong>Agent:</strong> Coder (one per subtask) implements changes, runs tests, commits.<br>
+        <strong>Code:</strong> Worktree isolation, scope violation detection, deliverable verification,
+        cherry-pick orchestration, git push with remote HEAD verification, sensor gates.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-rose">🔍</div>
+        <h3>QA Review Phase</h3>
+        <p><strong>Agent:</strong> QA Reviewer validates implementation against spec, writes <code>qa_report.json</code>.<br>
+        <strong>Code:</strong> Locked-report detection, unpushed-commit precheck with auto-push,
+        FAIL-type routing (cleanup / spec_concerns), max-attempt circuit breaker.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-cyan">🔀</div>
+        <h3>Create PR Phase</h3>
+        <p><strong>Agent:</strong> <span style="color:#34d399;">None — direct CLI</span>.<br>
+        <strong>Code:</strong> Rebase, artifact commit, <code>gh pr create</code> / <code>glab mr create</code>,
+        PR body generation, URL extraction. Agent only spawned if rebase has conflicts.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-amber">🔀</div>
+        <h3>Merge Phase</h3>
+        <p><strong>Agent:</strong> <span style="color:#34d399;">None if clean — only on conflict</span>.<br>
+        <strong>Code:</strong> Rebase, artifact commit, pre-merge sensors,
+        <code>git merge --no-edit</code>, worktree removal. Merger agent spawned only if merge conflicts.</p>
+      </div>
+    </div>
+
+    <div class="highlight-banner" style="margin-top:40px;">
+      <h3>🧠 Smart delegation: 5 sessions → 3 per clean pipeline run</h3>
+      <p>
+        Before optimization, every pipeline run spawned 5 Claude sessions (spec, plan, implement, create-pr, merge).
+        After replacing mechanical agent work with direct CLI calls, the clean path now uses only 3 —
+        <strong>spec, plan, and implement</strong>. PR creation and conflict-free merges are fully automated.
+        Agents are reserved for work that genuinely requires semantic understanding:
+        writing specifications, decomposing tasks, authoring code, reviewing quality, and resolving merge conflicts.
+      </p>
+    </div>
+
+    <div class="highlight-banner" style="margin-top:24px;background:linear-gradient(135deg, rgba(52,211,153,0.06) 0%, rgba(56,189,248,0.06) 100%);border-color:rgba(52,211,153,0.15);">
+      <h3>🔄 Two-tier conflict resolution pattern</h3>
+      <p>
+        All conflict-resolution paths follow the same pattern: try the direct command first (coded),
+        spawn a merger agent only on conflict (AI). Applied in three places —
+        rebase conflicts, cherry-pick conflicts, and merge conflicts.
+        This keeps the happy path fast (no agent spawn) while preserving semantic conflict resolution
+        for the edge cases where it's needed.
+      </p>
+    </div>
+
+    <p style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:32px;">
+      Full breakdown: <a href="https://github.com/vmorenoluna/TeamAI/blob/main/teamai/adr/007-agent-vs-code-breakdown.md">ADR 007 — Code Logic vs. Agent Sessions Per Phase</a>
+    </p>
   </div>
 </section>
 
