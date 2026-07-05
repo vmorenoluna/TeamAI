@@ -697,4 +697,4 @@ export function getOrchestrator(projectPath: string): Orchestrator {
 }
 
 // Re-export git platform utilities (extracted to git-platform.ts)
-export { detectGitPlatform, detectDefaultBranch, buildPlatformPrompt } from './git-platform';
+export { detectGitPlatform, detectDefaultBranch, buildPlatformPrompt, checkExistingPRViaCLI, createPRViaCLI, buildPRBody } from './git-platform';

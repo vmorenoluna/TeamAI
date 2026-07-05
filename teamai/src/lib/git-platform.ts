@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import { appendFileSync } from 'fs';
 import { warn as logWarn } from './logger';
 
 /**
@@ -36,7 +37,128 @@ export function detectDefaultBranch(projectRoot: string): string {
 }
 
 /**
+ * Build a PR/MR body from the task description and spec content.
+ * Used for direct CLI PR creation (no AI agent needed).
+ */
+export function buildPRBody(description: string, specContent: string): string {
+  return [
+    '## Summary',
+    '',
+    description,
+    '',
+    '## Testing',
+    '',
+    'QA review passed.',
+    '',
+    '---',
+    '',
+    '## Specification',
+    '',
+    specContent,
+  ].join('\n');
+}
+
+/**
+ * Check whether an open PR/MR already exists for the given branch.
+ * Returns the PR URL if one exists, or null otherwise.
+ */
+export function checkExistingPRViaCLI(
+  platform: 'github' | 'gitlab' | 'bitbucket' | 'unknown',
+  branch: string,
+  projectRoot: string,
+): string | null {
+  if (platform === 'github') {
+    try {
+      const result = execFileSync('gh', [
+        'pr', 'list',
+        '--head', branch,
+        '--state', 'open',
+        '--json', 'url',
+        '--jq', '.[0].url',
+      ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 });
+      const url = result.trim();
+      return url || null;
+    } catch (err) {
+      logWarn('git-platform', 'Failed to check existing PR via gh CLI', err);
+      return null;
+    }
+  }
+
+  if (platform === 'gitlab') {
+    try {
+      const result = execFileSync('glab', [
+        'mr', 'list',
+        '--source-branch', branch,
+        '--state', 'opened',
+        '--json', 'web_url',
+        '--jq', '.[0].web_url',
+      ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 });
+      const url = result.trim();
+      return url || null;
+    } catch (err) {
+      logWarn('git-platform', 'Failed to check existing MR via glab CLI', err);
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Create a PR/MR directly via CLI (`gh pr create` / `glab mr create`).
+ * Returns the PR/MR URL on success.
+ *
+ * For Bitbucket and unknown platforms where no standard CLI exists, returns null
+ * — the caller should fall back to constructing the create URL manually.
+ */
+export function createPRViaCLI(
+  platform: 'github' | 'gitlab' | 'bitbucket' | 'unknown',
+  branch: string,
+  title: string,
+  body: string,
+  projectRoot: string,
+  logFile: string,
+): string | null {
+  const defaultBranch = detectDefaultBranch(projectRoot);
+
+  if (platform === 'github') {
+    appendFileSync(logFile, `[PR] Creating GitHub PR via gh CLI: ${branch} → ${defaultBranch}\n`);
+    const result = execFileSync('gh', [
+      'pr', 'create',
+      '--title', title,
+      '--body', body,
+      '--base', defaultBranch,
+      '--head', branch,
+    ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 30_000 });
+    const url = result.trim();
+    appendFileSync(logFile, `[PR] Created: ${url}\n`);
+    return url;
+  }
+
+  if (platform === 'gitlab') {
+    appendFileSync(logFile, `[PR] Creating GitLab MR via glab CLI: ${branch} → ${defaultBranch}\n`);
+    const result = execFileSync('glab', [
+      'mr', 'create',
+      '--title', title,
+      '--description', body,
+      '--target-branch', defaultBranch,
+      '--source-branch', branch,
+      '--yes',
+    ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 30_000 });
+    const url = result.trim();
+    appendFileSync(logFile, `[PR] Created: ${url}\n`);
+    return url;
+  }
+
+  // Bitbucket / unknown: no standard CLI — return null for caller to handle
+  appendFileSync(logFile, `[PR] Platform "${platform}" has no standard CLI — cannot auto-create PR\n`);
+  return null;
+}
+
+/**
  * Generate platform-specific instructions for creating pull/merge requests.
+ * @deprecated Used only by the old agent-based PR creation path. Kept for
+ * backward compatibility (re-exported from orchestrator.ts).
  */
 export function buildPlatformPrompt(
   platform: 'github' | 'gitlab' | 'bitbucket' | 'unknown',
