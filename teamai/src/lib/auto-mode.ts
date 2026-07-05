@@ -392,10 +392,15 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
 }
 
 function _finishTask(taskId: string, projectRoot: string, state: AutoProjectState): void {
+  // Set autoProcessed BEFORE markTaskDone so the flag is on disk before the
+  // phase-change WebSocket event triggers UI refreshes. Otherwise the amber
+  // auto-processed border won't appear because the task data is re-read
+  // without autoProcessed:true when the phase-change to 'done' fires.
+  const taskStore = new TaskStore(projectRoot);
+  taskStore.update(taskId, { autoProcessed: true });
+
   const orchestrator = getOrchestrator(projectRoot);
   orchestrator.markTaskDone(taskId).then(() => {
-    const taskStore = new TaskStore(projectRoot);
-    taskStore.update(taskId, { autoProcessed: true });
     state.autoTrackedIds.delete(taskId);
     console.log(`[auto-mode] Task ${taskId} marked as done (auto-processed)`);
   }).catch(err => {

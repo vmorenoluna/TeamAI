@@ -11,6 +11,7 @@ import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
 import { readContainerConfig, containerManager, dockerAvailable, _resetDockerAvailableCache } from '../container-manager';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
+import { rebaseOntoLatestMaster } from './phase-runners';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
 
@@ -99,6 +100,19 @@ export async function runImplement(
     const containerInfo = await containerManager.ensureContainer(deps.projectRoot, earlyLog);
     deps.patchWorktreeGitFile(pipeline.worktreePath, containerInfo.remoteWorkspaceFolder);
   }
+
+  // Rebase feature branch onto latest master so coders see the current upstream,
+  // not a potentially weeks-old snapshot from when the worktree was created.
+  const implementLog = path.join(pipeline.specPath, 'output.log');
+  await rebaseOntoLatestMaster(
+    pipeline.worktreePath, pipeline.taskId, implementLog,
+    {
+      projectRoot: deps.projectRoot,
+      execGit: deps.execGit,
+      sessionOpts: deps.sessionOpts,
+      waitForCompletion: deps.waitForCompletion,
+    },
+  );
 
   // AC9: clean stale per-subtask worktrees
   deps.cleanStaleSubtaskWorktrees(pipeline);
