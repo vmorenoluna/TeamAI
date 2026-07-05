@@ -276,6 +276,8 @@ const localPlugin = {
      * This prevents tests from accidentally corrupting the user's real
      * project registry during a test run.
      *
+     * Catches: writeFileSync, appendFileSync, writeFile (promises), writeSync
+     *
      * Safe patterns:
      *   vi.mock('os', () => ({ homedir: () => '/tmp/test' }))
      *   vi.mock('@/lib/project-store', () => ({ projectStore: { getAll: vi.fn() } }))
@@ -327,15 +329,17 @@ const localPlugin = {
         }
 
         return {
-          // Detect writeFileSync calls
+          // Detect file-write calls: writeFileSync, appendFileSync, writeFile (promises)
           CallExpression(node) {
             const callee = node.callee;
-            // writeFileSync(...) or fs.writeFileSync(...)
+            // writeFileSync(...), appendFileSync(...), writeFile(...) or
+            // fs.writeFileSync(...), fs.appendFileSync(...), fs.promises.writeFile(...)
             const name =
               callee.type === "Identifier" ? callee.name :
               callee.type === "MemberExpression" && callee.property?.type === "Identifier" ? callee.property.name :
               null;
-            if (name === "writeFileSync") {
+            const fileWriteMethods = ["writeFileSync", "appendFileSync", "writeFile", "writeSync"];
+            if (fileWriteMethods.includes(name)) {
               hasWriteFileSync = true;
               // Check if any argument contains a string with 'projects.json'
               if (node.arguments.some(arg => containsStringWith(arg, "projects.json"))) {
@@ -382,9 +386,9 @@ const localPlugin = {
               context.report({
                 node: projectsJsonNode,
                 message:
-                  "Test writes to projects.json without mocking 'os' or '@/lib/project-store' " +
-                  "or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME env-var isolation. " +
-                  "This can corrupt the real ~/.teamai/projects.json. " +
+                  "Test writes to projects.json (via writeFileSync/appendFileSync/writeFile/writeSync) without " +
+                  "mocking 'os' or '@/lib/project-store' or using TEAMAI_CONFIG_DIR/TEAMAI_TEST_HOME " +
+                  "env-var isolation. This can corrupt the real ~/.teamai/projects.json. " +
                   "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
               });
             }
