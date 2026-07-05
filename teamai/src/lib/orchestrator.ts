@@ -337,6 +337,7 @@ export class Orchestrator {
       sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
       waitForCompletion: sessionId => this.waitForCompletion(sessionId),
       advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
+      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
       commitArtifactsToWorktree: p => this._commitArtifactsToWorktree(p),
       getPipelineConfig: () => this.getPipelineConfig(),
       removeWorktree: taskId => this.removeWorktree(taskId),
