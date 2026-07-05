@@ -2,6 +2,7 @@
   "name": "teamai",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "dev": "tsx watch server.ts",
     "build": "next build",
@@ -11,7 +12,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "prepare": "cd .. && chmod +x .husky/pre-commit 2>/dev/null; git config core.hooksPath .husky 2>/dev/null; exit 0"
+    "prepare": "cd .. && chmod +x .husky/pre-commit 2>/dev/null; git config core.hooksPath .husky 2>/dev/null; exit 0",
+    "electron:dev": "cross-env ELECTRON_DEV=true electron .",
+    "electron:build": "npm run build && electron-builder --win --mac --linux",
+    "electron:start": "cross-env NODE_ENV=production ELECTRON_DEV=false electron ."
   },
   "dependencies": {
     "@devcontainers/cli": "^0.86.0",
@@ -22,6 +26,7 @@
     "node-pty": "^1.1.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "tsx": "^4.21.0",
     "uuid": "^13.0.0",
     "ws": "^8.20.0",
     "xterm": "^5.3.0"
@@ -37,6 +42,8 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.7.0",
     "@vitest/coverage-v8": "^1.6.1",
+    "electron": "^33.4.0",
+    "electron-builder": "^25.1.8",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "happy-dom": "^20.9.0",
@@ -44,11 +51,43 @@
     "jsdom": "^29.1.1",
     "lint-staged": "^15.5.2",
     "tailwindcss": "^4",
-    "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^1.6.1"
   },
   "lint-staged": {
     "*.{ts,tsx,mts}": ["eslint --fix", "eslint --max-warnings 0"]
+  },
+  "build": {
+    "appId": "com.teamai.app",
+    "productName": "TeamAI",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "server.ts",
+      ".next/**/*",
+      "node_modules/**/*",
+      "package.json",
+      "public/**/*",
+      "defaults/**/*",
+      "!node_modules/.cache"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "public/icon.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "public/icon.png"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "public/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }
