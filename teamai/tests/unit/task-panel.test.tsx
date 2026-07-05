@@ -20,6 +20,7 @@ import type { PlanData, QAReportData } from '@/lib/stream-types';
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
 
 const mockGetTaskFull = vi.hoisted(() => vi.fn());
+const mockMarkAutoReviewed = vi.hoisted(() => vi.fn());
 
 vi.mock('@/app/actions/tasks', () => ({
   getTaskFull: (...args: unknown[]) => mockGetTaskFull(...args),
@@ -34,6 +35,10 @@ vi.mock('@/app/actions/tasks', () => ({
 }));
 
 const mockRouterRefresh = vi.hoisted(() => vi.fn());
+
+vi.mock('@/app/actions/auto-mode', () => ({
+  markAutoReviewed: (...args: unknown[]) => mockMarkAutoReviewed(...args),
+}));
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mockRouterRefresh }),
@@ -1355,6 +1360,84 @@ describe('TaskDetail', () => {
         expect(qaTab.className).toContain('border-[#2563eb]');
       });
       window.location.hash = '';
+    });
+  });
+
+  // ── Auto-processed banner ────────────────────────────────────────────
+
+  describe('auto-processed banner', () => {
+    it('shows the auto-processed banner when autoProcessed, !autoReviewed, and phase is done', () => {
+      renderDetail({
+        task: { phase: 'done', autoProcessed: true, autoReviewed: false },
+      });
+
+      expect(screen.getByText(/This task was auto-processed/)).toBeInTheDocument();
+      expect(screen.getByText('🤖')).toBeInTheDocument();
+    });
+
+    it('shows the "Mark Reviewed" button in the banner', () => {
+      renderDetail({
+        task: { phase: 'done', autoProcessed: true, autoReviewed: false },
+      });
+
+      const btn = screen.getByText('✓ Mark Reviewed');
+      expect(btn).toBeInTheDocument();
+      expect(btn.tagName).toBe('BUTTON');
+    });
+
+    it('hides the banner when readonly is true', () => {
+      renderDetail({
+        task: { phase: 'done', autoProcessed: true, autoReviewed: false },
+        readonly: true,
+      });
+
+      expect(screen.queryByText(/This task was auto-processed/)).not.toBeInTheDocument();
+    });
+
+    it('hides the banner when autoReviewed is true', () => {
+      renderDetail({
+        task: { phase: 'done', autoProcessed: true, autoReviewed: true },
+      });
+
+      expect(screen.queryByText(/This task was auto-processed/)).not.toBeInTheDocument();
+    });
+
+    it('hides the banner when autoProcessed is false', () => {
+      renderDetail({
+        task: { phase: 'done', autoProcessed: false, autoReviewed: false },
+      });
+
+      expect(screen.queryByText(/This task was auto-processed/)).not.toBeInTheDocument();
+    });
+
+    it('hides the banner when phase is not done (even if autoProcessed and !autoReviewed)', () => {
+      renderDetail({
+        task: { phase: 'implement', autoProcessed: true, autoReviewed: false },
+      });
+
+      expect(screen.queryByText(/This task was auto-processed/)).not.toBeInTheDocument();
+    });
+
+    it('clicking "Mark Reviewed" calls markAutoReviewed with the task ID', async () => {
+      renderDetail({
+        task: { id: 'auto-task', phase: 'done', autoProcessed: true, autoReviewed: false },
+      });
+
+      const btn = screen.getByText('✓ Mark Reviewed');
+      fireEvent.click(btn);
+
+      await waitFor(() => {
+        expect(mockMarkAutoReviewed).toHaveBeenCalledWith('auto-task');
+      });
+    });
+
+    it('does not show the banner for normal done tasks (neither autoProcessed nor autoReviewed)', () => {
+      renderDetail({
+        task: { phase: 'done' },
+      });
+
+      expect(screen.queryByText(/This task was auto-processed/)).not.toBeInTheDocument();
+      expect(screen.queryByText('✓ Mark Reviewed')).not.toBeInTheDocument();
     });
   });
 });

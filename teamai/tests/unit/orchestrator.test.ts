@@ -1823,6 +1823,159 @@ describe('Orchestrator', () => {
         rmSync(pipeline.worktreePath, { recursive: true, force: true });
       }
     });
+
+    it('spawns merger agent when rebase has conflicts, resolves, and completes merge', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
+
+      let mergerSessionCreated = false;
+      // First session = merger (conflict path), second = merge
+      mockCreateSession.mockImplementation(() => {
+        if (!mergerSessionCreated) {
+          mergerSessionCreated = true;
+          return Promise.resolve('sess-merge-rebase');
+        }
+        return Promise.resolve('sess-merge-main');
+      });
+
+      // Simulate rebase conflict
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && Array.isArray(args)) {
+          const argStr = args.join(' ');
+          if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+            throw new Error('Rebase conflict');
+          }
+        }
+        return '';
+      });
+
+      const promise = (orch as AnyOrch).runMerge(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      // Merger session should have been created and sent /merge origin/master
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', '/merge origin/master');
+
+      // Complete the merger session
+      fireEvent('event', { sessionId: 'sess-merge-rebase', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 10));
+
+      // Complete the merge session
+      fireEvent('event', { sessionId: 'sess-merge-main', event: { type: 'result' } });
+      await promise;
+
+      expect(mockKillSession).toHaveBeenCalledWith('sess-merge-rebase');
+      expect(mockKillSession).toHaveBeenCalledWith('sess-merge-main');
+      expect(pipeline.phase).toBe('done');
+
+      if (existsSync(pipeline.worktreePath)) {
+        rmSync(pipeline.worktreePath, { recursive: true, force: true });
+      }
+    });
+
+    it('throws when rebase has conflicts and merger agent also fails', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
+
+      // Only the merger session (rebase conflict path) — merge never created
+      mockCreateSession.mockResolvedValue('sess-merge-rebase');
+
+      // Simulate rebase conflict
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && Array.isArray(args)) {
+          const argStr = args.join(' ');
+          if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+            throw new Error('Rebase conflict');
+          }
+        }
+        return '';
+      });
+
+      const promise = (orch as AnyOrch).runMerge(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      // Merger session was created
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', '/merge origin/master');
+
+      // Simulate merger failure — exit with non-zero code
+      fireEvent('exit', { sessionId: 'sess-merge-rebase', code: 1 });
+
+      // Merge should throw (unlike create-pr which proceeds)
+      await expect(promise).rejects.toThrow(/Rebase onto latest master failed/);
+
+      // Phase should NOT have advanced to done
+      expect(pipeline.phase).not.toBe('done');
+
+      if (existsSync(pipeline.worktreePath)) {
+        rmSync(pipeline.worktreePath, { recursive: true, force: true });
+      }
+    });
+
+    it('does not spawn merger agent when rebase succeeds (fast path)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
+
+      // Only one session — merge (no merger on fast path)
+      mockCreateSession.mockResolvedValue('sess-merge-fast');
+      mockExecFileSync.mockReturnValue('');
+
+      const promise = (orch as AnyOrch).runMerge(pipeline);
+      await new Promise(r => setTimeout(r, 20));
+
+      // Should have created only the merge session (no merger)
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+
+      // Should NOT have sent /merge origin/master
+      const sendCalls = mockSendMessage.mock.calls;
+      const mergeCalls = sendCalls.filter(
+        (call: any[]) => call[1] && typeof call[1] === 'string' && call[1].includes('/merge origin/master'),
+      );
+      expect(mergeCalls.length).toBe(0);
+
+      // Should have sent the /merge <branch> command
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-fast', expect.stringContaining('/merge'));
+
+      fireEvent('event', { sessionId: 'sess-merge-fast', event: { type: 'result' } });
+      await promise;
+
+      expect(pipeline.phase).toBe('done');
+
+      if (existsSync(pipeline.worktreePath)) {
+        rmSync(pipeline.worktreePath, { recursive: true, force: true });
+      }
+    });
   });
 
   // ── runCreatePR ───────────────────────────────────────────────────
@@ -2933,6 +3086,180 @@ describe('Orchestrator', () => {
   });
 
   // ── runQaReview PASS/Failure paths ────────────────────────────────
+
+  describe('runImplement — rebase onto latest master', () => {
+    it('runs rebase before subtask processing (fast path)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{ id: 1, title: 'Add feature', description: 'Do it', files: ['src/app.ts'], acceptance_criteria: ['Works'] }],
+      }));
+
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+      taskId: testData.taskId,
+      specPath: testData.taskDir,
+      branch: `feat/${slug}`,
+      worktreePath: join(testData.root, '..', 'worktrees', slug),
+    });
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+
+      mockCreateSession.mockResolvedValue('sess-subtask');
+      mockExecFileSync.mockReturnValue('');
+
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+    // No merger spawned on fast path
+      const sendCalls = mockSendMessage.mock.calls;
+      const mergeCalls = sendCalls.filter(
+      (call: any[]) => typeof call[1] === 'string' && call[1].includes('/merge origin/master'),
+      );
+      expect(mergeCalls.length).toBe(0);
+
+      const implCalls = sendCalls.filter(
+      (call: any[]) => typeof call[1] === 'string' && call[1].includes('/implement Subtask 1'),
+      );
+      expect(implCalls.length).toBeGreaterThanOrEqual(1);
+
+    // Complete subtask -> push -> QA -> done
+      fireEvent('event', { sessionId: 'sess-subtask', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 10));
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+      overall: 'PASS',
+      criteria: [],
+      }));
+      fireEvent('event', { sessionId: 'sess-subtask', event: { type: 'result' } });
+      await promise;
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+
+    it('spawns merger agent when rebase has conflicts, then proceeds to subtasks', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{ id: 1, title: 'Add feature', description: 'Do it', files: ['src/app.ts'], acceptance_criteria: ['Works'] }],
+      }));
+
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+      taskId: testData.taskId,
+      specPath: testData.taskDir,
+      branch: `feat/${slug}`,
+      worktreePath: join(testData.root, '..', 'worktrees', slug),
+    });
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+
+      let mergerCreated = false;
+      mockCreateSession.mockImplementation(() => {
+      if (!mergerCreated) {
+      mergerCreated = true;
+      return Promise.resolve('sess-impl-rebase');
+      }
+      return Promise.resolve('sess-subtask');
+    });
+
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && Array.isArray(args)) {
+      const argStr = args.join(' ');
+      if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+      throw new Error('Rebase conflict');
+      }
+      }
+      return '';
+    });
+
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+    // Merger session spawns first
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', '/merge origin/master');
+
+    // Complete merger
+      fireEvent('event', { sessionId: 'sess-impl-rebase', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 10));
+
+    // After rebase resolves, implement proceeds to subtask
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-subtask', expect.stringContaining('/implement Subtask 1'));
+
+    // Complete subtask -> push -> QA -> done
+      fireEvent('event', { sessionId: 'sess-subtask', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 10));
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+      overall: 'PASS',
+      criteria: [],
+      }));
+      fireEvent('event', { sessionId: 'sess-subtask', event: { type: 'result' } });
+      await promise;
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+
+    it('continues to subtasks even when rebase and merger both fail (silent failure)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{ id: 1, title: 'Add feature', description: 'Do it', files: ['src/app.ts'], acceptance_criteria: ['Works'] }],
+      }));
+
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+      taskId: testData.taskId,
+      specPath: testData.taskDir,
+      branch: `feat/${slug}`,
+      worktreePath: join(testData.root, '..', 'worktrees', slug),
+    });
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+
+      let mergerCreated = false;
+      mockCreateSession.mockImplementation(() => {
+      if (!mergerCreated) {
+      mergerCreated = true;
+      return Promise.resolve('sess-impl-rebase');
+      }
+      return Promise.resolve('sess-subtask-after');
+    });
+
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && Array.isArray(args)) {
+      const argStr = args.join(' ');
+      if (argStr.includes('rebase') && !argStr.includes('--abort')) {
+      throw new Error('Rebase conflict');
+      }
+      }
+      return '';
+    });
+
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+    // Merger was spawned
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', '/merge origin/master');
+
+    // Simulate merger failure
+      fireEvent('exit', { sessionId: 'sess-impl-rebase', code: 1 });
+      await new Promise(r => setTimeout(r, 10));
+
+    // Even though merger failed, implement continues (unlike merge which throws)
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-subtask-after', expect.stringContaining('/implement Subtask 1'));
+
+    // Complete subtask -> push -> QA -> done
+      fireEvent('event', { sessionId: 'sess-subtask-after', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 10));
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+      overall: 'PASS',
+      criteria: [],
+      }));
+      fireEvent('event', { sessionId: 'sess-subtask-after', event: { type: 'result' } });
+      await promise;
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+    });
 
   describe('runQaReview', () => {
     it('advances to awaiting-review when QA passes', async () => {

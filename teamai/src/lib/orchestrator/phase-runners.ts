@@ -16,7 +16,7 @@ import type { TaskPipeline, SessionOptsResult } from './types';
 
 // ── Shared rebase helper ──────────────────────────────────────────────────
 
-interface RebaseDeps {
+export interface RebaseDeps {
   projectRoot: string;
   execGit: (args: string[], hostCwd: string) => void;
   sessionOpts: SessionOptsFn;
@@ -31,7 +31,7 @@ interface RebaseDeps {
  * (merge path, where unresolved conflicts would corrupt the repo) or warn
  * (create-pr path, where the PR can still be reviewed and resolved manually).
  */
-async function rebaseOntoLatestMaster(
+export async function rebaseOntoLatestMaster(
   worktreePath: string,
   taskId: string,
   logFile: string,

@@ -552,8 +552,8 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
               />
             )}
 
-            {/* PR link (shown for non-review phases that have a PR) */}
-            {!isAwaiting && !isPrOpen && task.prUrl && (
+            {/* PR link — always visible in the overview when a PR exists */}
+            {task.prUrl && (
               <section>
                 <a
                   href={task.prUrl}

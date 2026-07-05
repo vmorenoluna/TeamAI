@@ -16,6 +16,8 @@ const mockGetPipelineConfig = vi.fn();
 const mockSetAutoModeState = vi.fn();
 const mockRevalidatePath = vi.fn();
 const mockTaskStoreUpdate = vi.fn();
+const mockTaskStoreGetById = vi.fn().mockReturnValue({ phase: 'done' });
+const mockProcessManagerEmit = vi.fn();
 
 vi.mock('@/app/actions/projects', () => ({
   getActiveProjectPath: (...args: unknown[]) => mockGetActiveProjectPath(...args),
@@ -37,7 +39,7 @@ vi.mock('@/lib/task-store', () => ({
       this.projectPath = projectPath;
     }
     update = mockTaskStoreUpdate;
-    getById = vi.fn();
+    getById = mockTaskStoreGetById;
     getAll = vi.fn();
     updatePhase = vi.fn();
     getDirById = vi.fn((id: string) => join(this.projectPath, '.teamai', id));
@@ -46,6 +48,12 @@ vi.mock('@/lib/task-store', () => ({
 
 vi.mock('next/cache', () => ({
   revalidatePath: (...args: unknown[]) => mockRevalidatePath(...args),
+}));
+
+vi.mock('@/lib/process-manager', () => ({
+  processManager: {
+    emit: (...args: unknown[]) => mockProcessManagerEmit(...args),
+  },
 }));
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -137,11 +145,12 @@ describe('auto-mode server actions', () => {
   // ── markAutoReviewed ───────────────────────────────────────────────────
 
   describe('markAutoReviewed', () => {
-    it('updates the task with autoReviewed: true', async () => {
+    it('updates the task with autoReviewed: true and reads it first for the current phase', async () => {
       const { markAutoReviewed } = await import('@/app/actions/auto-mode');
       await markAutoReviewed('task-123');
 
       expect(mockGetActiveProjectPath).toHaveBeenCalledTimes(1);
+      expect(mockTaskStoreGetById).toHaveBeenCalledWith('task-123');
       expect(mockTaskStoreUpdate).toHaveBeenCalledWith('task-123', { autoReviewed: true });
     });
 
@@ -180,7 +189,29 @@ describe('auto-mode server actions', () => {
       expect(mockGetActiveProjectPath).not.toHaveBeenCalled();
     });
 
+    it('emits a phase-change event with the current task phase after marking reviewed', async () => {
+      const { markAutoReviewed } = await import('@/app/actions/auto-mode');
+      mockProcessManagerEmit.mockClear();
+
+      await markAutoReviewed('task-789');
+
+      expect(mockProcessManagerEmit).toHaveBeenCalledWith('phase-change', {
+        taskId: 'task-789',
+        phase: 'done',
+        projectRoot: root,
+      });
+    });
+
+    it('throws when getById returns null (task not found in store)', async () => {
+      mockTaskStoreGetById.mockReturnValue(null);
+
+      const { markAutoReviewed } = await import('@/app/actions/auto-mode');
+      await expect(markAutoReviewed('gone-task')).rejects.toThrow('Task gone-task not found');
+    });
+
     it('propagates error when TaskStore.update throws', async () => {
+      // Ensure getById succeeds so we reach the update call
+      mockTaskStoreGetById.mockReturnValue({ phase: 'done' });
       mockTaskStoreUpdate.mockImplementation(() => {
         throw new Error('task not found');
       });
