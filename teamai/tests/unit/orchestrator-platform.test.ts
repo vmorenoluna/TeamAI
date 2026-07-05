@@ -37,6 +37,9 @@ import {
   detectGitPlatform,
   detectDefaultBranch,
   buildPlatformPrompt,
+  checkExistingPRViaCLI,
+  createPRViaCLI,
+  buildPRBody,
   getOrchestrator,
   Orchestrator,
 } from '../../src/lib/orchestrator';
@@ -202,6 +205,130 @@ describe('Orchestrator — remaining edge cases', () => {
       // Should not throw
       (orch as any).cancelPipeline('nonexistent');
     });
+  });
+});
+
+describe('buildPRBody', () => {
+  it('includes description and spec content in output', () => {
+    const result = buildPRBody('Add login feature', '# Feature: Login\n\nImplement login.');
+    expect(result).toContain('## Summary');
+    expect(result).toContain('Add login feature');
+    expect(result).toContain('## Specification');
+    expect(result).toContain('# Feature: Login');
+    expect(result).toContain('Implement login.');
+  });
+
+  it('includes QA testing section', () => {
+    const result = buildPRBody('Fix bug', '# Bug Fix');
+    expect(result).toContain('## Testing');
+    expect(result).toContain('QA review passed.');
+  });
+
+  it('handles empty spec content', () => {
+    const result = buildPRBody('Empty spec', '');
+    expect(result).toContain('## Summary');
+    expect(result).toContain('Empty spec');
+    expect(result).toContain('## Specification');
+  });
+});
+
+describe('checkExistingPRViaCLI', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns PR URL when gh pr list finds an open PR', () => {
+    mockExecFileSync.mockReturnValue('https://github.com/owner/repo/pull/42\n');
+    const result = checkExistingPRViaCLI('github', 'feat/test', '/test');
+    expect(result).toBe('https://github.com/owner/repo/pull/42');
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'gh',
+      expect.arrayContaining(['pr', 'list', '--head', 'feat/test', '--state', 'open']),
+      expect.any(Object),
+    );
+  });
+
+  it('returns null when gh pr list returns empty', () => {
+    mockExecFileSync.mockReturnValue('\n');
+    const result = checkExistingPRViaCLI('github', 'feat/test', '/test');
+    expect(result).toBeNull();
+  });
+
+  it('returns null when gh CLI fails, logs warning', () => {
+    mockExecFileSync.mockImplementation(() => { throw new Error('gh not found'); });
+    const result = checkExistingPRViaCLI('github', 'feat/test', '/test');
+    expect(result).toBeNull();
+    expect(mockWarn).toHaveBeenCalledWith('git-platform', 'Failed to check existing PR via gh CLI', expect.any(Error));
+  });
+
+  it('returns MR URL when glab mr list finds an open MR', () => {
+    mockExecFileSync.mockReturnValue('https://gitlab.com/group/project/-/merge_requests/99\n');
+    const result = checkExistingPRViaCLI('gitlab', 'feat/test', '/test');
+    expect(result).toBe('https://gitlab.com/group/project/-/merge_requests/99');
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'glab',
+      expect.arrayContaining(['mr', 'list', '--source-branch', 'feat/test', '--state', 'opened']),
+      expect.any(Object),
+    );
+  });
+
+  it('returns null when glab CLI fails, logs warning', () => {
+    mockExecFileSync.mockImplementation(() => { throw new Error('glab not found'); });
+    const result = checkExistingPRViaCLI('gitlab', 'feat/test', '/test');
+    expect(result).toBeNull();
+    expect(mockWarn).toHaveBeenCalledWith('git-platform', 'Failed to check existing MR via glab CLI', expect.any(Error));
+  });
+
+  it('returns null for unknown platform', () => {
+    const result = checkExistingPRViaCLI('unknown', 'feat/test', '/test');
+    expect(result).toBeNull();
+  });
+});
+
+describe('createPRViaCLI', () => {
+  const logFile = '/tmp/test-output.log';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('creates GitHub PR via gh CLI with correct args', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('refs/remotes/origin/main\n')  // detectDefaultBranch
+      .mockReturnValueOnce('https://github.com/owner/repo/pull/42\n');
+    const result = createPRViaCLI('github', 'feat/test', 'Test PR', 'PR body', '/test', logFile);
+    expect(result).toBe('https://github.com/owner/repo/pull/42');
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'gh',
+      expect.arrayContaining(['pr', 'create', '--title', 'Test PR', '--body', 'PR body']),
+      expect.any(Object),
+    );
+  });
+
+  it('creates GitLab MR via glab CLI with correct args', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('refs/remotes/origin/main\n')
+      .mockReturnValueOnce('https://gitlab.com/group/project/-/merge_requests/99\n');
+    const result = createPRViaCLI('gitlab', 'feat/test', 'Test MR', 'MR body', '/test', logFile);
+    expect(result).toBe('https://gitlab.com/group/project/-/merge_requests/99');
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'glab',
+      expect.arrayContaining(['mr', 'create', '--title', 'Test MR', '--description', 'MR body', '--yes']),
+      expect.any(Object),
+    );
+  });
+
+  it('returns null for Bitbucket platform', () => {
+    // detectDefaultBranch still runs
+    mockExecFileSync.mockReturnValueOnce('refs/remotes/origin/main\n');
+    const result = createPRViaCLI('bitbucket', 'feat/test', 'Test', 'Body', '/test', logFile);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for unknown platform', () => {
+    mockExecFileSync.mockReturnValueOnce('refs/remotes/origin/main\n');
+    const result = createPRViaCLI('unknown', 'feat/test', 'Test', 'Body', '/test', logFile);
+    expect(result).toBeNull();
   });
 });
 

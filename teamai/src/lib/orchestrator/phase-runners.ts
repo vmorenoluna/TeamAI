@@ -8,7 +8,7 @@ import { existsSync, readFileSync, unlinkSync, appendFileSync, rmSync } from 'fs
 import path from 'path';
 import { processManager } from '../process-manager';
 import { TaskStore } from '../task-store';
-import { detectGitPlatform, buildPlatformPrompt } from '../git-platform';
+import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody } from '../git-platform';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
@@ -236,13 +236,27 @@ export async function runMergePhase(
     }
   }
 
-  const sessionId = await processManager.createSession(
-    deps.sessionOpts('merger', deps.projectRoot, pipeline.taskId, logFile),
-  );
-  pipeline.sessionId = sessionId;
-  processManager.sendMessage(sessionId, `/merge ${pipeline.branch}`);
-  await deps.waitForCompletion(sessionId);
-  processManager.killSession(sessionId);
+  // Try direct merge first — only spawn agent on conflict
+  let mergeSucceeded = false;
+  try {
+    appendFileSync(logFile, `[MERGE] Attempting direct merge of ${pipeline.branch} into master\n`);
+    deps.execGit(['merge', pipeline.branch, '--no-edit'], deps.projectRoot);
+    mergeSucceeded = true;
+    appendFileSync(logFile, `[MERGE] Direct merge succeeded — no conflicts\n`);
+  } catch {
+    try { deps.execGit(['merge', '--abort'], deps.projectRoot); } catch { /* best-effort */ }
+    appendFileSync(logFile, `[MERGE] Merge had conflicts — spawning merger agent\n`);
+  }
+
+  if (!mergeSucceeded) {
+    const sessionId = await processManager.createSession(
+      deps.sessionOpts('merger', deps.projectRoot, pipeline.taskId, logFile),
+    );
+    pipeline.sessionId = sessionId;
+    processManager.sendMessage(sessionId, `/merge ${pipeline.branch}`);
+    await deps.waitForCompletion(sessionId);
+    processManager.killSession(sessionId);
+  }
 
   deps.removeWorktree(pipeline.taskId);
   deps.advancePhase(pipeline, 'done');
@@ -281,20 +295,22 @@ export async function runCreatePRPhase(
   deps.commitArtifactsToWorktree(pipeline);
   deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
 
-  const sessionId = await processManager.createSession({
-    ...deps.sessionOpts('merger', deps.projectRoot, pipeline.taskId, logFile),
-    projectRoot: undefined,
-  });
-  pipeline.sessionId = sessionId;
-
   const specContent = readFileSync(path.join(pipeline.specPath, 'spec.md'), 'utf-8');
   const platform = detectGitPlatform(deps.projectRoot);
-  const platformMsg = buildPlatformPrompt(platform, pipeline.branch, pipeline.description, specContent, deps.projectRoot);
-  processManager.sendMessage(sessionId, platformMsg);
-  await deps.waitForCompletion(sessionId);
-  processManager.killSession(sessionId);
 
-  const prUrl = deps.extractPrUrl(logFile);
+  // Check for existing open PR first — avoid creating duplicates
+  let prUrl: string | null = checkExistingPRViaCLI(platform, pipeline.branch, deps.projectRoot);
+  if (prUrl) {
+    appendFileSync(logFile, `[PR] Open PR already exists for branch ${pipeline.branch}: ${prUrl}\n`);
+  } else {
+    // Create PR directly via CLI (gh / glab) instead of spawning a merger agent
+    const body = buildPRBody(pipeline.description, specContent);
+    prUrl = createPRViaCLI(platform, pipeline.branch, pipeline.description, body, deps.projectRoot, logFile);
+    // Fallback: scan log for PR URL (handles Bitbucket/unknown where CLI returns null)
+    if (!prUrl) {
+      prUrl = deps.extractPrUrl(logFile);
+    }
+  }
 
   deps.taskStore.update(pipeline.taskId, {
     platform: platform !== 'unknown' ? platform : undefined,

@@ -1775,7 +1775,7 @@ describe('Orchestrator', () => {
   // ── runMerge ──────────────────────────────────────────────────────
 
   describe('runMerge', () => {
-    it('creates session, sends /merge command, waits, kills, cleans up', async () => {
+    it('merges directly via git merge --no-edit, cleans up', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
       const slug = testData.slug;
@@ -1787,44 +1787,35 @@ describe('Orchestrator', () => {
       });
 
       mkdirSync(pipeline.worktreePath, { recursive: true });
-      // Set branch AND description on the task so getWorktreePath returns the correct path.
-      // getWorktreePath derives the path from slugify(task.description), which must match
-      // the worktree directory we created above.
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
-      mockCreateSession.mockResolvedValue('sess-merge');
       mockExecFileSync.mockReturnValue('');
 
       const promise = (orch as AnyOrch).runMerge(pipeline);
-      await new Promise(r => setTimeout(r, 10));
-
-      expect(mockCreateSession).toHaveBeenCalled();
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', expect.stringContaining('/merge'));
-
-      fireEvent('event', { sessionId: 'sess-merge', event: { type: 'result' } });
       await promise;
 
-      expect(mockKillSession).toHaveBeenCalledWith('sess-merge');
-      // removeWorktree tries normal remove first, then branch -D (force delete)
+      // Direct merge should have been attempted (no session created)
+      expect(mockCreateSession).not.toHaveBeenCalled();
+      // execGit was called for merge
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['merge', `feat/${slug}`]),
+        expect.any(Object),
+      );
+      // Worktree removed
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
         expect.arrayContaining(['worktree', 'remove']),
         expect.any(Object),
       );
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['branch', '-D']),
-        expect.any(Object),
-      );
       expect(pipeline.phase).toBe('done');
 
-      // Clean up the created worktree dir
       if (existsSync(pipeline.worktreePath)) {
         rmSync(pipeline.worktreePath, { recursive: true, force: true });
       }
     });
 
-    it('spawns merger agent when rebase has conflicts, resolves, and completes merge', async () => {
+    it('spawns merger agent when rebase has conflicts, then direct merge succeeds', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
       const slug = testData.slug;
@@ -1839,17 +1830,10 @@ describe('Orchestrator', () => {
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
 
-      let mergerSessionCreated = false;
-      // First session = merger (conflict path), second = merge
-      mockCreateSession.mockImplementation(() => {
-        if (!mergerSessionCreated) {
-          mergerSessionCreated = true;
-          return Promise.resolve('sess-merge-rebase');
-        }
-        return Promise.resolve('sess-merge-main');
-      });
+      // One session = merger for rebase (no merge session needed)
+      mockCreateSession.mockResolvedValue('sess-merge-rebase');
 
-      // Simulate rebase conflict
+      // Simulate rebase conflict, but merge succeeds
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git' && Array.isArray(args)) {
           const argStr = args.join(' ');
@@ -1863,19 +1847,22 @@ describe('Orchestrator', () => {
       const promise = (orch as AnyOrch).runMerge(pipeline);
       await new Promise(r => setTimeout(r, 20));
 
-      // Merger session should have been created and sent /merge origin/master
+      // Merger session should have been created for rebase conflict
       expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', '/merge origin/master');
 
       // Complete the merger session
       fireEvent('event', { sessionId: 'sess-merge-rebase', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 10));
-
-      // Complete the merge session
-      fireEvent('event', { sessionId: 'sess-merge-main', event: { type: 'result' } });
       await promise;
 
       expect(mockKillSession).toHaveBeenCalledWith('sess-merge-rebase');
-      expect(mockKillSession).toHaveBeenCalledWith('sess-merge-main');
+      // Only one session created (rebase merger only, no merge session)
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+      // Direct merge was attempted
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['merge', `feat/${slug}`]),
+        expect.any(Object),
+      );
       expect(pipeline.phase).toBe('done');
 
       if (existsSync(pipeline.worktreePath)) {
@@ -1932,7 +1919,7 @@ describe('Orchestrator', () => {
       }
     });
 
-    it('does not spawn merger agent when rebase succeeds (fast path)', async () => {
+    it('spawns merger agent when direct merge has conflicts', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
       const slug = testData.slug;
@@ -1947,29 +1934,67 @@ describe('Orchestrator', () => {
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
 
-      // Only one session — merge (no merger on fast path)
-      mockCreateSession.mockResolvedValue('sess-merge-fast');
-      mockExecFileSync.mockReturnValue('');
+      // One session: merger for the merge conflict (rebase succeeds cleanly)
+      mockCreateSession.mockResolvedValue('sess-merge-conflict');
+
+      // Rebase succeeds, but merge fails with conflict
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && Array.isArray(args)) {
+          const argStr = args.join(' ');
+          if (argStr.includes('merge') && !argStr.includes('--abort') && argStr.includes(`feat/${slug}`)) {
+            throw new Error('Merge conflict');
+          }
+        }
+        return '';
+      });
 
       const promise = (orch as AnyOrch).runMerge(pipeline);
       await new Promise(r => setTimeout(r, 20));
 
-      // Should have created only the merge session (no merger)
+      // Merger session created for merge conflict
       expect(mockCreateSession).toHaveBeenCalledTimes(1);
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-conflict', expect.stringContaining('/merge'));
 
-      // Should NOT have sent /merge origin/master
-      const sendCalls = mockSendMessage.mock.calls;
-      const mergeCalls = sendCalls.filter(
-        (call: any[]) => call[1] && typeof call[1] === 'string' && call[1].includes('/merge origin/master'),
-      );
-      expect(mergeCalls.length).toBe(0);
-
-      // Should have sent the /merge <branch> command
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-fast', expect.stringContaining('/merge'));
-
-      fireEvent('event', { sessionId: 'sess-merge-fast', event: { type: 'result' } });
+      // Complete the merger session
+      fireEvent('event', { sessionId: 'sess-merge-conflict', event: { type: 'result' } });
       await promise;
 
+      expect(mockKillSession).toHaveBeenCalledWith('sess-merge-conflict');
+      expect(pipeline.phase).toBe('done');
+
+      if (existsSync(pipeline.worktreePath)) {
+        rmSync(pipeline.worktreePath, { recursive: true, force: true });
+      }
+    });
+
+    it('does not spawn any sessions when rebase and merge both succeed (fast path)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
+
+      mockExecFileSync.mockReturnValue('');
+
+      const promise = (orch as AnyOrch).runMerge(pipeline);
+      await promise;
+
+      // No sessions should have been created at all
+      expect(mockCreateSession).not.toHaveBeenCalled();
+      // Direct merge was attempted
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['merge', `feat/${slug}`]),
+        expect.any(Object),
+      );
       expect(pipeline.phase).toBe('done');
 
       if (existsSync(pipeline.worktreePath)) {
@@ -1981,7 +2006,7 @@ describe('Orchestrator', () => {
   // ── runCreatePR ───────────────────────────────────────────────────
 
   describe('runCreatePR', () => {
-    it('pushes branch, creates session, sends prompt, extracts PR URL', async () => {
+    it('pushes branch, creates PR via gh CLI, advances to pr-open', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature\n\nImplement this feature.');
@@ -1994,34 +2019,40 @@ describe('Orchestrator', () => {
         worktreePath: join(testData.root, '..', 'worktrees', slug),
       });
 
-      mockCreateSession.mockResolvedValue('sess-pr');
-      mockExecFileSync
-        .mockReturnValueOnce('')
-        .mockReturnValueOnce('https://github.com/owner/repo.git')
-        .mockReturnValueOnce('refs/remotes/origin/main');
+      // Mock: no existing PR, then gh pr create returns the URL
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        const argStr = Array.isArray(args) ? args.join(' ') : '';
+        if (cmd === 'gh' && argStr.includes('pr list')) return '';
+        if (cmd === 'gh' && argStr.includes('pr create')) return 'https://github.com/owner/repo/pull/42';
+        if (cmd === 'git' && argStr.includes('remote') && argStr.includes('get-url')) return 'https://github.com/owner/repo.git';
+        if (cmd === 'git' && argStr.includes('symbolic-ref')) return 'refs/remotes/origin/main';
+        return '';
+      });
 
       const promise = (orch as AnyOrch).runCreatePR(pipeline);
-      await new Promise(r => setTimeout(r, 10));
+      await promise;
 
+      // Verify git push happened
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
         expect.arrayContaining(['push', '-u', 'origin', `feat/${slug}`]),
         expect.any(Object),
       );
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-pr', expect.stringContaining('Pull Request'));
-
-      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
-      await promise;
-
-      expect(mockKillSession).toHaveBeenCalledWith('sess-pr');
+      // Verify gh pr create was called
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'gh',
+        expect.arrayContaining(['pr', 'create', '--title', pipeline.description]),
+        expect.any(Object),
+      );
+      // No agent sessions should have been created for PR creation
+      expect(mockCreateSession).not.toHaveBeenCalled();
       expect(pipeline.phase).toBe('pr-open');
     });
 
-    it('extracts PR URL from log and runs gh pr update-branch', async () => {
+    it('reuses existing PR URL when open PR already exists', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
-      writeFileSync(join(testData.taskDir, 'output.log'), 'Created: https://github.com/owner/repo/pull/42\n');
 
       const slug = testData.slug;
       const pipeline = makePipeline({
@@ -2031,25 +2062,37 @@ describe('Orchestrator', () => {
         worktreePath: join(testData.root, '..', 'worktrees', slug),
       });
 
-      mockCreateSession.mockResolvedValue('sess-pr');
-      mockExecFileSync
-        .mockReturnValueOnce('')
-        .mockReturnValueOnce('https://github.com/owner/repo.git')
-        .mockReturnValueOnce('refs/remotes/origin/main');
+      // Mock: existing PR found, no create needed
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        const argStr = Array.isArray(args) ? args.join(' ') : '';
+        if (cmd === 'gh' && argStr.includes('pr list')) return 'https://github.com/owner/repo/pull/99';
+        if (cmd === 'gh' && argStr.includes('pr create')) throw new Error('should not be called');
+        if (cmd === 'git' && argStr.includes('remote') && argStr.includes('get-url')) return 'https://github.com/owner/repo.git';
+        if (cmd === 'git' && argStr.includes('symbolic-ref')) return 'refs/remotes/origin/main';
+        return '';
+      });
 
       const promise = (orch as AnyOrch).runCreatePR(pipeline);
-      await new Promise(r => setTimeout(r, 10));
-      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
       await promise;
 
-      expect(mockExecFileSync).toHaveBeenCalled();
+      // gh pr list was called, but gh pr create was NOT
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'gh',
+        expect.arrayContaining(['pr', 'list']),
+        expect.any(Object),
+      );
+      // pr create should not be called
+      const prCreateCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'gh' && Array.isArray(call[1]) && call[1].includes('pr') && call[1].includes('create'),
+      );
+      expect(prCreateCalls.length).toBe(0);
+      expect(pipeline.phase).toBe('pr-open');
     });
 
     it('advances to pr-open after successful PR creation', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
-      writeFileSync(join(testData.taskDir, 'output.log'), 'Created: https://github.com/owner/repo/pull/42\n');
 
       const slug = testData.slug;
       const pipeline = makePipeline({
@@ -2059,12 +2102,16 @@ describe('Orchestrator', () => {
         worktreePath: join(testData.root, '..', 'worktrees', slug),
       });
 
-      mockCreateSession.mockResolvedValue('sess-pr');
-      mockExecFileSync.mockReturnValue('');
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        const argStr = Array.isArray(args) ? args.join(' ') : '';
+        if (cmd === 'gh' && argStr.includes('pr list')) return '';
+        if (cmd === 'gh' && argStr.includes('pr create')) return 'https://github.com/owner/repo/pull/42';
+        if (cmd === 'git' && argStr.includes('remote') && argStr.includes('get-url')) return 'https://github.com/owner/repo.git';
+        if (cmd === 'git' && argStr.includes('symbolic-ref')) return 'refs/remotes/origin/main';
+        return '';
+      });
 
       const promise = (orch as AnyOrch).runCreatePR(pipeline);
-      await new Promise(r => setTimeout(r, 10));
-      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
       await promise;
 
       expect(pipeline.phase).toBe('pr-open');
@@ -2083,7 +2130,6 @@ describe('Orchestrator', () => {
         worktreePath: join(testData.root, '..', 'worktrees', slug),
       });
 
-      mockCreateSession.mockResolvedValue('sess-pr');
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git' && Array.isArray(args) && args[0] === 'remote') {
           return 'https://unknown.example.com/repo.git';
@@ -2095,8 +2141,6 @@ describe('Orchestrator', () => {
       });
 
       const promise = (orch as AnyOrch).runCreatePR(pipeline);
-      await new Promise(r => setTimeout(r, 10));
-      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
       await promise;
 
       const taskStore = (orch as AnyOrch).taskStore;
@@ -2104,7 +2148,7 @@ describe('Orchestrator', () => {
       expect(updated?.platform).toBeUndefined();
     });
 
-    it('spawns merger agent when rebase has conflicts', async () => {
+    it('spawns merger agent when rebase has conflicts, then creates PR via CLI', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
@@ -2118,21 +2162,13 @@ describe('Orchestrator', () => {
       });
 
       let rebaseCalled = false;
-      let mergerSessionCreated = false;
 
-      // First session = merger (conflict path), second = PR creation
-      mockCreateSession.mockImplementation(() => {
-        if (!mergerSessionCreated) {
-          mergerSessionCreated = true;
-          return Promise.resolve('sess-merger');
-        }
-        return Promise.resolve('sess-pr');
-      });
+      // Only one session: merger for rebase conflict (no PR session anymore)
+      mockCreateSession.mockResolvedValue('sess-merger');
 
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git') {
           const argStr = Array.isArray(args) ? args.join(' ') : '';
-          // Simulate rebase conflict
           if (argStr.includes('rebase') && !argStr.includes('--abort')) {
             rebaseCalled = true;
             throw new Error('Rebase conflict');
@@ -2143,6 +2179,12 @@ describe('Orchestrator', () => {
           if (argStr.includes('symbolic-ref')) {
             return 'refs/remotes/origin/main';
           }
+        }
+        // After rebase resolved, gh creates PR directly
+        if (cmd === 'gh') {
+          const argStr = Array.isArray(args) ? args.join(' ') : '';
+          if (argStr.includes('pr list')) return '';
+          if (argStr.includes('pr create')) return 'https://github.com/owner/repo/pull/42';
         }
         return '';
       });
@@ -2157,14 +2199,17 @@ describe('Orchestrator', () => {
 
       // Complete the merger session
       fireEvent('event', { sessionId: 'sess-merger', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 10));
-
-      // Complete the PR creation session
-      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
       await promise;
 
       expect(mockKillSession).toHaveBeenCalledWith('sess-merger');
-      expect(mockKillSession).toHaveBeenCalledWith('sess-pr');
+      // No second session for PR creation
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+      // gh pr create was called
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'gh',
+        expect.arrayContaining(['pr', 'create']),
+        expect.any(Object),
+      );
       expect(pipeline.phase).toBe('pr-open');
     });
 
@@ -2181,15 +2226,8 @@ describe('Orchestrator', () => {
         worktreePath: join(testData.root, '..', 'worktrees', slug),
       });
 
-      let mergerSessionCreated = false;
-
-      mockCreateSession.mockImplementation(() => {
-        if (!mergerSessionCreated) {
-          mergerSessionCreated = true;
-          return Promise.resolve('sess-merger');
-        }
-        return Promise.resolve('sess-pr');
-      });
+      // Only one session: merger (no PR session)
+      mockCreateSession.mockResolvedValue('sess-merger');
 
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git') {
@@ -2204,6 +2242,12 @@ describe('Orchestrator', () => {
             return 'refs/remotes/origin/main';
           }
         }
+        // After rebase resolved, gh creates PR
+        if (cmd === 'gh') {
+          const argStr = Array.isArray(args) ? args.join(' ') : '';
+          if (argStr.includes('pr list')) return '';
+          if (argStr.includes('pr create')) return 'https://github.com/owner/repo/pull/42';
+        }
         return '';
       });
 
@@ -2215,17 +2259,15 @@ describe('Orchestrator', () => {
 
       // Simulate merger failure — exit with non-zero code
       fireEvent('exit', { sessionId: 'sess-merger', code: 1 });
-      await new Promise(r => setTimeout(r, 10));
-
-      // PR creation should still proceed
-      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
       await promise;
 
       // Pipeline still advances to pr-open even though merger failed
       expect(pipeline.phase).toBe('pr-open');
+      // Only one session created (just the merger, no PR session)
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
     });
 
-    it('does not spawn merger agent when rebase succeeds (fast path)', async () => {
+    it('does not spawn any sessions when rebase succeeds (fast path)', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
@@ -2238,41 +2280,26 @@ describe('Orchestrator', () => {
         worktreePath: join(testData.root, '..', 'worktrees', slug),
       });
 
-      // Only one session — PR creation (no merger on fast path)
-      mockCreateSession.mockResolvedValue('sess-pr');
-
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git') {
-          const argStr = Array.isArray(args) ? args.join(' ') : '';
-          if (argStr.includes('remote') && argStr.includes('get-url')) {
-            return 'https://github.com/owner/repo.git';
-          }
-          if (argStr.includes('symbolic-ref')) {
-            return 'refs/remotes/origin/main';
-          }
-        }
+        const argStr = Array.isArray(args) ? args.join(' ') : '';
+        if (cmd === 'gh' && argStr.includes('pr list')) return '';
+        if (cmd === 'gh' && argStr.includes('pr create')) return 'https://github.com/owner/repo/pull/42';
+        if (cmd === 'git' && argStr.includes('remote') && argStr.includes('get-url')) return 'https://github.com/owner/repo.git';
+        if (cmd === 'git' && argStr.includes('symbolic-ref')) return 'refs/remotes/origin/main';
         return '';
       });
 
       const promise = (orch as AnyOrch).runCreatePR(pipeline);
-      await new Promise(r => setTimeout(r, 20));
-
-      // Should have created only the PR session (no merger)
-      expect(mockCreateSession).toHaveBeenCalledTimes(1);
-
-      // Should NOT have sent /merge origin/master
-      const sendCalls = mockSendMessage.mock.calls;
-      const mergeCalls = sendCalls.filter(
-        (call: any[]) => call[1] && typeof call[1] === 'string' && call[1].includes('/merge origin/master')
-      );
-      expect(mergeCalls.length).toBe(0);
-
-      // Should have sent PR creation prompt
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-pr', expect.stringContaining('Pull Request'));
-
-      fireEvent('event', { sessionId: 'sess-pr', event: { type: 'result' } });
       await promise;
 
+      // No sessions should have been created at all
+      expect(mockCreateSession).not.toHaveBeenCalled();
+      // gh pr create was called
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'gh',
+        expect.arrayContaining(['pr', 'create']),
+        expect.any(Object),
+      );
       expect(pipeline.phase).toBe('pr-open');
     });
   });
@@ -2296,7 +2323,7 @@ describe('Orchestrator', () => {
   // ── approveTask with pull-request strategy ───────────────────────
 
   describe('approveTask — pull-request strategy', () => {
-    it('executes create-pr when strategy is pull-request', async () => {
+    it('executes create-pr via CLI when strategy is pull-request', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
       // Update the task phase since approveTask checks taskStore, not the pipeline
@@ -2314,18 +2341,21 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
-      mockCreateSession.mockResolvedValue('sess-pr-approve');
-      mockExecFileSync.mockReturnValue('');
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        const argStr = Array.isArray(args) ? args.join(' ') : '';
+        if (cmd === 'gh' && argStr.includes('pr list')) return '';
+        if (cmd === 'gh' && argStr.includes('pr create')) return 'https://github.com/owner/repo/pull/42';
+        if (cmd === 'git' && argStr.includes('remote') && argStr.includes('get-url')) return 'https://github.com/owner/repo.git';
+        if (cmd === 'git' && argStr.includes('symbolic-ref')) return 'refs/remotes/origin/main';
+        return '';
+      });
 
       const promise = orch.approveTask(testData.taskId, 'pull-request');
-      await new Promise(r => setTimeout(r, 10));
-
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-pr-approve', expect.stringContaining('Pull Request'));
-
-      fireEvent('event', { sessionId: 'sess-pr-approve', event: { type: 'result' } });
       await promise;
 
       expect(pipeline.phase).toBe('pr-open');
+      // No agent sessions should have been created
+      expect(mockCreateSession).not.toHaveBeenCalled();
     });
 
     it('throws rollback to awaiting-review on error', async () => {
@@ -2362,10 +2392,17 @@ describe('Orchestrator', () => {
       const worktreePath = join(testData.root, '..', 'worktrees', slug);
       mkdirSync(worktreePath, { recursive: true });
 
-      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      // Simulate gh pr create failing (not available in test env)
+      // The point is that moveTaskToPhase reached executePhase for create-pr
+      mockExecFileSync.mockImplementation((cmd: string) => {
+        if (cmd === 'gh') throw new Error('gh not available');
+        return '';
+      });
       await orch.moveTaskToPhase(testData.taskId, 'create-pr').catch(() => {});
 
-      expect(mockCreateSession).toHaveBeenCalled();
+      // execFileSync was called (for gh pr list or gh pr create), proving
+      // moveTaskToPhase reached executePhase for create-pr
+      expect(mockExecFileSync).toHaveBeenCalled();
 
       if (existsSync(worktreePath)) rmSync(worktreePath, { recursive: true, force: true });
     });
