@@ -1,6 +1,8 @@
 {
   "name": "teamai",
   "version": "0.1.0",
+  "description": "Multi-agent Claude Code CLI orchestration with a browser UI",
+  "author": "TeamAI",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -14,7 +16,10 @@
     "test:e2e": "playwright test",
     "prepare": "cd .. && chmod +x .husky/pre-commit 2>/dev/null; git config core.hooksPath .husky 2>/dev/null; exit 0",
     "electron:dev": "cross-env ELECTRON_DEV=true electron .",
-    "electron:build": "npm run build && electron-builder --win --mac --linux",
+    "electron:build": "npm run build && electron-builder --win",
+    "electron:build:mac": "npm run build && electron-builder --mac",
+    "electron:build:linux": "npm run build && electron-builder --linux",
+    "electron:build:all": "npm run build && electron-builder --win --mac --linux",
     "electron:start": "cross-env NODE_ENV=production ELECTRON_DEV=false electron ."
   },
   "dependencies": {
@@ -75,7 +80,8 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "public/icon.png"
+      "icon": "public/icon.png",
+      "signAndEditExecutable": false
     },
     "mac": {
       "target": "dmg",
@@ -88,6 +94,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "npmRebuild": false
   }
 }
