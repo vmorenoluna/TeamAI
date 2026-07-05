@@ -33,4 +33,5 @@ Rules:
 - Each subtask must be self-contained enough for an independent agent to implement.
 - Include ALL files that need to change, not just the primary ones.
 - Order subtasks so dependencies are resolved top-down.
+- **No two subtasks may list the same file path.** If two subtasks would modify the same file, merge them into a single subtask. This applies regardless of `depends_on` order
 ```

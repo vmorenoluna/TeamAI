@@ -29,8 +29,8 @@ If the prompt includes "⚠️ QA FEEDBACK" at the top, you are in QA rework mod
 
 ## Rules
 - Only modify files listed in the subtask unless absolutely necessary.
-- If you must modify additional files, explain why.
-- Do NOT modify files belonging to other subtasks.
+- **CRITICAL: Do NOT modify files that are not listed in this subtask's `files` array** — even to fix a test or update a doc. Each subtask runs in its own branch; the orchestrator cherry-picks all subtask branches sequentially. If you touch a file outside your list, that file will have uncommitted changes in the main worktree when the next subtask is cherry-picked, causing git to abort and the entire task to fail. If you genuinely need to touch an extra file, commit it as part of your subtask commit so it is tracked.
+- Do NOT modify files listed in other subtasks' `files` arrays.
 - Match existing code style exactly (indentation, naming, patterns).
 - Add or update tests for any new functionality.
 ```
