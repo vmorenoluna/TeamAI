@@ -32,6 +32,17 @@ export async function browseDirectory(dirPath?: string): Promise<BrowseResult> {
 
 const ACTIVE_PROJECT_COOKIE = 'activeProject';
 
+/**
+ * Invalidate both the page and root-layout caches for '/'.
+ *
+ * In Next.js 16, `revalidatePath('/')` alone may not purge the root layout's
+ * RSC payload when called from a server action invoked by a client component
+ * inside the layout.  The explicit `'layout'` variant fills that gap.
+ */
+function revalidateRoot() {
+  revalidateRoot();
+}
+
 // Not async — used synchronously in getStores() in tasks.ts.
 // Reads cookies via the synchronous API (available in Next.js server context).
 export async function getActiveProjectPath(): Promise<string> {
@@ -53,8 +64,7 @@ export async function getActiveProject() {
 export async function setActiveProject(projectPath: string) {
   const cookieStore = await cookies();
   cookieStore.set(ACTIVE_PROJECT_COOKIE, projectPath);
-  revalidatePath('/', 'layout');
-  revalidatePath('/');
+  revalidateRoot();
 }
 
 export async function addProject(
@@ -74,8 +84,7 @@ export async function addProject(
   }
   const cookieStore = await cookies();
   cookieStore.set(ACTIVE_PROJECT_COOKIE, path);
-  revalidatePath('/', 'layout');
-  revalidatePath('/');
+  revalidateRoot();
   return { ok: true };
 }
 
@@ -85,8 +94,7 @@ export async function removeProject(projectPath: string) {
   if (cookieStore.get(ACTIVE_PROJECT_COOKIE)?.value === projectPath) {
     cookieStore.delete(ACTIVE_PROJECT_COOKIE);
   }
-  revalidatePath('/', 'layout');
-  revalidatePath('/');
+  revalidateRoot();
 }
 
 export async function getProjects() {
