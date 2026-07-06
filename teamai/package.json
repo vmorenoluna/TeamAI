@@ -48,6 +48,7 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.7.0",
     "@vitest/coverage-v8": "^1.6.1",
+    "cross-env": "^10.1.0",
     "electron": "^33.4.0",
     "electron-builder": "^25.1.8",
     "eslint": "^9",
@@ -61,7 +62,10 @@
     "vitest": "^1.6.1"
   },
   "lint-staged": {
-    "*.{ts,tsx,mts}": ["eslint --fix", "eslint --max-warnings 0"]
+    "*.{ts,tsx,mts}": [
+      "eslint --fix",
+      "eslint --max-warnings 0"
+    ]
   },
   "build": {
     "appId": "com.teamai.app",
@@ -99,7 +103,9 @@
       "!node_modules/**/LICENSE",
       "!node_modules/**/CHANGELOG*"
     ],
-    "electronLanguages": ["en-US"],
+    "electronLanguages": [
+      "en-US"
+    ],
     "win": {
       "target": "nsis",
       "icon": "public/icon.png",
@@ -110,7 +116,10 @@
       "icon": "public/icon.png"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "public/icon.png"
     },
     "nsis": {
