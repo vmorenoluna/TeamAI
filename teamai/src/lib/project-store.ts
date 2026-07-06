@@ -311,7 +311,9 @@ export class ProjectStore {
     if (!dryRun && (updated.length > 0 || Object.keys(storedManifest).length === 0)) {
       try {
         writeFileSync(manifestPath, JSON.stringify({ version: 1, files: newManifest }, null, 2));
-      } catch { /* best-effort */ }
+      } catch (err) {
+        console.error(`[ProjectStore] Failed to write scaffold manifest at ${manifestPath}:`, err);
+      }
     }
 
     return updated;
