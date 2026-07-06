@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { ReviewPanel } from '@/components/review-panel';
 
@@ -760,6 +760,179 @@ describe('ReviewPanel', () => {
       expect(screen.getByText('Open Pull Request')).toBeDisabled();
       expect(screen.getByText('Request Changes')).toBeDisabled();
       expect(screen.getByText('Revising Spec…')).toBeDisabled();
+    });
+  });
+
+  // ── Raw-throw path (regression) ──────────────────────────────────
+  // All four RunAction-routed handlers (Approve local-merge / Approve
+  // pull-request / Reject / ReviseSpec) plus handleMarkDone (also via
+  // runAction) had the original silent-failure antipattern: bare
+  // `await action(...)` calls let thrown errors vanish into
+  // useServerMutation's empty catch, so the button click appeared to
+  // "do nothing" on failure.
+  //
+  // The fix wraps every call in a single shared `runAction<T>(label,
+  // fallbackMessage, fn)` helper that sets `error` state on rejection
+  // and re-throws. The dismissable role='alert' banner appears above
+  // the action buttons with `Action failed` header + the raw
+  // `err.message` (or fallbackMessage if the rejection isn't an Error
+  // with a message). These tests lock in that contract for each path.
+
+  describe('raw-throw path (regression)', () => {
+    function setupAwaitingReview(overrides: Partial<Parameters<typeof ReviewPanel>[0]> = {}) {
+      return render(
+        <ReviewPanel
+          taskId="task-r1"
+          spec={null}
+          qaReport={QA_REPORT_PASS}
+          diff={null}
+          prUrl={null}
+          phase="awaiting-review"
+          {...overrides}
+        />,
+      );
+    }
+
+    async function assertErrorBannerWith(text: string) {
+      await waitFor(() => {
+        const banner = screen.getByRole('alert');
+        // The banner always carries the "Action failed" header — assert both
+        // header and surfaced message to lock in the helper's contract.
+        expect(banner).toHaveTextContent('Action failed');
+        expect(banner).toHaveTextContent(text);
+      });
+    }
+
+    it('handleApprove (local-merge): role=alert surfaces when approveTask throws; pendingAction clears', async () => {
+      mockApproveTask.mockRejectedValueOnce(new Error('merge raw throw: rebase conflict'));
+
+      setupAwaitingReview();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Merge Locally'));
+      });
+
+      expect(mockApproveTask).toHaveBeenCalledWith('task-r1', 'local-merge');
+      await assertErrorBannerWith('merge raw throw: rebase conflict');
+      // runAction's `finally` cleared pendingAction — button reverts from
+      // "Merging…" loading text back to "Merge Locally".
+      expect(screen.getByText('Merge Locally')).toBeInTheDocument();
+      // Re-throw → useServerMutation skips router.refresh() on failure.
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('handleApprove (pull-request): role=alert surfaces when approveTask throws', async () => {
+      mockApproveTask.mockRejectedValueOnce(new Error('pr raw throw: gh auth expired'));
+
+      setupAwaitingReview();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Open Pull Request'));
+      });
+
+      expect(mockApproveTask).toHaveBeenCalledWith('task-r1', 'pull-request');
+      await assertErrorBannerWith('pr raw throw: gh auth expired');
+      expect(screen.getByText('Open Pull Request')).toBeInTheDocument();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('handleReviseSpec: role=alert surfaces when reviseSpec throws', async () => {
+      mockReviseSpec.mockRejectedValueOnce(new Error('revise raw throw: spec snapshot conflict'));
+
+      setupAwaitingReview({ qaReport: QA_REPORT_WITH_SPEC_CONCERNS });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Revise Spec'));
+      });
+
+      expect(mockReviseSpec).toHaveBeenCalledWith('task-r1');
+      await assertErrorBannerWith('revise raw throw: spec snapshot conflict');
+      expect(screen.getByText('Revise Spec')).toBeInTheDocument();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('handleMarkDone: role=alert surfaces when markTaskDone throws', async () => {
+      mockMarkTaskDone.mockRejectedValueOnce(new Error('markDone raw throw: gh merge conflict'));
+
+      render(
+        <ReviewPanel
+          taskId="task-r1"
+          spec={null}
+          qaReport={QA_REPORT_PASS}
+          diff={null}
+          prUrl="https://github.com/owner/repo/pull/42"
+          phase="pr-open"
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Mark as Done'));
+      });
+
+      expect(mockMarkTaskDone).toHaveBeenCalledWith('task-r1');
+      await assertErrorBannerWith('markDone raw throw: gh merge conflict');
+      expect(screen.getByText('Mark as Done')).toBeInTheDocument();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('handleReject: role=alert surfaces when rejectTask throws', async () => {
+      mockRejectTask.mockRejectedValueOnce(new Error('reject raw throw: comment api down'));
+
+      render(
+        <ReviewPanel
+          taskId="task-r1"
+          spec={null}
+          qaReport={QA_REPORT_PASS}
+          diff={null}
+          prUrl="https://github.com/owner/repo/pull/42"
+          phase="pr-open"
+        />,
+      );
+
+      // Open the feedback UI and submit it (handler requires non-empty feedback).
+      await act(async () => {
+        fireEvent.click(screen.getByText('Request Changes'));
+      });
+      await act(async () => {
+        fireEvent.change(screen.getByPlaceholderText('Describe what needs to change...'), {
+          target: { value: 'Please add a test for X' },
+        });
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Send Back'));
+      });
+
+      expect(mockRejectTask).toHaveBeenCalledWith('task-r1', 'Please add a test for X');
+      await assertErrorBannerWith('reject raw throw: comment api down');
+      // runAction's re-throw preserves the feedback UI — textarea still
+      // visible so the user can edit and retry.
+      expect(screen.getByPlaceholderText('Describe what needs to change...')).toBeInTheDocument();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('fallback message: when rejection is not an Error<string>, runAction uses fallbackMessage', async () => {
+      // Promise.reject('plain string') — the rejection value isn't an Error,
+      // so `err instanceof Error && err.message` is false → fallbackMessage
+      // When the rejection is a non-Error string, formatActionError falls back
+      // to 'Unknown error' — so the banner surfaces the full prefixed template
+      // 'Failed to merge task: Unknown error' (the bare 'Failed to merge task'
+      // fallbackMessage that predates the formatActionError refactor is gone).
+      mockApproveTask.mockRejectedValueOnce('some non-Error string');
+
+      setupAwaitingReview();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Merge Locally'));
+      });
+
+      await waitFor(() => {
+        const banner = screen.getByRole('alert');
+        expect(banner).toHaveTextContent('Action failed');
+        expect(banner).toHaveTextContent('Failed to merge task: Unknown error');
+      });
+      // The literal "some non-Error string" should NOT be in the banner.
+      expect(screen.queryByText('some non-Error string')).not.toBeInTheDocument();
     });
   });
 });

@@ -11,6 +11,7 @@ import { addDependency, removeDependency, addBlock, removeBlock, deleteTask, ret
 import { markAutoReviewed } from '@/app/actions/auto-mode';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, PlanSubtask, QAReportData, QACriterion } from '@/lib/stream-types';
+import { formatActionError } from '@/lib/error-format';
 import { PHASE_BADGE, PHASE_LABELS } from '@/constants/phases';
 import { SpecDiffView } from './spec-diff-view';
 
@@ -259,6 +260,11 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   const router = useRouter();
   const { run, isPending } = useServerMutation();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+  // Error banner — surfaces Server Action failures (regression fix:
+  // previously bare `await action()` calls let thrown errors vanish into
+  // useServerMutation's empty catch, so e.g. changing a dependency appeared
+  // to "do nothing" if the action threw).
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const syncFromHash = () => {
@@ -291,46 +297,90 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   ];
 
   function handleDepToggle(depId: string, checked: boolean) {
+    setError(null);
     run(async () => {
-      if (checked) await addDependency(task.id, depId);
-      else await removeDependency(task.id, depId);
+      try {
+        if (checked) await addDependency(task.id, depId);
+        else await removeDependency(task.id, depId);
+      } catch (err) {
+        const msg = formatActionError(checked ? 'add dependency' : 'remove dependency', err);
+        setError(msg);
+        throw err;
+      }
     });
   }
 
   function handleBlockToggle(blockedId: string, checked: boolean) {
+    setError(null);
     run(async () => {
-      if (checked) await addBlock(task.id, blockedId);
-      else await removeBlock(task.id, blockedId);
+      try {
+        if (checked) await addBlock(task.id, blockedId);
+        else await removeBlock(task.id, blockedId);
+      } catch (err) {
+        const msg = formatActionError(checked ? 'add block' : 'remove block', err);
+        setError(msg);
+        throw err;
+      }
     });
   }
 
   function handleDelete() {
     if (!confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
+    setError(null);
     run(async () => {
-      await deleteTask(task.id);
-      if (onClose) {
-        onClose();
-      } else {
-        router.push('/');
+      try {
+        await deleteTask(task.id);
+        if (onClose) {
+          onClose();
+        } else {
+          router.push('/');
+        }
+      } catch (err) {
+        setError(formatActionError('delete task', err));
+        throw err;
       }
     });
   }
 
   function handleRestart() {
     if (!confirm(`Restart "${task.title}" from scratch? This will clear the current phase's work and re-run it.`)) return;
+    setError(null);
     run(async () => {
-      const result = await restartCurrentPhase(task.id);
-      if (!result.success) {
-        alert(`Failed to restart task: ${result.error}`);
-        throw new Error(result.error); // prevent refresh on failure
+      try {
+        const result = await restartCurrentPhase(task.id);
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+      } catch (err) {
+        setError(formatActionError('restart task', err));
+        throw err;
       }
     });
   }
 
   function handleMarkReviewed() {
     if (!confirm(`Mark "${task.title}" as manually reviewed? This will remove the auto-processed highlight.`)) return;
+    setError(null);
     run(async () => {
-      await markAutoReviewed(task.id);
+      try {
+        await markAutoReviewed(task.id);
+      } catch (err) {
+        setError(
+          formatActionError('mark task as reviewed', err),
+        );
+        throw err;
+      }
+    });
+  }
+
+  function handleInlineRetry() {
+    setError(null);
+    run(async () => {
+      try {
+        const result = await retryTask(task.id);
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+      } catch (err) {
+        setError(formatActionError('retry task', err));
+        throw err;
+      }
     });
   }
 
@@ -341,6 +391,28 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   return (
     <div className="flex flex-col h-full">
       {!readonly && <PhaseSyncer />}
+
+      {/* Error banner — surfaces Server Action failures (regression fix) */}
+      {error && (
+        <div
+          role="alert"
+          className="shrink-0 mx-6 mt-3 rounded-lg border border-red-800/40 bg-red-950/30 p-3 flex items-start gap-3"
+        >
+          <span className="text-red-400 font-bold shrink-0 mt-0.5">✗</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-red-300">Action failed</p>
+            <p className="text-xs text-red-200/90 mt-0.5 break-words">{error}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            title="Dismiss"
+            className="shrink-0 text-red-400 hover:text-red-300 text-base leading-none px-1"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Header */}
       <div className={`shrink-0 px-6 pt-5 pb-0 ${readonly ? '' : 'border-b border-[#1e293b]'} bg-[#11131b]`}>
@@ -512,12 +584,9 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                       📋 Copy
                     </button>
                     <button
-                      onClick={async (e) => {
+                      onClick={(e) => {
                         e.stopPropagation();
-                        run(async () => {
-                          const result = await retryTask(task.id);
-                          if (!result.success) throw new Error(result.error);
-                        });
+                        handleInlineRetry();
                       }}
                       disabled={isPending}
                       data-testid="detail-retry-button"

@@ -3,27 +3,40 @@
 import { useState, useTransition } from 'react';
 import { saveRole, resetRole } from '@/app/actions/roles';
 import type { RoleDefinition } from '@/app/actions/roles';
+import { formatActionError } from '@/lib/error-format';
 
 export function RoleEditor({ role }: { role: RoleDefinition }) {
   const [open, setOpen] = useState(false);
   const [content, setContent] = useState(role.content);
   const [saved, setSaved] = useState(false);
+  // Regression-fix contract: surfaces Server Action failures (raw-throw path).
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function handleSave() {
+    setError(null);
     startTransition(async () => {
-      await saveRole(role.filename, content);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      try {
+        await saveRole(role.filename, content);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      } catch (err) {
+        setError(formatActionError('save role', err));
+      }
     });
   }
 
   function handleReset() {
+    setError(null);
     startTransition(async () => {
-      const defaultContent = await resetRole(role.filename);
-      setContent(defaultContent);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      try {
+        const defaultContent = await resetRole(role.filename);
+        setContent(defaultContent);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      } catch (err) {
+        setError(formatActionError('reset role', err));
+      }
     });
   }
 
@@ -51,6 +64,23 @@ export function RoleEditor({ role }: { role: RoleDefinition }) {
             rows={16}
             className="w-full px-3 py-2 text-sm font-mono border border-[#334155] rounded-lg bg-[#1e2333] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] resize-y"
           />
+          {/* Inline error banner — surfaces Server Action throws from handleSave / handleReset. */}
+          {error && (
+            <div
+              role="alert"
+              className="p-2 bg-red-900/30 border border-red-800/50 rounded flex items-start justify-between gap-2"
+            >
+              <p className="text-xs text-red-300 flex-1">{error}</p>
+              <button
+                onClick={() => setError(null)}
+                aria-label="Dismiss error"
+                className="text-red-500 hover:text-red-300 text-xs leading-none transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <button
               onClick={handleReset}

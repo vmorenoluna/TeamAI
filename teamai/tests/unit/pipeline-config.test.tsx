@@ -379,4 +379,98 @@ describe('PipelineConfigEditor', () => {
       expect(mockSavePipelineConfig).toHaveBeenCalledTimes(3);
     });
   });
+
+  // ── Raw-throw path (regression) ───────────────────────────────────
+
+  describe('raw-throw path (regression)', () => {
+    it('surfaces role="alert" banner when savePipelineConfig rejects', async () => {
+      mockSavePipelineConfig.mockRejectedValueOnce(new Error('validation rejected: invalid cron'));
+
+      renderComponent();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save Pipeline Config' }));
+      });
+
+      await waitFor(() => {
+        const banner = screen.getByRole('alert');
+        expect(banner).toHaveTextContent('Failed to save pipeline config: validation rejected: invalid cron');
+      });
+    });
+
+    it('does not show "Saved!" when savePipelineConfig throws', async () => {
+      mockSavePipelineConfig.mockRejectedValueOnce(new Error('disk full'));
+
+      renderComponent();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save Pipeline Config' }));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Saved!')).not.toBeInTheDocument();
+      // Button reverts to the idle label since setSaved(true) was never reached.
+      expect(screen.getByRole('button', { name: 'Save Pipeline Config' })).toBeInTheDocument();
+    });
+
+    it('uses "Unknown error" fallback for non-Error rejects', async () => {
+      mockSavePipelineConfig.mockRejectedValueOnce('plain string reason' as unknown as Error);
+
+      renderComponent();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save Pipeline Config' }));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toHaveTextContent('Failed to save pipeline config: Unknown error');
+      });
+    });
+
+    it('dismisses the role="alert" banner when the ✕ button is clicked', async () => {
+      mockSavePipelineConfig.mockRejectedValueOnce(new Error('temporary'));
+
+      renderComponent();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save Pipeline Config' }));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+      });
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('a subsequent successful save clears a prior error banner', async () => {
+      mockSavePipelineConfig.mockRejectedValueOnce(new Error('first attempt fails'));
+      mockSavePipelineConfig.mockResolvedValueOnce(undefined);
+
+      renderComponent();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save Pipeline Config' }));
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toBeInTheDocument();
+      });
+
+      // Click save again — handleSave calls setError(null) before re-running.
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save Pipeline Config' }));
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.getByText('Saved!')).toBeInTheDocument();
+      });
+    });
+  });
 });

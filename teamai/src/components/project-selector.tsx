@@ -26,13 +26,21 @@ export function ProjectSelector({ projects, activeProjectPath, collapsed = false
   function handleAdd(formData: FormData) {
     setAddError(null);
     run(async () => {
-      const result = await addProject(formData);
-      if ('error' in result) {
-        setAddError(result.error);
-        throw new Error(result.error); // prevent router.refresh() on error
+      try {
+        const result = await addProject(formData);
+        if ('error' in result) {
+          setAddError(result.error);
+          throw new Error(result.error); // prevent router.refresh() on error
+        }
+        setShowDialog(false);
+        setPathValue('');
+      } catch (err) {
+        // Surface thrown errors (stale Server Action ID, network failure,
+        // cookies() context error, etc.) so the button doesn't appear to
+        // "do nothing" — useServerMutation's catch otherwise logs only.
+        setAddError(err instanceof Error && err.message ? err.message : 'Failed to add project');
+        throw err;
       }
-      setShowDialog(false);
-      setPathValue('');
     });
   }
 
@@ -89,7 +97,11 @@ export function ProjectSelector({ projects, activeProjectPath, collapsed = false
       {showDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/60" onClick={() => setShowDialog(false)} />
-          <div className="relative bg-[#1e2333] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] p-6 w-full max-w-md mx-4">
+          <div
+            role="dialog"
+            aria-label="Add Project"
+            className="relative bg-[#1e2333] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] p-6 w-full max-w-md mx-4"
+          >
             <h2 className="text-base font-semibold text-white mb-4">
               Add Project
             </h2>

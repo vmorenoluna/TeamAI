@@ -415,5 +415,127 @@ describe('ProviderConfigEditor', () => {
     expect(comboboxes.length).toBe(7);
   });
 
+  // ── Raw-throw path (regression) ───────────────────────────────────
 
+  describe('raw-throw path (regression)', () => {
+    it('surfaces role="alert" banner when saveProvidersConfig rejects', async () => {
+      mockSaveProvidersConfig.mockRejectedValueOnce(new Error('config validation failed: unknown role'));
+
+      await act(async () => {
+        render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+        if (!vi.isFakeTimers()) {
+          await new Promise(r => setTimeout(r, 0));
+        }
+      });
+      await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
+
+      const saveButton = screen.getByText('Save Provider Config');
+      await act(async () => {
+        fireEvent.click(saveButton);
+      });
+
+      await waitFor(() => {
+        const banner = screen.getByRole('alert');
+        expect(banner).toHaveTextContent('Failed to save provider config: config validation failed: unknown role');
+      });
+    });
+
+    it('does not show "Saved!" when saveProvidersConfig throws', async () => {
+      mockSaveProvidersConfig.mockRejectedValueOnce(new Error('disk full'));
+
+      await act(async () => {
+        render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+        if (!vi.isFakeTimers()) {
+          await new Promise(r => setTimeout(r, 0));
+        }
+      });
+      await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Save Provider Config'));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Saved!')).not.toBeInTheDocument();
+      // Button reverts to idle label since setSaved(true) was never reached.
+      expect(screen.getByText('Save Provider Config')).toBeInTheDocument();
+    });
+
+    it('uses "Unknown error" fallback for non-Error rejects', async () => {
+      mockSaveProvidersConfig.mockRejectedValueOnce('plain string reason' as unknown as Error);
+
+      await act(async () => {
+        render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+        if (!vi.isFakeTimers()) {
+          await new Promise(r => setTimeout(r, 0));
+        }
+      });
+      await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Save Provider Config'));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toHaveTextContent('Failed to save provider config: Unknown error');
+      });
+    });
+
+    it('dismisses the role="alert" banner when the ✕ button is clicked', async () => {
+      mockSaveProvidersConfig.mockRejectedValueOnce(new Error('temporary'));
+
+      await act(async () => {
+        render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+        if (!vi.isFakeTimers()) {
+          await new Promise(r => setTimeout(r, 0));
+        }
+      });
+      await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Save Provider Config'));
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+      });
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('a subsequent successful save clears a prior error banner', async () => {
+      mockSaveProvidersConfig.mockRejectedValueOnce(new Error('first attempt fails'));
+      mockSaveProvidersConfig.mockResolvedValueOnce(undefined);
+
+      await act(async () => {
+        render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+        if (!vi.isFakeTimers()) {
+          await new Promise(r => setTimeout(r, 0));
+        }
+      });
+      await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Save Provider Config'));
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toBeInTheDocument();
+      });
+
+      // handleSave calls setError(null) before re-running
+      await act(async () => {
+        fireEvent.click(screen.getByText('Save Provider Config'));
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.getByText('Saved!')).toBeInTheDocument();
+      });
+    });
+  });
 });

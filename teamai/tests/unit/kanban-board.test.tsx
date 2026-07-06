@@ -13,7 +13,7 @@
  * following the project's established pattern.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { Task } from '@/lib/task-store';
@@ -369,6 +369,208 @@ describe('KanbanBoard', () => {
     });
   });
 
+  // ── Bulk move error handling (regression) ─────────────────────────────
+  // The audit-flagged bug: handleBulkMove had no try/catch, so the first
+  // Server Action throw was swallowed by useServerMutation's empty catch.
+  // Result: the first moveTask succeeded silently, the second failed silently,
+  // and the user had no signal that something went wrong. The fix adds
+  // try/catch: surfaces the error, intentionally does NOT call clearSelection
+  // (so the user can retry), and does NOT auto-revert the already-succeeded
+  // tasks (server side, those moves are already committed).
+
+  describe('bulk move error handling', () => {
+    it('on partial failure: surfaces error, does NOT clear selection, does NOT revert succeeded tasks', async () => {
+      // First id succeeds, second id throws — exercises the for-loop stop-on-first-throw semantic.
+      mockMoveTask.mockImplementation(async (id: string) => {
+        if (id === '2') throw new Error('second moveTask failed: rate limited');
+        return undefined;
+      });
+
+      renderBoard([
+        task({ id: '1', title: 'First', phase: 'backlog' }),
+        task({ id: '2', title: 'Second', phase: 'backlog' }),
+      ]);
+
+      // Ctrl-click both cards → 2 selected
+      const cards = screen.getAllByTestId('task-card');
+      fireEvent.click(cards[0], { ctrlKey: true });
+      fireEvent.click(cards[1], { ctrlKey: true });
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+      // Fire change on the bulk-move <select> → triggers handleBulkMove('implement')
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'implement' } });
+
+      // (a) moveTask was called for BOTH ids with the resolved normalized phase.
+      await waitFor(() => {
+        expect(mockMoveTask).toHaveBeenCalledTimes(2);
+      });
+      expect(mockMoveTask).toHaveBeenNthCalledWith(1, '1', 'implement');
+      expect(mockMoveTask).toHaveBeenNthCalledWith(2, '2', 'implement');
+
+      // (b) Error banner surfaces the second call's thrown message.
+      await waitFor(() => {
+        const banner = screen.getByRole('alert');
+        expect(banner).toHaveTextContent('second moveTask failed: rate limited');
+      });
+
+      // (c) SelectedIds is NOT cleared on failure — the for loop breaks BEFORE
+      //     reaching clearSelection(), so the bulk bar persists and the user
+      //     can retry the failed move (or Deselect manually).
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+      expect(screen.getByText('Deselect')).toBeInTheDocument();
+      expect(screen.getByText('Delete selected')).toBeInTheDocument();
+
+      // (d) No auto-revert — both cards still rendered. Bulk-move has no
+      //     optimistic update at all, so server-side succeeded-then-failed
+      //     never auto-undoes from the client. The first card's move is
+      //     already committed (server-side), and that's a feature not a bug.
+      expect(screen.getAllByTestId('task-card')).toHaveLength(2);
+    });
+  });
+
+  // ── Other handler error paths (regression) ────────────────────────────
+  // Each of the three remaining silent-failure-fixed handlers
+  // (handleCreate, handleBulkDelete, handleUndo) gets a focused test that
+  // locks in its specific anti-regression invariant beyond "error visible":
+  //   handleCreate     \u2192 dialog stays open, template fields preserved (no reset on throw)
+  //   handleBulkDelete \u2192 selection retained (user can retry)
+  //   handleUndo       \u2192 popped entry is NOT re-pushed (Ctrl+Z is a no-op after undo throws)
+
+  describe('single-handler error paths', () => {
+    let originalConfirm: typeof window.confirm;
+
+    beforeEach(() => {
+      originalConfirm = window.confirm;
+      // handleBulkDelete calls window.confirm before invoking the action.
+      window.confirm = vi.fn().mockReturnValue(true);
+    });
+
+    afterEach(() => {
+      window.confirm = originalConfirm;
+    });
+
+    it('handleCreate: surfaces error, keeps dialog open, preserves template fields', async () => {
+      mockCreateTask.mockRejectedValueOnce(new Error('createTask refused: invalid path'));
+
+      renderBoard();
+
+      // Open dialog and pre-fill via template so we can verify "no reset on throw"
+      fireEvent.click(screen.getByRole('button', { name: '+ New Task' }));
+      expect(screen.getByText('New Task')).toBeInTheDocument();
+      fireEvent.click(screen.getByText('Bug Fix'));
+
+      const titleInput = screen.getByPlaceholderText('Add dark mode toggle') as HTMLInputElement;
+      const descTextarea = screen.getByPlaceholderText('Describe what needs to be done...') as HTMLTextAreaElement;
+      const filledTitle = titleInput.value;
+      const filledDesc = descTextarea.value;
+      expect(filledTitle).toContain('Fix: ');
+      expect(filledDesc).toContain('Current Behavior');
+
+      // Submit the form \u2192 handleCreate fires \u2192 createTask throws
+      fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));
+
+      await waitFor(() => {
+        expect(mockCreateTask).toHaveBeenCalledTimes(1);
+      });
+      await waitFor(() => {
+        const banner = screen.getByRole('alert');
+        expect(banner).toHaveTextContent('createTask refused: invalid path');
+      });
+
+      // (a) Dialog did NOT close \u2014 setShowDialog(false) lives on the success path only.
+      expect(screen.getByText('New Task')).toBeInTheDocument();
+
+      // (b) Template fields preserved \u2014 clearTemplate() lives on the success path only,
+      //     so the user can correct the FormData and retry without re-selecting a template.
+      const titleAfter = (screen.getByPlaceholderText('Add dark mode toggle') as HTMLInputElement).value;
+      const descAfter = (screen.getByPlaceholderText('Describe what needs to be done...') as HTMLTextAreaElement).value;
+      expect(titleAfter).toBe(filledTitle);
+      expect(descAfter).toBe(filledDesc);
+    });
+
+    it('handleBulkDelete: surfaces error, leaves selection intact for retry', async () => {
+      mockBulkDeleteTasks.mockRejectedValueOnce(new Error('bulkDelete refused: server timeout'));
+
+      renderBoard([
+        task({ id: '1', title: 'A', phase: 'backlog' }),
+        task({ id: '2', title: 'B', phase: 'backlog' }),
+      ]);
+
+      const cards = screen.getAllByTestId('task-card');
+      fireEvent.click(cards[0], { ctrlKey: true });
+      fireEvent.click(cards[1], { ctrlKey: true });
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+      // Click Delete selected \u2192 handleBulkDelete fires \u2192 bulkDeleteTasks throws
+      fireEvent.click(screen.getByText('Delete selected'));
+
+      await waitFor(() => {
+        const banner = screen.getByRole('alert');
+        expect(banner).toHaveTextContent('bulkDelete refused: server timeout');
+      });
+
+      // (a) bulkDeleteTasks was invoked with both selected IDs
+      expect(mockBulkDeleteTasks).toHaveBeenCalledWith(['1', '2']);
+
+      // (b) Selection retained \u2014 clearSelection() lives on the success path only,
+      //     so the user can retry. Same invariant as bulk-move.
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+      expect(screen.getByText('Deselect')).toBeInTheDocument();
+      expect(screen.getByText('Delete selected')).toBeInTheDocument();
+    });
+
+    it('handleUndo: on moveTask throw, does NOT re-push the popped entry (Ctrl+Z is a no-op)', async () => {
+      // First moveTask (the drag-drop) succeeds; second moveTask (the undo) throws.
+      // mockResolvedValueOnce + mockRejectedValueOnce is the cleanest chain.
+      mockMoveTask
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('undo moveTask refused: stale event handler'));
+
+      renderBoard([task({ id: '1', title: 'Undo me', phase: 'backlog' })]);
+
+      // 1. Drag the card to In Progress \u2192 handleDrop succeeds \u2192 toast appears with Undo button
+      const card = screen.getByTestId('task-card');
+      fireEvent.dragStart(card);
+      const implementHeader = screen.getByText('In Progress');
+      fireEvent.drop(implementHeader.closest('.flex.flex-col')!);
+
+      await waitFor(() => {
+        expect(mockMoveTask).toHaveBeenCalledWith('1', 'implement');
+      });
+      await waitFor(() => {
+        expect(screen.getByText('Undo')).toBeInTheDocument();
+      });
+
+      // 2. Click the toast's Undo button \u2192 handleUndo pops from undoStackRef,
+      //    calls moveTask('1', 'backlog') \u2192 rejected \u2192 catch runs:
+      //      setError(msg); throw err;  \u2014\u2014 INTENTIONALLY does NOT re-push the entry.
+      fireEvent.click(screen.getByText('Undo'));
+
+      await waitFor(() => {
+        expect(mockMoveTask).toHaveBeenCalledWith('1', 'backlog');
+      });
+      await waitFor(() => {
+        const banner = screen.getByRole('alert');
+        expect(banner).toHaveTextContent('undo moveTask refused: stale event handler');
+      });
+      // exactly two calls: drop + the one undo attempt
+      expect(mockMoveTask).toHaveBeenCalledTimes(2);
+
+      // 3. CRITICAL: pressed Ctrl+Z must be a no-op. The Ctrl+Z listener
+      //    (registered in useEffect) gates on `undoStackRef.current.length > 0`
+      //    \u2014 because the popped entry was NOT re-pushed, the stack is empty and
+      //    the listener prevents default without calling handleUndo.
+      mockMoveTask.mockClear();
+      fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+
+      await waitFor(() => {
+        // mockClear reset the call list \u2014 if Ctrl+Z triggered handleUndo, the
+        // list would be non-empty. A genuine no-op assertion.
+        expect(mockMoveTask).not.toHaveBeenCalled();
+      });
+    });
+  });
+
   // ── Drag and drop ────────────────────────────────────────────────────
 
   describe('drag and drop', () => {
@@ -428,6 +630,57 @@ describe('KanbanBoard', () => {
 
       // The card wrapper should get opacity class
       expect(cardWrapper.className).toContain('opacity-40');
+    });
+
+    // ── Regression: handleDrop's catch block ────────────────────────────
+    // The audit-flagged bug was that a bare `await moveTask(...)` threw into
+    // useServerMutation's empty catch — leaving the card stuck in the
+    // optimistic column and the corresponding undo-stack entry available,
+    // so clicking Undo would re-attempt the same known-failing action.
+    // The fix specifically: clearOptimistic + filter undoStackRef + setError.
+
+    it('clears optimistic UI and removes the undo-stack entry when moveTask throws', async () => {
+      mockMoveTask.mockRejectedValueOnce(new Error('database timeout on moveTask'));
+
+      renderBoard([task({ id: '1', title: 'Will fail', phase: 'backlog' })]);
+
+      const card = screen.getByTestId('task-card');
+      fireEvent.dragStart(card);
+
+      const implementHeader = screen.getByText('In Progress');
+      const implementColumn = implementHeader.closest('.flex.flex-col')!;
+      fireEvent.dragOver(implementColumn);
+      fireEvent.drop(implementColumn);
+
+      // moveTask was invoked with the resolved (normalized) target phase
+      await waitFor(() => {
+        expect(mockMoveTask).toHaveBeenCalledWith('1', 'implement');
+      });
+
+      // (a) Error banner surfaces the thrown message
+      await waitFor(() => {
+        const banner = screen.getByRole('alert');
+        expect(banner).toHaveTextContent('database timeout on moveTask');
+      });
+
+      // (b) Optimistic UI cleared — the isMoving marker on the card wrapper
+      //     is gone (clearOptimistic removed the taskId from optimisticPhases
+      //     and cleared the 10s reconciliation timeout).
+      expect(screen.queryByTestId('is-moving')).not.toBeInTheDocument();
+
+      // (c) Undo-stack entry dropped — even though the toast still renders
+      //     its 'Undo' button (toast.undoAction snapshot was set BEFORE the
+      //     throw), clicking it must NOT re-call moveTask. handleUndo pops
+      //     from undoStackRef which was filtered to remove the failing id,
+      //     so the click is a no-op.
+      const undoBtn = screen.getByText('Undo');
+      expect(undoBtn).toBeInTheDocument();
+      fireEvent.click(undoBtn);
+
+      // Give the click handler a tick to settle
+      await waitFor(() => {
+        expect(mockMoveTask).toHaveBeenCalledTimes(1);
+      });
     });
   });
 

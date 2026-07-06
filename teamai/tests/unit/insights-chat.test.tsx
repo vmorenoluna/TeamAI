@@ -890,4 +890,185 @@ describe('InsightsChat', () => {
       expect(screen.queryByText('Part')).not.toBeInTheDocument();
     });
   });
+
+  // ── Raw-throw path (regression) ────────────────────────────────────
+
+  describe('raw-throw path (regression)', () => {
+
+    /** Wait for the role='alert' banner with the given text. */
+    async function assertErrorBanner(text: string | RegExp) {
+      await waitFor(() => {
+        const banner = screen.queryByRole('alert');
+        expect(banner).not.toBeNull();
+        expect(banner).toHaveTextContent(text);
+      });
+    }
+
+    it('mount: surfaces role="alert" banner when getOrCreateInsightsSession rejects', async () => {
+      mockGetOrCreateInsightsSession.mockRejectedValueOnce(
+        new Error('session init failed: db timeout'),
+      );
+
+      await renderComponent();
+
+      await assertErrorBanner('Failed to start chat session: session init failed: db timeout');
+    });
+
+    it('mount: textarea stays disabled when session creation fails', async () => {
+      mockGetOrCreateInsightsSession.mockRejectedValueOnce(new Error('init broke'));
+
+      await renderComponent();
+
+      await assertErrorBanner(/init broke/);
+      expect(screen.getByPlaceholderText('Connecting…')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    });
+
+    it('handleSend: surfaces role="alert" banner when sendInsightsMessage rejects', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-snd');
+      mockSendInsightsMessage.mockRejectedValueOnce(new Error('send failed: network'));
+
+      await renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('Ask about the codebase… (Enter to send)')).toBeInTheDocument();
+      });
+
+      await sendMessage('Hello');
+
+      await assertErrorBanner('Failed to send message: send failed: network');
+      // After throw: running reset, Send button reappears
+      expect(screen.queryByText('✕ Stop')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+    });
+
+    it('handleSend: prior user message bubble remains visible after send throws', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValue('sess-preserve');
+      mockSendInsightsMessage.mockRejectedValueOnce(new Error('queue full'));
+
+      await renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('Ask about the codebase… (Enter to send)')).toBeInTheDocument();
+      });
+
+      await sendMessage('A question');
+
+      await assertErrorBanner(/Failed to send message: queue full/);
+      // User bubble persists so the user can retry without retyping
+      expect(screen.getByText('A question')).toBeInTheDocument();
+    });
+
+    it('handleCancel reconnect: surfaces role="alert" banner when getOrCreateInsightsSession rejects', async () => {
+      const { promise: sendPromise, resolve: resolveSend } = deferred<void>();
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-original');
+      // The reconnect call (after cancel) rejects.
+      mockGetOrCreateInsightsSession.mockRejectedValueOnce(
+        new Error('reconnect after cancel failed'),
+      );
+      mockSendInsightsMessage.mockReturnValue(sendPromise);
+
+      await renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('Ask about the codebase… (Enter to send)')).toBeInTheDocument();
+      });
+
+      await sendMessage('Hello');
+      expect(screen.getByText('✕ Stop')).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('✕ Stop'));
+      });
+
+      await assertErrorBanner('Failed to reconnect after cancel: reconnect after cancel failed');
+
+      resolveSend();
+    });
+
+    it('onRetry (rate-limit banner): surfaces role="alert" banner when reconnect rejects', async () => {
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-rl');
+      mockGetOrCreateInsightsSession.mockRejectedValueOnce(
+        new Error('retry reconnect failed'),
+      );
+      mockUseSessionStream.mockReturnValue([
+        ev({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'session limit reached' }] },
+        }),
+      ]);
+
+      await renderComponent();
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Retry Now' }));
+      });
+
+      await assertErrorBanner('Failed to retry chat session: retry reconnect failed');
+    });
+
+    it('dismiss button (✕) clears the role="alert" banner', async () => {
+      mockGetOrCreateInsightsSession.mockRejectedValueOnce(new Error('recoverable'));
+
+      await renderComponent();
+
+      await assertErrorBanner(/recoverable/);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+      });
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('non-Error rejection uses "Unknown error" fallback', async () => {
+      mockGetOrCreateInsightsSession.mockRejectedValueOnce('plain string reason' as unknown as Error);
+
+      await renderComponent();
+
+      await assertErrorBanner('Failed to start chat session: Unknown error');
+    });
+
+    it('successful retry after a mount throw restores functional Send button', async () => {
+      // First call (mount) throws; second call (re-mount after dismiss) succeeds.
+      mockGetOrCreateInsightsSession.mockRejectedValueOnce(new Error('first attempt fails'));
+      mockGetOrCreateInsightsSession.mockResolvedValueOnce('sess-recovered');
+
+      await renderComponent();
+
+      await assertErrorBanner(/first attempt fails/);
+
+      // Dismiss the banner — does NOT auto-retry (mount only fires once).
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+      });
+
+      // The user can manually re-engage by typing and clicking Send as normal.
+      const textarea = screen.getByRole('textbox');
+      fireEvent.change(textarea, { target: { value: 'Continuing chat' } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      });
+
+      // User message bubble stays visible.
+      expect(screen.getByText('Continuing chat')).toBeInTheDocument();
+    });
+
+    // Note: the auto-resume-timer-triggered reconnect throw path is NOT
+    // separately tested here. Two layers of coverage lock this in:
+    //   1. The shared `reconnect` helper's catch + error-format contract is
+    //      exercised by the 'onRetry reconnect rejects' test above (same
+    //      catch path, just different label string).
+    //   2. The underlying timer-fire trigger mechanism (useRateLimitAutoResume
+    //      firing its callback at countdown 0) is exercised for the SUCCESS
+    //      path by 'timer triggers handleRetryNow when countdown reaches 0'.
+    // The only thing an auto-resume-timer-throw test would add is the
+    // composition of (1) + (2) under rejection, which is brittle to test
+    // due to scheduler interactions between vi.useFakeTimers and React's
+    // update queue.
+  });
 });

@@ -3,6 +3,7 @@
 import { useState, useTransition, useEffect, useCallback, useRef } from 'react';
 import { saveProvidersConfig, getAvailableModels } from '@/app/actions/providers';
 import type { ProvidersConfig } from '@/app/actions/providers';
+import { formatActionError } from '@/lib/error-format';
 
 const ROLES = ['analyst', 'planner', 'coder', 'qa-reviewer', 'merger'] as const;
 
@@ -201,6 +202,8 @@ function ModelRow({
 export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
   const [cfg, setCfg] = useState(config);
   const [saved, setSaved] = useState(false);
+  // Regression-fix contract: surfaces Server Action failures (raw-throw path).
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function setDefault(value: string) {
@@ -222,15 +225,36 @@ export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
   }
 
   function handleSave() {
+    setError(null);
     startTransition(async () => {
-      await saveProvidersConfig(cfg);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      try {
+        await saveProvidersConfig(cfg);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      } catch (err) {
+        setError(formatActionError('save provider config', err));
+      }
     });
   }
 
   return (
     <div className="space-y-4">
+      {/* Error banner — surfaces Server Action throws from handleSave. */}
+      {error && (
+        <div
+          role="alert"
+          className="p-2.5 bg-red-900/30 border border-red-800/50 rounded-lg flex items-start justify-between gap-2"
+        >
+          <p className="text-xs text-red-300 flex-1">{error}</p>
+          <button
+            onClick={() => setError(null)}
+            aria-label="Dismiss error"
+            className="text-red-500 hover:text-red-300 text-sm leading-none transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div>
         <p className="text-xs font-medium text-slate-400 mb-2">Default (all roles)</p>
         <ModelRow
