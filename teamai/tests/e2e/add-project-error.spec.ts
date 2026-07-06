@@ -21,14 +21,24 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { tmpdir } from 'os';
+import { ensureProjectSelected } from './helpers';
 
 /** Open the Add Project dialog (helper, not a test). */
 async function openAddDialog(page: Page) {
-  await page.goto('/');
-  await expect(page.locator('button[title="Add project"]')).toBeVisible({
-    timeout: 15_000,
-  });
-  await page.click('button[title="Add project"]');
+  // Ensure the seeded project is selected so the project selector tabs
+  // (including the + button) render in the layout.
+  await ensureProjectSelected(page);
+
+  // Wait for React hydration — the + button is SSR'd but needs the
+  // onClick handler attached. Playwright's built-in actionability check
+  // (scroll into view, stable position) is usually enough, but a short
+  // sleep ensures the client component's useEffect/hydration completed.
+  // NOTE: avoid waitForLoadState('networkidle') — the app has WebSocket
+  // connections (processManager) that keep the network busy indefinitely.
+  const addBtn = page.locator('button[title="Add project"]');
+  await expect(addBtn).toBeVisible({ timeout: 10_000 });
+  await page.waitForTimeout(500);
+  await addBtn.click();
   await expect(page.locator('[role="dialog"][aria-label="Add Project"]')).toBeVisible({
     timeout: 5_000,
   });

@@ -22,7 +22,7 @@ test.describe('Settings Page', () => {
 
     await expect(page.locator('text=Container Isolation')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('text=Pipeline Configuration')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('text=Providers')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('text=Models').first()).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('text=Agent Roles')).toBeVisible({ timeout: 5_000 });
   });
 

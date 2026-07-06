@@ -1,4 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
+import { randomUUID } from 'crypto';
+import { join } from 'path';
+import { tmpdir } from 'os';
+
+const TEMP_CONFIG_DIR = join(tmpdir(), `teamai-e2e-config-${randomUUID().slice(0, 8)}`);
+
+// Set in the Playwright process so globalSetup inherits it.
+// webServer is a separate process — its env is set in webServer.env below.
+process.env.TEAMAI_CONFIG_DIR = TEMP_CONFIG_DIR;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -18,11 +27,22 @@ export default defineConfig({
   webServer: {
     command: 'npx tsx server.ts',
     url: 'http://localhost:3000',
-    reuseExistingServer: true,
+    // Force a fresh dev server per test run. If we allow reuseExistingServer,
+    // the running server's projectStore.ts singleton has its CONFIG_DIR frozen
+    // at module-load time, so projectStore.getByPath() returns NULL on every lookup
+    // and the kanban tests time out at 30s in beforeEach.
+    // CI → same behavior (false). Local dev → also false so tests don't
+    // silently reuse a `npm run dev` server with stale state.
+    reuseExistingServer: false,
     timeout: 120_000,
     cwd: __dirname,
     env: {
       NODE_ENV: 'test',
+      // Pass the temp config dir via env var so project-store.ts resolves
+      // CONFIG_DIR at module-load time (before globalSetup runs). Playwright
+      // starts webServer before globalSetup, so a file-based approach
+      // (.teamai-e2e-config-path) creates a race condition.
+      TEAMAI_CONFIG_DIR: TEMP_CONFIG_DIR,
     },
   },
   projects: [
