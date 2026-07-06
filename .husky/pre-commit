@@ -1,21 +1,28 @@
 #!/bin/sh
-# Check if lockfile is in sync when package.json changes
+# Check if lockfile is in sync when package.json changes.
+# Uses Node.js for platform-specific operations (stderr redirection, etc.)
+# so the hook works in both Git Bash (sh) and cmd.exe on Windows.
 if git diff --cached --name-only | grep -qx "teamai/package.json"; then
   cd teamai
-  echo "▸ package.json staged — verifying package-lock.json is in sync..."
-  if ! npm install --package-lock-only --ignore-scripts --silent 2>/dev/null; then
-    echo "✗ npm install --package-lock-only failed"
-    exit 1
-  fi
-  if ! git diff --exit-code package-lock.json >/dev/null 2>&1; then
-    echo "✗ package-lock.json is out of date — run: cd teamai && npm install"
-    echo "  Then stage package-lock.json before committing."
-    git checkout package-lock.json 2>/dev/null
-    exit 1
-  fi
-  echo "✓ package-lock.json is up to date"
+  echo "package.json staged — verifying package-lock.json is in sync..."
+  node -e "
+    var e=require('child_process').execSync;
+    // Run npm install --package-lock-only to regenerate the lock file
+    try { e('npm install --package-lock-only --ignore-scripts --silent'); }
+    catch(ex) { console.error('npm install --package-lock-only failed'); process.exit(1); }
+    // Check if the regenerated lock file differs from what's staged
+    try { e('git diff --exit-code package-lock.json'); }
+    catch(ex) {
+      console.error('package-lock.json is out of date — run: cd teamai && npm install');
+      console.error('  Then stage package-lock.json before committing.');
+      try { e('git checkout package-lock.json'); } catch(_) {}
+      process.exit(1);
+    }
+    console.log('package-lock.json is up to date');
+  " || { cd ..; exit 1; }
   cd ..
 fi
 
 # Run typecheck, lint, then tests on every commit
 cd teamai && npx tsc --noEmit && npx lint-staged && npx vitest run --exclude 'tests/integration/**'
+# test
