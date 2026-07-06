@@ -67,15 +67,19 @@ test.describe('DefaultsUpdater', () => {
       const currentDefaultsContent = readFileSync(defaultImplSrc, 'utf-8');
       expect(computeChecksum(currentDefaultsContent)).toBe(manifest.files['commands/implement.md']);
 
-      // ── UI verification: the completed-results "1 project synced"
-      //     summary appears after sync ──────────────────────────────────
-      // Note: the component removes synced projects from local state
-      // immediately (setLocalStale filter in handleSync). The amber banner
-      // may briefly co-exist with the completed-results view when
-      // router.refresh() returns stale initialStale — this is a Next.js 16
-      // RSC caching quirk that does not affect correctness: the sync
-      // succeeded, the manifest is updated, and the UI acknowledges it.
+      // ── UI verification: "1 project synced" appears ─────────────────
       await expect(page.locator('text=1 project synced')).toBeVisible({ timeout: 10_000 });
+
+      // ── UI verification: amber banner disappears after sync ─────────
+      // The component removes synced projects from localStale immediately
+      // in handleSync, and the useEffect merge strategy blocks re-entry
+      // via syncedPaths gating. Path 2 (CompletedResults only, no banner)
+      // renders once pendingStale drops to zero. Poll the DOM until the
+      // warning banner text is gone.
+      await page.waitForFunction(
+        () => !document.body.innerText.includes('Defaults update available'),
+        { timeout: 10_000 },
+      );
     } finally {
       writeFileSync(defaultImplSrc, backup);
     }
