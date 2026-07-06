@@ -40,7 +40,8 @@ const ACTIVE_PROJECT_COOKIE = 'activeProject';
  * inside the layout.  The explicit `'layout'` variant fills that gap.
  */
 function revalidateRoot() {
-  revalidateRoot();
+  revalidatePath('/', 'layout');
+  revalidatePath('/');
 }
 
 // Not async — used synchronously in getStores() in tasks.ts.
@@ -110,8 +111,7 @@ export async function getOutdatedProjects() {
 export async function syncProjectDefaults(projectPath: string): Promise<string[]> {
   const updated = projectStore.syncDefaults(projectPath);
   if (updated.length > 0) {
-    revalidatePath('/', 'layout');
-    revalidatePath('/');
+    revalidateRoot();
   }
   return updated;
 }
