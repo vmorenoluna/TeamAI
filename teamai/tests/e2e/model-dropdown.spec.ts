@@ -61,13 +61,6 @@ test.describe('Model Dropdown', () => {
       await expect(refreshButtons.first()).toBeVisible({ timeout: 3_000 });
     });
 
-    test('changing provider triggers model reload', async () => {
-      // Provider is now hardcoded to Anthropic — the provider dropdown was
-      // removed from the UI. This test can be re-enabled when multi-provider
-      // support returns.
-      test.skip(true, 'Provider dropdown removed — Anthropic is the only provider');
-    });
-
     test('Save Provider Config button is present and clickable', async ({ page }) => {
       const ok = await ensureProjectSelected(page);
       if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }

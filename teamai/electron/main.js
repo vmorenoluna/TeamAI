@@ -8,6 +8,8 @@
  * In development (ELECTRON_DEV=true), the server runs with tsx watch for HMR.
  * In production (packaged by electron-builder), it runs the production server.
  */
+let mainWindow = null;
+
 const { app, BrowserWindow, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
