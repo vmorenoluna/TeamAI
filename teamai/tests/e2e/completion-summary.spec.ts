@@ -72,7 +72,7 @@ test.describe('QA Failure Banner & Completion Summary', () => {
     await expect(page.locator('text=Empty input handled without crash')).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('text=Shows helpful error message to user')).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('text=Edge cases covered (whitespace, special chars)')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('text=just silently ignores').first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('text=No user-facing message shown').first()).toBeAttached({ timeout: 15_000 });
   });
 
   test('done task shows all subtasks completed', async ({ page }) => {

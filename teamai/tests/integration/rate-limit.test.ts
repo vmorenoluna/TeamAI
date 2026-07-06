@@ -941,8 +941,12 @@ describe('Rate Limit Integration', () => {
 
       // _commitArtifactsToWorktree now calls execFileSync('git', ...) directly
       // (not through _execGit), so we need mockExecFileSync to handle git calls.
-      // Mock _execGit for removeWorktree calls too.
-      vi.spyOn(orch, '_execGit').mockImplementation(() => {});
+      // Mock _execGit: throw on 'merge' so runMergePhase spawns a merger agent;
+      // all other git commands (rebase, removeWorktree, etc.) succeed as no-ops.
+      vi.spyOn(orch, '_execGit').mockImplementation((...callArgs: unknown[]) => {
+        const gitArgs = callArgs[0] as string[];
+        if (gitArgs[0] === 'merge') throw new Error('simulated merge conflict');
+      });
 
       const pipeline = makePipeline({ phase: 'merge' });
       orch.pipelines.set(taskId, pipeline);
@@ -996,9 +1000,12 @@ describe('Rate Limit Integration', () => {
     it('merge resume completes and advances to done', async () => {
       mkdirSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true });
 
-      // Mock _execGit for removeWorktree calls.
-      // _commitArtifactsToWorktree calls execFileSync directly (mockExecFileSync).
-      vi.spyOn(orch, '_execGit').mockImplementation(() => {});
+      // Mock _execGit: throw on 'merge' so runMergePhase spawns a merger agent;
+      // all other git commands (rebase, removeWorktree, etc.) succeed as no-ops.
+      vi.spyOn(orch, '_execGit').mockImplementation((...callArgs: unknown[]) => {
+        const gitArgs = callArgs[0] as string[];
+        if (gitArgs[0] === 'merge') throw new Error('simulated merge conflict');
+      });
 
       const pipeline = makePipeline({ phase: 'merge' });
       orch.pipelines.set(taskId, pipeline);
@@ -1034,9 +1041,12 @@ describe('Rate Limit Integration', () => {
     it('merge resume sends correct /merge command with branch name', async () => {
       mkdirSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true });
 
-      // Mock _execGit for removeWorktree calls.
-      // _commitArtifactsToWorktree calls execFileSync directly (mockExecFileSync).
-      vi.spyOn(orch, '_execGit').mockImplementation(() => {});
+      // Mock _execGit: throw on 'merge' so runMergePhase spawns a merger agent;
+      // all other git commands (rebase, removeWorktree, etc.) succeed as no-ops.
+      vi.spyOn(orch, '_execGit').mockImplementation((...callArgs: unknown[]) => {
+        const gitArgs = callArgs[0] as string[];
+        if (gitArgs[0] === 'merge') throw new Error('simulated merge conflict');
+      });
 
       const pipeline = makePipeline({ phase: 'merge', branch: 'feat/my-feature-branch' });
       orch.pipelines.set(taskId, pipeline);

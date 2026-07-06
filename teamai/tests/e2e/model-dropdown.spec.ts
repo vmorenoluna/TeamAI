@@ -21,7 +21,7 @@ test.describe('Model Dropdown', () => {
 
       await page.goto('/settings');
 
-      await expect(page.locator('text=Providers')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('text=Models').first()).toBeVisible({ timeout: 10_000 });
 
       // Wait for model selects to appear (curated models load quickly via server action)
       const selects = page.locator('select');
@@ -44,7 +44,7 @@ test.describe('Model Dropdown', () => {
 
       await page.goto('/settings');
 
-      await expect(page.locator('text=Providers')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('text=Models').first()).toBeVisible({ timeout: 10_000 });
 
       // Wait for loading to finish
       await page.waitForTimeout(1_500);
@@ -61,41 +61,11 @@ test.describe('Model Dropdown', () => {
       await expect(refreshButtons.first()).toBeVisible({ timeout: 3_000 });
     });
 
-    test('changing provider triggers model reload', async ({ page }) => {
-      const ok = await ensureProjectSelected(page);
-      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
-
-      await page.goto('/settings');
-
-      await expect(page.locator('text=Providers')).toBeVisible({ timeout: 10_000 });
-
-      // Wait for initial models to load
-      await page.waitForTimeout(1_500);
-
-      // Find provider selects (these have provider names as values, not model names)
-      const selects = page.locator('select');
-
-      // The first select could be a provider select — let's find one that contains 'anthropic' as an option
-      const allSelects = await selects.all();
-      let foundProviderSelect = false;
-
-      for (const select of allSelects) {
-        const options = await select.locator('option').allTextContents();
-        if (options.some(o => o.trim() === 'anthropic')) {
-          // This is a provider select — change it
-          await select.selectOption('openai');
-          // Verify the value actually changed
-          await expect(select).toHaveValue('openai');
-          foundProviderSelect = true;
-          break;
-        }
-      }
-
-      expect(foundProviderSelect).toBeTruthy();
-
-      // After changing provider, the models should reload (brief loading state)
-      // Wait a moment for the reload to trigger
-      await page.waitForTimeout(1_000);
+    test('changing provider triggers model reload', async () => {
+      // Provider is now hardcoded to Anthropic — the provider dropdown was
+      // removed from the UI. This test can be re-enabled when multi-provider
+      // support returns.
+      test.skip(true, 'Provider dropdown removed — Anthropic is the only provider');
     });
 
     test('Save Provider Config button is present and clickable', async ({ page }) => {
@@ -104,7 +74,7 @@ test.describe('Model Dropdown', () => {
 
       await page.goto('/settings');
 
-      await expect(page.locator('text=Providers')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('text=Models').first()).toBeVisible({ timeout: 10_000 });
 
       const saveButton = page.locator('button:has-text("Save Provider Config")');
       await expect(saveButton).toBeVisible({ timeout: 5_000 });
