@@ -53,6 +53,7 @@ export async function getActiveProject() {
 export async function setActiveProject(projectPath: string) {
   const cookieStore = await cookies();
   cookieStore.set(ACTIVE_PROJECT_COOKIE, projectPath);
+  revalidatePath('/', 'layout');
   revalidatePath('/');
 }
 
@@ -73,6 +74,7 @@ export async function addProject(
   }
   const cookieStore = await cookies();
   cookieStore.set(ACTIVE_PROJECT_COOKIE, path);
+  revalidatePath('/', 'layout');
   revalidatePath('/');
   return { ok: true };
 }
@@ -83,6 +85,7 @@ export async function removeProject(projectPath: string) {
   if (cookieStore.get(ACTIVE_PROJECT_COOKIE)?.value === projectPath) {
     cookieStore.delete(ACTIVE_PROJECT_COOKIE);
   }
+  revalidatePath('/', 'layout');
   revalidatePath('/');
 }
 
@@ -98,7 +101,10 @@ export async function getOutdatedProjects() {
 /** Sync defaults for a specific project. Returns list of updated file paths. */
 export async function syncProjectDefaults(projectPath: string): Promise<string[]> {
   const updated = projectStore.syncDefaults(projectPath);
-  if (updated.length > 0) revalidatePath('/');
+  if (updated.length > 0) {
+    revalidatePath('/', 'layout');
+    revalidatePath('/');
+  }
   return updated;
 }
 
