@@ -18,6 +18,8 @@ full_coverage2.txt
 # Test artifacts
 .teamai-test-*
 .teamai-e2e-seed
+.teamai-e2e-seed-diag
+.teamai/
 
 # Git worktrees (generated at runtime)
 worktrees/
