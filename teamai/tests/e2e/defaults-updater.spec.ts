@@ -67,8 +67,14 @@ test.describe('DefaultsUpdater', () => {
       const currentDefaultsContent = readFileSync(defaultImplSrc, 'utf-8');
       expect(computeChecksum(currentDefaultsContent)).toBe(manifest.files['commands/implement.md']);
 
-      // ── UI verification: after sync + router.refresh(), the component
-      //     switches to the "1 project synced" completed-results view  ──
+      // ── UI verification: the completed-results "1 project synced"
+      //     summary appears after sync ──────────────────────────────────
+      // Note: the component removes synced projects from local state
+      // immediately (setLocalStale filter in handleSync). The amber banner
+      // may briefly co-exist with the completed-results view when
+      // router.refresh() returns stale initialStale — this is a Next.js 16
+      // RSC caching quirk that does not affect correctness: the sync
+      // succeeded, the manifest is updated, and the UI acknowledges it.
       await expect(page.locator('text=1 project synced')).toBeVisible({ timeout: 10_000 });
     } finally {
       writeFileSync(defaultImplSrc, backup);

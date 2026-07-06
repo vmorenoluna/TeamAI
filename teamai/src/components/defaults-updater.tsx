@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 import { getOutdatedProjects, syncProjectDefaults } from '@/app/actions/projects';
@@ -12,17 +12,51 @@ interface Props {
 }
 
 export function DefaultsUpdater({ initialStale }: Props) {
-  const router = useRouter(); // for handleCheck's plain refresh
+  const router = useRouter();
   const { run } = useServerMutation();
-  // Client-fetched stale data — only used when initialStale is not provided.
-  // When initialStale IS provided, it's the source of truth (always fresh from server).
-  const [clientStale, setClientStale] = useState<StaleDefaults[]>([]);
+
+  // ── State ────────────────────────────────────────────────────────
+  // The server provides initialStale from SSR, but after that we manage
+  // staleness locally. This avoids a Next.js 16 issue where router.refresh()
+  // from a client component inside the root layout may not reliably trigger
+  // a full root-layout re-render — leaving initialStale stale.
+  const [localStale, setLocalStale] = useState<StaleDefaults[]>(
+    initialStale ?? [],
+  );
   const [loading, setLoading] = useState(initialStale === undefined);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, { updated: string[]; error?: string }>>({});
 
-  // stale: derived from server prop when available, else from client fetch
-  const stale = initialStale !== undefined ? initialStale : clientStale;
+  // stale: always derived from localStale — synced from either
+  // server prop (initialStale) or client fetch (getOutdatedProjects).
+  const stale = localStale;
+
+  // ── Effects ──────────────────────────────────────────────────────
+
+  // Sync with server prop when it changes (router.refresh, navigation, etc.).
+  // Only ADD genuinely new entries — never re-add entries that were locally
+  // removed by handleSync. Projects tracked in `results` (synced successfully)
+  // are blocked from re-entering localStale.
+  const prevInitialStale = useRef(initialStale);
+  useEffect(() => {
+    if (initialStale === prevInitialStale.current) return;
+    prevInitialStale.current = initialStale;
+    if (initialStale === undefined) return;
+    setLocalStale(prev => {
+      const prevPaths = new Set(prev.map(s => s.projectPath));
+      // Block entries that handleSync already removed
+      const syncedPaths = new Set(
+        Object.keys(results).filter(k => !results[k].error),
+      );
+      const additions = initialStale.filter(
+        s => !prevPaths.has(s.projectPath) && !syncedPaths.has(s.projectPath),
+      );
+      return additions.length > 0 ? [...prev, ...additions] : prev;
+    });
+    // results in deps: the filter must have the latest synced-project set
+    // when initialStale changes (e.g. after router.refresh completes).
+     
+  }, [initialStale, results]);
 
   // Fetch on mount when no server data is provided
   useEffect(() => {
@@ -30,7 +64,7 @@ export function DefaultsUpdater({ initialStale }: Props) {
       (async () => {
         try {
           const data = await getOutdatedProjects();
-          setClientStale(data);
+          setLocalStale(data);
         } finally {
           setLoading(false);
         }
@@ -38,9 +72,9 @@ export function DefaultsUpdater({ initialStale }: Props) {
     }
   }, [initialStale]);
 
+  // ── Handlers ─────────────────────────────────────────────────────
+
   function handleCheck() {
-    // When server-provided data exists, trigger a fresh server render.
-    // (Setting clientStale would be ignored since stale derives from initialStale.)
     if (initialStale !== undefined) {
       router.refresh();
       return;
@@ -49,7 +83,7 @@ export function DefaultsUpdater({ initialStale }: Props) {
     (async () => {
       try {
         const data = await getOutdatedProjects();
-        setClientStale(data);
+        setLocalStale(data);
       } finally {
         setLoading(false);
       }
@@ -61,10 +95,11 @@ export function DefaultsUpdater({ initialStale }: Props) {
     try {
       const updated = await syncProjectDefaults(projectPath);
       setResults(prev => ({ ...prev, [projectPath]: { updated } }));
+      // Immediately remove synced project from local stale state.
+      // This guarantees the banner disappears without waiting for
+      // router.refresh() — which may not re-render the root layout.
+      setLocalStale(prev => prev.filter(s => s.projectPath !== projectPath));
     } catch (err) {
-      // Deliberately NOT formatActionError — inline 'Sync failed:' prefix avoids
-      // double-prefix noise like "Failed to sync beta: Sync failed: EACCES" in row UI.
-      // Matches the per-row convention in projects-settings.tsx.
       setResults(prev => ({
         ...prev,
         [projectPath]: {
@@ -77,6 +112,8 @@ export function DefaultsUpdater({ initialStale }: Props) {
     }
     run(async () => {}); // trigger router.refresh() for server re-render
   }
+
+  // ── Render ───────────────────────────────────────────────────────
 
   // Filter out already-synced projects (tracked locally via results)
   const pendingStale = stale.filter(s => !results[s.projectPath]);
@@ -156,7 +193,7 @@ function CompletedResults({
       <div className="mt-1 space-y-0.5">
         {entries.map(([path, r]) => (
           <div key={path} className="text-[10px] text-green-400/80">
-            {path.split(/[\\/]/).pop()}: {r.updated.length} file
+            {path.split(/[\\\\/]/).pop()}: {r.updated.length} file
             {r.updated.length !== 1 ? 's' : ''} updated
             {r.error && (
               <span className="text-red-400 ml-1">({r.error})</span>
