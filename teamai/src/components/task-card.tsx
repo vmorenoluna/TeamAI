@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 import { checkTaskWorktree, deleteTaskWorktree, retryTask, stopTask, playTask } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
+import { formatActionError } from '@/lib/error-format';
 import { PHASE_BADGE, PHASE_LABELS } from '@/constants/phases';
 
 const DESCRIPTION_LIMIT = 80;
@@ -55,10 +56,12 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
         const result = await deleteTaskWorktree(task.id);
         if (result.success) {
           setWtStatus({ exists: false, path: null });
-        } else {
-          alert(`Failed to delete worktree: ${result.error}`);
-          throw new Error(result.error); // skip refresh on failure
+          return;
         }
+        throw new Error(result.error || 'Unknown error'); // skip refresh on failure
+      } catch (err) {
+        alert(formatActionError('delete worktree', err));
+        throw err;
       } finally {
         setWtDeleting(false);
       }
@@ -75,10 +78,12 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
   async function handleRetry(e: React.MouseEvent) {
     e.stopPropagation();
     runRetry(async () => {
-      const result = await retryTask(task.id);
-      if (!result.success) {
-        alert(`Failed to retry task: ${result.error}`);
-        throw new Error(result.error); // skip refresh on failure
+      try {
+        const result = await retryTask(task.id);
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+      } catch (err) {
+        alert(formatActionError('retry task', err));
+        throw err;
       }
     });
   }
@@ -86,10 +91,12 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
   async function handleStop(e: React.MouseEvent) {
     e.stopPropagation();
     runStop(async () => {
-      const result = await stopTask(task.id);
-      if (!result.success) {
-        alert(`Failed to stop task: ${result.error}`);
-        throw new Error(result.error); // skip refresh on failure
+      try {
+        const result = await stopTask(task.id);
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+      } catch (err) {
+        alert(formatActionError('stop task', err));
+        throw err;
       }
     });
   }
@@ -97,10 +104,12 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
   async function handlePlay(e: React.MouseEvent) {
     e.stopPropagation();
     runPlay(async () => {
-      const result = await playTask(task.id);
-      if (!result.success) {
-        alert(`Failed to start task: ${result.error}`);
-        throw new Error(result.error); // skip refresh on failure
+      try {
+        const result = await playTask(task.id);
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+      } catch (err) {
+        alert(formatActionError('start task', err));
+        throw err;
       }
     });
   }

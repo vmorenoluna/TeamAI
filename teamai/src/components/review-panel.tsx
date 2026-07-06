@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { approveTask, rejectTask, markTaskDone, reviseSpec } from '@/app/actions/tasks';
 import { useServerMutation } from '@/hooks/use-server-mutation';
+import { formatActionError } from '@/lib/error-format';
 
 interface SpecConcern {
   issue: string;
@@ -60,55 +61,63 @@ type PendingAction = 'approve-local' | 'approve-pr' | 'reject' | 'mark-done' | '
 export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase }: Props) {
   const { run } = useServerMutation();
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const [error, setError] = useState<string | null>(null);
   const [showReject, setShowReject] = useState(false);
   const [feedback, setFeedback] = useState('');
   const isPrOpen = phase === 'pr-open' || !!prUrl;
 
-  async function handleApprove(strategy: 'local-merge' | 'pull-request') {
-    setPendingAction(strategy === 'local-merge' ? 'approve-local' : 'approve-pr');
+  /**
+   * Run a Server Action with full error + pending state management:
+   * - Set the pending label while the action runs (button shows its spinner text)
+   * - Clear any previous error at the start
+   * - On throw (or returned error), set an error message visible in the banner —
+   *   this is the regression fix: previously, thrown errors were swallowed by
+   *   useServerMutation's empty catch and the button appeared to "do nothing"
+   * - Always clear pendingAction via finally, even on failure
+   * - Re-throw so useServerMutation skips router.refresh() on failure
+   */
+  async function runAction<T>(
+    label: PendingAction,
+    verb: string,
+    fn: () => Promise<T>,
+  ): Promise<void> {
+    setPendingAction(label);
+    setError(null);
     run(async () => {
       try {
-        await approveTask(taskId, strategy);
+        await fn();
+      } catch (err) {
+        setError(formatActionError(verb, err));
+        throw err;
       } finally {
         setPendingAction(null);
       }
     });
+  }
+
+  async function handleApprove(strategy: 'local-merge' | 'pull-request') {
+    await runAction(
+      strategy === 'local-merge' ? 'approve-local' : 'approve-pr',
+      strategy === 'local-merge' ? 'merge task' : 'create pull request',
+      () => approveTask(taskId, strategy),
+    );
   }
 
   async function handleReject() {
     if (!feedback.trim()) return;
-    setPendingAction('reject');
-    run(async () => {
-      try {
-        await rejectTask(taskId, feedback);
-      } finally {
-        setShowReject(false);
-        setFeedback('');
-        setPendingAction(null);
-      }
+    await runAction('reject', 'send task back', async () => {
+      await rejectTask(taskId, feedback);
+      setShowReject(false);
+      setFeedback('');
     });
   }
 
   async function handleReviseSpec() {
-    setPendingAction('revise-spec');
-    run(async () => {
-      try {
-        await reviseSpec(taskId);
-      } finally {
-        setPendingAction(null);
-      }
-    });
+    await runAction('revise-spec', 'revise spec', () => reviseSpec(taskId));
   }
 
   async function handleMarkDone() {
-    setPendingAction('mark-done');
-    run(async () => {
-      try {
-        await markTaskDone(taskId);
-      } finally {
-        setPendingAction(null);
-      }
-    });
+    await runAction('mark-done', 'mark task as done', () => markTaskDone(taskId));
   }
 
   return (
@@ -198,6 +207,29 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
 
       {/* Action buttons */}
       <div className="flex flex-col gap-3 pt-2">
+        {/* Error banner — surfaces Server Action failures (regression fix:
+            previously useServerMutation's empty catch swallowed the throw
+            and the button looked like it did nothing) */}
+        {error && (
+          <div
+            role="alert"
+            className="rounded-md border border-red-800/40 bg-red-950/30 p-3 flex items-start gap-3"
+          >
+            <span className="text-red-400 text-sm font-bold shrink-0 mt-0.5">✗</span>
+            <div className="flex-1 min-w-0 text-xs">
+              <p className="font-semibold text-red-300">Action failed</p>
+              <p className="text-red-200/90 mt-0.5 break-words">{error}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              title="Dismiss"
+              className="shrink-0 text-red-400 hover:text-red-300 text-base leading-none px-1"
+            >
+              ×
+            </button>
+          </div>
+        )}
         {/* PR open banner */}
         {isPrOpen && prUrl && (
           <a

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react';
 import { browseDirectory, type BrowseResult } from '@/app/actions/projects';
+import { formatActionError } from '@/lib/error-format';
 
 interface Props {
   onSelect: (path: string) => void;
@@ -18,13 +19,21 @@ function FolderIcon() {
 
 export function DirectoryBrowser({ onSelect, onClose }: Props) {
   const [result, setResult] = useState<BrowseResult | null>(null);
+  // Regression-fix contract: surfaces Server Action failures (raw-throw path)
+  // when browseDirectory rejects mid-navigation.
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => { navigate(undefined); }, []);
 
   function navigate(path?: string) {
+    setError(null);
     startTransition(async () => {
-      setResult(await browseDirectory(path));
+      try {
+        setResult(await browseDirectory(path));
+      } catch (err) {
+        setError(formatActionError('browse directory', err));
+      }
     });
   }
 
@@ -62,6 +71,22 @@ export function DirectoryBrowser({ onSelect, onClose }: Props) {
 
         {/* Directory listing */}
         <div className="flex-1 overflow-y-auto">
+          {/* Error banner — surfaces Server Action throws from browseDirectory. */}
+          {error && (
+            <div
+              role="alert"
+              className="mx-3 my-2 p-2 bg-red-900/30 border border-red-800/50 rounded flex items-start justify-between gap-2"
+            >
+              <p className="text-xs text-red-300 flex-1">{error}</p>
+              <button
+                onClick={() => setError(null)}
+                aria-label="Dismiss error"
+                className="text-red-500 hover:text-red-300 text-xs leading-none transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           {isPending && (
             <p className="text-xs text-slate-400 px-4 py-4">Loading…</p>
           )}

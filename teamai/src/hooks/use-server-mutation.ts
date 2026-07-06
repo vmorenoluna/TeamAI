@@ -48,8 +48,11 @@ export function useServerMutation() {
       try {
         await action();
         router.refresh();
-      } catch {
-        // Caller handles errors via their own state; skip refresh on failure
+      } catch (err) {
+        // Caller handles errors via their own state; skip refresh on failure.
+        // Log the error so silent "the button does nothing" failures surface
+        // in DevTools/Electron console instead of vanishing.
+        console.error('[useServerMutation] action threw:', err);
       }
     });
   }, [startTransition, router]);
@@ -66,8 +69,10 @@ export function useServerMutation() {
       try {
         await action(...args);
         router.refresh();
-      } catch {
-        // Caller handles errors via their own state; skip refresh on failure
+      } catch (err) {
+        // Log the error so silent "the button does nothing" failures surface
+        // in DevTools/Electron console instead of vanishing.
+        console.error('[useServerMutation] action threw:', err);
       }
     });
   }, [startTransition, router]);

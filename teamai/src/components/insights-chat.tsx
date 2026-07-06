@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition, useMemo, useCallback } from
 import { getOrCreateInsightsSession, sendInsightsMessage, cancelInsightsSession } from '@/app/actions/insights';
 import { useSessionStream } from '@/hooks/use-session-stream';
 import { extractText } from '@/lib/stream-types';
+import { formatActionError } from '@/lib/error-format';
 import { useRateLimitAutoResume } from '@/hooks/use-rate-limit-auto-resume';
 import { useStreamProgress } from '@/hooks/use-stream-progress';
 import { useStreamingState } from '@/hooks/use-streaming-state';
@@ -20,6 +21,9 @@ export function InsightsChat() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  // Regression-fix contract: surfaces Server Action failures (raw-throw path)
+  // from mount, handleSend, reconnect (cancel + retry + auto-resume).
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const cancelRequestedRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -28,9 +32,26 @@ export function InsightsChat() {
   // Running state synced from stream events
   const { running, setRunning } = useStreamingState(streamEvents);
 
+  /**
+   * Shared reconnect helper: calls getOrCreateInsightsSession, sets sessionId,
+   * and surfaces any rejection in the role='alert' banner with a consistent
+   * `Failed to <label>: <msg>` template. Used by mount, handleCancel,
+   * useRateLimitAutoResume auto-resume, and rate-limit banner onRetry.
+   */
+  const reconnect = useCallback(async (label: string) => {
+    try {
+      const newId = await getOrCreateInsightsSession();
+      setSessionId(newId);
+    } catch (err) {
+      setError(formatActionError(label, err));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Start session on mount
   useEffect(() => {
-    getOrCreateInsightsSession().then(setSessionId);
+    reconnect('start chat session');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const {
@@ -43,10 +64,7 @@ export function InsightsChat() {
   } = useRateLimitAutoResume(streamEvents, () => {
     setRunning(false);
     setSessionId(null);
-    startTransition(async () => {
-      const newId = await getOrCreateInsightsSession();
-      setSessionId(newId);
-    });
+    startTransition(() => { reconnect('resume chat session'); });
   }, () => setRunning(false));
 
   // Compute progress indicator text (last tool/status line while the agent works)
@@ -98,12 +116,14 @@ export function InsightsChat() {
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setInput('');
     setRunning(true);
+    setError(null);
     resetRateLimit();
     startTransition(async () => {
       try {
         await sendInsightsMessage(sessionId, text);
-      } catch {
+      } catch (err) {
         setRunning(false);
+        setError(formatActionError('send message', err));
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -118,11 +138,10 @@ export function InsightsChat() {
     setSessionId(null);
     resetRateLimit();
     // Auto-reconnect: get a fresh session for follow-up messages
-    const newId = await getOrCreateInsightsSession();
-    setSessionId(newId);
+    await reconnect('reconnect after cancel');
     cancelRequestedRef.current = false;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resetRateLimit]);
+  }, [resetRateLimit, reconnect]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -144,13 +163,28 @@ export function InsightsChat() {
             resetRateLimit();
             setRunning(false);
             setSessionId(null);
-            startTransition(async () => {
-              const newId = await getOrCreateInsightsSession();
-              setSessionId(newId);
-            });
+            setError(null);
+            startTransition(() => { reconnect('retry chat session'); });
           }}
           variant="inline"
         />
+      )}
+
+      {/* Error banner — surfaces Server Action throws from mount, send, reconnect. */}
+      {error && (
+        <div
+          role="alert"
+          className="mx-4 mt-2 p-2.5 bg-red-900/30 border border-red-800/50 rounded-lg flex items-start justify-between gap-2"
+        >
+          <p className="text-xs text-red-300 flex-1">{error}</p>
+          <button
+            onClick={() => setError(null)}
+            aria-label="Dismiss error"
+            className="text-red-500 hover:text-red-300 text-sm leading-none transition-colors"
+          >
+            ✕
+          </button>
+        </div>
       )}
 
       {/* Messages */}

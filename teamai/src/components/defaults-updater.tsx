@@ -61,10 +61,16 @@ export function DefaultsUpdater({ initialStale }: Props) {
     try {
       const updated = await syncProjectDefaults(projectPath);
       setResults(prev => ({ ...prev, [projectPath]: { updated } }));
-    } catch {
+    } catch (err) {
+      // Deliberately NOT formatActionError — inline 'Sync failed:' prefix avoids
+      // double-prefix noise like "Failed to sync beta: Sync failed: EACCES" in row UI.
+      // Matches the per-row convention in projects-settings.tsx.
       setResults(prev => ({
         ...prev,
-        [projectPath]: { updated: [], error: 'Sync failed' },
+        [projectPath]: {
+          updated: [],
+          error: `Sync failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        },
       }));
     } finally {
       setSyncing(null);

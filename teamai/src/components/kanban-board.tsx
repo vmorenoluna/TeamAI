@@ -8,6 +8,7 @@ import { TaskCard } from './task-card';
 import { TaskPanel } from './task-panel';
 import { ConnectionIndicator } from './connection-indicator';
 import { COLUMNS, normalizePhase, resolveTargetPhase, TEMPLATES } from './kanban-utils';
+import { formatActionError } from '@/lib/error-format';
 import type { Task } from '@/lib/task-store';
 
 interface Props {
@@ -43,6 +44,13 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
+
+  // Error banner — surfaces Server Action failures (regression fix:
+  // previously bare `await moveTask(...)` etc. let thrown errors vanish
+  // into useServerMutation's empty catch; clearOptimistic ran via WS
+  // confirmation only, so a throw left the card stuck in the wrong column
+  // for ~10s until the timeout fallback).
+  const [error, setError] = useState<string | null>(null);
 
   // WS connection state — 'connecting' (initial), 'connected', 'disconnected' (after close)
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
@@ -171,21 +179,35 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   }
 
   function handleBulkMove(targetPhase: string) {
+    setError(null);
     run(async () => {
-      for (const id of selectedIds) {
-        const task = tasks.find(t => t.id === id);
-        const actualPhase = resolveTargetPhase(targetPhase, task?.phase);
-        await moveTask(id, actualPhase);
+      try {
+        for (const id of selectedIds) {
+          const task = tasks.find(t => t.id === id);
+          const actualPhase = resolveTargetPhase(targetPhase, task?.phase);
+          await moveTask(id, actualPhase);
+        }
+        clearSelection();
+      } catch (err) {
+        const msg = formatActionError('move tasks', err);
+        setError(msg);
+        throw err;
       }
-      clearSelection();
     });
   }
 
   function handleBulkDelete() {
     if (!confirm(`Delete ${selectedIds.size} task(s)? This cannot be undone.`)) return;
+    setError(null);
     run(async () => {
-      await bulkDeleteTasks([...selectedIds]);
-      clearSelection();
+      try {
+        await bulkDeleteTasks([...selectedIds]);
+        clearSelection();
+      } catch (err) {
+        const msg = formatActionError('delete tasks', err);
+        setError(msg);
+        throw err;
+      }
     });
   }
 
@@ -199,9 +221,19 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   const handleUndo = useCallback(() => {
     const action = undoStackRef.current.pop();
     if (!action) return;
+    setError(null);
     run(async () => {
-      await moveTask(action.taskId, action.previousPhase);
-      showToast(`Undone: moved "${action.taskTitle}" back to ${action.previousPhase}`);
+      try {
+        await moveTask(action.taskId, action.previousPhase);
+        showToast(`Undone: moved "${action.taskTitle}" back to ${action.previousPhase}`);
+      } catch (err) {
+        // Intentionally do NOT re-push the popped undo entry onto the
+        // stack: re-applying the same known-failing move via "Undo" would
+        // just reproduce the failure. User can re-do the action via drag.
+        const msg = formatActionError('undo move', err);
+        setError(msg);
+        throw err;
+      }
     });
   }, [showToast, run]);
 
@@ -222,10 +254,17 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   }, [handleUndo]);
 
   function handleCreate(formData: FormData) {
+    setError(null);
     run(async () => {
-      await createTask(formData);
-      setShowDialog(false);
-      clearTemplate();
+      try {
+        await createTask(formData);
+        setShowDialog(false);
+        clearTemplate();
+      } catch (err) {
+        const msg = formatActionError('create task', err);
+        setError(msg);
+        throw err;
+      }
     });
   }
 
@@ -282,7 +321,22 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
     // Resolve the actual phase for the moveTask call (e.g. analysis → spec)
     const actualPhase = resolveTargetPhase(targetPhase, task.phase);
     run(async () => {
-      await moveTask(draggingTaskId, actualPhase);
+      try {
+        await moveTask(draggingTaskId, actualPhase);
+      } catch (err) {
+        // CRITICAL: reconcile optimistic UI. Without revert+timeout-clear,
+        // the card stays in the wrong column until the 10s timeout fallback
+        // (or a successful re-move) cleans it up.
+        clearOptimistic(draggingTaskId);
+        // Also drop the undo-stack entry — re-applying it via "Undo" would
+        // re-trigger the same failing Server Action.
+        undoStackRef.current = undoStackRef.current.filter(
+          a => a.taskId !== draggingTaskId,
+        );
+        const msg = formatActionError('move task', err);
+        setError(msg);
+        throw err;
+      }
     });
   }
 
@@ -602,6 +656,28 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
           </div>
         )}
       </div>
+
+      {/* Error banner — surfaces Server Action failures (regression fix) */}
+      {error && (
+        <div
+          role="alert"
+          className="fixed top-4 right-4 z-50 max-w-md bg-red-950/90 border border-red-800 rounded-lg shadow-xl shadow-black/40 p-3 flex items-start gap-3"
+        >
+          <span className="text-red-400 font-bold shrink-0 mt-0.5">✗</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-red-300">Operation failed</p>
+            <p className="text-xs text-red-200/90 mt-0.5 break-words">{error}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            title="Dismiss"
+            className="shrink-0 text-red-400 hover:text-red-300 text-base leading-none px-1"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Undo toast */}
       {toast && (

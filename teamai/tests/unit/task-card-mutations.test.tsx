@@ -356,4 +356,82 @@ describe('TaskCard mutation handlers', () => {
       }
     });
   });
+
+  // ── Raw-throw path (regression) ──────────────────────────────────────
+  // The existing !result.success tests above cover the failed-action
+  // surface ({success:false, error:'...'} → throw new Error(...)). These
+  // tests cover the OTHER branch through the same catch: the Server Action
+  // itself throws an Error (e.g., upstream transport/network failure).
+  // Both branches converge at the unified catch and must produce an alert
+  // — the audit-flagged regression was that the raw throw path was
+  // silently swallowed by useServerMutation's empty catch.
+
+  describe('raw-throw path (regression)', () => {
+    it('handleRetry: alerts when retryTask raw-throws', async () => {
+      mockRetryTask.mockRejectedValue(new Error('network dropped'));
+
+      render(<TaskCard task={makeTask({ id: 'failed-r', phase: 'failed' })} onSelect={vi.fn()} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('retry-button'));
+      });
+
+      expect(mockRetryTask).toHaveBeenCalledWith('failed-r');
+      expect(window.alert).toHaveBeenCalledWith('Failed to retry task: network dropped');
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('handleStop: alerts when stopTask raw-throws', async () => {
+      mockStopTask.mockRejectedValue(new Error('session killed'));
+
+      render(<TaskCard task={makeTask({ id: 'active-r', phase: 'implement' })} onSelect={vi.fn()} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Stop'));
+      });
+
+      expect(mockStopTask).toHaveBeenCalledWith('active-r');
+      expect(window.alert).toHaveBeenCalledWith('Failed to stop task: session killed');
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('handlePlay: alerts when playTask raw-throws', async () => {
+      mockPlayTask.mockRejectedValue(new Error('config missing'));
+
+      render(<TaskCard task={makeTask({ id: 'backlog-r', phase: 'backlog' })} onSelect={vi.fn()} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Start'));
+      });
+
+      expect(mockPlayTask).toHaveBeenCalledWith('backlog-r');
+      expect(window.alert).toHaveBeenCalledWith('Failed to start task: config missing');
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('handleDeleteWorktree: alerts when deleteTaskWorktree raw-throws', async () => {
+      mockDeleteWorktree.mockRejectedValue(new Error('git worktree lock'));
+      mockCheckWorktree.mockResolvedValue({ exists: true, path: '/tmp/wt/task-r' });
+
+      render(
+        <TaskCard
+          task={makeTask({ id: 'wt-r', branch: 'feature/test' })}
+          onSelect={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTitle(/Delete worktree/)).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTitle(/Delete worktree/));
+      });
+
+      expect(window.confirm).toHaveBeenCalled();
+      expect(mockDeleteWorktree).toHaveBeenCalledWith('wt-r');
+      expect(window.alert).toHaveBeenCalledWith('Failed to delete worktree: git worktree lock');
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+  });
 });
