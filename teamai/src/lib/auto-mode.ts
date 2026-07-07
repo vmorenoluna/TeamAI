@@ -115,6 +115,18 @@ export function setAutoModeState(projectRoot: string, enabled: boolean, maxParal
 
 // ── Internal helpers ────────────────────────────────────────────────────────
 
+/** Check whether pipeline.json has demo:true — halts all pipeline processing. */
+function _isDemoProject(projectRoot: string): boolean {
+  try {
+    const cfgPath = join(projectRoot, '.teamai', 'pipeline.json');
+    if (existsSync(cfgPath)) {
+      const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
+      return cfg.demo === true;
+    }
+  } catch { /* malformed config — don't block */ }
+  return false;
+}
+
 const TERMINAL_PHASES = new Set(['backlog', 'done', 'failed']);
 const PAUSED_PHASES = new Set(['awaiting-review', 'pr-open']);
 
@@ -189,6 +201,9 @@ function _start(projectRoot: string, state: AutoProjectState): void {
  * - pr-open: add to autoTrackedIds and start CI polling immediately.
  */
 function _adoptStalledTasks(projectRoot: string, state: AutoProjectState): void {
+  // Demo mode: when pipeline.json has demo:true, skip all pipeline processing
+  if (_isDemoProject(projectRoot)) return;
+
   let taskStore: TaskStore;
   try {
     taskStore = new TaskStore(projectRoot);
@@ -252,6 +267,9 @@ function _stop(state: AutoProjectState): void {
 
 function _tick(projectRoot: string, state: AutoProjectState): void {
   if (!state.enabled) return;
+
+  // Demo mode: when pipeline.json has demo:true, skip all pipeline processing
+  if (_isDemoProject(projectRoot)) return;
 
   let taskStore: TaskStore;
   try {

@@ -1,6 +1,6 @@
 # TeamAI — Multi-Agent Claude Code Orchestrator
 
-TeamAI is a Next.js web application that orchestrates multi-agent [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI workflows. It replaces manual CLI usage with a browser UI that spawns and manages parallel Claude subprocesses, enabling automated software development pipelines across spec, plan, implement, and QA phases.
+TeamAI is an Electron desktop application that orchestrates multi-agent [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI workflows. It replaces manual CLI usage with a native desktop app that spawns and manages parallel Claude subprocesses, enabling automated software development pipelines across spec, plan, implement, and QA phases.
 
 ## Features
 
@@ -44,7 +44,7 @@ cd teamai
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Launch the TeamAI desktop app to get started.
 
 ## Project Structure
 
@@ -66,7 +66,7 @@ TeamAI/
 │   ├── packaging-options.md
 │   ├── teamai-implementation-plan.md
 │   └── teamai-ui-spec.md
-├── teamai/                    # Next.js application
+├── teamai/                    # Electron application (React renderer + Node.js main process)
 │   ├── package.json
 │   ├── server.ts              # Custom HTTP + WebSocket server
 │   ├── tsconfig.json
@@ -75,7 +75,7 @@ TeamAI/
 │   ├── vitest.config.ts
 │   ├── playwright.config.ts
 │   ├── src/
-│   │   ├── app/               # Next.js App Router pages
+│   │   ├── app/               # Renderer pages and components
 │   │   │   ├── layout.tsx
 │   │   │   ├── page.tsx
 │   │   │   ├── globals.css
@@ -107,9 +107,9 @@ TeamAI/
 
 ## Architecture
 
-### Custom Server (`server.ts`)
+### Main Process
 
-Wraps Next.js with a raw HTTP + WebSocket server (`ws` package). The browser connects via WebSocket at `/ws` for real-time agent event streaming. REST API routes handle task CRUD and pipeline orchestration.
+The Electron main process manages Claude CLI subprocesses via the ProcessManager. The renderer communicates with the main process through IPC for real-time agent event streaming and pipeline orchestration.
 
 ### ProcessManager (`src/lib/process-manager.ts`)
 
@@ -192,7 +192,7 @@ When enabled, all agent subprocesses run inside a Docker devcontainer, providing
 
 ```bash
 cd teamai
-npm run dev       # Development server (tsx server.ts + Next.js HMR)
+npm run dev       # Development mode (Electron + React HMR)
 npm run build     # Production build
 npm run start     # Production server
 npm run lint      # ESLint check

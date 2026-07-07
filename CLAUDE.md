@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-TeamAI is a Next.js web app that orchestrates multi-agent Claude Code CLI workflows. It replaces an Electron-based approach with a browser UI that spawns and manages Claude CLI subprocesses, enabling parallel agent sessions (planner, coder, qa-reviewer, etc.) for automated software development pipelines.
+TeamAI is an Electron desktop app that orchestrates multi-agent Claude Code CLI workflows. It replaces manual CLI usage with a native desktop UI that spawns and manages Claude CLI subprocesses, enabling parallel agent sessions (planner, coder, qa-reviewer, etc.) for automated software development pipelines.
 
 All source code lives in the `teamai/` subdirectory. Run all commands from there.
 
@@ -13,9 +13,9 @@ All source code lives in the `teamai/` subdirectory. Run all commands from there
 
 ```bash
 cd teamai
-npm run dev      # Development server (tsx server.ts + Next.js hot reload)
+npm run dev      # Development mode (Electron + React HMR)
 npm run build    # Production build
-npm run start    # Production server
+npm run start    # Launch the Electron app
 npm run lint     # ESLint check
 ```
 
@@ -27,8 +27,9 @@ npx tsx scripts/test-process-manager.ts
 
 ## Architecture
 
-### Custom Server (`server.ts`)
-Wraps Next.js with a raw HTTP+WebSocket server (`ws` package). The browser connects via WebSocket for real-time agent event streaming; REST API routes handle task CRUD and pipeline orchestration.
+### Main Process
+
+The Electron main process manages Claude CLI subprocesses via the ProcessManager and communicates with the renderer through IPC for real-time agent event streaming and pipeline orchestration.
 
 ### ProcessManager (`src/lib/process-manager.ts`)
 Core engine. Extends `EventEmitter` and manages a `Map<string, AgentSession>`. Each session spawns a `claude -p --input-format stream-json --output-format stream-json` subprocess with piped stdio. Output is buffered and parsed line-by-line as NDJSON, then re-emitted as typed events (`event`, `error`, `exit`).
@@ -40,32 +41,32 @@ Defined in `defaults/roles/` (analyst, planner, coder, qa-reviewer, qa-fixer, me
 
 Each command template injects the role at runtime: the Claude subprocess is told to adopt a role persona from `.claude/roles/{role}.md`. Per-project customization lives in the target project's `.claude/` directory.
 
-### Frontend
-Next.js App Router (`src/app/`). shadcn/ui components go in `src/components/ui/`. Path alias `@/*` maps to `src/*`. Tailwind CSS 4. Terminal output will render via xterm.js (dependency already installed, not yet wired up).
+### Renderer
+React application in `src/app/`. shadcn/ui components go in `src/components/ui/`. Path alias `@/*` maps to `src/*`. Tailwind CSS 4. Terminal output renders via xterm.js (dependency already installed).
 
-### Data-Flow Pattern: Server Props, Not Async Fetch
+### Data-Flow Pattern: Props Over Async Fetch
 
-**Client components must never `useEffect` + async-fetch their own state on mount.** An ESLint rule (`local/no-async-fetch-on-mount`) enforces this.
+**Components must never `useEffect` + async-fetch their own state on mount.** An ESLint rule (`local/no-async-fetch-on-mount`) enforces this.
 
-Antipattern (state resets on `router.refresh()`):
+Antipattern (state resets on refresh):
 ```tsx
 const [enabled, setEnabled] = useState(false);
 useEffect(() => { fetchState().then(s => setEnabled(s.enabled)); }, []);
 ```
 
-Correct pattern — pass initial state as a server prop:
+Correct pattern — pass initial state as a prop:
 ```tsx
-// Server Component (layout.tsx / page.tsx)
-const state = getSomeServerState();
+// Parent component
+const state = getSomeState();
 return <Button initialEnabled={state.enabled} />;
 
-// Client Component
+// Child component
 function Button({ initialEnabled }: { initialEnabled: boolean }) {
   const [enabled, setEnabled] = useState(initialEnabled); // survives refresh
 }
 ```
 
-Why: `usePhaseSync` calls `router.refresh()` on every phase-change WebSocket event (including rate-limit pauses). This re-renders the layout and re-mounts all client components. Any component using `useState(literal)` + async-fetch-on-mount will briefly show the wrong default on every refresh.
+Why: phase-change events trigger UI re-renders that re-mount components. Any component using `useState(literal)` + async-fetch-on-mount will briefly show the wrong default on every refresh.
 
 ## Key Design Decisions
 

@@ -49,6 +49,10 @@ export function findInterruptedTasks(): InterruptedTask[] {
   const interrupted: InterruptedTask[] = [];
 
   for (const project of projects) {
+    // Demo projects have pipeline.json demo:true — their in-progress tasks
+    // are intentional seed data, not interrupted. Skip them entirely.
+    if (_isDemoProject(project.path)) continue;
+
     const teamaiDir = join(project.path, '.teamai');
     if (!existsSync(teamaiDir)) continue;
 
@@ -359,6 +363,9 @@ export async function sweepStalledTasks(): Promise<number> {
   let resumed = 0;
 
   for (const project of projects) {
+    // Demo projects have pipeline.json demo:true — skip them entirely
+    if (_isDemoProject(project.path)) continue;
+
     const teamaiDir = join(project.path, '.teamai');
     if (!existsSync(teamaiDir)) continue;
 
@@ -448,4 +455,16 @@ function _loadProjects(): { name: string; path: string }[] {
   } catch {
     return [];
   }
+}
+
+/** Check whether a project's pipeline.json has demo:true. */
+function _isDemoProject(projectPath: string): boolean {
+  try {
+    const cfgPath = join(projectPath, '.teamai', 'pipeline.json');
+    if (existsSync(cfgPath)) {
+      const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
+      return cfg.demo === true;
+    }
+  } catch { /* malformed config — don't block */ }
+  return false;
 }

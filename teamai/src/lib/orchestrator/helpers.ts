@@ -20,6 +20,8 @@ export interface PipelineConfig {
   sensors?: SensorsConfig;
   maxDeliverableFails: number;
   maxWakeupAttempts: number;
+  /** When true, all pipeline processing is skipped — demo data stays pristine. */
+  demo?: boolean;
 }
 
 // ── Pure: session-limit parsing ───────────────────────────────────────────
@@ -143,6 +145,7 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
         parallelSubtasks: typeof raw.parallelSubtasks === 'boolean' ? raw.parallelSubtasks : true,
         maxDeliverableFails: typeof raw.maxDeliverableFails === 'number' ? raw.maxDeliverableFails : 3,
         maxWakeupAttempts: typeof raw.maxWakeupAttempts === 'number' ? raw.maxWakeupAttempts : 3,
+        demo: typeof raw.demo === 'boolean' ? raw.demo : undefined,
         ...(sensors ? { sensors } : {}),
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }

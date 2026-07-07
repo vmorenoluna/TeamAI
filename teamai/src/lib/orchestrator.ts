@@ -120,13 +120,18 @@ export class Orchestrator {
   }
 
   async runTask(taskId: string, description: string, startPhase?: PipelinePhase): Promise<void> {
+    // Invalidate pipeline config cache so pipeline.json changes take effect.
+    // Must happen BEFORE the demo check — otherwise stale demo:true survives
+    // config edits and prevents the project from ever running tasks.
+    this._pipelineConfigCache = null;
+
+    // Demo mode: when pipeline.json has demo:true, skip all pipeline processing
+    if (this.getPipelineConfig().demo) return;
+
     // Prevent concurrent runs of the same task
     if (this.activeTasks.has(taskId)) {
       throw new Error(`Task ${taskId} is already running — wait for the current pipeline to finish.`);
     }
-
-    // Cancel any currently running pipeline for this task before starting a new one
-    this._pipelineConfigCache = null; // invalidate cache so pipeline.json changes take effect
     this.cancelPipeline(taskId);
     this.activeTasks.add(taskId);
 
