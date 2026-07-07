@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TeamAI — Multi-Agent Claude Code Orchestration</title>
-  <meta name="description" content="TeamAI orchestrates multi-agent Claude Code CLI workflows through a browser UI. Parallel AI agents — analyst, planner, coder, QA reviewer — collaborate on automated software development pipelines.">
-  <meta property="og:title" content="TeamAI — Multi-Agent Claude Code Orchestration">
-  <meta property="og:description" content="Orchestrate parallel Claude Code CLI agents through a browser UI. From feature request to reviewed pull request — automatically.">
+  <title>TeamAI: Multi-Agent Claude Code Orchestration</title>
+  <meta name="description" content="TeamAI is a desktop app that deploys a team of AI agents to write, review, and merge code automatically. From feature request to pull request, hands free.">
+  <meta property="og:title" content="TeamAI: Multi-Agent Claude Code Orchestration">
+  <meta property="og:description" content="Deploy a team of AI agents to write, review, and merge code automatically. From feature request to pull request, hands free.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="https://raw.githubusercontent.com/vmorenoluna/TeamAI/main/docs/images/og-image.png">
   <meta name="twitter:card" content="summary_large_image">
@@ -125,8 +125,6 @@
       margin: 36px 0; transition: border-color 0.2s;
     }
     .screenshot-slot:hover { border-color: #334155; }
-    .screenshot-slot .placeholder { color: #475569; font-size: 0.9rem; text-align: center; }
-    .screenshot-slot .placeholder .label { font-weight: 600; margin-bottom: 4px; color: #64748b; }
     .screenshot-slot img { border-radius: 10px; }
     .screenshot-slot.full  { min-height: 300px; }
     .screenshot-slot.side  { min-height: 260px; margin: 0; }
@@ -223,7 +221,6 @@
       <a href="#review" class="nav-link">Review</a>
       <a href="#streaming" class="nav-link">Streaming</a>
       <a href="#extras" class="nav-link">More</a>
-      <a href="#breakdown" class="nav-link">Internals</a>
     </div>
   </div>
 </nav>
@@ -231,10 +228,9 @@
 <!-- ==================== Hero ==================== -->
 <section class="hero">
   <div class="container">
-    <div class="hero-badge"><span class="dot"></span> CLI-based — not the API</div>
-    <h1>Multi-Agent Software<br>Development, Automated</h1>
+    <h1>A Team of AI Agents<br>for Your Codebase</h1>
     <p class="subtitle">
-      TeamAI orchestrates parallel Claude Code CLI agents — analyst, planner, coder, QA reviewer, merger — through a browser UI, turning feature requests into reviewed pull requests with zero API keys.
+      TeamAI puts a full development team at your fingertips. An analyst, a planner, a coder, and a QA reviewer work together through a clean desktop app, turning feature requests into reviewed pull requests.
     </p>
     <a href="https://github.com/vmorenoluna/TeamAI" class="hero-cta">View on GitHub</a>
     <a href="#pipeline" class="hero-cta-secondary">How it works ↓</a>
@@ -246,37 +242,37 @@
   <div class="container">
     <span class="section-label">Why TeamAI</span>
     <h2>Not another AI coding tool</h2>
-    <p class="section-desc">TeamAI is different — it orchestrates the actual <code>claude</code> CLI binary, not the API. Each agent gets its own Claude subprocess, its own git worktree, and its own role persona. No API keys, no token limits, no vendor lock-in.</p>
+    <p class="section-desc">TeamAI runs the actual Claude CLI on your machine. Each agent gets its own terminal session, its own working copy of the code, and a distinct personality.</p>
     <div class="features-grid">
       <div class="feature-card">
         <div class="icon icon-blue">🖥️</div>
-        <h3>CLI-Native</h3>
-        <p>Spawns real <code>claude</code> CLI subprocesses with stream-json I/O. Full access to the filesystem, git, and shell — no API abstraction layer.</p>
+        <h3>Runs Locally</h3>
+        <p>Agents run as terminal processes on your computer with full access to the filesystem, git, and any command line tool you use.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-purple">🐳</div>
-        <h3>Container Isolation</h3>
-        <p>Each agent runs inside a Docker devcontainer with VS Code devcontainer.json support, ensuring reproducible, sandboxed execution environments.</p>
+        <h3>Sandboxed Execution</h3>
+        <p>Each agent can work inside its own Docker container, keeping your environment clean and safer.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-emerald">⚡</div>
-        <h3>Parallel Agents</h3>
-        <p>Multiple agent sessions run simultaneously with git worktree isolation — planner and coder work in parallel without conflicts.</p>
+        <h3>Agents Work in Parallel</h3>
+        <p>Multiple agents run simultaneously in isolated workspaces without stepping on each other.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-amber">🌐</div>
-        <h3>Multi-Project</h3>
-        <p>Manage multiple codebases from a single UI. Each project has its own <code>.teamai/</code> state and <code>.claude/</code> configuration.</p>
+        <h3>Multiple Projects</h3>
+        <p>Manage several codebases from a single window. Each project keeps its own settings, agent roles, and task board.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-rose">🔌</div>
-        <h3>WebSocket Streaming</h3>
-        <p>Real-time agent output streams to the browser via WebSocket. Watch each agent think, plan, and code in real time.</p>
+        <h3>Live Streaming</h3>
+        <p>Watch each agent think, plan, and code in real time as their terminal output streams directly to the app.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-cyan">🔧</div>
-        <h3>Customizable Roles</h3>
-        <p>Define your own agent roles and command templates — analyst, planner, coder, QA reviewer, merger — or create new ones.</p>
+        <h3>Customizable Agents</h3>
+        <p>Define your own agent roles and personalities. Tailor how each one thinks, writes, and reviews to match your team's standards.</p>
       </div>
     </div>
   </div>
@@ -285,9 +281,9 @@
 <!-- ==================== Multi-Agent Pipeline ==================== -->
 <section id="pipeline">
   <div class="container">
-    <span class="section-label">Multi-Agent Pipeline</span>
-    <h2>From idea to merged PR — automatically</h2>
-    <p class="section-desc">Each task flows through a chain of specialized AI agents. Each agent adopts a role persona, reads the previous agent's output, and advances the task to the next phase.</p>
+    <span class="section-label">The Pipeline</span>
+    <h2>From idea to merged pull request, automatically</h2>
+    <p class="section-desc">Each task passes through a chain of specialized AI agents. Every agent picks up where the previous one left off and advances the work to the next stage.</p>
 
     <div class="pipeline-flow" aria-label="Pipeline phases: Spec, Plan, Implement, QA Review, Merge PR">
       <div class="pipeline-node"><div class="role">Analyst</div><div class="phase">📋 Spec</div></div>
@@ -301,24 +297,24 @@
       <div class="pipeline-node"><div class="role">Merger</div><div class="phase">🔀 Merge PR</div></div>
     </div>
     <p style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:8px;">
-      QA failures automatically loop back to Implement with structured feedback including severity levels (critical, error, warning, suggestion).
+      When QA finds issues, the task automatically loops back to the coder with detailed feedback and severity levels.
+    </p>
+    <p style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:8px;">
+      When the coder finds a gap in the spec, the task automatically loops back to the analyst for a clarification.
     </p>
 
     <div class="screenshot-slot full">
-      <div class="placeholder">
-        <div class="label">📸 Screenshot: Pipeline view</div>
-        <div>Replace this with <code>images/pipeline-view.png</code></div>
-      </div>
+      <img src="images/pipeline-view.png" alt="TeamAI pipeline view showing task detail with spec, plan, and subtask breakdown" loading="lazy">
     </div>
   </div>
 </section>
 
-<!-- ==================== CLI-Native highlight ==================== -->
+<!-- ==================== Highlight ==================== -->
 <section style="padding: 80px 0;">
   <div class="container">
     <div class="highlight-banner">
-      <h3>💡 Powered by the Claude CLI, not the API</h3>
-      <p>TeamAI spawns real <code style="background:#1e293b;padding:2px 6px;border-radius:4px;">claude -p --input-format stream-json --output-format stream-json</code> subprocesses. Each agent has full filesystem access, runs shell commands, and uses the same Claude Code you use in your terminal. No API keys. No rate limits. No context window truncation.</p>
+      <h3>💡 Runs the actual Claude CLI on your machine</h3>
+      <p>TeamAI launches real Claude terminal sessions. Each agent has full filesystem access, can run shell commands, and uses the exact same Claude Code you use in your terminal. The application also detects and automatically resumes tasks that hit a rate limit.</p>
     </div>
   </div>
 </section>
@@ -327,14 +323,11 @@
 <section id="kanban">
   <div class="container">
     <span class="section-label">Kanban Board</span>
-    <h2>Phased workflow, visualized</h2>
-    <p class="section-desc">Tasks move through columns representing pipeline phases — Backlog, Spec, Plan, Implement, QA Review, Awaiting Review, and Done. Drag-and-drop with guardrails prevents invalid transitions.</p>
+    <h2>See every task at a glance</h2>
+    <p class="section-desc">Tasks are organized into columns by stage. Drag and drop to move them between stages, or let the pipeline advance them automatically. Click any task to see its full details, specification, plan, and review report.</p>
 
     <div class="screenshot-slot full">
-      <div class="placeholder">
-        <div class="label">📸 Screenshot: Kanban board</div>
-        <div>Replace this with <code>images/kanban-board.png</code></div>
-      </div>
+      <img src="images/kanban-board.png" alt="TeamAI kanban board with tasks across pipeline stages" loading="lazy">
     </div>
   </div>
 </section>
@@ -345,21 +338,18 @@
     <div class="two-col">
       <div class="text">
         <span class="section-label">Auto Mode</span>
-        <h2>Hands-off pipeline execution</h2>
-        <p style="color:#94a3b8;margin-bottom:16px;">Enable Auto Mode and TeamAI autonomously picks tasks from the backlog, respects dependency ordering, runs them through the pipeline, auto-approves at the review stage, creates PRs, polls CI, and auto-merges when all checks pass.</p>
+        <h2>Set it and forget it</h2>
+        <p style="color:#94a3b8;margin-bottom:16px;">Flip the switch and TeamAI takes over. It picks tasks from the backlog, respects task dependencies, runs them through the full pipeline, approves them at review time, opens pull requests, waits for CI to pass, and merges automatically.</p>
         <ul>
-          <li>Configurable max parallel tasks</li>
-          <li>Dependency-aware task selection (blocks incomplete deps)</li>
-          <li>Auto-approve at awaiting-review → create PR</li>
-          <li>CI polling via <code>gh pr view</code> → auto-merge on green</li>
-          <li>Auto-done tasks highlighted for later manual review</li>
+          <li>Configurable limit on how many tasks run at once</li>
+          <li>Respects task dependencies and ordering</li>
+          <li>Creates pull requests and monitors CI checks</li>
+          <li>Merges automatically when all checks are green</li>
+          <li>Highlights automatically merged tasks for later review</li>
         </ul>
       </div>
       <div class="screenshot-slot side">
-        <div class="placeholder">
-          <div class="label">📸 Screenshot: Auto Mode</div>
-          <div>Replace with <code>images/auto-mode.png</code></div>
-        </div>
+        <img src="images/auto-mode.png" alt="TeamAI auto mode enabled on the kanban board" loading="lazy">
       </div>
     </div>
   </div>
@@ -371,21 +361,17 @@
     <div class="two-col reversed">
       <div class="text">
         <span class="section-label">Review Panel</span>
-        <h2>Human-gated quality checks</h2>
-        <p style="color:#94a3b8;margin-bottom:16px;">When QA detects issues, the task pauses for human review. The review panel shows the full QA report with pass/fail criteria, severity-graded additional issues, and a diff viewer.</p>
+        <h2>A human always has the final say</h2>
+        <p style="color:#94a3b8;margin-bottom:16px;">When QA finds problems, the task pauses for you to decide. The review panel shows the full quality report: what passed, what failed, and why. You choose whether to send it back for fixes, revise the original specification, merge the changes, or open a pull request.</p>
         <ul>
-          <li>Pass/Fail per spec acceptance criterion</li>
-          <li>Severity-graded issues: critical, error, warning, suggestion</li>
-          <li>Spec concerns detection — QA flags when the spec itself is wrong</li>
-          <li>Revise Spec workflow: preserves original spec, re-runs pipeline from scratch</li>
-          <li>Merge Locally / Open Pull Request / Request Changes actions</li>
+          <li>Clear pass and fail results for every acceptance criterion</li>
+          <li>Issues graded by severity: critical, error, warning, suggestion</li>
+          <li>Spec revision mode when the requirements themselves need rethinking</li>
+          <li>One-click actions: merge locally, open a pull request, or request changes</li>
         </ul>
       </div>
       <div class="screenshot-slot side col-image">
-        <div class="placeholder">
-          <div class="label">📸 Screenshot: Review panel</div>
-          <div>Replace with <code>images/review-panel.png</code></div>
-        </div>
+        <img src="images/review-panel.png" alt="TeamAI review panel showing QA report with pass/fail criteria" loading="lazy">
       </div>
     </div>
   </div>
@@ -394,15 +380,12 @@
 <!-- ==================== Streaming / Terminal ==================== -->
 <section id="streaming">
   <div class="container">
-    <span class="section-label">Real-Time Streaming</span>
-    <h2>Watch agents think and code in real time</h2>
-    <p class="section-desc">Each agent's Claude CLI output streams to the browser via WebSocket with NDJSON parsing. Watch analysis, planning, implementation, and QA happen live — every thought, every file edit, every command.</p>
+    <span class="section-label">Live Streaming</span>
+    <h2>Watch every agent work in real time</h2>
+    <p class="section-desc">Each agent's terminal output streams live to the app. Watch the analyst write the spec, the planner break it into subtasks, the coder implement each change, and QA validate the results. Every thought, every file edit, every command ran, all visible as it happens.</p>
 
     <div class="screenshot-slot full">
-      <div class="placeholder">
-        <div class="label">📸 Screenshot: Streaming output / Terminal view</div>
-        <div>Replace this with <code>images/streaming-output.png</code></div>
-      </div>
+      <img src="images/streaming-output.png" alt="TeamAI terminal view for interactive Claude agent sessions" loading="lazy">
     </div>
   </div>
 </section>
@@ -410,84 +393,29 @@
 <!-- ==================== Roadmap & Insights ==================== -->
 <section id="extras">
   <div class="container">
-    <span class="section-label">Roadmap &amp; Insights</span>
-    <h2>Strategic planning, not just execution</h2>
-    <p class="section-desc">TeamAI goes beyond task execution with roadmap planning, ideation scanning, and project insights.</p>
+    <span class="section-label">Roadmap and Insights</span>
+    <h2>Plan the big picture, not just the next task</h2>
+    <p class="section-desc">TeamAI helps you think strategically about where your project is headed, not just what to build next.</p>
     <div class="features-grid">
       <div class="feature-card">
         <div class="icon icon-purple">🗺️</div>
-        <h3>Roadmap</h3>
-        <p>Generate multi-phase roadmaps from ideation reports. View tasks grouped by phase with linked dependencies and status tracking.</p>
+        <h3>Product Roadmap</h3>
+        <p>Generate multi-phase roadmaps with competitive analysis. Group features into Now, Next, Later, and Icebox, then convert them into tasks with one click.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-blue">💡</div>
         <h3>Ideation Scanner</h3>
-        <p>Scan your codebase for improvement opportunities. AI analyzes architecture, identifies tech debt, and proposes feature ideas.</p>
+        <p>Let AI scan your codebase and surface opportunities you might have missed: performance improvements, tech debt cleanup, missing features, and architectural suggestions.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-emerald">📊</div>
-        <h3>Insights Chat</h3>
-        <p>Ask natural-language questions about your project's state. "What tasks are blocked?" "Show me recent QA failures."</p>
+        <h3>Project Insights</h3>
+        <p>Ask natural language questions about your project. "Which tasks are stuck?" "Show me recent QA failures." "What did we ship this week?"</p>
       </div>
     </div>
 
     <div class="screenshot-slot full">
-      <div class="placeholder">
-        <div class="label">📸 Screenshot: Roadmap view</div>
-        <div>Replace this with <code>images/roadmap-view.png</code></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ==================== Container Support ==================== -->
-<section>
-  <div class="container">
-    <span class="section-label">Container Support</span>
-    <h2>Sandboxed agent execution</h2>
-    <p class="section-desc">Every agent can run inside an isolated Docker container using VS Code devcontainer configuration. TeamAI auto-generates devcontainer specs based on your project's language and toolchain.</p>
-    <div class="features-grid">
-      <div class="feature-card">
-        <div class="icon icon-cyan">🐳</div>
-        <h3>Devcontainer Integration</h3>
-        <p>Auto-detects Python, Go, Rust, Node.js — generates appropriate devcontainer.json with language-specific tooling.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon icon-emerald">🔒</div>
-        <h3>Filesystem Isolation</h3>
-        <p>Agents operate within container boundaries. Combined with git worktree isolation, no cross-contamination between tasks.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon icon-blue">⚙️</div>
-        <h3>Per-Project Configuration</h3>
-        <p>Each project specifies its own container config in <code>.teamai/container.json</code>. Switch between host and container modes per agent.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ==================== Agent Customization ==================== -->
-<section>
-  <div class="container">
-    <span class="section-label">Agent Customization</span>
-    <h2>Define your own agents</h2>
-    <p class="section-desc">TeamAI ships with default roles and commands, but everything is customizable per project. Override any role persona or command template in your project's <code>.claude/</code> directory.</p>
-    <div class="features-grid">
-      <div class="feature-card">
-        <div class="icon icon-rose">👤</div>
-        <h3>Role Personas</h3>
-        <p>Define agent behavior with markdown role files. Each agent reads its role at session start: "You are a senior QA engineer...".</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon icon-purple">📝</div>
-        <h3>Command Templates</h3>
-        <p>Customize pipeline commands per phase. Inject project-specific context, rules, and guardrails into each agent's prompt.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon icon-amber">🔄</div>
-        <h3>Pipeline Workflow Rules</h3>
-        <p>14 cross-cutting guardrails prevent anti-patterns: no delegated analysis, no mathematical substitution for empirical evidence, spec authority enforcement, and more.</p>
-      </div>
+      <img src="images/roadmap-view.png" alt="TeamAI product roadmap with phased items" loading="lazy">
     </div>
   </div>
 </section>
@@ -495,103 +423,19 @@
 <!-- ==================== Architecture ==================== -->
 <section>
   <div class="container" style="text-align: center;">
-    <span class="section-label">Architecture</span>
-    <h2>How it fits together</h2>
+    <span class="section-label">How It Works</span>
+    <h2>The moving parts</h2>
     <p class="section-desc" style="margin:12px auto 40px;">
-      A custom Node.js server wraps Next.js with WebSocket support. The ProcessManager spawns and manages Claude CLI subprocesses. The orchestrator coordinates the multi-agent pipeline.
+      The desktop app manages Claude terminal sessions through a background process. Each agent gets its own session, with messages passing between them as tasks move through the pipeline.
     </p>
 
     <div class="arch-flow">
-      <div class="arch-node"><div class="title">🌐 Browser</div><div class="sub">Next.js + Tailwind</div></div>
+      <div class="arch-node"><div class="title">🖥️ Desktop App</div><div class="sub">React and Tailwind</div></div>
       <span class="arch-arrow">⇄</span>
-      <div class="arch-node"><div class="title">🔌 WebSocket</div><div class="sub">ws + NDJSON stream</div></div>
+      <div class="arch-node"><div class="title">🔌 Background Process</div><div class="sub">Task orchestration</div></div>
       <span class="arch-arrow">⇄</span>
-      <div class="arch-node"><div class="title">⚙️ Server</div><div class="sub">tsx server.ts</div></div>
-      <span class="arch-arrow">⇄</span>
-      <div class="arch-node highlight"><div class="title">🤖 Claude CLI</div><div class="sub">Multiple subprocesses</div></div>
+      <div class="arch-node highlight"><div class="title">🤖 Claude Sessions</div><div class="sub">One per agent role</div></div>
     </div>
-  </div>
-</section>
-
-<!-- ==================== Agent vs. Code Breakdown ==================== -->
-<section id="breakdown">
-  <div class="container">
-    <span class="section-label">Pipeline Internals</span>
-    <h2>What agents do vs. what the orchestrator handles</h2>
-    <p class="section-desc">
-      Not every pipeline step needs an AI agent. The orchestrator handles mechanical operations directly
-      with coded logic — git operations, CLI commands, file checks — only spawning Claude agents where
-      semantic understanding is required.
-    </p>
-
-    <div class="features-grid">
-      <div class="feature-card">
-        <div class="icon icon-blue">📋</div>
-        <h3>Spec Phase</h3>
-        <p><strong>Agent:</strong> Analyst writes <code>spec.md</code> from the task description.<br>
-        <strong>Code:</strong> Log rotation, phase headers, revision-mode detection.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon icon-purple">📐</div>
-        <h3>Plan Phase</h3>
-        <p><strong>Agent:</strong> Planner reads the spec and produces <code>plan.json</code>.<br>
-        <strong>Code:</strong> Worktree creation, git pull, phase cascading.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon icon-emerald">⚙️</div>
-        <h3>Implement Phase</h3>
-        <p><strong>Agent:</strong> Coder (one per subtask) implements changes, runs tests, commits.<br>
-        <strong>Code:</strong> Worktree isolation, scope violation detection, deliverable verification,
-        cherry-pick orchestration, git push with remote HEAD verification, sensor gates.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon icon-rose">🔍</div>
-        <h3>QA Review Phase</h3>
-        <p><strong>Agent:</strong> QA Reviewer validates implementation against spec, writes <code>qa_report.json</code>.<br>
-        <strong>Code:</strong> Locked-report detection, unpushed-commit precheck with auto-push,
-        FAIL-type routing (cleanup / spec_concerns), max-attempt circuit breaker.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon icon-cyan">🔀</div>
-        <h3>Create PR Phase</h3>
-        <p><strong>Agent:</strong> <span style="color:#34d399;">None — direct CLI</span>.<br>
-        <strong>Code:</strong> Rebase, artifact commit, <code>gh pr create</code> / <code>glab mr create</code>,
-        PR body generation, URL extraction. Agent only spawned if rebase has conflicts.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon icon-amber">🔀</div>
-        <h3>Merge Phase</h3>
-        <p><strong>Agent:</strong> <span style="color:#34d399;">None if clean — only on conflict</span>.<br>
-        <strong>Code:</strong> Rebase, artifact commit, pre-merge sensors,
-        <code>git merge --no-edit</code>, worktree removal. Merger agent spawned only if merge conflicts.</p>
-      </div>
-    </div>
-
-    <div class="highlight-banner" style="margin-top:40px;">
-      <h3>🧠 Smart delegation: 5 sessions → 3 per clean pipeline run</h3>
-      <p>
-        Before optimization, every pipeline run spawned 5 Claude sessions (spec, plan, implement, create-pr, merge).
-        After replacing mechanical agent work with direct CLI calls, the clean path now uses only 3 —
-        <strong>spec, plan, and implement</strong>. PR creation and conflict-free merges are fully automated.
-        Agents are reserved for work that genuinely requires semantic understanding:
-        writing specifications, decomposing tasks, authoring code, reviewing quality, and resolving merge conflicts.
-      </p>
-    </div>
-
-    <div class="highlight-banner" style="margin-top:24px;background:linear-gradient(135deg, rgba(52,211,153,0.06) 0%, rgba(56,189,248,0.06) 100%);border-color:rgba(52,211,153,0.15);">
-      <h3>🔄 Two-tier conflict resolution pattern</h3>
-      <p>
-        All conflict-resolution paths follow the same pattern: try the direct command first (coded),
-        spawn a merger agent only on conflict (AI). Applied in three places —
-        rebase conflicts, cherry-pick conflicts, and merge conflicts.
-        This keeps the happy path fast (no agent spawn) while preserving semantic conflict resolution
-        for the edge cases where it's needed.
-      </p>
-    </div>
-
-    <p style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:32px;">
-      Full breakdown: <a href="https://github.com/vmorenoluna/TeamAI/blob/main/teamai/adr/007-agent-vs-code-breakdown.md">ADR 007 — Code Logic vs. Agent Sessions Per Phase</a>
-    </p>
   </div>
 </section>
 
@@ -599,9 +443,9 @@
 <section style="text-align: center;">
   <div class="container">
     <span class="section-label">Get Started</span>
-    <h2>Ready to automate your pipeline?</h2>
+    <h2>Ready to put AI agents to work?</h2>
     <p class="section-desc" style="margin:16px auto 32px;">
-      TeamAI is open source. Clone the repo, install dependencies, and start orchestrating AI agents from your browser.
+      TeamAI is open source. Clone the repo, install the dependencies, and launch the desktop app to deploy your team of AI agents.
     </p>
     <a href="https://github.com/vmorenoluna/TeamAI" class="hero-cta">View on GitHub</a>
     <a href="https://github.com/vmorenoluna/TeamAI#readme" class="hero-cta-secondary">Read the docs</a>
@@ -611,8 +455,8 @@
 <!-- ==================== Footer ==================== -->
 <footer>
   <div class="container">
-    <p>TeamAI — Multi-Agent Claude Code Orchestration</p>
-    <p style="margin-top: 4px;">Built with TypeScript, Next.js, React 19, Tailwind CSS 4, and the Claude CLI</p>
+    <p>TeamAI: Multi-Agent Claude Code Orchestration</p>
+    <p style="margin-top: 4px;">Built with TypeScript, Electron, React, and the Claude CLI</p>
   </div>
 </footer>
 
