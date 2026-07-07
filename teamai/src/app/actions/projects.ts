@@ -49,8 +49,11 @@ function revalidateRoot() {
 export async function getActiveProjectPath(): Promise<string> {
   const cookieStore = await cookies();
   const path = cookieStore.get(ACTIVE_PROJECT_COOKIE)?.value;
-  if (!path) throw new Error('No active project selected');
-  return path;
+  if (path) return path;
+  // No cookie set — auto-select when there's exactly one registered project
+  const projects = projectStore.getAll();
+  if (projects.length === 1) return projects[0].path;
+  throw new Error('No active project selected');
 }
 
 export async function getActiveProject() {

@@ -337,13 +337,7 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
 const ROADMAP = {
   generated_at: '2026-07-06T12:00:00.000Z',
   executive_summary: 'ShopForge is building a competitive mid-market e-commerce platform. The next 6 months focus on conversion rate optimization and international expansion.',
-  competitor_analysis_run: true,
-  competitors: [
-    { name: 'Shopify Plus', strengths: ['App ecosystem', 'Scalability'], weaknesses: ['Transaction fees', 'Limited customization'] },
-    { name: 'BigCommerce', strengths: ['B2B features', 'No transaction fees'], weaknesses: ['Annual revenue caps', 'Theme complexity'] },
-    { name: 'WooCommerce', strengths: ['Open source', 'Plugin ecosystem'], weaknesses: ['Self-hosting burden', 'Performance at scale'] },
-    { name: 'Magento', strengths: ['Enterprise features', 'Multi-store'], weaknesses: ['Development cost', 'Hosting complexity'] },
-  ],
+  competitor_analysis_run: true,   competitors: ['Shopify Plus', 'BigCommerce', 'WooCommerce', 'Magento'],
   phases: {
     now: [
       { title: 'Abandoned Cart Email Recovery', priority: 'P0', complexity: 'Medium', category: 'Conversion', description: 'Automated 3-email sequence for abandoned carts with progressive discounts', affected_files: ['src/email/*', 'src/cart/*'], source: 'internal' },
