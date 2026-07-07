@@ -96,12 +96,13 @@ app.prepare().then(() => {
   });
 
   server.on('upgrade', (request, socket, head) => {
-    const { pathname, query } = parse(request.url!, true);
+    const reqUrl = new URL(request.url!, `http://${request.headers.host || '127.0.0.1:3000'}`);
+    const pathname = reqUrl.pathname;
+    const project = reqUrl.searchParams.get('project');
     if (pathname === '/ws') {
       wss.handleUpgrade(request, socket, head, (client) => {
-        // Store project association from query param so broadcasts can be filtered
-        if (typeof query?.project === 'string') {
-          (client as ProjectWebSocket).projectRoot = query.project;
+        if (typeof project === 'string') {
+          (client as ProjectWebSocket).projectRoot = project;
         }
         wss.emit('connection', client, request);
       });
