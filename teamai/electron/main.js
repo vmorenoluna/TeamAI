@@ -10,7 +10,7 @@
  */
 let mainWindow = null;
 
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, session } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -173,6 +173,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      webSecurity: false, // allow WebSocket connections to local dev server
     },
     autoHideMenuBar: true,
   });
@@ -201,6 +202,16 @@ function createWindow() {
 // ── App lifecycle ───────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  // Strip Content-Security-Policy headers so WebSocket connections work in the
+  // Electron renderer. Next.js dev server sends CSP headers that can block ws://
+  // connections even with webSecurity: false on some Chromium versions.
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const responseHeaders = { ...details.responseHeaders };
+    delete responseHeaders['content-security-policy'];
+    delete responseHeaders['content-security-policy-report-only'];
+    callback({ responseHeaders });
+  });
+
   try {
     await startServer();
     createWindow();
