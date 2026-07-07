@@ -53,24 +53,19 @@ export class ProjectStore {
     // the backup still exists. Restore it so the user's data is intact.
     this._restoreFromBackup();
 
-    // Defensive init: only create projects.json if it truly doesn't exist.
-    // existsSync can return false temporarily (antivirus, cloud sync, etc.),
-    // so we double-check by attempting a read before writing an empty array.
-    if (!existsSync(PROJECTS_FILE)) {
-      try {
-        // If the file actually has content but existsSync lied, this will succeed
-        // and we'll see the existing data — don't overwrite it.
-        const existing = readFileSync(PROJECTS_FILE, 'utf-8');
-        if (existing.trim()) return; // file exists and has content — keep it
-      } catch {
-        // File truly doesn't exist or is unreadable — create it fresh
-      }
-      this._atomicWrite(() => []);
-    }
+    // Note: we intentionally do NOT auto-create projects.json with [].
+    // getAll() already handles a missing file gracefully (returns []).
+    // Auto-creating the file causes data loss when existsSync returns a
+    // false negative (common on Windows with AV/cloud sync) — the empty
+    // write overwrites a valid file that was written moments before.
   }
 
   getAll(): Project[] {
-    return JSON.parse(readFileSync(PROJECTS_FILE, 'utf-8'));
+    try {
+      return JSON.parse(readFileSync(PROJECTS_FILE, 'utf-8'));
+    } catch {
+      return [];
+    }
   }
 
   getByPath(projectPath: string): Project | null {
