@@ -44,9 +44,13 @@ Rules:
   no orphaned criteria. After writing the plan, verify that each criterion from the
   spec appears in a subtask's `acceptance_criteria` array. If a criterion has no
   matching subtask, add one.
-- If two parallel subtasks modify the same file, add an explicit `depends_on` between
-  them or merge them into one subtask — parallel writes to the same file cause merge
-  conflicts that waste engineer sessions.
+- **No two subtasks may list the same file path — regardless of `depends_on` order.**
+  The orchestrator runs each subtask in its own branch and cherry-picks them
+  sequentially onto the feature branch. Adding a `depends_on` edge does NOT
+  prevent a conflict: a file touched by subtask N will still have uncommitted
+  changes in the worktree when subtask N+1 is cherry-picked, and git aborts.
+  If two subtasks need to touch the same file, merge them into a single subtask —
+  this is the only fix, not an alternative to sequencing.
 - **Verification scripts need dedicated subtasks:** When the spec includes an acceptance
   criterion that requires running a script to produce empirical evidence (e.g. a
   benchmark, integration run, or data pipeline), the plan MUST include a dedicated

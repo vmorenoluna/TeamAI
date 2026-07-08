@@ -31,7 +31,38 @@ Rules:
 - Subtasks with the same `parallel_group` letter can run concurrently.
 - Subtasks with `depends_on` entries must wait for those IDs to complete.
 - Each subtask must be self-contained enough for an independent agent to implement.
-- Include ALL files that need to change, not just the primary ones.
+- Subtasks must be small enough to complete in a single session — no multi-day epics.
+- Include ALL files that need to change (INCLUDING associated test files). NEVER isolate test updates into a separate subtask from the implementation changes they verify. A feature and its tests must be in the same subtask — parallel test-only subtasks will cause cherry-pick conflicts when the implementation also touches those test files.
 - Order subtasks so dependencies are resolved top-down.
-- **No two subtasks may list the same file path.** If two subtasks would modify the same file, merge them into a single subtask. This applies regardless of `depends_on` order
+- Flag risks explicitly in the subtask description — don't assume things will work out.
+- **NEVER include subtasks that create, modify, or delete files under `.teamai/`.** Ticket
+  creation is the analyst's responsibility (the analyst uses a more capable model with
+  broader project context). If the spec says to file follow-up tickets for findings,
+  document those findings in the final documentation subtask instead — the analyst will
+  create the follow-up tickets after reviewing the completed work.
+- **Plan coverage**: Every spec acceptance criterion must map to at least one subtask —
+  no orphaned criteria. After writing the plan, verify that each criterion from the
+  spec appears in a subtask's `acceptance_criteria` array. If a criterion has no
+  matching subtask, add one.
+- **No two subtasks may list the same file path — regardless of `depends_on` order.**
+  The orchestrator runs each subtask in its own branch and cherry-picks them
+  sequentially onto the feature branch. Adding a `depends_on` edge does NOT
+  prevent a conflict: a file touched by subtask N will still have uncommitted
+  changes in the worktree when subtask N+1 is cherry-picked, and git aborts.
+  If two subtasks need to touch the same file, merge them into a single subtask —
+  this is the only fix, not an alternative to sequencing.
+- **Verification scripts need dedicated subtasks:** When the spec includes an acceptance
+  criterion that requires running a script to produce empirical evidence (e.g. a
+  benchmark, integration run, or data pipeline), the plan MUST include a dedicated
+  subtask for that script run. Never fold it into a documentation subtask. The subtask
+  must specify: (a) the exact command to run, (b) what output artifact to commit, and
+  (c) the specific check to apply to the output (e.g. "section X shows fewer than N
+  failures"). This makes the criterion independently verifiable by QA without relying
+  on the engineer's self-report.
+- **`files_to_create` paths are relative to the repository root.** When populating
+  `files_to_create` for a subtask that must produce committed file artifacts
+  (benchmark output, sweep results, data pipeline output, generated documentation),
+  specify paths relative to the repository root (e.g. `docs/analysis.md`, not
+  `/absolute/path/to/docs/analysis.md`). The orchestrator resolves these against
+  the worktree root at verification time.
 ```
