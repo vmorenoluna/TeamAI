@@ -1771,6 +1771,149 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
 
     await promise;
   });
+
+  it('skips push failure and continues to qa-review when a PR already exists for the branch', async () => {
+    // Scenario: git push fails (worktree was cleaned up after PR creation),
+    // but a PR already exists for this branch. The push guard should detect
+    // the existing PR via `gh pr list` and treat the failure as non-fatal,
+    // advancing to qa-review instead of failed.
+    const existingPrUrl = 'https://github.com/shopforge/demo/pull/162';
+
+    mockExecFileSync.mockImplementation((cmd: string, args?: string[]) => {
+      if (cmd === 'gh' && Array.isArray(args) && args[0] === 'pr' && args[1] === 'list') {
+        // gh pr list returns the existing PR URL
+        return existingPrUrl + '\n';
+      }
+      if (Array.isArray(args)) {
+        if (args[0] === 'push') throw new Error('src refspec feat/robustness-test does not match any');
+        if (args[0] === 'pull') return '';
+      }
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-impl-pr-exists');
+
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
+
+      // Resolve the implement subtask
+      fireEvent('event', { sessionId: 'sess-impl-pr-exists', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+
+      // Should NOT be failed — PR exists, push failure is non-fatal
+      expect(pipeline.phase).not.toBe('failed');
+      expect(pipeline.phase).toBe('qa-review');
+
+      // No FAIL report should have been written — the PR-exists path logs a
+      // warning and continues, it does not write a qa_report.json at all.
+      const reportPath = join(project.taskDir, 'qa_report.json');
+      expect(existsSync(reportPath)).toBe(false);
+
+      // executePhase was called to cascade to qa-review
+      expect(executeSpy).toHaveBeenCalled();
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('still fails when push fails AND no PR exists for the branch', async () => {
+    // Scenario: push fails AND gh pr list returns empty (no PR exists).
+    // This is the normal failure case — push should be treated as fatal.
+    mockExecFileSync.mockImplementation((cmd: string, args?: string[]) => {
+      if (cmd === 'gh' && Array.isArray(args) && args[0] === 'pr' && args[1] === 'list') {
+        return ''; // empty — no PR exists
+      }
+      if (Array.isArray(args)) {
+        if (args[0] === 'push') throw new Error('remote: Permission denied');
+        if (args[0] === 'pull') return '';
+      }
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-impl-no-pr');
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    const promise = (orch as AnyOrch).runImplement(pipeline);
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
+
+    fireEvent('event', { sessionId: 'sess-impl-no-pr', event: { type: 'result' } });
+    await new Promise(r => setTimeout(r, 50));
+
+    // Should fail — no PR exists, push failure is fatal
+    expect(pipeline.phase).toBe('failed');
+
+    const reportPath = join(project.taskDir, 'qa_report.json');
+    expect(existsSync(reportPath)).toBe(true);
+    const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+    expect(report.overall).toBe('FAIL');
+    expect(report.criteria[0].name).toBe('Git push verification');
+
+    await promise;
+  });
+
+  it('handles gh CLI unavailable gracefully — still fails when push fails and pr check throws', async () => {
+    // Scenario: push fails AND gh CLI is not available (throws).
+    // The prExists check is a best-effort fallback — if it throws,
+    // fall through to the normal failure path.
+    mockExecFileSync.mockImplementation((cmd: string, args?: string[]) => {
+      if (cmd === 'gh' && Array.isArray(args) && args[0] === 'pr' && args[1] === 'list') {
+        throw new Error('gh: command not found');
+      }
+      if (Array.isArray(args)) {
+        if (args[0] === 'push') throw new Error('remote: Permission denied');
+        if (args[0] === 'pull') return '';
+      }
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-impl-no-gh');
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    const promise = (orch as AnyOrch).runImplement(pipeline);
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
+
+    fireEvent('event', { sessionId: 'sess-impl-no-gh', event: { type: 'result' } });
+    await new Promise(r => setTimeout(r, 50));
+
+    // Should fail — gh unavailable, normal failure path
+    expect(pipeline.phase).toBe('failed');
+
+    const reportPath = join(project.taskDir, 'qa_report.json');
+    expect(existsSync(reportPath)).toBe(true);
+    const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+    expect(report.overall).toBe('FAIL');
+    expect(report.criteria[0].name).toBe('Git push verification');
+    expect(report.criteria[0].notes).toContain('Permission denied');
+
+    await promise;
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════

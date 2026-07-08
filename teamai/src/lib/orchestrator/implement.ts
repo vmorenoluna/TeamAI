@@ -662,19 +662,40 @@ export async function runImplement(
   } catch (pushErr) {
     const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
     appendFileSync(logFile, '[PUSH] Push failed: ' + pushMsg + '\n');
-    appendFileSync(logFile, '[PUSH] Task cannot advance — engineer must be able to push before QA can verify\n');
-    const reportPath = path.join(pipeline.specPath, 'qa_report.json');
-    writeFileSync(reportPath, JSON.stringify({
-      overall: 'FAIL',
-      criteria: [{
-        criterion: 'Git push verification',
-        name: 'Git push verification',
-        status: 'FAIL',
-        notes: 'Git push failed: ' + pushMsg + '. The engineer must be able to push commits before QA can verify.',
-      }],
-    }, null, 2));
-    deps.advancePhase(pipeline, 'failed');
-    return;
+
+    // Check if a PR already exists for this branch — if so, the push failure
+    // is likely because the worktree was cleaned up after PR creation (e.g.,
+    // during auto-mode re-adoption). Don't fail the task; the code is already
+    // in the PR and QA can proceed.
+    let prExists = false;
+    try {
+      const prCheck = execFileSync('gh', ['pr', 'list', '--head', pipeline.branch, '--json', 'url', '--jq', '.[0].url'], {
+        cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000,
+      }).trim();
+      if (prCheck) {
+        prExists = true;
+        appendFileSync(logFile, '[PUSH] PR already exists for branch ' + pipeline.branch + ': ' + prCheck + ' — push failure is non-fatal\n');
+        appendFileSync(logFile, '[PUSH] Code is already in the PR — advancing to QA review\n');
+      }
+    } catch { /* gh unavailable or no PR exists — fall through to normal failure */ }
+
+    if (prExists) {
+      // Non-fatal: code is already in the open PR. Skip the push and continue.
+    } else {
+      appendFileSync(logFile, '[PUSH] Task cannot advance — engineer must be able to push before QA can verify\n');
+      const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+      writeFileSync(reportPath, JSON.stringify({
+        overall: 'FAIL',
+        criteria: [{
+          criterion: 'Git push verification',
+          name: 'Git push verification',
+          status: 'FAIL',
+          notes: 'Git push failed: ' + pushMsg + '. The engineer must be able to push commits before QA can verify.',
+        }],
+      }, null, 2));
+      deps.advancePhase(pipeline, 'failed');
+      return;
+    }
   }
 
   // Sensor gate: check per-subtask sensor reports

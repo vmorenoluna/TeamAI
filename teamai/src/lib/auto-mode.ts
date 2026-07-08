@@ -128,7 +128,10 @@ function _isDemoProject(projectRoot: string): boolean {
 }
 
 const TERMINAL_PHASES = new Set(['backlog', 'done', 'failed']);
-const PAUSED_PHASES = new Set(['awaiting-review', 'pr-open']);
+// create-pr is a brief transitional phase between awaiting-review and pr-open.
+// It counts as paused so it doesn't consume a parallel slot in the tick loop
+// (the approveTask it runs is synchronous within _adoptStalledTasks).
+const PAUSED_PHASES = new Set(['awaiting-review', 'pr-open', 'create-pr']);
 
 function _start(projectRoot: string, state: AutoProjectState): void {
   if (state.enabled) return;

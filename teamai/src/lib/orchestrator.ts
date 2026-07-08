@@ -531,14 +531,29 @@ export class Orchestrator {
 
     // Determine start phase:
     // - Active pipeline phase (rate-limited / crash-recovered): resume from current phase
-    // - Backlog/stopped/done: detect phase from existing artifacts (spec.md, plan.json)
+    // - Backlog/done/failed: detect phase from existing artifacts (spec.md, plan.json)
+    // - Paused phases (awaiting-review, pr-open): throw — these should be handled
+    //   by review actions (approveTask/rejectTask) or CI polling, not resumeTask.
+    //   Re-entering implement from a paused phase causes redundant work and can
+    //   produce spurious failures when the worktree was already cleaned up.
     let startPhase: PipelinePhase;
     if (!NO_RESUME_PHASES.has(task.phase)) {
       // Task was mid-pipeline — resume from its actual phase instead of
       // restarting from implement. This preserves the phase that handleRateLimit
       // paused at, preventing unnecessary re-work.
       startPhase = task.phase as PipelinePhase;
+    } else if (task.phase === 'awaiting-review' || task.phase === 'pr-open') {
+      // Paused phases: re-entering implement from here causes redundant work
+      // and spurious push failures (worktree was cleaned up after PR creation).
+      // These phases are handled by review actions or CI polling.
+      throw new Error(
+        `Task ${taskId} is in paused phase "${task.phase}" — ` +
+        `use approve/reject instead of resume. ` +
+        `If called from auto-mode, the adoption flow (_adoptStalledTasks) ` +
+        `should have handled this task, not the tick loop.`
+      );
     } else {
+      // backlog / done / failed — restart from artifact detection
       const hasSpec = existsSync(path.join(dir, 'spec.md'));
       const hasPlan = existsSync(path.join(dir, 'plan.json'));
       if (hasPlan) {
