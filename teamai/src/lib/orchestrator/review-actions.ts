@@ -32,6 +32,7 @@ export interface ReviewActionsDeps {
 function resetAllCounters(pipeline: TaskPipeline): void {
   pipeline.qaAttempt = 0;
   pipeline.deliverableFailCounts = {};
+  pipeline.persistedCriterionFailCounts = {};
   // Wakeup state — counters AND identity fields MUST reset together.
   // Leaving wakeupSubtaskId set would cause incorrect subtask isolation
   // on the next implement pass (ADR 002), and a lingering wakeupUntil
@@ -185,7 +186,7 @@ export async function autoReviseSpec(
   deps.taskStore.clearArtifacts(pipeline.taskId, 'plan');
 
   // Also clear additional revision-related files that should not persist
-  const extraFiles = ['qa_feedback.md', 'completion_summary.md', 'human_feedback.md', 'human_feedback_before_bounce.md'];
+  const extraFiles = ['qa_feedback.md', 'completion_summary.md', 'human_feedback.md', 'human_feedback_before_bounce.md', 'qa_report_before_bounce.json'];
   for (const f of extraFiles) {
     try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
   }

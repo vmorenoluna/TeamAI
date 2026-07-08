@@ -273,13 +273,13 @@ describe('_writeQaFeedback', () => {
     expect(content).toContain('QA Feedback');
   });
 
-  // ── Severity embedded in plan.json patch tags ──────────────────────
+  // ── QA ISSUE patch tags (severity removed) ──────────────────────
 
-  it('embeds critical severity in [QA ISSUE (critical): ...] patch tag', () => {
+  it('writes [QA ISSUE: ...] tag without severity', () => {
     const report = {
       overall: 'FAIL',
       additional_issues: [
-        { severity: 'critical', description: 'Memory leak', file: 'src/featureA.ts', fix_needed: 'Add cleanup' },
+        { description: 'Memory leak', file: 'src/featureA.ts', fix_needed: 'Add cleanup' },
       ],
     };
 
@@ -289,16 +289,16 @@ describe('_writeQaFeedback', () => {
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
     const subtaskA = plan.subtasks.find((s: any) => s.id === 1);
     expect(subtaskA.acceptance_criteria.some((ac: string) =>
-      ac === '[QA ISSUE (critical): Memory leak → Fix: Add cleanup]'
+      ac === '[QA ISSUE: Memory leak → Fix: Add cleanup]'
     )).toBe(true);
     expect(subtaskA.qa_flagged).toBe(true);
   });
 
-  it('embeds warning severity in [QA ISSUE (warning): ...] patch tag', () => {
+  it('writes [QA ISSUE: ...] tag without fix_needed', () => {
     const report = {
       overall: 'FAIL',
       additional_issues: [
-        { severity: 'warning', description: 'Deprecated API', file: 'src/featureB.ts' },
+        { description: 'Deprecated API', file: 'src/featureB.ts' },
       ],
     };
 
@@ -308,16 +308,16 @@ describe('_writeQaFeedback', () => {
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
     const subtaskB = plan.subtasks.find((s: any) => s.id === 2);
     expect(subtaskB.acceptance_criteria.some((ac: string) =>
-      ac === '[QA ISSUE (warning): Deprecated API]'
+      ac === '[QA ISSUE: Deprecated API]'
     )).toBe(true);
     expect(subtaskB.qa_flagged).toBe(true);
   });
 
-  it('embeds suggestion severity in [QA ISSUE (suggestion): ...] patch tag', () => {
+  it('flags issue even without fix_needed — just description', () => {
     const report = {
       overall: 'FAIL',
       additional_issues: [
-        { severity: 'suggestion', description: 'Add JSDoc comments', file: 'src/featureA.ts' },
+        { description: 'Add JSDoc comments', file: 'src/featureA.ts' },
       ],
     };
 
@@ -327,15 +327,15 @@ describe('_writeQaFeedback', () => {
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
     const subtaskA = plan.subtasks.find((s: any) => s.id === 1);
     expect(subtaskA.acceptance_criteria.some((ac: string) =>
-      ac === '[QA ISSUE (suggestion): Add JSDoc comments]'
+      ac === '[QA ISSUE: Add JSDoc comments]'
     )).toBe(true);
   });
 
-  it('embeds error severity (newly added) in [QA ISSUE (error): ...] patch tag', () => {
+  it('writes [QA ISSUE: ...] with fix_needed', () => {
     const report = {
       overall: 'FAIL',
       additional_issues: [
-        { severity: 'error', description: 'Null pointer dereference', file: 'src/featureA.ts', fix_needed: 'Add null check' },
+        { description: 'Null pointer dereference', file: 'src/featureA.ts', fix_needed: 'Add null check' },
       ],
     };
 
@@ -345,12 +345,12 @@ describe('_writeQaFeedback', () => {
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
     const subtaskA = plan.subtasks.find((s: any) => s.id === 1);
     expect(subtaskA.acceptance_criteria.some((ac: string) =>
-      ac === '[QA ISSUE (error): Null pointer dereference → Fix: Add null check]'
+      ac === '[QA ISSUE: Null pointer dereference → Fix: Add null check]'
     )).toBe(true);
     expect(subtaskA.qa_flagged).toBe(true);
   });
 
-  it('falls back to unknown severity when severity is missing from additional_issues', () => {
+  it('still flags issue when description is the only field (no severity needed)', () => {
     const report = {
       overall: 'FAIL',
       additional_issues: [
@@ -364,7 +364,7 @@ describe('_writeQaFeedback', () => {
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
     const subtaskA = plan.subtasks.find((s: any) => s.id === 1);
     expect(subtaskA.acceptance_criteria.some((ac: string) =>
-      ac.includes('[QA ISSUE (unknown)')
+      ac.includes('[QA ISSUE:')
     )).toBe(true);
   });
 });
@@ -501,7 +501,7 @@ describe('subtaskFeedback — severity cleaning regex', () => {
   const cleanCriteria = (ac: string): string => {
     return ac
       .replace(/\s*\[QA CORRECTION:\s*/g, '[BLOCKER] ')
-      .replace(/\s*\[QA ISSUE\s*\((\w*)\):\s*/g, '[$1] ')
+      .replace(/\s*\[QA ISSUE\s*(?:\((?:\w*)\))?:\s*/g, '')
       .replace(/\]$/, '');
   };
 
@@ -510,36 +510,39 @@ describe('subtaskFeedback — severity cleaning regex', () => {
       .toBe('[BLOCKER] Handle null inputs');
   });
 
-  it('transforms [QA ISSUE (critical): desc → Fix: fix] → [critical] desc → Fix: fix', () => {
+  it('strips [QA ISSUE: ...] prefix — severity removed', () => {
+    expect(cleanCriteria('[QA ISSUE: Memory leak → Fix: Add cleanup]'))
+      .toBe('Memory leak → Fix: Add cleanup');
+  });
+
+  it('strips legacy [QA ISSUE (critical): ...] prefix for backward compat', () => {
     expect(cleanCriteria('[QA ISSUE (critical): Memory leak → Fix: Add cleanup]'))
-      .toBe('[critical] Memory leak → Fix: Add cleanup');
+      .toBe('Memory leak → Fix: Add cleanup');
   });
 
-  it('transforms [QA ISSUE (warning): desc] → [warning] desc', () => {
+  it('strips legacy [QA ISSUE (warning): ...] prefix for backward compat', () => {
     expect(cleanCriteria('[QA ISSUE (warning): Deprecated API]'))
-      .toBe('[warning] Deprecated API');
+      .toBe('Deprecated API');
   });
 
-  it('transforms [QA ISSUE (suggestion): desc] → [suggestion] desc', () => {
+  it('strips legacy [QA ISSUE (suggestion): ...] prefix for backward compat', () => {
     expect(cleanCriteria('[QA ISSUE (suggestion): Add JSDoc comments]'))
-      .toBe('[suggestion] Add JSDoc comments');
+      .toBe('Add JSDoc comments');
   });
 
-  it('transforms [QA ISSUE (error): desc → Fix: fix] → [error] desc → Fix: fix', () => {
+  it('strips legacy [QA ISSUE (error): desc → Fix: fix] prefix for backward compat', () => {
     expect(cleanCriteria('[QA ISSUE (error): Null pointer dereference → Fix: Add null check]'))
-      .toBe('[error] Null pointer dereference → Fix: Add null check');
+      .toBe('Null pointer dereference → Fix: Add null check');
   });
 
-  it('handles unknown severity gracefully (e.g. custom severity from QA agent)', () => {
-    // The regex captures any \w* word — even non-standard severities
+  it('strips legacy severity regardless of label (backward compat)', () => {
     expect(cleanCriteria('[QA ISSUE (high): Performance regression → Fix: Add cache]'))
-      .toBe('[high] Performance regression → Fix: Add cache');
+      .toBe('Performance regression → Fix: Add cache');
   });
 
-  it('handles missing/empty severity — produces [] prefix', () => {
-    // \w* allows zero-length match — empty parens produce empty bracket tag
+  it('strips empty severity parens from legacy tags', () => {
     expect(cleanCriteria('[QA ISSUE (): No severity given]'))
-      .toBe('[] No severity given');
+      .toBe('No severity given');
   });
 
   it('passes through non-QA criteria unchanged', () => {
@@ -550,16 +553,12 @@ describe('subtaskFeedback — severity cleaning regex', () => {
   });
 
   it('strips only trailing bracket — preserves brackets in description text', () => {
-    expect(cleanCriteria('[QA ISSUE (critical): Fix the [login] button]'))
-      .toBe('[critical] Fix the [login] button');
+    expect(cleanCriteria('[QA ISSUE: Fix the [login] button]'))
+      .toBe('Fix the [login] button');
   });
 
-  it('handles multiple QA CORRECTION + QA ISSUE entries in the same criteria string', () => {
-    // In practice each criteria entry is a single tag, but the regex is applied
-    // per-string with /g flag. The closing bracket from the first tag is preserved
-    // (only the last ] is stripped) — this is expected since plan.json stores tags
-    // as separate array elements, not concatenated strings.
+  it('handles multiple QA CORRECTION + QA ISSUE entries (backward compat)', () => {
     const input = '[QA ISSUE (critical): Fix A][QA ISSUE (warning): Fix B]';
-    expect(cleanCriteria(input)).toBe('[critical] Fix A][warning] Fix B');
+    expect(cleanCriteria(input)).toBe('Fix A]Fix B');
   });
 });

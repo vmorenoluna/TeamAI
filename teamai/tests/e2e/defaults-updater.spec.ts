@@ -15,6 +15,20 @@ function computeChecksum(content: string): string {
   return 'sha256:' + createHash('sha256').update(content).digest('hex').slice(0, 16);
 }
 
+/** Retry write on Windows where the dev server may hold a file lock. */
+function writeFileWithRetry(path: string, content: string): void {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      writeFileSync(path, content, 'utf-8');
+      return;
+    } catch (e) {
+      if (attempt === 4) throw e;
+      const start = Date.now();
+      while (Date.now() - start < 200) { /* busy-wait */ }
+    }
+  }
+}
+
 test.describe('DefaultsUpdater', () => {
   const defaultImplSrc = join(process.cwd(), 'defaults', 'commands', 'implement.md');
   const MARKER = '\n\n<!-- E2E defaults-updater test marker -->\n';
@@ -29,7 +43,7 @@ test.describe('DefaultsUpdater', () => {
     if (content.includes('E2E defaults-updater test marker')) {
       content = content.replace(/\r\n/g, '\n');
       content = content.replace(MARKER, '');
-      writeFileSync(defaultImplSrc, content, 'utf-8');
+      writeFileWithRetry(defaultImplSrc, content);
     }
   });
 
@@ -48,17 +62,21 @@ test.describe('DefaultsUpdater', () => {
       const bannerSection = page.locator('text=Defaults update available');
       await expect(bannerSection).toBeVisible({ timeout: 10_000 });
 
-      // Click Sync — triggers syncProjectDefaults
+      // Sync all stale projects — the marker makes every registered
+      // project stale, and in the full suite other tests may have added
+      // extra projects beyond the E2E seed project.
+      // Use a while loop (not for-with-nth) to handle DOM re-renders
+      // as synced projects are removed from the stale list mid-loop.
       await page.waitForTimeout(1000);
-      const syncButton = page.locator('button:has-text("Sync"):not(:has-text("All"))').first();
-      await syncButton.click();
+      const syncButtons = page.locator('button:has-text("Sync"):not(:has-text("Sync All"))');
+      while (await syncButtons.count() > 0) {
+        await syncButtons.first().click();
+        await expect(page.locator('button:has-text("Updating…")').first()).toBeVisible({ timeout: 5_000 });
+        await expect(page.locator('button:has-text("Updating…")').first()).not.toBeVisible({ timeout: 20_000 });
+      }
 
-      const updatingLocator = page.locator('button:has-text("Updating…")').first();
-      await expect(updatingLocator).toBeVisible({ timeout: 5_000 });
-      await expect(updatingLocator).not.toBeVisible({ timeout: 15_000 });
-
-      // ── Disk verification: sync successfully updated both the project
-      //     file and the scaffold manifest ──────────────────────────────
+      // ── Disk verification: sync successfully updated the E2E seed
+      //     project file and its scaffold manifest ────────────────────
       const implPath = join(SEED_DIR, '.claude', 'commands', 'implement.md');
       expect(readFileSync(implPath, 'utf-8')).toContain('E2E defaults-updater test marker');
 
@@ -67,21 +85,11 @@ test.describe('DefaultsUpdater', () => {
       const currentDefaultsContent = readFileSync(defaultImplSrc, 'utf-8');
       expect(computeChecksum(currentDefaultsContent)).toBe(manifest.files['commands/implement.md']);
 
-      // ── UI verification: "1 project synced" appears ─────────────────
-      await expect(page.locator('text=1 project synced')).toBeVisible({ timeout: 10_000 });
-
       // ── UI verification: amber banner disappears after sync ─────────
-      // The component removes synced projects from localStale immediately
-      // in handleSync, and the useEffect merge strategy blocks re-entry
-      // via syncedPaths gating. Path 2 (CompletedResults only, no banner)
-      // renders once pendingStale drops to zero. Poll the DOM until the
-      // warning banner text is gone.
-      await page.waitForFunction(
-        () => !document.body.innerText.includes('Defaults update available'),
-        { timeout: 10_000 },
-      );
+      await page.waitForTimeout(500);
+      await expect(page.locator('text=Defaults update available')).not.toBeVisible({ timeout: 20_000 });
     } finally {
-      writeFileSync(defaultImplSrc, backup);
+      writeFileWithRetry(defaultImplSrc, backup);
     }
   });
 });

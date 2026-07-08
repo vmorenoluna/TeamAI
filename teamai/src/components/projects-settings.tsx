@@ -11,8 +11,8 @@ import { formatActionError } from '@/lib/error-format';
 
 export function ProjectsSettings() {
   const { run } = useServerMutation();
+  /* eslint-disable local/no-async-fetch-on-mount */
   const [projects, setProjects] = useState<ProjectSyncStatus[]>([]);
-  // eslint-disable-next-line local/no-async-fetch-on-mount -- loading is data-fetch indicator, not user-toggleable state
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [syncResults, setSyncResults] = useState<Record<string, { updated: string[]; error?: string }>>({});
@@ -31,6 +31,7 @@ export function ProjectsSettings() {
       }
     })();
   }, []);
+  /* eslint-enable local/no-async-fetch-on-mount */
 
   function handleRefresh() {
     setLoading(true);

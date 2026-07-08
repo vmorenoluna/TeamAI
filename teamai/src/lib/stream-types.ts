@@ -89,7 +89,8 @@ export interface QACriterion {
 }
 
 export interface QAIssue {
-  severity: 'critical' | 'warning' | 'suggestion';
+  /** @deprecated Severity is no longer used by the pipeline — all issues are mandatory. */
+  severity?: 'critical' | 'warning' | 'suggestion';
   description: string;
   file?: string;
   fix_needed?: string;

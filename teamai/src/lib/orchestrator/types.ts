@@ -37,6 +37,9 @@ export interface TaskPipeline {
   wakeupArtifact?: string;
   /** Consecutive wakeup attempts for the current subtask (ADR 002) */
   wakeupAttemptCount?: number;
+  /** Map of FAIL criterion text → number of consecutive QA cycles it has appeared unchanged.
+   *  Used by the orchestrator to escalate persisted failures in the rework prompt. */
+  persistedCriterionFailCounts?: Record<string, number>;
 }
 
 // ── QA report types ───────────────────────────────────────────────────────
@@ -55,6 +58,7 @@ export interface QaIssue {
   message?: string;
   file?: string;
   fix_needed?: string;
+  /** @deprecated Severity is no longer used — all additional_issues are mandatory. */
   severity?: string;
 }
 

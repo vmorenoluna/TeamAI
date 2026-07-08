@@ -1355,7 +1355,7 @@ describe('Orchestrator', () => {
       expect(content).toContain('**All endpoints documented**');
       expect(content).toContain('Missing DELETE');
       expect(content).not.toContain('Examples included'); // PASS criteria excluded
-      expect(content).toContain('[error] DELETE endpoint not documented');
+      expect(content).toContain('DELETE endpoint not documented');
     });
 
     it('handles report with no criteria or issues gracefully', () => {

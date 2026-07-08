@@ -61,6 +61,32 @@ This means on a rework pass where only one criterion failed and its file was cha
    - Style: Does it match existing code conventions?
    - Regressions: Could this break existing functionality?
 
+### Step 5a: Label/Assertion Mismatch Detection
+
+**Active whenever a criterion involves a numeric/count requirement** (e.g.,
+"at least 3 positive cases", "no occurrences of X remain", "Y occurrences exist").
+
+For count-based criteria, do NOT trust comments, labels, or variable names as
+proof that a specific case counts toward the requirement. Comments lie;
+assertions don't.
+
+1. For each candidate item that could satisfy the count requirement:
+   - Read the item's actual assertion logic, not its comment or label.
+   - Classify what the assertion actually proves (positive, negative, zero, no-op).
+2. If any candidate has a label/comment that says one thing but an assertion
+   that proves something different (e.g., a test case commented as "// Positive
+   case 2" but asserting `result shouldBe 0`), flag it as an
+   `additional_issues` entry:
+   - **description**: "Test case at [file:line] is labeled as '[label]' but asserts [what it actually asserts] — this inflates the count for criterion '[criterion text]'"
+   - **file**: exact file path and line number
+   - **fix_needed**: "Fix the assertion to match the label, or relabel/remove the case"
+3. The FAIL criterion itself should remain FAIL until the actual count of
+   correctly-asserted cases meets the requirement. The label/assertion mismatch
+   is a separate issue that the coder must also fix.
+4. Apply the same rigor to negative counts ("no occurrences of X") — grep
+   results alone are not sufficient; verify that each occurrence actually
+   does what the grep keyword suggests.
+
 ## Step 6: Run Test Suite
 
 > ⚠️ **ON REWORK PASSES: Run the FULL suite.** The coder was told to run tests,
@@ -86,7 +112,7 @@ This means on a rework pass where only one criterion failed and its file was cha
 4. If tests fail:
    - Failures in code the coder was assigned to change → standard FAIL on
      the relevant acceptance criteria.
-   - Failures in code the coder was NOT supposed to touch → add a **critical**
+   - Failures in code the coder was NOT supposed to touch → add an
      `additional_issues` entry (regression / unintended side effect).
 5. Record the test command used and the result (pass/fail + any failure output)
    as evidence in the QA report.
@@ -109,7 +135,7 @@ When spec concerns are present, the task goes to human review — the reviewer d
 
 > ⚠️ **REWORK PASS: Check for unauthorized formula changes.** The coder was told
 > NOT to change formulas, algorithms, or domain logic during QA fixes. If they did
-> anyway, that's a critical issue — it means the fix approach is wrong and the spec
+> anyway, that's an issue — it means the fix approach is wrong and the spec
 > likely needs revision.
 
 **Trigger**: If a previous `qa_report.json` exists in `.teamai/{slug}/`, this is a rework pass — activate this step.
@@ -117,7 +143,7 @@ When spec concerns are present, the task goes to human review — the reviewer d
 1. Examine the git diff for changes to algorithms, mathematical expressions, formulas, or business logic.
 2. Cross-reference any such changes against the QA issues from the previous review (check the previous `qa_report.json` in `.teamai/{slug}/`).
 3. If the coder changed a formula or algorithm that was NOT part of the QA issues:
-   - Add a **critical** severity entry to `additional_issues`: "Coder changed domain logic outside QA fix scope: [describe the formula/algorithm change]"
+   - Add an entry to `additional_issues`: "Coder changed domain logic outside QA fix scope: [describe the formula/algorithm change]"
    - Populate `spec_concerns` using the same criteria as Step 7 if the formula change is a spec-level deviation
 4. A coder inventing a new formula during a qa-fix pass is a red flag — it means the fix approach is wrong and the spec likely needs revision.
 
@@ -150,18 +176,11 @@ The orchestrator uses this to route cleanup failures directly without spawning a
   ],
   "additional_issues": [
     {
-      "severity": "critical" | "error" | "warning" | "suggestion",
       "description": "issue found",
       "file": "path",
       "fix_needed": "how to fix"
     }
   ],
-
-Severity semantics for additional_issues:
-- **critical**: Hard blocker — the task cannot pass QA until this is fixed. Treated as equivalent to a FAIL criterion. The fixer MUST address this.
-- **error**: Same as critical — hard blocker. Used interchangeably with critical for issues that prevent QA pass.
-- **warning**: Should be addressed but does not block QA pass on its own. If time permits, fix it.
-- **suggestion**: Nice-to-have improvement. Optional — the fixer may skip this without penalty.
   "spec_concerns": [
     {
       "issue": "one-line summary of the spec problem",
@@ -172,5 +191,6 @@ Severity semantics for additional_issues:
 }
 ```
 
+**Any `additional_issues` entry means overall FAIL.** There are no severity levels — every issue found beyond the spec's acceptance criteria is a hard blocker. The coder MUST fix all of them.
+
 Only include `spec_concerns` if spec gaps were detected. Omit the field entirely if all FAILs are implementation bugs.
-```

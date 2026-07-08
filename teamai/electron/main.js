@@ -8,6 +8,7 @@
  * In development (ELECTRON_DEV=true), the server runs with tsx watch for HMR.
  * In production (packaged by electron-builder), it runs the production server.
  */
+/* eslint-disable @typescript-eslint/no-require-imports */
 let mainWindow = null;
 
 const { app, BrowserWindow, shell, session } = require('electron');
