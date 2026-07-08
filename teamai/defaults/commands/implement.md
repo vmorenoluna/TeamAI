@@ -47,26 +47,51 @@ If `fail_type` is `"code"` or absent, proceed with the standard QA rework steps 
 ### Standard QA Rework Steps
 
 1. Read the QA feedback FIRST. It takes priority over everything else.
-2. Address ONLY the QA issues listed. The acceptance criteria below are limited
+
+2. **⚠️ PERSISTED FAILURES CHECK**: If the QA feedback contains a "⚠️ PERSISTED
+   FAILURE" section at the very top, those criteria have failed identically
+   across multiple consecutive QA cycles. They MUST be resolved before
+   addressing anything else. The escalation text tells you
+   exactly how many times each criterion has failed unchanged. Do NOT
+   deprioritize a persisted failure in favor of another issue.
+
+3. **Per-criterion checklist — MANDATORY before considering a FAIL criterion resolved**:
+   For EVERY FAIL criterion (especially those with numeric/count requirements
+   like "must have at least N cases of X" or "Y occurrences remain"):
+
+   a) **Enumerate**: List every existing case/candidate/occurrence explicitly.
+   b) **Classify assertion direction**: For each case that involves a test
+      assertion, read the actual assertion logic — NOT the comment, label, or
+      variable name. A test case that is commented as "positive case 2" but
+      asserts a zero/no-op result does NOT count as a positive case.
+   c) **Confirm the count**: After classification, verify that the count of
+      cases with the correct assertion direction matches the requirement.
+   d) **Summary report**: Print a line-per-case breakdown before marking
+      the criterion resolved.
+
+   Never trust comments, labels, or variable names as proof of satisfaction.
+   Comments lie; assertions don't.
+
+4. Address ONLY the QA issues listed. The acceptance criteria below are limited
    to items marked [QA CORRECTION] or [QA ISSUE] — fix those and nothing else.
-3. Do NOT re-read the full spec or re-validate criteria that QA already passed.
+5. Do NOT re-read the full spec or re-validate criteria that QA already passed.
    Those were verified by the QA agent and require no changes.
-4. For each QA issue:
+6. For each QA issue:
    - Address it even if the current code already satisfies the original plan.
    - If the issue requires a different approach than the plan, follow the QA feedback
      and note the deviation in your summary.
-5. Do NOT skip an issue because the code "already matches the plan."
-6. Do NOT mark the subtask as complete unless ALL QA issues are addressed.
-   - Issues marked as **critical** or **error** severity are HARD BLOCKERS — they carry the same weight as FAIL criteria. You MUST fix them; they are not suggestions.
-   - Only **suggestion** severity items are optional.
-7. Focus on the specific issues listed — don't refactor unrelated code.
-8. **Run the full test suite** after all fixes are committed to catch regressions
+7. Do NOT skip an issue because the code "already matches the plan."
+8. Do NOT mark the subtask as complete unless ALL QA issues are addressed.
+   - EVERY issue listed in the QA feedback MUST be fixed. There are no optional or skippable items.
+   - Failed criteria, additional issues — all of them are requirements. Fix them all.
+9. Focus on the specific issues listed — don't refactor unrelated code.
+10. **Run the full test suite** after all fixes are committed to catch regressions
    on already-passed subtasks that shouldn't be affected by your changes. Run
    the command ONCE and wait — do not re-run it repeatedly. Capture only the
    pass/fail summary line — do not read the full test output into context unless a
    failure requires diagnosis.
    See `.claude/teamai-workflow.md` for full guidance on long-running scripts.
-9. **CRITICAL: Do NOT change formulas, algorithms, or domain logic.** QA fixes
+11. **CRITICAL: Do NOT change formulas, algorithms, or domain logic.** QA fixes
    are surgical corrections of implementation defects — they are NOT opportunities
    to redesign the solution. If an issue seems to require changing a formula or
    algorithm, STOP: this is a spec concern that must be escalated, not fixed in place.

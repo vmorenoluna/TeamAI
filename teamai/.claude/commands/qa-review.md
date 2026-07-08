@@ -9,6 +9,18 @@ Read the spec at: $ARGUMENTS
 
 Check whether a previous `qa_report.json` already exists in `.teamai/{slug}/`.
 
+> ⚠️ **REWORK PASS: DON'T SKIP VERIFICATION.** A previous QA report exists —
+> that means the coder has made changes, and your job is to verify those changes
+> haven't broken anything. Carry forward ONLY criteria whose files haven't changed.
+> For everything else: re-verify from scratch. The coder was told to fix specific
+> issues — they may have introduced regressions elsewhere.
+
+### First QA Pass
+
+**If it does NOT exist** (first QA pass) → proceed normally from Step 1.
+
+### Rework Pass
+
 **If it DOES exist** (this is a rework pass):
 1. Read the previous `qa_report.json`. Note which criteria previously FAILed and which PASSed.
 2. Read `head_at_review` from the previous report (the sha of the commit QA last reviewed).
@@ -19,15 +31,19 @@ Check whether a previous `qa_report.json` already exists in `.teamai/{slug}/`.
 5. For each criterion that previously **FAILed** → always re-verify from scratch.
 6. Skip Steps 1–4 of the Review Process for carry-forward criteria (they are already verified).
 
-**If it does NOT exist** (first QA pass) → proceed normally from Step 1.
-
 This means on a rework pass where only one criterion failed and its file was changed, QA only needs to re-verify that one criterion — not all of them.
 
 ## Review Process
+
+### Step 1–4: Gather Evidence
+
 1. Read the spec's acceptance criteria.
 2. Read every file listed in the spec's "Files to Modify" section. Read the current file content — not just the diff.
 3. Check the git diff to see what actually changed: `git diff origin/HEAD...HEAD`
 4. **Ticket-creation subtasks**: If the coder's summary contains `[SKIPPED] Ticket creation is the analyst's responsibility`, treat all acceptance criteria for that subtask as **PASS**. Creating files under `.teamai/` is explicitly out of scope for the coder role — the analyst handles follow-up tickets. Do NOT mark these criteria as FAIL.
+
+### Step 5: Evaluate Each Criterion
+
 5. For each acceptance criterion, determine PASS or FAIL with evidence from the actual file content:
    - If a criterion says "no occurrences of X remain": grep the relevant files and paste the result.
    - If a criterion says "Y is used instead of Z": read the file and confirm.
@@ -45,7 +61,38 @@ This means on a rework pass where only one criterion failed and its file was cha
    - Style: Does it match existing code conventions?
    - Regressions: Could this break existing functionality?
 
+### Step 5a: Label/Assertion Mismatch Detection
+
+**Active whenever a criterion involves a numeric/count requirement** (e.g.,
+"at least 3 positive cases", "no occurrences of X remain", "Y occurrences exist").
+
+For count-based criteria, do NOT trust comments, labels, or variable names as
+proof that a specific case counts toward the requirement. Comments lie;
+assertions don't.
+
+1. For each candidate item that could satisfy the count requirement:
+   - Read the item's actual assertion logic, not its comment or label.
+   - Classify what the assertion actually proves (positive, negative, zero, no-op).
+2. If any candidate has a label/comment that says one thing but an assertion
+   that proves something different (e.g., a test case commented as "// Positive
+   case 2" but asserting `result shouldBe 0`), flag it as an
+   `additional_issues` entry:
+   - **description**: "Test case at [file:line] is labeled as '[label]' but asserts [what it actually asserts] — this inflates the count for criterion '[criterion text]'"
+   - **file**: exact file path and line number
+   - **fix_needed**: "Fix the assertion to match the label, or relabel/remove the case"
+3. The FAIL criterion itself should remain FAIL until the actual count of
+   correctly-asserted cases meets the requirement. The label/assertion mismatch
+   is a separate issue that the coder must also fix.
+4. Apply the same rigor to negative counts ("no occurrences of X") — grep
+   results alone are not sufficient; verify that each occurrence actually
+   does what the grep keyword suggests.
+
 ## Step 6: Run Test Suite
+
+> ⚠️ **ON REWORK PASSES: Run the FULL suite.** The coder was told to run tests,
+> but they may have introduced regressions in areas QA previously passed.
+> Independent verification is mandatory.
+
 **Run the project's test suite to verify the implementation end-to-end.**
 
 1. Find the test command from the project's build config, Makefile, or package.json.
@@ -65,7 +112,7 @@ This means on a rework pass where only one criterion failed and its file was cha
 4. If tests fail:
    - Failures in code the coder was assigned to change → standard FAIL on
      the relevant acceptance criteria.
-   - Failures in code the coder was NOT supposed to touch → add a **critical**
+   - Failures in code the coder was NOT supposed to touch → add an
      `additional_issues` entry (regression / unintended side effect).
 5. Record the test command used and the result (pass/fail + any failure output)
    as evidence in the QA report.
@@ -85,12 +132,18 @@ Flag a spec concern when:
 When spec concerns are present, the task goes to human review — the reviewer decides whether to revise the spec. Not all FAIL criteria are spec concerns; only flag when the *specification* is the root cause, not the implementation.
 
 ## Step 8: Domain Logic Integrity Check
+
+> ⚠️ **REWORK PASS: Check for unauthorized formula changes.** The coder was told
+> NOT to change formulas, algorithms, or domain logic during QA fixes. If they did
+> anyway, that's an issue — it means the fix approach is wrong and the spec
+> likely needs revision.
+
 **Trigger**: If a previous `qa_report.json` exists in `.teamai/{slug}/`, this is a rework pass — activate this step.
 
 1. Examine the git diff for changes to algorithms, mathematical expressions, formulas, or business logic.
 2. Cross-reference any such changes against the QA issues from the previous review (check the previous `qa_report.json` in `.teamai/{slug}/`).
 3. If the coder changed a formula or algorithm that was NOT part of the QA issues:
-   - Add a **critical** severity entry to `additional_issues`: "Coder changed domain logic outside QA fix scope: [describe the formula/algorithm change]"
+   - Add an entry to `additional_issues`: "Coder changed domain logic outside QA fix scope: [describe the formula/algorithm change]"
    - Populate `spec_concerns` using the same criteria as Step 7 if the formula change is a spec-level deviation
 4. A coder inventing a new formula during a qa-fix pass is a red flag — it means the fix approach is wrong and the spec likely needs revision.
 
@@ -123,18 +176,11 @@ The orchestrator uses this to route cleanup failures directly without spawning a
   ],
   "additional_issues": [
     {
-      "severity": "critical" | "error" | "warning" | "suggestion",
       "description": "issue found",
       "file": "path",
       "fix_needed": "how to fix"
     }
   ],
-
-Severity semantics for additional_issues:
-- **critical**: Hard blocker — the task cannot pass QA until this is fixed. Treated as equivalent to a FAIL criterion. The fixer MUST address this.
-- **error**: Same as critical — hard blocker. Used interchangeably with critical for issues that prevent QA pass.
-- **warning**: Should be addressed but does not block QA pass on its own. If time permits, fix it.
-- **suggestion**: Nice-to-have improvement. Optional — the fixer may skip this without penalty.
   "spec_concerns": [
     {
       "issue": "one-line summary of the spec problem",
@@ -145,5 +191,6 @@ Severity semantics for additional_issues:
 }
 ```
 
+**Any `additional_issues` entry means overall FAIL.** There are no severity levels — every issue found beyond the spec's acceptance criteria is a hard blocker. The coder MUST fix all of them.
+
 Only include `spec_concerns` if spec gaps were detected. Omit the field entirely if all FAILs are implementation bugs.
-```

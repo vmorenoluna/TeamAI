@@ -45,14 +45,13 @@ export function InsightsChat() {
     } catch (err) {
       setError(formatActionError(label, err));
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Start session on mount
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     reconnect('start chat session');
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reconnect]);
 
   const {
     rateLimited,

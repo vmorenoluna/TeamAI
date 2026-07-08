@@ -869,7 +869,7 @@ function buildSubtaskFeedback(
     for (const c of qaOnlyCriteria) {
       const cleaned = c
         .replace(/\s*\[QA CORRECTION:\s*/g, '[BLOCKER] ')
-        .replace(/\s*\[QA ISSUE\s*\((\w*)\):\s*/g, '[$1] ')
+        .replace(/\s*\[QA ISSUE\s*(?:\((?:\w*)\))?:\s*/g, '')
         .replace(/\]$/, '');
       lines.push('- ' + cleaned);
     }

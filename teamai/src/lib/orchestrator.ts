@@ -172,6 +172,7 @@ export class Orchestrator {
       if (savedState.wakeupCommand !== undefined) pipeline.wakeupCommand = savedState.wakeupCommand;
       if (savedState.wakeupArtifact !== undefined) pipeline.wakeupArtifact = savedState.wakeupArtifact;
       if (savedState.wakeupAttemptCount !== undefined) pipeline.wakeupAttemptCount = savedState.wakeupAttemptCount;
+      if (savedState.persistedCriterionFailCounts !== undefined) pipeline.persistedCriterionFailCounts = savedState.persistedCriterionFailCounts;
       if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;
     }
 
@@ -479,7 +480,7 @@ export class Orchestrator {
       spec: ['spec.md', 'plan.json'],
       plan: ['plan.json'],
       implement: [],
-      'qa-review': ['qa_report.json', 'qa_feedback.md', 'completion_summary.md'],
+      'qa-review': ['qa_report.json', 'qa_feedback.md', 'completion_summary.md', 'qa_report_before_bounce.json'],
       merge: [],
     };
 
@@ -629,7 +630,7 @@ export class Orchestrator {
     return buildSessionOpts(this.projectRoot, role, cwd, taskId, logFile);
   }
 
-  private _writeQaFeedback(pipeline: TaskPipeline, report: QaReport): void { writeQaFeedback(pipeline.specPath, report); }
+  private _writeQaFeedback(pipeline: TaskPipeline, report: QaReport): void { writeQaFeedback(pipeline.specPath, report, pipeline.persistedCriterionFailCounts); }
 
   private _writeCompletionSummary(pipeline: TaskPipeline): void { writeCompletionSummary(pipeline.specPath, pipeline.qaAttempt, pipeline.taskId, this.taskStore); }
 

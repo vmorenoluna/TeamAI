@@ -50,6 +50,7 @@ export function savePipelineState(pipeline: TaskPipeline): void {
       wakeupCommand: pipeline.wakeupCommand,
       wakeupArtifact: pipeline.wakeupArtifact,
       wakeupAttemptCount: pipeline.wakeupAttemptCount,
+      persistedCriterionFailCounts: pipeline.persistedCriterionFailCounts,
       branch: pipeline.branch,
       worktreePath: pipeline.worktreePath,
       updatedAt: new Date().toISOString(),

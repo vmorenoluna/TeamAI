@@ -166,11 +166,49 @@ export async function runQaReview(
     deps.writeCompletionSummary(pipeline);
     deps.advancePhase(pipeline, 'failed');
   } else {
-    // Snapshot QA report before bouncing back
+    // Persisted FAIL criterion detection: compare current FAIL criteria
+    // against the PREVIOUS cycle's report (read before snapshot overwrite).
+    const prevSnapshotPath = path.join(pipeline.specPath, 'qa_report_before_bounce.json');
+    const currentFailNames = new Set<string>(
+      (report.criteria || []).filter(c => c.status === 'FAIL').map(c => (c.criterion || c.name || '').trim())
+    );
+    let prevFailNames = new Set<string>();
+    if (existsSync(prevSnapshotPath) && currentFailNames.size > 0) {
+      try {
+        const prevReport: QaReport = JSON.parse(readFileSync(prevSnapshotPath, 'utf-8'));
+        prevFailNames = new Set<string>(
+          (prevReport.criteria || []).filter(c => c.status === 'FAIL').map(c => (c.criterion || c.name || '').trim())
+        );
+      } catch { /* best-effort */ }
+    }
+
+    // Snapshot QA report before bouncing back (overwrites previous snapshot)
     try {
       const bounceSnapshot = path.join(pipeline.specPath, 'qa_report_before_bounce.json');
       writeFileSync(bounceSnapshot, readFileSync(reportPath, 'utf-8'));
     } catch { /* best-effort */ }
+
+    // Update persisted criterion fail counts based on comparison
+    if (currentFailNames.size > 0 && prevFailNames.size > 0) {
+      if (!pipeline.persistedCriterionFailCounts) pipeline.persistedCriterionFailCounts = {};
+      for (const name of currentFailNames) {
+        if (prevFailNames.has(name)) {
+          // persistedCriterionFailCounts tracks the total number of consecutive
+          // QA cycles where this criterion has appeared unchanged. On first
+          // detection: previous cycle (at least 1) + current cycle = 2 total.
+          const prevTotal = pipeline.persistedCriterionFailCounts[name] || 1;
+          pipeline.persistedCriterionFailCounts[name] = prevTotal + 1;
+          appendFileSync(logFile, `\n[QA-ESCALATE] Persisted FAIL criterion detected: "${name}" has failed ${pipeline.persistedCriterionFailCounts[name]} times in a row\n`);
+        }
+      }
+      // Remove criteria that are no longer failing (they got fixed)
+      for (const name of Object.keys(pipeline.persistedCriterionFailCounts)) {
+        if (!currentFailNames.has(name)) {
+          delete pipeline.persistedCriterionFailCounts[name];
+          appendFileSync(logFile, `\n[QA-ESCALATE] Criterion "${name}" resolved — removed from persisted failures tracking\n`);
+        }
+      }
+    }
 
     // FAIL-type router
     if (report.fail_type === 'cleanup') {

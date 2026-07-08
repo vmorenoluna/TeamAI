@@ -148,7 +148,7 @@ export class TaskStore {
     const files: Record<string, string[]> = {
       spec: ['spec.md', 'plan.json', 'qa_report.json', 'spec_revision_feedback.md', 'spec_v1.md', 'spec_v2.md', 'spec_v3.md'],
       plan: ['plan.json', 'qa_report.json'],
-      qa:   ['qa_report.json', 'qa_feedback.md', 'completion_summary.md'],
+      qa:   ['qa_report.json', 'qa_feedback.md', 'completion_summary.md', 'qa_report_before_bounce.json'],
     };
     for (const f of files[level]) {
       const p = join(dir, f);

@@ -4,9 +4,34 @@ import type { TaskStore } from '../task-store';
 import type { QaReport } from './types';
 
 /** Write QA feedback for bouncing back to implement */
-export function writeQaFeedback(specPath: string, report: QaReport): void {
+export function writeQaFeedback(
+  specPath: string,
+  report: QaReport,
+  persistedCriterionFailCounts?: Record<string, number>,
+): void {
   const feedbackPath = path.join(specPath, 'qa_feedback.md');
   let content = `# QA Feedback\n\n`;
+
+  // Persisted FAIL criteria escalation: inject at the very top so the coder
+  // sees it before anything else. These are criteria that have failed
+  // identically across 2+ consecutive QA cycles.
+  if (persistedCriterionFailCounts) {
+    const escalated = Object.entries(persistedCriterionFailCounts)
+      .filter(([, count]) => count >= 2)
+      .map(([name, count]) => ({ name, count }));
+    if (escalated.length > 0) {
+      content += `## ⚠️ PERSISTED FAILURES — RESOLVE THESE FIRST ⚠️\n\n`;
+      content += `The following criteria have failed **identically** across multiple consecutive QA cycles. `;
+      content += `They MUST be resolved before addressing anything else below. `;
+      content += `Do NOT deprioritize a persisted failure in favor of another issue.\n\n`;
+      for (const { name, count } of escalated) {
+        content += `> **"${name}"** — this exact criterion has failed **${count} times in a row**.\n`;
+        content += `> Before considering it resolved, enumerate every case, verify each assertion direction (not comments/labels), and confirm the count meets the requirement.\n\n`;
+      }
+      content += `---\n\n`;
+    }
+  }
+
   content += `## ⚠️ IMPORTANT: QA Feedback OVERRIDES the plan\n\n`;
   content += `The issues listed below represent the latest requirements. `;
   content += `Where QA feedback and the plan's acceptance criteria conflict, **follow the QA feedback**. `;
@@ -32,7 +57,7 @@ export function writeQaFeedback(specPath: string, report: QaReport): void {
       const desc = issue.description || issue.message || JSON.stringify(issue);
       const file = issue.file ? ` (${issue.file})` : '';
       const fix = issue.fix_needed ? ` → Fix: ${issue.fix_needed}` : '';
-      content += `- [${issue.severity || 'error'}] ${desc}${file}${fix}\n`;
+      content += `- ${desc}${file}${fix}\n`;
     }
   }
   writeFileSync(feedbackPath, content);
@@ -83,7 +108,7 @@ export function writeQaFeedback(specPath: string, report: QaReport): void {
                 return fileBase === issueBase || f.endsWith(issue.file!) || issue.file!.endsWith(f);
               })) {
                 if (!subtask.acceptance_criteria) subtask.acceptance_criteria = [];
-                subtask.acceptance_criteria.push(`[QA ISSUE (${issue.severity || 'unknown'}): ${desc}${fix ? ` → Fix: ${fix}` : ''}]`);
+                subtask.acceptance_criteria.push(`[QA ISSUE: ${desc}${fix ? ` → Fix: ${fix}` : ''}]`);
                 subtask.qa_flagged = true;
                 modified = true;
               }
@@ -142,7 +167,7 @@ export function writeCompletionSummary(
         content += `\n### Issues\n\n`;
         for (const issue of issues) {
           const desc = issue.description || issue.message || JSON.stringify(issue);
-          content += `- ${issue.severity ? `[${issue.severity}] ` : ''}${desc}\n`;
+          content += `- ${desc}\n`;
         }
       }
     } catch { /* skip */ }
