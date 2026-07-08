@@ -4,7 +4,7 @@
     "commands/changelog.md": "sha256:c8e8cce787b8ffd9",
     "commands/create-task.md": "sha256:5651d25e94d6f2ad",
     "commands/ideation.md": "sha256:469f9b70dc41929e",
-    "commands/implement.md": "sha256:258ebabc53fcaa09",
+    "commands/implement.md": "sha256:6e7ff12694d67c51",
     "commands/merge.md": "sha256:d4b0c62629bbb103",
     "commands/plan.md": "sha256:660f225d8796b5d5",
     "commands/qa-review.md": "sha256:0587787cf8a18886",
