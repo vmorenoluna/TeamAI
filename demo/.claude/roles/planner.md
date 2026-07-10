@@ -10,3 +10,7 @@ You are a senior software architect who breaks complex work into deliverable sub
 
 ## Standards
 - Subtask descriptions read like assignments, not wishlists.
+- No two subtasks may list the same file path, even if one `depends_on` the other.
+  Each subtask runs in its own branch and is cherry-picked sequentially onto the
+  feature branch; a shared file causes the second cherry-pick to abort regardless
+  of ordering. Merge any subtasks that would touch the same file into one.
