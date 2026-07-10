@@ -2307,16 +2307,100 @@ describe('Orchestrator', () => {
   // ── markTaskDone ──────────────────────────────────────────────────
 
   describe('markTaskDone', () => {
-    it('removes worktree, updates phase to done, emits phase-change', async () => {
+    it('deletes live directory, attempts git pull, falls back to recreate task.json on pull failure, emits once', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
 
+      // Verify the task directory exists before markTaskDone
+      expect(existsSync(testData.taskDir)).toBe(true);
+
+      // Make git pull fail (simulating no remote)
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args.includes('pull')) {
+          throw new Error('fatal: Could not read from remote repository');
+        }
+        return '';
+      });
+
+      mockEmit.mockClear();
       await orch.markTaskDone(testData.taskId);
 
+      // Fallback: directory was recreated with task.json + events.jsonl
+      expect(existsSync(testData.taskDir)).toBe(true);
+      expect(existsSync(join(testData.taskDir, 'task.json'))).toBe(true);
+      expect(existsSync(join(testData.taskDir, 'events.jsonl'))).toBe(true);
+
+      // phase-change was emitted exactly once
+      expect(mockEmit).toHaveBeenCalledTimes(1);
       expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId: testData.taskId,
         phase: 'done',
       }));
+
+      // git pull was attempted
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['pull', '--ff-only', 'origin', 'master']),
+        expect.objectContaining({ cwd: testData.root }),
+      );
+    });
+
+    it('does not recreate task.json when pull succeeds (pulled copy already has phase:done)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      expect(existsSync(testData.taskDir)).toBe(true);
+
+      // Make git pull "succeed" by recreating the task directory as a side effect,
+      // simulating what a real git pull would do (restore the committed snapshot).
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args.includes('pull')) {
+          // Simulate pull restoring the committed .teamai/{slug}/ directory
+          mkdirSync(testData.taskDir, { recursive: true });
+          writeFileSync(join(testData.taskDir, 'task.json'), JSON.stringify({
+            id: testData.taskId,
+            title: 'Test Task',
+            description: 'A test task for full coverage',
+            phase: 'done',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }));
+          return '';
+        }
+        return '';
+      });
+
+      mockEmit.mockClear();
+      await orch.markTaskDone(testData.taskId);
+
+      // Pull succeeded — directory was restored from the snapshot
+      expect(existsSync(testData.taskDir)).toBe(true);
+
+      // phase-change was emitted exactly once
+      expect(mockEmit).toHaveBeenCalledTimes(1);
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
+        taskId: testData.taskId,
+        phase: 'done',
+      }));
+
+      // git pull was attempted
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['pull', '--ff-only', 'origin', 'master']),
+        expect.objectContaining({ cwd: testData.root }),
+      );
+
+      // events.jsonl should have the 'done' entry (written by updatePhase)
+      const eventsPath = join(testData.taskDir, 'events.jsonl');
+      expect(existsSync(eventsPath)).toBe(true);
+      expect(readFileSync(eventsPath, 'utf-8')).toContain('"done"');
+    });
+
+    it('throws when task does not exist', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      await expect(orch.markTaskDone('nonexistent-id')).rejects.toThrow('not found');
     });
   });
 

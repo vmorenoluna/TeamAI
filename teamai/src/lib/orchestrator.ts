@@ -1,5 +1,6 @@
-import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, rmSync, mkdirSync } from 'fs';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import { processManager, type AgentSession } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
 import { TaskStore } from './task-store';
@@ -366,8 +367,56 @@ export class Orchestrator {
   }
 
   async markTaskDone(taskId: string): Promise<void> {
+    // Snapshot task data before deleting the directory (needed for fallback).
+    const task = this.taskStore.getById(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+
     this.removeWorktree(taskId);
-    this.taskStore.updatePhase(taskId, 'done');
+
+    // Delete the live .teamai/{slug}/ directory so pulling the just-merged
+    // commit won't collide with local files.
+    const dir = this.taskStore.getDirById(taskId);
+    rmSync(dir, { recursive: true, force: true });
+
+    // Try to pull the just-merged commit into the main project root.
+    // On success, the pulled .teamai/{slug}/task.json already has phase: "done"
+    // (set by commitArtifactsToWorktree before the merge).
+    let pulled = false;
+    try {
+      execFileSync('git', ['pull', '--ff-only', 'origin', 'master'], {
+        cwd: this.projectRoot,
+        stdio: 'pipe',
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      });
+      pulled = true;
+    } catch {
+      // Pull failed — non-fast-forward, offline, etc.
+      // Fall through to recreate the task so it doesn't disappear from kanban.
+    }
+
+    if (pulled) {
+      // Pull succeeded — the pulled .teamai/{slug}/task.json already has
+      // phase: "done" (set by commitArtifactsToWorktree). Call updatePhase
+      // to append the final events.jsonl entry so the phase-change history
+      // is complete.
+      this.taskStore.updatePhase(taskId, 'done');
+    } else {
+      // Pull failed — non-fast-forward, offline, etc.
+      // Fallback: recreate a minimal task.json so the task stays visible
+      // in the kanban until the next successful pull.
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, 'task.json'), JSON.stringify({
+        ...task,
+        phase: 'done',
+        updatedAt: new Date().toISOString(),
+      }, null, 2));
+      const event = { phase: 'done', timestamp: new Date().toISOString() };
+      appendFileSync(path.join(dir, 'events.jsonl'), JSON.stringify(event) + '\n');
+    }
+
+    // Only emit phase-change once, after the full delete→pull(→fallback)
+    // sequence resolves — UI listeners refetch exactly once against the
+    // final, settled state.
     processManager.emit('phase-change', { taskId, phase: 'done', projectRoot: this.projectRoot });
   }
 

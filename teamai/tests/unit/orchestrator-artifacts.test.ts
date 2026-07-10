@@ -190,10 +190,10 @@ describe('_commitArtifactsToWorktree', () => {
     expect(committedTask.phase).toBe('done');
     expect(committedTask.updatedAt).toBeTruthy();
 
-    // _execGit should have been called with git add
+    // _execGit should have been called with git add -f .teamai/<slug>
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
-      expect.arrayContaining(['add', '.teamai/']),
+      expect.arrayContaining(['add', '-f', expect.stringContaining('.teamai/')]),
       expect.objectContaining({ cwd: worktreePath }),
     );
     // And git commit

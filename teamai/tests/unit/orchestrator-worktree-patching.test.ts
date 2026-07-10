@@ -913,7 +913,7 @@ describe('_commitArtifactsToWorktree — GIT_DIR bypass', () => {
     // Must have called host git
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
-      expect.arrayContaining(['add', '.teamai/']),
+      expect.arrayContaining(['add', '-f', expect.stringContaining('.teamai/')]),
       expect.any(Object),
     );
   });
