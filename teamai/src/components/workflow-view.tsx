@@ -41,6 +41,10 @@ const BACKWARD_TRANSITIONS: [string, string][] = [
   ['pr-open', 'implement'],
 ];
 
+const SPEC_REVISION_TRANSITIONS: [string, string][] = [
+  ['implement', 'spec'],
+];
+
 const FAILURE_TRANSITIONS: [string, string][] = [
   ['implement', 'failed'],
   ['qa-review', 'failed'],
@@ -293,7 +297,6 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
           <text key={`${key}-label`} x={lx} y={midY}
             fill={h ? (textFill ?? '#94a3b8') : (textFill ?? '#94a3b8')}
             textAnchor="middle" dominantBaseline="central"
-            transform={`rotate(-90, ${lx}, ${midY})`}
             className={`text-[9px] font-medium transition-all duration-200 ${h ? 'opacity-100' : 'opacity-60'}`}>
             {label}
           </text>,
@@ -320,7 +323,7 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
     // Backward bounce-backs — stagger label X to avoid overlap
     let bounceLabelIdx = 0;
     for (const [from, to] of BACKWARD_TRANSITIONS) {
-      const staggerX = (LEFT_X - CURVE_OFFSET - 10) + bounceLabelIdx * 16;
+      const staggerX = (LEFT_X - CURVE_OFFSET - 55) + bounceLabelIdx * 16;
       addLeftCurve(from, to,
         'stroke-amber-500/60 stroke-[1.5] stroke-dasharray-[4_4]',
         'stroke-amber-400 stroke-[2.5] stroke-dasharray-[4_4] drop-shadow-[0_0_8px_rgba(245,158,11,0.4)]',
@@ -331,12 +334,21 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
     // Failure transitions — stagger label X to avoid overlap
     let failLabelIdx = 0;
     for (const [from, to] of FAILURE_TRANSITIONS) {
-      const staggerX = (LEFT_X - CURVE_OFFSET - 40) + failLabelIdx * 16;
+      const staggerX = (LEFT_X - CURVE_OFFSET - 60) + failLabelIdx * 16;
       addLeftCurve(from, to,
         'stroke-red-500/50 stroke-[1.5] stroke-dasharray-[4_4]',
         'stroke-red-400 stroke-[2.5] stroke-dasharray-[4_4] drop-shadow-[0_0_8px_rgba(239,68,68,0.4)]',
         'arrow-left-red', 'arrow-left-red-hover', 'max attempts', '#ef444488', staggerX);
       failLabelIdx++;
+    }
+
+    // Spec revision transitions — indigo, from implement back to spec
+    for (const [from, to] of SPEC_REVISION_TRANSITIONS) {
+      const labelX = (LEFT_X - CURVE_OFFSET) - 58;
+      addLeftCurve(from, to,
+        'stroke-indigo-500/60 stroke-[1.5] stroke-dasharray-[4_4]',
+        'stroke-indigo-400 stroke-[2.5] stroke-dasharray-[4_4] drop-shadow-[0_0_8px_rgba(99,102,241,0.4)]',
+        'arrow-left-indigo', 'arrow-left-indigo-hover', 'spec revision', '#818cf899', labelX);
     }
 
     return arrows;
@@ -448,6 +460,12 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
                     </marker>
                     <marker id="arrow-left-red-hover" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
                       <polygon points="0,0 10,5 0,10" className="fill-red-400" />
+                    </marker>
+                    <marker id="arrow-left-indigo" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                      <polygon points="0,0 10,5 0,10" className="fill-indigo-500/60" />
+                    </marker>
+                    <marker id="arrow-left-indigo-hover" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                      <polygon points="0,0 10,5 0,10" className="fill-indigo-400" />
                     </marker>
                   </defs>
                   {renderArrows()}
