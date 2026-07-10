@@ -1917,6 +1917,143 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Safety-net commit excludes .teamai/ (Bug 1 fix)
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('runImplement — safety-net commit excludes .teamai/ (Bug 1)', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+
+    // Write plan.json with 2 subtasks sharing the same parallel_group
+    // to trigger isMultiGroup=true and the safety-net commit path.
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        {
+          id: 1,
+          title: 'Fix login bug',
+          description: 'Fix null pointer in login form',
+          files: ['src/login.ts'],
+          acceptance_criteria: ['No crash on null input'],
+          parallel_group: 'bug-fixes',
+        },
+        {
+          id: 2,
+          title: 'Fix dashboard bug',
+          description: 'Fix chart rendering error',
+          files: ['src/dashboard.ts'],
+          acceptance_criteria: ['Charts render correctly'],
+          parallel_group: 'bug-fixes',
+        },
+      ],
+    }));
+
+    // Mock git operations:
+    // - git status --porcelain returns dirty to trigger safety-net
+    // - cherry-pick, push, fetch, pull, rebase all succeed silently
+    // - rev-parse returns a commit hash
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        const argStr = args.join(' ');
+        if (argStr.includes('status') && argStr.includes('--porcelain')) {
+          return '?? stray-dirty-file.txt\n';
+        }
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull'
+            || args[0] === 'rebase' || args[0] === 'cherry-pick') {
+          return '';
+        }
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'branch') return '';
+        if (args[0] === 'worktree') return '';
+      }
+      return '';
+    });
+
+    // Create 2 coder sessions (one per subtask)
+    mockCreateSession
+      .mockResolvedValueOnce('sess-safety-net-st1')
+      .mockResolvedValueOnce('sess-safety-net-st2');
+  });
+
+  afterEach(() => {
+    // Clean up only the mocks this describe block modified to prevent state
+    // leakage. Do NOT use vi.resetAllMocks() — it nukes all hoisted mocks
+    // (readContainerConfig, dockerAvailable, etc.) and breaks downstream tests.
+    mockExecFileSync.mockReset();
+    mockCreateSession.mockReset();
+    project.clean();
+  });
+
+  it('uses git add with .teamai/ pathspec exclusion when worktree is dirty', async () => {
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+
+      // Wait for both coder sessions to start (sendMessage called for each)
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalledTimes(2);
+      });
+
+      // Resolve both coder sessions so the groups loop can complete
+      fireEvent('event', { sessionId: 'sess-safety-net-st1', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 20));
+      fireEvent('event', { sessionId: 'sess-safety-net-st2', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+
+      // Verify the safety-net commit used git add with .teamai/ pathspec exclusion
+      const addCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) =>
+          call[0] === 'git' &&
+          Array.isArray(call[1]) &&
+          call[1].includes('add') &&
+          call[1].includes('-A'),
+      );
+      expect(addCalls.length).toBeGreaterThan(0);
+
+      // The safety-net add command must include the .teamai/ exclusion pathspec
+      expect(addCalls[0][1]).toContain(':!.teamai');
+
+      // It must NOT be a bare `git add -A` without any filter
+      const bareAddCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) =>
+          call[0] === 'git' &&
+          Array.isArray(call[1]) &&
+          call[1].length === 2 &&
+          call[1][0] === 'add' &&
+          call[1][1] === '-A',
+      );
+      expect(bareAddCalls.length).toBe(0);
+
+      // The commit message should match the safety-net pattern
+      const commitCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) =>
+          call[0] === 'git' &&
+          Array.isArray(call[1]) &&
+          call[1].includes('commit') &&
+          (call[1] as string[]).some((a: string) => a.includes('auto-save worktree state')),
+      );
+      expect(commitCalls.length).toBe(1);
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 //  Targeted re-run — only QA-flagged subtasks on bounce-back
 // ═══════════════════════════════════════════════════════════════════════
 

@@ -398,6 +398,174 @@ describe('_commitArtifactsToWorktree', () => {
     );
   });
 
+  // ── Nested subdirectory support (Bug 2 fix) ─────────────────────────
+
+  it('recursively copies files from nested subdirectories, excluding ARTIFACT_EXCLUDE at every depth', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    // Create a nested directory structure in the source
+    const nestedDir = join(testData.taskDir, 'reports');
+    mkdirSync(nestedDir, { recursive: true });
+    const deepDir = join(nestedDir, 'subreports');
+    mkdirSync(deepDir, { recursive: true });
+
+    writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+    writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
+    writeFileSync(join(nestedDir, 'qa-results.md'), '# QA Results');
+    writeFileSync(join(nestedDir, 'output.log'), 'should be excluded');  // excluded even nested
+    writeFileSync(join(deepDir, 'detailed-report.md'), '# Detailed');
+    writeFileSync(join(deepDir, '.pipeline_state.json'), '{}');  // excluded even deep
+
+    const worktreePath = join(testData.root, 'worktree-nested');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: testData.slug,
+      specPath: testData.taskDir,
+      worktreePath,
+    });
+
+    mockExecFileSync.mockReturnValue('');
+
+    (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
+
+    const targetDir = join(worktreePath, '.teamai', basename(pipeline.specPath as string));
+
+    // Top-level files copied
+    expect(existsSync(join(targetDir, 'spec.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'plan.json'))).toBe(true);
+
+    // Nested directory and files copied
+    expect(existsSync(join(targetDir, 'reports'))).toBe(true);
+    expect(existsSync(join(targetDir, 'reports', 'qa-results.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'reports', 'subreports', 'detailed-report.md'))).toBe(true);
+
+    // Excluded files at every depth
+    expect(existsSync(join(targetDir, 'reports', 'output.log'))).toBe(false);
+    expect(existsSync(join(targetDir, 'reports', 'subreports', '.pipeline_state.json'))).toBe(false);
+
+    // Log file should count 4 copied files (spec, plan, qa-results, detailed-report)
+    const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('Committed 5 artifact file');  // 4 + task.json
+  });
+
+  it('handles empty subdirectories gracefully (copies only files)', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    const emptyDir = join(testData.taskDir, 'empty-reports');
+    mkdirSync(emptyDir, { recursive: true });
+    writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+
+    const worktreePath = join(testData.root, 'worktree-empty-subdir');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: testData.slug,
+      specPath: testData.taskDir,
+      worktreePath,
+    });
+
+    mockExecFileSync.mockReturnValue('');
+
+    (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
+
+    const targetDir = join(worktreePath, '.teamai', basename(pipeline.specPath as string));
+
+    // Top-level file still copied
+    expect(existsSync(join(targetDir, 'spec.md'))).toBe(true);
+    // Empty directory created but no files inside
+    expect(existsSync(join(targetDir, 'empty-reports'))).toBe(true);
+
+    const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('Committed 2 artifact file');  // spec + task.json
+  });
+
+  it('recursively copies 3+ levels deep, excluding ARTIFACT_EXCLUDE files at every depth', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    // Build a 3-level directory tree with excluded files mixed in at each level.
+    //
+    // taskDir/                         ← level 0
+    //   spec.md                        ← included
+    //   output.log                     ← EXCLUDED (ARTIFACT_EXCLUDE at depth 0)
+    //   benchmarks/                    ← level 1
+    //     results.json                 ← included
+    //     .pipeline_state.json         ← EXCLUDED (ARTIFACT_EXCLUDE at depth 1)
+    //     raw/                         ← level 2
+    //       dataset.csv                ← included
+    //       output.log                 ← EXCLUDED (ARTIFACT_EXCLUDE at depth 2)
+    //       archive/                   ← level 3
+    //         summary.md               ← included
+    //         .pipeline_state.json     ← EXCLUDED (ARTIFACT_EXCLUDE at depth 3)
+
+    const l1 = join(testData.taskDir, 'benchmarks');
+    const l2 = join(l1, 'raw');
+    const l3 = join(l2, 'archive');
+    mkdirSync(l1, { recursive: true });
+    mkdirSync(l2, { recursive: true });
+    mkdirSync(l3, { recursive: true });
+
+    // Level 0
+    writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+    writeFileSync(join(testData.taskDir, 'output.log'), 'excluded at L0');
+
+    // Level 1
+    writeFileSync(join(l1, 'results.json'), '{}');
+    writeFileSync(join(l1, '.pipeline_state.json'), 'excluded at L1');
+
+    // Level 2
+    writeFileSync(join(l2, 'dataset.csv'), 'col1,col2');
+    writeFileSync(join(l2, 'output.log'), 'excluded at L2');
+
+    // Level 3
+    writeFileSync(join(l3, 'summary.md'), '# Deep Summary');
+    writeFileSync(join(l3, '.pipeline_state.json'), 'excluded at L3');
+
+    const worktreePath = join(testData.root, 'worktree-deep');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: testData.slug,
+      specPath: testData.taskDir,
+      worktreePath,
+    });
+
+    mockExecFileSync.mockReturnValue('');
+
+    (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
+
+    const targetDir = join(worktreePath, '.teamai', basename(pipeline.specPath as string));
+
+    // ── Level 0 assertions ──
+    expect(existsSync(join(targetDir, 'spec.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'output.log'))).toBe(false);
+
+    // ── Level 1 assertions ──
+    expect(existsSync(join(targetDir, 'benchmarks'))).toBe(true);
+    expect(existsSync(join(targetDir, 'benchmarks', 'results.json'))).toBe(true);
+    expect(existsSync(join(targetDir, 'benchmarks', '.pipeline_state.json'))).toBe(false);
+
+    // ── Level 2 assertions ──
+    expect(existsSync(join(targetDir, 'benchmarks', 'raw'))).toBe(true);
+    expect(existsSync(join(targetDir, 'benchmarks', 'raw', 'dataset.csv'))).toBe(true);
+    expect(existsSync(join(targetDir, 'benchmarks', 'raw', 'output.log'))).toBe(false);
+
+    // ── Level 3 assertions ──
+    expect(existsSync(join(targetDir, 'benchmarks', 'raw', 'archive'))).toBe(true);
+    expect(existsSync(join(targetDir, 'benchmarks', 'raw', 'archive', 'summary.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'benchmarks', 'raw', 'archive', '.pipeline_state.json'))).toBe(false);
+
+    // 4 included files (spec, results, dataset, summary) + task.json = 5
+    const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('Committed 5 artifact file');
+  });
+
   // ── Full artifact set (spec revisions, snapshots, etc.) ────────────
 
   it('excludes output.log and .pipeline_state.json but includes spec revisions and snapshots', () => {

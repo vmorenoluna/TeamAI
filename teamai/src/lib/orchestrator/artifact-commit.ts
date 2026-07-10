@@ -36,6 +36,36 @@ export const ARTIFACT_EXCLUDE = new Set([
 // ── Commit function ───────────────────────────────────────────────────────
 
 /**
+ * Recursively copy artifacts from sourceDir to destDir, applying
+ * ARTIFACT_EXCLUDE by filename at every depth. Mirrors directory
+ * structure and returns the total number of files copied.
+ */
+function copyArtifactsRecursive(sourceDir: string, destDir: string, logFile: string): number {
+  let count = 0;
+  const entries = readdirSync(sourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (ARTIFACT_EXCLUDE.has(entry.name)) continue;
+    const srcPath = path.join(sourceDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      mkdirSync(destPath, { recursive: true });
+      const subCount = copyArtifactsRecursive(srcPath, destPath, logFile);
+      if (subCount > 0) {
+        appendFileSync(logFile, `[ARTIFACTS] Copied directory ${entry.name}/ (${subCount} file(s))\n`);
+        count += subCount;
+      }
+    } else if (entry.isFile()) {
+      copyFileSync(srcPath, destPath);
+      count++;
+    }
+    // Symlinks and other entry types are intentionally skipped.
+  }
+  return count;
+}
+
+// ── Commit function ───────────────────────────────────────────────────────
+
+/**
  * Copy the task's TeamAI artifacts into the worktree and commit them
  * so the PR includes the full story of the implementation.
  *
@@ -57,17 +87,13 @@ export function commitArtifactsToWorktree(
     mkdirSync(targetDir, { recursive: true });
   }
 
-  // Copy all files except excluded ones
+  // Recursively copy all files except excluded ones.
+  // Handles nested subdirectories (e.g. generated report folders, log directories)
+  // applying ARTIFACT_EXCLUDE by filename at every depth.
   const sourceDir = pipeline.specPath;
   let copied = 0;
   if (existsSync(sourceDir)) {
-    const entries = readdirSync(sourceDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      if (ARTIFACT_EXCLUDE.has(entry.name)) continue;
-      copyFileSync(path.join(sourceDir, entry.name), path.join(targetDir, entry.name));
-      copied++;
-    }
+    copied = copyArtifactsRecursive(sourceDir, targetDir, logFile);
   }
 
   // ── Rewrite task.json phase to "done" in the committed copy ──
