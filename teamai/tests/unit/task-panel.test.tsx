@@ -62,13 +62,16 @@ vi.mock('@/hooks/use-websocket', () => ({
 
 // SubtaskTerminalList mock (replaces AgentPanel for per-subtask terminals)
 vi.mock('@/components/subtask-terminal-list', () => ({
-  SubtaskTerminalList: ({ taskId, subtaskTerminals, qaLog, orchestratorLog }: {
+  SubtaskTerminalList: ({ taskId, subtaskTerminals, qaLog, specLog, planLog, mergeLog, orchestratorLog }: {
     taskId: string; subtaskTerminals: { id: number; title: string; log: string | null }[];
-    qaLog: string | null; orchestratorLog: string | null;
+    qaLog: string | null; specLog: string | null; planLog: string | null; mergeLog: string | null; orchestratorLog: string | null;
   }) => (
     <div data-testid="subtask-terminal-list" data-task-id={taskId}>
       <span data-testid="subtask-count">{subtaskTerminals.length}</span>
       {qaLog && <span data-testid="qa-log-present">qa</span>}
+      {specLog && <span data-testid="spec-log-present">spec</span>}
+      {planLog && <span data-testid="plan-log-present">plan</span>}
+      {mergeLog && <span data-testid="merge-log-present">merge</span>}
       {orchestratorLog && <span data-testid="orchestrator-log-present">orch</span>}
     </div>
   ),
@@ -861,6 +864,27 @@ describe('TaskDetail', () => {
 
       const panel = screen.getByTestId('subtask-terminal-list');
       expect(panel.getAttribute('data-task-id')).toBe('task-1');
+    });
+
+    it('shows Spec terminal indicator when specLog is provided', () => {
+      renderDetail();
+      fireEvent.click(screen.getByText('Terminal'));
+      // specLog defaults to null from renderDetail — no indicator
+      expect(screen.queryByTestId('spec-log-present')).not.toBeInTheDocument();
+    });
+
+    it('shows Plan terminal indicator when planLog is provided', () => {
+      renderDetail();
+      fireEvent.click(screen.getByText('Terminal'));
+      // planLog defaults to null from renderDetail — no indicator
+      expect(screen.queryByTestId('plan-log-present')).not.toBeInTheDocument();
+    });
+
+    it('shows Merge terminal indicator when mergeLog is provided', () => {
+      renderDetail();
+      fireEvent.click(screen.getByText('Terminal'));
+      // mergeLog defaults to null from renderDetail — no indicator
+      expect(screen.queryByTestId('merge-log-present')).not.toBeInTheDocument();
     });
   });
 
