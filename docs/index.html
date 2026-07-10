@@ -206,8 +206,8 @@
     <div class="nav-links">
       <a href="#kanban" class="nav-link">Kanban</a>
       <a href="#pipeline" class="nav-link">Pipeline</a>
-      <a href="#auto" class="nav-link">Auto Mode</a>
       <a href="#review" class="nav-link">Review</a>
+      <a href="#auto" class="nav-link">Auto Mode</a>
       <a href="#resume" class="nav-link">Recovery</a>
       <a href="#streaming" class="nav-link">Streaming</a>
       <a href="#extras" class="nav-link">More</a>
@@ -335,7 +335,7 @@
   <div class="container">
     <span class="section-label">Review Panel</span>
     <h2>A human always has the final say</h2>
-    <p class="section-desc">When QA finds problems, the task pauses for you to decide. The review panel shows the full quality report: what passed, what failed, and why. You choose whether to send it back for fixes, revise the original specification, merge the changes, or open a pull request.</p>
+    <p class="section-desc">When QA review passes, or when the task fails, the task pauses for you to decide. The review panel shows the full quality report: what passed, what failed, and why. You choose whether to send it back for fixes, revise the original specification, merge the changes, or open a pull request.</p>
     <div class="features-grid" style="margin-bottom: 36px;">
       <div class="feature-card">
         <div class="icon icon-blue">✓</div>
@@ -343,14 +343,9 @@
         <p>Clear pass and fail results for every acceptance criterion with detailed notes.</p>
       </div>
       <div class="feature-card">
-        <div class="icon icon-rose">⚠</div>
-        <h3>Severity Levels</h3>
-        <p>Issues graded by severity: critical, error, warning, suggestion.</p>
-      </div>
-      <div class="feature-card">
         <div class="icon icon-purple">✏️</div>
         <h3>Spec Revision</h3>
-        <p>Spec revision mode when the requirements themselves need rethinking.</p>
+        <p>Spec revision when the requirements themselves need rethinking.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-emerald">⚡</div>
@@ -377,7 +372,7 @@
           <li>Respects task dependencies and ordering</li>
           <li>Creates pull requests and monitors CI checks</li>
           <li>Merges automatically when all checks are green</li>
-          <li>Highlights automatically merged tasks for later review</li>
+          <li>Highlights automatically merged tasks for later review, so you can catch up</li>
         </ul>
       </div>
         <img src="images/automode.jpg" alt="TeamAI auto mode enabled on the kanban board" loading="lazy" style="max-width:225px;width:100%;border-radius:12px;display:block;margin:0 auto;">
