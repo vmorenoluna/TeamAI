@@ -506,6 +506,25 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
     title: 'Dark Mode Support',
     description: 'Add system-preference-based dark mode with a manual toggle in the user settings.',
     phase: 'awaiting-review',
+    spec: '# Dark Mode Support Feature Specification\n\n## Overview\nAdd system-preference-based dark mode with a manual toggle in user settings. All UI components must support both light and dark color schemes using CSS custom properties.\n\n## Acceptance Criteria\n1. All colors use CSS custom properties (var(--color-*)) — no hardcoded color values anywhere\n2. Theme toggle in settings switches between Light, Dark, and System modes\n3. Theme preference persists across page refreshes via localStorage\n4. All 127 components render correctly in dark mode with sufficient contrast\n5. System preference detected via prefers-color-scheme media query on first visit\n\n## Design Decisions\n- Token-based theming: 48 CSS custom properties defined for each theme\n- Persist to localStorage: theme key with values light, dark, or system\n- No flash on load: Theme applied via inline <script> before first paint to avoid FOUC\n- Visual regression: 34 component screenshots validated in dark mode\n',
+    plan: {
+      subtasks: [
+        { id: 1, title: 'Add CSS custom properties for color scheme', acceptance_criteria: ['All colors use var(--color-*) tokens', 'Dark palette defined alongside light'], depends_on: [], qa_flagged: false },
+        { id: 2, title: 'Implement theme toggle in settings', acceptance_criteria: ['Toggle switches between light/dark/system', 'Preference persists in localStorage'], depends_on: [1], qa_flagged: false },
+        { id: 3, title: 'Update all components to use CSS variables', acceptance_criteria: ['No hardcoded colors remain', 'All components render correctly in dark mode'], depends_on: [1], qa_flagged: false },
+      ],
+    },
+    qaReport: {
+      overall: 'PASS',
+      criteria: [
+        { name: 'CSS custom properties for all colors', status: 'PASS', notes: '48 CSS custom properties defined. All 127 components use var(--color-*) tokens. Zero hardcoded color values found.' },
+        { name: 'Theme toggle (light/dark/system)', status: 'PASS', notes: "Toggle component renders correctly with three options. System preference detected via matchMedia('prefers-color-scheme')." },
+        { name: 'Preference persists across refresh', status: 'PASS', notes: "localStorage 'theme' key survives page refresh. Inline script prevents flash of unstyled content." },
+        { name: 'All components render in dark mode', status: 'PASS', notes: '34/34 component screenshots pass visual regression. Minimum contrast ratio 4.7:1.' },
+        { name: 'No hardcoded colors anywhere', status: 'PASS', notes: 'Static analysis: zero color literals in 127 component files. ESLint rule enforced.' },
+      ],
+      additional_issues: [],
+    },
     outputLog: `[QA-REVIEW] Dark Mode Support — Attempt 1
 [SESSION] Claude Code v2.4.1 — qa-reviewer persona loaded
 
@@ -581,13 +600,6 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
 
 [AWAITING REVIEW] PR #127 is open. CI checks: 3/4 passed.
 `,
-    plan: {
-      subtasks: [
-        { id: 1, title: 'Add CSS custom properties for color scheme', acceptance_criteria: ['All colors use var(--color-*) tokens', 'Dark palette defined alongside light'], depends_on: [], qa_flagged: false },
-        { id: 2, title: 'Implement theme toggle in settings', acceptance_criteria: ['Toggle switches between light/dark/system', 'Preference persists in localStorage'], depends_on: [1], qa_flagged: false },
-        { id: 3, title: 'Update all components to use CSS variables', acceptance_criteria: ['No hardcoded colors remain', 'All components render correctly in dark mode'], depends_on: [1], qa_flagged: false },
-      ],
-    },
     events: ['backlog', 'spec', 'plan', 'implement', 'qa-review', 'awaiting-review'],
   },
   {
