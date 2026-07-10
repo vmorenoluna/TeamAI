@@ -221,7 +221,7 @@
   <div class="container">
     <h1>A Team of AI Agents<br>for Your Codebase</h1>
     <p class="subtitle">
-      TeamAI puts a full development team at your fingertips. An analyst, a planner, a coder, and a QA reviewer work together in a clean desktop app, turning feature requests into deliverables.
+      TeamAI puts a full development team at your fingertips. An analyst, a planner, a coder, and a QA reviewer work together, turning feature requests into reviewed pull requests.
     </p>
     <a href="https://github.com/vmorenoluna/TeamAI" class="hero-cta">View on GitHub</a>
   </div>
@@ -231,18 +231,18 @@
 <section>
   <div class="container">
     <span class="section-label">Why TeamAI</span>
-    <h2>The tool that lets you stay in control</h2>
+    <h2>Stay in control</h2>
     <p class="section-desc">TeamAI runs the actual Claude CLI on your machine. Each agent gets its own terminal session, its own working copy of the code, and a distinct role.</p>
     <div class="features-grid">
       <div class="feature-card">
         <div class="icon icon-blue">🖥️</div>
         <h3>Runs Locally</h3>
-        <p>Agents run as terminal processes on your computer with full access to the filesystem, git, and any other command line tool you use.</p>
+        <p>Agents run as terminal processes on your computer with full filesystem access, plus git and any command line tool you use.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-purple">🐳</div>
         <h3>Sandboxed Execution</h3>
-        <p>Each agent can work inside its own Docker container, keeping your environment clean and safer.</p>
+        <p>Each agent can work inside its own Docker container, keeping your environment clean and safe.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-emerald">⚡</div>
@@ -262,7 +262,7 @@
       <div class="feature-card">
         <div class="icon icon-cyan">🔧</div>
         <h3>Customizable Agents</h3>
-        <p>Assign the model to use for each agent and define your own roles: tailor how each one thinks, writes, and reviews to match your project and team's standards.</p>
+        <p>Assign models and define custom roles for each agent. Tailor how they think, write, and review to match your team's standards.</p>
       </div>
     </div>
   </div>
@@ -298,10 +298,10 @@
       <div class="pipeline-node"><div class="role">Merger</div><div class="phase">🔀 Merge PR</div></div>
     </div>
     <p style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:8px;">
-      When QA finds issues, the task automatically loops back to the coder with detailed feedback and severity levels.
+      When QA finds issues, the task loops back to the coder with detailed feedback.
     </p>
     <p style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:8px;">
-      When the coder finds a gap in the spec, the task automatically loops back to the analyst for a clarification.
+      When the coder finds a gap in the spec, the task loops back to the analyst for clarification.
     </p>
 
     <img src="images/workflow.jpg" alt="TeamAI pipeline view showing task detail with spec, plan, and subtask breakdown" loading="lazy" style="max-width:650px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
@@ -314,7 +314,7 @@
   <div class="container">
     <span class="section-label">Live Streaming</span>
     <h2>Watch every agent work in real time</h2>
-    <p class="section-desc">Each agent's terminal output streams live to the app. Watch the analyst write the spec, the planner break it into subtasks, the coder implement each change, and QA validate the results. Every thought, every file edit, every command ran, all visible as it happens.</p>
+    <p class="section-desc">Each agent's terminal output streams live to the app. Watch the analyst write the spec, the planner break it into subtasks, the coder implement each change, and QA validate the results — every thought, file edit, and command run, visible as it happens.</p>
 
       <img src="images/ticket-terminal.jpg" alt="TeamAI terminal view for interactive Claude agent sessions" loading="lazy" style="width:100%;border-radius:12px;">
   </div>
@@ -337,7 +337,7 @@
       <div class="text">
         <span class="section-label">Crash Recovery</span>
         <h2>Picks up right where it left off</h2>
-        <p style="color:#94a3b8;margin-bottom:16px;">If a task hits a token rate limit or the app restarts, TeamAI detects the interrupted task and resumes it automatically at the same phase, same subtask, with zero lost work.</p>
+        <p style="color:#94a3b8;margin-bottom:16px;">If a task hits a rate limit or the app restarts, TeamAI detects the interrupted task and resumes it automatically at the same phase and subtask, with zero lost work.</p>
       </div>
     </div>
 
@@ -351,7 +351,7 @@
   <div class="container">
     <span class="section-label">Review Panel</span>
     <h2>A human always has the final say</h2>
-    <p class="section-desc">When QA review passes, or when the task fails, the task pauses for you to decide. The review panel shows the full quality report: what passed, what failed, and why. You choose whether to send it back for fixes, revise the original specification, merge the changes, or open a pull request.</p>
+    <p class="section-desc">When QA completes or a task fails, the pipeline pauses for your decision. The review panel shows the full quality report — what passed, what failed, and why. Choose whether to send it back for fixes, revise the specification, merge the changes, or open a pull request.</p>
     <div class="features-grid" style="margin-bottom: 36px;">
       <div class="feature-card">
         <div class="icon icon-blue">✓</div>
@@ -361,7 +361,7 @@
       <div class="feature-card">
         <div class="icon icon-purple">✏️</div>
         <h3>Spec Revision</h3>
-        <p>Spec revision when the requirements themselves need rethinking.</p>
+        <p>Revise the spec itself when the requirements need rethinking.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-emerald">⚡</div>
@@ -384,11 +384,11 @@
         <h2>Set it and forget it</h2>
         <p style="color:#94a3b8;margin-bottom:16px;">Flip the switch and TeamAI takes over. It picks tasks from the backlog, respects task dependencies, runs them through the full pipeline, approves them at review time, opens pull requests, waits for CI to pass, and merges automatically.</p>
         <ul>
-          <li>Configurable limit on how many tasks run at once</li>
+          <li>Set the maximum number of parallel tasks</li>
           <li>Respects task dependencies and ordering</li>
           <li>Creates pull requests and monitors CI checks</li>
           <li>Merges automatically when all checks are green</li>
-          <li>Highlights automatically merged tasks for later review, so you can catch up</li>
+          <li>Highlights automatically merged tasks for later review</li>
         </ul>
       </div>
         <img src="images/automode.jpg" alt="TeamAI auto mode enabled on the kanban board" loading="lazy" style="max-width:225px;width:100%;border-radius:12px;display:block;margin:0 auto;">
@@ -416,7 +416,7 @@
       <div class="feature-card">
         <div class="icon icon-emerald">📊</div>
         <h3>Project Insights</h3>
-        <p>Ask natural language questions about your project. "Which tasks are stuck?" "Show me recent QA failures." "What did we ship this week?"</p>
+        <p>Ask questions about your project in plain English. "Which tasks are stuck?" "Show me recent QA failures." "What did we ship this week?"</p>
       </div>
     </div>
 
