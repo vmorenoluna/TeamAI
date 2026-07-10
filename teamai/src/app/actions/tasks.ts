@@ -298,6 +298,11 @@ export async function getTaskArtifacts(taskId: string) {
       diff = null;
     }
   }
+  // Fallback: read pre-canned diff.txt from task directory (for demo / mocked tasks)
+  if (!diff) {
+    const diffPath = join(dir, 'diff.txt');
+    if (existsSync(diffPath)) diff = readFileSync(diffPath, 'utf-8');
+  }
 
   return { spec, qaReport, humanFeedback, diff };
 }
@@ -336,6 +341,11 @@ export async function getTaskFull(taskId: string) {
       const base = detectDefaultBranch(projectPath);
       diff = execFileSync('git', ['diff', `${base}...${task.branch}`], { cwd: projectPath, encoding: 'utf-8' });
     } catch { /* no diff yet */ }
+  }
+  // Fallback: read pre-canned diff.txt from task directory (for demo / mocked tasks)
+  if (!diff) {
+    const diffPath = join(dir, 'diff.txt');
+    if (existsSync(diffPath)) diff = readFileSync(diffPath, 'utf-8');
   }
 
   const humanFeedback = await readHumanFeedback(dir);
