@@ -297,12 +297,14 @@
       <span class="pipeline-arrow">→</span>
       <div class="pipeline-node"><div class="role">Merger</div><div class="phase">🔀 Merge PR</div></div>
     </div>
-    <p style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:8px;">
-      When QA finds issues, the task automatically loops back to the coder with detailed feedback and severity levels.
-    </p>
-    <p style="text-align:center;color:#64748b;font-size:0.85rem;margin-top:8px;">
-      When the coder finds a gap in the spec, the task automatically loops back to the analyst for a clarification.
-    </p>
+    <div style="display:flex;justify-content:center;gap:16px;margin-top:20px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:8px;background:rgba(251,113,133,0.08);border:1px solid rgba(251,113,133,0.18);border-radius:8px;padding:8px 16px;font-size:0.82rem;color:#fb7185;">
+        <span style="font-size:1rem;">↩</span> QA issues loop back to Coder
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;background:rgba(129,140,248,0.08);border:1px solid rgba(129,140,248,0.18);border-radius:8px;padding:8px 16px;font-size:0.82rem;color:#818cf8;">
+        <span style="font-size:1rem;">↩</span> Spec gaps loop back to Analyst
+      </div>
+    </div>
 
     <img src="images/workflow.jpg" alt="TeamAI pipeline view showing task detail with spec, plan, and subtask breakdown" loading="lazy" style="max-width:800px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
 
