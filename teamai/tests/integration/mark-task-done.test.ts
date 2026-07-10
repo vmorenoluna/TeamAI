@@ -8,7 +8,8 @@
  *
  * Coverage:
  *  - Pull failure: directory deleted, recreated with task.json + events.jsonl
- *  - Pull success: directory deleted, restored by pull simulation, updatePhase called
+ *  - Pull success: directory deleted, restored by pull simulation, snapshot left untouched
+ *  - Pull success without artifacts: fallback recreates task.json
  *  - Single emit: phase-change fires exactly once after the full sequence
  */
 
@@ -300,20 +301,22 @@ describe('markTaskDone Integration', () => {
   // ── Pull success: directory restored, events.jsonl updated ──────────────
 
   describe('pull success path', () => {
-    it('deletes directory, pulls successfully, calls updatePhase for events.jsonl, emits once', async () => {
+    it('deletes directory, pulls successfully, leaves pulled snapshot untouched, emits once', async () => {
+      const pulledSnapshot = JSON.stringify({
+        id: taskId,
+        title: 'Mark Task Done Test',
+        description: 'Integration test for markTaskDone flow',
+        phase: 'done',   // phase was set to 'done' by commitArtifactsToWorktree before the merge
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
       // Make pull succeed and simulate restoring the directory
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git' && args.includes('pull')) {
           // Simulate pull restoring the committed .teamai/{slug}/ directory
           mkdirSync(taskDir, { recursive: true });
-          writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
-            id: taskId,
-            title: 'Mark Task Done Test',
-            description: 'Integration test for markTaskDone flow',
-            phase: 'done',   // phase was set to 'done' by commitArtifactsToWorktree before the merge
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          }));
+          writeFileSync(join(taskDir, 'task.json'), pulledSnapshot);
           return '';
         }
         return '';
@@ -326,10 +329,10 @@ describe('markTaskDone Integration', () => {
       expect(existsSync(taskDir)).toBe(true);
       expect(existsSync(join(taskDir, 'task.json'))).toBe(true);
 
-      // ── events.jsonl was written by updatePhase ──
-      expect(existsSync(join(taskDir, 'events.jsonl'))).toBe(true);
-      const eventsContent = readFileSync(join(taskDir, 'events.jsonl'), 'utf-8');
-      expect(eventsContent).toContain('"done"');
+      // ── The pulled (tracked) snapshot is byte-identical: rewriting it
+      //    would leave the repo dirty after every completed task ──
+      expect(readFileSync(join(taskDir, 'task.json'), 'utf-8')).toBe(pulledSnapshot);
+      expect(existsSync(join(taskDir, 'events.jsonl'))).toBe(false);
 
       // ── git pull was attempted ──
       expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -344,6 +347,48 @@ describe('markTaskDone Integration', () => {
         taskId,
         phase: 'done',
       }));
+    });
+
+    it('patches phase via updatePhase when the pulled snapshot lacks phase:done', async () => {
+      // Simulate a pull restoring a snapshot whose task.json was frozen at
+      // an earlier phase (artifact commit ran on an older orchestrator).
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args.includes('pull')) {
+          mkdirSync(taskDir, { recursive: true });
+          writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
+            id: taskId, title: 'Mark Task Done Test', description: 'desc',
+            phase: 'pr-open', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+          }));
+          return '';
+        }
+        return '';
+      });
+
+      mockEmit.mockClear();
+      await orch.markTaskDone(taskId);
+
+      const taskJson = JSON.parse(readFileSync(join(taskDir, 'task.json'), 'utf-8'));
+      expect(taskJson.phase).toBe('done');
+      expect(mockEmit).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to recreating task.json when pull succeeds but restores no artifacts', async () => {
+      // Pull succeeds but restores nothing — e.g. the project gitignores
+      // .teamai/ in-repo, so commitArtifactsToWorktree skipped the commit.
+      mockExecFileSync.mockReturnValue('');
+
+      mockEmit.mockClear();
+      await orch.markTaskDone(taskId);
+
+      // Fallback recreated the minimal task so it stays on the kanban
+      expect(existsSync(join(taskDir, 'task.json'))).toBe(true);
+      const taskJson = JSON.parse(readFileSync(join(taskDir, 'task.json'), 'utf-8'));
+      expect(taskJson.phase).toBe('done');
+      expect(taskJson.title).toBe('Mark Task Done Test');
+      expect(existsSync(join(taskDir, 'events.jsonl'))).toBe(true);
+
+      // Emitted exactly once, after everything settled
+      expect(mockEmit).toHaveBeenCalledTimes(1);
     });
 
     it('does not double-emit when pull succeeds', async () => {
