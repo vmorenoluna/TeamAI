@@ -394,16 +394,29 @@ export class Orchestrator {
       // Fall through to recreate the task so it doesn't disappear from kanban.
     }
 
-    if (pulled) {
-      // Pull succeeded — the pulled .teamai/{slug}/task.json already has
-      // phase: "done" (set by commitArtifactsToWorktree). Call updatePhase
-      // to append the final events.jsonl entry so the phase-change history
-      // is complete.
-      this.taskStore.updatePhase(taskId, 'done');
-    } else {
-      // Pull failed — non-fast-forward, offline, etc.
-      // Fallback: recreate a minimal task.json so the task stays visible
-      // in the kanban until the next successful pull.
+    // If the pull restored the committed snapshot, leave it untouched: the
+    // snapshot's task.json already has phase: "done" (set by
+    // commitArtifactsToWorktree), and those files are tracked — rewriting
+    // updatedAt or appending to events.jsonl would leave the repo dirty on
+    // every completed task.
+    let settled = false;
+    const pulledTaskJson = path.join(dir, 'task.json');
+    if (pulled && existsSync(pulledTaskJson)) {
+      try {
+        settled = JSON.parse(readFileSync(pulledTaskJson, 'utf-8')).phase === 'done';
+      } catch { /* unreadable — patch it below */ }
+      if (!settled) {
+        // Snapshot came back without phase: "done" — patch it in place.
+        this.taskStore.updatePhase(taskId, 'done');
+        settled = true;
+      }
+    }
+
+    if (!settled) {
+      // Pull failed (non-fast-forward, offline, ...) or brought no artifacts
+      // for this task (e.g. .teamai/ is gitignored in the repo, so the
+      // artifact commit was skipped). Fallback: recreate a minimal task.json
+      // so the task stays visible in the kanban.
       mkdirSync(dir, { recursive: true });
       writeFileSync(path.join(dir, 'task.json'), JSON.stringify({
         ...task,

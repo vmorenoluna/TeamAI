@@ -2345,11 +2345,20 @@ describe('Orchestrator', () => {
       );
     });
 
-    it('does not recreate task.json when pull succeeds (pulled copy already has phase:done)', async () => {
+    it('leaves the pulled snapshot untouched when pull succeeds (pulled copy already has phase:done)', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
 
       expect(existsSync(testData.taskDir)).toBe(true);
+
+      const pulledSnapshot = JSON.stringify({
+        id: testData.taskId,
+        title: 'Test Task',
+        description: 'A test task for full coverage',
+        phase: 'done',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
 
       // Make git pull "succeed" by recreating the task directory as a side effect,
       // simulating what a real git pull would do (restore the committed snapshot).
@@ -2357,14 +2366,7 @@ describe('Orchestrator', () => {
         if (cmd === 'git' && args.includes('pull')) {
           // Simulate pull restoring the committed .teamai/{slug}/ directory
           mkdirSync(testData.taskDir, { recursive: true });
-          writeFileSync(join(testData.taskDir, 'task.json'), JSON.stringify({
-            id: testData.taskId,
-            title: 'Test Task',
-            description: 'A test task for full coverage',
-            phase: 'done',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          }));
+          writeFileSync(join(testData.taskDir, 'task.json'), pulledSnapshot);
           return '';
         }
         return '';
@@ -2390,10 +2392,35 @@ describe('Orchestrator', () => {
         expect.objectContaining({ cwd: testData.root }),
       );
 
-      // events.jsonl should have the 'done' entry (written by updatePhase)
-      const eventsPath = join(testData.taskDir, 'events.jsonl');
-      expect(existsSync(eventsPath)).toBe(true);
-      expect(readFileSync(eventsPath, 'utf-8')).toContain('"done"');
+      // The pulled (tracked) snapshot must not be rewritten — modifying it
+      // would leave the repo dirty after every completed task.
+      expect(readFileSync(join(testData.taskDir, 'task.json'), 'utf-8')).toBe(pulledSnapshot);
+      expect(existsSync(join(testData.taskDir, 'events.jsonl'))).toBe(false);
+    });
+
+    it('falls back to recreating task.json when pull succeeds but restores no artifacts', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+
+      // Pull succeeds but does NOT restore the directory — e.g. the project
+      // gitignores .teamai/ in-repo, so the artifact commit was skipped.
+      mockExecFileSync.mockReturnValue('');
+
+      mockEmit.mockClear();
+      await orch.markTaskDone(testData.taskId);
+
+      // Fallback recreated the minimal task so it stays on the kanban
+      expect(existsSync(join(testData.taskDir, 'task.json'))).toBe(true);
+      const taskJson = JSON.parse(readFileSync(join(testData.taskDir, 'task.json'), 'utf-8'));
+      expect(taskJson.phase).toBe('done');
+      expect(existsSync(join(testData.taskDir, 'events.jsonl'))).toBe(true);
+
+      // Emitted exactly once, after everything settled
+      expect(mockEmit).toHaveBeenCalledTimes(1);
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
+        taskId: testData.taskId,
+        phase: 'done',
+      }));
     });
 
     it('throws when task does not exist', async () => {
