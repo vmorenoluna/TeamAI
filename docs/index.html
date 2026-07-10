@@ -8,8 +8,8 @@
   <meta property="og:title" content="TeamAI: Multi-Agent Claude Code Orchestration">
   <meta property="og:description" content="Deploy a team of AI agents to write, review, and merge code automatically. From feature request to pull request, hands free.">
   <meta property="og:type" content="website">
-  <meta property="og:image" content="https://raw.githubusercontent.com/vmorenoluna/TeamAI/main/docs/images/og-image.png">
-  <meta name="twitter:card" content="summary_large_image">
+  <meta property="og:image" content="https://raw.githubusercontent.com/vmorenoluna/TeamAI/main/docs/images/workflow.jpg">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/vmorenoluna/TeamAI/main/docs/images/workflow.jpg">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230b0f19'/><text x='16' y='22' text-anchor='middle' font-size='20' font-weight='800' fill='%2338bdf8' font-family='system-ui'>T</text></svg>">
   <style>
     /* ========== Reset & Base ========== */
@@ -219,6 +219,7 @@
       <a href="#kanban" class="nav-link">Kanban</a>
       <a href="#auto" class="nav-link">Auto Mode</a>
       <a href="#review" class="nav-link">Review</a>
+      <a href="#resume" class="nav-link">Recovery</a>
       <a href="#streaming" class="nav-link">Streaming</a>
       <a href="#extras" class="nav-link">More</a>
     </div>
@@ -303,18 +304,54 @@
       When the coder finds a gap in the spec, the task automatically loops back to the analyst for a clarification.
     </p>
 
-    <div class="screenshot-slot full">
-      <img src="images/pipeline-view.png" alt="TeamAI pipeline view showing task detail with spec, plan, and subtask breakdown" loading="lazy">
+    <img src="images/workflow.jpg" alt="TeamAI pipeline view showing task detail with spec, plan, and subtask breakdown" loading="lazy" style="width:100%;border-radius:12px;">
+
+    <div style="margin-top: 48px;">
+      <h2 style="text-align: center;">Every task is broken into subtasks</h2>
+      <p class="section-desc" style="margin: 12px auto 36px;">The planner divides complex features into small, independent subtasks. Each subtask runs in its own git worktree so parallel agents never conflict.</p>
+      <div class="screenshot-slot full">
+        <img src="images/subtasks.jpg" alt="TeamAI subtask breakdown with git worktree assignment" loading="lazy">
+      </div>
     </div>
   </div>
 </section>
 
-<!-- ==================== Highlight ==================== -->
-<section style="padding: 80px 0;">
+<!-- ==================== Agent Roles ==================== -->
+<section>
+  <div class="container">
+    <span class="section-label">Agent Roles</span>
+    <h2>Teach each agent its job</h2>
+    <p class="section-desc">Every agent role comes with a detailed persona prompt — personality, standards, and domain knowledge. You can customize each one through the UI or edit the markdown files directly.</p>
+
+    <div class="screenshot-slot full">
+      <img src="images/roles.jpg" alt="TeamAI agent role configuration showing persona and standards" loading="lazy">
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Crash Recovery ==================== -->
+<section id="resume" style="padding: 80px 0;">
   <div class="container">
     <div class="highlight-banner">
       <h3>💡 Runs the actual Claude CLI on your machine</h3>
-      <p>TeamAI launches real Claude terminal sessions. Each agent has full filesystem access, can run shell commands, and uses the exact same Claude Code you use in your terminal. The application also detects and automatically resumes tasks that hit a rate limit.</p>
+      <p>TeamAI launches real Claude terminal sessions. Each agent has full filesystem access, can run shell commands, and uses the exact same Claude Code you use in your terminal.</p>
+    </div>
+
+    <div class="two-col" style="margin-top: 48px;">
+      <div class="text">
+        <span class="section-label">Crash Recovery</span>
+        <h2>Picks up right where it left off</h2>
+        <p style="color:#94a3b8;margin-bottom:16px;">If a task hits an API rate limit or the app restarts, TeamAI detects the interrupted task and resumes it automatically — same phase, same subtask, zero lost work.</p>
+        <ul>
+          <li>Detects rate-limited and crashed sessions on startup</li>
+          <li>Restores pipeline state from disk automatically</li>
+          <li>Rate limits are free retries — no wasted attempts</li>
+          <li>Works across dev server restarts and app crashes</li>
+        </ul>
+      </div>
+      <div class="screenshot-slot side">
+        <img src="images/autoresume.jpg" alt="TeamAI auto-resume showing rate-limited task recovery" loading="lazy">
+      </div>
     </div>
   </div>
 </section>
@@ -327,7 +364,7 @@
     <p class="section-desc">Tasks are organized into columns by stage. Drag and drop to move them between stages, or let the pipeline advance them automatically. Click any task to see its full details, specification, plan, and review report.</p>
 
     <div class="screenshot-slot full">
-      <img src="images/kanban-board.png" alt="TeamAI kanban board with tasks across pipeline stages" loading="lazy">
+      <img src="images/board.jpg" alt="TeamAI kanban board with tasks across pipeline stages" loading="lazy">
     </div>
   </div>
 </section>
@@ -349,7 +386,7 @@
         </ul>
       </div>
       <div class="screenshot-slot side">
-        <img src="images/auto-mode.png" alt="TeamAI auto mode enabled on the kanban board" loading="lazy">
+        <img src="images/automode.jpg" alt="TeamAI auto mode enabled on the kanban board" loading="lazy">
       </div>
     </div>
   </div>
@@ -371,7 +408,7 @@
         </ul>
       </div>
       <div class="screenshot-slot side col-image">
-        <img src="images/review-panel.png" alt="TeamAI review panel showing QA report with pass/fail criteria" loading="lazy">
+        <img src="images/review.jpg" alt="TeamAI review panel showing QA report with pass/fail criteria" loading="lazy">
       </div>
     </div>
   </div>
@@ -385,7 +422,7 @@
     <p class="section-desc">Each agent's terminal output streams live to the app. Watch the analyst write the spec, the planner break it into subtasks, the coder implement each change, and QA validate the results. Every thought, every file edit, every command ran, all visible as it happens.</p>
 
     <div class="screenshot-slot full">
-      <img src="images/streaming-output.png" alt="TeamAI terminal view for interactive Claude agent sessions" loading="lazy">
+      <img src="images/ticket-terminal.jpg" alt="TeamAI terminal view for interactive Claude agent sessions" loading="lazy">
     </div>
   </div>
 </section>
@@ -415,7 +452,7 @@
     </div>
 
     <div class="screenshot-slot full">
-      <img src="images/roadmap-view.png" alt="TeamAI product roadmap with phased items" loading="lazy">
+      <img src="images/roadmap.jpg" alt="TeamAI product roadmap with phased items" loading="lazy">
     </div>
   </div>
 </section>
