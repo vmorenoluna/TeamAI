@@ -220,7 +220,7 @@
   <div class="container">
     <h1>A Team of AI Agents<br>for Your Codebase</h1>
     <p class="subtitle">
-      TeamAI puts a full development team at your fingertips. An analyst, a planner, a coder, and a QA reviewer work together through a clean desktop app, turning feature requests into reviewed pull requests.
+      TeamAI puts a full development team at your fingertips. An analyst, a planner, a coder, and a QA reviewer work together in a clean desktop app, turning feature requests into deliverables.
     </p>
     <a href="https://github.com/vmorenoluna/TeamAI" class="hero-cta">View on GitHub</a>
     <a href="#pipeline" class="hero-cta-secondary">How it works ↓</a>
@@ -231,13 +231,13 @@
 <section>
   <div class="container">
     <span class="section-label">Why TeamAI</span>
-    <h2>Not another AI coding tool</h2>
-    <p class="section-desc">TeamAI runs the actual Claude CLI on your machine. Each agent gets its own terminal session, its own working copy of the code, and a distinct personality.</p>
+    <h2>The tool that lets you stay in control</h2>
+    <p class="section-desc">TeamAI runs the actual Claude CLI on your machine. Each agent gets its own terminal session, its own working copy of the code, and a distinct role.</p>
     <div class="features-grid">
       <div class="feature-card">
         <div class="icon icon-blue">🖥️</div>
         <h3>Runs Locally</h3>
-        <p>Agents run as terminal processes on your computer with full access to the filesystem, git, and any command line tool you use.</p>
+        <p>Agents run as terminal processes on your computer with full access to the filesystem, git, and any other command line tool you use.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-purple">🐳</div>
@@ -262,24 +262,20 @@
       <div class="feature-card">
         <div class="icon icon-cyan">🔧</div>
         <h3>Customizable Agents</h3>
-        <p>Define your own agent roles and personalities. Tailor how each one thinks, writes, and reviews to match your team's standards.</p>
+        <p>Assign the model to use for each agent and define your own roles: tailor how each one thinks, writes, and reviews to match your project and team's standards.</p>
       </div>
     </div>
+  </div>
+</section>
 
-    <div style="margin-top: 48px; text-align: center;">
-      <h2>How it all fits together</h2>
-      <p class="section-desc" style="margin: 12px auto 40px; max-width: 700px;">
-        TeamAI launches real Claude terminal sessions on your machine. Each agent has full filesystem access, can run shell commands, and uses the exact same Claude Code you use in your terminal.
-      </p>
+<!-- ==================== Kanban Board ==================== -->
+<section id="kanban">
+  <div class="container">
+    <span class="section-label">Kanban Board</span>
+    <h2>See every task at a glance</h2>
+    <p class="section-desc">Tasks are organized into columns by stage. Drag and drop to move them between stages, or let the pipeline advance them automatically. Click any task to see its full details, specification, plan, and review report.</p>
 
-      <div class="arch-flow" style="font-size:1.2rem;gap:32px;">
-        <div class="arch-node" style="padding:32px 40px;"><div class="title" style="font-size:1.3rem;">🖥️ Desktop App</div><div class="sub" style="font-size:0.95rem;">React and Tailwind</div></div>
-        <span class="arch-arrow" style="font-size:2rem;">⇄</span>
-        <div class="arch-node" style="padding:32px 40px;"><div class="title" style="font-size:1.3rem;">🔌 Background Process</div><div class="sub" style="font-size:0.95rem;">Task orchestration</div></div>
-        <span class="arch-arrow" style="font-size:2rem;">⇄</span>
-        <div class="arch-node highlight" style="padding:32px 40px;"><div class="title" style="font-size:1.3rem;">🤖 Claude Sessions</div><div class="sub" style="font-size:0.95rem;">One per agent role</div></div>
-      </div>
-    </div>
+      <img src="images/board.jpg" alt="TeamAI kanban board with tasks across pipeline stages" loading="lazy" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:0 auto;">
   </div>
 </section>
 
@@ -318,17 +314,6 @@
   </div>
 </section>
 
-<!-- ==================== Agent Roles ==================== -->
-<section>
-  <div class="container">
-    <span class="section-label">Agent Roles</span>
-    <h2>Teach each agent its job</h2>
-    <p class="section-desc">Every agent role comes with a detailed persona prompt: personality, standards, and domain knowledge. You can customize each one through the UI or edit the markdown files directly.</p>
-
-      <img src="images/roles.jpg" alt="TeamAI agent role configuration showing persona and standards" loading="lazy" style="width:100%;border-radius:12px;">
-  </div>
-</section>
-
 <!-- ==================== Crash Recovery ==================== -->
 <section id="resume" style="padding: 80px 0;">
   <div class="container">
@@ -348,17 +333,6 @@
 
     <img src="images/autoresume.jpg" alt="TeamAI auto-resume showing rate-limited task recovery" loading="lazy" style="max-width:900px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
     </div>
-  </div>
-</section>
-
-<!-- ==================== Kanban Board ==================== -->
-<section id="kanban">
-  <div class="container">
-    <span class="section-label">Kanban Board</span>
-    <h2>See every task at a glance</h2>
-    <p class="section-desc">Tasks are organized into columns by stage. Drag and drop to move them between stages, or let the pipeline advance them automatically. Click any task to see its full details, specification, plan, and review report.</p>
-
-      <img src="images/board.jpg" alt="TeamAI kanban board with tasks across pipeline stages" loading="lazy" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:0 auto;">
   </div>
 </section>
 
