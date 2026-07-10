@@ -37,12 +37,15 @@ const FORWARD_TRANSITIONS: [string, string][] = [
 
 const BACKWARD_TRANSITIONS: [string, string][] = [
   ['qa-review', 'implement'],
-  ['awaiting-review', 'implement'],
   ['pr-open', 'implement'],
 ];
 
+const REQUEST_CHANGES_TRANSITIONS: [string, string][] = [
+  ['awaiting-review', 'implement'],
+];
+
 const SPEC_REVISION_TRANSITIONS: [string, string][] = [
-  ['implement', 'spec'],
+  ['awaiting-review', 'spec'],
 ];
 
 const FAILURE_TRANSITIONS: [string, string][] = [
@@ -331,6 +334,15 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
       bounceLabelIdx++;
     }
 
+    // Request changes — orange, from awaiting-review back to implement
+    for (const [from, to] of REQUEST_CHANGES_TRANSITIONS) {
+      const labelX = (LEFT_X - CURVE_OFFSET) - 58;
+      addLeftCurve(from, to,
+        'stroke-orange-500/60 stroke-[1.5] stroke-dasharray-[4_4]',
+        'stroke-orange-400 stroke-[2.5] stroke-dasharray-[4_4] drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]',
+        'arrow-left-orange', 'arrow-left-orange-hover', 'request changes', '#f9731699', labelX);
+    }
+
     // Failure transitions — stagger label X to avoid overlap
     let failLabelIdx = 0;
     for (const [from, to] of FAILURE_TRANSITIONS) {
@@ -411,6 +423,14 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
             bounce
           </span>
           <span className="flex items-center gap-1">
+            <span className="inline-block w-2 h-0.5 bg-orange-500/60 rounded" />
+            request changes
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-2 h-0.5 bg-indigo-500/60 rounded" />
+            spec revision
+          </span>
+          <span className="flex items-center gap-1">
             <span className="inline-block w-2 h-0.5 bg-red-500/50 rounded" />
             failure
           </span>
@@ -454,6 +474,12 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
                     </marker>
                     <marker id="arrow-left-amber-hover" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
                       <polygon points="0,0 10,5 0,10" className="fill-amber-400" />
+                    </marker>
+                    <marker id="arrow-left-orange" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                      <polygon points="0,0 10,5 0,10" className="fill-orange-500/60" />
+                    </marker>
+                    <marker id="arrow-left-orange-hover" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
+                      <polygon points="0,0 10,5 0,10" className="fill-orange-400" />
                     </marker>
                     <marker id="arrow-left-red" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse">
                       <polygon points="0,0 10,5 0,10" className="fill-red-500/50" />
