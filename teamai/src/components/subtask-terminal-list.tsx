@@ -13,11 +13,14 @@ interface Props {
   taskId: string;
   subtaskTerminals: SubtaskTerminalInfo[];
   qaLog: string | null;
+  specLog: string | null;
+  planLog: string | null;
+  mergeLog: string | null;
   orchestratorLog: string | null;
   sessionMap?: Record<string, string>;
 }
 
-export function SubtaskTerminalList({ taskId, subtaskTerminals, qaLog, orchestratorLog, sessionMap }: Props) {
+export function SubtaskTerminalList({ taskId, subtaskTerminals, qaLog, specLog, planLog, mergeLog, orchestratorLog, sessionMap }: Props) {
   // Build the list of terminals
   interface TerminalDef {
     key: string; label: string; log: string | null; color: string; sessionIds: string[];
@@ -27,13 +30,16 @@ export function SubtaskTerminalList({ taskId, subtaskTerminals, qaLog, orchestra
   // Collect session IDs per terminal
   const coderSessionIds: string[] = [];
   const qaSessionIds: string[] = [];
+  const specSessionId: string[] = [];
+  const planSessionId: string[] = [];
+  const mergeSessionId: string[] = [];
   if (sessionMap) {
     for (const [k, v] of Object.entries(sessionMap)) {
-      if (k === 'qa') {
-        qaSessionIds.push(v);
-      } else {
-        coderSessionIds.push(v);
-      }
+      if (k === 'qa') qaSessionIds.push(v);
+      else if (k === 'spec') specSessionId.push(v);
+      else if (k === 'plan') planSessionId.push(v);
+      else if (k === 'merge') mergeSessionId.push(v);
+      else coderSessionIds.push(v);
     }
   }
 
@@ -62,6 +68,39 @@ export function SubtaskTerminalList({ taskId, subtaskTerminals, qaLog, orchestra
       log: qaLog,
       color: 'border-orange-500',
       sessionIds: qaSessionIds,
+    });
+  }
+
+  // Spec terminal (analyst)
+  if (specLog) {
+    terminals.push({
+      key: 'spec',
+      label: 'Spec (Analyst)',
+      log: specLog,
+      color: 'border-purple-500',
+      sessionIds: specSessionId,
+    });
+  }
+
+  // Plan terminal (planner)
+  if (planLog) {
+    terminals.push({
+      key: 'plan',
+      label: 'Plan (Planner)',
+      log: planLog,
+      color: 'border-blue-500',
+      sessionIds: planSessionId,
+    });
+  }
+
+  // Merge terminal (merger)
+  if (mergeLog) {
+    terminals.push({
+      key: 'merge',
+      label: 'Merge (Merger)',
+      log: mergeLog,
+      color: 'border-teal-500',
+      sessionIds: mergeSessionId,
     });
   }
 

@@ -816,9 +816,19 @@ async function tryCherryPickWithRecovery(
   } catch { /* best-effort — proceed with merger */ }
   appendFileSync(logFile, '[WORKTREE] Cherry-pick has conflicts — spawning merger agent for subtask ' + subtaskId + '\n');
   try {
+    const mergeLogFile = path.join(pipeline.specPath, 'output-merge.log');
     const mergeSessionId = await processManager.createSession(
-      deps.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, logFile),
+      deps.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, mergeLogFile),
     );
+    // Write session mapping for live streaming
+    const sessionMapPath = path.join(pipeline.specPath, 'session_map.json');
+    try {
+      const map: Record<string, string> = existsSync(sessionMapPath)
+        ? JSON.parse(readFileSync(sessionMapPath, 'utf-8'))
+        : {};
+      map['merge'] = mergeSessionId;
+      writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
+    } catch { /* best-effort */ }
     processManager.sendMessage(mergeSessionId,
       'Resolve cherry-pick conflicts\n\n' +
       'A `git cherry-pick` from branch `' + stBranch + '` was attempted onto `' + pipeline.branch + '`\n' +

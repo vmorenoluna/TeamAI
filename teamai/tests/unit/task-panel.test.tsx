@@ -145,6 +145,9 @@ function makeFullData(overrides: Partial<{
     specVersions: overrides.specVersions ?? {},
     subtaskTerminals: [],
     qaLog: null,
+    specLog: null,
+    planLog: null,
+    mergeLog: null,
     sessionMap: {},
   };
 }

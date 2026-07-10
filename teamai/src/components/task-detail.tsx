@@ -31,6 +31,9 @@ interface Props {
   agentOutput?: string | null;
   subtaskTerminals?: { id: number; title: string; log: string | null }[];
   qaLog?: string | null;
+  specLog?: string | null;
+  planLog?: string | null;
+  mergeLog?: string | null;
   sessionMap?: Record<string, string>;
   onClose?: () => void;
   readonly?: boolean;
@@ -259,7 +262,7 @@ export function QAReportView({ qaReport, humanFeedback }: { qaReport: QAReportDa
 // outside the component to avoid recreating on every render.
 const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, sessionMap, onClose, readonly = false }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, onClose, readonly = false }: Props) {
   const router = useRouter();
   const { run, isPending } = useServerMutation();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -719,6 +722,9 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
               taskId={task.id}
               subtaskTerminals={subtaskTerminals ?? []}
               qaLog={qaLog ?? null}
+              specLog={specLog ?? null}
+              planLog={planLog ?? null}
+              mergeLog={mergeLog ?? null}
               orchestratorLog={agentOutput ?? null}
               sessionMap={sessionMap}
             />
