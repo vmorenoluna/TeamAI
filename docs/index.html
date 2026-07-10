@@ -265,6 +265,21 @@
         <p>Define your own agent roles and personalities. Tailor how each one thinks, writes, and reviews to match your team's standards.</p>
       </div>
     </div>
+
+    <div style="margin-top: 48px; text-align: center;">
+      <h2>How it all fits together</h2>
+      <p class="section-desc" style="margin: 12px auto 40px; max-width: 700px;">
+        TeamAI launches real Claude terminal sessions on your machine. Each agent has full filesystem access, can run shell commands, and uses the exact same Claude Code you use in your terminal.
+      </p>
+
+      <div class="arch-flow" style="font-size:1.2rem;gap:32px;">
+        <div class="arch-node" style="padding:32px 40px;"><div class="title" style="font-size:1.3rem;">🖥️ Desktop App</div><div class="sub" style="font-size:0.95rem;">React and Tailwind</div></div>
+        <span class="arch-arrow" style="font-size:2rem;">⇄</span>
+        <div class="arch-node" style="padding:32px 40px;"><div class="title" style="font-size:1.3rem;">🔌 Background Process</div><div class="sub" style="font-size:0.95rem;">Task orchestration</div></div>
+        <span class="arch-arrow" style="font-size:2rem;">⇄</span>
+        <div class="arch-node highlight" style="padding:32px 40px;"><div class="title" style="font-size:1.3rem;">🤖 Claude Sessions</div><div class="sub" style="font-size:0.95rem;">One per agent role</div></div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -438,25 +453,6 @@
     </div>
 
       <img src="images/roadmap.jpg" alt="TeamAI product roadmap with phased items" loading="lazy" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:0 auto;">
-  </div>
-</section>
-
-<!-- ==================== Architecture ==================== -->
-<section>
-  <div class="container" style="text-align: center;">
-    <span class="section-label">How It Works</span>
-    <h2>The moving parts</h2>
-    <p class="section-desc" style="margin:12px auto 40px;">
-      TeamAI launches real Claude terminal sessions on your machine. Each agent has full filesystem access, can run shell commands, and uses the exact same Claude Code you use in your terminal. The desktop app manages these sessions through a background process, with messages passing between agents as tasks move through the pipeline.
-    </p>
-
-    <div class="arch-flow" style="font-size:1.2rem;gap:32px;">
-      <div class="arch-node" style="padding:32px 40px;"><div class="title" style="font-size:1.3rem;">🖥️ Desktop App</div><div class="sub" style="font-size:0.95rem;">React and Tailwind</div></div>
-      <span class="arch-arrow" style="font-size:2rem;">⇄</span>
-      <div class="arch-node" style="padding:32px 40px;"><div class="title" style="font-size:1.3rem;">🔌 Background Process</div><div class="sub" style="font-size:0.95rem;">Task orchestration</div></div>
-      <span class="arch-arrow" style="font-size:2rem;">⇄</span>
-      <div class="arch-node highlight" style="padding:32px 40px;"><div class="title" style="font-size:1.3rem;">🤖 Claude Sessions</div><div class="sub" style="font-size:0.95rem;">One per agent role</div></div>
-    </div>
   </div>
 </section>
 
