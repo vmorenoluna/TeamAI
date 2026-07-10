@@ -183,8 +183,11 @@
     nav a.nav-link { color: #94a3b8; font-size: 0.85rem; margin-left: 18px; text-decoration: none; }
     nav a.nav-link:hover { color: #cbd5e1; }
     /* Mobile hamburger */
-    .nav-toggle { display: none; background: none; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer; padding: 4px 8px; }
-    .nav-links.open { display: flex !important; }
+    .nav-toggle {
+      display: none; background: none; border: none; color: #94a3b8; font-size: 1.4rem;
+      line-height: 1; cursor: pointer; padding: 6px 8px; border-radius: 6px;
+    }
+    .nav-toggle:hover { color: #e2e8f0; }
 
     /* ========== Architecture ========== */
     .arch-flow {
@@ -210,10 +213,23 @@
       .hero { padding: 110px 0 64px; }
       .hero-cta-secondary { margin-left: 0; margin-top: 12px; }
       /* Mobile nav */
-      .nav-links { display: none; flex-direction: column; position: absolute; top: 100%; left: 0; right: 0;
-        background: rgba(11, 15, 25, 0.95); backdrop-filter: blur(10px); padding: 12px 24px 20px;
-        border-bottom: 1px solid #1e293b; }
-      .nav-links a.nav-link { margin: 8px 0; font-size: 1rem; }
+      nav .nav-links {
+        display: flex; flex-direction: column; align-items: stretch;
+        position: absolute; top: 100%; left: 12px; right: 12px; margin-top: 8px;
+        background: #111827; border: 1px solid #1e293b; border-radius: 12px;
+        box-shadow: 0 16px 32px rgba(0,0,0,0.4);
+        max-height: 0; overflow: hidden; opacity: 0; pointer-events: none;
+        padding: 0 8px;
+        transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+      }
+      nav .nav-links.open {
+        max-height: 600px; opacity: 1; pointer-events: auto; padding: 8px;
+      }
+      nav .nav-links a.nav-link {
+        margin: 0; padding: 12px 14px; font-size: 1rem;
+        border-bottom: 1px solid #1e293b;
+      }
+      nav .nav-links a.nav-link:last-child { border-bottom: none; }
       .nav-toggle { display: block; }
       .arch-flow { flex-direction: column; }
       .arch-arrow { transform: rotate(90deg); }
@@ -226,19 +242,35 @@
 <nav>
   <div class="container">
     <a href="#" class="logo" style="text-decoration:none;">Team<span>AI</span></a>
-    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')" aria-label="Toggle navigation">☰</button>
+    <button class="nav-toggle" onclick="toggleNav()" aria-label="Toggle navigation" aria-expanded="false">☰</button>
     <div class="nav-links">
-      <a href="#kanban" class="nav-link">Kanban</a>
-      <a href="#pipeline" class="nav-link">Pipeline</a>
-      <a href="#streaming" class="nav-link">Streaming</a>
-      <a href="#subtasks" class="nav-link">Subtasks</a>
-      <a href="#resume" class="nav-link">Recovery</a>
-      <a href="#review" class="nav-link">Review</a>
-      <a href="#auto" class="nav-link">Auto Mode</a>
-      <a href="#extras" class="nav-link">Roadmap</a>
+      <a href="#kanban" class="nav-link" onclick="closeNav()">Kanban</a>
+      <a href="#pipeline" class="nav-link" onclick="closeNav()">Pipeline</a>
+      <a href="#streaming" class="nav-link" onclick="closeNav()">Streaming</a>
+      <a href="#subtasks" class="nav-link" onclick="closeNav()">Subtasks</a>
+      <a href="#resume" class="nav-link" onclick="closeNav()">Recovery</a>
+      <a href="#review" class="nav-link" onclick="closeNav()">Review</a>
+      <a href="#auto" class="nav-link" onclick="closeNav()">Auto Mode</a>
+      <a href="#extras" class="nav-link" onclick="closeNav()">Roadmap</a>
     </div>
   </div>
 </nav>
+<script>
+  function toggleNav() {
+    const links = document.querySelector('.nav-links');
+    const toggle = document.querySelector('.nav-toggle');
+    const isOpen = links.classList.toggle('open');
+    toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    toggle.textContent = isOpen ? '✕' : '☰';
+  }
+  function closeNav() {
+    const links = document.querySelector('.nav-links');
+    const toggle = document.querySelector('.nav-toggle');
+    links.classList.remove('open');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.textContent = '☰';
+  }
+</script>
 
 <!-- ==================== Hero ==================== -->
 <section class="hero">
@@ -354,12 +386,12 @@
   </div>
 </section>
 
-<!-- ==================== Crash Recovery ==================== -->
+<!-- ==================== Recovery ==================== -->
 <section id="resume" style="padding: 80px 0;">
   <div class="container">
     <div class="two-col" style="margin-top: 0;">
       <div class="text">
-        <span class="section-label">Crash Recovery</span>
+        <span class="section-label">Recovery</span>
         <h2>Picks up right where it left off</h2>
         <p style="color:#94a3b8;margin-bottom:16px;">If a task hits a rate limit or the app restarts, TeamAI detects the interrupted task and resumes it automatically at the same phase and subtask, with zero lost work.</p>
       </div>
