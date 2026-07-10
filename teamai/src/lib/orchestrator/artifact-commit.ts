@@ -121,7 +121,7 @@ export function commitArtifactsToWorktree(
     ? { cwd: pipeline.worktreePath, env: { ...process.env, ...gitEnv } }
     : { cwd: pipeline.worktreePath };
 
-  execFileSync('git', ['add', '.teamai/'], gitOpts);
+  execFileSync('git', ['add', '-f', `.teamai/${slug}`], gitOpts);
 
   try {
     execFileSync('git', ['commit', '-m', `Add TeamAI pipeline artifacts for "${pipeline.description}"`], gitOpts);

@@ -184,7 +184,7 @@ export class ProjectStore {
    */
   private _updateGitignore(projectPath: string): void {
     const gitignorePath = join(projectPath, '.gitignore');
-    const TEAMAI_PATTERNS = ['.teamai/*/output.log', '.teamai/*/.pipeline_state.json'];
+    const TEAMAI_PATTERNS = ['.teamai/*'];
 
     const buildBlock = (patterns: string[]) =>
       '# TeamAI — exclude transient pipeline files\n' + patterns.join('\n') + '\n';

@@ -743,8 +743,7 @@ describe('ProjectStore', () => {
     expect(existsSync(gitignorePath)).toBe(true);
     const content = readFileSync(gitignorePath, 'utf-8');
     expect(content).toContain('# TeamAI — exclude transient pipeline files');
-    expect(content).toContain('.teamai/*/output.log');
-    expect(content).toContain('.teamai/*/.pipeline_state.json');
+    expect(content).toContain('.teamai/*');
   });
 
   it('_updateGitignore appends TeamAI exclusions when .gitignore exists without them', () => {
@@ -759,19 +758,17 @@ describe('ProjectStore', () => {
     expect(content).toContain('.env');
     // TeamAI exclusions appended
     expect(content).toContain('# TeamAI — exclude transient pipeline files');
-    expect(content).toContain('.teamai/*/output.log');
-    expect(content).toContain('.teamai/*/.pipeline_state.json');
+    expect(content).toContain('.teamai/*');
   });
 
-  it('_updateGitignore is a no-op when both TeamAI patterns are already present', () => {
+  it('_updateGitignore is a no-op when the TeamAI pattern is already present', () => {
     const gitignorePath = join(projectDir, '.gitignore');
     const original = [
       'node_modules/',
       '.env',
       '',
       '# TeamAI — exclude transient pipeline files',
-      '.teamai/*/output.log',
-      '.teamai/*/.pipeline_state.json',
+      '.teamai/*',
     ].join('\n') + '\n';
     writeFileSync(gitignorePath, original);
 
@@ -781,23 +778,18 @@ describe('ProjectStore', () => {
     expect(content).toBe(original);
   });
 
-  it('_updateGitignore appends only the missing pattern when one is already present', () => {
+  it('_updateGitignore appends the TeamAI pattern when not already present', () => {
     const gitignorePath = join(projectDir, '.gitignore');
     writeFileSync(gitignorePath, [
       'node_modules/',
-      '.teamai/*/output.log',
+      '.env',
     ].join('\n') + '\n');
 
     (store as any)._updateGitignore(projectDir);
 
     const content = readFileSync(gitignorePath, 'utf-8');
     expect(content).toContain('node_modules/');
-    // output.log was already present — should still be there exactly once
-    const outputLogCount = content.split('\n').filter(l => l.trim() === '.teamai/*/output.log').length;
-    expect(outputLogCount).toBe(1);
-    // pipeline_state.json was missing — should now be present
-    expect(content).toContain('.teamai/*/.pipeline_state.json');
-    // Header comment should be present
+    expect(content).toContain('.teamai/*');
     expect(content).toContain('# TeamAI — exclude transient pipeline files');
   });
 
