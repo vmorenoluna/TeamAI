@@ -189,6 +189,7 @@ export async function runImplement(
   }
 
   const logFile = path.join(pipeline.specPath, 'output.log');
+  const sessionMapPath = path.join(pipeline.specPath, 'session_map.json');
   for (const [, subtasks] of groups) {
     const completedIds: number[] = [];
     const isMultiGroup = subtasks.length >= 2;
@@ -226,6 +227,9 @@ export async function runImplement(
 
     let retainWorktrees = false;
     const scopeViolations = new Set<number>();
+    // Lock for session_map.json serialization — parallel subtasks each read-modify-write,
+    // so we serialise through a promise chain (same pattern as planWriteLock).
+    const sessionMapLock = { current: Promise.resolve() };
     try {
       const results = await Promise.allSettled(
         subtasks.map(async (subtask) => {
@@ -246,12 +250,24 @@ export async function runImplement(
             appendFileSync(logFile, '\n[SENSOR:pre_subtask] pre-subtask sensors failed (non-blocking): ' + msg + '\n');
           }
 
+          const subtaskLogFile = path.join(pipeline.specPath, `output-st${subtask.id}.log`);
           let sessionId: string;
           try {
-            sessionId = await processManager.createSession(deps.sessionOpts(coderRole, cwd, pipeline.taskId, logFile));
+            sessionId = await processManager.createSession(deps.sessionOpts(coderRole, cwd, pipeline.taskId, subtaskLogFile));
+            // Write session → subtask mapping for live streaming in the UI.
+            // Serialised through a lock so parallel subtasks don't race on the JSON file.
+            sessionMapLock.current = sessionMapLock.current.then(() => {
+              try {
+                const map: Record<string, string> = existsSync(sessionMapPath)
+                  ? JSON.parse(readFileSync(sessionMapPath, 'utf-8'))
+                  : {};
+                map[String(subtask.id)] = sessionId;
+                writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
+              } catch { /* best-effort */ }
+            });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            appendFileSync(logFile, '\n[ERROR] Session creation failed: ' + msg + '\n');
+            appendFileSync(logFile, '\n[ERROR] Session creation failed for subtask ' + subtask.id + ': ' + msg + '\n');
             throw err;
           }
 

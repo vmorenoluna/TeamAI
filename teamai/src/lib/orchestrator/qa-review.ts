@@ -41,6 +41,7 @@ export async function runQaReview(
   pipeline.qaAttempt++;
   deps.savePipelineState(pipeline);
   const logFile = path.join(pipeline.specPath, 'output.log');
+  const qaLogFile = path.join(pipeline.specPath, 'output-qa.log');
   deps.phaseHeader(logFile, `qa-review (attempt ${pipeline.qaAttempt})`);
 
   // Gap 3: Respect locked QA reports
@@ -125,9 +126,18 @@ export async function runQaReview(
   } catch { /* offline — proceed with cached refs */ }
 
   const sessionId = await processManager.createSession(
-    deps.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId, logFile),
+    deps.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId, qaLogFile),
   );
   pipeline.sessionId = sessionId;
+  // Write QA session mapping for live streaming in the UI
+  try {
+    const sessionMapPath = path.join(pipeline.specPath, 'session_map.json');
+    const map = existsSync(sessionMapPath)
+      ? JSON.parse(readFileSync(sessionMapPath, 'utf-8'))
+      : {};
+    map['qa'] = sessionId;
+    writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
+  } catch { /* best-effort */ }
   const agentSpecPath = deps.toAgentPath(pipeline.specPath);
   processManager.sendMessage(sessionId,
     `/qa-review ${agentSpecPath}/spec.md\n\n` +
