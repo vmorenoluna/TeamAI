@@ -511,7 +511,11 @@ export async function runImplement(
           }).trim();
           if (statusOut) {
             appendFileSync(logFile, '\n[WORKTREE] Main worktree has uncommitted changes — auto-committing before cherry-pick:\n' + statusOut + '\n');
-            execFileSync('git', ['add', '-A'], { cwd: pipeline.worktreePath, stdio: 'pipe' });
+            // Exclude .teamai/ from the safety-net commit — pipeline artifacts
+            // must only be committed by commitArtifactsToWorktree (artifact-commit.ts),
+            // which enforces ARTIFACT_EXCLUDE. Stray .teamai/ dirt from a coder session
+            // should never land in a chore: commit on the feature branch.
+            execFileSync('git', ['add', '-A', '--', '.', ':!.teamai'], { cwd: pipeline.worktreePath, stdio: 'pipe' });
             execFileSync('git', ['commit', '-m', 'chore: auto-save worktree state before cherry-pick'], {
               cwd: pipeline.worktreePath, stdio: 'pipe',
             });
