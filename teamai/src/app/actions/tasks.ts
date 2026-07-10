@@ -369,6 +369,14 @@ export async function getTaskFull(taskId: string) {
   const qaLogPath = join(dir, 'output-qa.log');
   const qaLog = existsSync(qaLogPath) ? readFileSync(qaLogPath, 'utf-8') : null;
 
+  // Read per-role log files
+  const specLogPath = join(dir, 'output-spec.log');
+  const specLog = existsSync(specLogPath) ? readFileSync(specLogPath, 'utf-8') : null;
+  const planLogPath = join(dir, 'output-plan.log');
+  const planLog = existsSync(planLogPath) ? readFileSync(planLogPath, 'utf-8') : null;
+  const mergeLogPath = join(dir, 'output-merge.log');
+  const mergeLog = existsSync(mergeLogPath) ? readFileSync(mergeLogPath, 'utf-8') : null;
+
   // Load spec revision snapshots for comparison UI
   const specVersions: Record<string, string> = {};
   for (const version of [1, 2, 3]) {
@@ -385,7 +393,7 @@ export async function getTaskFull(taskId: string) {
     try { sessionMap = JSON.parse(readFileSync(sessionMapPath, 'utf-8')); } catch { /* skip */ }
   }
 
-  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, sessionMap };
+  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap };
 }
 
 export async function addDependency(taskId: string, depId: string): Promise<void> {

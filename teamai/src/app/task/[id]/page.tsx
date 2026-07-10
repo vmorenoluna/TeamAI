@@ -30,6 +30,9 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
       agentOutput={full.agentOutput}
       subtaskTerminals={full.subtaskTerminals}
       qaLog={full.qaLog}
+      specLog={full.specLog}
+      planLog={full.planLog}
+      mergeLog={full.mergeLog}
       sessionMap={full.sessionMap}
     />
   );
