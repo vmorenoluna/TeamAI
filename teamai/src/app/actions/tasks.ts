@@ -353,6 +353,22 @@ export async function getTaskFull(taskId: string) {
   const outputPath = join(dir, 'output.log');
   const agentOutput = existsSync(outputPath) ? readFileSync(outputPath, 'utf-8') : null;
 
+  // Read per-subtask log files for the expandable terminal list
+  const subtaskTerminals: { id: number; title: string; log: string | null }[] = [];
+  if (plan?.subtasks) {
+    for (const s of plan.subtasks) {
+      const stLogPath = join(dir, `output-st${s.id}.log`);
+      if (existsSync(stLogPath)) {
+        subtaskTerminals.push({ id: Number(s.id), title: s.title, log: readFileSync(stLogPath, 'utf-8') });
+      }
+    }
+  }
+  subtaskTerminals.sort((a, b) => a.id - b.id);
+
+  // Read QA log (accumulates across QA retries)
+  const qaLogPath = join(dir, 'output-qa.log');
+  const qaLog = existsSync(qaLogPath) ? readFileSync(qaLogPath, 'utf-8') : null;
+
   // Load spec revision snapshots for comparison UI
   const specVersions: Record<string, string> = {};
   for (const version of [1, 2, 3]) {
@@ -362,7 +378,14 @@ export async function getTaskFull(taskId: string) {
     }
   }
 
-  return { task, allTasks, dependencies, dependents, spec, plan, qaReport, humanFeedback, diff, agentOutput, specVersions };
+  // Read session map for live streaming per terminal
+  let sessionMap: Record<string, string> = {};
+  const sessionMapPath = join(dir, 'session_map.json');
+  if (existsSync(sessionMapPath)) {
+    try { sessionMap = JSON.parse(readFileSync(sessionMapPath, 'utf-8')); } catch { /* skip */ }
+  }
+
+  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, sessionMap };
 }
 
 export async function addDependency(taskId: string, depId: string): Promise<void> {

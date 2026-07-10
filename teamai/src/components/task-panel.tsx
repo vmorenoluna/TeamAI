@@ -93,6 +93,9 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
             qaReport={data.qaReport}
             diff={data.diff}
             agentOutput={data.agentOutput}
+            subtaskTerminals={data.subtaskTerminals}
+            qaLog={data.qaLog}
+            sessionMap={data.sessionMap}
             onClose={onClose}
             readonly={readonly}
           />

@@ -60,11 +60,16 @@ vi.mock('@/hooks/use-websocket', () => ({
   },
 }));
 
-// AgentPanel mock
-vi.mock('@/components/agent-panel', () => ({
-  AgentPanel: ({ taskId, initialOutput }: { taskId: string; initialOutput?: string | null }) => (
-    <div data-testid="agent-panel" data-task-id={taskId}>
-      {initialOutput && <pre>{initialOutput}</pre>}
+// SubtaskTerminalList mock (replaces AgentPanel for per-subtask terminals)
+vi.mock('@/components/subtask-terminal-list', () => ({
+  SubtaskTerminalList: ({ taskId, subtaskTerminals, qaLog, orchestratorLog }: {
+    taskId: string; subtaskTerminals: { id: number; title: string; log: string | null }[];
+    qaLog: string | null; orchestratorLog: string | null;
+  }) => (
+    <div data-testid="subtask-terminal-list" data-task-id={taskId}>
+      <span data-testid="subtask-count">{subtaskTerminals.length}</span>
+      {qaLog && <span data-testid="qa-log-present">qa</span>}
+      {orchestratorLog && <span data-testid="orchestrator-log-present">orch</span>}
     </div>
   ),
 }));
@@ -138,6 +143,9 @@ function makeFullData(overrides: Partial<{
     diff: overrides.diff ?? null,
     agentOutput: overrides.agentOutput ?? null,
     specVersions: overrides.specVersions ?? {},
+    subtaskTerminals: [],
+    qaLog: null,
+    sessionMap: {},
   };
 }
 
@@ -680,6 +688,9 @@ describe('TaskDetail', () => {
         diff={overrides.diff ?? null}
         agentOutput={overrides.agentOutput ?? null}
         specVersions={overrides.specVersions ?? {}}
+        subtaskTerminals={[]}
+        qaLog={null}
+        sessionMap={{}}
         readonly={overrides.readonly ?? false}
         onClose={overrides.onClose}
       />
@@ -834,18 +845,18 @@ describe('TaskDetail', () => {
   // ── Terminal tab ─────────────────────────────────────────────────────
 
   describe('terminal tab', () => {
-    it('renders AgentPanel when Terminal tab is active', () => {
+    it('renders SubtaskTerminalList when Terminal tab is active', () => {
       renderDetail();
       fireEvent.click(screen.getByText('Terminal'));
 
-      expect(screen.getByTestId('agent-panel')).toBeInTheDocument();
+      expect(screen.getByTestId('subtask-terminal-list')).toBeInTheDocument();
     });
 
-    it('passes taskId to AgentPanel', () => {
+    it('passes taskId to SubtaskTerminalList', () => {
       renderDetail();
       fireEvent.click(screen.getByText('Terminal'));
 
-      const panel = screen.getByTestId('agent-panel');
+      const panel = screen.getByTestId('subtask-terminal-list');
       expect(panel.getAttribute('data-task-id')).toBe('task-1');
     });
   });

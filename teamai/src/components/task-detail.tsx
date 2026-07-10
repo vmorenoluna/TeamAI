@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useServerMutation } from '@/hooks/use-server-mutation';
-import { AgentPanel } from './agent-panel';
+import { SubtaskTerminalList } from './subtask-terminal-list';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
 import { addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, restartCurrentPhase } from '@/app/actions/tasks';
@@ -29,6 +29,9 @@ interface Props {
   humanFeedback?: string | null;
   diff: string | null;
   agentOutput?: string | null;
+  subtaskTerminals?: { id: number; title: string; log: string | null }[];
+  qaLog?: string | null;
+  sessionMap?: Record<string, string>;
   onClose?: () => void;
   readonly?: boolean;
 }
@@ -256,7 +259,7 @@ export function QAReportView({ qaReport, humanFeedback }: { qaReport: QAReportDa
 // outside the component to avoid recreating on every render.
 const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, onClose, readonly = false }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, sessionMap, onClose, readonly = false }: Props) {
   const router = useRouter();
   const { run, isPending } = useServerMutation();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -712,7 +715,13 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
         {/* TERMINAL */}
         {activeTab === 'terminal' && (
           <div className="p-4 flex-1 min-h-0">
-            <AgentPanel taskId={task.id} initialOutput={agentOutput} />
+            <SubtaskTerminalList
+              taskId={task.id}
+              subtaskTerminals={subtaskTerminals ?? []}
+              qaLog={qaLog ?? null}
+              orchestratorLog={agentOutput ?? null}
+              sessionMap={sessionMap}
+            />
           </div>
         )}
 

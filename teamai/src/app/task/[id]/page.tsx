@@ -28,6 +28,9 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
       humanFeedback={full.humanFeedback}
       diff={full.diff}
       agentOutput={full.agentOutput}
+      subtaskTerminals={full.subtaskTerminals}
+      qaLog={full.qaLog}
+      sessionMap={full.sessionMap}
     />
   );
 }

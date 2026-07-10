@@ -121,6 +121,9 @@ describe('TaskDetail mutation handlers', () => {
         plan={null}
         qaReport={null}
         diff={null}
+        subtaskTerminals={[]}
+        qaLog={null}
+        sessionMap={{}}
       />,
     );
   }
