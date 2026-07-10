@@ -85,6 +85,7 @@ interface SeedTask {
   qaReport?: object;
   completionSummary?: string;
   outputLog?: string;
+  diff?: string;
   events: string[];  // phase names in order
   source?: string;
   competitiveContext?: string;
@@ -600,6 +601,90 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
 
 [AWAITING REVIEW] PR #127 is open. CI checks: 3/4 passed.
 `,
+    diff: `diff --git a/src/styles/tokens.css b/src/styles/tokens.css
+new file mode 100644
+--- /dev/null
++++ b/src/styles/tokens.css
+@@ -0,0 +1,48 @@
++:root {
++  --color-bg-primary: #ffffff;
++  --color-bg-secondary: #f8fafc;
++  --color-text-primary: #0f172a;
++  --color-text-secondary: #475569;
++  --color-border: #e2e8f0;
++  --color-accent: #2563eb;
++  --color-success: #16a34a;
++  --color-error: #dc2626;
++}
++[data-theme="dark"] {
++  --color-bg-primary: #0f172a;
++  --color-bg-secondary: #1e293b;
++  --color-text-primary: #f1f5f9;
++  --color-text-secondary: #94a3b8;
++  --color-border: #334155;
++  --color-accent: #3b82f6;
++  --color-card-bg: #1e293b;
++}
+diff --git a/src/components/ThemeToggle.tsx b/src/components/ThemeToggle.tsx
+new file mode 100644
+--- /dev/null
++++ b/src/components/ThemeToggle.tsx
+@@ -0,0 +1,45 @@
++'use client';
++import { useEffect, useState } from 'react';
++import { getTheme, setTheme, type Theme } from '@/utils/theme';
++
++export function ThemeToggle() {
++  const [theme, setThemeState] = useState<Theme>('system');
++  const [mounted, setMounted] = useState(false);
++
++  useEffect(() => {
++    setThemeState(getTheme());
++    setMounted(true);
++  }, []);
++
++  return (
++    <div className="theme-toggle" role="radiogroup">
++      {(['light', 'dark', 'system'] as Theme[]).map((t) => (
++        <button key={t} aria-checked={theme === t}
++          onClick={() => { setThemeState(t); setTheme(t); }}>
++          {t === 'light' ? '☀️' : t === 'dark' ? '🌙' : '💻'}
++        </button>
++      ))}
++    </div>
++  );
++}
+diff --git a/src/utils/theme.ts b/src/utils/theme.ts
+new file mode 100644
+--- /dev/null
++++ b/src/utils/theme.ts
+@@ -0,0 +1,32 @@
++export type Theme = 'light' | 'dark' | 'system';
++
++const STORAGE_KEY = 'theme';
++
++export function setTheme(theme: Theme): void {
++  const root = document.documentElement;
++  if (theme === 'system') {
++    root.removeAttribute('data-theme');
++  } else {
++    root.setAttribute('data-theme', theme);
++  }
++  localStorage.setItem(STORAGE_KEY, theme);
++}
++
++export function getTheme(): Theme {
++  const stored = localStorage.getItem(STORAGE_KEY);
++  if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
++  return 'system';
++}
++
++export function initTheme(): void {
++  const stored = localStorage.getItem(STORAGE_KEY);
++  if (stored === 'light' || stored === 'dark') {
++    document.documentElement.setAttribute('data-theme', stored);
++  }
++}`,
     events: ['backlog', 'spec', 'plan', 'implement', 'qa-review', 'awaiting-review'],
   },
   {
@@ -894,6 +979,7 @@ function writeTask(task: SeedTask) {
   if (task.qaReport) writeFileSync(join(dir, 'qa_report.json'), JSON.stringify(task.qaReport, null, 2));
   if (task.completionSummary) writeFileSync(join(dir, 'completion_summary.md'), task.completionSummary);
   if (task.outputLog) writeFileSync(join(dir, 'output.log'), task.outputLog);
+  if (task.diff) writeFileSync(join(dir, 'diff.txt'), task.diff);
 }
 
 // ── Main ────────────────────────────────────────────────────────────
