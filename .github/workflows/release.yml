@@ -1,0 +1,242 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# Cancel in-progress release builds if a new tag is pushed
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Version check ──────────────────────────────────────────────────────
+
+  version-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: teamai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Verify git tag matches package.json version
+        run: |
+          TAG_VERSION="${{ github.ref_name }}"
+          TAG_VERSION="${TAG_VERSION#v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          echo "Tag: v$TAG_VERSION, package.json: $PKG_VERSION"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "❌ Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
+            echo "   Update version in teamai/package.json before tagging."
+            exit 1
+          fi
+          echo "✅ Versions match"
+
+  # ── Windows build ──────────────────────────────────────────────────────
+
+  build-windows:
+    needs: version-check
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: teamai
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: teamai/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Build server bundle
+        run: npm run build:server
+
+      - name: Package Electron (Windows)
+        run: npx electron-builder --win --publish=never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            teamai/dist-electron/TeamAI Setup *.exe
+            teamai/dist-electron/TeamAI*.zip
+            teamai/dist-electron/latest*.yml
+          if-no-files-found: error
+
+  # ── macOS build ────────────────────────────────────────────────────────
+
+  build-macos:
+    needs: version-check
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: teamai
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: teamai/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Build server bundle
+        run: npm run build:server
+
+      - name: Package Electron (macOS)
+        run: npx electron-builder --mac --universal --publish=never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Skip code signing and notarization (requires Apple Developer account)
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            teamai/dist-electron/*.dmg
+            teamai/dist-electron/*.zip
+            teamai/dist-electron/latest*.yml
+          if-no-files-found: error
+
+  # ── Linux build ────────────────────────────────────────────────────────
+
+  build-linux:
+    needs: version-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: teamai
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: teamai/package-lock.json
+
+      - name: Install native build tools (for node-pty)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential python3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Build server bundle
+        run: npm run build:server
+
+      - name: Package Electron (Linux)
+        run: npx electron-builder --linux --publish=never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            teamai/dist-electron/*.AppImage
+            teamai/dist-electron/*.deb
+            teamai/dist-electron/latest*.yml
+          if-no-files-found: error
+
+  # ── GitHub Release ─────────────────────────────────────────────────────
+
+  create-release:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-artifacts'
+          merge-multiple: true
+          path: dist
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Set version and prerelease flag
+        run: |
+          VERSION="${TAG#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          if [[ "$VERSION" == 0.* ]]; then
+            echo "IS_PRERELEASE=true" >> $GITHUB_ENV
+            echo "Marked as prerelease (0.x version)"
+          else
+            echo "IS_PRERELEASE=false" >> $GITHUB_ENV
+          fi
+        env:
+          TAG: ${{ github.ref_name }}
+
+      - name: Build release body
+        run: |
+          {
+            echo "### Downloads"
+            echo ""
+            echo "**Windows**"
+            echo "- \`TeamAI Setup ${VERSION}.exe\` — NSIS installer (recommended)"
+            echo "- \`TeamAI-${VERSION}-win.zip\` — portable (extract & run)"
+            echo ""
+            echo "**macOS** *(unsigned — right-click → Open on first launch)*"
+            echo "- \`TeamAI-${VERSION}-universal.dmg\`"
+            echo "- \`TeamAI-${VERSION}-mac.zip\`"
+            echo ""
+            echo "**Linux**"
+            echo "- \`TeamAI-${VERSION}.AppImage\`"
+            echo "- \`teamai_${VERSION}_amd64.deb\`"
+            echo ""
+            echo "---"
+          } > /tmp/release-body.md
+
+          # Append version section from CHANGELOG if it exists
+          if [ -f teamai/CHANGELOG.md ]; then
+            echo "" >> /tmp/release-body.md
+            VERSION_ESC="${VERSION//./\\.}"
+            awk "/^## \[${VERSION_ESC}\]/{flag=1; print; next} /^## \[/{flag=0} flag" \
+              teamai/CHANGELOG.md >> /tmp/release-body.md
+            echo "Changelog section for v${VERSION} appended"
+          else
+            echo "No CHANGELOG.md found — skipping"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: /tmp/release-body.md
+          files: dist/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ env.IS_PRERELEASE == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

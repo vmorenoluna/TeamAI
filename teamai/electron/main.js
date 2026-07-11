@@ -11,7 +11,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 let mainWindow = null;
 
-const { app, BrowserWindow, shell, session } = require('electron');
+const { app, BrowserWindow, shell, session, ipcMain } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -20,6 +20,9 @@ const isDev = process.env.ELECTRON_DEV === 'true';
 const PORT = 3000;
 const HOST = '127.0.0.1';
 const URL = `http://${HOST}:${PORT}`;
+
+// Auto-updater (only in production packaged app)
+const { autoUpdater } = isDev ? {} : require('electron-updater');
 
 // Prevent second instance — focus existing window instead
 const gotLock = app.requestSingleInstanceLock();
@@ -43,25 +46,41 @@ function startServer() {
   return new Promise((resolve, reject) => {
     const projectRoot = path.join(__dirname, '..');
 
-    const args = isDev
-      ? ['tsx', 'watch', 'server.ts']
-      : ['tsx', 'server.ts'];
+    // In the packaged app, the compiled server entry point and .next/
+    // are unpacked from the asar so they're on the real filesystem.
+    // The server runs as an Electron child process (no ELECTRON_RUN_AS_NODE)
+    // so it retains asar support for resolving node_modules imports.
+    // Tradeoff: ~150MB Chromium overhead per server process.
+    const unpackedRoot = isDev
+      ? projectRoot
+      : projectRoot.replace(/app\.asar$/, 'app.asar.unpacked');
+    const serverEntry = path.join(unpackedRoot, 'dist-server', 'server.mjs');
 
     const env = {
       ...process.env,
-      ...(isDev ? {} : { NODE_ENV: 'production' }),
+      ...(isDev ? {} : {
+        NODE_ENV: 'production',
+        // NOTE: Not using ELECTRON_RUN_AS_NODE here — the server needs
+        // asar support to resolve node_modules imports (next, ws, etc.)
+        // from inside the asar archive. Tradeoff: ~150MB Chromium overhead
+        // per server process. Optimize later with a standalone Node binary.
+      }),
       HOST,
       // Suppress Next.js telemetry in packaged app
       NEXT_TELEMETRY_DISABLED: '1',
     };
 
-    console.log(`[electron] Starting server: npx ${args.join(' ')} (cwd: ${projectRoot})`);
+    // In dev mode, use tsx watch for HMR; in production, run compiled JS
+    const args = isDev
+      ? [path.join(projectRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'), 'watch', path.join(projectRoot, 'server.ts')]
+      : [serverEntry];
 
-    serverProcess = spawn('npx', args, {
-      cwd: projectRoot,
+    console.log(`[electron] Starting server: ${args.join(' ')} (cwd: ${unpackedRoot})`);
+
+    serverProcess = spawn(process.execPath, args, {
+      cwd: unpackedRoot,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: process.platform === 'win32',
     });
 
     let resolved = false;
@@ -174,6 +193,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
       webSecurity: false, // allow WebSocket connections to local dev server
     },
     autoHideMenuBar: true,
@@ -202,6 +222,85 @@ function createWindow() {
 
 // ── App lifecycle ───────────────────────────────────────────────────────────
 
+function setupAutoUpdater() {
+  // Always register get-update-status so the renderer can query it on mount.
+  // In dev mode it returns false; in production it returns the tracked flag.
+  ipcMain.handle('get-update-status', () => ({ updateDownloaded: false }));
+
+  if (!autoUpdater) {
+    // Dev mode — register keyboard shortcut to simulate update flow
+    if (isDev && mainWindow) {
+      mainWindow.webContents.on('before-input-event', (_event, input) => {
+        if (input.control && input.shift && input.key === 'U') {
+          console.log('[updater:dev] Simulating update flow (Ctrl+Shift+U)');
+          simulateUpdateForDev();
+        }
+      });
+    }
+    return;
+  }
+
+  let updateDownloaded = false;
+
+  // Re-register the handler so it captures the real updateDownloaded variable
+  ipcMain.removeHandler('get-update-status');
+  ipcMain.handle('get-update-status', () => ({ updateDownloaded }));
+
+  // Log updater events
+  autoUpdater.on('checking-for-update', () => console.log('[updater] Checking for update...'));
+  autoUpdater.on('update-available', (info) => console.log('[updater] Update available:', info.version));
+  autoUpdater.on('update-not-available', () => console.log('[updater] Already up to date'));
+  autoUpdater.on('download-progress', (p) => {
+    const pct = Math.floor(p.percent);
+    console.log(`[updater] Download: ${pct}%`);
+    if (mainWindow) mainWindow.webContents.send('download-progress', pct);
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    console.log('[updater] Update downloaded — ready to install');
+    updateDownloaded = true;
+    if (mainWindow) {
+      mainWindow.webContents.send('update-ready');
+    }
+  });
+  autoUpdater.on('error', (err) => console.error('[updater] Error:', err.message));
+
+  // Handle install-update IPC from renderer (e.g., user clicks "Install Update")
+  ipcMain.on('install-update', () => {
+    console.log('[updater] Installing update and restarting...');
+    autoUpdater.quitAndInstall();
+  });
+
+  // Check for updates 10 seconds after startup (let the server settle)
+  setTimeout(() => autoUpdater.checkForUpdates(), 10_000);
+}
+
+// Dev-only helper: simulate the update flow (download → ready)
+let simulatingUpdate = false;
+
+function simulateUpdateForDev() {
+  if (!mainWindow || simulatingUpdate) return;
+  simulatingUpdate = true;
+  const win = mainWindow; // capture reference — safe if window closes mid-simulation
+  let pct = 0;
+  const interval = setInterval(() => {
+    pct += Math.floor(Math.random() * 15) + 5;
+    if (pct >= 100) {
+      pct = 100;
+      clearInterval(interval);
+      setTimeout(() => {
+        // Also update the tracked flag so get-update-status returns true
+        ipcMain.removeHandler('get-update-status');
+        ipcMain.handle('get-update-status', () => ({ updateDownloaded: true }));
+        win.webContents.send('update-ready');
+        simulatingUpdate = false;
+        console.log('[updater:dev] Simulated update-ready');
+      }, 400);
+    }
+    win.webContents.send('download-progress', pct);
+  }, 600);
+}
+
 app.whenReady().then(async () => {
   // Strip Content-Security-Policy headers so WebSocket connections work in the
   // Electron renderer. Next.js dev server sends CSP headers that can block ws://
@@ -216,6 +315,7 @@ app.whenReady().then(async () => {
   try {
     await startServer();
     createWindow();
+    setupAutoUpdater();
   } catch (err) {
     console.error('[electron] Failed to start:', err);
     app.quit();
