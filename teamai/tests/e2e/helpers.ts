@@ -8,6 +8,7 @@
 import { expect, type Page } from '@playwright/test';
 import { resolve, join } from 'path';
 import { readFileSync, readdirSync, existsSync } from 'fs';
+import { getTestServerUrl } from '../../scripts/get-test-port';
 
 /** The seed project path — must match seed.ts */
 export const SEED_DIR = resolve(__dirname, '..', '..', '.teamai-e2e-seed');
@@ -61,7 +62,7 @@ export async function ensureProjectSelected(page: Page): Promise<boolean> {
   await page.context().addCookies([{
     name: 'activeProject',
     value: SEED_DIR,
-    url: 'http://localhost:3001',
+    url: getTestServerUrl(),
   }]);
 
   await page.goto('/');
