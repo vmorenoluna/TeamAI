@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 import { checkTools, updateToolPath, resetToolPath } from '@/app/actions/tools';
 import type { ToolName, ToolStatus } from '@/lib/tool-checker';
@@ -10,28 +10,15 @@ const STATUS_ORDER: Record<string, number> = {
   claude: 0, git: 1, gh: 2, glab: 3, docker: 4, devcontainer: 5,
 };
 
-export function ToolSettings() {
+export function ToolSettings({ initialTools }: { initialTools: ToolStatus[] }) {
   const { run } = useServerMutation();
-  /* eslint-disable local/no-async-fetch-on-mount */
-  const [tools, setTools] = useState<ToolStatus[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [tools, setTools] = useState<ToolStatus[]>(
+    initialTools.sort((a, b) => (STATUS_ORDER[a.name] ?? 99) - (STATUS_ORDER[b.name] ?? 99))
+  );
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [editPaths, setEditPaths] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
-  /* eslint-enable local/no-async-fetch-on-mount */
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await checkTools();
-        setTools(data.sort((a, b) => (STATUS_ORDER[a.name] ?? 99) - (STATUS_ORDER[b.name] ?? 99)));
-      } catch (err) {
-        setError(formatActionError('check tools', err));
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
 
   async function handleRefresh() {
     setLoading(true);

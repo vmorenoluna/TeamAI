@@ -32,6 +32,8 @@ export interface ContainerInfo {
 }
 
 function devcontainerBin(): string {
+  const custom = getToolPath('devcontainer');
+  if (custom !== 'devcontainer') return custom;
   const ext = process.platform === 'win32' ? '.cmd' : '';
   const local = path.join(process.cwd(), 'node_modules', '.bin', `devcontainer${ext}`);
   return existsSync(local) ? local : `devcontainer${ext}`;
@@ -149,7 +151,7 @@ export class ContainerManager extends EventEmitter {
       const normalized = projectRoot.replace(/^([A-Z]):/, (_, d) => `${d.toLowerCase()}:`);
       const label = `devcontainer.local_folder=${normalized}`;
       // Use execFileSync to bypass shell quoting (backslashes in Windows paths break execSync's shell)
-      const out = execFileSync('docker', [
+      const out = execFileSync(getToolPath('docker'), [
         'ps', '-a',
         '--filter', `label=${label}`,
         '--format', '{{.Status}}',
@@ -167,12 +169,12 @@ export class ContainerManager extends EventEmitter {
     try {
       const normalized = projectRoot.replace(/^([A-Z]):/, (_, d) => `${d.toLowerCase()}:`);
       const label = `devcontainer.local_folder=${normalized}`;
-      const containerId = execFileSync('docker', [
+      const containerId = execFileSync(getToolPath('docker'), [
         'ps', '--filter', `label=${label}`, '--format', '{{.ID}}',
       ], { encoding: 'utf-8', timeout: 5000 }).trim();
       if (!containerId) return null;
 
-      const mountsJson = execFileSync('docker', [
+      const mountsJson = execFileSync(getToolPath('docker'), [
         'inspect', containerId, '--format', '{{json .Mounts}}',
       ], { encoding: 'utf-8', timeout: 5000 }).trim();
       const mounts: Array<{ Source: string; Destination: string }> = JSON.parse(mountsJson);
@@ -406,7 +408,7 @@ export class ContainerManager extends EventEmitter {
       this._emitLog(projectRoot, `  ▶ ${step.name}…`);
 
       try {
-        const output = execFileSync('docker', [
+        const output = execFileSync(getToolPath('docker'), [
           'exec', '-i', '-w', record.remoteWorkspaceFolder!,
           record.containerId,
           'sh', '-c', step.command,
