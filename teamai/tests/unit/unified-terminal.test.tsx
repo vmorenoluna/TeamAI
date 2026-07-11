@@ -11,7 +11,7 @@
  *   - Interleaved output: selectedRoles filtering, timestamp ordering
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ vi.mock('@xterm/addon-fit', () => ({
   FitAddon: mockFitAddonConstructor,
 }));
 
-const mockUseAgentStreamReturn = vi.hoisted(() => [] as Array<{ sessionId: string; event: Record<string, unknown> }>);
+const mockUseAgentStreamReturn = vi.hoisted(() => [] as Array<{ sessionId: string; event: StreamEvent }>);
 
 vi.mock('@/hooks/use-agent-stream', () => ({
   useAgentStream: () => mockUseAgentStreamReturn,
@@ -551,6 +551,242 @@ describe('UnifiedTerminal — component', () => {
 
       const filterBar = screen.getByTestId('unified-terminal');
       expect(filterBar.className).toContain('flex-wrap');
+    });
+  });
+
+  // ── Filter effect re-runs without TDZ ─────────────────────────────────────
+  //
+  // Regression test for the bug where `const selectedSessionIds = useMemo(...)`
+  // was declared AFTER the interleaved-output useEffect that listed it in its
+  // dep array. React evaluates hook dep arrays during render, so referencing
+  // an uninitialized const threw a ReferenceError (TDZ) and broke the page.
+  // The fix moved the useMemo above the effects that depend on it.
+
+  describe('filter effect re-runs without TDZ ReferenceError', () => {
+    // All sessions present, mapped qa/spec/plan/merge → their role; anything
+    // else (e.g. `coder`) falls into the coder bucket per component logic.
+    const sessionMap = {
+      qa: 'qa-session',
+      spec: 'spec-session',
+      plan: 'plan-session',
+      merge: 'merge-session',
+      coder: 'coder-session',
+    };
+
+    async function renderFull() {
+      // Spy on console.error so any asynchronously-thrown ReferenceError
+      // (e.g. from a useEffect callback after mount) is captured instead of
+      // silently swallowed. Synchronous render-phase TDZ errors are caught
+      // by render() itself throwing, which is the primary signal.
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const view = render(
+        <UnifiedTerminal
+          {...makeDefaultProps({
+            sessionMap,
+            qaLog: '[12:00:01] QA line',
+            specLog: '[12:00:02] Spec line',
+            planLog: '[12:00:03] Plan line',
+            mergeLog: '[12:00:04] Merge line',
+            orchestratorLog: '[12:00:05] Orch line',
+            subtaskTerminals: [{ id: 1, title: 'Login', log: '[12:00:00] Coder line' }],
+          })}
+        />
+      );
+
+      // Wait for xterm init + first interleaved-write before returning so
+      // callers can fireEvent.click immediately without racing termReady.
+      await waitForNextReset();
+
+      return { ...view, errorSpy };
+    }
+
+    // Helper: wait until at least one interleaved-output effect run has
+    // happened for the current state. The effect is async (terminal init
+    // Promise resolves on a microtask, then setTermReady triggers another
+    // render, then rAF for scrollToBottom). `waitFor` polls until ready.
+    async function waitForNextReset() {
+      await waitFor(() => {
+        expect(mockTerminalReset).toHaveBeenCalled();
+      });
+    }
+
+    // Helper: read the most recent terminal.write() argument as a string.
+    // The interleaved-output useEffect calls write() exactly once per run
+    // (with empty string for "None"), and the live-events effect never
+    // writes here because mockUseAgentStreamReturn is empty.
+    const lastWriteArg = () =>
+      String(mockTerminalWrite.mock.calls.at(-1)?.[0] ?? '');
+
+    it('mounts and reaches a stable interleaved write without throwing', async () => {
+      const { errorSpy } = await renderFull();
+
+      // renderFull already awaits waitForNextReset; no extra wait needed.
+
+      // Initial write must include every role's label (all selected by default).
+      const initialWrite = lastWriteArg();
+      expect(initialWrite).toContain('[QA Review]');
+      expect(initialWrite).toContain('[Spec (Analyst)]');
+      expect(initialWrite).toContain('[Plan (Planner)]');
+      expect(initialWrite).toContain('[Merge (Merger)]');
+      expect(initialWrite).toContain('[Orchestrator]');
+      expect(initialWrite).toContain('[Coder]');
+
+      // No async ReferenceError leaked through to console.error.
+      const refErrors = errorSpy.mock.calls.filter(args =>
+        args.some(a => typeof a === 'string' && a.includes('ReferenceError'))
+      );
+      expect(refErrors).toEqual([]);
+      errorSpy.mockRestore();
+    });
+
+    it('re-runs the interleaved-output effect when a chip is toggled, excluding the deselected role', async () => {
+      await renderFull();
+      vi.clearAllMocks();
+
+      // Deselect QA chip.
+      const qaBtn = screen.getByText('QA Review').closest('button')!;
+      fireEvent.click(qaBtn);
+
+      // selectedRoles changed → selectedSessionIds (a new Set) changed →
+      // dep array is different → the interleaved-output useEffect must run.
+      // The reset call from this re-run is the only one after clearAllMocks(),
+      // so waiting for the count to exceed 0 cleanly isolates "effect ran
+      // because of the click" from earlier mount-time runs.
+      await waitFor(() => {
+        expect(mockTerminalReset).toHaveBeenCalled();
+      });
+
+      const toggledWrite = lastWriteArg();
+      expect(toggledWrite).not.toContain('[QA Review]');
+      expect(toggledWrite).not.toContain('QA line');
+      // Other roles still selected.
+      expect(toggledWrite).toContain('[Spec (Analyst)]');
+      expect(toggledWrite).toContain('[Coder]');
+    });
+
+    it('re-runs the effect when reselecting a previously deselected role', async () => {
+      await renderFull();
+      vi.clearAllMocks();
+
+      const qaBtn = screen.getByText('QA Review').closest('button')!;
+      // Deselect first.
+      fireEvent.click(qaBtn);
+      await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+      vi.clearAllMocks();
+
+      // Reselect.
+      fireEvent.click(qaBtn);
+      await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+
+      const finalWrite = lastWriteArg();
+      expect(finalWrite).toContain('[QA Review]');
+      expect(finalWrite).toContain('QA line');
+    });
+
+    it('handles None followed by All without throwing, re-running the effect each step', async () => {
+      await renderFull();
+      vi.clearAllMocks();
+
+      // Click None → all roles deselected → interleaved output becomes empty
+      // string. Effect still resets terminal but writes nothing.
+      fireEvent.click(screen.getByText('None'));
+      await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+      expect(mockTerminalWrite).not.toHaveBeenCalled();
+
+      vi.clearAllMocks();
+
+      // Click All → all roles reselected → effect runs again with full content.
+      fireEvent.click(screen.getByText('All'));
+      await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+
+      const fullWrite = lastWriteArg();
+      expect(fullWrite).toContain('[QA Review]');
+      expect(fullWrite).toContain('[Spec (Analyst)]');
+      expect(fullWrite).toContain('[Plan (Planner)]');
+      expect(fullWrite).toContain('[Merge (Merger)]');
+      expect(fullWrite).toContain('[Orchestrator]');
+      expect(fullWrite).toContain('[Coder]');
+    });
+
+    // roundTripLabels: helper for "toggle a chip off, then back on" using
+    // the same label each time. Each iteration ends in selectedRoles
+    // matching its starting state, so the loop is idempotent regardless of
+    // iteration order.
+    const roundTripLabels = ['QA Review', 'Plan (Planner)', 'Spec (Analyst)'];
+
+    it('toggles multiple chips off then back on without TDZ errors', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await renderFull();
+      vi.clearAllMocks();
+
+      // First loop: each label is currently SELECTED → click deselects it.
+      for (const label of roundTripLabels) {
+        fireEvent.click(screen.getByText(label).closest('button')!);
+        await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+        vi.clearAllMocks();
+      }
+
+      // Second loop: each label is now DESELECTED → click reselects it.
+      for (const label of roundTripLabels) {
+        fireEvent.click(screen.getByText(label).closest('button')!);
+        await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+        vi.clearAllMocks();
+      }
+
+      const refErrors = errorSpy.mock.calls.filter(args =>
+        args.some(a => typeof a === 'string' && a.includes('ReferenceError'))
+      );
+      expect(refErrors).toEqual([]);
+      errorSpy.mockRestore();
+    });
+
+    // The interleaved-output effect is the headline regression case, but
+    // selectedSessionIds is also in the live-events useEffect dep array.
+    // Verify that effect also re-runs without TDZ when a chip is toggled,
+    // and that filtering by selectedSessionIds drops events whose session
+    // is no longer selected. Saving and restoring the hoisted array keeps
+    // this test isolated from siblings.
+
+    it('also re-runs the live-events effect on filter toggle without TDZ', async () => {
+      const originalLength = mockUseAgentStreamReturn.length;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        // Push one event bound to the QA session. Since QA is selected by
+        // default post-mount, the live-events effect will process it and
+        // write the formatted "Session started" line to the terminal.
+        mockUseAgentStreamReturn.push({
+          sessionId: 'qa-session',
+          event: { type: 'system', subtype: 'init', model: 'test-model' } as StreamEvent,
+        });
+
+        await renderFull();
+        // Live-events effect ran on mount: write should contain the formatted event line.
+        await waitFor(() => {
+          expect(lastWriteArg()).toContain('Session started');
+        });
+        expect(lastWriteArg()).toContain('test-model');
+
+        vi.clearAllMocks();
+
+        // Toggle QA off → selectedSessionIds drops qa-session → both
+        // effects (interleaved AND live-events) re-run because
+        // selectedSessionIds changed. If TDZ were reintroduced render()
+        // would throw before this click ever dispatches.
+        const qaBtn = screen.getByText('QA Review').closest('button')!;
+        fireEvent.click(qaBtn);
+
+        // Interleaved effect runs on dep change → resets terminal.
+        await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+
+        const refErrors = errorSpy.mock.calls.filter(args =>
+          args.some(a => typeof a === 'string' && a.includes('ReferenceError'))
+        );
+        expect(refErrors).toEqual([]);
+      } finally {
+        mockUseAgentStreamReturn.length = originalLength;
+        errorSpy.mockRestore();
+      }
     });
   });
 });
