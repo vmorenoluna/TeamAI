@@ -141,10 +141,20 @@ function _start(projectRoot: string, state: AutoProjectState): void {
     { taskId: string; phase: string; projectRoot: string }) => {
     if (eventProject !== projectRoot || !state.enabled) return;
 
-    if (phase === 'awaiting-review' && state.autoTrackedIds.has(taskId)) {
-      // Remove from autoTrackedIds to prevent infinite retry loop if approveTask fails.
-      // Add to autoApprovedIds so the pr-open handler (which fires synchronously inside
-      // approveTask before it returns) can still detect this task and start CI polling.
+    if (phase === 'awaiting-review' && !state.autoApprovedIds.has(taskId)) {
+      // Auto mode owns awaiting-review: approve ANY task that reaches it while
+      // enabled, not just ones in autoTrackedIds. That set is in-memory only —
+      // a task resumed by crash recovery after a server restart is no longer
+      // tracked and would otherwise stall here forever (_adoptStalledTasks
+      // only scans at _start, and the tick loop skips paused phases). This
+      // also matches _adoptStalledTasks, which approves every awaiting-review
+      // task regardless of provenance.
+      // The autoApprovedIds guard prevents double-approval while one is in
+      // flight; on failure the id is removed (one-shot, no retry loop).
+      // Remove from autoTrackedIds so the sets stay consistent; add to
+      // autoApprovedIds so the pr-open handler (which fires synchronously
+      // inside approveTask before it returns) can still detect this task and
+      // start CI polling.
       state.autoTrackedIds.delete(taskId);
       state.autoApprovedIds.add(taskId);
       const orchestrator = getOrchestrator(projectRoot);
@@ -153,7 +163,11 @@ function _start(projectRoot: string, state: AutoProjectState): void {
           console.error(`[auto-mode] Failed to auto-approve task ${taskId}:`, err);
           state.autoApprovedIds.delete(taskId);
         });
-    } else if (phase === 'pr-open' && (state.autoTrackedIds.has(taskId) || state.autoApprovedIds.has(taskId))) {
+    } else if (phase === 'pr-open') {
+      // Same reasoning: start CI polling for any task that reaches pr-open
+      // while auto mode is enabled — a task resuming through create-pr after
+      // a restart is in neither tracking set. _startCIPolling is idempotent
+      // (ciPollTimers guard), so untracked or duplicate events are safe.
       state.autoApprovedIds.delete(taskId);
       // Start CI polling
       _startCIPolling(taskId, projectRoot, state);

@@ -613,10 +613,11 @@ describe('Auto Mode Integration', () => {
       });
     });
 
-    it('does NOT auto-approve task that was NOT auto-tracked', async () => {
+    it('auto-approves task even when NOT auto-tracked (e.g. resumed after a server restart)', async () => {
       // Move task to 'implement' so the tick does NOT pick it (not in backlog).
-      // The phase-change listener is still registered, but the task won't be
-      // in autoTrackedIds, so approveTask should not fire.
+      // autoTrackedIds is in-memory only — a task resumed by crash recovery
+      // after a restart is untracked, but auto mode must still approve it when
+      // it reaches awaiting-review, otherwise it stalls there forever.
       const { TaskStore } = await import('@/lib/task-store');
       const store = new TaskStore(testDir);
       store.updatePhase(taskId, 'implement');
@@ -627,9 +628,27 @@ describe('Auto Mode Integration', () => {
 
       fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
 
-      await new Promise(r => setTimeout(r, 50));
+      await vi.waitFor(() => {
+        expect(mockOrch.approveTask).toHaveBeenCalledWith(taskId, 'pull-request');
+      });
+    });
 
-      expect(mockOrch.approveTask).not.toHaveBeenCalled();
+    it('does not double-approve while an approval is already in flight', async () => {
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      // Keep the approval pending so the autoApprovedIds guard stays active.
+      mockOrch.approveTask.mockClear();
+      mockOrch.approveTask.mockReturnValue(new Promise(() => {}));
+
+      fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
+      fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
+
+      await new Promise(r => setTimeout(r, 50));
+      expect(mockOrch.approveTask).toHaveBeenCalledTimes(1);
     });
 
     it('does NOT auto-approve when auto mode is disabled', async () => {
