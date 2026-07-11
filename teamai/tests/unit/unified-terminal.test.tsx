@@ -618,6 +618,15 @@ describe('UnifiedTerminal — component', () => {
     const lastWriteArg = () =>
       String(mockTerminalWrite.mock.calls.at(-1)?.[0] ?? '');
 
+    // Helper: join every terminal.write() argument into a single string.
+    // Used for content-presence checks when the interleaved-output effect
+    // AND the live-events effect both fire (e.g. when a live event was
+    // pushed before mount). lastWriteArg() is order-dependent and returns
+    // only the most recent write, which is the live event when both run;
+    // allWrites() lets the test assert against either effect's output.
+    const allWrites = () =>
+      mockTerminalWrite.mock.calls.map(c => String(c[0] ?? '')).join('');
+
     it('mounts and reaches a stable interleaved write without throwing', async () => {
       const { errorSpy } = await renderFull();
 
@@ -779,6 +788,116 @@ describe('UnifiedTerminal — component', () => {
         // Interleaved effect runs on dep change → resets terminal.
         await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
 
+        const refErrors = errorSpy.mock.calls.filter(args =>
+          args.some(a => typeof a === 'string' && a.includes('ReferenceError'))
+        );
+        expect(refErrors).toEqual([]);
+      } finally {
+        mockUseAgentStreamReturn.length = originalLength;
+        errorSpy.mockRestore();
+      }
+    });
+
+    // The tests above all pass `sessionMap`, so the `if (!sessionMap) return
+    // new Set<string>()` short-circuit in the selectedSessionIds useMemo is
+    // never exercised. This test renders WITHOUT sessionMap and verifies:
+    //   1. The useMemo's null branch produces a valid (empty) Set that the
+    //      two effects can safely depend on without throwing a TDZ error.
+    //   2. The live-events effect's `sessionMap ? filter(events) : events`
+    //      short-circuit passes events through unfiltered.
+    //   3. Toggling a filter chip still re-runs both effects (the useMemo
+    //      is called, returns a fresh Set, and the new reference triggers
+    //      the dep change in both useEffects).
+
+    it('handles the missing sessionMap case: useMemo null branch + effect re-runs without TDZ', async () => {
+      const originalLength = mockUseAgentStreamReturn.length;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        // Push a live event with an arbitrary sessionId. Because sessionMap
+        // is undefined below, the live-events effect takes the
+        // `sessionMap ? events.filter(...) : events` short-circuit and writes
+        // the event through unfiltered. If the null branch in the useMemo
+        // ever broke (e.g. threw, or returned a non-iterable), this write
+        // would never happen and the test would fail at the waitFor below.
+        mockUseAgentStreamReturn.push({
+          sessionId: 'arbitrary-session-id-not-in-any-map',
+          event: { type: 'system', subtype: 'init', model: 'no-map-model' } as StreamEvent,
+        });
+
+        // Render WITHOUT sessionMap — explicitly set to undefined to make
+        // the intent clear (the default for missing props is also undefined,
+        // but being explicit documents what we're testing).
+        render(
+          <UnifiedTerminal
+            {...makeDefaultProps({
+              sessionMap: undefined,
+              qaLog: '[12:00:01] QA line',
+              specLog: '[12:00:02] Spec line',
+              planLog: '[12:00:03] Plan line',
+              mergeLog: '[12:00:04] Merge line',
+              orchestratorLog: '[12:00:05] Orch line',
+              subtaskTerminals: [{ id: 1, title: 'Login', log: '[12:00:00] Coder line' }],
+            })}
+          />
+        );
+        // Wait for xterm init + first interleaved-write (the same gate the
+        // other tests use, inlined here since renderFull() always passes
+        // sessionMap).
+        await waitFor(() => {
+          expect(mockTerminalReset).toHaveBeenCalled();
+        });
+
+        // ── Verify BOTH effects' writes happened on mount ──
+        // The interleaved-output effect runs first (writes role content),
+        // then the live-events effect runs (writes the "Session started"
+        // text). lastWriteArg() therefore returns the live-event write,
+        // so use the allWrites() helper that joins all writes for
+        // content-presence checks. This indirectly proves the useMemo's
+        // null branch returned a valid empty Set: if it had thrown or
+        // returned a non-iterable, the effect would crash before writing
+        // the event.
+        await waitFor(() => {
+          expect(allWrites()).toContain('Session started');
+        });
+        expect(allWrites()).toContain('no-map-model');
+
+        // Interleaved-output effect's content (all roles selected) is also
+        // present — sessionMap doesn't gate this effect.
+        expect(allWrites()).toContain('[QA Review]');
+        expect(allWrites()).toContain('[Spec (Analyst)]');
+        expect(allWrites()).toContain('[Plan (Planner)]');
+        expect(allWrites()).toContain('[Merge (Merger)]');
+        expect(allWrites()).toContain('[Orchestrator]');
+        expect(allWrites()).toContain('[Coder]');
+
+        // ── Toggle a chip and verify the effects re-run without TDZ ──
+        // selectedRoles changed → selectedSessionIds useMemo recomputes
+        // (returning a new empty Set) → both useEffects see a new dep
+        // reference → they re-run. If the useMemo were ever moved AFTER
+        // the effects (re-introducing the original TDZ bug), render() or
+        // the click handler would throw a ReferenceError.
+        vi.clearAllMocks();
+        const qaBtn = screen.getByText('QA Review').closest('button')!;
+        fireEvent.click(qaBtn);
+
+        await waitFor(() => {
+          expect(mockTerminalReset).toHaveBeenCalled();
+        });
+
+        // After deselecting QA, the new interleaved write must drop QA content.
+        expect(allWrites()).not.toContain('[QA Review]');
+        expect(allWrites()).not.toContain('QA line');
+        expect(allWrites()).toContain('[Spec (Analyst)]');
+        expect(allWrites()).toContain('[Coder]');
+
+        // ── Reselect QA and confirm the round trip also works ──
+        vi.clearAllMocks();
+        fireEvent.click(qaBtn);
+        await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+        expect(allWrites()).toContain('[QA Review]');
+        expect(allWrites()).toContain('QA line');
+
+        // ── No TDZ or other ReferenceError leaked through ──
         const refErrors = errorSpy.mock.calls.filter(args =>
           args.some(a => typeof a === 'string' && a.includes('ReferenceError'))
         );
