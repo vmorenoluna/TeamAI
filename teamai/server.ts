@@ -96,7 +96,7 @@ app.prepare().then(() => {
   });
 
   server.on('upgrade', (request, socket, head) => {
-    const reqUrl = new URL(request.url!, `http://${request.headers.host || '127.0.0.1:3000'}`);
+    const reqUrl = new URL(request.url!, `http://${request.headers.host || `127.0.0.1:${port}`}`);
     const pathname = reqUrl.pathname;
     const project = reqUrl.searchParams.get('project');
     if (pathname === '/ws') {
@@ -110,6 +110,7 @@ app.prepare().then(() => {
     // All other paths (e.g. /_next/webpack-hmr) fall through to Next.js
   });
 
+  const port = parseInt(process.env.PORT || '3000', 10);
   const host = process.env.HOST || '0.0.0.0';
   // ── Global error handlers so unhandled rejections don't crash the server ──
   process.on('unhandledRejection', (reason: unknown) => {
@@ -121,8 +122,8 @@ app.prepare().then(() => {
     // Don't exit — log and continue
   });
 
-  server.listen(3000, host, () => {
-    console.log(`> Ready on http://${host}:3000`);
+  server.listen(port, host, () => {
+    console.log(`> Ready on http://${host}:${port}`);
 
     // ── Startup crash recovery scan ─────────────────────────────────────
     const staleSessions = processManager.getStaleSessions();

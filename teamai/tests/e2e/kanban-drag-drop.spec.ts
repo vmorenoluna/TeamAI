@@ -4,7 +4,7 @@
  * Prerequisites:
  *   - Global playwright-setup.ts seeds a test project with 7 sample tasks
  *     in phases: backlog, implement, qa-review, done, failed.
- *   - Dev server at http://localhost:3000.
+ *   - Dev server at http://localhost:3001.
  *
  * Note: Native HTML5 DragEvents dispatched via page.evaluate() are unreliable
  * in Playwright (browsers require real user gestures to initiate drags).
