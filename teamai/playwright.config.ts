@@ -37,7 +37,7 @@ export default defineConfig({
     timeout: 120_000,
     cwd: __dirname,
     // Why 3001 (not 3002): avoids the dev server. Dev tooling should
-    // import getTestServerUrl() from scripts/get-test-port.ts instead
+    // import getTestServerUrl() from scripts/servers.ts instead
     // — to avoid drift.
     env: {
       NODE_ENV: 'test',

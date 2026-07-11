@@ -25,9 +25,9 @@ cd teamai
 npx tsx scripts/test-process-manager.ts
 ```
 
-> **Talking to the test server from a script or test?** Don't hardcode `localhost:3001` — import `getTestServerUrl()` from `teamai/scripts/get-test-port.ts` (which reads the `PORT` literal from `playwright.config.ts`).
+> **Talking to the test server from a script or test?** Don't hardcode `localhost:3001` — import `getTestServerUrl()` from `teamai/scripts/servers.ts` (which reads the `PORT` literal from `playwright.config.ts`).
 >
-> **Talking to the dev server from a script or test?** Don't hardcode `localhost:3002` — import `getDevServerUrl()` from `teamai/scripts/get-dev-port.ts` (which reads the `PORT` literal from `package.json`'s `dev` script).
+> **Talking to the dev server from a script or test?** Don't hardcode `localhost:3002` — import `getDevServerUrl()` from the same `teamai/scripts/servers.ts` (which reads the `PORT` literal from `package.json`'s `dev` script).
 
 ## Architecture
 

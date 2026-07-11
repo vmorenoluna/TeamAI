@@ -8,7 +8,7 @@
 import { expect, type Page } from '@playwright/test';
 import { resolve, join } from 'path';
 import { readFileSync, readdirSync, existsSync } from 'fs';
-import { getTestServerUrl } from '../../scripts/get-test-port';
+import { getTestServerUrl } from '../../scripts/servers';
 
 /** The seed project path — must match seed.ts */
 export const SEED_DIR = resolve(__dirname, '..', '..', '.teamai-e2e-seed');
