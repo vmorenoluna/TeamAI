@@ -599,7 +599,7 @@ describe('Auto Mode Integration', () => {
     it('auto-approves task when it reaches awaiting-review and was auto-tracked', async () => {
       autoMode.setAutoModeState(testDir, true, 1);
 
-      // The tick picks the task and adds to autoTrackedIds
+      // The tick picks the task and starts it
       await vi.waitFor(() => {
         expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
       });
@@ -615,9 +615,9 @@ describe('Auto Mode Integration', () => {
 
     it('auto-approves task even when NOT auto-tracked (e.g. resumed after a server restart)', async () => {
       // Move task to 'implement' so the tick does NOT pick it (not in backlog).
-      // autoTrackedIds is in-memory only — a task resumed by crash recovery
-      // after a restart is untracked, but auto mode must still approve it when
-      // it reaches awaiting-review, otherwise it stalls there forever.
+      // A task resumed by crash recovery after a restart was never started by
+      // this auto-mode session, but auto mode must still approve it when it
+      // reaches awaiting-review, otherwise it stalls there forever.
       const { TaskStore } = await import('@/lib/task-store');
       const store = new TaskStore(testDir);
       store.updatePhase(taskId, 'implement');
@@ -631,6 +631,25 @@ describe('Auto Mode Integration', () => {
       await vi.waitFor(() => {
         expect(mockOrch.approveTask).toHaveBeenCalledWith(taskId, 'pull-request');
       });
+    });
+
+    it('stamps autoProcessed: true on the live task.json before approving', async () => {
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      mockOrch.approveTask.mockClear();
+      fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
+
+      await vi.waitFor(() => {
+        expect(mockOrch.approveTask).toHaveBeenCalledWith(taskId, 'pull-request');
+      });
+
+      // The stamp lands before approveTask, so the create-pr artifact commit
+      // copies it into the snapshot and the amber border survives the
+      // delete-on-done + pull flow.
+      const taskJson = JSON.parse(
+        readFileSync(join(testDir, '.teamai', taskId, 'task.json'), 'utf-8'),
+      );
+      expect(taskJson.autoProcessed).toBe(true);
     });
 
     it('does not double-approve while an approval is already in flight', async () => {
@@ -1146,20 +1165,20 @@ describe('Auto Mode Integration', () => {
       expect(state.enabled).toBe(false);
     });
 
-    it('clears autoTrackedIds on stop', async () => {
+    it('stops approving on awaiting-review after stop', async () => {
       autoMode.setAutoModeState(testDir, true, 1);
 
       await vi.waitFor(() => {
         expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
       });
 
-      const stateBefore = autoMode.getAutoModeState(testDir);
-      expect(stateBefore.trackedCount).toBeGreaterThanOrEqual(1);
-
       autoMode.setAutoModeState(testDir, false, 1);
 
-      const stateAfter = autoMode.getAutoModeState(testDir);
-      expect(stateAfter.trackedCount).toBe(0);
+      mockOrch.approveTask.mockClear();
+      fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
+
+      await new Promise(r => setTimeout(r, 50));
+      expect(mockOrch.approveTask).not.toHaveBeenCalled();
     });
   });
 
@@ -1425,9 +1444,15 @@ describe('Auto Mode Integration', () => {
       // Give the .catch() handler time to run
       await new Promise(r => setTimeout(r, 50));
 
-      const state = autoMode.getAutoModeState(testDir);
-      // Task should not be tracked since approve failed
-      expect(state.trackedCount).toBe(0);
+      // The in-flight guard was released — a new awaiting-review event may
+      // attempt approval again (one attempt per event, no retry loop).
+      mockOrch.approveTask.mockClear();
+      mockOrch.approveTask.mockResolvedValue(undefined);
+      fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
+
+      await vi.waitFor(() => {
+        expect(mockOrch.approveTask).toHaveBeenCalledWith(taskId, 'pull-request');
+      });
     });
   });
 });
