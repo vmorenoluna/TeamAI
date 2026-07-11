@@ -1,4 +1,5 @@
 # Playwright output
+.playwright-mcp/
 test-results/
 
 # TypeScript build artifacts
