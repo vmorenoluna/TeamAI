@@ -25,7 +25,20 @@ interface AutoProjectState {
   eventCleanup: (() => void) | null;
 }
 
-const projectStates = new Map<string, AutoProjectState>();
+// Store on global so server.ts and Next.js server actions share the same state
+// across module contexts (Next.js loads server actions in a separate module
+// graph). Without this there are TWO projectStates maps: restoreAutoModeStates
+// (called from server.ts at boot) enables auto mode — timers and phase-change
+// listener — in the custom-server instance, while a UI toggle-off runs in the
+// Next bundle instance, sees enabled:false, and early-returns. The UI then
+// shows auto mode off while the boot instance keeps approving and starting
+// tasks.
+declare global {
+  var __autoModeProjectStates: Map<string, AutoProjectState> | undefined;
+}
+
+const projectStates: Map<string, AutoProjectState> =
+  global.__autoModeProjectStates ?? (global.__autoModeProjectStates = new Map());
 
 /** Path to the per-project auto-mode state file. */
 function autoModeStatePath(projectRoot: string): string {
@@ -99,17 +112,21 @@ export function getAutoModeState(projectRoot: string): {
 
 export function setAutoModeState(projectRoot: string, enabled: boolean, maxParallel: number = 1): void {
   const state = getState(projectRoot);
-  if (enabled === state.enabled && maxParallel === state.maxParallel) return;
+  const changed = enabled !== state.enabled || maxParallel !== state.maxParallel;
 
   state.maxParallel = maxParallel;
 
-  if (enabled) {
-    _start(projectRoot, state);
-  } else {
-    _stop(state);
+  if (changed) {
+    if (enabled) {
+      _start(projectRoot, state);
+    } else {
+      _stop(state);
+    }
   }
 
-  // Persist to disk so auto mode survives server restarts (Bug 1)
+  // Always persist, even when in-memory state already matches — an explicit
+  // toggle must land on disk so a stale auto-mode.json (e.g. after a failed
+  // restore) can't resurrect the old setting on the next restart.
   saveAutoModeState(projectRoot, state);
 }
 

@@ -179,7 +179,23 @@ function cleanup() {
   // default empty array so restoreAutoModeStates finds no projects by default.
   mockProjectStoreGetAll.mockReturnValue([]);
   onHandlers.clear();
-  // Clear module-level state by resetting the auto-mode module
+  // projectStates lives on globalThis (shared across module graphs, like
+  // processManager) so vi.resetModules() no longer clears it. Stop any live
+  // timers/listeners and drop all states explicitly.
+  const states = (global as { __autoModeProjectStates?: Map<string, {
+    tickTimer: ReturnType<typeof setInterval> | null;
+    ciPollTimers: Map<string, ReturnType<typeof setInterval>>;
+    eventCleanup: (() => void) | null;
+  }> }).__autoModeProjectStates;
+  if (states) {
+    for (const s of states.values()) {
+      if (s.tickTimer) clearInterval(s.tickTimer);
+      for (const t of s.ciPollTimers.values()) clearInterval(t);
+      s.eventCleanup?.();
+    }
+    states.clear();
+  }
+  // Reset the module registry (fresh module-level imports per test)
   vi.resetModules();
 
   if (testDir && existsSync(testDir)) {
@@ -1346,6 +1362,58 @@ describe('Auto Mode Integration', () => {
       const autoMode = await setupAutoMode();
       const restored = autoMode.restoreAutoModeStates();
       expect(restored).toBe(0);
+    });
+  });
+
+  // ── Cross-module-instance state (globalThis singleton) ──────────────────
+
+  describe('Cross-module-instance state (globalThis singleton)', () => {
+    afterEach(() => {
+      cleanup();
+    });
+
+    it('a second module instance sees and can disable auto mode enabled by the first', async () => {
+      setupTestProject();
+      const autoMode = await setupAutoMode();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+      expect(autoMode.isAutoModeEnabled(testDir)).toBe(true);
+
+      // Simulate Next.js loading server actions in a separate module graph
+      // (the custom server.ts and the Next bundle each import auto-mode):
+      // reset the registry and import a fresh module instance.
+      vi.resetModules();
+      const second = await import('@/lib/auto-mode');
+
+      // Without the globalThis singleton this was the auto-mode-stays-on bug:
+      // the second instance saw enabled:false, the toggle early-returned, and
+      // the first instance's tick loop kept starting tasks.
+      expect(second.isAutoModeEnabled(testDir)).toBe(true);
+
+      second.setAutoModeState(testDir, false, 1);
+      expect(autoMode.isAutoModeEnabled(testDir)).toBe(false);
+      expect(second.isAutoModeEnabled(testDir)).toBe(false);
+
+      // The toggle-off is also persisted to disk
+      const saved = JSON.parse(readFileSync(join(testDir, '.teamai', 'auto-mode.json'), 'utf-8'));
+      expect(saved.enabled).toBe(false);
+    });
+
+    it('persists enabled:false to disk even when in-memory state already matches', async () => {
+      setupTestProject();
+      const autoMode = await setupAutoMode();
+
+      // Stale disk state: enabled:true on disk, in-memory disabled (e.g. a
+      // restore that never ran). An explicit toggle-off must overwrite it.
+      writeFileSync(
+        join(testDir, '.teamai', 'auto-mode.json'),
+        JSON.stringify({ enabled: true, maxParallel: 1 }, null, 2),
+      );
+
+      autoMode.setAutoModeState(testDir, false, 1);
+
+      const saved = JSON.parse(readFileSync(join(testDir, '.teamai', 'auto-mode.json'), 'utf-8'));
+      expect(saved.enabled).toBe(false);
     });
   });
 
