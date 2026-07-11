@@ -36,9 +36,9 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120_000,
     cwd: __dirname,
-    // Why 3001 (not 3000): lets `npm run dev` and the test server coexist
-    // on the same machine. Dev tooling should import getTestServerUrl()
-    // from scripts/get-test-port.ts instead — to avoid drift.
+    // Why 3001 (not 3002): avoids the dev server. Dev tooling should
+    // import getTestServerUrl() from scripts/get-test-port.ts instead
+    // — to avoid drift.
     env: {
       NODE_ENV: 'test',
       // Pass the temp config dir via env var so project-store.ts resolves
