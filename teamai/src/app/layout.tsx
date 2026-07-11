@@ -32,7 +32,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <Sidebar projects={projects} activeProjectPath={activeProject?.path ?? null} />
         <div className="flex-1 min-w-0 overflow-auto flex flex-col">
           {/* Project tabs row - moved above main content */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-1">
             <div className="flex-1 min-w-0">
               <ProjectSelector projects={projects} activeProjectPath={activeProject?.path ?? null} />
             </div>
