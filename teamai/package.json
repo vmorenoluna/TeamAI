@@ -6,7 +6,7 @@
   "private": true,
   "main": "electron/main.js",
   "scripts": {
-    "dev": "tsx watch server.ts",
+    "dev": "cross-env PORT=3002 tsx watch server.ts",
     "build": "next build",
     "build:server": "node -e \"require('esbuild').build({entryPoints:['server.ts'],bundle:true,platform:'node',format:'esm',packages:'external',outfile:'dist-server/server.mjs'})\"",
     "start": "cross-env NODE_ENV=production tsx server.ts",
