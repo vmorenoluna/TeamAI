@@ -1,237 +1,153 @@
-# TeamAI — Multi-Agent Claude Code Orchestrator
+# TeamAI
 
-TeamAI is an Electron desktop application that orchestrates multi-agent [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI workflows. It replaces manual CLI usage with a native desktop app that spawns and manages parallel Claude subprocesses, enabling automated software development pipelines across spec, plan, implement, and QA phases.
-
-## Features
-
-- **Multi-Agent Pipeline** — Run spec, plan, implement, QA review, and merge phases with role-specialized Claude agents (analyst, planner, coder, qa-reviewer, merger)
-- **Kanban Board** — Drag-and-drop task management with real-time phase tracking and QA report summaries
-- **Roadmap View** — Product roadmap with phased kanban columns, competitor analysis, changelog generation, and ticket conversion
-- **Ideation Scanner** — Analyse your codebase for feature opportunities and improvement suggestions
-- **GitHub Issues Import** — Fetch and import open GitHub issues as kanban tasks via MCP integration
-- **Insights Chat** — Interactive AI chat for codebase questions with streaming responses
-- **Interactive Terminals** — Open PTY-based Claude sessions pre-loaded with role personas
-- **Reusable UI Components** — Shared RateLimitBanner, StreamingOutput, LoadingSpinner, and phased RoadmapCard/PhasedKanban for consistent UX
-- **Dark Mode UI** — Full dark mode with shadcn/ui components and Tailwind CSS v4
-- **Multi-Provider Support** — Anthropic, Bedrock, Vertex, OpenAI, Gemini, and Ollama backends
-- **Container Isolation** — Optional devcontainer sandboxing for agent sessions
-- **Session Recovery** — Auto-detect interrupted tasks and stale sessions on server restart
-- **Rate-Limit Auto-Resume** — Detects Claude Code session limits and auto-resumes with a countdown timer
-- **Real-time Streaming** — WebSocket-based agent event streaming with tool-call visibility
-- **Spec Revision Workflow** — Human-gated spec revision when QA identifies specification-level issues
+Multi-agent [Claude Code](https://docs.anthropic.com/en/docs/claude-code) orchestrator — an Electron desktop app that runs parallel Claude CLI agents through automated software development pipelines.
 
 ## Prerequisites
 
 - **Node.js** ≥ 20
-- **Claude Code CLI** — Install via `npm install -g @anthropic-ai/claude-code`
-- **Git** — Required for worktree-based parallel agent isolation
-- **Docker** (optional) — For container-isolated agent sessions
+- **Claude Code CLI** — `npm install -g @anthropic-ai/claude-code`
+- **Git**
+- **Docker** (optional — for container-isolated agent sessions)
 
 ## Quick Start
 
 ```bash
-# Clone and install
 git clone <repo-url>
-cd TeamAI/teamai
-npm install
+cd TeamAI
 
-# Set the git hooks path from the project root (required for pre-commit checks)
-cd ..
+# Set up git hooks
 git config core.hooksPath .husky
 
-# Start development server (run from teamai/)
+# Install and run
 cd teamai
-npm run dev
+npm install
+npm run dev          # start dev server (React HMR on :3000)
+npm run electron:dev  # launch Electron app (separate terminal)
 ```
 
-Launch the TeamAI desktop app to get started.
+Open `http://localhost:3000` in a browser, or use the Electron app.
+
+## Commands
+
+All commands run from `teamai/`.
+
+### Development
+
+| Command | Description |
+|---|---|
+| `npm run dev` | Start Next.js dev server with HMR |
+| `npm run electron:dev` | Launch Electron app pointing at the dev server |
+| `npm run start` | Start production server |
+| `npm run electron:start` | Launch Electron app in production mode |
+
+### Testing
+
+| Command | Description |
+|---|---|
+| `npm test` | Run all unit + integration tests (Vitest) |
+| `npm run test:e2e` | Run Playwright E2E tests |
+| `npm run test:changelog` | Run CHANGELOG parsing tests |
+| `npm run test:watch` | Run tests in watch mode |
+| `npx vitest run tests/unit` | Run only unit tests |
+| `npx vitest run tests/integration` | Run only integration tests |
+| `npx playwright test tests/e2e/update-banner.spec.ts` | Run a single E2E spec |
+
+### Linting & Type Checking
+
+| Command | Description |
+|---|---|
+| `npm run lint` | ESLint with zero-warnings enforcement |
+| `npm run typecheck` | TypeScript type checking (`tsc --noEmit`) |
+
+### Building
+
+| Command | Description |
+|---|---|
+| `npm run build` | Production Next.js build |
+| `npm run build:server` | Bundle the custom server with esbuild |
+| `npm run electron:build` | Build Windows installer (NSIS + zip) |
+| `npm run electron:build:mac` | Build macOS installer (DMG + zip) |
+| `npm run electron:build:linux` | Build Linux packages (AppImage + deb) |
+| `npm run electron:build:all` | Build all three platforms |
+
+### Release
+
+```bash
+# 1. Update teamai/CHANGELOG.md with changes since last release
+# 2. Run the release script
+./scripts/release.sh 0.2.0
+
+# 3. Push — the tag triggers CI to build installers + create a GitHub Release
+git push origin main && git push origin v0.2.0
+```
+
+The CI workflow (`.github/workflows/release.yml`):
+
+- Validates the tag matches `package.json` version
+- Builds Windows, macOS, and Linux installers in parallel
+- Creates a GitHub Release with the changelog section + auto-generated PR notes
+- Marks `0.x` versions as prereleases automatically
+- Uploads `latest.yml` metadata for [electron-updater](https://www.electron.build/auto-update) auto-update support
+
+See `scripts/release.sh` for the version-bump-and-tag helper.
 
 ## Project Structure
 
 ```
-TeamAI/
-├── README.md                  # Project overview and quick start (this file)
-├── CLAUDE.md                  # Claude Code guidance
-├── .gitignore
-├── .mcp.json                  # MCP (Model Context Protocol) configuration
-├── .github/                   # CI/CD workflows
-│   └── workflows/
-├── .husky/                    # Git hooks (pre-commit lint/typecheck)
-├── .teamai/                   # Per-project pipeline state (tasks, configs)
-│   ├── container.json         # Devcontainer sandboxing config
-│   ├── providers.json         # LLM provider configuration
-│   ├── pipeline.json          # Pipeline phase configuration
-│   └── <task-slug>/           # Per-task directory (spec.md, plan.json, qa_report.json)
-├── docs/                      # Supplementary documentation
-│   ├── packaging-options.md
-│   ├── teamai-implementation-plan.md
-│   └── teamai-ui-spec.md
-├── teamai/                    # Electron application (React renderer + Node.js main process)
-│   ├── package.json
-│   ├── server.ts              # Custom HTTP + WebSocket server
-│   ├── tsconfig.json
-│   ├── eslint.config.mjs
-│   ├── next.config.ts
-│   ├── vitest.config.ts
-│   ├── playwright.config.ts
-│   ├── src/
-│   │   ├── app/               # Renderer pages and components
-│   │   │   ├── layout.tsx
-│   │   │   ├── page.tsx
-│   │   │   ├── globals.css
-│   │   │   ├── actions/       # Server actions (tasks, pipeline, providers, etc.)
-│   │   │   ├── ideation/      # Ideation scanner page
-│   │   │   ├── insights/      # Insights/chat page
-│   │   │   ├── roadmap/       # Product roadmap page
-│   │   │   ├── settings/      # Provider/pipeline configuration page
-│   │   │   ├── task/[id]/     # Task detail page
-│   │   │   └── terminals/     # Interactive terminal page
-│   │   ├── components/        # React components (kanban, task panel, etc.)
-│   │   ├── hooks/             # Custom hooks (useAgentStream, usePhaseSync, etc.)
-│   │   ├── lib/               # Core business logic
-│   │   │   ├── orchestrator.ts
-│   │   │   ├── process-manager.ts
-│   │   │   ├── task-store.ts
-│   │   │   ├── providers.ts
-│   │   │   ├── recovery.ts
-│   │   │   └── container-manager.ts
-│   │   └── constants/         # Shared constants (phase labels, colors)
-│   ├── defaults/              # Default pipeline configuration
-│   │   ├── commands/          # Command templates (spec, plan, implement, etc.)
-│   │   ├── roles/             # Role persona definitions (planner, coder, etc.)
-│   │   └── pipeline.json
-│   ├── scripts/               # Utility scripts
-│   └── tests/                 # Unit, integration, and E2E tests
-└── .devcontainer/             # Dev container configuration
+teamai/
+├── electron/              # Electron main process + preload
+│   ├── main.js            # App lifecycle, server spawn, auto-updater
+│   └── preload.js         # IPC bridge (contextBridge)
+├── src/
+│   ├── app/               # Next.js pages + server actions
+│   ├── components/        # React components (kanban, task panel, terminals)
+│   ├── hooks/             # Custom hooks
+│   ├── lib/               # Core logic (orchestrator, process manager, task store)
+│   └── constants/         # Phase labels, colours
+├── defaults/              # Pipeline configs, command templates, role personas
+├── tests/
+│   ├── unit/              # Vitest unit tests
+│   ├── integration/       # Vitest integration tests
+│   └── e2e/               # Playwright E2E tests
+├── scripts/               # Utility scripts (release.sh, test helpers)
+├── server.ts              # Custom HTTP + WebSocket server
+├── package.json
+├── tsconfig.json
+├── eslint.config.mjs
+└── vitest.config.ts
 ```
 
 ## Architecture
 
-### Main Process
+**Pipeline:** Each task flows through configurable phases — spec → plan → implement → QA review → merge. Role-specialized Claude agents (analyst, planner, coder, qa-reviewer, merger) handle each phase.
 
-The Electron main process manages Claude CLI subprocesses via the ProcessManager. The renderer communicates with the main process through IPC for real-time agent event streaming and pipeline orchestration.
+**ProcessManager:** Spawns `claude -p --input-format stream-json --output-format stream-json` subprocesses. NDJSON output is parsed and streamed to the UI via WebSocket.
 
-### ProcessManager (`src/lib/process-manager.ts`)
+**Git worktree isolation:** Parallel agents run in isolated git worktrees at `worktrees/<task-slug>/`, preventing file conflicts.
 
-The core engine. Extends `EventEmitter` and manages a `Map<string, AgentSession>`. Each session spawns a `claude -p --input-format stream-json --output-format stream-json` subprocess with piped stdio. Output is buffered and parsed line-by-line as NDJSON, then re-emitted as typed events.
+**Auto mode:** Optionally auto-advances tasks through the pipeline — picks backlog tasks, auto-approves reviews, creates PRs, polls CI, and auto-merges. State persists across restarts.
 
-Also manages PTY terminal sessions via `node-pty` for the interactive Terminals page.
+**Recovery:** On startup, detects interrupted tasks and stale sessions. Rate-limited sessions auto-resume with a countdown timer.
 
-### Orchestrator (`src/lib/orchestrator.ts`)
-
-Manages multi-agent pipelines. Each task progresses through configurable phases:
-
-1. **Spec** — Planner agent writes `spec.md`
-2. **Plan** — Planner agent writes `plan.json` with subtask breakdown
-3. **Implement** — Coder agent(s) implement changes in parallel within git worktrees
-4. **QA Review** — QA Reviewer agent inspects changes and writes `qa_report.json`
-5. **QA Fix** (if needed) — QA Fixer agent addresses issues
-6. **Awaiting Review** — Paused for human approval
-7. **Merge** / **Create PR** — Merger agent merges or opens a PR
-
-### Pipeline Commands & Roles
-
-Commands (`defaults/commands/`) define the agent prompts for each phase. Roles (`defaults/roles/`) define the persona and instructions for each agent type:
-
-| Role | File | Purpose |
-|------|------|---------|
-| Analyst | `analyst.md` | Codebase analysis and ideation |
-| Planner | `planner.md` | Spec writing and implementation planning |
-| Coder | `coder.md` | Code implementation |
-| QA Reviewer | `qa-reviewer.md` | Code review and quality assessment |
-| QA Fixer | `qa-fixer.md` | Fixes issues found in QA review |
-| Merger | `merger.md` | Git merge and PR creation |
-
-### Git Worktree Isolation
-
-Parallel agents run in isolated git worktrees so they don't conflict on file edits. Each task gets a worktree at `worktrees/<task-slug>/`.
+**Electron:** In dev mode, `Ctrl+Shift+U` simulates the update download → ready flow for testing the update banner.
 
 ## Configuration
 
-### Providers (`providers.json`)
+Per-project `.teamai/` directory:
 
-Configure which LLM backend each agent role uses:
+| File | Purpose |
+|---|---|
+| `providers.json` | LLM backend per role (Anthropic, Bedrock, Vertex, OpenAI, Gemini, Ollama) |
+| `pipeline.json` | Phase order and max QA retry attempts |
+| `container.json` | Enable/disable Docker devcontainer sandboxing |
 
-```json
-{
-  "default": { "provider": "anthropic", "model": "claude-sonnet-4-6" },
-  "roles": {
-    "coder": { "provider": "anthropic", "model": "claude-sonnet-4-6" },
-    "qa-reviewer": { "provider": "vertex", "model": "claude-sonnet-4-6" }
-  }
-}
-```
-
-Supported providers: `anthropic`, `bedrock`, `vertex`, `openai`, `gemini`, `ollama`.
-
-### Pipeline (`pipeline.json`)
-
-Customize which pipeline phases run and how many QA retry attempts to allow:
-
-```json
-{
-  "phases": ["spec", "plan", "implement", "qa-review", "merge"],
-  "maxQaAttempts": 3,
-  "parallelSubtasks": true
-}
-```
-
-### Container Isolation
-
-Set `container.json` in `.teamai/` to enable devcontainer sandboxing for agent sessions:
-
-```json
-{ "enabled": true }
-```
-
-When enabled, all agent subprocesses run inside a Docker devcontainer, providing filesystem and network isolation.
-
-## Development
-
-### Commands
-
-```bash
-cd teamai
-npm run dev       # Development mode (Electron + React HMR)
-npm run build     # Production build
-npm run start     # Production server
-npm run lint      # ESLint check
-npm run typecheck # TypeScript type checking
-npm test          # Run unit tests (Vitest)
-```
-
-### Running Tests
-
-```bash
-# Unit tests
-cd teamai && npm test
-
-# E2E tests (requires dev server running)
-npx playwright test
-```
-
-### Pre-commit Hooks
-
-The project uses Husky + lint-staged for pre-commit checks. On every commit, staged TypeScript files are checked with ESLint and TypeScript type checking.
-
-## Recovery
-
-TeamAI detects interrupted state on server startup:
-
-- **Interrupted tasks** — Tasks stuck in in-progress phases are shown in the recovery banner
-- **Stale sessions** — Orphaned ProcessManager sessions are detected and cleaned up
-- **Orphaned worktrees** — Git worktrees without active tasks are reported
+Default configs live in `defaults/` and are synced to projects on startup.
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch (`feat/my-feature`)
-3. Make changes following existing code conventions
-4. Run `npm run lint && npm run typecheck`
-5. Submit a Pull Request
+1. Fork and create a feature branch
+2. Make changes following existing conventions
+3. Run `npm run lint && npm run typecheck && npm test`
+4. Submit a Pull Request
 
-See `CLAUDE.md` for AI coding guidance and conventions used in this project.
-
-## License
-
-MIT
+See `teamai/CLAUDE.md` for AI coding guidance. See `teamai/AGENTS.md` for dev shortcuts.

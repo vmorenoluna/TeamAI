@@ -6,6 +6,7 @@ import { Sidebar } from '@/components/sidebar';
 import { ProjectSelector } from '@/components/project-selector';
 import { DefaultsUpdater } from '@/components/defaults-updater';
 import { RecoveryBanner } from '@/components/recovery-banner';
+import { UpdateBanner } from '@/components/update-banner';
 import { AutoModeButton } from '@/components/auto-mode-button';
 import { getInterruptedTasks } from '@/app/actions/recovery';
 import { getAutoModeState } from '@/lib/auto-mode';
@@ -41,6 +42,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </div>
           {/* Defaults update banner — shows when projects have outdated copies of TeamAI defaults */}
           <DefaultsUpdater initialStale={staleDefaults} />
+          {/* Update banner — shows when an auto-update is downloaded and ready to install */}
+          <UpdateBanner />
           {/* Recovery banner — shows when interrupted tasks are detected from previous session */}
           <RecoveryBanner tasks={interruptedTasks} />
           <div className="flex-1 min-h-0">{children}</div>

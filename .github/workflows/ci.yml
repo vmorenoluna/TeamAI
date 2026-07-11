@@ -62,6 +62,16 @@ jobs:
       - name: Vitest (unit + integration)
         run: npm test
 
+  test-changelog:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: teamai
+    steps:
+      - uses: actions/checkout@v4
+      - name: CHANGELOG parsing
+        run: bash tests/unit/changelog-parsing.test.sh
+
   test-e2e:
     runs-on: ubuntu-latest
     defaults:
@@ -113,7 +123,7 @@ jobs:
 
   # Enable auto-merge when all checks pass (including AI review and E2E)
   auto-merge:
-    needs: [typecheck, lint, test, test-e2e, ai-review]
+    needs: [typecheck, lint, test, test-changelog, test-e2e, ai-review]
     if: success() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
