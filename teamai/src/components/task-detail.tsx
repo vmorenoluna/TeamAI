@@ -91,7 +91,7 @@ function DepPicker({
       </button>
 
       {open && (
-        <div className="absolute z-20 top-full left-0 mt-1.5 w-72 bg-[#1e2333] rounded-lg border border-[#1e293b] shadow-xl overflow-hidden">
+        <div className="absolute z-20 top-full left-0 mt-1.5 w-64 sm:w-72 max-w-[calc(100vw-4rem)] bg-[#1e2333] rounded-lg border border-[#1e293b] shadow-xl overflow-hidden">
           <div className="p-2 border-b border-[#1e293b]">
             <input
               autoFocus
@@ -423,11 +423,11 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
       {/* Header */}
       <div className={`shrink-0 px-6 pt-5 pb-0 ${readonly ? '' : 'border-b border-[#1e293b]'} bg-[#11131b]`}>
         {/* Row 1: breadcrumb + phase badge + delete (hidden in readonly) */}
-        <div className="flex items-center justify-between gap-3 mb-2">
-          <Link href="/" className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
+        <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+          <Link href="/" className="text-xs text-slate-500 hover:text-slate-300 transition-colors shrink-0">
             ← Board
           </Link>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className={`text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded ${badge}`}>
               {PHASE_LABELS[task.phase] ?? task.phase}
             </span>
@@ -539,9 +539,9 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
           </p>
         </div>
 
-        {/* Tabs (hidden in readonly) */}
+        {/* Tabs (hidden in readonly) — scrollable at narrow widths */}
         {!readonly && (
-          <div className="flex gap-0">
+          <div className="flex gap-0 overflow-x-auto -mx-6 px-6">
             {tabs.map(t => (
               <button
                 key={t.id}

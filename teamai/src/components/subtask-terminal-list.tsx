@@ -145,19 +145,19 @@ export function SubtaskTerminalList({ taskId, subtaskTerminals, qaLog, specLog, 
             {/* Header — click to expand/collapse */}
             <button
               onClick={() => toggle(t.key)}
-              className="flex items-center justify-between px-3 py-2 bg-[#1a1f2e] shrink-0 hover:bg-[#1e293b] transition-colors"
+              className="flex items-center justify-between gap-2 px-3 py-2 bg-[#1a1f2e] shrink-0 hover:bg-[#1e293b] transition-colors"
             >
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-slate-300">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-xs font-medium text-slate-300 truncate" title={t.label}>
                   {t.label}
                 </span>
                 {!isExpanded && (
-                  <span className="text-[10px] text-slate-500">
+                  <span className="text-[10px] text-slate-500 shrink-0">
                     {t.log ? `${t.log.split('\n').length} lines` : 'no output'}
                   </span>
                 )}
               </div>
-              <span className="text-slate-400 text-sm">
+              <span className="text-slate-400 text-sm shrink-0">
                 {isExpanded ? '▼' : '▶'}
               </span>
             </button>

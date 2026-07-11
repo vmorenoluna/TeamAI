@@ -12,8 +12,8 @@ export function UpdateBanner() {
   const pct = downloadProgress ?? 0;
 
   return (
-    <div className="flex items-center justify-between px-4 py-2 bg-emerald-900/40 border-b border-emerald-700/50 text-emerald-100 text-sm">
-      <span className="flex items-center gap-3">
+    <div className="flex items-center justify-between gap-2 px-4 py-2 bg-emerald-900/40 border-b border-emerald-700/50 text-emerald-100 text-sm flex-wrap">
+      <span className="flex items-center gap-2 min-w-0">
         {isReady ? (
           <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

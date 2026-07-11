@@ -15,11 +15,11 @@ export function Sidebar({ projects: _projects, activeProjectPath: _activeProject
   const pathname = usePathname();
 
   return (
-    <aside className={`shrink-0 flex flex-col bg-[#11131b] text-slate-300 transition-all duration-200 ${collapsed ? 'w-12' : 'w-60'}`}>
+    <aside className={`shrink-0 flex flex-col bg-[#11131b] text-slate-300 transition-all duration-200 ${collapsed ? 'w-12' : 'w-48 lg:w-60'}`}>
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-4 border-b border-[#1e293b] bg-[#11131b]">
+      <div className="flex items-center justify-between px-2 lg:px-3 py-4 border-b border-[#1e293b] bg-[#11131b]">
         {!collapsed && (
-          <span className="text-lg font-bold tracking-tight text-white">TeamAI</span>
+          <span className="text-base lg:text-lg font-bold tracking-tight text-white truncate">TeamAI</span>
         )}
         <button
           onClick={() => setCollapsed(c => !c)}
@@ -49,7 +49,7 @@ export function Sidebar({ projects: _projects, activeProjectPath: _activeProject
             key={href}
             href={href}
             title={collapsed ? label : undefined}
-            className={`flex items-center gap-3 px-3 py-2 text-sm transition-colors ${
+            className={`flex items-center gap-2 lg:gap-3 px-2 lg:px-3 py-2 text-sm transition-colors ${
               isActive
                 ? 'text-white bg-[#2563eb]/15 border-r-2 border-[#2563eb]'
                 : 'text-slate-400 hover:bg-[#1a1f2e] hover:text-white'
