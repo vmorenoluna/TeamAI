@@ -66,8 +66,11 @@ artifact snapshot was finalized.
    runs (in `runMerge`).
 3. **Already committed**: If artifacts are already on the branch (e.g., re-running PR
    creation after a reject-bounce cycle), the commit is a no-op — no duplicate commit is made.
-4. **Gitignored**: If `.teamai/` is listed in the project's `.gitignore`, the commit is
-   silently skipped. The user's choice to not track artifacts is respected.
+4. **Gitignore-proof**: TeamAI adds `.teamai/*` to the project's `.gitignore` when the
+   project is imported, so the live pipeline workspace never shows up as untracked
+   noise in the main project root. The artifact commit is unaffected: it force-adds
+   (`git add -f .teamai/<slug>`) the task's directory in the worktree, so snapshots
+   are committed to the feature branch regardless of the ignore rule.
 
 ### Why this matters
 
@@ -88,13 +91,18 @@ The artifact commit copies files into `.teamai/{slug}/` inside the worktree. Thi
 distinct from the pipeline workspace at `.teamai/{task-slug}/` in the main project root:
 
 - **Pipeline workspace** (`.teamai/{task-slug}/`) — live runtime state, rewritten on every
-  phase transition, never tracked in git
+  phase transition, kept out of git by the `.teamai/*` entry TeamAI adds to the
+  project's `.gitignore` on import
 - **Committed artifacts** (`.teamai/{slug}/` in the worktree) — frozen snapshot at PR/merge
-  time, pushed to the remote, pulled into main after merge
+  time, force-added past the ignore rule, pushed to the remote, pulled into main after merge
 
 These two directories coexist without conflict — they're the same top-level `.teamai/`
-directory but with different subdirectories (`task-slug` vs `slug`). The live workspace
-persists through the entire task lifecycle and is never deleted on merge.
+directory but with different subdirectories (`task-slug` vs `slug`). When a task reaches
+**done** (its PR is merged), the orchestrator deletes the live workspace directory and
+pulls the updated default branch into the main project root — the merged artifact
+snapshot (already frozen at `phase: "done"`) becomes the on-disk copy, and the working
+tree stays clean. If the pull fails (offline, non-fast-forward), a minimal `task.json`
+is recreated so the task stays visible on the kanban until the next successful pull.
 
 ## Memory
 Claude Code's Auto Memory is enabled for this project. Claude will automatically:
