@@ -6,6 +6,12 @@ import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
 import { type StreamEvent } from '@/lib/stream-types';
 
+// Static side-effect import — bundlers reliably pick this up across
+// dev/prod (Turbopack, webpack, Vite). A dynamic `import('xterm.css')` inside
+// the runtime Promise.all below silently drops the CSS in production, which
+// renders xterm at 0 rows so the user sees only one overwriting line.
+import '@xterm/xterm/css/xterm.css';
+
 // ── Role definitions ────────────────────────────────────────────────────────
 
 interface RoleDef {
@@ -69,7 +75,7 @@ export function parseRoleLog(role: string, content: string | null): ParsedLine[]
     const m = line.match(TS_RE);
     const ts = m ? m[1] : '00:00:00';
     const text = m ? line.slice(m[0].length) : line;
-    const prefixed = `${ansi}[${label}]\x1b[0m ${text}\r\n`;
+    const prefixed = `\x1b[90m[${ts}]\x1b[0m ${ansi}[${label}]\x1b[0m ${text}\r\n`;
     result.push({ role, timestamp: ts, text, prefixed });
   }
 
@@ -97,14 +103,14 @@ export function parseCoderLogs(subtaskTerminals: SubtaskTerminalInfo[]): ParsedL
         role: 'coder',
         timestamp: ts,
         text,
-        prefixed: `${ansi}[${label}]\x1b[0m ${text}\r\n`,
+        prefixed: `\x1b[90m[${ts}]\x1b[0m ${ansi}[${label}]\x1b[0m ${text}\r\n`,
       });
     }
     result.push({
       role: 'coder',
       timestamp: firstTs,
       text: `═══ Subtask ${st.id}: ${st.title} ═══`,
-      prefixed: `\x1b[33;1m═══ Subtask ${st.id}: ${st.title} ═══\x1b[0m\r\n`,
+      prefixed: `\x1b[90m[${firstTs}]\x1b[0m \x1b[33;1m═══ Subtask ${st.id}: ${st.title} ═══\x1b[0m\r\n`,
     });
     result.push(...contentLines);
   }
@@ -240,10 +246,13 @@ export function UnifiedTerminal({
     Promise.all([
       import('@xterm/xterm'),
       import('@xterm/addon-fit'),
-    ]).then(([{ Terminal }, { FitAddon }]) => {
+    ]).then(([xterm, addonFit]) => {
       if (!container.isConnected) return;
 
-      terminal = new Terminal({
+      const TerminalCtor = xterm.Terminal;
+      const FitAddonCtor = addonFit.FitAddon;
+
+      terminal = new TerminalCtor({
         theme: {
           background: '#000000',
           foreground: '#e2e8f0',
@@ -259,7 +268,7 @@ export function UnifiedTerminal({
         scrollback: 50000,
       });
 
-      fitAddon = new FitAddon();
+      fitAddon = new FitAddonCtor();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
       fitAddon.fit();
@@ -285,20 +294,7 @@ export function UnifiedTerminal({
     };
   }, []);
 
-  // ── Write interleaved output ──────────────────────────────────────────
-
-  useEffect(() => {
-    if (!termReady || !termRef.current) return;
-    const { terminal } = termRef.current;
-    terminal.reset();
-    if (interleavedOutput) {
-      terminal.write(interleavedOutput);
-      requestAnimationFrame(() => terminal.scrollToTop());
-    }
-    liveWrittenRef.current = 0;
-  }, [interleavedOutput, termReady]);
-
-  // ── Append live events ────────────────────────────────────────────────
+  // ── Compute selected session ids (must come BEFORE the effects below) ───
 
   const selectedSessionIds = useMemo(() => {
     if (!sessionMap) return new Set<string>();
@@ -314,6 +310,28 @@ export function UnifiedTerminal({
     }
     return ids;
   }, [sessionMap, selectedRoles]);
+
+  // ── Write interleaved output ──────────────────────────────────────────
+
+  useEffect(() => {
+    if (!termReady || !termRef.current) return;
+    const { terminal } = termRef.current;
+    terminal.reset();
+    // After reset the buffer is empty and cursor sits at top — treat that
+    // as "user is at the bottom" so the auto-scroll below still runs.
+    userScrolledRef.current = false;
+    if (interleavedOutput) {
+      terminal.write(interleavedOutput);
+    }
+    // Scroll to bottom so user sees the latest content; if they scroll up
+    // afterwards, userScrolledRef stops auto-scroll on live events.
+    requestAnimationFrame(() => {
+      if (!userScrolledRef.current) terminal.scrollToBottom();
+    });
+    liveWrittenRef.current = 0;
+  }, [interleavedOutput, termReady, selectedSessionIds]);
+
+  // ── Append live events ────────────────────────────────────────────────
 
   useEffect(() => {
     if (!termReady || !termRef.current) return;
@@ -399,7 +417,7 @@ export function UnifiedTerminal({
           </div>
 
           {/* Terminal */}
-          <div ref={containerRef} className="flex-1 min-h-0 rounded-lg overflow-hidden border border-[#1e293b]" />
+          <div ref={containerRef} className="flex-1 min-h-[300px] rounded-lg overflow-hidden border border-[#1e293b]" />
         </>
       )}
     </div>
