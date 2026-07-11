@@ -9,11 +9,14 @@ import { projectStore } from './project-store';
 interface AutoProjectState {
   enabled: boolean;
   maxParallel: number;
-  /** Task IDs that were started by auto mode — tracked for CI polling after PR creation. */
-  autoTrackedIds: Set<string>;
-  /** Task IDs that auto mode has called approveTask for but pr-open hasn't fired yet.
-   *  Bridges the timing gap: approveTask emits pr-open synchronously inside runCreatePR
-   *  before the async call returns, so autoTrackedIds cannot be re-added via .then(). */
+  /** Task IDs with an approveTask call in flight — guards against double-approval.
+   *  Cleared when pr-open fires (emitted synchronously inside runCreatePR before
+   *  the async approveTask call returns) or when the approval fails.
+   *  NOTE: keep this the only per-task tracking set, and never let it gate
+   *  orchestration decisions beyond the in-flight window — in-memory membership
+   *  does not survive server restarts, while tasks do (see the removed
+   *  autoTrackedIds set, whose restart-stale gates stalled tasks in
+   *  awaiting-review/pr-open). */
   autoApprovedIds: Set<string>;
   /** Task IDs currently being started (between resumeTask call and phase change) — prevents duplicate picks. */
   startingIds: Set<string>;
@@ -57,7 +60,6 @@ function getState(projectRoot: string): AutoProjectState {
     state = {
       enabled: false,
       maxParallel: 1,
-      autoTrackedIds: new Set(),
       autoApprovedIds: new Set(),
       startingIds: new Set(),
       tickTimer: null,
@@ -79,7 +81,6 @@ export function getAutoModeState(projectRoot: string): {
   enabled: boolean;
   maxParallel: number;
   activeCount: number;
-  trackedCount: number;
 } {
   const state = getState(projectRoot);
   let activeCount = 0;
@@ -93,7 +94,6 @@ export function getAutoModeState(projectRoot: string): {
     enabled: state.enabled,
     maxParallel: state.maxParallel,
     activeCount,
-    trackedCount: state.autoTrackedIds.size,
   };
 }
 
@@ -141,45 +141,20 @@ function _start(projectRoot: string, state: AutoProjectState): void {
     { taskId: string; phase: string; projectRoot: string }) => {
     if (eventProject !== projectRoot || !state.enabled) return;
 
-    if (phase === 'awaiting-review' && !state.autoApprovedIds.has(taskId)) {
+    if (phase === 'awaiting-review') {
       // Auto mode owns awaiting-review: approve ANY task that reaches it while
-      // enabled, not just ones in autoTrackedIds. That set is in-memory only —
-      // a task resumed by crash recovery after a server restart is no longer
-      // tracked and would otherwise stall here forever (_adoptStalledTasks
-      // only scans at _start, and the tick loop skips paused phases). This
-      // also matches _adoptStalledTasks, which approves every awaiting-review
-      // task regardless of provenance.
-      // The autoApprovedIds guard prevents double-approval while one is in
-      // flight; on failure the id is removed (one-shot, no retry loop).
-      // Remove from autoTrackedIds so the sets stay consistent; add to
-      // autoApprovedIds so the pr-open handler (which fires synchronously
-      // inside approveTask before it returns) can still detect this task and
-      // start CI polling.
-      state.autoTrackedIds.delete(taskId);
-      state.autoApprovedIds.add(taskId);
-      const orchestrator = getOrchestrator(projectRoot);
-      orchestrator.approveTask(taskId, 'pull-request')
-        .catch(err => {
-          console.error(`[auto-mode] Failed to auto-approve task ${taskId}:`, err);
-          state.autoApprovedIds.delete(taskId);
-        });
+      // enabled. Membership in an in-memory tracking set must never gate this —
+      // a task resumed by crash recovery after a server restart would not be
+      // in such a set and would stall here forever (_adoptStalledTasks only
+      // scans at _start, and the tick loop skips paused phases).
+      _autoApprove(taskId, projectRoot, state);
     } else if (phase === 'pr-open') {
       // Same reasoning: start CI polling for any task that reaches pr-open
-      // while auto mode is enabled — a task resuming through create-pr after
-      // a restart is in neither tracking set. _startCIPolling is idempotent
-      // (ciPollTimers guard), so untracked or duplicate events are safe.
+      // while auto mode is enabled — untracked-membership gates stall tasks
+      // resumed after a restart. _startCIPolling is idempotent (ciPollTimers
+      // guard), so duplicate events are safe.
       state.autoApprovedIds.delete(taskId);
-      // Start CI polling
       _startCIPolling(taskId, projectRoot, state);
-    } else if (phase === 'done' && state.autoTrackedIds.has(taskId)) {
-      // Task reached done — clean up tracking
-      state.autoTrackedIds.delete(taskId);
-    } else if (phase === 'failed' && state.autoTrackedIds.has(taskId)) {
-      // Task failed — clean up tracking so it's not stuck
-      state.autoTrackedIds.delete(taskId);
-    } else if (phase === 'backlog' && state.autoTrackedIds.has(taskId)) {
-      // Task was stopped/returned to backlog — clean up tracking
-      state.autoTrackedIds.delete(taskId);
     }
 
     // Clean up startingIds when task leaves backlog (success or failure)
@@ -194,11 +169,9 @@ function _start(projectRoot: string, state: AutoProjectState): void {
   // Start tick loop — runs every 5 seconds
   state.tickTimer = setInterval(() => _tick(projectRoot, state), 5000);
 
-  // Bug 2: Re-adopt tasks that stalled in paused phases while auto mode was off.
-  // Without this, tasks sitting in awaiting-review or pr-open are orphaned — the
-  // phase-change listener only auto-approves tasks in autoTrackedIds, but a fresh
-  // _start creates an empty set. Scan the task store and re-adopt them so the
-  // listener and tick loop will process them.
+  // Re-adopt tasks that stalled in paused phases while auto mode was off:
+  // their phase-change events already fired (or were never seen), so scan the
+  // task store and approve / restart CI polling for them directly.
   _adoptStalledTasks(projectRoot, state);
 
   // Run an immediate tick to pick up any backlog tasks right away
@@ -208,14 +181,38 @@ function _start(projectRoot: string, state: AutoProjectState): void {
 }
 
 /**
- * Bug 2: Re-adopt tasks that stalled in paused phases (awaiting-review, pr-open)
- * while auto mode was disabled. These tasks need orchestrator action (approve /
- * CI poll) that only fires for tasks in autoTrackedIds. Without re-adoption,
- * re-enabling auto mode only picks up future events — stalled tasks are orphaned.
+ * Auto-approve a task sitting in awaiting-review. Shared by the phase-change
+ * listener and _adoptStalledTasks.
  *
- * - awaiting-review: add to autoTrackedIds and immediately call approveTask
- *   (the phase-change listener won't fire because the phase isn't changing).
- * - pr-open: add to autoTrackedIds and start CI polling immediately.
+ * Stamps autoProcessed: true on the live task.json BEFORE approving: the
+ * create-pr artifact commit copies the live task.json into the committed
+ * snapshot, so the flag survives the delete-on-done + pull flow and the amber
+ * "auto-processed" border persists after the merge. (Stamping later, at merge
+ * time, would only reach the live copy — which markTaskDone deletes.)
+ *
+ * The autoApprovedIds guard prevents double-approval while one is in flight;
+ * on failure the id is removed (one-shot, no retry loop).
+ */
+function _autoApprove(taskId: string, projectRoot: string, state: AutoProjectState): void {
+  if (state.autoApprovedIds.has(taskId)) return;
+  state.autoApprovedIds.add(taskId);
+  try {
+    new TaskStore(projectRoot).update(taskId, { autoProcessed: true });
+  } catch { /* best-effort — approval proceeds regardless */ }
+  getOrchestrator(projectRoot).approveTask(taskId, 'pull-request')
+    .catch(err => {
+      console.error(`[auto-mode] Failed to auto-approve task ${taskId}:`, err);
+      state.autoApprovedIds.delete(taskId);
+    });
+}
+
+/**
+ * Re-adopt tasks that stalled in paused phases (awaiting-review, pr-open)
+ * while auto mode was disabled. Their phase-change events fired (or were
+ * missed) before this _start, so the listener alone won't process them.
+ *
+ * - awaiting-review: approve immediately.
+ * - pr-open: start CI polling immediately.
  */
 function _adoptStalledTasks(projectRoot: string, state: AutoProjectState): void {
   // Demo mode: when pipeline.json has demo:true, skip all pipeline processing
@@ -233,23 +230,13 @@ function _adoptStalledTasks(projectRoot: string, state: AutoProjectState): void 
 
   for (const task of allTasks) {
     if (task.phase === 'awaiting-review') {
-      // Re-adopt and auto-approve immediately — the phase-change event won't
-      // fire because the task is already in this phase.
-      // Mirror the onPhaseChange handler's transition: add to autoApprovedIds
-      // (not autoTrackedIds) so the pr-open handler can clean it up properly
-      // when approveTask succeeds and emits pr-open.
-      state.autoApprovedIds.add(task.id);
+      // Approve immediately — the phase-change event won't fire because the
+      // task is already in this phase.
       adopted++;
-      const orchestrator = getOrchestrator(projectRoot);
-      orchestrator.approveTask(task.id, 'pull-request')
-        .catch(err => {
-          console.error(`[auto-mode] Failed to auto-approve stalled task ${task.id}:`, err);
-          state.autoApprovedIds.delete(task.id);
-        });
+      _autoApprove(task.id, projectRoot, state);
     } else if (task.phase === 'pr-open') {
-      // Re-adopt and restart CI polling — the pr-open phase-change event
-      // was missed while auto mode was off.
-      state.autoTrackedIds.add(task.id);
+      // Restart CI polling — the pr-open phase-change event was missed while
+      // auto mode was off.
       adopted++;
       _startCIPolling(task.id, projectRoot, state);
     }
@@ -275,7 +262,6 @@ function _stop(state: AutoProjectState): void {
     clearInterval(timer);
   }
   state.ciPollTimers.clear();
-  state.autoTrackedIds.clear();
   state.autoApprovedIds.clear();
   state.startingIds.clear();
 
@@ -327,12 +313,10 @@ function _tick(projectRoot: string, state: AutoProjectState): void {
   // Start up to `slots` tasks
   const toStart = eligible.slice(0, slots);
   for (const task of toStart) {
-    state.autoTrackedIds.add(task.id);
     state.startingIds.add(task.id); // prevent duplicate pick until phase changes
     const orchestrator = getOrchestrator(projectRoot);
     orchestrator.resumeTask(task.id).catch(err => {
       console.error(`[auto-mode] Failed to start task ${task.id}:`, err);
-      state.autoTrackedIds.delete(task.id);
       state.startingIds.delete(task.id);
     });
     console.log(`[auto-mode] Started task: ${task.title} (${task.id})`);
@@ -426,17 +410,18 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
   state.ciPollTimers.set(taskId, timer);
 }
 
-function _finishTask(taskId: string, projectRoot: string, state: AutoProjectState): void {
-  // Set autoProcessed BEFORE markTaskDone so the flag is on disk before the
-  // phase-change WebSocket event triggers UI refreshes. Otherwise the amber
-  // auto-processed border won't appear because the task data is re-read
-  // without autoProcessed:true when the phase-change to 'done' fires.
+function _finishTask(taskId: string, projectRoot: string, _state: AutoProjectState): void {
+  // Belt-and-braces autoProcessed stamp. The flag is normally already in the
+  // committed artifact snapshot (set by _autoApprove before create-pr), which
+  // markTaskDone's pull restores. This live-copy stamp covers the pull-failure
+  // fallback, which recreates task.json from the live copy read at the start
+  // of markTaskDone. (On pull success the snapshot wins by design — a task
+  // approved manually and only merged by auto mode won't carry the flag.)
   const taskStore = new TaskStore(projectRoot);
   taskStore.update(taskId, { autoProcessed: true });
 
   const orchestrator = getOrchestrator(projectRoot);
   orchestrator.markTaskDone(taskId).then(() => {
-    state.autoTrackedIds.delete(taskId);
     console.log(`[auto-mode] Task ${taskId} marked as done (auto-processed)`);
   }).catch(err => {
     console.error(`[auto-mode] Failed to mark task ${taskId} as done:`, err);
