@@ -7,9 +7,11 @@ import { ProjectSelector } from '@/components/project-selector';
 import { DefaultsUpdater } from '@/components/defaults-updater';
 import { RecoveryBanner } from '@/components/recovery-banner';
 import { UpdateBanner } from '@/components/update-banner';
+import { MissingToolsBanner } from '@/components/missing-tools-banner';
 import { AutoModeButton } from '@/components/auto-mode-button';
 import { getInterruptedTasks } from '@/app/actions/recovery';
 import { getAutoModeState } from '@/lib/auto-mode';
+import { checkTools } from '@/app/actions/tools';
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
@@ -25,6 +27,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const staleDefaults = await getOutdatedProjects();
   const interruptedTasks = await getInterruptedTasks();
   const autoModeState = activeProject ? getAutoModeState(activeProject.path) : { enabled: false };
+  const toolStatuses = await checkTools();
 
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full`}>
@@ -46,6 +49,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <UpdateBanner />
           {/* Recovery banner — shows when interrupted tasks are detected from previous session */}
           <RecoveryBanner tasks={interruptedTasks} />
+          {/* Missing tools banner — shows when required CLI tools are not found */}
+          <MissingToolsBanner tools={toolStatuses} />
           <div className="flex-1 min-h-0">{children}</div>
         </div>
       </body>
