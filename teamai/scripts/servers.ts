@@ -101,6 +101,20 @@ export function getDevServerUrl(): string {
   return `http://localhost:${getDevPort()}`;
 }
 
+// ── Collision guard ─────────────────────────────────────────────────────────
+// Catches a future typo that makes dev and test share a port, which would
+// re-introduce the collision the split was designed to prevent. Runs at
+// module load so the error surfaces before any consumer does real work.
+
+if (getDevPort() === getTestPort()) {
+  throw new Error(
+    `Dev and test ports are both ${getDevPort()}; they must differ so ` +
+    `'npm run dev' and 'npm run test:e2e' can coexist. Update the PORT=... ` +
+    `literal in package.json's dev script and/or the PORT literal in ` +
+    `playwright.config.ts.`,
+  );
+}
+
 // ── CLI entry ───────────────────────────────────────────────────────────────
 // Usage: npx tsx scripts/servers.ts <test|dev> [--url]
 
