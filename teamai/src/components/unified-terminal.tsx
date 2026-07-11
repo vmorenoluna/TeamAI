@@ -56,7 +56,7 @@ interface Props {
 
 const TS_RE = /^\[(\d{2}:\d{2}:\d{2})\]\s/;
 
-function parseRoleLog(role: string, content: string | null): ParsedLine[] {
+export function parseRoleLog(role: string, content: string | null): ParsedLine[] {
   if (!content) return [];
   const roleDef = ROLE_MAP.get(role);
   const ansi = roleDef?.ansiColor ?? '\x1b[37m';
@@ -76,7 +76,7 @@ function parseRoleLog(role: string, content: string | null): ParsedLine[] {
   return result;
 }
 
-function parseCoderLogs(subtaskTerminals: SubtaskTerminalInfo[]): ParsedLine[] {
+export function parseCoderLogs(subtaskTerminals: SubtaskTerminalInfo[]): ParsedLine[] {
   const roleDef = ROLE_MAP.get('coder')!;
   const ansi = roleDef.ansiColor;
   const label = roleDef.label;
@@ -114,7 +114,7 @@ function parseCoderLogs(subtaskTerminals: SubtaskTerminalInfo[]): ParsedLine[] {
 
 // ── Live event formatting ───────────────────────────────────────────────────
 
-function formatLiveEvent(event: StreamEvent): string | null {
+export function formatLiveEvent(event: StreamEvent): string | null {
   switch (event.type) {
     case 'system':
       if (event.subtype === 'init') {
