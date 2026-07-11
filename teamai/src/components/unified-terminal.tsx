@@ -271,7 +271,27 @@ export function UnifiedTerminal({
       fitAddon = new FitAddonCtor();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
-      fitAddon.fit();
+      // Defer the first fit() to the next animation frame so the flex chain
+      // has time to resolve a non-zero pixel height. xterm.js needs the
+      // container to have a definite size at measurement time — without
+      // this, the very first fit() can see a 0×N viewport and render
+      // a single row even when the ResizeObserver eventually re-fires.
+      // Belt-and-suspenders: if rAF still fires before layout settles,
+      // retry via setTimeout(0). The ResizeObserver remains the ultimate
+      // safety net for any subsequent resize.
+      requestAnimationFrame(() => {
+        // Guard against unmount between Promise.all resolving and rAF firing.
+        // The synchronous .fitAddon.fit() had the same exposure; this is the
+        // belt-and-suspenders fix.
+        if (!container.isConnected) return;
+        if (container.clientHeight > 0) {
+          fitAddon.fit();
+        } else {
+          setTimeout(() => {
+            if (container.isConnected) fitAddon.fit();
+          }, 0);
+        }
+      });
 
       terminal.onScroll(() => {
         const atBottom = terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
@@ -417,7 +437,7 @@ export function UnifiedTerminal({
           </div>
 
           {/* Terminal */}
-          <div ref={containerRef} className="flex-1 min-h-[300px] rounded-lg overflow-hidden border border-[#1e293b]" />
+          <div ref={containerRef} className="flex-1 min-h-0 rounded-lg overflow-hidden border border-[#1e293b]" />
         </>
       )}
     </div>

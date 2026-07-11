@@ -51,7 +51,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <RecoveryBanner tasks={interruptedTasks} />
           {/* Missing tools banner — shows when required CLI tools are not found */}
           <MissingToolsBanner tools={toolStatuses} />
-          <div className="flex-1 min-h-0">{children}</div>
+          <div className="flex-1 min-h-0 flex flex-col">{children}</div>
         </div>
       </body>
     </html>
