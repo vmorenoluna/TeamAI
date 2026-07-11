@@ -1,25 +1,12 @@
-import { spawn, ChildProcess, execFileSync } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
 import * as pty from 'node-pty';
 import { readFileSync, existsSync, appendFileSync } from 'fs';
 import { containerManager, readContainerConfig, readContainerRemoteUser, hostToContainerPath } from './container-manager';
+import { getToolPath } from './tool-checker';
 
-function findExecutable(name: string): string {
-  // On Windows, where.exe locates commands in PATH.
-  // On Unix, which is a real binary on both Linux and macOS (unlike 'command -v'
-  // which is a shell builtin and cannot be invoked via execFileSync on macOS).
-  // Both are called via execFileSync to avoid shell quoting inconsistencies.
-  try {
-    if (process.platform === 'win32') {
-      return execFileSync('where', [name], { encoding: 'utf-8' }).trim().split(/\r?\n/)[0].trim();
-    }
-    return execFileSync('which', [name], { encoding: 'utf-8' }).trim();
-  } catch {
-    return name;
-  }
-}
 
 export interface TerminalSession {
   id: string;
@@ -94,7 +81,8 @@ export class ProcessManager extends EventEmitter {
     } else {
       if (opts.permissionMode) claudeArgs.push('--permission-mode', opts.permissionMode);
 
-      proc = spawn('claude', claudeArgs, {
+      const claudePath = getToolPath('claude');
+      proc = spawn(claudePath, claudeArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ...(opts.env ?? {}) },
         cwd: opts.cwd,
@@ -284,7 +272,7 @@ export class ProcessManager extends EventEmitter {
     const args = roleContent ? ['--append-system-prompt', roleContent] : [];
     if (opts.model) args.push('--model', opts.model);
 
-    const claudeBin = findExecutable('claude');
+    const claudeBin = getToolPath('claude');
     const ptyProcess = pty.spawn(claudeBin, args, {
       name: 'xterm-color',
       cols: 120,

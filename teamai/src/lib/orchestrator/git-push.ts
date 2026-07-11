@@ -10,6 +10,7 @@
  */
 import { execFileSync } from 'child_process';
 import { appendFileSync } from 'fs';
+import { getToolPath } from '../tool-checker';
 
 /**
  * Push (or pull) a branch to/from origin, injecting a GitHub OAuth token
@@ -24,7 +25,7 @@ export function gitPush(projectRoot: string, pushArgs: string[], logFile: string
   // Helper: obtain the gh OAuth token.
   const _getToken = (): string => {
     try {
-      return execFileSync('gh', ['auth', 'token'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
+      return execFileSync(getToolPath('gh'), ['auth', 'token'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
     } catch {
       return '';
     }
@@ -76,7 +77,7 @@ export function gitPush(projectRoot: string, pushArgs: string[], logFile: string
         let freshToken = null;
         try {
           const hostname = _remoteUrl ? new URL(_remoteUrl).hostname : 'github.com';
-          execFileSync('gh', ['auth', 'refresh', '-s', 'repo', '--hostname', hostname], {
+          execFileSync(getToolPath('gh'), ['auth', 'refresh', '-s', 'repo', '--hostname', hostname], {
             encoding: 'utf-8', stdio: 'pipe', timeout: 30_000,
           });
           freshToken = _getToken();
