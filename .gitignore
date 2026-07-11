@@ -1,3 +1,6 @@
+# Dependencies (installed per-machine, never committed)
+node_modules/
+
 # Playwright output
 .playwright-mcp/
 test-results/
