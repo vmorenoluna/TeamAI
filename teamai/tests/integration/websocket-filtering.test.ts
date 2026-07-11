@@ -134,7 +134,7 @@ describe('WebSocket Project Filtering', () => {
       }
     });
 
-    // Start server on random port
+    // Port 0 + 127.0.0.1: ephemeral (not the playwright 3001) + IPv4 only (no localhost→::1). Don't hardcode.
     await new Promise<void>((resolve) => {
       server.listen(0, '127.0.0.1', () => {
         port = (server.address() as AddressInfo).port;
