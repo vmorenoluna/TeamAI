@@ -355,7 +355,7 @@ describe('ProcessManager — Full Coverage', () => {
   // ── _appendToLog ──────────────────────────────────────────────────────────
 
   describe('_appendToLog (via private method access)', () => {
-    it('formats init event', () => {
+    it('formats init event with timestamp', () => {
       (pm as unknown as AnyPM)._appendToLog('/tmp/test.log', {
         type: 'system',
         subtype: 'init',
@@ -363,11 +363,11 @@ describe('ProcessManager — Full Coverage', () => {
       });
       expect(mockAppendFileSync).toHaveBeenCalledWith(
         '/tmp/test.log',
-        '◆ Session started — claude-sonnet-4\n',
+        expect.stringMatching(/^\[\d{2}:\d{2}:\d{2}\] ◆ Session started — claude-sonnet-4\n$/),
       );
     });
 
-    it('formats assistant event with text blocks', () => {
+    it('formats assistant event with text blocks and timestamp', () => {
       (pm as unknown as AnyPM)._appendToLog('/tmp/test.log', {
         type: 'assistant',
         message: {
@@ -379,11 +379,11 @@ describe('ProcessManager — Full Coverage', () => {
       });
       expect(mockAppendFileSync).toHaveBeenCalledWith(
         '/tmp/test.log',
-        'Hello world▶ bash\n',
+        expect.stringMatching(/^\[\d{2}:\d{2}:\d{2}\] Hello world▶ bash\n$/),
       );
     });
 
-    it('formats result success event', () => {
+    it('formats result success event with timestamp', () => {
       (pm as unknown as AnyPM)._appendToLog('/tmp/test.log', {
         type: 'result',
         subtype: 'success',
@@ -392,11 +392,11 @@ describe('ProcessManager — Full Coverage', () => {
       });
       expect(mockAppendFileSync).toHaveBeenCalledWith(
         '/tmp/test.log',
-        '\n✓ Done — $0.0123 (1500ms)\n',
+        expect.stringMatching(/^\[\d{2}:\d{2}:\d{2}\] \n✓ Done — \$0\.0123 \(1500ms\)\n$/),
       );
     });
 
-    it('formats result failure event', () => {
+    it('formats result failure event with timestamp', () => {
       (pm as unknown as AnyPM)._appendToLog('/tmp/test.log', {
         type: 'result',
         subtype: 'error',
@@ -405,11 +405,11 @@ describe('ProcessManager — Full Coverage', () => {
       });
       expect(mockAppendFileSync).toHaveBeenCalledWith(
         '/tmp/test.log',
-        '\n✗ Failed: Invalid API key\n',
+        expect.stringMatching(/^\[\d{2}:\d{2}:\d{2}\] \n✗ Failed: Invalid API key\n$/),
       );
     });
 
-    it('formats result failure with unknown error when result missing', () => {
+    it('formats result failure with unknown error with timestamp', () => {
       (pm as unknown as AnyPM)._appendToLog('/tmp/test.log', {
         type: 'result',
         subtype: 'error',
@@ -417,7 +417,7 @@ describe('ProcessManager — Full Coverage', () => {
       });
       expect(mockAppendFileSync).toHaveBeenCalledWith(
         '/tmp/test.log',
-        '\n✗ Failed: unknown error\n',
+        expect.stringMatching(/^\[\d{2}:\d{2}:\d{2}\] \n✗ Failed: unknown error\n$/),
       );
     });
 
@@ -449,7 +449,7 @@ describe('ProcessManager — Full Coverage', () => {
       ).not.toThrow();
     });
 
-    it('handles result event without total_cost_usd', () => {
+    it('handles result event without total_cost_usd, with timestamp', () => {
       (pm as unknown as AnyPM)._appendToLog('/tmp/test.log', {
         type: 'result',
         subtype: 'success',
@@ -457,7 +457,7 @@ describe('ProcessManager — Full Coverage', () => {
       });
       expect(mockAppendFileSync).toHaveBeenCalledWith(
         '/tmp/test.log',
-        '\n✓ Done (100ms)\n',
+        expect.stringMatching(/^\[\d{2}:\d{2}:\d{2}\] \n✓ Done \(100ms\)\n$/),
       );
     });
   });

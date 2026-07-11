@@ -60,13 +60,13 @@ vi.mock('@/hooks/use-websocket', () => ({
   },
 }));
 
-// SubtaskTerminalList mock (replaces AgentPanel for per-subtask terminals)
-vi.mock('@/components/subtask-terminal-list', () => ({
-  SubtaskTerminalList: ({ taskId, subtaskTerminals, qaLog, specLog, planLog, mergeLog, orchestratorLog }: {
+// UnifiedTerminal mock (replaces SubtaskTerminalList for unified terminal with filter chips)
+vi.mock('@/components/unified-terminal', () => ({
+  UnifiedTerminal: ({ taskId, subtaskTerminals, qaLog, specLog, planLog, mergeLog, orchestratorLog }: {
     taskId: string; subtaskTerminals: { id: number; title: string; log: string | null }[];
     qaLog: string | null; specLog: string | null; planLog: string | null; mergeLog: string | null; orchestratorLog: string | null;
   }) => (
-    <div data-testid="subtask-terminal-list" data-task-id={taskId}>
+    <div data-testid="unified-terminal" data-task-id={taskId}>
       <span data-testid="subtask-count">{subtaskTerminals.length}</span>
       {qaLog && <span data-testid="qa-log-present">qa</span>}
       {specLog && <span data-testid="spec-log-present">spec</span>}
@@ -851,18 +851,18 @@ describe('TaskDetail', () => {
   // ── Terminal tab ─────────────────────────────────────────────────────
 
   describe('terminal tab', () => {
-    it('renders SubtaskTerminalList when Terminal tab is active', () => {
+    it('renders UnifiedTerminal when Terminal tab is active', () => {
       renderDetail();
       fireEvent.click(screen.getByText('Terminal'));
 
-      expect(screen.getByTestId('subtask-terminal-list')).toBeInTheDocument();
+      expect(screen.getByTestId('unified-terminal')).toBeInTheDocument();
     });
 
-    it('passes taskId to SubtaskTerminalList', () => {
+    it('passes taskId to UnifiedTerminal', () => {
       renderDetail();
       fireEvent.click(screen.getByText('Terminal'));
 
-      const panel = screen.getByTestId('subtask-terminal-list');
+      const panel = screen.getByTestId('unified-terminal');
       expect(panel.getAttribute('data-task-id')).toBe('task-1');
     });
 
