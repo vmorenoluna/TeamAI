@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useServerMutation } from '@/hooks/use-server-mutation';
-import { SubtaskTerminalList } from './subtask-terminal-list';
+import { UnifiedTerminal } from './unified-terminal';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
 import { addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, restartCurrentPhase } from '@/app/actions/tasks';
@@ -717,8 +717,8 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
 
         {/* TERMINAL */}
         {activeTab === 'terminal' && (
-          <div className="p-4 flex-1 min-h-0">
-            <SubtaskTerminalList
+          <div className="p-3 flex-1 min-h-0">
+            <UnifiedTerminal
               taskId={task.id}
               subtaskTerminals={subtaskTerminals ?? []}
               qaLog={qaLog ?? null}

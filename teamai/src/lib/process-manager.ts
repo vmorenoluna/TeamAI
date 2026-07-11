@@ -127,7 +127,10 @@ export class ProcessManager extends EventEmitter {
 
     proc.stderr!.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
-      if (logFile) appendFileSync(logFile, `[STDERR] ${text}`);
+      if (logFile) {
+        const ts = new Date().toISOString().slice(11, 19);
+        appendFileSync(logFile, `[${ts}] [STDERR] ${text}`);
+      }
       this.emit('error', { sessionId: id, error: text });
     });
 
@@ -177,7 +180,10 @@ export class ProcessManager extends EventEmitter {
       } else if (event.type === 'error') {
         text = `\n⚠ ${event.error}\n`;
       }
-      if (text) appendFileSync(logFile, text);
+      if (text) {
+        const ts = new Date().toISOString().slice(11, 19); // HH:MM:SS
+        appendFileSync(logFile, `[${ts}] ${text}`);
+      }
     } catch { /* best-effort */ }
   }
 
