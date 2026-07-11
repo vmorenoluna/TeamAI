@@ -8,6 +8,7 @@ import { PipelineConfigEditor } from '@/components/pipeline-config';
 import { ProviderConfigEditor } from '@/components/provider-config';
 import { ContainerConfigEditor } from '@/components/container-config';
 import { ProjectsSettings } from '@/components/projects-settings';
+import { ToolSettings } from '@/components/tool-settings';
 
 export default async function SettingsPage() {
   const activeProject = await getActiveProject();
@@ -71,6 +72,9 @@ export default async function SettingsPage() {
             ))}
           </div>
         </section>
+
+        {/* Tool paths */}
+        <ToolSettings />
 
         {/* Project defaults sync */}
         <ProjectsSettings />

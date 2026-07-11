@@ -5,6 +5,7 @@ import { execFileSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { projectStore } from './project-store';
+import { getToolPath } from './tool-checker';
 
 interface AutoProjectState {
   enabled: boolean;
@@ -371,7 +372,7 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
         return;
       }
 
-      const prData = JSON.parse(execFileSync('gh', [
+      const prData = JSON.parse(execFileSync(getToolPath('gh'), [
         'pr', 'view', prNumber,
         '--json', 'state,statusCheckRollup',
       ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 }));
@@ -404,7 +405,7 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
         state.ciPollTimers.delete(taskId);
 
         try {
-          execFileSync('gh', ['pr', 'merge', prNumber, '--merge'], {
+          execFileSync(getToolPath('gh'), ['pr', 'merge', prNumber, '--merge'], {
             cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
           });
           console.log(`[auto-mode] PR #${prNumber} merged successfully`);

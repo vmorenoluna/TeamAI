@@ -3,6 +3,7 @@ import { existsSync, readFileSync, appendFileSync, writeFileSync, mkdirSync } fr
 import { EventEmitter } from 'events';
 import path from 'path';
 import { warn as logWarn, log } from './logger';
+import { getToolPath } from './tool-checker';
 
 export type ContainerState = 'stopped' | 'starting' | 'running' | 'restarting' | 'generating' | 'validating';
 
@@ -47,7 +48,7 @@ export function _resetDockerAvailableCache(): void {
 export function dockerAvailable(): boolean {
   if (_dockerAvailable !== null) return _dockerAvailable;
   try {
-    execFileSync('docker', ['info'], { stdio: 'ignore', timeout: 2000 });
+    execFileSync(getToolPath('docker'), ['info'], { stdio: 'ignore', timeout: 2000 });
     _dockerAvailable = true;
   } catch (err) {
     _dockerAvailable = false;
@@ -294,7 +295,7 @@ export class ContainerManager extends EventEmitter {
   }
 
   private _watchEvents(record: ContainerRecord): void {
-    const watcher = spawn('docker', [
+    const watcher = spawn(getToolPath('docker'), [
       'events',
       '--filter', `container=${record.containerId}`,
       '--filter', 'event=die',

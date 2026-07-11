@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import { appendFileSync } from 'fs';
 import { warn as logWarn } from './logger';
+import { getToolPath } from './tool-checker';
 
 /**
  * Detect the Git hosting platform from the remote origin URL.
@@ -69,7 +70,7 @@ export function checkExistingPRViaCLI(
 ): string | null {
   if (platform === 'github') {
     try {
-      const result = execFileSync('gh', [
+      const result = execFileSync(getToolPath('gh'), [
         'pr', 'list',
         '--head', branch,
         '--state', 'open',
@@ -86,7 +87,7 @@ export function checkExistingPRViaCLI(
 
   if (platform === 'gitlab') {
     try {
-      const result = execFileSync('glab', [
+      const result = execFileSync(getToolPath('glab'), [
         'mr', 'list',
         '--source-branch', branch,
         '--state', 'opened',

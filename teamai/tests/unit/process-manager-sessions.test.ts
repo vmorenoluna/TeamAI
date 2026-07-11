@@ -509,13 +509,13 @@ describe('ProcessManager — Full Coverage', () => {
       expect(pm.getTerminalSessions()[0].id).toBe(id);
     });
 
-    it('calls findExecutable to locate claude binary', () => {
+    it('uses default claude binary name for PTY session', () => {
       pm.createTerminalSession({
         projectPath: '/test/project',
         role: 'coder.md',
       });
 
-      expect(mockExecFileSync).toHaveBeenCalled();
+      expect(mockPtySpawn.mock.calls[0][0]).toBe('claude');
     });
 
     it('uses role file content when it exists', () => {
@@ -621,19 +621,16 @@ describe('ProcessManager — Full Coverage', () => {
       expect(exitSpy).toHaveBeenCalledWith({ sessionId: expect.any(String) });
     });
 
-    it('findExecutable resolves full path on success', () => {
-      mockExecFileSync.mockReturnValue('/usr/local/bin/claude');
-
+    it('uses getToolPath for claude binary name', () => {
+      // getToolPath returns 'claude' by default (no tools.json config)
       pm.createTerminalSession({
         projectPath: '/test', role: 'coder.md',
       });
 
-      expect(mockPtySpawn.mock.calls[0][0]).toBe('/usr/local/bin/claude');
+      expect(mockPtySpawn.mock.calls[0][0]).toBe('claude');
     });
 
-    it('findExecutable falls back to binary name on failure', () => {
-      mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
-
+    it('falls back to default claude binary name', () => {
       pm.createTerminalSession({
         projectPath: '/test', role: 'coder.md',
       });

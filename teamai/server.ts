@@ -7,6 +7,7 @@ import { containerManager } from './src/lib/container-manager';
 import { startupCleanup, autoResumeInterruptedTasks, sweepStalledTasks } from './src/lib/recovery';
 import { restoreAutoModeStates } from './src/lib/auto-mode';
 import { error as logError } from './src/lib/logger';
+import { checkAllTools } from './src/lib/tool-checker';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
 const handle = app.getRequestHandler();
@@ -124,6 +125,19 @@ app.prepare().then(() => {
 
   server.listen(port, host, () => {
     console.log(`> Ready on http://${host}:${port}`);
+
+    // ── Prerequisite tool check ────────────────────────────────────────
+    const tools = checkAllTools();
+    const missing = tools.filter(t => !t.found);
+    if (missing.length > 0) {
+      console.warn('[tools] Missing external tools detected:');
+      for (const t of missing) {
+        console.warn(`  • ${t.label}: ${t.error}`);
+      }
+      console.warn('[tools] Configure custom paths in Settings → Tool Paths.');
+    } else {
+      console.log('[tools] All prerequisite tools found');
+    }
 
     // ── Startup crash recovery scan ─────────────────────────────────────
     const staleSessions = processManager.getStaleSessions();
