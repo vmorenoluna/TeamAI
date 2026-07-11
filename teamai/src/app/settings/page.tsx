@@ -9,6 +9,7 @@ import { ProviderConfigEditor } from '@/components/provider-config';
 import { ContainerConfigEditor } from '@/components/container-config';
 import { ProjectsSettings } from '@/components/projects-settings';
 import { ToolSettings } from '@/components/tool-settings';
+import { checkTools } from '@/app/actions/tools';
 
 export default async function SettingsPage() {
   const activeProject = await getActiveProject();
@@ -17,8 +18,8 @@ export default async function SettingsPage() {
     return <div className="p-6 text-sm text-slate-400">No active project selected.</div>;
   }
 
-  const [roles, pipelineConfig, providersConfig, containerConfig, containerState] = await Promise.all([
-    getRoles(), getPipelineConfig(), getProvidersConfig(), getContainerConfig(), getContainerState(),
+  const [roles, pipelineConfig, providersConfig, containerConfig, containerState, tools] = await Promise.all([
+    getRoles(), getPipelineConfig(), getProvidersConfig(), getContainerConfig(), getContainerState(), checkTools(),
   ]);
 
   return (
@@ -74,7 +75,7 @@ export default async function SettingsPage() {
         </section>
 
         {/* Tool paths */}
-        <ToolSettings />
+        <ToolSettings initialTools={tools} />
 
         {/* Project defaults sync */}
         <ProjectsSettings />
