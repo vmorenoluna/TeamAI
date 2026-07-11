@@ -20,13 +20,13 @@ export default defineConfig({
   globalSetup: require.resolve('./tests/e2e/playwright-setup.ts'),
   globalTeardown: require.resolve('./tests/e2e/playwright-teardown.ts'),
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: 'http://localhost:3001',
     trace: 'on-first-retry',
     headless: true,
   },
   webServer: {
     command: 'npx tsx server.ts',
-    url: 'http://localhost:3000',
+    url: 'http://localhost:3001',
     // Force a fresh dev server per test run. If we allow reuseExistingServer,
     // the running server's projectStore.ts singleton has its CONFIG_DIR frozen
     // at module-load time, so projectStore.getByPath() returns NULL on every lookup
@@ -43,6 +43,7 @@ export default defineConfig({
       // starts webServer before globalSetup, so a file-based approach
       // (.teamai-e2e-config-path) creates a race condition.
       TEAMAI_CONFIG_DIR: TEMP_CONFIG_DIR,
+      PORT: '3001',
     },
   },
   projects: [

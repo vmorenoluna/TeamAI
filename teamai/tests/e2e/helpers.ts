@@ -61,7 +61,7 @@ export async function ensureProjectSelected(page: Page): Promise<boolean> {
   await page.context().addCookies([{
     name: 'activeProject',
     value: SEED_DIR,
-    url: 'http://localhost:3000',
+    url: 'http://localhost:3001',
   }]);
 
   await page.goto('/');
