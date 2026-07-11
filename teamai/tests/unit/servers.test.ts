@@ -10,7 +10,7 @@
  * files that existed before scripts/servers.ts consolidated the helpers.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { copyFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import {
