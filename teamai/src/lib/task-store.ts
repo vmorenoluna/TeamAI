@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, rmSync, unlinkSync, renameSync } from 'fs';
 
-function isRetryableError(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && 'code' in err && ((err as { code: string }).code === 'EPERM' || (err as { code: string }).code === 'EBUSY');
+export function isRetryableError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err
+    && ((err as { code: string }).code === 'EPERM' || (err as { code: string }).code === 'EBUSY');
 }
 import { join } from 'path';
 import { slugify } from './utils';

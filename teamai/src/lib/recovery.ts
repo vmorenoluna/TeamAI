@@ -346,6 +346,20 @@ export async function sweepStalledTasks(): Promise<number> {
   // Dynamic import processManager to avoid circular dependency
   const { processManager } = await import('./process-manager');
 
+  // ── Kill hung sessions (>2 min no output) ──────────────────────────
+  const stalledSessions = processManager.getStalledSessions(120_000);
+  for (const session of stalledSessions) {
+    try {
+      console.warn(
+        `[sweep] Session ${session.id} (task ${session.taskId}, role ${session.role}) ` +
+        `stalled >2min with no output — killing`,
+      );
+      processManager.killSession(session.id);
+    } catch (err) {
+      logWarn('sweep', `Failed to kill stalled session ${session.id}:`, err);
+    }
+  }
+
   const projects = _loadProjects();
   let resumed = 0;
 

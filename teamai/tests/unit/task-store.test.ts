@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
-import { TaskStore } from '@/lib/task-store';
+import { TaskStore, isRetryableError } from '@/lib/task-store';
 import { createTestProject } from '../utils/test-project';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -33,6 +33,44 @@ function createTask(
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
+
+describe('isRetryableError', () => {
+  it('returns true for {code: "EPERM"}', () => {
+    expect(isRetryableError({ code: 'EPERM' })).toBe(true);
+  });
+
+  it('returns true for {code: "EBUSY"}', () => {
+    expect(isRetryableError({ code: 'EBUSY' })).toBe(true);
+  });
+
+  it('returns false for {code: "ENOENT"}', () => {
+    expect(isRetryableError({ code: 'ENOENT' })).toBe(false);
+  });
+
+  it('returns false for {code: "EEXIST"}', () => {
+    expect(isRetryableError({ code: 'EEXIST' })).toBe(false);
+  });
+
+  it('returns false for null', () => {
+    expect(isRetryableError(null)).toBe(false);
+  });
+
+  it('returns false for undefined', () => {
+    expect(isRetryableError(undefined)).toBe(false);
+  });
+
+  it('returns false for a string error', () => {
+    expect(isRetryableError('some string error')).toBe(false);
+  });
+
+  it('returns false for a plain Error instance', () => {
+    expect(isRetryableError(new Error('boom'))).toBe(false);
+  });
+
+  it('returns false for a number', () => {
+    expect(isRetryableError(42)).toBe(false);
+  });
+});
 
 describe('TaskStore', () => {
   beforeEach(() => {
