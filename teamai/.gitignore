@@ -75,5 +75,3 @@ full_coverage2.txt
 
 # Electron build output
 dist-electron/
-dist-server/
-tmp/

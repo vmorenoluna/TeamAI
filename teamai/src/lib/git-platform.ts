@@ -169,7 +169,7 @@ export function createPRViaCLI(
 
   if (platform === 'github') {
     appendFileSync(logFile, `[PR] Creating GitHub PR via gh CLI: ${branch} → ${defaultBranch}\n`);
-    const result = execFileSync(getToolPath('gh'), [
+    const result = execFileSync('gh', [
       'pr', 'create',
       '--title', title,
       '--body', body,
@@ -183,7 +183,7 @@ export function createPRViaCLI(
 
   if (platform === 'gitlab') {
     appendFileSync(logFile, `[PR] Creating GitLab MR via glab CLI: ${branch} → ${defaultBranch}\n`);
-    const result = execFileSync(getToolPath('glab'), [
+    const result = execFileSync('glab', [
       'mr', 'create',
       '--title', title,
       '--description', body,

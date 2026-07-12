@@ -6,7 +6,6 @@
  * and post-implement cleanup.
  */
 import { execFileSync } from 'child_process';
-import { getToolPath } from '../tool-checker';
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, rmSync } from 'fs';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
@@ -690,7 +689,7 @@ export async function runImplement(
     // in the PR and QA can proceed.
     let prExists = false;
     try {
-      const prCheck = execFileSync(getToolPath('gh'), ['pr', 'list', '--head', pipeline.branch, '--json', 'url', '--jq', '.[0].url'], {
+      const prCheck = execFileSync('gh', ['pr', 'list', '--head', pipeline.branch, '--json', 'url', '--jq', '.[0].url'], {
         cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000,
       }).trim();
       if (prCheck) {

@@ -13,8 +13,7 @@ import { parseSessionLimitReset, extractPrUrl, phaseHeader, restoreQaReportFromS
 import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn, getWorktreePath as getWorktreePathFn } from './orchestrator/worktree-ops';
 import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
 import { gitPush } from './orchestrator/git-push';
-import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
-import { NO_RESUME_PHASES } from '@/constants/phases';
+import { RateLimitError, NO_RESUME_PHASES, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
 import { runImplement } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
 import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec } from './orchestrator/review-actions';
@@ -51,9 +50,6 @@ export class Orchestrator {
     const pipeline = this.pipelines.get(taskId);
     if (pipeline?.sessionId) {
       processManager.killSession(pipeline.sessionId);
-    }
-    if (pipeline?.pendingTimer) {
-      clearTimeout(pipeline.pendingTimer);
     }
     this.pipelines.delete(taskId);
     this.activeTasks.delete(taskId);
@@ -790,9 +786,7 @@ export class Orchestrator {
     const mins = Math.ceil(waitMs / 60000);
     console.log(`[wakeup] Task ${pipeline.taskId} paused for ~${mins}min. Resuming at ${pipeline.wakeupUntil}`);
 
-    // Track the timer so cancelPipeline can clear it
-    if (pipeline.pendingTimer) clearTimeout(pipeline.pendingTimer);
-    pipeline.pendingTimer = setTimeout(async () => {
+    setTimeout(async () => {
       const task = this.taskStore.getById(pipeline.taskId);
       if (!task || NO_RESUME_PHASES.has(task.phase)) {
         console.log(`[wakeup] Task ${pipeline.taskId} is in terminal phase "${task?.phase}" — skipping resume`);

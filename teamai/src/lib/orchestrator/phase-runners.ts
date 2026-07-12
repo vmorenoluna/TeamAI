@@ -357,18 +357,6 @@ export async function runCreatePRPhase(
     ...(prUrl ? { prUrl } : {}),
   });
 
-  // Re-commit + push so the artifact snapshot that lands in the PR (and
-  // later in master, and later in whatever markTaskDone restores after
-  // merge) actually includes prUrl. The commit above ran before the PR
-  // existed, so its task.json snapshot is necessarily prUrl-less — without
-  // this second pass, every pull-request-strategy task's committed
-  // artifacts permanently lack the PR reference, even though the live
-  // task.json has it.
-  if (prUrl) {
-    deps.commitArtifactsToWorktree(pipeline);
-    deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
-  }
-
   deps.advancePhase(pipeline, 'pr-open', {
     ...(prUrl ? { prUrl } : {}),
     ...(platform !== 'unknown' ? { platform } : {}),

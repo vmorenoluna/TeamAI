@@ -6,7 +6,6 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { projectStore } from './project-store';
 import { getToolPath } from './tool-checker';
-import { TERMINAL_PHASES, PAUSED_PHASES } from '@/constants/phases';
 
 interface AutoProjectState {
   enabled: boolean;
@@ -145,6 +144,12 @@ function _isDemoProject(projectRoot: string): boolean {
   } catch { /* malformed config — don't block */ }
   return false;
 }
+
+const TERMINAL_PHASES = new Set(['backlog', 'done', 'failed']);
+// create-pr is a brief transitional phase between awaiting-review and pr-open.
+// It counts as paused so it doesn't consume a parallel slot in the tick loop
+// (the approveTask it runs is synchronous within _adoptStalledTasks).
+const PAUSED_PHASES = new Set(['awaiting-review', 'pr-open', 'create-pr']);
 
 function _start(projectRoot: string, state: AutoProjectState): void {
   if (state.enabled) return;
