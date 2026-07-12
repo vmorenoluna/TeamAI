@@ -345,11 +345,14 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
   const task = taskStore.getById(taskId);
   if (!task?.prUrl) return;
 
+  // Parse PR/MR number from URL — supports GitHub (/pull/N) and GitLab (/-/merge_requests/N)
   const prMatch = task.prUrl.match(/\/pull\/(\d+)/);
-  if (!prMatch) return;
-  const prNumber = prMatch[1];
+  const mrMatch = task.prUrl.match(/\/-\/merge_requests\/(\d+)/);
+  if (!prMatch && !mrMatch) return;
+  const prNumber = prMatch ? prMatch[1] : mrMatch![1];
+  const isGitLab = !!mrMatch;
 
-  console.log(`[auto-mode] Starting CI polling for PR #${prNumber} (task ${taskId})`);
+  console.log(`[auto-mode] Starting CI polling for ${isGitLab ? 'MR' : 'PR'} #${prNumber} (task ${taskId})`);
 
   const timer = setInterval(() => {
     if (!state.enabled) {
@@ -367,56 +370,100 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
         return;
       }
 
-      const prData = JSON.parse(execFileSync(getToolPath('gh'), [
-        'pr', 'view', prNumber,
-        '--json', 'state,statusCheckRollup',
-      ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 }));
+      if (isGitLab) {
+        // GitLab MR polling via glab
+        const mrData = JSON.parse(execFileSync(getToolPath('glab'), [
+          'mr', 'view', prNumber,
+          '--output', 'json',
+        ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 }));
 
-      if (prData.state === 'MERGED') {
-        // Already merged externally — just mark done
-        clearInterval(timer);
-        state.ciPollTimers.delete(taskId);
-        _finishTask(taskId, projectRoot, state);
-        return;
-      }
-
-      if (prData.state !== 'OPEN') {
-        // PR closed without merge — stop polling
-        clearInterval(timer);
-        state.ciPollTimers.delete(taskId);
-        console.log(`[auto-mode] PR #${prNumber} closed without merge — stopping CI poll`);
-        return;
-      }
-
-      // Check if all status checks passed
-      const checks: Array<{ conclusion: string }> = prData.statusCheckRollup ?? [];
-      const allPassed = checks.length > 0 && checks.every(c =>
-        c.conclusion === 'SUCCESS' || c.conclusion === 'NEUTRAL' || c.conclusion === 'SKIPPED'
-      );
-
-      if (allPassed) {
-        console.log(`[auto-mode] All CI checks passed for PR #${prNumber} — auto-merging`);
-        clearInterval(timer);
-        state.ciPollTimers.delete(taskId);
-
-        try {
-          execFileSync(getToolPath('gh'), ['pr', 'merge', prNumber, '--merge'], {
-            cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
-          });
-          console.log(`[auto-mode] PR #${prNumber} merged successfully`);
-        } catch (mergeErr) {
-          const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
-          console.error(`[auto-mode] Failed to merge PR #${prNumber}: ${msg}`);
-          // Don't mark done if merge failed — leave for manual intervention
+        if (mrData.state === 'merged') {
+          clearInterval(timer);
+          state.ciPollTimers.delete(taskId);
+          _finishTask(taskId, projectRoot, state);
           return;
         }
 
-        _finishTask(taskId, projectRoot, state);
+        if (mrData.state !== 'opened') {
+          clearInterval(timer);
+          state.ciPollTimers.delete(taskId);
+          console.log(`[auto-mode] MR #${prNumber} closed without merge — stopping CI poll`);
+          return;
+        }
+
+        // Check if pipeline (CI) passed
+        const pipeline = mrData.head_pipeline;
+        if (pipeline && pipeline.status === 'success') {
+          console.log(`[auto-mode] All CI checks passed for MR #${prNumber} — auto-merging`);
+          clearInterval(timer);
+          state.ciPollTimers.delete(taskId);
+
+          try {
+            execFileSync(getToolPath('glab'), ['mr', 'merge', prNumber], {
+              cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
+            });
+            console.log(`[auto-mode] MR #${prNumber} merged successfully`);
+          } catch (mergeErr) {
+            const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
+            console.error(`[auto-mode] Failed to merge MR #${prNumber}: ${msg}`);
+            return;
+          }
+
+          _finishTask(taskId, projectRoot, state);
+        }
+      } else {
+        // GitHub PR polling via gh
+        const prData = JSON.parse(execFileSync(getToolPath('gh'), [
+          'pr', 'view', prNumber,
+          '--json', 'state,statusCheckRollup',
+        ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 }));
+
+        if (prData.state === 'MERGED') {
+          // Already merged externally — just mark done
+          clearInterval(timer);
+          state.ciPollTimers.delete(taskId);
+          _finishTask(taskId, projectRoot, state);
+          return;
+        }
+
+        if (prData.state !== 'OPEN') {
+          // PR closed without merge — stop polling
+          clearInterval(timer);
+          state.ciPollTimers.delete(taskId);
+          console.log(`[auto-mode] PR #${prNumber} closed without merge — stopping CI poll`);
+          return;
+        }
+
+        // Check if all status checks passed
+        const checks: Array<{ conclusion: string }> = prData.statusCheckRollup ?? [];
+        const allPassed = checks.length > 0 && checks.every(c =>
+          c.conclusion === 'SUCCESS' || c.conclusion === 'NEUTRAL' || c.conclusion === 'SKIPPED'
+        );
+
+        if (allPassed) {
+          console.log(`[auto-mode] All CI checks passed for PR #${prNumber} — auto-merging`);
+          clearInterval(timer);
+          state.ciPollTimers.delete(taskId);
+
+          try {
+            execFileSync(getToolPath('gh'), ['pr', 'merge', prNumber, '--merge'], {
+              cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
+            });
+            console.log(`[auto-mode] PR #${prNumber} merged successfully`);
+          } catch (mergeErr) {
+            const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
+            console.error(`[auto-mode] Failed to merge PR #${prNumber}: ${msg}`);
+            // Don't mark done if merge failed — leave for manual intervention
+            return;
+          }
+
+          _finishTask(taskId, projectRoot, state);
+        }
       }
     } catch (err) {
-      // Silently retry — gh might be temporarily unavailable or rate-limited
+      // Silently retry — gh/glab might be temporarily unavailable or rate-limited
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[auto-mode] CI poll error for PR #${prNumber}: ${msg}`);
+      console.error(`[auto-mode] CI poll error for ${isGitLab ? 'MR' : 'PR'} #${prNumber}: ${msg}`);
     }
   }, 30_000); // poll every 30 seconds
 

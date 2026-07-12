@@ -224,7 +224,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     await new Promise(r => setTimeout(r, 100));
 
     // Verify the merger agent was spawned
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', '/merge origin/master');
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', '/merge origin/main');
 
     // Simulate the merger agent resolving the conflict:
     try {
@@ -281,7 +281,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     await new Promise(r => setTimeout(r, 100));
 
     // Verify merger was spawned
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', '/merge origin/master');
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', '/merge origin/main');
 
     // Simulate merger failure — exit with non-zero code
     fireEvent('exit', { sessionId: 'sess-merge', code: 1 });
@@ -325,7 +325,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     // Should NOT have sent /merge origin/master (no rebase conflict)
     const sendCalls = mockSendMessage.mock.calls as any[][];
     const mergeCalls = sendCalls.filter(
-      (c) => c[1] && typeof c[1] === 'string' && c[1].includes('/merge origin/master'),
+      (c) => c[1] && typeof c[1] === 'string' && c[1].includes('/merge origin/main'),
     );
     expect(mergeCalls.length).toBe(0);
 

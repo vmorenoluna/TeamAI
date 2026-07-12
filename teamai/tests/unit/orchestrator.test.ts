@@ -1848,7 +1848,7 @@ describe('Orchestrator', () => {
       await new Promise(r => setTimeout(r, 20));
 
       // Merger session should have been created for rebase conflict
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', '/merge origin/master');
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', '/merge origin/main');
 
       // Complete the merger session
       fireEvent('event', { sessionId: 'sess-merge-rebase', event: { type: 'result' } });
@@ -1903,13 +1903,13 @@ describe('Orchestrator', () => {
       await new Promise(r => setTimeout(r, 20));
 
       // Merger session was created
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', '/merge origin/master');
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', '/merge origin/main');
 
       // Simulate merger failure — exit with non-zero code
       fireEvent('exit', { sessionId: 'sess-merge-rebase', code: 1 });
 
       // Merge should throw (unlike create-pr which proceeds)
-      await expect(promise).rejects.toThrow(/Rebase onto latest master failed/);
+      await expect(promise).rejects.toThrow(/Rebase onto latest main failed/);
 
       // Phase should NOT have advanced to done
       expect(pipeline.phase).not.toBe('done');
@@ -2194,8 +2194,8 @@ describe('Orchestrator', () => {
 
       expect(rebaseCalled).toBe(true);
 
-      // Merger session should have been created and sent /merge origin/master
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', '/merge origin/master');
+      // Merger session should have been created and sent /merge origin/main
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', '/merge origin/main');
 
       // Complete the merger session
       fireEvent('event', { sessionId: 'sess-merger', event: { type: 'result' } });
@@ -2254,9 +2254,7 @@ describe('Orchestrator', () => {
       const promise = (orch as AnyOrch).runCreatePR(pipeline);
       await new Promise(r => setTimeout(r, 20));
 
-      // Merger session was created
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', '/merge origin/master');
-
+      // Merger session was created      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', '/merge origin/main');
       // Simulate merger failure — exit with non-zero code
       fireEvent('exit', { sessionId: 'sess-merger', code: 1 });
       await promise;
@@ -2340,7 +2338,7 @@ describe('Orchestrator', () => {
       // git fetch was attempted; checkout/merge were skipped since fetch failed
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['fetch', 'origin', 'master']),
+        expect.arrayContaining(['fetch', 'origin', 'main']),
         expect.objectContaining({ cwd: testData.root }),
       );
       expect(mockExecFileSync).not.toHaveBeenCalledWith(
@@ -2394,12 +2392,12 @@ describe('Orchestrator', () => {
       // git fetch + scoped checkout were attempted
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['fetch', 'origin', 'master']),
+        expect.arrayContaining(['fetch', 'origin', 'main']),
         expect.objectContaining({ cwd: testData.root }),
       );
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['checkout', 'origin/master', '--']),
+        expect.arrayContaining(['checkout', 'origin/main', '--']),
         expect.objectContaining({ cwd: testData.root }),
       );
 
@@ -3425,7 +3423,7 @@ describe('Orchestrator', () => {
     // No merger spawned on fast path
       const sendCalls = mockSendMessage.mock.calls;
       const mergeCalls = sendCalls.filter(
-      (call: any[]) => typeof call[1] === 'string' && call[1].includes('/merge origin/master'),
+      (call: any[]) => typeof call[1] === 'string' && call[1].includes('/merge origin/main'),
       );
       expect(mergeCalls.length).toBe(0);
 
@@ -3487,7 +3485,7 @@ describe('Orchestrator', () => {
       await new Promise(r => setTimeout(r, 20));
 
     // Merger session spawns first
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', '/merge origin/master');
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', '/merge origin/main');
 
     // Complete merger
       fireEvent('event', { sessionId: 'sess-impl-rebase', event: { type: 'result' } });
@@ -3549,7 +3547,7 @@ describe('Orchestrator', () => {
       await new Promise(r => setTimeout(r, 20));
 
     // Merger was spawned
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', '/merge origin/master');
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', '/merge origin/main');
 
     // Simulate merger failure
       fireEvent('exit', { sessionId: 'sess-impl-rebase', code: 1 });

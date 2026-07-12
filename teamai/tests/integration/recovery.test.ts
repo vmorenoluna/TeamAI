@@ -96,14 +96,16 @@ function createTask(
   return dir;
 }
 
-/** Create a worktree directory under .teamai/worktrees/ */
+/** Create a worktree directory under the project's worktree base path (next to project) */
 function createWorktree(
   projectPath: string,
   taskId: string,
 ): string {
-  const wtDir = join(projectPath, '.teamai', 'worktrees');
+  // Worktrees live at <project>/../worktrees/<slug>, matching getWorktreeBase()
+  const slug = `task-${taskId}`;
+  const wtDir = join(projectPath, '..', 'worktrees');
   mkdirSync(wtDir, { recursive: true });
-  const dir = join(wtDir, `task-${taskId}`);
+  const dir = join(wtDir, slug);
   mkdirSync(dir, { recursive: true });
   return dir;
 }

@@ -10,6 +10,7 @@ import { processManager } from '../process-manager';
 import { TaskStore } from '../task-store';
 import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody } from '../git-platform';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
+import { resolveBaseBranch } from '../git-platform';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
 import type { TaskPipeline, SessionOptsResult } from './types';
@@ -31,16 +32,16 @@ export interface RebaseDeps {
  * (merge path, where unresolved conflicts would corrupt the repo) or warn
  * (create-pr path, where the PR can still be reviewed and resolved manually).
  */
-export async function rebaseOntoLatestMaster(
+export async function rebaseOntoLatestDefault(
   worktreePath: string,
   taskId: string,
   logFile: string,
-  deps: RebaseDeps,
+  deps: RebaseDeps & { baseBranch: string },
 ): Promise<boolean> {
   try {
-    execFileSync('git', ['fetch', 'origin', 'master'], { cwd: deps.projectRoot, stdio: 'pipe' });
-    deps.execGit(['rebase', 'origin/master'], worktreePath);
-    appendFileSync(logFile, '\n[INFO] Feature branch rebased onto latest master\n');
+    execFileSync('git', ['fetch', 'origin', deps.baseBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
+    deps.execGit(['rebase', `origin/${deps.baseBranch}`], worktreePath);
+    appendFileSync(logFile, `\n[INFO] Feature branch rebased onto latest ${deps.baseBranch}\n`);
     return true;
   } catch {
     try { deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* ignore */ }
@@ -59,7 +60,7 @@ export async function rebaseOntoLatestMaster(
         map['merge'] = mergeSessionId;
         writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
       } catch { /* best-effort */ }
-      processManager.sendMessage(mergeSessionId, '/merge origin/master');
+      processManager.sendMessage(mergeSessionId, `/merge origin/${deps.baseBranch}`);
       await deps.waitForCompletion(mergeSessionId);
       processManager.killSession(mergeSessionId);
       appendFileSync(logFile, '\n[INFO] Merger resolved rebase conflicts\n');
@@ -184,9 +185,10 @@ export async function runPlanPhase(
   await deps.waitForCompletion(sessionId);
   processManager.killSession(sessionId);
 
+  const baseBranch = resolveBaseBranch(deps.projectRoot);
   try {
-    deps.gitPush(['pull', '--ff-only', 'origin', 'master'], path.join(pipeline.specPath, 'output.log'));
-  } catch { /* non-fast-forward or offline — proceed with local master */ }
+    deps.gitPush(['pull', '--ff-only', 'origin', baseBranch], path.join(pipeline.specPath, 'output.log'));
+  } catch { /* non-fast-forward or offline — proceed with local branch */ }
 
   if (!existsSync(pipeline.worktreePath)) {
     if (path.resolve(pipeline.worktreePath) === path.resolve(deps.projectRoot)) {
@@ -227,17 +229,18 @@ export async function runMergePhase(
   const logFile = path.join(pipeline.specPath, 'output.log');
   deps.phaseHeader(logFile, 'merge');
 
-  // Rebase onto latest master before merging so the diff only contains the
+  // Rebase onto latest default branch before merging so the diff only contains the
   // ticket's actual changes, not drift from an old worktree snapshot.
-  const rebaseOk = await rebaseOntoLatestMaster(
+  const baseBranch = resolveBaseBranch(deps.projectRoot);
+  const rebaseOk = await rebaseOntoLatestDefault(
     pipeline.worktreePath, pipeline.taskId, logFile,
-    { projectRoot: deps.projectRoot, execGit: deps.execGit, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion },
+    { projectRoot: deps.projectRoot, execGit: deps.execGit, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
   );
   if (!rebaseOk) {
     throw new Error(
-      'Rebase onto latest master failed with conflicts that could not be resolved. ' +
-      'The target branch has likely diverged too far from master. ' +
-      'Consider stopping and restarting the task to recreate the worktree from the latest master.'
+      `Rebase onto latest ${baseBranch} failed with conflicts that could not be resolved. ` +
+      `The target branch has likely diverged too far from ${baseBranch}. ` +
+      `Consider stopping and restarting the task to recreate the worktree from the latest ${baseBranch}.`
     );
   }
 
@@ -269,7 +272,7 @@ export async function runMergePhase(
   // Try direct merge first — only spawn agent on conflict
   let mergeSucceeded = false;
   try {
-    appendFileSync(logFile, `[MERGE] Attempting direct merge of ${pipeline.branch} into master\n`);
+    appendFileSync(logFile, `[MERGE] Attempting direct merge of ${pipeline.branch} into ${baseBranch}\n`);
     deps.execGit(['merge', pipeline.branch, '--no-edit'], deps.projectRoot);
     mergeSucceeded = true;
     appendFileSync(logFile, `[MERGE] Direct merge succeeded — no conflicts\n`);
@@ -321,10 +324,11 @@ export async function runCreatePRPhase(
   deps.persistAndEmitPhase(pipeline);
   const logFile = path.join(pipeline.specPath, 'output.log');
 
-  // Rebase onto latest master so the PR diff only contains the ticket's actual changes.
-  const rebaseOk = await rebaseOntoLatestMaster(
+  // Rebase onto latest default branch so the PR diff only contains the ticket's actual changes.
+  const baseBranch = resolveBaseBranch(deps.projectRoot);
+  const rebaseOk = await rebaseOntoLatestDefault(
     pipeline.worktreePath, pipeline.taskId, logFile,
-    { projectRoot: deps.projectRoot, execGit: deps.execGit, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion },
+    { projectRoot: deps.projectRoot, execGit: deps.execGit, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
   );
   if (rebaseOk) {
     appendFileSync(logFile, '\n[INFO] PR will be conflict-free\n');

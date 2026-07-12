@@ -235,7 +235,7 @@ describe('markTaskDone Integration', () => {
       //    since fetch failed ──
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['fetch', 'origin', 'master']),
+        expect.arrayContaining(['fetch', 'origin', 'main']),
         expect.objectContaining({ cwd: testDir }),
       );
       expect(mockExecFileSync).not.toHaveBeenCalledWith(
@@ -352,12 +352,12 @@ describe('markTaskDone Integration', () => {
       // ── git fetch + scoped checkout were attempted ──
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['fetch', 'origin', 'master']),
+        expect.arrayContaining(['fetch', 'origin', 'main']),
         expect.objectContaining({ cwd: testDir }),
       );
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['checkout', 'origin/master', '--']),
+        expect.arrayContaining(['checkout', 'origin/main', '--']),
         expect.objectContaining({ cwd: testDir }),
       );
 
