@@ -1,11 +1,8 @@
 import { readFileSync, readdirSync, existsSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 import { warn as logWarn } from './logger';
-
-const IN_PROGRESS_PHASES = new Set([
-  'spec', 'plan', 'implement', 'qa-review', 'merge', 'create-pr',
-]);
+import { IN_PROGRESS_PHASES } from '@/constants/phases';
+import { projectStore } from './project-store';
 
 export interface InterruptedTask {
   taskId: string;
@@ -448,13 +445,7 @@ export async function sweepStalledTasks(): Promise<number> {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function _loadProjects(): { name: string; path: string }[] {
-  const projectsFile = join(homedir(), '.teamai', 'projects.json');
-  if (!existsSync(projectsFile)) return [];
-  try {
-    return JSON.parse(readFileSync(projectsFile, 'utf-8'));
-  } catch {
-    return [];
-  }
+  return projectStore.getAll();
 }
 
 /** Check whether a project's pipeline.json has demo:true. */
