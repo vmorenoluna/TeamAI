@@ -54,27 +54,6 @@ export const PHASE_LABELS: Record<string, string> = {
   done:              'Done',
 };
 
-// ── Phase category sets ────────────────────────────────────────────────────
-// Single source of truth: add new phases here and all consumers pick them up.
-
-/** Phases where no pipeline is running (terminal states). */
-export const TERMINAL_PHASES = new Set(['backlog', 'done', 'failed']);
-
-/** Phases where pipeline work is paused (waiting for human or external system). */
-export const PAUSED_PHASES = new Set(['awaiting-review', 'pr-open', 'create-pr']);
-
-/** Phases where a rate-limited task should NOT auto-resume. */
-export const NO_RESUME_PHASES = new Set(['backlog', 'done', 'failed', 'awaiting-review', 'pr-open']);
-
-/** Phases actively running pipeline sessions (used by crash-recovery sweep). */
-export const IN_PROGRESS_PHASES = new Set(['spec', 'plan', 'implement', 'qa-review', 'merge', 'create-pr']);
-
-/** Phases where stopping the task (moving to backlog) is not allowed. */
-export const NO_STOP_PHASES = new Set(['backlog', 'done', 'failed']);
-
-/** Phases where restarting the current phase is allowed. */
-export const RESTARTABLE_PHASES = new Set(['spec', 'plan', 'implement', 'qa-review']);
-
 /** Hex colors for each phase (used in stacked bar charts / phase distribution diagrams) */
 export const PHASE_COLORS: Record<string, string> = {
   backlog:           '#475569',
