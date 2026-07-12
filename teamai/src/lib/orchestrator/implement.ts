@@ -14,6 +14,7 @@ import { processManager, type AgentSession } from '../process-manager';
 import { readContainerConfig, containerManager, dockerAvailable, _resetDockerAvailableCache } from '../container-manager';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { rebaseOntoLatestDefault } from './phase-runners';
+import { updateSessionMap } from './helpers';
 import { resolveBaseBranch } from '../git-platform';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
@@ -200,7 +201,6 @@ export async function runImplement(
   }
 
   const logFile = path.join(pipeline.specPath, 'output.log');
-  const sessionMapPath = path.join(pipeline.specPath, 'session_map.json');
   for (const [, subtasks] of groups) {
     if (pipeline.phase === 'failed') break;
     const completedIds: number[] = [];
@@ -266,16 +266,9 @@ export async function runImplement(
           let sessionId: string;
           try {
             sessionId = await processManager.createSession(deps.sessionOpts(coderRole, cwd, pipeline.taskId, subtaskLogFile));
-            // Write session → subtask mapping for live streaming in the UI.
             // Serialised through a lock so parallel subtasks don't race on the JSON file.
             sessionMapLock.current = sessionMapLock.current.then(() => {
-              try {
-                const map: Record<string, string> = existsSync(sessionMapPath)
-                  ? JSON.parse(readFileSync(sessionMapPath, 'utf-8'))
-                  : {};
-                map[String(subtask.id)] = sessionId;
-                writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
-              } catch { /* best-effort */ }
+              updateSessionMap(pipeline.specPath, String(subtask.id), sessionId);
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -847,15 +840,7 @@ async function tryCherryPickWithRecovery(
     const mergeSessionId = await processManager.createSession(
       deps.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, mergeLogFile),
     );
-    // Write session mapping for live streaming
-    const sessionMapPath = path.join(pipeline.specPath, 'session_map.json');
-    try {
-      const map: Record<string, string> = existsSync(sessionMapPath)
-        ? JSON.parse(readFileSync(sessionMapPath, 'utf-8'))
-        : {};
-      map['merge'] = mergeSessionId;
-      writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
-    } catch { /* best-effort */ }
+    updateSessionMap(pipeline.specPath, 'merge', mergeSessionId);
     processManager.sendMessage(mergeSessionId,
       'Resolve cherry-pick conflicts\n\n' +
       'A `git cherry-pick` from branch `' + stBranch + '` was attempted onto `' + pipeline.branch + '`\n' +

@@ -7,6 +7,7 @@
  */
 import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'fs';
+import { updateSessionMap } from './helpers';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
 import { resolveBaseBranch } from '../git-platform';
@@ -133,14 +134,7 @@ export async function runQaReview(
   );
   pipeline.sessionId = sessionId;
   // Write QA session mapping for live streaming in the UI
-  try {
-    const sessionMapPath = path.join(pipeline.specPath, 'session_map.json');
-    const map = existsSync(sessionMapPath)
-      ? JSON.parse(readFileSync(sessionMapPath, 'utf-8'))
-      : {};
-    map['qa'] = sessionId;
-    writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
-  } catch { /* best-effort */ }
+  updateSessionMap(pipeline.specPath, 'qa', sessionId);
   const agentSpecPath = deps.toAgentPath(pipeline.specPath);
   processManager.sendMessage(sessionId,
     `/qa-review ${agentSpecPath}/spec.md\n\n` +

@@ -4,13 +4,14 @@
  * deep test coupling and complex internal state dependencies.
  */
 import { execFileSync } from 'child_process';
-import { existsSync, readFileSync, unlinkSync, appendFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync, appendFileSync, rmSync } from 'fs';
 import path from 'path';
 import { processManager } from '../process-manager';
 import { TaskStore } from '../task-store';
 import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody } from '../git-platform';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
+import { updateSessionMap } from './helpers';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
 import type { TaskPipeline, SessionOptsResult } from './types';
@@ -51,15 +52,7 @@ export async function rebaseOntoLatestDefault(
       const mergeSessionId = await processManager.createSession(
         deps.sessionOpts('merger', worktreePath, taskId, mergeLogFile),
       );
-      // Write session mapping for live streaming
-      try {
-        const sessionMapPath = path.join(path.dirname(logFile), 'session_map.json');
-        const map: Record<string, string> = existsSync(sessionMapPath)
-          ? JSON.parse(readFileSync(sessionMapPath, 'utf-8'))
-          : {};
-        map['merge'] = mergeSessionId;
-        writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
-      } catch { /* best-effort */ }
+      updateSessionMap(path.dirname(logFile), 'merge', mergeSessionId);
       processManager.sendMessage(mergeSessionId, `/merge origin/${deps.baseBranch}`);
       await deps.waitForCompletion(mergeSessionId);
       processManager.killSession(mergeSessionId);
@@ -114,15 +107,7 @@ export async function runSpecPhase(
   );
   pipeline.sessionId = sessionId;
   deps.savePipelineState(pipeline);
-  // Write session mapping for live streaming
-  try {
-    const sessionMapPath = path.join(pipeline.specPath, 'session_map.json');
-    const map: Record<string, string> = existsSync(sessionMapPath)
-      ? JSON.parse(readFileSync(sessionMapPath, 'utf-8'))
-      : {};
-    map['spec'] = sessionId;
-    writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
-  } catch { /* best-effort */ }
+  updateSessionMap(pipeline.specPath, 'spec', sessionId);
   const agentSpecPath = deps.toAgentPath(pipeline.specPath);
 
   const revisionFeedbackPath = path.join(pipeline.specPath, 'spec_revision_feedback.md');
@@ -172,15 +157,7 @@ export async function runPlanPhase(
   );
   pipeline.sessionId = sessionId;
   deps.savePipelineState(pipeline);
-  // Write session mapping for live streaming
-  try {
-    const sessionMapPath = path.join(pipeline.specPath, 'session_map.json');
-    const map: Record<string, string> = existsSync(sessionMapPath)
-      ? JSON.parse(readFileSync(sessionMapPath, 'utf-8'))
-      : {};
-    map['plan'] = sessionId;
-    writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
-  } catch { /* best-effort */ }
+  updateSessionMap(pipeline.specPath, 'plan', sessionId);
   processManager.sendMessage(sessionId, `/plan ${deps.toAgentPath(pipeline.specPath)}/spec.md`);
   await deps.waitForCompletion(sessionId);
   processManager.killSession(sessionId);
@@ -287,15 +264,7 @@ export async function runMergePhase(
       deps.sessionOpts('merger', deps.projectRoot, pipeline.taskId, mergeLogFile),
     );
     pipeline.sessionId = sessionId;
-    // Write session mapping for live streaming
-    try {
-      const sessionMapPath = path.join(pipeline.specPath, 'session_map.json');
-      const map: Record<string, string> = existsSync(sessionMapPath)
-        ? JSON.parse(readFileSync(sessionMapPath, 'utf-8'))
-        : {};
-      map['merge'] = sessionId;
-      writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
-    } catch { /* best-effort */ }
+    updateSessionMap(pipeline.specPath, 'merge', sessionId);
     processManager.sendMessage(sessionId, `/merge ${pipeline.branch}`);
     await deps.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
