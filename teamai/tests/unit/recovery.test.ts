@@ -24,6 +24,8 @@ const mockGetOrchestrator = vi.fn();
 const mockIsTaskActive = vi.fn();
 const mockSweepResumeTask = vi.fn();
 const mockGetAllSessions = vi.fn();
+const mockGetStalledSessions = vi.fn<[], { id: string; taskId: string; role: string }[]>(() => []);
+const mockKillSession = vi.fn();
 
 vi.mock('../../src/lib/orchestrator', () => ({
   getOrchestrator: (...args: unknown[]) => mockGetOrchestrator(...args),
@@ -31,7 +33,9 @@ vi.mock('../../src/lib/orchestrator', () => ({
 
 vi.mock('../../src/lib/process-manager', () => ({
   processManager: {
-    getAllSessions: (...args: unknown[]) => mockGetAllSessions(...args),
+    getAllSessions: (...args: unknown[]) => mockGetAllSessions(...args as []),
+    getStalledSessions: (_timeoutMs: number) => mockGetStalledSessions(),
+    killSession: (sessionId: string) => mockKillSession(sessionId),
   },
 }));
 
@@ -1076,6 +1080,8 @@ describe('sweepStalledTasks', () => {
     mockIsTaskActive.mockReturnValue(false);
     mockSweepResumeTask.mockResolvedValue(undefined);
     mockGetAllSessions.mockReturnValue([]);
+    mockGetStalledSessions.mockReturnValue([]);
+    mockKillSession.mockClear();
   });
 
   it('returns 0 when no projects exist', async () => {
@@ -1343,5 +1349,17 @@ describe('sweepStalledTasks', () => {
     const count = await sweepStalledTasks();
     expect(count).toBe(1);
     expect(mockSweepResumeTask).toHaveBeenCalledWith('t1');
+  });
+
+  it('kills sessions stalled >2min with no output', async () => {
+    vi.mocked(existsSync).mockReturnValue(false); // prevent project scanning
+    mockGetStalledSessions.mockReturnValue([
+      { id: 'sess-abc', taskId: 't1', role: 'coder' },
+    ]);
+
+    const count = await sweepStalledTasks();
+    // No project tasks were swept, so count stays 0 — session kills are side-effect only
+    expect(count).toBe(0);
+    expect(mockKillSession).toHaveBeenCalledWith('sess-abc');
   });
 });
