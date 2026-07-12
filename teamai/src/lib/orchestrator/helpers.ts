@@ -153,6 +153,30 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
   return { maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 3 };
 }
 
+// ── Session map ───────────────────────────────────────────────────────────
+
+/**
+ * Write a session → role mapping to session_map.json for live streaming in
+ * the UI. Best-effort — never blocks the pipeline on write failures.
+ *
+ * Used by spec, plan, implement (subtask + merge sessions), qa-review, and
+ * rebase/cherry-pick merger sessions.  Previously copy-pasted 7×.
+ */
+export function updateSessionMap(
+  specPath: string,
+  roleOrSubtaskId: string,
+  sessionId: string,
+): void {
+  try {
+    const sessionMapPath = path.join(specPath, 'session_map.json');
+    const map: Record<string, string> = existsSync(sessionMapPath)
+      ? JSON.parse(readFileSync(sessionMapPath, 'utf-8'))
+      : {};
+    map[roleOrSubtaskId] = sessionId;
+    writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
+  } catch { /* best-effort */ }
+}
+
 // ── Session options ───────────────────────────────────────────────────────
 
 /**
