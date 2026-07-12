@@ -536,6 +536,46 @@ describe('UnifiedTerminal — component', () => {
     });
   });
 
+  // ── Mount before logs exist, then receive logs (regression) ────────────────
+  //
+  // Regression test for the bug where the containerRef div was only rendered
+  // when hasAnyLog was true. The xterm-init effect runs once on mount (deps:
+  // []); if the component's first render happened before any log existed,
+  // containerRef.current was null and the effect gave up permanently. A
+  // later re-render on the SAME instance with real log content (exactly what
+  // TaskPanel's silent WebSocket-triggered refresh does) flipped hasAnyLog to
+  // true and mounted the div, but the init effect never reran — so the
+  // terminal stayed blank forever while the filter chips (driven by
+  // roleStats, independent of DOM mount state) rendered normally. The fix
+  // mounts the container div unconditionally.
+
+  describe('mounts before logs exist, then receives logs (regression)', () => {
+    it('initializes the terminal and writes content once logs arrive after an empty-state mount', async () => {
+      const { rerender } = render(<UnifiedTerminal {...makeDefaultProps()} />);
+
+      // Initial mount: no logs yet, empty-state message shown, no filter bar.
+      expect(screen.getByText(/No agent output yet/)).toBeInTheDocument();
+      expect(screen.queryByTestId('unified-terminal')).not.toBeInTheDocument();
+
+      // Same component instance re-renders once real log content arrives.
+      rerender(
+        <UnifiedTerminal {...makeDefaultProps({ qaLog: '[12:00:00] QA line' })} />
+      );
+
+      // Filter bar now appears...
+      expect(screen.getByTestId('unified-terminal')).toBeInTheDocument();
+
+      // ...and the terminal must actually have initialized and written the
+      // content. Before the fix, termReady never became true and this write
+      // never happened.
+      await waitFor(() => {
+        expect(mockTerminalWrite).toHaveBeenCalled();
+      });
+      const written = mockTerminalWrite.mock.calls.map(c => String(c[0] ?? '')).join('');
+      expect(written).toContain('QA line');
+    });
+  });
+
   // ── Responsive layout ─────────────────────────────────────────────────────
 
   describe('responsive layout', () => {

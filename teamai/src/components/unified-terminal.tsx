@@ -384,62 +384,70 @@ export function UnifiedTerminal({
 
   return (
     <div className="flex flex-col h-full gap-2">
-      {!hasAnyLog ? (
-        <div className="flex items-center justify-center h-full text-sm text-slate-400">
-          No agent output yet. Run the pipeline to see terminal output.
-        </div>
-      ) : (
-        <>
-          {/* Filter bar */}
-          <div className="shrink-0 flex items-center gap-2 px-1 flex-wrap" data-testid="unified-terminal">
-            <button
-              onClick={selectAll}
-              className="text-[10px] font-medium px-1.5 py-0.5 rounded text-slate-400 hover:text-white hover:bg-[#1e293b] transition-colors shrink-0"
-            >
-              All
-            </button>
-            <button
-              onClick={selectNone}
-              className="text-[10px] font-medium px-1.5 py-0.5 rounded text-slate-400 hover:text-white hover:bg-[#1e293b] transition-colors shrink-0"
-            >
-              None
-            </button>
-            <span className="text-slate-600 mx-0.5 shrink-0">|</span>
-            {ROLES.map(role => {
-              const selected = selectedRoles.has(role.key);
-              const count = roleStats[role.key] ?? 0;
-              if (count === 0) return null;
-              return (
-                <button
-                  key={role.key}
-                  onClick={() => toggleRole(role.key)}
-                  className={`flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded border transition-colors shrink-0 ${
-                    selected
-                      ? `${role.color} bg-[#1a1f2e] text-slate-200`
-                      : 'border-transparent bg-[#11131b] text-slate-500 hover:text-slate-300'
+      {/* Filter bar */}
+      {hasAnyLog && (
+        <div className="shrink-0 flex items-center gap-2 px-1 flex-wrap" data-testid="unified-terminal">
+          <button
+            onClick={selectAll}
+            className="text-[10px] font-medium px-1.5 py-0.5 rounded text-slate-400 hover:text-white hover:bg-[#1e293b] transition-colors shrink-0"
+          >
+            All
+          </button>
+          <button
+            onClick={selectNone}
+            className="text-[10px] font-medium px-1.5 py-0.5 rounded text-slate-400 hover:text-white hover:bg-[#1e293b] transition-colors shrink-0"
+          >
+            None
+          </button>
+          <span className="text-slate-600 mx-0.5 shrink-0">|</span>
+          {ROLES.map(role => {
+            const selected = selectedRoles.has(role.key);
+            const count = roleStats[role.key] ?? 0;
+            if (count === 0) return null;
+            return (
+              <button
+                key={role.key}
+                onClick={() => toggleRole(role.key)}
+                className={`flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded border transition-colors shrink-0 ${
+                  selected
+                    ? `${role.color} bg-[#1a1f2e] text-slate-200`
+                    : 'border-transparent bg-[#11131b] text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                    role.key === 'coder' ? 'bg-amber-500' :
+                    role.key === 'qa' ? 'bg-orange-500' :
+                    role.key === 'spec' ? 'bg-purple-500' :
+                    role.key === 'plan' ? 'bg-blue-500' :
+                    role.key === 'merge' ? 'bg-teal-500' :
+                    'bg-slate-500'
                   }`}
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                      role.key === 'coder' ? 'bg-amber-500' :
-                      role.key === 'qa' ? 'bg-orange-500' :
-                      role.key === 'spec' ? 'bg-purple-500' :
-                      role.key === 'plan' ? 'bg-blue-500' :
-                      role.key === 'merge' ? 'bg-teal-500' :
-                      'bg-slate-500'
-                    }`}
-                  />
-                  {role.label}
-                  <span className="text-slate-600">{count}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Terminal */}
-          <div ref={containerRef} className="flex-1 min-h-0 rounded-lg overflow-hidden border border-[#1e293b]" />
-        </>
+                />
+                {role.label}
+                <span className="text-slate-600">{count}</span>
+              </button>
+            );
+          })}
+        </div>
       )}
+
+      {/* Terminal — always mounted so xterm initializes on the very first
+          render, even before any log exists. Gating this div on hasAnyLog
+          used to mean the mount-once init effect (deps: []) would find
+          containerRef.current null and give up for good; a later re-render
+          with real logs would flip hasAnyLog to true and mount the div, but
+          the init effect never reruns on the same component instance, so
+          the terminal stayed permanently blank while the filter chips (fed
+          by roleStats, independent of DOM mount state) rendered normally. */}
+      <div className="relative flex-1 min-h-0 rounded-lg overflow-hidden border border-[#1e293b]">
+        {!hasAnyLog && (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400 pointer-events-none">
+            No agent output yet. Run the pipeline to see terminal output.
+          </div>
+        )}
+        <div ref={containerRef} className="w-full h-full" />
+      </div>
     </div>
   );
 }
