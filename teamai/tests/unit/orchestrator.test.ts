@@ -2307,16 +2307,16 @@ describe('Orchestrator', () => {
   // ── markTaskDone ──────────────────────────────────────────────────
 
   describe('markTaskDone', () => {
-    it('deletes live directory, attempts git pull, falls back to recreate task.json on pull failure, emits once', async () => {
+    it('deletes live directory, attempts scoped restore, falls back to recreate task.json on fetch failure, emits once', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
 
       // Verify the task directory exists before markTaskDone
       expect(existsSync(testData.taskDir)).toBe(true);
 
-      // Make git pull fail (simulating no remote)
+      // Make git fetch fail (simulating no remote / offline)
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('pull')) {
+        if (cmd === 'git' && args.includes('fetch')) {
           throw new Error('fatal: Could not read from remote repository');
         }
         return '';
@@ -2337,21 +2337,26 @@ describe('Orchestrator', () => {
         phase: 'done',
       }));
 
-      // git pull was attempted
+      // git fetch was attempted; checkout/merge were skipped since fetch failed
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['pull', '--ff-only', 'origin', 'master']),
+        expect.arrayContaining(['fetch', 'origin', 'master']),
         expect.objectContaining({ cwd: testData.root }),
+      );
+      expect(mockExecFileSync).not.toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['checkout']),
+        expect.anything(),
       );
     });
 
-    it('leaves the pulled snapshot untouched when pull succeeds (pulled copy already has phase:done)', async () => {
+    it('leaves the restored snapshot untouched when checkout succeeds (restored copy already has phase:done)', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
 
       expect(existsSync(testData.taskDir)).toBe(true);
 
-      const pulledSnapshot = JSON.stringify({
+      const restoredSnapshot = JSON.stringify({
         id: testData.taskId,
         title: 'Test Task',
         description: 'A test task for full coverage',
@@ -2360,13 +2365,14 @@ describe('Orchestrator', () => {
         updatedAt: new Date().toISOString(),
       });
 
-      // Make git pull "succeed" by recreating the task directory as a side effect,
-      // simulating what a real git pull would do (restore the committed snapshot).
+      // Make the scoped `git checkout origin/master -- <dir>` "succeed" by
+      // recreating the task directory as a side effect, simulating what a
+      // real checkout would do (restore the committed snapshot) regardless
+      // of how dirty the rest of the working tree is.
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('pull')) {
-          // Simulate pull restoring the committed .teamai/{slug}/ directory
+        if (cmd === 'git' && args.includes('checkout')) {
           mkdirSync(testData.taskDir, { recursive: true });
-          writeFileSync(join(testData.taskDir, 'task.json'), pulledSnapshot);
+          writeFileSync(join(testData.taskDir, 'task.json'), restoredSnapshot);
           return '';
         }
         return '';
@@ -2375,7 +2381,7 @@ describe('Orchestrator', () => {
       mockEmit.mockClear();
       await orch.markTaskDone(testData.taskId);
 
-      // Pull succeeded — directory was restored from the snapshot
+      // Checkout succeeded — directory was restored from the snapshot
       expect(existsSync(testData.taskDir)).toBe(true);
 
       // phase-change was emitted exactly once
@@ -2385,16 +2391,21 @@ describe('Orchestrator', () => {
         phase: 'done',
       }));
 
-      // git pull was attempted
+      // git fetch + scoped checkout were attempted
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['pull', '--ff-only', 'origin', 'master']),
+        expect.arrayContaining(['fetch', 'origin', 'master']),
+        expect.objectContaining({ cwd: testData.root }),
+      );
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['checkout', 'origin/master', '--']),
         expect.objectContaining({ cwd: testData.root }),
       );
 
-      // The pulled (tracked) snapshot must not be rewritten — modifying it
+      // The restored (tracked) snapshot must not be rewritten — modifying it
       // would leave the repo dirty after every completed task.
-      expect(readFileSync(join(testData.taskDir, 'task.json'), 'utf-8')).toBe(pulledSnapshot);
+      expect(readFileSync(join(testData.taskDir, 'task.json'), 'utf-8')).toBe(restoredSnapshot);
       expect(existsSync(join(testData.taskDir, 'events.jsonl'))).toBe(false);
     });
 
@@ -2428,6 +2439,105 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root);
 
       await expect(orch.markTaskDone('nonexistent-id')).rejects.toThrow('not found');
+    });
+
+    // ── PR-merge guard ──────────────────────────────────────────────
+    //
+    // markTaskDone used to have no awareness of whether a PR-routed task's
+    // PR had actually merged. Clicking "Mark as Done" in the UI is enabled
+    // as soon as a PR exists (review-panel.tsx's isPrOpen), so a click
+    // moments after PR creation — before merge — would delete the live
+    // .teamai/{slug}/ directory and then fail to restore it from
+    // origin/master (which doesn't have the task's commits yet), destroying
+    // in-progress artifacts for nothing.
+
+    describe('PR-merge guard', () => {
+      function writeTaskJsonWithPr(taskDir: string, taskId: string) {
+        writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
+          id: taskId,
+          title: 'Test Task',
+          description: 'A test task for full coverage',
+          phase: 'pr-open',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          platform: 'github',
+          prUrl: 'https://github.com/example/repo/pull/42',
+          mergeStrategy: 'pull-request',
+        }));
+      }
+
+      it('refuses to mark done when the PR is still open, leaving the directory untouched', async () => {
+        testData = setupTestProject();
+        const orch = makeOrch(testData.root);
+        writeTaskJsonWithPr(testData.taskDir, testData.taskId);
+
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          if (args.includes('view') && args.includes('state')) {
+            return JSON.stringify({ state: 'OPEN' });
+          }
+          return '';
+        });
+
+        mockEmit.mockClear();
+        await expect(orch.markTaskDone(testData.taskId)).rejects.toThrow(/has not been merged yet/);
+
+        // Nothing destructive happened — directory is untouched and no
+        // phase-change was emitted.
+        expect(existsSync(testData.taskDir)).toBe(true);
+        expect(existsSync(join(testData.taskDir, 'task.json'))).toBe(true);
+        expect(mockEmit).not.toHaveBeenCalled();
+
+        // No fetch/checkout/rmSync-adjacent git calls were attempted.
+        expect(mockExecFileSync).not.toHaveBeenCalledWith(
+          'git',
+          expect.arrayContaining(['fetch']),
+          expect.anything(),
+        );
+      });
+
+      it('proceeds when the PR is confirmed merged', async () => {
+        testData = setupTestProject();
+        const orch = makeOrch(testData.root);
+        writeTaskJsonWithPr(testData.taskDir, testData.taskId);
+
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          if (args.includes('view') && args.includes('state')) {
+            return JSON.stringify({ state: 'MERGED' });
+          }
+          return '';
+        });
+
+        mockEmit.mockClear();
+        await orch.markTaskDone(testData.taskId);
+
+        expect(mockEmit).toHaveBeenCalledTimes(1);
+        expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
+          taskId: testData.taskId,
+          phase: 'done',
+        }));
+      });
+
+      it('proceeds when merge state cannot be determined (CLI failure) rather than blocking indefinitely', async () => {
+        testData = setupTestProject();
+        const orch = makeOrch(testData.root);
+        writeTaskJsonWithPr(testData.taskDir, testData.taskId);
+
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          if (args.includes('view') && args.includes('state')) {
+            throw new Error('gh: command not found');
+          }
+          return '';
+        });
+
+        mockEmit.mockClear();
+        await orch.markTaskDone(testData.taskId);
+
+        expect(mockEmit).toHaveBeenCalledTimes(1);
+        expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
+          taskId: testData.taskId,
+          phase: 'done',
+        }));
+      });
     });
   });
 

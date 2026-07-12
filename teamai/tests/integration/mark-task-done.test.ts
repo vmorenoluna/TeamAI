@@ -1,15 +1,22 @@
 /**
  * Integration tests for markTaskDone end-to-end flow.
  *
- * Tests verify the delete→pull→fallback→emit sequence with a real git
- * repository on disk. The processManager and execFileSync are mocked so
- * no real remote operations occur, but filesystem operations (mkdir, rm,
- * readFileSync) use real Node.js APIs against a temp directory.
+ * Tests verify the delete→fetch→scoped-checkout→fallback→emit sequence with
+ * a real git repository on disk. The processManager and execFileSync are
+ * mocked so no real remote operations occur, but filesystem operations
+ * (mkdir, rm, readFileSync) use real Node.js APIs against a temp directory.
+ *
+ * The restore step is deliberately scoped to just the task's own directory
+ * (`git checkout origin/master -- <dir>`) rather than a whole-repo `git
+ * pull` — see orchestrator.ts markTaskDone for why: a repo-wide pull fails
+ * the moment ANY unrelated file elsewhere in the tree is dirty, which was
+ * the actual bug that left completed tasks stuck with bare-bones fallback
+ * artifacts instead of their real committed snapshot.
  *
  * Coverage:
- *  - Pull failure: directory deleted, recreated with task.json + events.jsonl
- *  - Pull success: directory deleted, restored by pull simulation, snapshot left untouched
- *  - Pull success without artifacts: fallback recreates task.json
+ *  - Fetch failure: directory deleted, recreated with task.json + events.jsonl
+ *  - Checkout success: directory deleted, restored by checkout simulation, snapshot left untouched
+ *  - Checkout success without artifacts: fallback recreates task.json
  *  - Single emit: phase-change fires exactly once after the full sequence
  */
 
@@ -184,16 +191,16 @@ describe('markTaskDone Integration', () => {
 
   // ── Pull failure: fallback recreates task.json + events.jsonl ────────────
 
-  describe('pull failure — fallback path', () => {
-    it('deletes directory, attempts pull, recreates task.json + events.jsonl on failure, emits once', async () => {
+  describe('fetch failure — fallback path', () => {
+    it('deletes directory, attempts fetch, recreates task.json + events.jsonl on failure, emits once', async () => {
       // Verify initial state
       expect(existsSync(taskDir)).toBe(true);
       expect(existsSync(join(taskDir, 'task.json'))).toBe(true);
       expect(existsSync(join(taskDir, 'spec.md'))).toBe(true);
 
-      // Make git pull fail (simulating no remote / offline)
+      // Make git fetch fail (simulating no remote / offline)
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('pull')) {
+        if (cmd === 'git' && args.includes('fetch')) {
           throw new Error('fatal: Could not read from remote repository');
         }
         return '';
@@ -224,11 +231,17 @@ describe('markTaskDone Integration', () => {
       const events = eventsContent.split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
       expect(events.some((e: any) => e.phase === 'done')).toBe(true);
 
-      // ── git pull was attempted with correct args ──
+      // ── git fetch was attempted with correct args; checkout was skipped
+      //    since fetch failed ──
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['pull', '--ff-only', 'origin', 'master']),
+        expect.arrayContaining(['fetch', 'origin', 'master']),
         expect.objectContaining({ cwd: testDir }),
+      );
+      expect(mockExecFileSync).not.toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['checkout']),
+        expect.anything(),
       );
 
       // ── phase-change emitted exactly once ──
@@ -239,15 +252,15 @@ describe('markTaskDone Integration', () => {
       }));
     });
 
-    it('handles pull failure when directory has many artifact files', async () => {
+    it('handles fetch failure when directory has many artifact files', async () => {
       // Add extra artifacts to verify rmSync truly removes everything
       writeFileSync(join(taskDir, 'output.log'), 'sensitive terminal output');
       writeFileSync(join(taskDir, 'completion_summary.md'), '# Summary');
       writeFileSync(join(taskDir, 'qa_feedback.md'), 'feedback');
 
-      // Make pull fail
+      // Make fetch fail
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('pull')) {
+        if (cmd === 'git' && args.includes('fetch')) {
           throw new Error('fatal: not a git repository');
         }
         return '';
@@ -275,9 +288,9 @@ describe('markTaskDone Integration', () => {
     });
 
     it('preserves task identity fields in recreated task.json', async () => {
-      // Make pull fail
+      // Make fetch fail
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('pull')) {
+        if (cmd === 'git' && args.includes('fetch')) {
           throw new Error('fatal: remote not found');
         }
         return '';
@@ -300,9 +313,9 @@ describe('markTaskDone Integration', () => {
 
   // ── Pull success: directory restored, events.jsonl updated ──────────────
 
-  describe('pull success path', () => {
-    it('deletes directory, pulls successfully, leaves pulled snapshot untouched, emits once', async () => {
-      const pulledSnapshot = JSON.stringify({
+  describe('checkout success path', () => {
+    it('deletes directory, restores via scoped checkout, leaves restored snapshot untouched, emits once', async () => {
+      const restoredSnapshot = JSON.stringify({
         id: taskId,
         title: 'Mark Task Done Test',
         description: 'Integration test for markTaskDone flow',
@@ -311,12 +324,14 @@ describe('markTaskDone Integration', () => {
         updatedAt: new Date().toISOString(),
       });
 
-      // Make pull succeed and simulate restoring the directory
+      // Make the scoped checkout succeed and simulate restoring the directory
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('pull')) {
-          // Simulate pull restoring the committed .teamai/{slug}/ directory
+        if (cmd === 'git' && args.includes('checkout')) {
+          // Simulate `git checkout origin/master -- <dir>` restoring the
+          // committed .teamai/{slug}/ directory, regardless of how dirty
+          // the rest of the working tree is.
           mkdirSync(taskDir, { recursive: true });
-          writeFileSync(join(taskDir, 'task.json'), pulledSnapshot);
+          writeFileSync(join(taskDir, 'task.json'), restoredSnapshot);
           return '';
         }
         return '';
@@ -325,19 +340,24 @@ describe('markTaskDone Integration', () => {
       mockEmit.mockClear();
       await orch.markTaskDone(taskId);
 
-      // ── Directory exists from pull restore ──
+      // ── Directory exists from checkout restore ──
       expect(existsSync(taskDir)).toBe(true);
       expect(existsSync(join(taskDir, 'task.json'))).toBe(true);
 
-      // ── The pulled (tracked) snapshot is byte-identical: rewriting it
+      // ── The restored (tracked) snapshot is byte-identical: rewriting it
       //    would leave the repo dirty after every completed task ──
-      expect(readFileSync(join(taskDir, 'task.json'), 'utf-8')).toBe(pulledSnapshot);
+      expect(readFileSync(join(taskDir, 'task.json'), 'utf-8')).toBe(restoredSnapshot);
       expect(existsSync(join(taskDir, 'events.jsonl'))).toBe(false);
 
-      // ── git pull was attempted ──
+      // ── git fetch + scoped checkout were attempted ──
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
-        expect.arrayContaining(['pull', '--ff-only', 'origin', 'master']),
+        expect.arrayContaining(['fetch', 'origin', 'master']),
+        expect.objectContaining({ cwd: testDir }),
+      );
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['checkout', 'origin/master', '--']),
         expect.objectContaining({ cwd: testDir }),
       );
 
@@ -349,11 +369,11 @@ describe('markTaskDone Integration', () => {
       }));
     });
 
-    it('patches phase via updatePhase when the pulled snapshot lacks phase:done', async () => {
-      // Simulate a pull restoring a snapshot whose task.json was frozen at
-      // an earlier phase (artifact commit ran on an older orchestrator).
+    it('patches phase via updatePhase when the restored snapshot lacks phase:done', async () => {
+      // Simulate a checkout restoring a snapshot whose task.json was frozen
+      // at an earlier phase (artifact commit ran on an older orchestrator).
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('pull')) {
+        if (cmd === 'git' && args.includes('checkout')) {
           mkdirSync(taskDir, { recursive: true });
           writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
             id: taskId, title: 'Mark Task Done Test', description: 'desc',
@@ -372,8 +392,8 @@ describe('markTaskDone Integration', () => {
       expect(mockEmit).toHaveBeenCalledTimes(1);
     });
 
-    it('falls back to recreating task.json when pull succeeds but restores no artifacts', async () => {
-      // Pull succeeds but restores nothing — e.g. the project gitignores
+    it('falls back to recreating task.json when checkout succeeds but restores no artifacts', async () => {
+      // Checkout succeeds but restores nothing — e.g. the project gitignores
       // .teamai/ in-repo, so commitArtifactsToWorktree skipped the commit.
       mockExecFileSync.mockReturnValue('');
 
@@ -391,12 +411,12 @@ describe('markTaskDone Integration', () => {
       expect(mockEmit).toHaveBeenCalledTimes(1);
     });
 
-    it('does not double-emit when pull succeeds', async () => {
+    it('does not double-emit when checkout succeeds', async () => {
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('pull')) {
+        if (cmd === 'git' && args.includes('checkout')) {
           mkdirSync(taskDir, { recursive: true });
           writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
-            id: taskId, title: 'Pull Test', description: 'desc',
+            id: taskId, title: 'Checkout Test', description: 'desc',
             phase: 'done', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
           }));
           return '';
@@ -420,9 +440,9 @@ describe('markTaskDone Integration', () => {
     });
 
     it('handles multiple calls to markTaskDone gracefully (idempotent second call fails)', async () => {
-      // First call: pull fails, fallback recreates
+      // First call: fetch fails, fallback recreates
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('pull')) {
+        if (cmd === 'git' && args.includes('fetch')) {
           throw new Error('fatal: remote not found');
         }
         return '';
@@ -440,15 +460,15 @@ describe('markTaskDone Integration', () => {
       expect(mockEmit).toHaveBeenCalledTimes(1);
     });
 
-    it('does not emit phase-change before the pull attempt', async () => {
+    it('does not emit phase-change before the fetch attempt', async () => {
       // Use a mock that tracks call order
       const callOrder: string[] = [];
 
       mockEmit.mockImplementation(() => { callOrder.push('emit'); });
 
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('pull')) {
-          callOrder.push('pull');
+        if (cmd === 'git' && args.includes('fetch')) {
+          callOrder.push('fetch');
           throw new Error('fatal: remote not found');
         }
         return '';
@@ -457,10 +477,11 @@ describe('markTaskDone Integration', () => {
       try {
         await orch.markTaskDone(taskId);
 
-        // 'pull' must come BEFORE 'emit' in the call order
-        const pullIdx = callOrder.indexOf('pull');
+        // 'fetch' must come BEFORE 'emit' in the call order
+        const fetchIdx = callOrder.indexOf('fetch');
         const emitIdx = callOrder.indexOf('emit');
-        expect(pullIdx).toBeLessThan(emitIdx);
+        expect(fetchIdx).toBeGreaterThanOrEqual(0);
+        expect(fetchIdx).toBeLessThan(emitIdx);
       } finally {
         // Restore defaults so mock implementations don't leak to other tests.
         // mockReset() returns vi.fn() to its default (no-op returning undefined).

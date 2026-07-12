@@ -106,6 +106,51 @@ export function checkExistingPRViaCLI(
 }
 
 /**
+ * Check whether a PR/MR has actually been merged.
+ *
+ * Returns `true`/`false` when the platform's CLI can give a definitive
+ * answer, or `null` when the merge state couldn't be determined (unsupported
+ * platform, or the CLI call itself failed — e.g. offline, rate-limited).
+ * Callers that use this as a safety guard should treat `null` as "unknown,
+ * don't block" rather than "not merged" — there is no CLI-backed way to
+ * verify Bitbucket/unknown platforms, and refusing to proceed there would be
+ * a pure regression for projects that never had this check.
+ */
+export function isPrMerged(
+  platform: 'github' | 'gitlab' | 'bitbucket' | 'unknown',
+  prUrl: string,
+  projectRoot: string,
+): boolean | null {
+  if (platform === 'github') {
+    try {
+      const result = execFileSync(getToolPath('gh'), [
+        'pr', 'view', prUrl,
+        '--json', 'state',
+      ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 });
+      return JSON.parse(result).state === 'MERGED';
+    } catch (err) {
+      logWarn('git-platform', `Failed to check PR merge state via gh CLI for ${prUrl}`, err);
+      return null;
+    }
+  }
+
+  if (platform === 'gitlab') {
+    try {
+      const result = execFileSync(getToolPath('glab'), [
+        'mr', 'view', prUrl,
+        '--output', 'json',
+      ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 });
+      return JSON.parse(result).state === 'merged';
+    } catch (err) {
+      logWarn('git-platform', `Failed to check MR merge state via glab CLI for ${prUrl}`, err);
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Create a PR/MR directly via CLI (`gh pr create` / `glab mr create`).
  * Returns the PR/MR URL on success.
  *

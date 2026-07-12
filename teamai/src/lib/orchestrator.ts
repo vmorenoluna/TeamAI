@@ -17,6 +17,8 @@ import { RateLimitError, NO_RESUME_PHASES, waitForCompletion, handleRateLimit as
 import { runImplement } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
 import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec } from './orchestrator/review-actions';
+import { detectGitPlatform, isPrMerged } from './git-platform';
+import { warn as logWarn } from './logger';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy, QaReport } from './orchestrator/types';
 
@@ -371,37 +373,99 @@ export class Orchestrator {
     const task = this.taskStore.getById(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
 
+    // Guard: refuse to mark a PR-routed task done until the PR has actually
+    // merged. Without this, clicking "Mark as Done" (the button is enabled
+    // as soon as a PR exists — see review-panel.tsx's isPrOpen) or any other
+    // premature caller would delete the live .teamai/{slug}/ directory below
+    // and then try to restore it from origin/master, which doesn't have this
+    // task's commits yet — they only land on master once the PR merges. The
+    // task's own in-progress artifacts would be destroyed for nothing, and
+    // it would fall into the lossy fallback branch further down.
+    if (task.mergeStrategy === 'pull-request' && task.prUrl) {
+      const platform = (task.platform as 'github' | 'gitlab' | 'bitbucket' | 'unknown' | undefined)
+        ?? detectGitPlatform(this.projectRoot);
+      const merged = isPrMerged(platform, task.prUrl, this.projectRoot);
+      if (merged === false) {
+        throw new Error(
+          `Cannot mark task done: PR ${task.prUrl} has not been merged yet.`
+        );
+      }
+      // merged === null: platform/CLI couldn't confirm either way (e.g.
+      // Bitbucket, or gh temporarily unreachable). Proceed rather than block
+      // a user who has no way to satisfy the check — this matches how the
+      // rest of the codebase treats unverifiable platforms.
+    }
+
     this.removeWorktree(taskId);
 
-    // Delete the live .teamai/{slug}/ directory so pulling the just-merged
-    // commit won't collide with local files.
+    // Delete the live .teamai/{slug}/ directory so restoring the just-merged
+    // commit's snapshot won't collide with local files.
     const dir = this.taskStore.getDirById(taskId);
+    const relDir = path.relative(this.projectRoot, dir);
     rmSync(dir, { recursive: true, force: true });
 
-    // Try to pull the just-merged commit into the main project root.
-    // On success, the pulled .teamai/{slug}/task.json already has phase: "done"
-    // (set by commitArtifactsToWorktree before the merge).
-    let pulled = false;
+    // Restore this task's committed artifact snapshot from origin/master.
+    // This is deliberately scoped to just `relDir` via `git checkout <ref>
+    // -- <path>` rather than a whole-repo `git pull` — a repo-wide pull
+    // requires the ENTIRE working tree to be clean/fast-forwardable, and
+    // fails the moment any unrelated file is dirty (another task's
+    // in-progress edits, a stray local config change, etc.). That silent
+    // failure was the actual bug: the pull would bail, and every completed
+    // task fell into the lossy fallback below — recreating a bare-bones
+    // task.json + events.jsonl instead of the real multi-file snapshot
+    // (spec.md, plan.json, qa_report.json, output-*.log, ...) that's sitting
+    // right there on origin/master. Because `dir` was just deleted above,
+    // there is nothing local left to collide with the incoming checkout, so
+    // this restore succeeds regardless of how dirty the rest of the repo is.
+    let fetched = false;
     try {
-      execFileSync('git', ['pull', '--ff-only', 'origin', 'master'], {
+      execFileSync('git', ['fetch', 'origin', 'master'], {
         cwd: this.projectRoot,
         stdio: 'pipe',
         env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       });
-      pulled = true;
-    } catch {
-      // Pull failed — non-fast-forward, offline, etc.
-      // Fall through to recreate the task so it doesn't disappear from kanban.
+      fetched = true;
+    } catch (err) {
+      logWarn('orchestrator', `markTaskDone: git fetch origin master failed for ${taskId}`, err);
     }
 
-    // If the pull restored the committed snapshot, leave it untouched: the
-    // snapshot's task.json already has phase: "done" (set by
+    let restored = false;
+    if (fetched) {
+      try {
+        execFileSync('git', ['checkout', 'origin/master', '--', relDir], {
+          cwd: this.projectRoot,
+          stdio: 'pipe',
+        });
+        restored = existsSync(path.join(dir, 'task.json'));
+      } catch (err) {
+        logWarn('orchestrator', `markTaskDone: git checkout of ${relDir} from origin/master failed`, err);
+      }
+    }
+
+    // Best-effort: also fast-forward the local master branch pointer itself
+    // so it doesn't drift further behind origin over time. This is allowed
+    // to fail independently of the restore above (e.g. unrelated dirty
+    // files elsewhere in the tree still block a full fast-forward) — that
+    // failure no longer costs this task its artifacts.
+    if (fetched) {
+      try {
+        execFileSync('git', ['merge', '--ff-only', 'origin/master'], {
+          cwd: this.projectRoot,
+          stdio: 'pipe',
+        });
+      } catch (err) {
+        logWarn('orchestrator', `markTaskDone: fast-forwarding local master failed`, err);
+      }
+    }
+
+    // If the restore brought back the committed snapshot, leave it
+    // untouched: the snapshot's task.json already has phase: "done" (set by
     // commitArtifactsToWorktree), and those files are tracked — rewriting
     // updatedAt or appending to events.jsonl would leave the repo dirty on
     // every completed task.
     let settled = false;
     const pulledTaskJson = path.join(dir, 'task.json');
-    if (pulled && existsSync(pulledTaskJson)) {
+    if (restored && existsSync(pulledTaskJson)) {
       try {
         settled = JSON.parse(readFileSync(pulledTaskJson, 'utf-8')).phase === 'done';
       } catch { /* unreadable — patch it below */ }
