@@ -205,6 +205,7 @@ app.prepare().then(() => {
     // Every 5 minutes, scan all projects for tasks stuck in active phases
     // (expired rate-limit windows, silent session exits, etc.) and re-queue them.
     const SWEEP_INTERVAL_MS = 5 * 60_000; // 5 minutes
+    const STALLED_SESSION_TIMEOUT_MS = 10 * 60_000; // 10 minutes
     setInterval(() => {
       sweepStalledTasks().then(count => {
         if (count > 0) {
@@ -213,6 +214,16 @@ app.prepare().then(() => {
       }).catch(err => {
         logError('sweep', 'Periodic stall-detection sweep failed', err);
       });
+
+      // Also detect and clean up hung agent sessions (no output for >10 min)
+      const stalled = processManager.getStalledSessions(STALLED_SESSION_TIMEOUT_MS);
+      for (const s of stalled) {
+        console.log(`[sweep] Session ${s.id.substring(0, 8)}… task=${s.taskId} role=${s.role} stalled >10 min — killing`);
+        processManager.killSession(s.id);
+      }
+      if (stalled.length > 0) {
+        console.log(`[sweep] Killed ${stalled.length} stalled session(s)`);
+      }
     }, SWEEP_INTERVAL_MS);
   });
 

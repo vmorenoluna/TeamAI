@@ -11,6 +11,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync, rmSync } from 
 import { getResumePhaseForFailedTask } from '@/lib/task-utils';
 import { join, resolve } from 'path';
 import { execFileSync } from 'child_process';
+import { NO_STOP_PHASES, RESTARTABLE_PHASES } from '@/constants/phases';
 
 async function getStores() {
   const projectPath = await getActiveProjectPath();
@@ -127,8 +128,7 @@ export async function stopTask(taskId: string): Promise<{ success: boolean; erro
   const task = taskStore.getById(taskId);
   if (!task) return { success: false, error: 'Task not found' };
 
-  const noStopPhases = new Set(['backlog', 'done', 'failed']);
-  if (noStopPhases.has(task.phase)) return { success: false, error: `Cannot stop task in "${task.phase}" phase` };
+  if (NO_STOP_PHASES.has(task.phase)) return { success: false, error: `Cannot stop task in "${task.phase}" phase` };
 
   // Cancel the running pipeline
   orchestrator.cancelPipeline(taskId);
@@ -162,8 +162,7 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
   const task = taskStore.getById(taskId);
   if (!task) return { success: false, error: 'Task not found' };
 
-  const restartablePhases = new Set(['spec', 'plan', 'implement', 'qa-review']);
-  if (!restartablePhases.has(task.phase)) {
+  if (!RESTARTABLE_PHASES.has(task.phase)) {
     return { success: false, error: `Cannot restart task in "${task.phase}" phase` };
   }
 

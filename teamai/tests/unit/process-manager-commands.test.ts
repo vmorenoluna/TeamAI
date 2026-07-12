@@ -163,7 +163,7 @@ describe('ProcessManager — killSession', () => {
     expect(() => pm.killSession('nonexistent')).not.toThrow();
   });
 
-  it('sets status from error to done when killed', () => {
+  it('preserves error status when killed (BUG-14 fix)', () => {
     const killSpy = vi.fn();
     const proc = mockProcess({ kill: killSpy });
     addMockSession(pm, 'sess-1', { process: proc, status: 'error' });
@@ -171,7 +171,7 @@ describe('ProcessManager — killSession', () => {
     pm.killSession('sess-1');
 
     const session = pm.getSession('sess-1');
-    expect(session?.status).toBe('done');
+    expect(session?.status).toBe('error');
   });
 
   // Coverage: lines 194-197 — SIGKILL fallback when process ignores SIGTERM

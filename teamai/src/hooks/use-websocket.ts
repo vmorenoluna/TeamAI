@@ -120,10 +120,8 @@ export function useWebSocket(opts?: UseWebSocketOptions) {
         ws = null;
       }
     };
-    // NOTE: intentionally stable — reconnecting on url change is handled by
-    // the consumer calling `reconnect()` if needed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [url, project]);
 
   const reconnect = () => connectRef.current?.();
   return { reconnect };
