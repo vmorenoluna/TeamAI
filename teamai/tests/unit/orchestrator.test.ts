@@ -8,6 +8,8 @@ import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
 
+import { createFireEvent, makePipeline, AnyOrch } from '../utils/orchestrator-harness';
+
 // ── Hoisted mocks for shared state ──
 
 const { mockWarn, onHandlers } = vi.hoisted(() => ({
@@ -81,17 +83,7 @@ import { Orchestrator, getOrchestrator } from '../../src/lib/orchestrator';
 import { processManager } from '../../src/lib/process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache, readContainerRemoteUser } from '../../src/lib/container-manager';
 
-type AnyOrch = any;
-
-/** Fire an event to all registered handlers for the given event type */
-function fireEvent(event: string, data: any) {
-  const handlers = onHandlers.get(event);
-  if (handlers) {
-    for (const h of [...handlers]) {
-      try { h(data); } catch { /* ignore */ }
-    }
-  }
-}
+const fireEvent = createFireEvent(onHandlers);
 
 // ── Helpers ──
 
@@ -148,21 +140,6 @@ function makeOrch(root: string): Orchestrator {
   (orch as AnyOrch).pipelines.clear();
   (orch as AnyOrch).activeTasks.clear();
   return orch;
-}
-
-/** Make a minimal pipeline object for testing. */
-function makePipeline(overrides: Record<string, any> = {}): any {
-  return {
-    taskId: 'task-id',
-    description: 'test',
-    phase: 'spec',
-    specPath: '/test/spec',
-    worktreePath: '/test/wt',
-    branch: 'feat/test',
-    qaAttempt: 0,
-    maxQaAttempts: 3,
-    ...overrides,
-  };
 }
 
 // ── Tests ──

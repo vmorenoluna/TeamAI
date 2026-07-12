@@ -8,6 +8,8 @@ import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
 
+import { createFireEvent, makePipeline, AnyOrch } from '../utils/orchestrator-harness';
+
 // ── Hoisted mocks ──
 
 const { mockWarn, onHandlers } = vi.hoisted(() => ({
@@ -78,16 +80,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 import { getOrchestrator } from '../../src/lib/orchestrator';
 import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache, readContainerRemoteUser } from '../../src/lib/container-manager';
 
-type AnyOrch = any;
-
-function fireEvent(event: string, data: any) {
-  const handlers = onHandlers.get(event);
-  if (handlers) {
-    for (const h of [...handlers]) {
-      try { h(data); } catch { /* ignore */ }
-    }
-  }
-}
+const fireEvent = createFireEvent(onHandlers);
 
 function setupTestProject() {
   const root = join(tmpdir(), `teamai-wfi-${randomUUID().slice(0, 8)}`);
@@ -131,15 +124,6 @@ function makeOrch(root: string): any {
   (orch as any).pipelines.clear();
   (orch as any).activeTasks.clear();
   return orch;
-}
-
-function makePipeline(overrides: Record<string, any> = {}): any {
-  return {
-    taskId: 'task-id', description: 'test', phase: 'spec',
-    specPath: '/test/spec', worktreePath: '/test/wt', branch: 'feat/test',
-    qaAttempt: 0, maxQaAttempts: 3, specRevision: 0,
-    ...overrides,
-  };
 }
 
 describe('Workflow Improvements', () => {
