@@ -21,6 +21,8 @@ export interface AgentSession {
   taskId: string;
   role: 'analyst' | 'planner' | 'coder' | 'qa-reviewer' | 'merger' | 'general';
   cwd: string;
+  /** The project root this session belongs to. Set from createSession opts. */
+  projectRoot?: string;
   status: 'running' | 'idle' | 'done' | 'error';
   /** Last time (epoch ms) the session produced stdout output. Used for stall detection (#8). */
   lastOutputAt: number;
@@ -142,6 +144,7 @@ export class ProcessManager extends EventEmitter {
       taskId: opts.taskId,
       role: opts.role,
       cwd: opts.cwd,
+      projectRoot: opts.projectRoot,
       status: 'running',
       lastOutputAt: now,
     });

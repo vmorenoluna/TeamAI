@@ -8,11 +8,13 @@
 import { execFileSync } from 'child_process';
 import { getToolPath } from '../tool-checker';
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, rmSync } from 'fs';
+import { readJsonFile } from '../json-io';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
 import { readContainerConfig, containerManager, dockerAvailable, _resetDockerAvailableCache } from '../container-manager';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
-import { rebaseOntoLatestMaster } from './phase-runners';
+import { rebaseOntoLatestDefault } from './phase-runners';
+import { resolveBaseBranch } from '../git-platform';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
 
@@ -69,9 +71,10 @@ export async function runImplement(
   deps.restoreQaReportFromSnapshot(pipeline.specPath);
   deps.restoreHumanFeedbackFromSnapshot(pipeline.specPath);
 
-  // Pull latest master (token-authed)
+  // Pull latest default branch (token-authed)
+  const baseBranch = resolveBaseBranch(deps.projectRoot);
   try {
-    deps.gitPush(['pull', '--ff-only', 'origin', 'master'], path.join(pipeline.specPath, 'output.log'));
+    deps.gitPush(['pull', '--ff-only', 'origin', baseBranch], path.join(pipeline.specPath, 'output.log'));
   } catch { /* non-fast-forward or offline */ }
 
   // Ensure worktree exists and is healthy
@@ -105,13 +108,14 @@ export async function runImplement(
   // Rebase feature branch onto latest master so coders see the current upstream,
   // not a potentially weeks-old snapshot from when the worktree was created.
   const implementLog = path.join(pipeline.specPath, 'output.log');
-  await rebaseOntoLatestMaster(
+  await rebaseOntoLatestDefault(
     pipeline.worktreePath, pipeline.taskId, implementLog,
     {
       projectRoot: deps.projectRoot,
       execGit: deps.execGit,
       sessionOpts: deps.sessionOpts,
       waitForCompletion: deps.waitForCompletion,
+      baseBranch: resolveBaseBranch(deps.projectRoot),
     },
   );
 
@@ -119,7 +123,13 @@ export async function runImplement(
   deps.cleanStaleSubtaskWorktrees(pipeline);
 
   const planPath = path.join(pipeline.specPath, 'plan.json');
-  const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+  const planResult = readJsonFile<{ subtasks: PlanSubtask[] }>(planPath, { required: true });
+  if (planResult.error) {
+    const logFile = path.join(pipeline.specPath, 'output.log');
+    appendFileSync(logFile, `\n[ERROR] Cannot read plan.json: ${planResult.error.message}\n`);
+    throw new Error(`Plan file is missing or invalid at ${planPath}: ${planResult.error.message}. The planner must produce a valid plan.json before implement can proceed.`);
+  }
+  const plan = planResult.data!;
 
   const coderRole = 'coder' as AgentSession['role'];
 
@@ -192,8 +202,9 @@ export async function runImplement(
   const logFile = path.join(pipeline.specPath, 'output.log');
   const sessionMapPath = path.join(pipeline.specPath, 'session_map.json');
   for (const [, subtasks] of groups) {
+    if (pipeline.phase === 'failed') break;
     const completedIds: number[] = [];
-    const isMultiGroup = subtasks.length >= 2;
+    const isMultiGroup = deps.getPipelineConfig().parallelSubtasks !== false && subtasks.length >= 2;
     const subtaskWorktrees = new Map();
     let containerWorkspace: string | undefined;
 
@@ -232,8 +243,8 @@ export async function runImplement(
     // so we serialise through a promise chain (same pattern as planWriteLock).
     const sessionMapLock = { current: Promise.resolve() };
     try {
-      const results = await Promise.allSettled(
-        subtasks.map(async (subtask) => {
+      const subtaskHandler = async (subtask: PlanSubtask) => {
+          if (pipeline.phase === 'failed') return;
           deps.phaseHeader(logFile, 'implement — subtask ' + subtask.id + ': ' + subtask.title);
           const cwd = isMultiGroup ? subtaskWorktrees.get(subtask.id) : pipeline.worktreePath;
 
@@ -379,8 +390,10 @@ export async function runImplement(
           // Only active during first-pass implement — not during QA rework
           let wakeupDetected = false;
           if (!hasQaFeedback) {
-          const wakeupPath = path.join(pipeline.specPath, 'subtask_wakeup.json');
-          if (existsSync(wakeupPath)) {
+          const wakeupPathId = path.join(pipeline.specPath, `subtask_wakeup-st${subtask.id}.json`);
+          const wakeupPathLegacy = path.join(pipeline.specPath, 'subtask_wakeup.json');
+          const wakeupPath = existsSync(wakeupPathId) ? wakeupPathId : (existsSync(wakeupPathLegacy) ? wakeupPathLegacy : null);
+          if (wakeupPath) {
             try {
               const wd = JSON.parse(readFileSync(wakeupPath, 'utf-8'));
               if (wd.subtask_id != null && wd.wakeup_at) {
@@ -509,10 +522,23 @@ export async function runImplement(
               renameSync(tmpPath, cpPlanPath);
             } catch { /* best-effort */ }
           });
-        })
-      );
+      };
 
-      if (results.every(r => r.status === 'rejected')) {
+      let results: PromiseSettledResult<void>[] = [];
+      if (deps.getPipelineConfig().parallelSubtasks === false) {
+        for (const subtask of subtasks) {
+          try {
+            await subtaskHandler(subtask);
+            results.push({ status: 'fulfilled', value: undefined });
+          } catch (err) {
+            results.push({ status: 'rejected', reason: err });
+          }
+        }
+      } else {
+        results = await Promise.allSettled(subtasks.map(subtaskHandler));
+      }
+
+      if (results.length > 0 && results.every(r => r.status === 'rejected')) {
         const firstReason = (results[0] as PromiseRejectedResult).reason;
         throw firstReason instanceof Error ? firstReason : new Error(String(firstReason));
       }

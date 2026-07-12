@@ -38,6 +38,21 @@ export function detectDefaultBranch(projectRoot: string): string {
 }
 
 /**
+ * Resolve the repository's default branch name with in-memory caching.
+ * Calls detectDefaultBranch on first invocation per projectRoot; subsequent
+ * calls return the cached value. Callers can pass invalidate=true to force
+ * a re-detection (e.g. after a remote rename).
+ */
+const _baseBranchCache = new Map<string, string>();
+export function resolveBaseBranch(projectRoot: string, invalidate?: boolean): string {
+  if (invalidate) _baseBranchCache.delete(projectRoot);
+  if (!_baseBranchCache.has(projectRoot)) {
+    _baseBranchCache.set(projectRoot, detectDefaultBranch(projectRoot));
+  }
+  return _baseBranchCache.get(projectRoot)!;
+}
+
+/**
  * Build a PR/MR body from the task description and spec content.
  * Used for direct CLI PR creation (no AI agent needed).
  */

@@ -39,9 +39,15 @@ app.prepare().then(() => {
   }
 
   wss.on('connection', (ws) => {
-    // Agent event streaming
+    // Agent event streaming — filtered to the client's project
     const agentHandler = ({ sessionId, event }: { sessionId: string; event: Record<string, unknown> }) => {
-      const taskId = processManager.getSession(sessionId)?.taskId;
+      const session = processManager.getSession(sessionId);
+      if (!session) return;
+      const taskId = session.taskId;
+      const pws = ws as ProjectWebSocket;
+      // Filter: only send if the client has no project filter (backwards compat)
+      // or the session's projectRoot matches the client's project
+      if (pws.projectRoot && session.projectRoot && session.projectRoot !== pws.projectRoot) return;
       ws.send(JSON.stringify({ sessionId, taskId, event }));
     };
     processManager.on('event', agentHandler);

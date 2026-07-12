@@ -18,7 +18,7 @@ import { NO_RESUME_PHASES } from '@/constants/phases';
 import { runImplement } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
 import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec } from './orchestrator/review-actions';
-import { detectGitPlatform, isPrMerged } from './git-platform';
+import { detectGitPlatform, isPrMerged, resolveBaseBranch } from './git-platform';
 import { warn as logWarn } from './logger';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy, QaReport } from './orchestrator/types';
@@ -421,44 +421,45 @@ export class Orchestrator {
     // right there on origin/master. Because `dir` was just deleted above,
     // there is nothing local left to collide with the incoming checkout, so
     // this restore succeeds regardless of how dirty the rest of the repo is.
+    const baseBranch = resolveBaseBranch(this.projectRoot);
     let fetched = false;
     try {
-      execFileSync('git', ['fetch', 'origin', 'master'], {
+      execFileSync('git', ['fetch', 'origin', baseBranch], {
         cwd: this.projectRoot,
         stdio: 'pipe',
         env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       });
       fetched = true;
     } catch (err) {
-      logWarn('orchestrator', `markTaskDone: git fetch origin master failed for ${taskId}`, err);
+      logWarn('orchestrator', `markTaskDone: git fetch origin ${baseBranch} failed for ${taskId}`, err);
     }
 
     let restored = false;
     if (fetched) {
       try {
-        execFileSync('git', ['checkout', 'origin/master', '--', relDir], {
+        execFileSync('git', ['checkout', `origin/${baseBranch}`, '--', relDir], {
           cwd: this.projectRoot,
           stdio: 'pipe',
         });
         restored = existsSync(path.join(dir, 'task.json'));
       } catch (err) {
-        logWarn('orchestrator', `markTaskDone: git checkout of ${relDir} from origin/master failed`, err);
+        logWarn('orchestrator', `markTaskDone: git checkout of ${relDir} from origin/${baseBranch} failed`, err);
       }
     }
 
-    // Best-effort: also fast-forward the local master branch pointer itself
+    // Best-effort: also fast-forward the local default branch pointer itself
     // so it doesn't drift further behind origin over time. This is allowed
     // to fail independently of the restore above (e.g. unrelated dirty
     // files elsewhere in the tree still block a full fast-forward) — that
     // failure no longer costs this task its artifacts.
     if (fetched) {
       try {
-        execFileSync('git', ['merge', '--ff-only', 'origin/master'], {
+        execFileSync('git', ['merge', '--ff-only', `origin/${baseBranch}`], {
           cwd: this.projectRoot,
           stdio: 'pipe',
         });
       } catch (err) {
-        logWarn('orchestrator', `markTaskDone: fast-forwarding local master failed`, err);
+        logWarn('orchestrator', `markTaskDone: fast-forwarding local ${baseBranch} failed`, err);
       }
     }
 

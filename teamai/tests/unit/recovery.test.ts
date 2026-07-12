@@ -247,8 +247,8 @@ describe('findOrphanedWorktrees', () => {
 
   it('finds worktree with no matching task', () => {
     const projectPath = '/test/project';
-    const wtDir = join(projectPath, '.teamai', 'worktrees');
-    const wtPath = join(wtDir, 'task-orphan-123');
+    const wtDir = join(projectPath, '..', 'worktrees');
+    const wtPath = join(wtDir, 'orphan-123');
 
     vi.mocked(existsSync).mockImplementation((p) => {
       const path = String(p);
@@ -262,7 +262,7 @@ describe('findOrphanedWorktrees', () => {
       return '';
     });
     mockReaddir((p) => {
-      if (String(p) === wtDir) return ['task-orphan-123'];
+      if (String(p) === wtDir) return ['orphan-123'];
       if (String(p) === join(projectPath, '.teamai')) return ['other'];
       return [];
     });
@@ -275,8 +275,8 @@ describe('findOrphanedWorktrees', () => {
 
   it('finds worktree whose task is no longer active', () => {
     const projectPath = '/test/project';
-    const wtDir = join(projectPath, '.teamai', 'worktrees');
-    const wtPath = join(wtDir, 'task-done-456');
+    const wtDir = join(projectPath, '..', 'worktrees');
+    const wtPath = join(wtDir, 'done-slug');
     const taskFile = join(projectPath, '.teamai', 'done-slug', 'task.json');
 
     vi.mocked(existsSync).mockImplementation((p) => {
@@ -295,7 +295,7 @@ describe('findOrphanedWorktrees', () => {
       return '';
     });
     mockReaddir((p) => {
-      if (String(p) === wtDir) return ['task-done-456'];
+      if (String(p) === wtDir) return ['done-slug'];
       if (String(p) === join(projectPath, '.teamai')) return ['done-slug'];
       return [];
     });
@@ -308,7 +308,7 @@ describe('findOrphanedWorktrees', () => {
 
   it('skips non-directory entries in worktrees', () => {
     const projectPath = '/test/project';
-    const wtDir = join(projectPath, '.teamai', 'worktrees');
+    const wtDir = join(projectPath, '..', 'worktrees');
 
     vi.mocked(existsSync).mockImplementation((p) =>
       String(p) === join('/mock/home', '.teamai', 'projects.json') || String(p) === wtDir);
@@ -318,7 +318,7 @@ describe('findOrphanedWorktrees', () => {
       return '';
     });
     mockReaddir((p) => {
-      if (String(p) === wtDir) return ['task-123'];
+      if (String(p) === wtDir) return ['some-slug'];
       return [];
     });
     mockStatSync(() => ({ isDirectory: () => false }));
@@ -328,7 +328,7 @@ describe('findOrphanedWorktrees', () => {
 
   it('ignores worktree entries without task- prefix', () => {
     const projectPath = '/test/project';
-    const wtDir = join(projectPath, '.teamai', 'worktrees');
+    const wtDir = join(projectPath, '..', 'worktrees');
 
     vi.mocked(existsSync).mockImplementation((p) =>
       String(p) === join('/mock/home', '.teamai', 'projects.json') || String(p) === wtDir);
@@ -344,7 +344,7 @@ describe('findOrphanedWorktrees', () => {
 
   it('keeps worktree when task is still in progress', () => {
     const projectPath = '/test/project';
-    const wtDir = join(projectPath, '.teamai', 'worktrees');
+    const wtDir = join(projectPath, '..', 'worktrees');
     const taskFile = join(projectPath, '.teamai', 'active', 'task.json');
 
     vi.mocked(existsSync).mockImplementation((p) => {
@@ -363,7 +363,7 @@ describe('findOrphanedWorktrees', () => {
       return '';
     });
     mockReaddir((p) => {
-      if (String(p) === wtDir) return ['task-active-789'];
+      if (String(p) === wtDir) return ['active'];
       if (String(p) === join(projectPath, '.teamai')) return ['active'];
       return [];
     });
@@ -375,7 +375,7 @@ describe('findOrphanedWorktrees', () => {
   // Coverage: lines 86-87 — readdirSync throws for worktreesDir
   it('skips project when readdirSync throws for worktreesDir', () => {
     const projectPath = '/test/project';
-    const wtDir = join(projectPath, '.teamai', 'worktrees');
+    const wtDir = join(projectPath, '..', 'worktrees');
 
     vi.mocked(existsSync).mockImplementation((p) => {
       const path = String(p);
@@ -763,7 +763,7 @@ describe('_loadProjects (via findInterruptedTasks)', () => {
 describe('findOrphanedWorktrees — catch blocks', () => {
   it('reports worktree as orphaned when readdirSync throws for teamai dir', () => {
     const projectPath = '/test/project';
-    const wtDir = join(projectPath, '.teamai', 'worktrees');
+    const wtDir = join(projectPath, '..', 'worktrees');
 
     vi.mocked(existsSync).mockImplementation((p) => {
       const path = String(p);
@@ -779,22 +779,22 @@ describe('findOrphanedWorktrees — catch blocks', () => {
     // First call (wtDir) returns entries, second call (teamaiDir) throws
     let callCount = 0;
     mockReaddir((p) => {
-      if (String(p) === wtDir && callCount++ === 0) return ['task-123'];
+      if (String(p) === wtDir && callCount++ === 0) return ['orphan-slug'];
       throw new Error('readdirSync failed');
     });
     mockStatSync(() => ({ isDirectory: () => true }));
 
-    // When readdirSync for teamaiDir throws, taskFound stays false,
-    // so the worktree IS reported as orphaned. This is correct behavior.
+    // When readdirSync for teamaiDir throws, the knownSlugs set is empty,
+    // so the worktree IS reported as orphaned.
     const result = findOrphanedWorktrees();
     expect(result).toHaveLength(1);
-    expect(result[0].path).toBe(join(wtDir, 'task-123'));
+    expect(result[0].path).toBe(join(wtDir, 'orphan-slug'));
   });
 
   // Coverage: lines 96-97 — statSync throws for a worktree entry
   it('skips entry when statSync throws', () => {
     const projectPath = '/test/project';
-    const wtDir = join(projectPath, '.teamai', 'worktrees');
+    const wtDir = join(projectPath, '..', 'worktrees');
 
     vi.mocked(existsSync).mockImplementation((p) =>
       String(p) === join('/mock/home', '.teamai', 'projects.json') || String(p) === wtDir);
@@ -804,7 +804,7 @@ describe('findOrphanedWorktrees — catch blocks', () => {
       return '';
     });
     mockReaddir((p) => {
-      if (String(p) === wtDir) return ['task-123'];
+      if (String(p) === wtDir) return ['some-slug'];
       return [];
     });
     // statSync throws — the catch at lines 96-97 continues to next entry
@@ -818,8 +818,8 @@ describe('findOrphanedWorktrees — catch blocks', () => {
   // Coverage: lines 121-122 — malformed JSON in inner task lookup
   it('reports worktree as orphaned when matching task.json is malformed', () => {
     const projectPath = '/test/project';
-    const wtDir = join(projectPath, '.teamai', 'worktrees');
-    const wtPath = join(wtDir, 'task-bad-json');
+    const wtDir = join(projectPath, '..', 'worktrees');
+    const wtPath = join(wtDir, 'bad');
     const taskFile = join(projectPath, '.teamai', 'bad', 'task.json');
 
     vi.mocked(existsSync).mockImplementation((p) => {
@@ -833,19 +833,19 @@ describe('findOrphanedWorktrees — catch blocks', () => {
       const path = String(p);
       if (path === join('/mock/home', '.teamai', 'projects.json'))
         return JSON.stringify([{ name: 'test', path: projectPath }]);
-      // task.json is malformed JSON — the inner catch at 121-122 skips it
+      // task.json is malformed JSON — the catch skips it
       if (path === taskFile) return 'not-valid-json{{{';
       return '';
     });
     // wtDir has the worktree, teamaiDir has 'bad' directory
     mockReaddir((p) => {
-      if (String(p) === wtDir) return ['task-bad-json'];
+      if (String(p) === wtDir) return ['bad'];
       if (String(p) === join(projectPath, '.teamai')) return ['bad'];
       return [];
     });
     mockStatSync(() => ({ isDirectory: () => true }));
 
-    // The inner catch skips the malformed JSON, taskFound stays false,
+    // The catch skips the malformed JSON, task stays out of knownSlugs,
     // so the worktree is reported as orphaned
     const result = findOrphanedWorktrees();
     expect(result).toHaveLength(1);

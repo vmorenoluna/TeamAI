@@ -9,6 +9,8 @@ import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'fs';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
+import { resolveBaseBranch } from '../git-platform';
+import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, SessionOptsResult } from './types';
@@ -120,9 +122,10 @@ export async function runQaReview(
     return;
   }
 
-  // Fetch latest origin/master
+  // Fetch latest origin/default-branch
   try {
-    execFileSync('git', ['fetch', 'origin', 'master'], { cwd: deps.projectRoot, stdio: 'pipe' });
+    const baseBranch = resolveBaseBranch(deps.projectRoot);
+    execFileSync('git', ['fetch', 'origin', baseBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
   } catch { /* offline — proceed with cached refs */ }
 
   const sessionId = await processManager.createSession(
@@ -154,7 +157,33 @@ export async function runQaReview(
   }
   processManager.killSession(sessionId);
 
-  const report: QaReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
+  const reportResult = readJsonFile<QaReport>(reportPath, { required: true });
+  if (reportResult.error) {
+    // QA agent produced no readable report — write a structured FAIL and
+    // follow the normal bounce/fail budget instead of crashing with ENOENT.
+    appendFileSync(logFile, `\n[QA-ERROR] QA agent did not produce a readable report: ${reportResult.error.message}\n`);
+    const failReport: QaReport = {
+      overall: 'FAIL',
+      criteria: [{
+        criterion: 'QA report unreadable',
+        name: 'QA report unreadable',
+        status: 'FAIL',
+        notes: `The QA agent session completed but the report at ${reportPath} is missing or invalid: ${reportResult.error.message}. This is a pipeline error — re-running QA may produce a valid report.`,
+      }],
+    };
+    writeFileSync(reportPath, JSON.stringify(failReport, null, 2));
+    if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
+      deps.writeCompletionSummary(pipeline);
+      deps.advancePhase(pipeline, 'failed');
+    } else {
+      deps.writeQaFeedback(pipeline, failReport);
+      deps.advancePhase(pipeline, 'implement');
+      deps.savePipelineState(pipeline);
+      await deps.executePhase(pipeline);
+    }
+    return;
+  }
+  const report: QaReport = reportResult.data!;
 
   // Stamp HEAD sha
   try {

@@ -3,6 +3,7 @@ import { join } from 'path';
 import { warn as logWarn } from './logger';
 import { IN_PROGRESS_PHASES } from '@/constants/phases';
 import { projectStore } from './project-store';
+import { getWorktreeBase } from './orchestrator/helpers';
 
 export interface InterruptedTask {
   taskId: string;
@@ -91,9 +92,11 @@ export function findInterruptedTasks(): InterruptedTask[] {
 export function findOrphanedWorktrees(): OrphanedWorktree[] {
   const projects = _loadProjects();
   const orphaned: OrphanedWorktree[] = [];
+  const reportedPaths = new Set<string>();
 
   for (const project of projects) {
-    const worktreesDir = join(project.path, '.teamai', 'worktrees');
+    // Scan the actual worktree base directory (not .teamai/worktrees which is unused)
+    const worktreesDir = getWorktreeBase(project.path);
     if (!existsSync(worktreesDir)) continue;
 
     let entries: string[] = [];
@@ -102,6 +105,23 @@ export function findOrphanedWorktrees(): OrphanedWorktree[] {
     } catch {
       continue;
     }
+
+    // Build a set of known task slugs for fast lookup
+    const knownSlugs = new Set<string>();
+    const teamaiDir = join(project.path, '.teamai');
+    try {
+      for (const taskDir of readdirSync(teamaiDir)) {
+        const taskFile = join(teamaiDir, taskDir, 'task.json');
+        if (!existsSync(taskFile)) continue;
+        try {
+          const task = JSON.parse(readFileSync(taskFile, 'utf-8'));
+          if (task.phase && !IN_PROGRESS_PHASES.has(task.phase)) continue; // task is done/failed
+          // Worktree dirs are named by slug (derived from description)
+          // The task directory name (under .teamai/) is the slug
+          if (taskDir) knownSlugs.add(taskDir);
+        } catch { /* skip malformed */ }
+      }
+    } catch { /* skip unreadable */ }
 
     for (const entry of entries) {
       const wtPath = join(worktreesDir, entry);
@@ -113,37 +133,12 @@ export function findOrphanedWorktrees(): OrphanedWorktree[] {
         continue;
       }
 
-      // Extract task ID from worktree directory name (format: task-<uuid>)
-      const taskIdMatch = entry.match(/^task-(.+)$/);
-      if (!taskIdMatch) continue;
-      const taskId = taskIdMatch[1];
-
-      // Look up the task in the teamai directory
-      const teamaiDir = join(project.path, '.teamai');
-      let taskFound = false;
-      let taskActive = false;
-
-      try {
-        for (const taskDir of readdirSync(teamaiDir)) {
-          const taskFile = join(teamaiDir, taskDir, 'task.json');
-          if (!existsSync(taskFile)) continue;
-          try {
-            const task = JSON.parse(readFileSync(taskFile, 'utf-8'));
-            if (task.id === taskId) {
-              taskFound = true;
-              taskActive = IN_PROGRESS_PHASES.has(task.phase);
-              break;
-            }
-          } catch {
-            // skip
-          }
-        }
-      } catch {
-        // skip
-      }
-
-      // Orphaned if task not found OR task is no longer active
-      if (!taskFound || !taskActive) {
+      // Worktree dirs are named by slug — check against known task slugs.
+      // Skip paths already scanned by a previous project (sibling projects
+      // that share a parent directory scan the same worktrees dir).
+      if (reportedPaths.has(wtPath)) continue;
+      reportedPaths.add(wtPath);
+      if (!knownSlugs.has(entry)) {
         orphaned.push({
           path: wtPath,
           projectPath: project.path,
