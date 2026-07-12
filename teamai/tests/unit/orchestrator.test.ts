@@ -2579,6 +2579,59 @@ describe('Orchestrator', () => {
       expect(mockCreateSession).not.toHaveBeenCalled();
     });
 
+    // Regression test: commitArtifactsToWorktree used to run once, before
+    // prUrl was ever determined. The task.json snapshot it commits into the
+    // worktree (and thus into the PR, and thus into whatever markTaskDone
+    // restores from origin/master after merge) was permanently missing
+    // prUrl as a result — every pull-request-strategy task's committed
+    // artifacts lacked the PR reference, even though the live task.json had
+    // it. Fixed by re-running the artifact commit + push once prUrl is
+    // known. This test verifies the *committed worktree copy*, not just the
+    // live task.json, actually contains prUrl.
+    it('commits the artifact snapshot with prUrl included, not just the live task.json', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root);
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
+
+      const slug = testData.slug;
+      const worktreePath = join(testData.root, '..', 'worktrees', slug);
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        phase: 'awaiting-review',
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath,
+      });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        const argStr = Array.isArray(args) ? args.join(' ') : '';
+        if (cmd === 'gh' && argStr.includes('pr list')) return '';
+        if (cmd === 'gh' && argStr.includes('pr create')) return 'https://github.com/owner/repo/pull/42';
+        if (cmd === 'git' && argStr.includes('remote') && argStr.includes('get-url')) return 'https://github.com/owner/repo.git';
+        if (cmd === 'git' && argStr.includes('symbolic-ref')) return 'refs/remotes/origin/main';
+        return '';
+      });
+
+      await orch.approveTask(testData.taskId, 'pull-request');
+
+      // commitArtifactsToWorktree derives the committed subdirectory name
+      // from path.basename(pipeline.specPath) — the task's UUID directory
+      // name — not from the branch slug used above.
+      const committedTaskJsonPath = join(worktreePath, '.teamai', testData.taskId, 'task.json');
+      expect(existsSync(committedTaskJsonPath)).toBe(true);
+      const committed = JSON.parse(readFileSync(committedTaskJsonPath, 'utf-8'));
+      expect(committed.phase).toBe('done');
+      expect(committed.prUrl).toBe('https://github.com/owner/repo/pull/42');
+
+      // The live task.json (source of truth pre-merge) also has it — this
+      // part already worked before the fix, included for contrast.
+      const liveTaskJson = JSON.parse(readFileSync(join(testData.taskDir, 'task.json'), 'utf-8'));
+      expect(liveTaskJson.prUrl).toBe('https://github.com/owner/repo/pull/42');
+    });
+
     it('throws rollback to awaiting-review on error', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root);
