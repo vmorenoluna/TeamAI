@@ -17,9 +17,11 @@ import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn
 import { NO_RESUME_PHASES } from '@/constants/phases';
 import { runImplement } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
+import { CLEANUP_ARTIFACTS } from './orchestrator/artifacts';
 import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec } from './orchestrator/review-actions';
 import { detectGitPlatform, isPrMerged, resolveBaseBranch } from './git-platform';
 import { warn as logWarn } from './logger';
+import type { PhaseContext } from './orchestrator/phase-context';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy, QaReport } from './orchestrator/types';
 
@@ -27,14 +29,81 @@ export class Orchestrator {
   private pipelines: Map<string, TaskPipeline> = new Map();
   private activeTasks: Set<string> = new Set();
   private taskStore: TaskStore;
+  // @ts-ignore TS6133 — PhaseContext infrastructure for T16+ refactors
+  private _ctx: PhaseContext;
 
   constructor(private projectRoot: string) {
     this.taskStore = new TaskStore(projectRoot);
+    this._ctx = this._buildPhaseContext();
   }
 
   /** Whether a pipeline is currently executing for the given task. */
   isTaskActive(taskId: string): boolean {
     return this.activeTasks.has(taskId);
+  }
+
+  private _buildPhaseContext(): PhaseContext {
+    const projectRoot = this.projectRoot;
+    const taskStore = this.taskStore;
+
+    return {
+      projectRoot,
+      taskStore,
+      pipelines: this.pipelines,
+      activeTasks: this.activeTasks,
+
+      persistAndEmitPhase: (pipeline) => persistAndEmitPhase(pipeline, taskStore, projectRoot),
+      advancePhase: (pipeline, phase, eventExtra) => pipelineAdvancePhase(pipeline, phase, taskStore, projectRoot, eventExtra),
+      savePipelineState: (pipeline) => savePipelineState(pipeline),
+      executePhase: (pipeline) => this.executePhase(pipeline),
+      handleRateLimit: (pipeline, resetsAt) => this.handleRateLimit(pipeline, resetsAt),
+
+      sessionOpts: (role, cwd, taskId, logFile) => buildSessionOpts(projectRoot, role, cwd, taskId, logFile),
+      waitForCompletion: (sessionId) => waitForCompletion(sessionId, { parseSessionLimitReset }),
+
+      execGit: (args, hostCwd) => execGit(args, hostCwd, projectRoot),
+      gitPush: (pushArgs, logFile) => gitPush(projectRoot, pushArgs, logFile),
+
+      rotateOutputLog: (logFile) => rotateOutputLog(logFile),
+      phaseHeader: (logFile, phase) => phaseHeader(logFile, phase),
+
+      toAgentPath: (hostPath) => {
+        if (readContainerConfig(projectRoot).enabled) {
+          const info = containerManager.getRunningContainer(projectRoot);
+          if (info) return hostToContainerPath(hostPath, projectRoot, info.remoteWorkspaceFolder);
+        }
+        return hostPath;
+      },
+      patchWorktreeGitFile: (hostWorktreePath, containerWorkspace) =>
+        patchWorktreeGitFile(hostWorktreePath, containerWorkspace, projectRoot),
+      isWorktreeHealthy: (worktreePath) => isWorktreeHealthy(worktreePath, projectRoot),
+      cleanStaleSubtaskWorktrees: (pipeline) =>
+        cleanStaleSubtaskWorktrees(pipeline, { execGit: (a, c) => execGit(a, c, projectRoot), projectRoot }),
+      removeWorktree: (taskId) =>
+        removeWorktreeFn(taskId, { execGit: (a, c) => execGit(a, c, projectRoot), projectRoot, taskStore }),
+
+      restoreQaReportFromSnapshot: (specPath) => restoreQaReportFromSnapshot(specPath),
+      restoreHumanFeedbackFromSnapshot: (specPath) => restoreHumanFeedbackFromSnapshot(specPath),
+
+      writeQaFeedback: (pipeline, report) => writeQaFeedback(pipeline.specPath, report, pipeline.persistedCriterionFailCounts),
+      writeCompletionSummary: (pipeline) => writeCompletionSummary(pipeline.specPath, pipeline.qaAttempt, pipeline.taskId, taskStore),
+      autoReviseSpec: (pipeline) => this._autoReviseSpec(pipeline),
+
+      getPipelineConfig: () => this.getPipelineConfig(),
+
+      planWriteLock: this._planWriteLockRef,
+
+      scheduleWakeup: (pipeline) => this._scheduleWakeup(pipeline),
+
+      extractPrUrl: (logFile) => extractPrUrl(logFile),
+      commitArtifactsToWorktree: (pipeline) =>
+        commitArtifactsToWorktree(pipeline, {
+          restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, projectRoot),
+          worktreeGitEnv: (h, c) => worktreeGitEnv(h, projectRoot, c),
+        }),
+
+      restorePipeline: (taskId, requiredPhase) => this.restorePipeline(taskId, requiredPhase),
+    };
   }
 
   private _pipelineConfigCache: PipelineConfig | null = null;
@@ -607,13 +676,7 @@ export class Orchestrator {
     try { if (existsSync(outputPath)) unlinkSync(outputPath); } catch { /* best-effort */ }
 
     // Files to delete by phase (each list covers that phase's artifacts)
-    const phaseFiles: Record<string, string[]> = {
-      spec: ['spec.md', 'plan.json'],
-      plan: ['plan.json'],
-      implement: [],
-      'qa-review': ['qa_report.json', 'qa_feedback.md', 'completion_summary.md', 'qa_report_before_bounce.json'],
-      merge: [],
-    };
+    const phaseFiles = CLEANUP_ARTIFACTS;
 
     // Delete artifacts for the in-progress phase and all subsequent phases
     for (let i = startIndex; i < pipelineOrder.length; i++) {

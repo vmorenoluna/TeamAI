@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } f
 import path from 'path';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy, QaReport } from './types';
+import { REVISION_CLEANUP_EXTRA } from './artifacts';
 
 // ── Dependencies ──────────────────────────────────────────────────────────
 
@@ -186,7 +187,7 @@ export async function autoReviseSpec(
   deps.taskStore.clearArtifacts(pipeline.taskId, 'plan');
 
   // Also clear additional revision-related files that should not persist
-  const extraFiles = ['qa_feedback.md', 'completion_summary.md', 'human_feedback.md', 'human_feedback_before_bounce.md', 'qa_report_before_bounce.json'];
+  const extraFiles = REVISION_CLEANUP_EXTRA;
   for (const f of extraFiles) {
     try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
   }
