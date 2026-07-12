@@ -5,6 +5,7 @@ function isRetryableError(err: unknown): boolean {
 }
 import { join } from 'path';
 import { slugify } from './utils';
+import { PHASE_ARTIFACTS } from './orchestrator/artifacts';
 
 type MergeStrategy = 'local-merge' | 'pull-request';
 
@@ -145,12 +146,8 @@ export class TaskStore {
   // level: 'spec' | 'plan' | 'qa'
   clearArtifacts(id: string, level: 'spec' | 'plan' | 'qa'): void {
     const dir = this.getDirById(id);
-    const files: Record<string, string[]> = {
-      spec: ['spec.md', 'plan.json', 'qa_report.json', 'spec_revision_feedback.md', 'spec_v1.md', 'spec_v2.md', 'spec_v3.md'],
-      plan: ['plan.json', 'qa_report.json'],
-      qa:   ['qa_report.json', 'qa_feedback.md', 'completion_summary.md', 'qa_report_before_bounce.json'],
-    };
-    for (const f of files[level]) {
+    const files = PHASE_ARTIFACTS[level];
+    for (const f of files) {
       const p = join(dir, f);
       if (existsSync(p)) unlinkSync(p);
     }

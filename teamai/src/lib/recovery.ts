@@ -4,6 +4,7 @@ import { warn as logWarn } from './logger';
 import { IN_PROGRESS_PHASES } from '@/constants/phases';
 import { projectStore } from './project-store';
 import { getWorktreeBase } from './orchestrator/helpers';
+import { REQUIRED_ARTIFACTS } from './orchestrator/artifacts';
 
 export interface InterruptedTask {
   taskId: string;
@@ -209,13 +210,7 @@ export function reconcileTaskArtifacts(): ArtifactInconsistency[] {
   const inconsistencies: ArtifactInconsistency[] = [];
 
   // Phases and their required artifacts
-  const phaseRequirements: Record<string, string[]> = {
-    plan: ['spec.md'],
-    implement: ['spec.md', 'plan.json'],
-    'qa-review': ['spec.md', 'plan.json'],
-    merge: ['spec.md', 'plan.json'],
-    'create-pr': ['spec.md', 'plan.json'],
-  };
+  const phaseRequirements = REQUIRED_ARTIFACTS;
 
   for (const project of projects) {
     const teamaiDir = join(project.path, '.teamai');
