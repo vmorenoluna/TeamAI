@@ -13,6 +13,7 @@ import { processManager } from '../process-manager';
 import type { TaskStore } from '../task-store';
 import type { TaskPipeline } from './types';
 import type { PipelinePhase } from '@/constants/phases';
+import { NO_RESUME_PHASES } from '@/constants/phases';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -28,11 +29,6 @@ export class RateLimitError extends Error {
     super(`Rate limited until ${new Date(resetsAt * 1000).toISOString()}`);
   }
 }
-
-// ── Shared constant ───────────────────────────────────────────────────────
-
-/** Phases where a rate-limited task should NOT auto-resume */
-export const NO_RESUME_PHASES = new Set(['backlog', 'done', 'failed', 'awaiting-review', 'pr-open']);
 
 // ── Session completion watcher ────────────────────────────────────────────
 
@@ -155,7 +151,9 @@ export function handleRateLimit(
   const mins = Math.ceil(waitMs / 60000);
   console.log(`[rate-limit] Task ${pipeline.taskId} paused for ~${mins}min. Resuming at ${resetsAtISO}`);
 
-  setTimeout(async () => {
+  // Track the timer so cancelPipeline can clear it
+  if (pipeline.pendingTimer) clearTimeout(pipeline.pendingTimer);
+  pipeline.pendingTimer = setTimeout(async () => {
     // Before resuming, check if the task was manually moved to a terminal phase
     const task = deps.taskStore.getById(pipeline.taskId);
     if (!task || NO_RESUME_PHASES.has(task.phase)) {

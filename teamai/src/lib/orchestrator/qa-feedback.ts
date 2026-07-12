@@ -79,10 +79,19 @@ export function writeQaFeedback(
                   (ac: string) => {
                     const acLower = ac.toLowerCase();
                     const critLower = criterionName.toLowerCase();
-                    return (
-                      acLower.includes(critLower) ||
-                      acLower.split(/\s+/).some((w: string) => critLower.split(/\s+/).every((cw: string) => w.includes(cw)))
-                    );
+                    // Primary: direct substring match
+                    if (acLower.includes(critLower)) return true;
+                    // Secondary: token-overlap scoring — match if ≥50% of criterion-name tokens
+                    // (minus common stopwords) appear in the acceptance criterion text
+                    const STOP_WORDS = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
+                      'of', 'in', 'to', 'for', 'on', 'at', 'by', 'with', 'from', 'as', 'into', 'through',
+                      'and', 'or', 'not', 'no', 'but', 'if', 'then', 'else', 'when', 'than', 'so',
+                      'that', 'this', 'these', 'those', 'it', 'its', 'has', 'have', 'had', 'do', 'does',
+                      'should', 'must', 'shall', 'will', 'can', 'may', 'would', 'could', 'might']);
+                    const critTokens = critLower.split(/\s+/).filter(w => w.length > 1 && !STOP_WORDS.has(w));
+                    if (critTokens.length === 0) return false;
+                    const matchCount = critTokens.filter(cw => acLower.includes(cw)).length;
+                    return matchCount >= Math.ceil(critTokens.length / 2);
                   }
                 );
                 if (idx >= 0) {
