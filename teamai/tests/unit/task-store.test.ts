@@ -343,45 +343,68 @@ describe('TaskStore', () => {
       writeFileSync(join(dir, 'qa_report.json'), '{}');
       writeFileSync(join(dir, 'qa_feedback.md'), '# feedback');
       writeFileSync(join(dir, 'completion_summary.md'), '# summary');
+      writeFileSync(join(dir, 'qa_report_before_bounce.json'), '{}');
+      writeFileSync(join(dir, 'qa_report_before_failed.json'), '{}');
       writeFileSync(join(dir, 'spec_revision_feedback.md'), '# revision feedback');
       writeFileSync(join(dir, 'spec_v1.md'), '# original spec snapshot');
+      // Control file: not in any artifact registry — should survive all levels
+      writeFileSync(join(dir, 'human_feedback.md'), '# human review');
     });
 
-    it('clears spec-level artifacts (spec.md, plan.json, qa_report.json)', () => {
+    it('clears spec-level artifacts (all downstream files)', () => {
       store.clearArtifacts(taskId, 'spec');
 
+      // Spec-level: cleared
       expect(existsSync(join(dir, 'spec.md'))).toBe(false);
-      expect(existsSync(join(dir, 'plan.json'))).toBe(false);
-      expect(existsSync(join(dir, 'qa_report.json'))).toBe(false);
-      // Lower-level artifacts should remain
-      // Lower-level artifacts should remain
-      expect(existsSync(join(dir, 'qa_feedback.md'))).toBe(true);
-      expect(existsSync(join(dir, 'completion_summary.md'))).toBe(true);
-      // Revision-related files should also be cleaned
       expect(existsSync(join(dir, 'spec_revision_feedback.md'))).toBe(false);
       expect(existsSync(join(dir, 'spec_v1.md'))).toBe(false);
-    });
-
-    it('clears plan-level artifacts (plan.json, qa_report.json)', () => {
-      store.clearArtifacts(taskId, 'plan');
-
+      // Plan-level: cleared
       expect(existsSync(join(dir, 'plan.json'))).toBe(false);
-      expect(existsSync(join(dir, 'qa_report.json'))).toBe(false);
-      // Higher-level artifact should remain
-      expect(existsSync(join(dir, 'spec.md'))).toBe(true);
-      // Lower-level artifacts should remain
-      expect(existsSync(join(dir, 'qa_feedback.md'))).toBe(true);
-    });
-
-    it('clears qa-level artifacts (qa_report.json, qa_feedback.md, completion_summary.md)', () => {
-      store.clearArtifacts(taskId, 'qa');
-
+      // QA-level: cleared (cumulative — spec clears everything downstream)
       expect(existsSync(join(dir, 'qa_report.json'))).toBe(false);
       expect(existsSync(join(dir, 'qa_feedback.md'))).toBe(false);
       expect(existsSync(join(dir, 'completion_summary.md'))).toBe(false);
-      // Higher-level artifacts should remain
+      expect(existsSync(join(dir, 'qa_report_before_bounce.json'))).toBe(false);
+      expect(existsSync(join(dir, 'qa_report_before_failed.json'))).toBe(false);
+      // Control: not in registry — should survive
+      expect(existsSync(join(dir, 'human_feedback.md'))).toBe(true);
+    });
+
+    it('clears plan-level artifacts (plan + downstream QA files)', () => {
+      store.clearArtifacts(taskId, 'plan');
+
+      // Plan-level: cleared
+      expect(existsSync(join(dir, 'plan.json'))).toBe(false);
+      // QA-level: cleared (cumulative — plan clears everything downstream)
+      expect(existsSync(join(dir, 'qa_report.json'))).toBe(false);
+      expect(existsSync(join(dir, 'qa_feedback.md'))).toBe(false);
+      expect(existsSync(join(dir, 'completion_summary.md'))).toBe(false);
+      expect(existsSync(join(dir, 'qa_report_before_bounce.json'))).toBe(false);
+      expect(existsSync(join(dir, 'qa_report_before_failed.json'))).toBe(false);
+      // Spec-level: should remain (plan is downstream of spec)
       expect(existsSync(join(dir, 'spec.md'))).toBe(true);
+      expect(existsSync(join(dir, 'spec_revision_feedback.md'))).toBe(true);
+      expect(existsSync(join(dir, 'spec_v1.md'))).toBe(true);
+      // Control: not in registry — should survive
+      expect(existsSync(join(dir, 'human_feedback.md'))).toBe(true);
+    });
+
+    it('clears qa-level artifacts only', () => {
+      store.clearArtifacts(taskId, 'qa');
+
+      // QA-level: cleared
+      expect(existsSync(join(dir, 'qa_report.json'))).toBe(false);
+      expect(existsSync(join(dir, 'qa_feedback.md'))).toBe(false);
+      expect(existsSync(join(dir, 'completion_summary.md'))).toBe(false);
+      expect(existsSync(join(dir, 'qa_report_before_bounce.json'))).toBe(false);
+      expect(existsSync(join(dir, 'qa_report_before_failed.json'))).toBe(false);
+      // Spec + plan-level: should remain (upstream of qa)
+      expect(existsSync(join(dir, 'spec.md'))).toBe(true);
+      expect(existsSync(join(dir, 'spec_revision_feedback.md'))).toBe(true);
+      expect(existsSync(join(dir, 'spec_v1.md'))).toBe(true);
       expect(existsSync(join(dir, 'plan.json'))).toBe(true);
+      // Control: not in registry — should survive
+      expect(existsSync(join(dir, 'human_feedback.md'))).toBe(true);
     });
 
     it('does not throw when clearing non-existent artifacts', () => {

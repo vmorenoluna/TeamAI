@@ -41,6 +41,10 @@ export const PHASE_ARTIFACTS: Record<string, string[]> = {
     'spec.md',
     'plan.json',
     'qa_report.json',
+    'qa_feedback.md',
+    'completion_summary.md',
+    'qa_report_before_bounce.json',
+    'qa_report_before_failed.json',
     'spec_revision_feedback.md',
     'spec_v1.md',
     'spec_v2.md',
@@ -49,12 +53,17 @@ export const PHASE_ARTIFACTS: Record<string, string[]> = {
   plan: [
     'plan.json',
     'qa_report.json',
+    'qa_feedback.md',
+    'completion_summary.md',
+    'qa_report_before_bounce.json',
+    'qa_report_before_failed.json',
   ],
   qa: [
     'qa_report.json',
     'qa_feedback.md',
     'completion_summary.md',
     'qa_report_before_bounce.json',
+    'qa_report_before_failed.json',
   ],
 };
 
@@ -73,6 +82,7 @@ export const CLEANUP_ARTIFACTS: Record<string, string[]> = {
     'qa_feedback.md',
     'completion_summary.md',
     'qa_report_before_bounce.json',
+    'qa_report_before_failed.json',
   ],
   merge: [],
 };
@@ -100,4 +110,5 @@ export const REVISION_CLEANUP_EXTRA: string[] = [
   'human_feedback.md',
   'human_feedback_before_bounce.md',
   'qa_report_before_bounce.json',
+  'qa_report_before_failed.json',
 ];
