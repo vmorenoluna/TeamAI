@@ -11,8 +11,7 @@ import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { createTestProject } from '../utils/test-project';
 
- 
-type AnyOrch = any;
+import { createFireEvent, AnyOrch } from '../utils/orchestrator-harness';
 
 // ── Hoisted mocks ──
 
@@ -76,15 +75,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 import { Orchestrator } from '../../src/lib/orchestrator';
 import { buildSyntheticReworkDescription } from '../../src/lib/orchestrator/implement';
 
-/** Fire an event to all registered handlers for the given event type */
-function fireEvent(event: string, data: any) {
-  const handlers = onHandlers.get(event);
-  if (handlers) {
-    for (const h of [...handlers]) {
-      try { h(data); } catch { /* ignore */ }
-    }
-  }
-}
+const fireEvent = createFireEvent(onHandlers);
 
 // ── Helpers ──
 
