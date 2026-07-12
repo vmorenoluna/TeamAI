@@ -43,6 +43,7 @@ import {
   getOrchestrator,
   Orchestrator,
 } from '../../src/lib/orchestrator';
+import { resolveBaseBranch } from '../../src/lib/git-platform';
 import { processManager } from '../../src/lib/process-manager';
 
 // ── Tests ──
@@ -127,6 +128,103 @@ describe('detectDefaultBranch', () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════
+//  T32 regression — resolveBaseBranch (T2 companion)
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('resolveBaseBranch', () => {
+  // Module-level cache persists across tests — each test uses a unique
+  // projectRoot to avoid cross-test contamination.
+  let root: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    root = `/test-${randomUUID().slice(0, 8)}`;
+  });
+
+  it('returns the detected default branch from detectDefaultBranch', () => {
+    mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
+    expect(resolveBaseBranch(root)).toBe('main');
+    // detectDefaultBranch was called via execFileSync
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'git',
+      ['symbolic-ref', 'refs/remotes/origin/HEAD'],
+      expect.objectContaining({ cwd: root }),
+    );
+  });
+
+  it('returns main when detectDefaultBranch falls back to main', () => {
+    mockExecFileSync.mockImplementation(() => { throw new Error('No upstream'); });
+    expect(resolveBaseBranch(root)).toBe('main');
+  });
+
+  it('returns master when the default branch is master', () => {
+    mockExecFileSync.mockReturnValue('refs/remotes/origin/master\n');
+    expect(resolveBaseBranch(root)).toBe('master');
+  });
+
+  it('returns develop when the default branch is develop', () => {
+    mockExecFileSync.mockReturnValue('refs/remotes/origin/develop\n');
+    expect(resolveBaseBranch(root)).toBe('develop');
+  });
+
+  it('caches the result \u2014 second call does not re-exec git', () => {
+    mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
+    expect(resolveBaseBranch(root)).toBe('main');
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+
+    // Second call returns cached value without re-execing git
+    mockExecFileSync.mockClear();
+    expect(resolveBaseBranch(root)).toBe('main');
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+  });
+
+  it('invalidates cache when invalidate=true, forcing re-detection', () => {
+    mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
+    expect(resolveBaseBranch(root)).toBe('main');
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+
+    // Invalidate and re-detect
+    mockExecFileSync.mockClear();
+    mockExecFileSync.mockReturnValue('refs/remotes/origin/develop\n');
+    expect(resolveBaseBranch(root, true)).toBe('develop');
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('caches per projectRoot \u2014 different roots get independent cache entries', () => {
+    const rootA = `/proj-a-${randomUUID().slice(0, 8)}`;
+    const rootB = `/proj-b-${randomUUID().slice(0, 8)}`;
+
+    mockExecFileSync.mockReturnValueOnce('refs/remotes/origin/main\n');
+    mockExecFileSync.mockReturnValueOnce('refs/remotes/origin/master\n');
+
+    expect(resolveBaseBranch(rootA)).toBe('main');
+    expect(resolveBaseBranch(rootB)).toBe('master');
+
+    expect(mockExecFileSync).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not share cache between project roots', () => {
+    const rootA = `/cache-a-${randomUUID().slice(0, 8)}`;
+    const rootB = `/cache-b-${randomUUID().slice(0, 8)}`;
+
+    mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
+    expect(resolveBaseBranch(rootA)).toBe('main');
+
+    mockExecFileSync.mockReturnValue('refs/remotes/origin/develop\n');
+    expect(resolveBaseBranch(rootB)).toBe('develop');
+
+    // rootA is still cached as main
+    mockExecFileSync.mockClear();
+    expect(resolveBaseBranch(rootA)).toBe('main');
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+
+    // rootB is still cached as develop
+    expect(resolveBaseBranch(rootB)).toBe('develop');
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+  });
+});
+
 describe('buildPlatformPrompt', () => {
   const defaultBranch = 'main';
   const branch = 'feat/new-feature';
@@ -173,7 +271,7 @@ describe('buildPlatformPrompt', () => {
   });
 });
 
-describe('Orchestrator — remaining edge cases', () => {
+describe('Orchestrator \u2014 remaining edge cases', () => {
   let orch: Orchestrator;
   let pmSpies: ReturnType<typeof vi.spyOn>[] = [];
 
@@ -192,7 +290,7 @@ describe('Orchestrator — remaining edge cases', () => {
   });
 
   afterEach(() => {
-    // Restore processManager spies only — not hoisted mocks (prevents footgun)
+    // Restore processManager spies only \u2014 not hoisted mocks (prevents footgun)
     pmSpies.forEach(s => s.mockRestore());
   });
 
