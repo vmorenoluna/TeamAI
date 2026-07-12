@@ -40,6 +40,8 @@ export interface TaskPipeline {
   /** Map of FAIL criterion text → number of consecutive QA cycles it has appeared unchanged.
    *  Used by the orchestrator to escalate persisted failures in the rework prompt. */
   persistedCriterionFailCounts?: Record<string, number>;
+  /** Handle for a pending rate-limit or wakeup setTimeout — cleared by cancelPipeline. */
+  pendingTimer?: ReturnType<typeof setTimeout>;
 }
 
 // ── QA report types ───────────────────────────────────────────────────────

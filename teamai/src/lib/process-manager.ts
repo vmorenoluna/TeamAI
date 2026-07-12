@@ -202,7 +202,7 @@ export class ProcessManager extends EventEmitter {
           s.process.kill('SIGKILL');
         }
       }, 5_000);
-      session.status = 'done';
+      session.status = session.status === 'error' ? 'error' : 'done';
     }
   }
 

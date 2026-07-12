@@ -12,7 +12,7 @@ import { markAutoReviewed } from '@/app/actions/auto-mode';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, PlanSubtask, QAReportData, QACriterion } from '@/lib/stream-types';
 import { formatActionError } from '@/lib/error-format';
-import { PHASE_BADGE, PHASE_LABELS } from '@/constants/phases';
+import { PHASE_BADGE, PHASE_LABELS, RESTARTABLE_PHASES } from '@/constants/phases';
 import { SpecDiffView } from './spec-diff-view';
 
 type Tab = 'overview' | 'terminal' | 'spec' | 'plan' | 'qa';
@@ -291,8 +291,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   const badge = PHASE_BADGE[task.phase] ?? PHASE_BADGE.backlog;
   const isAwaiting = task.phase === 'awaiting-review';
   const isPrOpen = task.phase === 'pr-open';
-  const restartablePhases = new Set<string>(['spec', 'plan', 'implement', 'qa-review']);
-  const canRestart = restartablePhases.has(task.phase);
+  const canRestart = RESTARTABLE_PHASES.has(task.phase);
 
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview' },
