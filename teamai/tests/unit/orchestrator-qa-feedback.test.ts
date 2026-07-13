@@ -121,7 +121,7 @@ describe('_writeQaFeedback', () => {
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const feedbackPath = join(project.taskDir, 'qa_feedback.md');
     expect(existsSync(feedbackPath)).toBe(true);
@@ -143,7 +143,7 @@ describe('_writeQaFeedback', () => {
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const feedbackPath = join(project.taskDir, 'qa_feedback.md');
     const content = readFileSync(feedbackPath, 'utf-8');
@@ -160,7 +160,7 @@ describe('_writeQaFeedback', () => {
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const feedbackPath = join(project.taskDir, 'qa_feedback.md');
     const content = readFileSync(feedbackPath, 'utf-8');
@@ -180,7 +180,7 @@ describe('_writeQaFeedback', () => {
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const feedbackPath = join(project.taskDir, 'qa_feedback.md');
     const content = readFileSync(feedbackPath, 'utf-8');
@@ -196,7 +196,7 @@ describe('_writeQaFeedback', () => {
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const planPath = join(project.taskDir, 'plan.json');
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
@@ -213,7 +213,7 @@ describe('_writeQaFeedback', () => {
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const planPath = join(project.taskDir, 'plan.json');
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
@@ -236,7 +236,7 @@ describe('_writeQaFeedback', () => {
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const planPath = join(project.taskDir, 'plan.json');
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
@@ -253,7 +253,7 @@ describe('_writeQaFeedback', () => {
       criteria: [{ criterion: 'X', status: 'FAIL', fix_needed: 'Fix it' }],
     };
 
-    expect(() => (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report)).not.toThrow();
+    expect(() => (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report)).not.toThrow();
 
     const feedbackPath = join(project.taskDir, 'qa_feedback.md');
     expect(existsSync(feedbackPath)).toBe(true);
@@ -265,7 +265,7 @@ describe('_writeQaFeedback', () => {
       criteria: [],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const feedbackPath = join(project.taskDir, 'qa_feedback.md');
     const content = readFileSync(feedbackPath, 'utf-8');
@@ -283,7 +283,7 @@ describe('_writeQaFeedback', () => {
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const planPath = join(project.taskDir, 'plan.json');
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
@@ -302,7 +302,7 @@ describe('_writeQaFeedback', () => {
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const planPath = join(project.taskDir, 'plan.json');
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
@@ -321,7 +321,7 @@ describe('_writeQaFeedback', () => {
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const planPath = join(project.taskDir, 'plan.json');
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
@@ -339,7 +339,7 @@ describe('_writeQaFeedback', () => {
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const planPath = join(project.taskDir, 'plan.json');
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
@@ -358,7 +358,7 @@ describe('_writeQaFeedback', () => {
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
 
     const planPath = join(project.taskDir, 'plan.json');
     const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
@@ -405,7 +405,7 @@ describe('_writeCompletionSummary', () => {
       ],
     }));
 
-    (orch as AnyOrch)._writeCompletionSummary(pipeline(project.taskId, project.taskDir));
+    (orch as AnyOrch)._ctx.writeCompletionSummary(pipeline(project.taskId, project.taskDir));
 
     const summaryPath = join(project.taskDir, 'completion_summary.md');
     expect(existsSync(summaryPath)).toBe(true);
@@ -426,7 +426,7 @@ describe('_writeCompletionSummary', () => {
       ],
     }));
 
-    (orch as AnyOrch)._writeCompletionSummary(pipeline(project.taskId, project.taskDir));
+    (orch as AnyOrch)._ctx.writeCompletionSummary(pipeline(project.taskId, project.taskDir));
 
     const summaryPath = join(project.taskDir, 'completion_summary.md');
     const content = readFileSync(summaryPath, 'utf-8');
@@ -443,7 +443,7 @@ describe('_writeCompletionSummary', () => {
       ],
     }));
 
-    (orch as AnyOrch)._writeCompletionSummary(pipeline(project.taskId, project.taskDir));
+    (orch as AnyOrch)._ctx.writeCompletionSummary(pipeline(project.taskId, project.taskDir));
 
     const summaryPath = join(project.taskDir, 'completion_summary.md');
     const content = readFileSync(summaryPath, 'utf-8');
@@ -459,7 +459,7 @@ describe('_writeCompletionSummary', () => {
       criteria: [],
     }));
 
-    (orch as AnyOrch)._writeCompletionSummary(pipeline(project.taskId, project.taskDir));
+    (orch as AnyOrch)._ctx.writeCompletionSummary(pipeline(project.taskId, project.taskDir));
 
     const summaryPath = join(project.taskDir, 'completion_summary.md');
     const content = readFileSync(summaryPath, 'utf-8');
@@ -474,7 +474,7 @@ describe('_writeCompletionSummary', () => {
       criteria: [{ criterion: 'X', status: 'FAIL' }],
     }));
 
-    (orch as AnyOrch)._writeCompletionSummary(pipeline(project.taskId, project.taskDir));
+    (orch as AnyOrch)._ctx.writeCompletionSummary(pipeline(project.taskId, project.taskDir));
 
     const taskPath = join(project.taskDir, 'task.json');
     const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
@@ -483,7 +483,7 @@ describe('_writeCompletionSummary', () => {
   });
 
   it('does not crash when qa_report.json is missing', () => {
-    expect(() => (orch as AnyOrch)._writeCompletionSummary(pipeline(project.taskId, project.taskDir))).not.toThrow();
+    expect(() => (orch as AnyOrch)._ctx.writeCompletionSummary(pipeline(project.taskId, project.taskDir))).not.toThrow();
 
     const summaryPath = join(project.taskDir, 'completion_summary.md');
     expect(existsSync(summaryPath)).toBe(true);

@@ -156,7 +156,7 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => '');              // git push succeeds
 
       expect(() =>
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
       ).not.toThrow();
 
       // gh auth token called once
@@ -200,7 +200,7 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => '');                   // git push (retry succeeds)
 
       expect(() =>
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
       ).not.toThrow();
 
       // gh auth token called twice (original + retry)
@@ -234,7 +234,7 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => '');                          // git push (retry)
 
       expect(() =>
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
       ).not.toThrow();
 
       // gh auth refresh was called
@@ -254,7 +254,7 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => '');                             // git push (retry)
 
       expect(() =>
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
       ).not.toThrow();
 
       const refreshCalls = mockExecFileSync.mock.calls.filter(
@@ -273,7 +273,7 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => '');                          // git push (retry)
 
       expect(() =>
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
       ).not.toThrow();
 
       const refreshCalls = mockExecFileSync.mock.calls.filter(
@@ -299,7 +299,7 @@ describe('_gitPush auto-refresh', () => {
         });
 
       try {
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile);
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile);
         expect.fail('should have thrown');
       } catch (e: any) {
         expect(e.message).toContain('no auth helper available');
@@ -324,7 +324,7 @@ describe('_gitPush auto-refresh', () => {
         });
 
       expect(() =>
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
       ).toThrow('credential helper fallback failed');
 
       // gh auth refresh called exactly once (only on first failure, not Tier 2)
@@ -349,7 +349,7 @@ describe('_gitPush auto-refresh', () => {
         });
 
       try {
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile);
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile);
         expect.fail('should have thrown');
       } catch (e: any) {
         // Tier 2 error propagates — no token in the message since _exec('', 2) has no token
@@ -389,7 +389,7 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => '');                   // Tier 2: credential helper succeeds
 
       expect(() =>
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
       ).not.toThrow();
 
       // gh auth refresh called exactly once (only during Tier 1)
@@ -421,7 +421,7 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => { throw NON_AUTH_ERROR; });   // git push (non-auth error)
 
       expect(() =>
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
       ).toThrow(/non-fast-forward/);
 
       // gh auth refresh should NOT have been called
@@ -445,7 +445,7 @@ describe('_gitPush auto-refresh', () => {
         });
 
       expect(() =>
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
       ).toThrow('git push failed: no auth');
 
       // git should have been called with the remote name (no extraheader, no token)
@@ -471,7 +471,7 @@ fatal: Authentication failed for 'https://github.com/user/repo.git/'
         .mockImplementationOnce(() => { throw NO_GH_AUTH_ERROR; });
 
       expect(() =>
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile),
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
       ).toThrow(/Invalid username or token/);
 
       // gh auth refresh should NOT have been called (no token to refresh)
@@ -499,7 +499,7 @@ fatal: Authentication failed for 'https://github.com/user/repo.git/'
         });
 
       try {
-        orch._gitPush(['push', 'origin', 'feat/test'], testData.logFile);
+        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile);
       } catch (e: any) {
         // The token is Base64-encoded in the extraheader — the plain token value never
         // appears in the error message (encoding is sufficient, replaceAll is a no-op).

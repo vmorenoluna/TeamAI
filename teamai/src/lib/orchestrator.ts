@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, rmSync, mkdirSync } from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { processManager, type AgentSession } from './process-manager';
+import { processManager } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
 import { TaskStore } from './task-store';
 import { slugify } from './utils';
@@ -10,7 +10,7 @@ import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelin
 import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedback';
 import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './orchestrator/phase-runners';
 import { parseSessionLimitReset, extractPrUrl, phaseHeader, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, computePipelineConfig, buildSessionOpts, type PipelineConfig } from './orchestrator/helpers';
-import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn, getWorktreePath as getWorktreePathFn } from './orchestrator/worktree-ops';
+import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn } from './orchestrator/worktree-ops';
 import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
 import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
@@ -23,13 +23,12 @@ import { detectGitPlatform, isPrMerged, resolveBaseBranch } from './git-platform
 import { warn as logWarn } from './logger';
 import type { PhaseContext } from './orchestrator/phase-context';
 import type { PipelinePhase } from '@/constants/phases';
-import type { TaskPipeline, MergeStrategy, QaReport } from './orchestrator/types';
+import type { TaskPipeline, MergeStrategy } from './orchestrator/types';
 
 export class Orchestrator {
   private pipelines: Map<string, TaskPipeline> = new Map();
   private activeTasks: Set<string> = new Set();
   private taskStore: TaskStore;
-  // @ts-ignore TS6133 — PhaseContext infrastructure for T16+ refactors
   private _ctx: PhaseContext;
 
   constructor(private projectRoot: string) {
@@ -53,7 +52,7 @@ export class Orchestrator {
       activeTasks: this.activeTasks,
 
       persistAndEmitPhase: (pipeline) => persistAndEmitPhase(pipeline, taskStore, projectRoot),
-      advancePhase: (pipeline, phase, eventExtra) => pipelineAdvancePhase(pipeline, phase, taskStore, projectRoot, eventExtra),
+      advancePhase: (pipeline, phase, eventExtra) => this.advancePhase(pipeline, phase, eventExtra),
       savePipelineState: (pipeline) => savePipelineState(pipeline),
       executePhase: (pipeline) => this.executePhase(pipeline),
       handleRateLimit: (pipeline, resetsAt) => this.handleRateLimit(pipeline, resetsAt),
@@ -61,7 +60,7 @@ export class Orchestrator {
       sessionOpts: (role, cwd, taskId, logFile) => buildSessionOpts(projectRoot, role, cwd, taskId, logFile),
       waitForCompletion: (sessionId) => waitForCompletion(sessionId, { parseSessionLimitReset }),
 
-      execGit: (args, hostCwd) => execGit(args, hostCwd, projectRoot),
+      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
       gitPush: (pushArgs, logFile) => gitPush(projectRoot, pushArgs, logFile),
 
       rotateOutputLog: (logFile) => rotateOutputLog(logFile),
@@ -76,11 +75,15 @@ export class Orchestrator {
       },
       patchWorktreeGitFile: (hostWorktreePath, containerWorkspace) =>
         patchWorktreeGitFile(hostWorktreePath, containerWorkspace, projectRoot),
+      restoreWorktreeGitFileToHostPaths: (hostWorktreePath) =>
+        restoreWorktreeGitFileToHostPaths(hostWorktreePath, projectRoot),
+      worktreeGitEnv: (hostCwd: string, containerWs?: string) =>
+        worktreeGitEnv(hostCwd, projectRoot, containerWs),
       isWorktreeHealthy: (worktreePath) => isWorktreeHealthy(worktreePath, projectRoot),
       cleanStaleSubtaskWorktrees: (pipeline) =>
-        cleanStaleSubtaskWorktrees(pipeline, { execGit: (a, c) => execGit(a, c, projectRoot), projectRoot }),
+        cleanStaleSubtaskWorktrees(pipeline, { execGit: (a, c) => this._execGit(a, c), projectRoot }),
       removeWorktree: (taskId) =>
-        removeWorktreeFn(taskId, { execGit: (a, c) => execGit(a, c, projectRoot), projectRoot, taskStore }),
+        removeWorktreeFn(taskId, { execGit: (a, c) => this._execGit(a, c), projectRoot, taskStore }),
 
       restoreQaReportFromSnapshot: (specPath) => restoreQaReportFromSnapshot(specPath),
       restoreHumanFeedbackFromSnapshot: (specPath) => restoreHumanFeedbackFromSnapshot(specPath),
@@ -142,7 +145,7 @@ export class Orchestrator {
     if (NO_RESUME_PHASES.has(targetPhase)) {
       // Auto-delete the git worktree when moving to 'done', 'backlog', or 'failed'
       if (targetPhase === 'done' || targetPhase === 'backlog' || targetPhase === 'failed') {
-        this.removeWorktree(taskId);
+        this._ctx.removeWorktree(taskId);
       }
       this.taskStore.updatePhase(taskId, targetPhase);
       processManager.emit('phase-change', { taskId, phase: targetPhase, projectRoot: this.projectRoot });
@@ -252,7 +255,7 @@ export class Orchestrator {
       if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;
     }
 
-    this._savePipelineState(pipeline);
+    this._ctx.savePipelineState(pipeline);
     let rateLimited = false;
     try {
       await this.executePhase(pipeline);
@@ -280,25 +283,11 @@ export class Orchestrator {
   }
 
   async approveTask(taskId: string, strategy: MergeStrategy): Promise<void> {
-    await approveTaskFn(taskId, strategy, {
-      taskStore: this.taskStore,
-      pipelines: this.pipelines,
-      restorePipeline: (id, phase) => this.restorePipeline(id, phase),
-      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
-      executePhase: p => this.executePhase(p),
-      savePipelineState: p => this._savePipelineState(p),
-    });
+    await approveTaskFn(taskId, strategy, this._ctx);
   }
 
   async rejectTask(taskId: string, feedback: string): Promise<void> {
-    await rejectTaskFn(taskId, feedback, {
-      taskStore: this.taskStore,
-      pipelines: this.pipelines,
-      restorePipeline: (id, phase) => this.restorePipeline(id, phase),
-      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
-      executePhase: p => this.executePhase(p),
-      savePipelineState: p => this._savePipelineState(p),
-    });
+    await rejectTaskFn(taskId, feedback, this._ctx);
   }
 
   async reviseSpec(taskId: string): Promise<void> {
@@ -314,14 +303,7 @@ export class Orchestrator {
 
   // Delegates to review-actions.autoReviseSpec
   private async _autoReviseSpec(pipeline: TaskPipeline): Promise<void> {
-    await autoReviseSpec(pipeline, {
-      taskStore: this.taskStore,
-      pipelines: this.pipelines,
-      restorePipeline: (id, phase) => this.restorePipeline(id, phase),
-      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
-      executePhase: p => this.executePhase(p),
-      savePipelineState: p => this._savePipelineState(p),
-    });
+    await autoReviseSpec(pipeline, this._ctx);
   }
 
   private async executePhase(pipeline: TaskPipeline): Promise<void> {
@@ -338,107 +320,27 @@ export class Orchestrator {
   }
 
   private async runSpec(pipeline: TaskPipeline): Promise<void> {
-    await runSpecPhase(pipeline, {
-      projectRoot: this.projectRoot,
-      rotateOutputLog: logFile => this._rotateOutputLog(logFile),
-      phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
-      persistAndEmitPhase: p => this._persistAndEmitPhase(p),
-      savePipelineState: p => this._savePipelineState(p),
-      sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
-      toAgentPath: hostPath => this._toAgentPath(hostPath),
-      waitForCompletion: sessionId => this.waitForCompletion(sessionId),
-      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
-      executePhase: p => this.executePhase(p),
-    });
+    await runSpecPhase(pipeline, this._ctx);
   }
 
   private async runPlan(pipeline: TaskPipeline): Promise<void> {
-    await runPlanPhase(pipeline, {
-      projectRoot: this.projectRoot,
-      rotateOutputLog: logFile => this._rotateOutputLog(logFile),
-      phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
-      persistAndEmitPhase: p => this._persistAndEmitPhase(p),
-      savePipelineState: p => this._savePipelineState(p),
-      sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
-      toAgentPath: hostPath => this._toAgentPath(hostPath),
-      waitForCompletion: sessionId => this.waitForCompletion(sessionId),
-      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
-      executePhase: p => this.executePhase(p),
-      gitPush: (pushArgs, logFile) => this._gitPush(pushArgs, logFile),
-      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
-    });
+    await runPlanPhase(pipeline, this._ctx);
   }
 
   private async runImplement(pipeline: TaskPipeline): Promise<void> {
-    await runImplement(pipeline, {
-      projectRoot: this.projectRoot,
-      persistAndEmitPhase: p => this._persistAndEmitPhase(p),
-      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
-      savePipelineState: p => this._savePipelineState(p),
-      executePhase: p => this.executePhase(p),
-      sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
-      waitForCompletion: sessionId => this.waitForCompletion(sessionId),
-      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
-      gitPush: (pushArgs, logFile) => this._gitPush(pushArgs, logFile),
-      patchWorktreeGitFile: (hostWorktreePath, containerWorkspace) => this._patchWorktreeGitFile(hostWorktreePath, containerWorkspace),
-      isWorktreeHealthy: worktreePath => this._isWorktreeHealthy(worktreePath),
-      cleanStaleSubtaskWorktrees: p => this._cleanStaleSubtaskWorktrees(p),
-      restoreQaReportFromSnapshot: specPath => this._restoreQaReportFromSnapshot(specPath),
-      restoreHumanFeedbackFromSnapshot: specPath => this._restoreHumanFeedbackFromSnapshot(specPath),
-      writeQaFeedback: (p, report) => this._writeQaFeedback(p, report),
-      getPipelineConfig: () => this.getPipelineConfig(),
-      phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
-      planWriteLock: this._planWriteLockRef,
-      scheduleWakeup: (pipeline) => this._scheduleWakeup(pipeline),
-    });
+    await runImplement(pipeline, this._ctx);
   }
 
   private async runQaReview(pipeline: TaskPipeline): Promise<void> {
-    await runQaReview(pipeline, {
-      projectRoot: this.projectRoot,
-      persistAndEmitPhase: p => this._persistAndEmitPhase(p),
-      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
-      savePipelineState: p => this._savePipelineState(p),
-      executePhase: p => this.executePhase(p),
-      sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
-      waitForCompletion: sessionId => this.waitForCompletion(sessionId),
-      gitPush: (pushArgs, logFile) => this._gitPush(pushArgs, logFile),
-      writeQaFeedback: (p, report) => this._writeQaFeedback(p, report),
-      writeCompletionSummary: p => this._writeCompletionSummary(p),
-      phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
-      toAgentPath: hostPath => this._toAgentPath(hostPath),
-      autoReviseSpec: p => this._autoReviseSpec(p),
-    });
+    await runQaReview(pipeline, this._ctx);
   }
 
   private async runMerge(pipeline: TaskPipeline): Promise<void> {
-    await runMergePhase(pipeline, {
-      projectRoot: this.projectRoot,
-      phaseHeader: (logFile, phase) => this._phaseHeader(logFile, phase),
-      persistAndEmitPhase: p => this._persistAndEmitPhase(p),
-      sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
-      waitForCompletion: sessionId => this.waitForCompletion(sessionId),
-      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
-      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
-      commitArtifactsToWorktree: p => this._commitArtifactsToWorktree(p),
-      getPipelineConfig: () => this.getPipelineConfig(),
-      removeWorktree: taskId => this.removeWorktree(taskId),
-    });
+    await runMergePhase(pipeline, this._ctx);
   }
 
   private async runCreatePR(pipeline: TaskPipeline): Promise<void> {
-    await runCreatePRPhase(pipeline, {
-      projectRoot: this.projectRoot,
-      taskStore: this.taskStore,
-      persistAndEmitPhase: p => this._persistAndEmitPhase(p),
-      sessionOpts: (role, cwd, taskId, logFile) => this.sessionOpts(role, cwd, taskId, logFile),
-      waitForCompletion: sessionId => this.waitForCompletion(sessionId),
-      advancePhase: (p, phase, eventExtra) => this.advancePhase(p, phase, eventExtra),
-      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
-      commitArtifactsToWorktree: p => this._commitArtifactsToWorktree(p),
-      gitPush: (pushArgs, logFile) => this._gitPush(pushArgs, logFile),
-      extractPrUrl: logFile => this._extractPrUrl(logFile),
-    });
+    await runCreatePRPhase(pipeline, this._ctx);
   }
 
   async markTaskDone(taskId: string): Promise<void> {
@@ -469,7 +371,7 @@ export class Orchestrator {
       // rest of the codebase treats unverifiable platforms.
     }
 
-    this.removeWorktree(taskId);
+    this._ctx.removeWorktree(taskId);
 
     // Delete the live .teamai/{slug}/ directory so restoring the just-merged
     // commit's snapshot won't collide with local files.
@@ -571,71 +473,21 @@ export class Orchestrator {
     processManager.emit('phase-change', { taskId, phase: 'done', projectRoot: this.projectRoot });
   }
 
-  /** Scan the output log for a PR/MR URL created by the agent. */
-  private _extractPrUrl(logFile: string): string | null { return extractPrUrl(logFile); }
-
   // Serializes writes to plan.json to prevent race conditions during
   // per-subtask checkpointing in runImplement (#2). Wrapped in an object
   // so the extracted runImplement can mutate the current promise through
   // its deps reference without aliasing `this`.
   private _planWriteLockRef = { current: Promise.resolve() };
 
-  private _rotateOutputLog(logFile: string): void { rotateOutputLog(logFile); }
-
-  private _persistAndEmitPhase(pipeline: TaskPipeline): void { persistAndEmitPhase(pipeline, this.taskStore, this.projectRoot); }
-
-  private _savePipelineState(pipeline: TaskPipeline): void { savePipelineState(pipeline); }
-
   private _restorePipelineState(_taskId: string, specPath: string): Partial<TaskPipeline> | null { return restorePipelineState(_taskId, specPath); }
-
-  // Delegates to worktree-utils.isWorktreeHealthy
-  private _isWorktreeHealthy(worktreePath: string): boolean { return isWorktreeHealthy(worktreePath, this.projectRoot); }
-
-  // Delegates to helpers.restoreQaReportFromSnapshot
-  private _restoreQaReportFromSnapshot(specPath: string): void { restoreQaReportFromSnapshot(specPath); }
-
-  // Delegates to helpers.restoreHumanFeedbackFromSnapshot
-  private _restoreHumanFeedbackFromSnapshot(specPath: string): void { restoreHumanFeedbackFromSnapshot(specPath); }
 
   private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void { pipelineAdvancePhase(pipeline, phase, this.taskStore, this.projectRoot, eventExtra); }
 
-  private waitForCompletion(sessionId: string): Promise<void> {
-    return waitForCompletion(sessionId, { parseSessionLimitReset });
-  }
-
-  private handleRateLimit(pipeline: TaskPipeline, resetsAt: number): void {
-    handleRateLimitFn(pipeline, resetsAt, {
-      taskStore: this.taskStore,
-      projectRoot: this.projectRoot,
-      activeTasks: this.activeTasks,
-      pipelines: this.pipelines,
-      executePhase: p => this.executePhase(p),
-      advancePhase: (p, phase) => this.advancePhase(p, phase),
-      handleRateLimit: (p, r) => this.handleRateLimit(p, r),
-    });
-  }
-
-  // Translate a host absolute path to the container-relative equivalent when
-  // container mode is enabled. Used so message content sent to agents inside
-  // the container references paths that actually exist there.
-  private _toAgentPath(hostPath: string): string {
-    if (readContainerConfig(this.projectRoot).enabled) {
-      const info = containerManager.getRunningContainer(this.projectRoot);
-      if (info) return hostToContainerPath(hostPath, this.projectRoot, info.remoteWorkspaceFolder);
-    }
-    return hostPath;
-  }
-
   private _execGit(args: string[], hostCwd: string): void { execGit(args, hostCwd, this.projectRoot); }
 
-  // Delegates to worktree-utils.worktreeGitEnv
-  private _worktreeGitEnv(hostCwd: string, containerWs?: string): Record<string, string> { return worktreeGitEnv(hostCwd, this.projectRoot, containerWs); }
-
-
-  // Delegates to worktree-utils.patchWorktreeGitFile
-  private _patchWorktreeGitFile(hostWorktreePath: string, containerWorkspace: string): void { patchWorktreeGitFile(hostWorktreePath, containerWorkspace, this.projectRoot); }
-
-  private _restoreWorktreeGitFileToHostPaths(hostWorktreePath: string): void { restoreWorktreeGitFileToHostPaths(hostWorktreePath, this.projectRoot); }
+  private handleRateLimit(pipeline: TaskPipeline, resetsAt: number): void {
+    handleRateLimitFn(pipeline, resetsAt, this._ctx);
+  }
   private restorePipeline(taskId: string, requiredPhase: PipelinePhase): TaskPipeline {
     const task = this.taskStore.getById(taskId);
     if (!task || task.phase !== requiredPhase) {
@@ -706,7 +558,7 @@ export class Orchestrator {
     // Clean the worktree for plan/implement phases so the next run starts with a clean slate
     if (currentPhase === 'plan') {
       // Worktree was created during plan — remove it so it gets recreated fresh
-      this._removeWorktreeForce(taskId);
+      this._ctx.removeWorktree(taskId);
     } else if (currentPhase === 'implement') {
       // Worktree has partial changes — discard them
       this._cleanWorktree(taskId);
@@ -771,47 +623,20 @@ export class Orchestrator {
     // Belt-and-suspenders: restore here too so the report exists before the pipeline
     // starts, not just when runImplement is reached. Covers scenarios where
     // resumeTask skips directly to implement on a previously-failed task.
-    this._restoreQaReportFromSnapshot(dir);
+    this._ctx.restoreQaReportFromSnapshot(dir);
 
     await this.runTask(taskId, task.description, startPhase);
   }
 
-  /**
-   * Clean up stale per-subtask worktrees from a previous crashed run (AC9).
-   * Scans for directories matching <worktree-base>/<task-slug>-st* and removes them
-   * along with their branches and git worktree metadata.
-   */
-  private _cleanStaleSubtaskWorktrees(pipeline: TaskPipeline): void {
-    cleanStaleSubtaskWorktrees(pipeline, {
-      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
-      projectRoot: this.projectRoot,
-    });
-  }
-
   /** Get the filesystem path to this task's git worktree, or null if the task has no branch. */
   public getWorktreePath(taskId: string): string | null {
-    return getWorktreePathFn(taskId, this.taskStore, getWorktreeBase(this.projectRoot));
+    const worktreeBase = getWorktreeBase(this.projectRoot);
+    const task = this.taskStore.getById(taskId);
+    if (!task || !task.branch) return null;
+    const slug = slugify(task.description);
+    return path.join(worktreeBase, slug);
   }
 
-  /**
-   * Remove the git worktree for this task if it exists on disk.
-   * Tries a normal remove first; falls back to --force if there are uncommitted changes.
-   * Always cleans up the branch and updates the task record so no stale state lingers.
-   */
-  private removeWorktree(taskId: string): void {
-    removeWorktreeFn(taskId, {
-      execGit: (args, hostCwd) => this._execGit(args, hostCwd),
-      projectRoot: this.projectRoot,
-      taskStore: this.taskStore,
-    });
-  }
-
-  /** Force-remove the git worktree (discards uncommitted changes). Delegates to removeWorktree. */
-  private _removeWorktreeForce(taskId: string): void {
-    this.removeWorktree(taskId);
-  }
-
-  /** Discard all uncommitted changes in the worktree. Works on both host and container. */
   private _cleanWorktree(taskId: string): void {
     cleanWorktreeFn(taskId, {
       execGit: (args, hostCwd) => this._execGit(args, hostCwd),
@@ -819,16 +644,6 @@ export class Orchestrator {
       taskStore: this.taskStore,
     });
   }
-
-  private sessionOpts(role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) {
-    return buildSessionOpts(this.projectRoot, role, cwd, taskId, logFile);
-  }
-
-  private _writeQaFeedback(pipeline: TaskPipeline, report: QaReport): void { writeQaFeedback(pipeline.specPath, report, pipeline.persistedCriterionFailCounts); }
-
-  private _writeCompletionSummary(pipeline: TaskPipeline): void { writeCompletionSummary(pipeline.specPath, pipeline.qaAttempt, pipeline.taskId, this.taskStore); }
-
-  private _phaseHeader(logFile: string, phase: string): void { phaseHeader(logFile, phase); }
 
   /** Schedule a wakeup timer (ADR 002). Follows the handleRateLimit setTimeout pattern. */
   private _scheduleWakeup(pipeline: TaskPipeline): void {
@@ -885,16 +700,6 @@ export class Orchestrator {
     }, waitMs);
   }
 
-  // Delegates to artifact-commit.commitArtifactsToWorktree
-  private _commitArtifactsToWorktree(pipeline: TaskPipeline): void {
-    commitArtifactsToWorktree(pipeline, {
-      restoreWorktreeGitFileToHostPaths: hostWorktreePath => this._restoreWorktreeGitFileToHostPaths(hostWorktreePath),
-      worktreeGitEnv: (hostCwd, containerWs) => this._worktreeGitEnv(hostCwd, containerWs),
-    });
-  }
-
-  // Delegates to git-push.gitPush
-  private _gitPush(pushArgs: string[], logFile: string): void { gitPush(this.projectRoot, pushArgs, logFile); }
 }
 
 

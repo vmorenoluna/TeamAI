@@ -2359,7 +2359,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       ],
     };
 
-    (orch as AnyOrch)._writeQaFeedback(pipeline, report);
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline, report);
 
     // Verify qa_feedback.md was written
     expect(existsSync(join(project.taskDir, 'qa_feedback.md'))).toBe(true);
@@ -3013,7 +3013,7 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
       deliverableFailCounts: { 3: 2 },
     });
 
-    (orch as AnyOrch)._savePipelineState(pipeline);
+    (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
     const statePath = join(project.taskDir, '.pipeline_state.json');
     expect(existsSync(statePath)).toBe(true);
@@ -3032,7 +3032,7 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
       deliverableFailCounts: { 7: 1 },
     });
 
-    (orch as AnyOrch)._savePipelineState(pipeline);
+    (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
     // Verify state file exists
     const statePath = join(project.taskDir, '.pipeline_state.json');
@@ -3097,7 +3097,7 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
       await promise1;
 
       // Save state (simulating what happens between passes)
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       // Simulate crash: clear pipeline from memory
       (orch as AnyOrch).pipelines.delete(project.taskId);
@@ -3123,7 +3123,7 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
     });
 
     // Save
-    (orch as AnyOrch)._savePipelineState(pipeline);
+    (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
     // Simulate crash — destroy pipeline from memory
     (orch as AnyOrch).pipelines.delete(project.taskId);
@@ -3496,7 +3496,7 @@ describe('runImplement — wakeup state persistence (ADR 002)', () => {
       wakeupSubtaskId: 2, wakeupUntil: '2026-07-04T15:00:00Z', wakeupCommand: 'npm run sweep', wakeupArtifact: 'data/output.jsonl', wakeupAttemptCount: 2,
     });
 
-    (orch as AnyOrch)._savePipelineState(pipeline);
+    (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
     const statePath = join(project.taskDir, '.pipeline_state.json');
     expect(existsSync(statePath)).toBe(true);
@@ -3513,7 +3513,7 @@ describe('runImplement — wakeup state persistence (ADR 002)', () => {
       wakeupSubtaskId: 5, wakeupUntil: '2026-07-04T18:00:00Z', wakeupCommand: 'python long-script.py', wakeupArtifact: 'reports/final.md', wakeupAttemptCount: 1,
     });
 
-    (orch as AnyOrch)._savePipelineState(pipeline);
+    (orch as AnyOrch)._ctx.savePipelineState(pipeline);
     (orch as AnyOrch).pipelines.delete(project.taskId);
 
     const restored = (orch as AnyOrch)._restorePipelineState(project.taskId, project.taskDir);

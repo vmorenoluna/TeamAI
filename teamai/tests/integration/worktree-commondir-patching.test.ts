@@ -162,7 +162,7 @@ suite('worktree commondir patching — integration', () => {
       const commondirPath = path.join(repoPath, '.git', 'worktrees', worktreeName, 'commondir');
       expect(existsSync(commondirPath)).toBe(true);
 
-      orch._patchWorktreeGitFile(worktreePath, containerWorkspace);
+      orch._ctx.patchWorktreeGitFile(worktreePath, containerWorkspace);
 
       // After patching: commondir must be ../.. (regardless of what git wrote initially)
       const afterContent = readFileSync(commondirPath, 'utf-8').trim();
@@ -173,7 +173,7 @@ suite('worktree commondir patching — integration', () => {
       const orch = getOrchestrator(repoPath) as AnyOrch;
       const containerWorkspace = '/workspaces/project';
 
-      orch._patchWorktreeGitFile(worktreePath, containerWorkspace);
+      orch._ctx.patchWorktreeGitFile(worktreePath, containerWorkspace);
 
       const worktreeName = path.basename(worktreePath);
       const gitFile = path.join(worktreePath, '.git');
@@ -185,7 +185,7 @@ suite('worktree commondir patching — integration', () => {
       const orch = getOrchestrator(repoPath) as AnyOrch;
       const containerWorkspace = '/workspaces/project';
 
-      orch._patchWorktreeGitFile(worktreePath, containerWorkspace);
+      orch._ctx.patchWorktreeGitFile(worktreePath, containerWorkspace);
 
       const worktreeName = path.basename(worktreePath);
       const gitdirPath = path.join(repoPath, '.git', 'worktrees', worktreeName, 'gitdir');
@@ -197,10 +197,10 @@ suite('worktree commondir patching — integration', () => {
       const orch = getOrchestrator(repoPath) as AnyOrch;
       const containerWorkspace = '/workspaces/project';
 
-      orch._patchWorktreeGitFile(worktreePath, containerWorkspace);
+      orch._ctx.patchWorktreeGitFile(worktreePath, containerWorkspace);
       const afterFirst = readFileSync(path.join(worktreePath, '.git'), 'utf-8');
 
-      orch._patchWorktreeGitFile(worktreePath, containerWorkspace);
+      orch._ctx.patchWorktreeGitFile(worktreePath, containerWorkspace);
       const afterSecond = readFileSync(path.join(worktreePath, '.git'), 'utf-8');
 
       expect(afterSecond).toBe(afterFirst);
@@ -211,7 +211,7 @@ suite('worktree commondir patching — integration', () => {
       const containerWorkspace = '/workspaces/project';
 
       // Patch — this rewrites .git to a container path the host can't resolve
-      orch._patchWorktreeGitFile(worktreePath, containerWorkspace);
+      orch._ctx.patchWorktreeGitFile(worktreePath, containerWorkspace);
 
       // After patching, the .git file points to a container path that doesn't
       // exist on the host. A bare git command should fail.
@@ -250,10 +250,10 @@ suite('worktree commondir patching — integration', () => {
 
       // Step 1: Patch to container paths
       const containerWorkspace = '/workspaces/project';
-      orch._patchWorktreeGitFile(worktreePath, containerWorkspace);
+      orch._ctx.patchWorktreeGitFile(worktreePath, containerWorkspace);
 
       // Step 2: Restore to host paths
-      orch._restoreWorktreeGitFileToHostPaths(worktreePath);
+      orch._ctx.restoreWorktreeGitFileToHostPaths(worktreePath);
 
       // .git file should now contain a host-absolute gitdir path
       const gitFile = path.join(worktreePath, '.git');
@@ -272,7 +272,7 @@ suite('worktree commondir patching — integration', () => {
       const orch = getOrchestrator(repoPath) as AnyOrch;
 
       const containerWorkspace = '/workspaces/project';
-      orch._patchWorktreeGitFile(worktreePath, containerWorkspace);
+      orch._ctx.patchWorktreeGitFile(worktreePath, containerWorkspace);
 
       // After patch, back-reference should be container-style
       const worktreeName = path.basename(worktreePath);
@@ -281,7 +281,7 @@ suite('worktree commondir patching — integration', () => {
       expect(afterPatch).toContain('/workspaces/project');
 
       // Restore
-      orch._restoreWorktreeGitFileToHostPaths(worktreePath);
+      orch._ctx.restoreWorktreeGitFileToHostPaths(worktreePath);
 
       // After restore, back-reference should NOT reference the container workspace
       const afterRestore = readFileSync(gitdirPath, 'utf-8').trim();
@@ -292,8 +292,8 @@ suite('worktree commondir patching — integration', () => {
       const orch = getOrchestrator(repoPath) as AnyOrch;
 
       // Patch to container, then restore
-      orch._patchWorktreeGitFile(worktreePath, '/workspaces/project');
-      orch._restoreWorktreeGitFileToHostPaths(worktreePath);
+      orch._ctx.patchWorktreeGitFile(worktreePath, '/workspaces/project');
+      orch._ctx.restoreWorktreeGitFileToHostPaths(worktreePath);
 
       // After restore, plain git commands (without GIT_DIR/GIT_WORK_TREE) must work
       const result = execFileSync('git', ['rev-parse', '--git-dir'], {
