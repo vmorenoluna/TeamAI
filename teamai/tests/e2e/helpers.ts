@@ -5,13 +5,30 @@
  * from here instead of duplicating the logic.
  */
 
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import { resolve, join } from 'path';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { getTestServerUrl } from '../../scripts/servers';
 
-/** The seed project path — must match seed.ts */
-export const SEED_DIR = resolve(__dirname, '..', '..', '.teamai-e2e-seed');
+/** Base seed project path — must match seed.ts */
+const BASE_SEED_DIR = resolve(__dirname, '..', '..', '.teamai-e2e-seed');
+
+/**
+ * Per-worker seed directory for isolated parallel execution (T31).
+ * Falls back to the base seed when worker index isn't available
+ * (e.g., single-worker mode or manual test runs).
+ */
+export function getActiveSeedDir(): string {
+  try {
+    const wi = test.info().workerIndex;
+    return resolve(__dirname, '..', '..', `.teamai-e2e-seed-w${wi}`);
+  } catch {
+    return BASE_SEED_DIR;
+  }
+}
+
+/** @deprecated Use getActiveSeedDir() for per-worker isolation (T31). */
+export const SEED_DIR = BASE_SEED_DIR;
 
 /**
  * Read a seed task ID from the filesystem by slug.
@@ -21,7 +38,7 @@ export const SEED_DIR = resolve(__dirname, '..', '..', '.teamai-e2e-seed');
  *   title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80)
  */
 export function getSeedTaskId(slug: string): string | null {
-  const taskPath = join(SEED_DIR, '.teamai', slug, 'task.json');
+  const taskPath = join(getActiveSeedDir(), '.teamai', slug, 'task.json');
   if (!existsSync(taskPath)) return null;
   try {
     const data = JSON.parse(readFileSync(taskPath, 'utf-8'));
@@ -36,7 +53,7 @@ export function getSeedTaskId(slug: string): string | null {
  */
 export function getAllSeedTaskIds(): Map<string, string> {
   const result = new Map<string, string>();
-  const tasksDir = join(SEED_DIR, '.teamai');
+  const tasksDir = join(getActiveSeedDir(), '.teamai');
   if (!existsSync(tasksDir)) return result;
   for (const entry of readdirSync(tasksDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
@@ -57,11 +74,12 @@ export function getAllSeedTaskIds(): Map<string, string> {
  * issues with slow page renders.
  */
 export async function ensureProjectSelected(page: Page): Promise<boolean> {
+  const seedDir = getActiveSeedDir();
   // Set the active project cookie directly — the server reads this to
   // resolve getActiveProjectPath(). Bypasses UI hunting entirely.
   await page.context().addCookies([{
     name: 'activeProject',
-    value: SEED_DIR,
+    value: seedDir,
     url: getTestServerUrl(),
   }]);
 

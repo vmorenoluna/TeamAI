@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { ensureProjectSelected, getSeedTaskId, requireSeedTaskId, SEED_DIR, scrollKanbanRight } from './helpers';
+import { ensureProjectSelected, getSeedTaskId, requireSeedTaskId, scrollKanbanRight, getActiveSeedDir } from './helpers';
 
 const SEARCH_CRASH_SLUG = 'fix-search-bar-crashes-on-empty-input';
 
@@ -34,9 +34,10 @@ Overall: **FAIL**
 
 test.describe('Spec Revision — Command Template Verification', () => {
   test('seed project has updated qa-review.md with spec-gap detection (Step 6)', () => {
-    if (!existsSync(SEED_DIR)) { test.skip(true, 'E2E seed directory not found'); return; }
+    const seedDir = getActiveSeedDir();
+    if (!existsSync(seedDir)) { test.skip(true, 'E2E seed directory not found'); return; }
 
-    const qaReviewPath = join(SEED_DIR, '.claude', 'commands', 'qa-review.md');
+    const qaReviewPath = join(seedDir, '.claude', 'commands', 'qa-review.md');
     expect(existsSync(qaReviewPath), 'qa-review.md should exist in seed project').toBe(true);
 
     const content = readFileSync(qaReviewPath, 'utf-8');
@@ -46,9 +47,10 @@ test.describe('Spec Revision — Command Template Verification', () => {
   });
 
   test('seed project has updated spec.md with Revision Mode', () => {
-    if (!existsSync(SEED_DIR)) { test.skip(true, 'E2E seed directory not found'); return; }
+    const seedDir = getActiveSeedDir();
+    if (!existsSync(seedDir)) { test.skip(true, 'E2E seed directory not found'); return; }
 
-    const specPath = join(SEED_DIR, '.claude', 'commands', 'spec.md');
+    const specPath = join(seedDir, '.claude', 'commands', 'spec.md');
     expect(existsSync(specPath), 'spec.md should exist in seed project').toBe(true);
 
     const content = readFileSync(specPath, 'utf-8');
@@ -169,7 +171,7 @@ test.describe.serial('Spec Revision — Retry with Updated Templates', () => {
     const taskId = getSeedTaskId(SEARCH_CRASH_SLUG);
     if (!taskId) return;
 
-    const taskPath = join(SEED_DIR, '.teamai', SEARCH_CRASH_SLUG, 'task.json');
+    const taskPath = join(getActiveSeedDir(), '.teamai', SEARCH_CRASH_SLUG, 'task.json');
     try {
       const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
       task.phase = 'failed';

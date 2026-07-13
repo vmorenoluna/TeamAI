@@ -15,8 +15,14 @@
  */
 
 import { execFileSync } from 'child_process';
-import { existsSync, rmSync } from 'fs';
+import { existsSync, rmSync, cpSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+
+// Default matches playwright.config.ts: CI uses 2, local uses os.cpus().length
+const MAX_WORKERS = parseInt(process.env.E2E_MAX_WORKERS || '4', 10);
+
+// Ensure at least 1 worker copy exists even if MAX_WORKERS is 0
+const WORKER_COUNT = Math.max(MAX_WORKERS, 1);
 
 async function globalSetup() {
   const cwd = process.cwd();
@@ -56,7 +62,7 @@ async function globalSetup() {
         TEAMAI_CONFIG_DIR: tempConfigDir,
       },
     });
-    console.log('[playwright-setup] Seed complete.');
+    console.log(`[playwright-setup] Seed complete.`);
   } catch (err) {
     console.error('[playwright-setup] Seed failed — aborting test run.');
     // Clean up before throwing so no leftover state leaks into the next run.
@@ -64,6 +70,34 @@ async function globalSetup() {
     try { rmSync(seedDir, { recursive: true, force: true }); } catch { /* best-effort */ }
     throw err;
   }
+
+  // ── Per-worker seed copies (T31) ────────────────────────────────────
+  // Copy the base seed for each parallel worker so tests that mutate
+  // seed data don't race on a shared directory. Workers read their
+  // seed dir from process.env.TEST_WORKER_INDEX (set by Playwright).
+  const configDir = join(tempConfigDir, '.teamai');
+  const projectsPath = join(configDir, 'projects.json');
+  const projects = JSON.parse(readFileSync(projectsPath, 'utf-8')) as Array<{ name: string; path: string }>;
+
+  for (let w = 0; w < WORKER_COUNT; w++) {
+    const workerSeedDir = join(cwd, `.teamai-e2e-seed-w${w}`);
+    if (w === 0) {
+      // Worker 0 reuses the base seed (already at .teamai-e2e-seed)
+      if (seedDir !== workerSeedDir) {
+        if (existsSync(workerSeedDir)) rmSync(workerSeedDir, { recursive: true, force: true });
+        cpSync(seedDir, workerSeedDir, { recursive: true });
+      }
+    } else {
+      if (existsSync(workerSeedDir)) rmSync(workerSeedDir, { recursive: true, force: true });
+      cpSync(seedDir, workerSeedDir, { recursive: true });
+    }
+    projects.push({ name: `E2E Test Project (w${w})`, path: workerSeedDir });
+    console.log(`[playwright-setup] Worker ${w} seed ready at ${workerSeedDir}`);
+  }
+
+  // Write updated projects.json with all worker entries
+  writeFileSync(projectsPath, JSON.stringify(projects, null, 2));
+  console.log(`[playwright-setup] Registered ${WORKER_COUNT} per-worker projects`);
 
   // Verify the seed created the expected data
   if (!existsSync(seedDir)) {

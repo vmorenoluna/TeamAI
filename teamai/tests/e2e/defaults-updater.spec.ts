@@ -6,7 +6,7 @@
  * updates uncustomized files and resolves the staleness.
  */
 import { test, expect } from '@playwright/test';
-import { ensureProjectSelected, SEED_DIR } from './helpers';
+import { ensureProjectSelected, getActiveSeedDir } from './helpers';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
@@ -29,7 +29,9 @@ function writeFileWithRetry(path: string, content: string): void {
   }
 }
 
-test.describe('DefaultsUpdater', () => {
+// Serial mode: this test mutates shared defaults/ files, which are not
+// per-worker isolated (T31 seed isolation only covers .teamai-e2e-seed-w*).
+test.describe.serial('DefaultsUpdater', () => {
   const defaultImplSrc = join(process.cwd(), 'defaults', 'commands', 'implement.md');
   const MARKER = '\n\n<!-- E2E defaults-updater test marker -->\n';
 
@@ -77,10 +79,10 @@ test.describe('DefaultsUpdater', () => {
 
       // ── Disk verification: sync successfully updated the E2E seed
       //     project file and its scaffold manifest ────────────────────
-      const implPath = join(SEED_DIR, '.claude', 'commands', 'implement.md');
+      const implPath = join(getActiveSeedDir(), '.claude', 'commands', 'implement.md');
       expect(readFileSync(implPath, 'utf-8')).toContain('E2E defaults-updater test marker');
 
-      const manifestPath = join(SEED_DIR, '.claude', '.teamai-scaffold.json');
+      const manifestPath = join(getActiveSeedDir(), '.claude', '.teamai-scaffold.json');
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
       const currentDefaultsContent = readFileSync(defaultImplSrc, 'utf-8');
       expect(computeChecksum(currentDefaultsContent)).toBe(manifest.files['commands/implement.md']);
