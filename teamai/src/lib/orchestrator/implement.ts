@@ -10,6 +10,7 @@
 import { execFileSync } from 'child_process';
 import { getToolPath } from '../tool-checker';
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, rmSync } from 'fs';
+import { PipelineConfigError, WorktreeError, PushVerificationError } from './errors';
 import { readJsonFile } from '../json-io';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
@@ -76,7 +77,7 @@ export async function ensureWorktree(
   if (containerCfg.enabled && !containerCfg.explicit) {
     _resetDockerAvailableCache();
     if (!dockerAvailable()) {
-      throw new Error('Docker is not running. Start Docker Desktop and move the task back to In Progress to retry.');
+      throw new PipelineConfigError('Docker is not running. Start Docker Desktop and move the task back to In Progress to retry.');
     }
   }
 
@@ -94,7 +95,7 @@ export async function ensureWorktree(
   if (!existsSync(pipeline.worktreePath) || !deps.isWorktreeHealthy(pipeline.worktreePath)) {
     if (existsSync(pipeline.worktreePath)) {
       if (path.resolve(pipeline.worktreePath) === path.resolve(deps.projectRoot)) {
-        throw new Error('Refusing to remove worktree at project root — this would destroy the repository');
+        throw new WorktreeError('Refusing to remove worktree at project root — this would destroy the repository', 'WORKTREE_AT_ROOT');
       }
       try {
         deps.execGit(['worktree', 'remove', '--force', pipeline.worktreePath], deps.projectRoot);
@@ -161,7 +162,7 @@ export function selectSubtasks(
   if (planResult.error) {
     const logFile = path.join(pipeline.specPath, 'output.log');
     appendFileSync(logFile, `\n[ERROR] Cannot read plan.json: ${planResult.error.message}\n`);
-    throw new Error(`Plan file is missing or invalid at ${planPath}: ${planResult.error.message}. The planner must produce a valid plan.json before implement can proceed.`);
+    throw new PipelineConfigError(`Plan file is missing or invalid at ${planPath}: ${planResult.error.message}. The planner must produce a valid plan.json before implement can proceed.`);
   }
   const plan = planResult.data!;
 
@@ -621,7 +622,7 @@ export function pushAndVerify(
         cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
       }).trim();
       if (localHead !== remoteHead) {
-        throw new Error('Push succeeded but HEADs differ — local=' + localHead + ' remote=' + remoteHead);
+        throw new PushVerificationError('Push succeeded but HEADs differ — local=' + localHead + ' remote=' + remoteHead, 'HEAD_MISMATCH');
       }
       appendFileSync(logFile, '[PUSH] Verified remote HEAD matches local HEAD\n');
     } catch (verifyErr) {
@@ -825,8 +826,9 @@ export async function runImplement(
       subtaskWorktrees, logFile, isMultiGroup,
     );
     if (!ok) {
-      throw new Error(
-        'Cherry-pick recovery exhausted — per-subtask branches have been preserved for manual recovery.'
+      throw new WorktreeError(
+        'Cherry-pick recovery exhausted — per-subtask branches have been preserved for manual recovery.',
+        'CHERRY_PICK_RECOVERY_EXHAUSTED',
       );
     }
 

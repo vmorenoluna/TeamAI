@@ -2886,7 +2886,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       expect(() => (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review')).toThrow(
-        'is not awaiting-review'
+        'must be awaiting-review'
       );
     });
   });
@@ -3771,7 +3771,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
-      await expect(orch.reviseSpec(testData.taskId)).rejects.toThrow('cannot revise spec for a task in backlog');
+      await expect(orch.reviseSpec(testData.taskId)).rejects.toThrow('cannot revise spec a task in backlog');
     });
 
     it('writes spec_revision_feedback.md from QA report spec_concerns', async () => {

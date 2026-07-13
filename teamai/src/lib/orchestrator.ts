@@ -14,6 +14,7 @@ import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWo
 import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
 import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
+import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError } from './orchestrator/errors';
 import { NO_RESUME_PHASES } from '@/constants/phases';
 import { runImplement } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
@@ -138,7 +139,7 @@ export class Orchestrator {
     this.cancelPipeline(taskId);
 
     const task = this.taskStore.getById(taskId);
-    if (!task) throw new Error(`Task ${taskId} not found`);
+    if (!task) throw new TaskNotFoundError(taskId);
     const dir = this.taskStore.getDirById(taskId);
 
     // Phases that require no pipeline action
@@ -209,7 +210,7 @@ export class Orchestrator {
 
     // Prevent concurrent runs of the same task
     if (this.activeTasks.has(taskId)) {
-      throw new Error(`Task ${taskId} is already running — wait for the current pipeline to finish.`);
+      throw new TaskAlreadyRunningError(taskId);
     }
     this.cancelPipeline(taskId);
     this.activeTasks.add(taskId);
@@ -264,10 +265,17 @@ export class Orchestrator {
         rateLimited = true;
         this.handleRateLimit(pipeline, e.resetsAt);
       } else {
-        const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
         const logFile = path.join(pipeline.specPath, 'output.log');
-        appendFileSync(logFile, `\n[ERROR] Task failed: ${errMsg}\n`);
-        console.error(`[orchestrator] Task ${taskId} failed:`, e);
+        if (e instanceof OrchestratorError) {
+          // Structured error — log with error code for observability
+          appendFileSync(logFile, `\n[ERROR] Task failed [${e.code}]: ${e.message}\n`);
+          if (e.stack) appendFileSync(logFile, `${e.stack}\n`);
+          console.error(`[orchestrator] Task ${taskId} failed [${e.code}]:`, e.message);
+        } else {
+          const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
+          appendFileSync(logFile, `\n[ERROR] Task failed: ${errMsg}\n`);
+          console.error(`[orchestrator] Task ${taskId} failed:`, e);
+        }
         this.advancePhase(pipeline, 'failed');
       }
     } finally {
@@ -292,10 +300,10 @@ export class Orchestrator {
 
   async reviseSpec(taskId: string): Promise<void> {
     const task = this.taskStore.getById(taskId);
-    if (!task) throw new Error(`Task ${taskId} not found`);
+    if (!task) throw new TaskNotFoundError(taskId);
     const phase = task.phase;
     if (phase !== 'awaiting-review') {
-      throw new Error(`cannot revise spec for a task in ${phase} — must be awaiting-review`);
+      throw new PhaseTransitionError(taskId, phase, 'awaiting-review', 'revise spec');
     }
     const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, 'awaiting-review');
     await this._autoReviseSpec(pipeline);
@@ -346,7 +354,7 @@ export class Orchestrator {
   async markTaskDone(taskId: string): Promise<void> {
     // Snapshot task data before deleting the directory (needed for fallback).
     const task = this.taskStore.getById(taskId);
-    if (!task) throw new Error(`Task ${taskId} not found`);
+    if (!task) throw new TaskNotFoundError(taskId);
 
     // Guard: refuse to mark a PR-routed task done until the PR has actually
     // merged. Without this, clicking "Mark as Done" (the button is enabled
@@ -490,8 +498,9 @@ export class Orchestrator {
   }
   private restorePipeline(taskId: string, requiredPhase: PipelinePhase): TaskPipeline {
     const task = this.taskStore.getById(taskId);
-    if (!task || task.phase !== requiredPhase) {
-      throw new Error(`Task ${taskId} is not ${requiredPhase}`);
+    if (!task) throw new TaskNotFoundError(taskId);
+    if (task.phase !== requiredPhase) {
+      throw new PhaseTransitionError(taskId, task.phase, requiredPhase, 'restore pipeline');
     }
     const branch = task.branch ?? `feat/${slugify(task.description)}`;
     const slug = branch.replace(/^feat\//, '');
@@ -572,7 +581,7 @@ export class Orchestrator {
    */
   async resumeTask(taskId: string): Promise<void> {
     const task = this.taskStore.getById(taskId);
-    if (!task) throw new Error(`Task ${taskId} not found`);
+    if (!task) throw new TaskNotFoundError(taskId);
 
     const dir = this.taskStore.getDirById(taskId);
 

@@ -9,6 +9,7 @@
 import { appendFileSync } from 'fs';
 import path from 'path';
 import { processManager } from '../process-manager';
+import { SessionExitedError } from './errors';
 
 import type { TaskStore } from '../task-store';
 import type { TaskPipeline } from './types';
@@ -91,7 +92,7 @@ export function waitForCompletion(
       if (sessionLimitResetsAt) reject(new RateLimitError(sessionLimitResetsAt));
       else if (code === 0 || code === null) resolve();
       else if (rateLimitResetsAt) reject(new RateLimitError(rateLimitResetsAt));
-      else reject(new Error(`Session exited with code ${code}`));
+      else reject(new SessionExitedError(code));
     };
 
     processManager.on('event', onEvent);

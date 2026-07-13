@@ -12,6 +12,7 @@ import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody }
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
 import { updateSessionMap } from './helpers';
+import { WorktreeError, PipelineConfigError } from './errors';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
 import type { TaskPipeline, SessionOptsResult } from './types';
@@ -169,7 +170,7 @@ export async function runPlanPhase(
 
   if (!existsSync(pipeline.worktreePath)) {
     if (path.resolve(pipeline.worktreePath) === path.resolve(deps.projectRoot)) {
-      throw new Error('Refusing to create worktree at project root — this would destroy the repository');
+      throw new WorktreeError('Refusing to create worktree at project root — this would destroy the repository', 'WORKTREE_AT_ROOT');
     }
     try {
       deps.execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], deps.projectRoot);
@@ -214,10 +215,11 @@ export async function runMergePhase(
     { projectRoot: deps.projectRoot, execGit: deps.execGit, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
   );
   if (!rebaseOk) {
-    throw new Error(
+    throw new PipelineConfigError(
       `Rebase onto latest ${baseBranch} failed with conflicts that could not be resolved. ` +
       `The target branch has likely diverged too far from ${baseBranch}. ` +
-      `Consider stopping and restarting the task to recreate the worktree from the latest ${baseBranch}.`
+      `Consider stopping and restarting the task to recreate the worktree from the latest ${baseBranch}.`,
+      'REBASE_CONFLICT_UNRESOLVABLE',
     );
   }
 
@@ -242,7 +244,7 @@ export async function runMergePhase(
     appendFileSync(logFile, sensorRunSummary(mergeResult));
     if (!mergeResult.allPassed) {
       const failMsg = mergeResult.reports.filter(r => !r.passed).map(r => r.sensor + ': ' + (r.error || 'exit ' + r.exitCode)).join('; ');
-      throw new Error('Pre-merge sensors failed: ' + failMsg);
+      throw new PipelineConfigError('Pre-merge sensors failed: ' + failMsg, 'PRE_MERGE_SENSORS_FAILED');
     }
   }
 
