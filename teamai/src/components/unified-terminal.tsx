@@ -240,6 +240,7 @@ export function UnifiedTerminal({
     let terminal: Terminal;
     let fitAddon: FitAddon;
     let observer: ResizeObserver;
+    let cancelled = false;
 
     liveWrittenRef.current = 0;
 
@@ -247,7 +248,7 @@ export function UnifiedTerminal({
       import('@xterm/xterm'),
       import('@xterm/addon-fit'),
     ]).then(([xterm, addonFit]) => {
-      if (!container.isConnected) return;
+      if (cancelled || !container.isConnected) return;
 
       const TerminalCtor = xterm.Terminal;
       const FitAddonCtor = addonFit.FitAddon;
@@ -306,6 +307,7 @@ export function UnifiedTerminal({
     });
 
     return () => {
+      cancelled = true;
       observer?.disconnect();
       terminal?.dispose();
       termRef.current = null;
