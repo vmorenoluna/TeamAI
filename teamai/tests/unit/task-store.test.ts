@@ -7,21 +7,17 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { TaskStore, isRetryableError } from '@/lib/task-store';
-import { createTestProject } from '../utils/test-project';
+import { setupTaskStoreTest, makeTask, type TaskStoreTestEnv } from '../utils/task-store-harness';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+let env: TaskStoreTestEnv;
 let store: TaskStore;
 let root: string;
 let clean: () => void;
-
-let taskCounter = 0;
-function nextId() {
-  return `task-${++taskCounter}`;
-}
 
 function createTask(
   title = 'Test task',
@@ -29,7 +25,7 @@ function createTask(
   source?: string,
   competitiveContext?: string,
 ) {
-  return store.create(nextId(), title, description, source, competitiveContext);
+  return makeTask(store, env.nextId, title, description, source, competitiveContext);
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -74,12 +70,10 @@ describe('isRetryableError', () => {
 
 describe('TaskStore', () => {
   beforeEach(() => {
-    const project = createTestProject();
-    root = project.root;
-    clean = project.clean;
-    mkdirSync(join(root, '.teamai'), { recursive: true });
-    store = new TaskStore(root);
-    taskCounter = 0;
+    env = setupTaskStoreTest();
+    store = env.store;
+    root = env.root;
+    clean = env.clean;
   });
 
   afterEach(() => {
@@ -143,7 +137,7 @@ describe('TaskStore', () => {
     it('handles multiple tasks with distinct slugs without collisions', () => {
       // "Fix bug" → 'fix-bug', "Fix bug UI" → 'fix-bug-ui' — different slugs
       const task1 = createTask('Fix bug', 'desc');
-      const task2 = store.create(nextId(), 'Fix bug UI', 'desc');
+      const task2 = store.create(env.nextId(), 'Fix bug UI', 'desc');
 
       // Both should be retrievable (no overwrite)
       expect(store.getById(task1.id)).not.toBeNull();
