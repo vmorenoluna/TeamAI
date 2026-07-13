@@ -52,6 +52,10 @@ export interface PhaseContext {
   // ── Container / worktree ──
   toAgentPath: (hostPath: string) => string;
   patchWorktreeGitFile: (hostWorktreePath: string, containerWorkspace: string) => void;
+  /** Restore host-side paths in a worktree .git file (used by tests + artifact-commit). */
+  restoreWorktreeGitFileToHostPaths: (hostWorktreePath: string) => void;
+  /** Get GIT_DIR / GIT_WORK_TREE env vars for worktree git commands. */
+  worktreeGitEnv: (hostCwd: string, containerWs?: string) => Record<string, string>;
   isWorktreeHealthy: (worktreePath: string) => boolean;
   cleanStaleSubtaskWorktrees: (pipeline: TaskPipeline) => void;
   removeWorktree: (taskId: string) => void;

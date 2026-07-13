@@ -164,7 +164,7 @@ describe('_commitArtifactsToWorktree', () => {
 
     mockExecFileSync.mockReturnValue('');
 
-    (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
+    (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline);
 
     // Verify target directory was created
     const targetDir = join(worktreePath, '.teamai', basename(pipeline.specPath as string));
@@ -231,7 +231,7 @@ describe('_commitArtifactsToWorktree', () => {
       worktreePath,
     });
 
-    (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
+    (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline);
 
     // Should NOT have called git at all
     const gitCalls = mockExecFileSync.mock.calls.filter(
@@ -260,7 +260,7 @@ describe('_commitArtifactsToWorktree', () => {
 
     // _phaseHeader catches the write failure, but the appendFileSync at
     // the copied===0 branch does not — it throws ENOENT.
-    expect(() => (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline)).toThrow();
+    expect(() => (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline)).toThrow();
   });
 
   // ── Gitignore-blocked ─────────────────────────────────────────────
@@ -291,7 +291,7 @@ describe('_commitArtifactsToWorktree', () => {
     });
 
     // Should NOT throw
-    expect(() => (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline)).not.toThrow();
+    expect(() => (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline)).not.toThrow();
 
     // Log should contain the gitignore warning
     const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
@@ -330,7 +330,7 @@ describe('_commitArtifactsToWorktree', () => {
     });
 
     // Should NOT throw
-    expect(() => (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline)).not.toThrow();
+    expect(() => (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline)).not.toThrow();
 
     // Log should indicate already committed
     const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
@@ -361,7 +361,7 @@ describe('_commitArtifactsToWorktree', () => {
       throw new Error('fatal: not a git repository');
     });
 
-    expect(() => (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline)).toThrow(
+    expect(() => (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline)).toThrow(
       'not a git repository'
     );
   });
@@ -393,7 +393,7 @@ describe('_commitArtifactsToWorktree', () => {
       return '';
     });
 
-    expect(() => (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline)).toThrow(
+    expect(() => (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline)).toThrow(
       'unable to create commit'
     );
   });
@@ -429,7 +429,7 @@ describe('_commitArtifactsToWorktree', () => {
 
     mockExecFileSync.mockReturnValue('');
 
-    (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
+    (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline);
 
     const targetDir = join(worktreePath, '.teamai', basename(pipeline.specPath as string));
 
@@ -471,7 +471,7 @@ describe('_commitArtifactsToWorktree', () => {
 
     mockExecFileSync.mockReturnValue('');
 
-    (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
+    (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline);
 
     const targetDir = join(worktreePath, '.teamai', basename(pipeline.specPath as string));
 
@@ -538,7 +538,7 @@ describe('_commitArtifactsToWorktree', () => {
 
     mockExecFileSync.mockReturnValue('');
 
-    (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
+    (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline);
 
     const targetDir = join(worktreePath, '.teamai', basename(pipeline.specPath as string));
 
@@ -603,7 +603,7 @@ describe('_commitArtifactsToWorktree', () => {
 
     mockExecFileSync.mockReturnValue('');
 
-    (orch as unknown as AnyOrch)._commitArtifactsToWorktree(pipeline);
+    (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline);
 
     const targetDir = join(worktreePath, '.teamai', basename(pipeline.specPath as string));
 

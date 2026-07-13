@@ -369,7 +369,7 @@ describe('Crash Recovery Integration', () => {
       };
 
       // Save state before crash
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       // Verify state file exists on disk
       const statePath = join(specPath, '.pipeline_state.json');
@@ -405,7 +405,7 @@ describe('Crash Recovery Integration', () => {
         sessionId: 'sess-to-clean',
       };
 
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       const statePath = join(specPath, '.pipeline_state.json');
       expect(existsSync(statePath)).toBe(true);
@@ -459,7 +459,7 @@ describe('Crash Recovery Integration', () => {
         maxQaAttempts: 3,
         sessionId: 'sess-1',
       };
-      (orch as AnyOrch)._savePipelineState(pipeline1);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline1);
 
       // Second save (phase: implement, different sessionId)
       const pipeline2 = {
@@ -469,7 +469,7 @@ describe('Crash Recovery Integration', () => {
         qaAttempt: 1,
         mergeStrategy: 'local-merge' as const,
       };
-      (orch as AnyOrch)._savePipelineState(pipeline2);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline2);
 
       // Crash and recover — should see latest state
       vi.resetModules();
@@ -518,7 +518,7 @@ describe('Crash Recovery Integration', () => {
       const LAST = 'UNIQUE_TAIL_'.repeat(4616); // ~60 KB (13 chars × 4616 = 60008)
       writeFileSync(logFile, PAD + LAST);
 
-      (orch as AnyOrch)._rotateOutputLog(logFile);
+      (orch as AnyOrch)._ctx.rotateOutputLog(logFile);
 
       const after = readFileSync(logFile, 'utf-8');
       // Should contain truncation marker
@@ -537,7 +537,7 @@ describe('Crash Recovery Integration', () => {
       const content = 'small log content\n'.repeat(100);
       writeFileSync(logFile, content);
 
-      (orch as AnyOrch)._rotateOutputLog(logFile);
+      (orch as AnyOrch)._ctx.rotateOutputLog(logFile);
 
       const after = readFileSync(logFile, 'utf-8');
       // Content should be unchanged
@@ -550,7 +550,7 @@ describe('Crash Recovery Integration', () => {
       expect(existsSync(logFile)).toBe(false);
 
       expect(() => {
-        (orch as AnyOrch)._rotateOutputLog(logFile);
+        (orch as AnyOrch)._ctx.rotateOutputLog(logFile);
       }).not.toThrow();
     });
   });
@@ -589,7 +589,7 @@ describe('Crash Recovery Integration', () => {
         sessionId: 'sess-atomic',
       };
 
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       const tmpPath = join(specPath, '.pipeline_state.json.tmp');
       const statePath = join(specPath, '.pipeline_state.json');
@@ -710,7 +710,7 @@ describe('Crash Recovery Integration', () => {
         sessionId: 'sess-qa-crash',
       };
 
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       // Crash
       vi.resetModules();
@@ -751,7 +751,7 @@ describe('Crash Recovery Integration', () => {
     it('phase persists as qa-review after crash (via _persistAndEmitPhase)', async () => {
       // Simulate: _persistAndEmitPhase was called at the start of runQaReview,
       // which atomically wrote phase to task.json, then crash happened.
-      (orch as AnyOrch)._persistAndEmitPhase({
+      (orch as AnyOrch)._ctx.persistAndEmitPhase({
         taskId,
         description: 'phase test',
         phase: 'qa-review',
@@ -794,11 +794,11 @@ describe('Crash Recovery Integration', () => {
         maxQaAttempts: 3,
         sessionId: 'sess-run-task-save',
       };
-      (orch as AnyOrch)._savePipelineState(preIncrement);
+      (orch as AnyOrch)._ctx.savePipelineState(preIncrement);
 
       // runQaReview increments qaAttempt and now calls _savePipelineState (the fix)
       preIncrement.qaAttempt++; // now 1
-      (orch as AnyOrch)._savePipelineState(preIncrement); // the new _savePipelineState call
+      (orch as AnyOrch)._ctx.savePipelineState(preIncrement); // the new _savePipelineState call
 
       // Crash
       vi.resetModules();
@@ -827,7 +827,7 @@ describe('Crash Recovery Integration', () => {
         maxQaAttempts: 3,
         sessionId: 'sess-early-qa',
       };
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       const reportPath = join(specPath, 'qa_report.json');
       expect(existsSync(reportPath)).toBe(false);
@@ -907,11 +907,11 @@ describe('Crash Recovery Integration', () => {
         maxQaAttempts: 3,
         sessionId: 'sess-merge-crash',
       };
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       // Verify worktree exists before crash
       expect(existsSync(worktreePath)).toBe(true);
-      expect((orch as AnyOrch)._isWorktreeHealthy(worktreePath)).toBe(true);
+      expect((orch as AnyOrch)._ctx.isWorktreeHealthy(worktreePath)).toBe(true);
 
       // Crash
       vi.resetModules();
@@ -945,7 +945,7 @@ describe('Crash Recovery Integration', () => {
         maxQaAttempts: 3,
         sessionId: 'sess-merge-partial',
       };
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       // Verify worktree is gone but branch may still exist
       expect(existsSync(worktreePath)).toBe(false);
@@ -977,7 +977,7 @@ describe('Crash Recovery Integration', () => {
       const recoveredOrch = getOrchestrator(testDir);
 
       // Worktree health check should return false
-      expect((recoveredOrch as AnyOrch)._isWorktreeHealthy(worktreePath)).toBe(false);
+      expect((recoveredOrch as AnyOrch)._ctx.isWorktreeHealthy(worktreePath)).toBe(false);
     });
 
     it('pipeline state merge phase survives crash', async () => {
@@ -993,7 +993,7 @@ describe('Crash Recovery Integration', () => {
         mergeStrategy: 'local-merge' as const,
         sessionId: 'sess-merge-state',
       };
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       // Crash
       vi.resetModules();
@@ -1025,7 +1025,7 @@ describe('Crash Recovery Integration', () => {
       const recoveredOrch = getOrchestrator(testDir);
 
       // Log rotation should be a no-op for small files
-      (recoveredOrch as AnyOrch)._rotateOutputLog(logFile);
+      (recoveredOrch as AnyOrch)._ctx.rotateOutputLog(logFile);
       const after = readFileSync(logFile, 'utf-8');
       expect(after).toContain('Merged feature branch into master');
     });
@@ -1072,7 +1072,7 @@ describe('Crash Recovery Integration', () => {
       const recoveredOrch = getOrchestrator(testDir);
 
       // _extractPrUrl should find the URL in the log
-      const prUrl = (recoveredOrch as AnyOrch)._extractPrUrl(logFile);
+      const prUrl = (recoveredOrch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(prUrl).toBe('https://github.com/teamai-org/TeamAI/pull/42');
     });
 
@@ -1090,7 +1090,7 @@ describe('Crash Recovery Integration', () => {
       const { getOrchestrator } = await import('@/lib/orchestrator');
       const recoveredOrch = getOrchestrator(testDir);
 
-      const prUrl = (recoveredOrch as AnyOrch)._extractPrUrl(logFile);
+      const prUrl = (recoveredOrch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(prUrl).toBe('https://gitlab.com/teamai-org/TeamAI/-/merge_requests/17');
     });
 
@@ -1105,7 +1105,7 @@ describe('Crash Recovery Integration', () => {
       const { getOrchestrator } = await import('@/lib/orchestrator');
       const recoveredOrch = getOrchestrator(testDir);
 
-      const prUrl = (recoveredOrch as AnyOrch)._extractPrUrl(logFile);
+      const prUrl = (recoveredOrch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(prUrl).toBeNull();
     });
 
@@ -1119,7 +1119,7 @@ describe('Crash Recovery Integration', () => {
       const { getOrchestrator } = await import('@/lib/orchestrator');
       const recoveredOrch = getOrchestrator(testDir);
 
-      const prUrl = (recoveredOrch as AnyOrch)._extractPrUrl(logFile);
+      const prUrl = (recoveredOrch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(prUrl).toBeNull();
     });
 
@@ -1137,7 +1137,7 @@ describe('Crash Recovery Integration', () => {
         sessionId: 'sess-pr-crash',
       };
 
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       // Crash
       vi.resetModules();
@@ -1156,7 +1156,7 @@ describe('Crash Recovery Integration', () => {
     it('pipeline state create-pr phase survives crash', async () => {
       // Simulate: _persistAndEmitPhase committed create-pr to task.json,
       // then _savePipelineState checkpointed, then crash.
-      (orch as AnyOrch)._persistAndEmitPhase({
+      (orch as AnyOrch)._ctx.persistAndEmitPhase({
         taskId,
         description: 'pr phase test',
         phase: 'create-pr',
@@ -1178,7 +1178,7 @@ describe('Crash Recovery Integration', () => {
         maxQaAttempts: 3,
         sessionId: 'sess-pr-phase',
       };
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       // Crash
       vi.resetModules();
@@ -1220,11 +1220,11 @@ describe('Crash Recovery Integration', () => {
       const recoveredOrch = getOrchestrator(testDir);
 
       // PR URL should be extractable
-      const prUrl = (recoveredOrch as AnyOrch)._extractPrUrl(logFile);
+      const prUrl = (recoveredOrch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(prUrl).toBe('https://github.com/teamai-org/TeamAI/pull/99');
 
       // Log rotation should be a no-op (under threshold)
-      (recoveredOrch as AnyOrch)._rotateOutputLog(logFile);
+      (recoveredOrch as AnyOrch)._ctx.rotateOutputLog(logFile);
       const after = readFileSync(logFile, 'utf-8');
       expect(after).toContain('PR will be conflict-free');
       expect(after).toContain('pull/99');
@@ -1272,7 +1272,7 @@ describe('Crash Recovery Integration', () => {
         mergeStrategy: 'pull-request' as const,
         sessionId: 'sess-full-cycle',
       };
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       // 3. Simulate large output.log (~180KB, with tail > 50KB so rotation
       //    drops all padding).
@@ -1304,7 +1304,7 @@ describe('Crash Recovery Integration', () => {
       expect(restored!.qaAttempt).toBe(1);
 
       // 8. VERIFY output.log rotation works
-      (recoveredOrch as AnyOrch)._rotateOutputLog(logFile);
+      (recoveredOrch as AnyOrch)._ctx.rotateOutputLog(logFile);
       const afterLog = readFileSync(logFile, 'utf-8');
       expect(afterLog).toContain('LOG TRUNCATED');
       expect(afterLog).toContain('IMPORTANT_TAIL_DATA');

@@ -201,7 +201,7 @@ describe('_restoreHumanFeedbackFromSnapshot', () => {
     const { taskDir } = makeProject();    const snapshotContent = '# Human Review Feedback\n\nFix alignment on mobile';
   writeFileSync(join(taskDir, 'human_feedback_before_bounce.md'), snapshotContent);
 
-    (orch as any)._restoreHumanFeedbackFromSnapshot(taskDir);
+    (orch as any)._ctx.restoreHumanFeedbackFromSnapshot(taskDir);
 
     const feedbackPath = join(taskDir, 'human_feedback.md');
     expect(existsSync(feedbackPath)).toBe(true);
@@ -214,7 +214,7 @@ describe('_restoreHumanFeedbackFromSnapshot', () => {
     writeFileSync(join(taskDir, 'human_feedback.md'), existingContent);
     writeFileSync(join(taskDir, 'human_feedback_before_bounce.md'), '# Human Review Feedback\n\nSnapshot content');
 
-    (orch as any)._restoreHumanFeedbackFromSnapshot(taskDir);
+    (orch as any)._ctx.restoreHumanFeedbackFromSnapshot(taskDir);
 
     // Original file should be unchanged
     expect(readFileSync(join(taskDir, 'human_feedback.md'), 'utf-8')).toBe(existingContent);
@@ -223,7 +223,7 @@ describe('_restoreHumanFeedbackFromSnapshot', () => {
   it('does nothing when snapshot does not exist', () => {
     const { taskDir } = makeProject();
 
-    (orch as any)._restoreHumanFeedbackFromSnapshot(taskDir);
+    (orch as any)._ctx.restoreHumanFeedbackFromSnapshot(taskDir);
 
     expect(existsSync(join(taskDir, 'human_feedback.md'))).toBe(false);
   });
@@ -231,7 +231,7 @@ describe('_restoreHumanFeedbackFromSnapshot', () => {
   it('does not throw when specPath is empty/missing', () => {
     const emptyDir = join(testDir, 'nonexistent');
 
-    expect(() => (orch as any)._restoreHumanFeedbackFromSnapshot(emptyDir)).not.toThrow();
+    expect(() => (orch as any)._ctx.restoreHumanFeedbackFromSnapshot(emptyDir)).not.toThrow();
   });
 });
 
@@ -244,11 +244,11 @@ describe('runImplement — safety guard creates missing snapshot', () => {
 
     // Mock git/worktree operations so runImplement doesn't actually run git commands
     vi.spyOn(orch as any, '_execGit').mockReturnValue(undefined);
-    vi.spyOn(orch as any, 'waitForCompletion').mockResolvedValue(undefined);
-    vi.spyOn(orch as any, '_persistAndEmitPhase').mockReturnValue(undefined);
+    vi.spyOn((orch as any)._ctx, 'waitForCompletion').mockResolvedValue(undefined);
+    vi.spyOn((orch as any)._ctx, 'persistAndEmitPhase').mockReturnValue(undefined);
     vi.spyOn(orch as any, 'advancePhase').mockReturnValue(undefined);
-    vi.spyOn(orch as any, '_savePipelineState').mockReturnValue(undefined);
-    vi.spyOn(orch as any, '_phaseHeader').mockReturnValue(undefined);
+    vi.spyOn((orch as any)._ctx, 'savePipelineState').mockReturnValue(undefined);
+    vi.spyOn((orch as any)._ctx, 'phaseHeader').mockReturnValue(undefined);
     vi.spyOn(orch as any, 'executePhase').mockResolvedValue(undefined);
     mockCreateSession.mockResolvedValue('sess-impl');
 

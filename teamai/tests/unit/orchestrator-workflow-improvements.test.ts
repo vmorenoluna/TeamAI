@@ -4,11 +4,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
-import { randomUUID } from 'crypto';
-import { execFileSync } from 'child_process';
 
-import { createFireEvent, makePipeline, AnyOrch } from '../utils/orchestrator-harness';
+import { createFireEvent, makePipeline, AnyOrch, setupTestProject, makeOrch } from '../utils/orchestrator-harness';
 
 // ── Hoisted mocks ──
 
@@ -82,50 +79,6 @@ import { readContainerConfig, containerManager, hostToContainerPath, dockerAvail
 
 const fireEvent = createFireEvent(onHandlers);
 
-function setupTestProject() {
-  const root = join(tmpdir(), `teamai-wfi-${randomUUID().slice(0, 8)}`);
-  mkdirSync(root, { recursive: true });
-
-  try {
-    execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['config', 'user.email', 'test@teamai.dev'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['config', 'user.name', 'TeamAI Test'], { cwd: root, stdio: 'ignore' });
-    writeFileSync(join(root, '.gitkeep'), '');
-    execFileSync('git', ['add', '.gitkeep'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['commit', '-m', 'initial'], { cwd: root, stdio: 'ignore' });
-  } catch { /* git might not be available */ }
-
-  mkdirSync(join(root, '.teamai'), { recursive: true });
-  writeFileSync(join(root, '.teamai', 'pipeline.json'), JSON.stringify({ maxQaAttempts: 3, parallelSubtasks: true }));
-
-  const taskId = randomUUID();
-  const taskDir = join(root, '.teamai', taskId);
-  mkdirSync(taskDir, { recursive: true });
-
-  writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
-    id: taskId, title: 'Test', description: 'Test task', phase: 'backlog',
-    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-  }));
-
-  const slug = randomUUID().slice(0, 8);
-  const branchName = `feat-${slug}`;
-
-  const clean = () => {
-    onHandlers.clear();
-    vi.clearAllMocks();
-    if (existsSync(root)) rmSync(root, { recursive: true, force: true });
-  };
-
-  return { root, taskId, taskDir, branchName, slug, clean };
-}
-
-function makeOrch(root: string): any {
-  const orch = getOrchestrator(root);
-  (orch as any).pipelines.clear();
-  (orch as any).activeTasks.clear();
-  return orch;
-}
-
 describe('Workflow Improvements', () => {
   let testData: ReturnType<typeof setupTestProject>;
 
@@ -141,7 +94,7 @@ describe('Workflow Improvements', () => {
   });
 
   afterEach(() => {
-    if (testData) testData.clean();
+    if (testData) testData.clean(onHandlers);
   });
 
   // ── Improvement 1: head_at_review SHA stamping ──────────────────
@@ -149,7 +102,7 @@ describe('Workflow Improvements', () => {
   describe('Improvement 1: SHA stamping', () => {
     it('stamps head_at_review sha into qa_report.json after QA completes', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
@@ -201,7 +154,7 @@ describe('Workflow Improvements', () => {
   describe('Improvement 4: FAIL-type router', () => {
     it('logs cleanup requirements when fail_type is cleanup', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
@@ -260,7 +213,7 @@ describe('Workflow Improvements', () => {
 
     it('routes artifact-cleanup failures and includes fail_type in qa_feedback.md', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
@@ -331,7 +284,7 @@ describe('Workflow Improvements', () => {
   describe('Improvement 6: QA session budget cap', () => {
     it('re-throws RateLimitError instead of treating as timeout', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
@@ -390,7 +343,7 @@ describe('Workflow Improvements', () => {
   describe('Verification script subtask', () => {
     it('includes script-run instruction from plan subtask in coder prompt', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec\n\nAcceptance criteria:\n- Post-fix benchmark exits with < 20 failures');
 
@@ -462,7 +415,7 @@ describe('Workflow Improvements', () => {
   describe('Sensor gate', () => {
     it('bounces to implement with fail_type: cleanup when sensor_report failures exist', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
 
@@ -549,7 +502,7 @@ describe('Workflow Improvements', () => {
 
     it('proceeds to qa-review when no sensor_report files exist', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({

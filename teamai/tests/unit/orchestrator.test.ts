@@ -6,9 +6,8 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, unlinkSync 
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
-import { execFileSync } from 'child_process';
 
-import { createFireEvent, makePipeline, AnyOrch } from '../utils/orchestrator-harness';
+import { createFireEvent, makePipeline, AnyOrch, setupTestProject, makeOrch } from '../utils/orchestrator-harness';
 
 // ── Hoisted mocks for shared state ──
 
@@ -85,63 +84,6 @@ import { readContainerConfig, containerManager, hostToContainerPath, dockerAvail
 
 const fireEvent = createFireEvent(onHandlers);
 
-// ── Helpers ──
-
-function setupTestProject(options?: { initGit?: boolean; containerEnabled?: boolean }): { root: string; taskId: string; taskDir: string; branchName: string; slug: string; clean: () => void } {
-  const root = join(tmpdir(), `teamai-ocrh-${randomUUID().slice(0, 8)}`);
-  mkdirSync(root, { recursive: true });
-
-  // Init git repo (needed for worktree operations)
-  if (options?.initGit !== false) {
-    try {
-      execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
-      execFileSync('git', ['config', 'user.email', 'test@teamai.dev'], { cwd: root, stdio: 'ignore' });
-      execFileSync('git', ['config', 'user.name', 'TeamAI Test'], { cwd: root, stdio: 'ignore' });
-      writeFileSync(join(root, '.gitkeep'), '');
-      execFileSync('git', ['add', '.gitkeep'], { cwd: root, stdio: 'ignore' });
-      execFileSync('git', ['commit', '-m', 'initial'], { cwd: root, stdio: 'ignore' });
-    } catch { /* git might not be available in test env */ }
-  }
-
-  mkdirSync(join(root, '.teamai'), { recursive: true });
-
-  if (options?.containerEnabled) {
-    writeFileSync(join(root, '.teamai', 'container.json'), JSON.stringify({ enabled: true }));
-  }
-
-  const taskId = randomUUID();
-  const taskDir = join(root, '.teamai', taskId);
-  mkdirSync(taskDir, { recursive: true });
-
-  writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
-    id: taskId,
-    title: 'Test Task',
-    description: 'A test task for full coverage',
-    phase: 'backlog',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }));
-
-  const slug = randomUUID().slice(0, 8);
-  const branchName = `feat-${slug}`;
-
-  const clean = () => {
-    onHandlers.clear();
-    vi.clearAllMocks();
-    if (existsSync(root)) rmSync(root, { recursive: true, force: true });
-  };
-
-  return { root, taskId, taskDir, branchName, slug, clean };
-}
-
-/** Returns a fresh orchestrator for the given project root. */
-function makeOrch(root: string): Orchestrator {
-  const orch = getOrchestrator(root);
-  (orch as AnyOrch).pipelines.clear();
-  (orch as AnyOrch).activeTasks.clear();
-  return orch;
-}
-
 // ── Tests ──
 
 describe('Orchestrator', () => {
@@ -161,7 +103,7 @@ describe('Orchestrator', () => {
   });
 
   afterEach(() => {
-    if (testData) testData.clean();
+    if (testData) testData.clean(onHandlers);
     vi.resetModules();
   });
 
@@ -172,7 +114,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       rmSync(join(testData.root, '.teamai', 'pipeline.json'), { force: true });
 
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const config = (orch as AnyOrch).getPipelineConfig();
 
       expect(config.maxQaAttempts).toBe(3);
@@ -186,7 +128,7 @@ describe('Orchestrator', () => {
         parallelSubtasks: false,
       }));
 
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const config = (orch as AnyOrch).getPipelineConfig();
 
       expect(config.maxQaAttempts).toBe(5);
@@ -197,7 +139,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       writeFileSync(join(testData.root, '.teamai', 'pipeline.json'), '{invalid}');
 
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const config = (orch as AnyOrch).getPipelineConfig();
 
       expect(config.maxQaAttempts).toBe(3);
@@ -210,7 +152,7 @@ describe('Orchestrator', () => {
   describe('moveTaskToPhase — no-run phases', () => {
     it('moves to backlog without spawning', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       await orch.moveTaskToPhase(testData.taskId, 'backlog');
 
@@ -222,7 +164,7 @@ describe('Orchestrator', () => {
 
     it('moves to done without spawning', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       await orch.moveTaskToPhase(testData.taskId, 'done');
 
@@ -234,7 +176,7 @@ describe('Orchestrator', () => {
 
     it('throws for nonexistent task', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       await expect(orch.moveTaskToPhase('nonexistent', 'spec')).rejects.toThrow('not found');
     });
@@ -245,7 +187,7 @@ describe('Orchestrator', () => {
   describe('runTask', () => {
     it('rejects when task is already active', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       (orch as AnyOrch).activeTasks.add(testData.taskId);
 
       await expect(orch.runTask(testData.taskId, 'test')).rejects.toThrow(/already running/i);
@@ -259,11 +201,11 @@ describe('Orchestrator', () => {
 
     beforeEach(() => {
       testData = setupTestProject();
-      orch = makeOrch(testData.root);
+      orch = makeOrch(testData.root, getOrchestrator);
     });
 
     it('resolves on result event', async () => {
-      const promise = (orch as AnyOrch).waitForCompletion('sess-1');
+      const promise = (orch as AnyOrch)._ctx.waitForCompletion('sess-1');
 
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
 
@@ -271,7 +213,7 @@ describe('Orchestrator', () => {
     });
 
     it('resolves on exit with code 0', async () => {
-      const promise = (orch as AnyOrch).waitForCompletion('sess-2');
+      const promise = (orch as AnyOrch)._ctx.waitForCompletion('sess-2');
 
       fireEvent('exit', { sessionId: 'sess-2', code: 0 });
 
@@ -279,7 +221,7 @@ describe('Orchestrator', () => {
     });
 
     it('rejects on exit with non-zero code', async () => {
-      const promise = (orch as AnyOrch).waitForCompletion('sess-3');
+      const promise = (orch as AnyOrch)._ctx.waitForCompletion('sess-3');
 
       fireEvent('exit', { sessionId: 'sess-3', code: 1 });
 
@@ -288,7 +230,7 @@ describe('Orchestrator', () => {
 
     it('rejects with RateLimitError on rate limit event + result error', async () => {
       const now = Math.floor(Date.now() / 1000);
-      const promise = (orch as AnyOrch).waitForCompletion('sess-4');
+      const promise = (orch as AnyOrch)._ctx.waitForCompletion('sess-4');
 
       fireEvent('event', {
         sessionId: 'sess-4',
@@ -306,7 +248,7 @@ describe('Orchestrator', () => {
     });
 
     it('ignores events from other sessions', async () => {
-      const promise = (orch as AnyOrch).waitForCompletion('sess-5');
+      const promise = (orch as AnyOrch)._ctx.waitForCompletion('sess-5');
 
       // Fire event for different session — should not resolve
       fireEvent('event', { sessionId: 'other-sess', event: { type: 'result' } });
@@ -321,7 +263,7 @@ describe('Orchestrator', () => {
       // Spy on processManager.off to verify cleanup
       const offSpy = vi.spyOn(processManager, 'off');
 
-      const promise = (orch as AnyOrch).waitForCompletion('sess-cleanup');
+      const promise = (orch as AnyOrch)._ctx.waitForCompletion('sess-cleanup');
       fireEvent('event', { sessionId: 'sess-cleanup', event: { type: 'result' } });
       await promise;
 
@@ -337,13 +279,13 @@ describe('Orchestrator', () => {
   describe('cancelPipeline', () => {
     it('does nothing when no pipeline exists', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       expect(() => orch.cancelPipeline('nonexistent')).not.toThrow();
     });
 
     it('calls killSession and cleans up', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({
         taskId: testData.taskId,
         sessionId: 'sess-cancel',
@@ -360,7 +302,7 @@ describe('Orchestrator', () => {
 
     it('does not call killSession when no sessionId', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({
         taskId: testData.taskId,
         // no sessionId
@@ -378,7 +320,7 @@ describe('Orchestrator', () => {
   describe('isTaskActive', () => {
     it('returns false for unknown task', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       expect(orch.isTaskActive('unknown')).toBe(false);
     });
   });
@@ -388,7 +330,7 @@ describe('Orchestrator', () => {
   describe('approveTask', () => {
     it('throws when not awaiting review', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       await expect(orch.approveTask(testData.taskId, 'local-merge')).rejects.toThrow('cannot approve a task in backlog');
     });
   });
@@ -396,13 +338,13 @@ describe('Orchestrator', () => {
   describe('rejectTask', () => {
     it('throws when not awaiting review', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       await expect(orch.rejectTask(testData.taskId, 'bad')).rejects.toThrow('cannot reject a task in backlog');
     });
 
     it('writes feedback and resets qaAttempt when awaiting review', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       // Update the task phase since rejectTask checks taskStore, not the pipeline
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { phase: 'awaiting-review' });
@@ -438,9 +380,9 @@ describe('Orchestrator', () => {
   describe('sessionOpts', () => {
     it('includes all options when provided', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
-      const opts = (orch as AnyOrch).sessionOpts('coder', '/cwd', 'task-1', '/log.txt');
+      const opts = (orch as AnyOrch)._ctx.sessionOpts('coder', '/cwd', 'task-1', '/log.txt');
       expect(opts.taskId).toBe('task-1');
       expect(opts.role).toBe('coder');
       expect(opts.cwd).toBe('/cwd');
@@ -451,9 +393,9 @@ describe('Orchestrator', () => {
 
     it('omits logFile when not provided', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
-      const opts = (orch as AnyOrch).sessionOpts('planner', '/cwd', 'task-2');
+      const opts = (orch as AnyOrch)._ctx.sessionOpts('planner', '/cwd', 'task-2');
       expect(opts.logFile).toBeUndefined();
     });
   });
@@ -463,87 +405,87 @@ describe('Orchestrator', () => {
   describe('_extractPrUrl', () => {
     it('extracts a GitHub PR URL from the log file', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const logFile = join(testData.taskDir, 'output.log');
 
       writeFileSync(logFile, 'Created PR: https://github.com/owner/repo/pull/42\nDone!');
 
-      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      const result = (orch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(result).toBe('https://github.com/owner/repo/pull/42');
     });
 
     it('extracts a GitLab MR URL from the log file', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const logFile = join(testData.taskDir, 'output.log');
 
       writeFileSync(logFile, 'MR created: https://gitlab.com/group/project/-/merge_requests/99');
 
-      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      const result = (orch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(result).toBe('https://gitlab.com/group/project/-/merge_requests/99');
     });
 
     it('extracts a Bitbucket PR URL from the log file', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const logFile = join(testData.taskDir, 'output.log');
 
       writeFileSync(logFile, 'https://bitbucket.org/team/repo/pull-requests/7 created');
 
-      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      const result = (orch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(result).toBe('https://bitbucket.org/team/repo/pull-requests/7');
     });
 
     it('returns null when no PR URL is found', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const logFile = join(testData.taskDir, 'output.log');
 
       writeFileSync(logFile, 'Task completed successfully. No URLs here.');
 
-      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      const result = (orch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(result).toBeNull();
     });
 
     it('returns null when the log file does not exist', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const logFile = join(testData.taskDir, 'nonexistent.log');
 
-      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      const result = (orch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(result).toBeNull();
     });
 
     it('returns the first match when multiple PR URLs exist', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const logFile = join(testData.taskDir, 'output.log');
 
       writeFileSync(logFile, 'First: https://github.com/owner/repo/pull/1\nSecond: https://github.com/other/repo/pull/2');
 
-      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      const result = (orch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(result).toBe('https://github.com/owner/repo/pull/1');
     });
 
     it('handles http URLs (not just https)', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const logFile = join(testData.taskDir, 'output.log');
 
       writeFileSync(logFile, 'http://github.com/owner/repo/pull/99');
 
-      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      const result = (orch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(result).toBe('http://github.com/owner/repo/pull/99');
     });
 
     it('returns null for an empty log file', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const logFile = join(testData.taskDir, 'output.log');
 
       writeFileSync(logFile, '');
 
-      const result = (orch as AnyOrch)._extractPrUrl(logFile);
+      const result = (orch as AnyOrch)._ctx.extractPrUrl(logFile);
       expect(result).toBeNull();
     });
   });
@@ -553,19 +495,19 @@ describe('Orchestrator', () => {
   describe('_phaseHeader', () => {
     it('handles write failure gracefully', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       expect(() =>
-        (orch as AnyOrch)._phaseHeader('/nonexistent/deep/path/output.log', 'spec'),
+        (orch as AnyOrch)._ctx.phaseHeader('/nonexistent/deep/path/output.log', 'spec'),
       ).not.toThrow();
     });
 
     it('writes to valid log path', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const logFile = join(testData.taskDir, 'output.log');
 
-      expect(() => (orch as AnyOrch)._phaseHeader(logFile, 'plan')).not.toThrow();
+      expect(() => (orch as AnyOrch)._ctx.phaseHeader(logFile, 'plan')).not.toThrow();
 
       const content = readFileSync(logFile, 'utf-8');
       expect(content).toContain('▶ PLAN');
@@ -577,7 +519,7 @@ describe('Orchestrator', () => {
   describe('advancePhase', () => {
     it('updates phase and emits phase-change', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId });
 
       (orch as AnyOrch).advancePhase(pipeline, 'plan');
@@ -591,7 +533,7 @@ describe('Orchestrator', () => {
 
     it('emits for all phase transitions', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'backlog' });
       mockEmit.mockClear();
 
@@ -612,31 +554,31 @@ describe('Orchestrator', () => {
   describe('_rotateOutputLog', () => {
     it('does nothing when the log file does not exist', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       expect(() => {
-        (orch as AnyOrch)._rotateOutputLog('/nonexistent/log/file.log');
+        (orch as AnyOrch)._ctx.rotateOutputLog('/nonexistent/log/file.log');
       }).not.toThrow();
     });
 
     it('does nothing when log file is under the size threshold', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const logFile = join(testData.root, '.teamai', 'small-log.log');
       writeFileSync(logFile, 'a'.repeat(1000));
       const before = readFileSync(logFile, 'utf-8');
-      (orch as AnyOrch)._rotateOutputLog(logFile);
+      (orch as AnyOrch)._ctx.rotateOutputLog(logFile);
       const after = readFileSync(logFile, 'utf-8');
       expect(after).toBe(before);
     });
 
     it('truncates to last ~50KB when the log exceeds 100KB', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const logFile = join(testData.root, '.teamai', 'large-log.log');
       const PAD = 'x'.repeat(102400);
       const SUFFIX = 'Y'.repeat(51200);
       writeFileSync(logFile, PAD + SUFFIX);
-      (orch as AnyOrch)._rotateOutputLog(logFile);
+      (orch as AnyOrch)._ctx.rotateOutputLog(logFile);
       const after = readFileSync(logFile, 'utf-8');
       expect(after.length).toBeGreaterThan(49000);
       expect(after.length).toBeLessThan(52000);
@@ -647,9 +589,9 @@ describe('Orchestrator', () => {
 
     it('does not throw on permission errors (best-effort)', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       expect(() => {
-        (orch as AnyOrch)._rotateOutputLog('/root/forbidden/log.log');
+        (orch as AnyOrch)._ctx.rotateOutputLog('/root/forbidden/log.log');
       }).not.toThrow();
     });
   });
@@ -659,7 +601,7 @@ describe('Orchestrator', () => {
   describe('_persistAndEmitPhase', () => {
     it('persists the current pipeline phase to disk and emits phase-change', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = {
         taskId: testData.taskId,
         description: 'test',
@@ -672,7 +614,7 @@ describe('Orchestrator', () => {
       };
 
       mockEmit.mockClear();
-      (orch as AnyOrch)._persistAndEmitPhase(pipeline);
+      (orch as AnyOrch)._ctx.persistAndEmitPhase(pipeline);
 
       expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId: testData.taskId,
@@ -685,7 +627,7 @@ describe('Orchestrator', () => {
 
     it('persists different phases correctly', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = {
         taskId: testData.taskId,
         description: 'test',
@@ -698,7 +640,7 @@ describe('Orchestrator', () => {
       };
 
       mockEmit.mockClear();
-      (orch as AnyOrch)._persistAndEmitPhase(pipeline);
+      (orch as AnyOrch)._ctx.persistAndEmitPhase(pipeline);
 
       expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId: testData.taskId,
@@ -715,7 +657,7 @@ describe('Orchestrator', () => {
   describe('_savePipelineState', () => {
     it('writes pipeline state to .pipeline_state.json atomically', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const statePath = join(testData.taskDir, '.pipeline_state.json');
       const tmpPath = statePath + '.tmp';
 
@@ -732,7 +674,7 @@ describe('Orchestrator', () => {
         sessionId: 'sess-123',
       };
 
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       expect(existsSync(tmpPath)).toBe(false);
       expect(existsSync(statePath)).toBe(true);
@@ -750,7 +692,7 @@ describe('Orchestrator', () => {
 
     it('writes pipeline state with undefined sessionId gracefully', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const statePath = join(testData.taskDir, '.pipeline_state.json');
 
       const pipeline = {
@@ -764,7 +706,7 @@ describe('Orchestrator', () => {
         maxQaAttempts: 3,
       };
 
-      (orch as AnyOrch)._savePipelineState(pipeline);
+      (orch as AnyOrch)._ctx.savePipelineState(pipeline);
 
       const saved = JSON.parse(readFileSync(statePath, 'utf-8'));
       expect(saved.sessionId).toBeUndefined();
@@ -774,7 +716,7 @@ describe('Orchestrator', () => {
 
     it('does not throw on permission errors (best-effort)', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = {
         taskId: testData.taskId,
         description: 'test',
@@ -787,7 +729,7 @@ describe('Orchestrator', () => {
       };
 
       expect(() => {
-        (orch as AnyOrch)._savePipelineState(pipeline);
+        (orch as AnyOrch)._ctx.savePipelineState(pipeline);
       }).not.toThrow();
     });
   });
@@ -806,14 +748,14 @@ describe('Orchestrator', () => {
     });
 
     it('returns null when no state file exists', () => {
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       expect(existsSync(statePath)).toBe(false);
       const result = (orch as AnyOrch)._restorePipelineState(testData.taskId, specPath);
       expect(result).toBeNull();
     });
 
     it('returns parsed state and cleans up the file after reading', () => {
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const state = {
         taskId: testData.taskId,
         phase: 'implement',
@@ -838,7 +780,7 @@ describe('Orchestrator', () => {
     });
 
     it('returns null for corrupt JSON (file stays on disk for debugging)', () => {
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(statePath, 'not valid json {{{');
       const result = (orch as AnyOrch)._restorePipelineState(testData.taskId, specPath);
       expect(result).toBeNull();
@@ -846,7 +788,7 @@ describe('Orchestrator', () => {
     });
 
     it('returns null for empty state file', () => {
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(statePath, '');
       const result = (orch as AnyOrch)._restorePipelineState(testData.taskId, specPath);
       expect(result).toBeNull();
@@ -858,7 +800,7 @@ describe('Orchestrator', () => {
   describe('_execGit', () => {
     it('calls git on host when container is disabled', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       mockExecFileSync.mockReturnValue('');
       (orch as AnyOrch)._execGit(['status'], testData.root);
@@ -877,7 +819,7 @@ describe('Orchestrator', () => {
         return '/workspace' + (hp === testData.root ? '' : '/cwd');
       });
 
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       mockExecFileSync.mockReturnValue('');
       (orch as AnyOrch)._execGit(['status'], testData.root);
@@ -898,7 +840,7 @@ describe('Orchestrator', () => {
       } as any);
       const mapSpy = vi.mocked(hostToContainerPath).mockReturnValue('/workspace/some/file');
 
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       mockExecFileSync.mockReturnValue('');
       // Pass an absolute path starting with projectRoot — should be mapped
@@ -925,7 +867,7 @@ describe('Orchestrator', () => {
       } as any);
       vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
 
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       mockExecFileSync.mockReturnValue('');
       // Path outside project root — should NOT be mapped
@@ -945,7 +887,7 @@ describe('Orchestrator', () => {
       // No running container
       vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
 
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       mockExecFileSync.mockReturnValue('');
       (orch as AnyOrch)._execGit(['status'], testData.root);
@@ -960,9 +902,9 @@ describe('Orchestrator', () => {
   describe('_toAgentPath', () => {
     it('returns host path unchanged when container is disabled', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
-      expect((orch as AnyOrch)._toAgentPath('/some/path')).toBe('/some/path');
+      expect((orch as AnyOrch)._ctx.toAgentPath('/some/path')).toBe('/some/path');
     });
 
     it('translates path via hostToContainerPath when container enabled and running', () => {
@@ -974,8 +916,8 @@ describe('Orchestrator', () => {
       } as any);
       vi.mocked(hostToContainerPath).mockReturnValue('/workspace/path');
 
-      const orch = makeOrch(testData.root);
-      const result = (orch as AnyOrch)._toAgentPath('/some/path');
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._ctx.toAgentPath('/some/path');
 
       expect(hostToContainerPath).toHaveBeenCalled();
       expect(result).toBe('/workspace/path');
@@ -987,7 +929,7 @@ describe('Orchestrator', () => {
   describe('getWorktreeBase', () => {
     it('returns ../worktrees when container disabled', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const base = (orch as AnyOrch).getWorktreeBase();
       expect(base).toContain('worktrees');
@@ -997,7 +939,7 @@ describe('Orchestrator', () => {
     it('returns .worktrees when container is enabled', () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const base = (orch as AnyOrch).getWorktreeBase();
       expect(base).toContain('.worktrees');
@@ -1009,7 +951,7 @@ describe('Orchestrator', () => {
   describe('getWorktreePath', () => {
     it('returns null when task has no branch', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // Task has no branch field
       expect(orch.getWorktreePath(testData.taskId)).toBeNull();
@@ -1017,7 +959,7 @@ describe('Orchestrator', () => {
 
     it('returns the worktree path when task has a branch', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // Set description and branch so getWorktreePath derives the correct directory
       const taskStore = (orch as AnyOrch).taskStore;
@@ -1035,39 +977,39 @@ describe('Orchestrator', () => {
   describe('_isWorktreeHealthy', () => {
     it('returns false when .git file does not exist', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const wtPath = join(testData.root, 'no-git');
       mkdirSync(wtPath, { recursive: true });
-      expect((orch as AnyOrch)._isWorktreeHealthy(wtPath)).toBe(false);
+      expect((orch as AnyOrch)._ctx.isWorktreeHealthy(wtPath)).toBe(false);
     });
 
     it('returns false when .git is not a worktree file (no gitdir: prefix)', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const wtPath = join(testData.root, 'bad-git-format');
       mkdirSync(wtPath, { recursive: true });
       writeFileSync(join(wtPath, '.git'), 'not a worktree file');
-      expect((orch as AnyOrch)._isWorktreeHealthy(wtPath)).toBe(false);
+      expect((orch as AnyOrch)._ctx.isWorktreeHealthy(wtPath)).toBe(false);
     });
 
     it('returns false when gitdir points to a nonexistent path', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const wtPath = join(testData.root, 'broken-gitdir');
       mkdirSync(wtPath, { recursive: true });
       writeFileSync(join(wtPath, '.git'), 'gitdir: /nonexistent/git/worktrees/test');
-      expect((orch as AnyOrch)._isWorktreeHealthy(wtPath)).toBe(false);
+      expect((orch as AnyOrch)._ctx.isWorktreeHealthy(wtPath)).toBe(false);
     });
 
     it('returns true for a valid worktree with an existing gitdir', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const wtPath = join(testData.root, 'healthy-worktree');
       mkdirSync(wtPath, { recursive: true });
       const gitdirPath = join(testData.root, 'fake-gitdir');
       mkdirSync(gitdirPath, { recursive: true });
       writeFileSync(join(wtPath, '.git'), `gitdir: ${gitdirPath}`);
-      expect((orch as AnyOrch)._isWorktreeHealthy(wtPath)).toBe(true);
+      expect((orch as AnyOrch)._ctx.isWorktreeHealthy(wtPath)).toBe(true);
     });
   });
 
@@ -1076,16 +1018,16 @@ describe('Orchestrator', () => {
   describe('removeWorktree (private, via public getWorktreePath)', () => {
     it('does not throw when worktree path does not exist on disk', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // No branch → getWorktreePath returns null → removeWorktree returns early
-      expect(() => (orch as AnyOrch).removeWorktree(testData.taskId)).not.toThrow();
+      expect(() => (orch as AnyOrch)._ctx.removeWorktree(testData.taskId)).not.toThrow();
     });
 
     // Coverage: lines 568-573 — _execGit throws, catch block handles gracefully
     it('handles _execGit failure gracefully in catch block', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // Give the task a branch so getWorktreePath returns a path
       const taskStore = (orch as AnyOrch).taskStore;
@@ -1102,7 +1044,7 @@ describe('Orchestrator', () => {
       });
 
       // Should not throw — the catch block at 571-573 handles it silently
-      expect(() => (orch as AnyOrch).removeWorktree(testData.taskId)).not.toThrow();
+      expect(() => (orch as AnyOrch)._ctx.removeWorktree(testData.taskId)).not.toThrow();
 
       // Verify _execGit was actually called (the git worktree remove command)
       expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -1128,7 +1070,7 @@ describe('Orchestrator', () => {
           return hp;
         });
 
-        const orch = makeOrch(testData.root);
+        const orch = makeOrch(testData.root, getOrchestrator);
         const taskStore = (orch as AnyOrch).taskStore;
         taskStore.update(testData.taskId, { description: testData.slug, branch: testData.branchName });
 
@@ -1137,7 +1079,7 @@ describe('Orchestrator', () => {
         mkdirSync(wtPath, { recursive: true });
 
         mockExecFileSync.mockReturnValue('');
-        (orch as AnyOrch).removeWorktree(testData.taskId);
+        (orch as AnyOrch)._ctx.removeWorktree(testData.taskId);
 
         // _execGit skips container routing for worktree commands — runs on host
         expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -1169,7 +1111,7 @@ describe('Orchestrator', () => {
           return hp;
         });
 
-        const orch = makeOrch(testData.root);
+        const orch = makeOrch(testData.root, getOrchestrator);
         const taskStore = (orch as AnyOrch).taskStore;
         taskStore.update(testData.taskId, { description: testData.slug, branch: testData.branchName });
 
@@ -1184,7 +1126,7 @@ describe('Orchestrator', () => {
           return '';
         });
 
-        (orch as AnyOrch).removeWorktree(testData.taskId);
+        (orch as AnyOrch)._ctx.removeWorktree(testData.taskId);
 
         // _execGit skips container routing for worktree commands — runs on host
         expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -1221,7 +1163,7 @@ describe('Orchestrator', () => {
           return hp;
         });
 
-        const orch = makeOrch(testData.root);
+        const orch = makeOrch(testData.root, getOrchestrator);
         const taskStore = (orch as AnyOrch).taskStore;
         taskStore.update(testData.taskId, { description: testData.slug, branch: testData.branchName });
 
@@ -1238,7 +1180,7 @@ describe('Orchestrator', () => {
           return '';
         });
 
-        (orch as AnyOrch).removeWorktree(testData.taskId);
+        (orch as AnyOrch)._ctx.removeWorktree(testData.taskId);
 
         // rmSync was called — the worktree directory should be gone
         expect(existsSync(wtPath)).toBe(false);
@@ -1268,7 +1210,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       // Write a spec.md so hasSpec is true
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec content');
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // Make createSession reject so pipeline stops at first phase
       // This lets us verify the branching logic ran without needing
@@ -1286,7 +1228,7 @@ describe('Orchestrator', () => {
       // Write both spec.md and plan.json so hasSpec=true and hasPlan=true
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [{ id: 1, title: "Test", description: "Test", files: [], acceptance_criteria: [] }] }));
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
       await orch.moveTaskToPhase(testData.taskId, 'implement').catch(() => {});
@@ -1296,7 +1238,7 @@ describe('Orchestrator', () => {
 
     it('starts from spec when neither hasSpec nor hasPlan exist', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
       await orch.moveTaskToPhase(testData.taskId, 'implement').catch(() => {});
@@ -1310,7 +1252,7 @@ describe('Orchestrator', () => {
   describe('_writeQaFeedback', () => {
     it('writes qa_feedback.md with failed criteria when report has criteria', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ specPath: testData.taskDir });
       const report = {
         overall: 'FAIL',
@@ -1323,7 +1265,7 @@ describe('Orchestrator', () => {
         ],
       };
 
-      (orch as AnyOrch)._writeQaFeedback(pipeline, report);
+      (orch as AnyOrch)._ctx.writeQaFeedback(pipeline, report);
 
       const feedbackPath = join(testData.taskDir, 'qa_feedback.md');
       expect(existsSync(feedbackPath)).toBe(true);
@@ -1337,11 +1279,11 @@ describe('Orchestrator', () => {
 
     it('handles report with no criteria or issues gracefully', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ specPath: testData.taskDir });
       const report = { overall: 'FAIL' };
 
-      (orch as AnyOrch)._writeQaFeedback(pipeline, report);
+      (orch as AnyOrch)._ctx.writeQaFeedback(pipeline, report);
 
       const feedbackPath = join(testData.taskDir, 'qa_feedback.md');
       expect(existsSync(feedbackPath)).toBe(true);
@@ -1355,7 +1297,7 @@ describe('Orchestrator', () => {
   describe('_writeCompletionSummary', () => {
     it('writes completion_summary.md with subtask status and QA report', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // Write a plan.json with mixed completed status
       const plan = {
@@ -1385,7 +1327,7 @@ describe('Orchestrator', () => {
         maxQaAttempts: 3,
       });
 
-      (orch as AnyOrch)._writeCompletionSummary(pipeline);
+      (orch as AnyOrch)._ctx.writeCompletionSummary(pipeline);
 
       const summaryPath = join(testData.taskDir, 'completion_summary.md');
       expect(existsSync(summaryPath)).toBe(true);
@@ -1403,14 +1345,14 @@ describe('Orchestrator', () => {
 
     it('handles missing plan.json gracefully', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
         qaAttempt: 1,
       });
 
-      (orch as AnyOrch)._writeCompletionSummary(pipeline);
+      (orch as AnyOrch)._ctx.writeCompletionSummary(pipeline);
 
       const summaryPath = join(testData.taskDir, 'completion_summary.md');
       expect(existsSync(summaryPath)).toBe(true);
@@ -1420,14 +1362,14 @@ describe('Orchestrator', () => {
 
     it('stores completionSummary on the task via taskStore', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
         qaAttempt: 3,
       });
 
-      (orch as AnyOrch)._writeCompletionSummary(pipeline);
+      (orch as AnyOrch)._ctx.writeCompletionSummary(pipeline);
 
       // Verify the task was updated with completionSummary
       const taskStore = (orch as AnyOrch).taskStore;
@@ -1443,7 +1385,7 @@ describe('Orchestrator', () => {
   describe('handleRateLimit', () => {
     it('updates task store with rateLimitedUntil and emits event', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId });
 
       const future = Math.floor(Date.now() / 1000) + 3600;
@@ -1459,7 +1401,7 @@ describe('Orchestrator', () => {
     // Coverage: handleRateLimit retry callback — non-RateLimitError branch (lines 505-507)
     it('advances to failed when retry encounters non-rate-limit error', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
 
       // Pipeline must be registered so handleRateLimit can re-acquire the lock
@@ -1496,7 +1438,7 @@ describe('Orchestrator', () => {
     // Coverage: handleRateLimit retry callback — RateLimitError branch (lines 501-504)
     it('re-enters handleRateLimit when retry is also rate limited', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // Use a pipeline with phase='spec' so executePhase → runSpec → createSession → waitForCompletion
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
@@ -1560,7 +1502,7 @@ describe('Orchestrator', () => {
 
     it('skips resume when task was moved to backlog during rate limit', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
 
       const taskStore = (orch as AnyOrch).taskStore;
@@ -1592,7 +1534,7 @@ describe('Orchestrator', () => {
 
     it('skips resume when pipeline was replaced (stale pipeline guard)', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipelineA = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
 
       const taskStore = (orch as AnyOrch).taskStore;
@@ -1639,7 +1581,7 @@ describe('Orchestrator', () => {
 
     it('keeps pipeline in maps after runTask catches RateLimitError (rateLimited flag fix)', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       mockCreateSession.mockResolvedValue('sess-rl-runTask');
       const runPromise = orch.runTask(testData.taskId, 'test task', 'spec').catch(() => {});
       await new Promise(r => setTimeout(r, 20));
@@ -1655,7 +1597,7 @@ describe('Orchestrator', () => {
 
     it('setTimeout stale-pipeline guard passes when pipeline remains in map', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
       (orch as AnyOrch).activeTasks.add(testData.taskId);
@@ -1689,7 +1631,7 @@ describe('Orchestrator', () => {
     // Coverage: runSpec (lines 247-261) — creates session, sends message, waits, advances
     it('runSpec creates session, sends message, and advances to plan on completion', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
@@ -1754,7 +1696,7 @@ describe('Orchestrator', () => {
   describe('runMerge', () => {
     it('merges directly via git merge --no-edit, cleans up', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -1794,7 +1736,7 @@ describe('Orchestrator', () => {
 
     it('spawns merger agent when rebase has conflicts, then direct merge succeeds', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -1849,7 +1791,7 @@ describe('Orchestrator', () => {
 
     it('throws when rebase has conflicts and merger agent also fails', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -1898,7 +1840,7 @@ describe('Orchestrator', () => {
 
     it('spawns merger agent when direct merge has conflicts', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -1946,7 +1888,7 @@ describe('Orchestrator', () => {
 
     it('does not spawn any sessions when rebase and merge both succeed (fast path)', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const slug = testData.slug;
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -1985,7 +1927,7 @@ describe('Orchestrator', () => {
   describe('runCreatePR', () => {
     it('pushes branch, creates PR via gh CLI, advances to pr-open', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature\n\nImplement this feature.');
 
       const slug = testData.slug;
@@ -2028,7 +1970,7 @@ describe('Orchestrator', () => {
 
     it('reuses existing PR URL when open PR already exists', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
 
       const slug = testData.slug;
@@ -2068,7 +2010,7 @@ describe('Orchestrator', () => {
 
     it('advances to pr-open after successful PR creation', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
 
       const slug = testData.slug;
@@ -2096,7 +2038,7 @@ describe('Orchestrator', () => {
 
     it('sets platform to undefined when remote is unknown', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
 
       const slug = testData.slug;
@@ -2127,7 +2069,7 @@ describe('Orchestrator', () => {
 
     it('spawns merger agent when rebase has conflicts, then creates PR via CLI', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
 
       const slug = testData.slug;
@@ -2192,7 +2134,7 @@ describe('Orchestrator', () => {
 
     it('falls back gracefully when merger agent cannot resolve conflicts', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
 
       const slug = testData.slug;
@@ -2244,7 +2186,7 @@ describe('Orchestrator', () => {
 
     it('does not spawn any sessions when rebase succeeds (fast path)', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
 
       const slug = testData.slug;
@@ -2284,7 +2226,7 @@ describe('Orchestrator', () => {
   describe('markTaskDone', () => {
     it('deletes live directory, attempts scoped restore, falls back to recreate task.json on fetch failure, emits once', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // Verify the task directory exists before markTaskDone
       expect(existsSync(testData.taskDir)).toBe(true);
@@ -2327,7 +2269,7 @@ describe('Orchestrator', () => {
 
     it('leaves the restored snapshot untouched when checkout succeeds (restored copy already has phase:done)', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       expect(existsSync(testData.taskDir)).toBe(true);
 
@@ -2386,7 +2328,7 @@ describe('Orchestrator', () => {
 
     it('falls back to recreating task.json when pull succeeds but restores no artifacts', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // Pull succeeds but does NOT restore the directory — e.g. the project
       // gitignores .teamai/ in-repo, so the artifact commit was skipped.
@@ -2411,7 +2353,7 @@ describe('Orchestrator', () => {
 
     it('throws when task does not exist', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       await expect(orch.markTaskDone('nonexistent-id')).rejects.toThrow('not found');
     });
@@ -2443,7 +2385,7 @@ describe('Orchestrator', () => {
 
       it('refuses to mark done when the PR is still open, leaving the directory untouched', async () => {
         testData = setupTestProject();
-        const orch = makeOrch(testData.root);
+        const orch = makeOrch(testData.root, getOrchestrator);
         writeTaskJsonWithPr(testData.taskDir, testData.taskId);
 
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
@@ -2472,7 +2414,7 @@ describe('Orchestrator', () => {
 
       it('proceeds when the PR is confirmed merged', async () => {
         testData = setupTestProject();
-        const orch = makeOrch(testData.root);
+        const orch = makeOrch(testData.root, getOrchestrator);
         writeTaskJsonWithPr(testData.taskDir, testData.taskId);
 
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
@@ -2494,7 +2436,7 @@ describe('Orchestrator', () => {
 
       it('proceeds when merge state cannot be determined (CLI failure) rather than blocking indefinitely', async () => {
         testData = setupTestProject();
-        const orch = makeOrch(testData.root);
+        const orch = makeOrch(testData.root, getOrchestrator);
         writeTaskJsonWithPr(testData.taskDir, testData.taskId);
 
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
@@ -2521,7 +2463,7 @@ describe('Orchestrator', () => {
   describe('approveTask — pull-request strategy', () => {
     it('executes create-pr via CLI when strategy is pull-request', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       // Update the task phase since approveTask checks taskStore, not the pipeline
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { phase: 'awaiting-review' });
@@ -2565,7 +2507,7 @@ describe('Orchestrator', () => {
     // live task.json, actually contains prUrl.
     it('commits the artifact snapshot with prUrl included, not just the live task.json', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { phase: 'awaiting-review' });
 
@@ -2609,7 +2551,7 @@ describe('Orchestrator', () => {
 
     it('throws rollback to awaiting-review on error', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -2629,7 +2571,7 @@ describe('Orchestrator', () => {
   describe('moveTaskToPhase — merge/create-pr branching', () => {
     it('starts from create-pr when worktree, branch, and plan exist', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [] }));
@@ -2658,7 +2600,7 @@ describe('Orchestrator', () => {
 
     it('starts from implement when plan exists but worktree missing for merge', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
@@ -2673,7 +2615,7 @@ describe('Orchestrator', () => {
 
     it('starts from plan when only spec exists for merge target', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
@@ -2684,7 +2626,7 @@ describe('Orchestrator', () => {
 
     it('starts from spec when no artifacts exist for merge target', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
       await orch.moveTaskToPhase(testData.taskId, 'merge').catch(() => {});
@@ -2698,7 +2640,7 @@ describe('Orchestrator', () => {
   describe('cleanupTaskArtifacts', () => {
     it('clears spec-phase artifacts (spec.md, plan.json, output.log)', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
@@ -2713,7 +2655,7 @@ describe('Orchestrator', () => {
 
     it('clears plan artifacts but preserves spec.md', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
@@ -2727,7 +2669,7 @@ describe('Orchestrator', () => {
 
     it('clears QA artifacts and resets subtask completions for implement phase', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
@@ -2752,7 +2694,7 @@ describe('Orchestrator', () => {
 
     it('no-ops when phase is not in pipeline order', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'output.log'), 'output');
       orch.cleanupTaskArtifacts(testData.taskId, 'nonexistent-phase');
@@ -2762,7 +2704,7 @@ describe('Orchestrator', () => {
 
     it('handles missing artifacts gracefully (does not throw)', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       expect(() => orch.cleanupTaskArtifacts(testData.taskId, 'qa-review')).not.toThrow();
     });
@@ -2773,7 +2715,7 @@ describe('Orchestrator', () => {
   describe('resumeTask', () => {
     it('resumes from implement when plan.json exists and preserves completions', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
@@ -2792,7 +2734,7 @@ describe('Orchestrator', () => {
 
     it('resumes from plan when only spec.md exists', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
@@ -2803,7 +2745,7 @@ describe('Orchestrator', () => {
 
     it('resumes from spec when no artifacts exist', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
       await orch.resumeTask(testData.taskId).catch(() => {});
@@ -2813,7 +2755,7 @@ describe('Orchestrator', () => {
 
     it('throws when task does not exist', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       await expect(orch.resumeTask('nonexistent')).rejects.toThrow('not found');
     });
@@ -2822,7 +2764,7 @@ describe('Orchestrator', () => {
 
     it('resumes from qa-review phase when task is in qa-review (active phase)', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // Set up artifacts so the old artifact-detection path would pick 'implement'
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
@@ -2852,7 +2794,7 @@ describe('Orchestrator', () => {
 
     it('resumes from implement phase when task is in implement (active phase)', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
@@ -2880,7 +2822,7 @@ describe('Orchestrator', () => {
 
     it('falls back to artifact detection (implement) when task is in backlog', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
@@ -2912,7 +2854,7 @@ describe('Orchestrator', () => {
   describe('restorePipeline', () => {
     it('restores pipeline from task data with correct branch', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { phase: 'awaiting-review', branch: 'feat/some-feature' });
@@ -2928,7 +2870,7 @@ describe('Orchestrator', () => {
 
     it('derives branch from description when task has no branch', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { phase: 'awaiting-review', branch: undefined });
@@ -2941,7 +2883,7 @@ describe('Orchestrator', () => {
 
     it('throws when task is not in the required phase', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       expect(() => (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review')).toThrow(
         'is not awaiting-review'
@@ -2954,7 +2896,7 @@ describe('Orchestrator', () => {
   describe('_removeWorktreeForce', () => {
     it('force-removes the git worktree', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { branch: testData.branchName });
@@ -2963,7 +2905,7 @@ describe('Orchestrator', () => {
       if (wtPath) mkdirSync(wtPath, { recursive: true });
 
       mockExecFileSync.mockReturnValue('');
-      (orch as AnyOrch)._removeWorktreeForce(testData.taskId);
+      (orch as AnyOrch)._ctx.removeWorktree(testData.taskId);
 
       // Now delegates to removeWorktree which tries normal remove first,
       // then git branch -D, then updates taskStore
@@ -2981,14 +2923,14 @@ describe('Orchestrator', () => {
 
     it('no-ops when worktree does not exist', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
-      expect(() => (orch as AnyOrch)._removeWorktreeForce('nonexistent')).not.toThrow();
+      expect(() => (orch as AnyOrch)._ctx.removeWorktree('nonexistent')).not.toThrow();
     });
 
     it('handles git failure gracefully', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { branch: testData.branchName });
@@ -2997,7 +2939,7 @@ describe('Orchestrator', () => {
       if (wtPath) mkdirSync(wtPath, { recursive: true });
 
       mockExecFileSync.mockImplementation(() => { throw new Error('git error'); });
-      expect(() => (orch as AnyOrch)._removeWorktreeForce(testData.taskId)).not.toThrow();
+      expect(() => (orch as AnyOrch)._ctx.removeWorktree(testData.taskId)).not.toThrow();
     });
   });
 
@@ -3006,7 +2948,7 @@ describe('Orchestrator', () => {
   describe('_cleanWorktree', () => {
     it('runs git checkout HEAD to discard changes', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { branch: testData.branchName });
@@ -3026,14 +2968,14 @@ describe('Orchestrator', () => {
 
     it('no-ops when worktree does not exist', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       expect(() => (orch as AnyOrch)._cleanWorktree('nonexistent')).not.toThrow();
     });
 
     it('handles git failure gracefully', () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { branch: testData.branchName });
@@ -3051,7 +2993,7 @@ describe('Orchestrator', () => {
   describe('runImplement — Docker availability', () => {
     it('throws when container is enabled but Docker is not available', async () => {
       testData = setupTestProject({ containerEnabled: true });
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: false });
       vi.mocked(dockerAvailable).mockReturnValue(false);
@@ -3075,7 +3017,7 @@ describe('Orchestrator', () => {
 
     it('proceeds when container enabled and Docker is available', async () => {
       testData = setupTestProject({ containerEnabled: true });
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       vi.mocked(dockerAvailable).mockReturnValue(true);
@@ -3127,7 +3069,7 @@ describe('Orchestrator', () => {
   describe('runImplement — worktree creation', () => {
     it('creates worktree when it does not exist', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
         subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [] }],
@@ -3169,7 +3111,7 @@ describe('Orchestrator', () => {
 
     it('uses branch checkout fallback when worktree add with -b fails', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
         subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [] }],
@@ -3221,7 +3163,7 @@ describe('Orchestrator', () => {
   describe('runImplement — QA/human feedback surfacing', () => {
     it('reads both qa_feedback.md and human_feedback.md and surfaces them to the coder prompt', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // Write both feedback files
       writeFileSync(join(testData.taskDir, 'qa_feedback.md'),
@@ -3279,7 +3221,7 @@ describe('Orchestrator', () => {
 
     it('surfaces only qa_feedback.md when human_feedback.md is absent', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'qa_feedback.md'),
         '# QA Feedback\\n\\nMobile layout is broken\\n');
@@ -3329,7 +3271,7 @@ describe('Orchestrator', () => {
 
     it('does not include feedback header when neither feedback file exists', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
         subtasks: [{ id: 1, title: 'Fix layout', description: 'Fix the mobile layout issues', files: ['src/App.tsx'], acceptance_criteria: ['Layout works at 375px [QA CORRECTION: Mobile layout is broken]'], qa_flagged: true }],
@@ -3376,7 +3318,7 @@ describe('Orchestrator', () => {
   describe('runImplement — rebase onto latest master', () => {
     it('runs rebase before subtask processing (fast path)', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{ id: 1, title: 'Add feature', description: 'Do it', files: ['src/app.ts'], acceptance_criteria: ['Works'] }],
@@ -3424,7 +3366,7 @@ describe('Orchestrator', () => {
 
     it('spawns merger agent when rebase has conflicts, then proceeds to subtasks', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{ id: 1, title: 'Add feature', description: 'Do it', files: ['src/app.ts'], acceptance_criteria: ['Works'] }],
@@ -3486,7 +3428,7 @@ describe('Orchestrator', () => {
 
     it('continues to subtasks even when rebase and merger both fail (silent failure)', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{ id: 1, title: 'Add feature', description: 'Do it', files: ['src/app.ts'], acceptance_criteria: ['Works'] }],
@@ -3550,7 +3492,7 @@ describe('Orchestrator', () => {
   describe('runQaReview', () => {
     it('advances to awaiting-review when QA passes', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -3574,7 +3516,7 @@ describe('Orchestrator', () => {
 
     it('writes completion summary and fails when max QA attempts reached', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -3604,7 +3546,7 @@ describe('Orchestrator', () => {
   describe('runQaReview — spec concerns diversion', () => {
     it('auto-revises spec when spec_concerns exist instead of awaiting human review', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -3657,7 +3599,7 @@ describe('Orchestrator', () => {
 
     it('auto-revises spec even when overall is PASS but spec_concerns exist', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -3705,7 +3647,7 @@ describe('Orchestrator', () => {
 
     it('still bounces to implement when overall is FAIL and no spec_concerns exist', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -3742,7 +3684,7 @@ describe('Orchestrator', () => {
 
     it('handles empty spec_concerns array like no spec_concerns at all', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -3779,7 +3721,7 @@ describe('Orchestrator', () => {
 
     it('falls back to awaiting-review when max spec revisions reached', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const pipeline = makePipeline({
         taskId: testData.taskId,
@@ -3827,14 +3769,14 @@ describe('Orchestrator', () => {
   describe('reviseSpec', () => {
     it('throws when task is not in awaiting-review', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       await expect(orch.reviseSpec(testData.taskId)).rejects.toThrow('cannot revise spec for a task in backlog');
     });
 
     it('writes spec_revision_feedback.md from QA report spec_concerns', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // Set task to awaiting-review
       const taskStore = (orch as AnyOrch).taskStore;
@@ -3876,7 +3818,7 @@ describe('Orchestrator', () => {
 
     it('snapshots spec.md as spec_v1.md before revision', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { phase: 'awaiting-review' });
@@ -3900,7 +3842,7 @@ describe('Orchestrator', () => {
 
     it('creates spec_v2.md on second revision without overwriting spec_v1.md', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { phase: 'awaiting-review' });
@@ -3937,7 +3879,7 @@ describe('Orchestrator', () => {
 
     it('clears downstream artifacts (plan.json, qa_report.json, feedback files)', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { phase: 'awaiting-review' });
@@ -3972,7 +3914,7 @@ describe('Orchestrator', () => {
 
     it('resets qaAttempt to 0 for a fresh QA cycle on revised spec', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { phase: 'awaiting-review' });
@@ -4000,7 +3942,7 @@ describe('Orchestrator', () => {
 
     it('advances to spec phase and starts the pipeline', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { phase: 'awaiting-review' });
@@ -4025,7 +3967,7 @@ describe('Orchestrator', () => {
   describe('runSpec — revision mode', () => {
     it('sends REVISION prompt when spec_revision_feedback.md exists', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // Write spec_revision_feedback.md to trigger revision mode
       writeFileSync(join(testData.taskDir, 'spec_revision_feedback.md'),
@@ -4067,7 +4009,7 @@ describe('Orchestrator', () => {
 
     it('cleans up spec_revision_feedback.md after revision completes', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec_revision_feedback.md'),
         '## Test concern\n\n**Reasoning:** Test.\n');
@@ -4100,7 +4042,7 @@ describe('Orchestrator', () => {
 
     it('sends standard /spec prompt when spec_revision_feedback.md does not exist', async () => {
       testData = setupTestProject();
-      const orch = makeOrch(testData.root);
+      const orch = makeOrch(testData.root, getOrchestrator);
 
       // No spec_revision_feedback.md — this is a normal spec phase
 
