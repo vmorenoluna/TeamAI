@@ -5,8 +5,11 @@ import { createTask, moveTask, bulkDeleteTasks } from '@/app/actions/tasks';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskCard } from './task-card';
-import { TaskPanel } from './task-panel';
 import { ConnectionIndicator } from './connection-indicator';
+import { ErrorBanner } from './error-banner';
+import { TaskModal } from './task-modal';
+import { NewTaskDialog } from './new-task-dialog';
+import { KanbanFilters } from './kanban-filters';
 import { COLUMNS, normalizePhase, resolveTargetPhase, TEMPLATES } from './kanban-utils';
 import { formatActionError } from '@/lib/error-format';
 import type { Task } from '@/lib/task-store';
@@ -22,46 +25,25 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [dragOverPhase, setDragOverPhase] = useState<string | null>(null);
 
-  // Optimistic phase map — shows the card in the target column immediately after drop
   const [optimisticPhases, setOptimisticPhases] = useState<Map<string, string>>(new Map());
   const optimisticTimeoutRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  // Search, filter, and sort state
   const [searchQuery, setSearchQuery] = useState('');
   const [phaseFilter, setPhaseFilter] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'az' | 'za'>('newest');
-  const [showPhaseDropdown, setShowPhaseDropdown] = useState(false);
-  const [showSourceDropdown, setShowSourceDropdown] = useState(false);
-  const [showSortDropdown, setShowSortDropdown] = useState(false);
-
-  // New Task dialog template state
-  const [newTitle, setNewTitle] = useState('');
-  const [newDesc, setNewDesc] = useState('');
-  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
 
-  // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
-
-  // Error banner — surfaces Server Action failures (regression fix:
-  // previously bare `await moveTask(...)` etc. let thrown errors vanish
-  // into useServerMutation's empty catch; clearOptimistic ran via WS
-  // confirmation only, so a throw left the card stuck in the wrong column
-  // for ~10s until the timeout fallback).
   const [error, setError] = useState<string | null>(null);
-
-  // WS connection state — 'connecting' (initial), 'connected', 'disconnected' (after close)
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
 
-  // Undo state
   interface UndoAction { taskId: string; previousPhase: string; taskTitle: string; }
   const undoStackRef = useRef<UndoAction[]>([]);
   const [toast, setToast] = useState<{ text: string; undoAction?: UndoAction } | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Clear optimistic phase when WebSocket confirms the change
   const clearOptimistic = useCallback((taskId: string) => {
     setOptimisticPhases(prev => {
       const next = new Map(prev);
@@ -78,7 +60,6 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
     onConnectionChange: (connected) => setWsStatus(connected ? 'connected' : 'disconnected'),
   });
 
-  // Close the task window on Escape key
   useEffect(() => {
     if (!selectedTaskId) return;
     function handleKey(e: KeyboardEvent) {
@@ -88,16 +69,12 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
     return () => window.removeEventListener('keydown', handleKey);
   }, [selectedTaskId]);
 
-  // Get the effective phase for a task, considering optimistic updates
   const effectivePhase = useCallback((task: Task): string => {
     return optimisticPhases.get(task.id) ?? task.phase;
   }, [optimisticPhases]);
 
-  // Filter and sort tasks
   const processedTasks = useCallback((): Task[] => {
     let result = [...tasks];
-
-    // Search filter
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter(t =>
@@ -105,18 +82,12 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
         (t.description && t.description.toLowerCase().includes(q))
       );
     }
-
-    // Phase filter
     if (phaseFilter.size > 0) {
       result = result.filter(t => phaseFilter.has(normalizePhase(effectivePhase(t))));
     }
-
-    // Source filter
     if (sourceFilter) {
       result = result.filter(t => t.source === sourceFilter);
     }
-
-    // Sort
     result.sort((a, b) => {
       switch (sortBy) {
         case 'newest': return b.createdAt.localeCompare(a.createdAt);
@@ -126,28 +97,11 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
         default: return 0;
       }
     });
-
     return result;
   }, [tasks, searchQuery, phaseFilter, sourceFilter, sortBy, effectivePhase]);
 
   const hasActiveFilters = searchQuery.trim() !== '' || phaseFilter.size > 0 || sourceFilter !== null || sortBy !== 'newest';
 
-  function selectTemplate(name: string) {
-    const t = TEMPLATES.find(t => t.name === name);
-    if (t) {
-      setNewTitle(t.titlePrefix);
-      setNewDesc(t.descriptionTemplate);
-      setSelectedTemplate(name);
-    }
-  }
-
-  function clearTemplate() {
-    setNewTitle('');
-    setNewDesc('');
-    setSelectedTemplate(null);
-  }
-
-  // Bulk selection handlers
   const filteredTaskList = useCallback(() => processedTasks(), [processedTasks]);
 
   function handleCardClick(taskId: string, index: number, e: React.MouseEvent) {
@@ -189,8 +143,7 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
         }
         clearSelection();
       } catch (err) {
-        const msg = formatActionError('move tasks', err);
-        setError(msg);
+        setError(formatActionError('move tasks', err));
         throw err;
       }
     });
@@ -204,14 +157,12 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
         await bulkDeleteTasks([...selectedIds]);
         clearSelection();
       } catch (err) {
-        const msg = formatActionError('delete tasks', err);
-        setError(msg);
+        setError(formatActionError('delete tasks', err));
         throw err;
       }
     });
   }
 
-  // Undo helpers
   const showToast = useCallback((text: string, undoAction?: UndoAction) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ text, undoAction });
@@ -227,17 +178,12 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
         await moveTask(action.taskId, action.previousPhase);
         showToast(`Undone: moved "${action.taskTitle}" back to ${action.previousPhase}`);
       } catch (err) {
-        // Intentionally do NOT re-push the popped undo entry onto the
-        // stack: re-applying the same known-failing move via "Undo" would
-        // just reproduce the failure. User can re-do the action via drag.
-        const msg = formatActionError('undo move', err);
-        setError(msg);
+        setError(formatActionError('undo move', err));
         throw err;
       }
     });
   }, [showToast, run]);
 
-  // Ctrl+Z listener — stable ref pattern avoids re-attaching on every keystroke
   const toastUndoRef = useRef(toast?.undoAction);
   useEffect(() => { toastUndoRef.current = toast?.undoAction; }, [toast?.undoAction]);
   useEffect(() => {
@@ -259,10 +205,8 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
       try {
         await createTask(formData);
         setShowDialog(false);
-        clearTemplate();
       } catch (err) {
-        const msg = formatActionError('create task', err);
-        setError(msg);
+        setError(formatActionError('create task', err));
         throw err;
       }
     });
@@ -286,18 +230,11 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
       return;
     }
 
-    // Store the actual task phase for undo (not the normalized column phase)
     const previousPhase = task.phase;
-    // Push to undo stack
-    undoStackRef.current.push({
-      taskId: draggingTaskId,
-      previousPhase,
-      taskTitle: task.title,
-    });
+    undoStackRef.current.push({ taskId: draggingTaskId, previousPhase, taskTitle: task.title });
     if (undoStackRef.current.length > 20) undoStackRef.current.shift();
     showToast(`Moved "${task.title}" to ${targetPhase}`, { taskId: draggingTaskId, previousPhase, taskTitle: task.title });
 
-    // Optimistic UI: immediately show the card in the target column
     setOptimisticPhases(prev => {
       const next = new Map(prev);
       next.set(draggingTaskId, targetPhase);
@@ -307,7 +244,6 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
     setDraggingTaskId(null);
     setDragOverPhase(null);
 
-    // Clear optimistic phase after 10s if WebSocket hasn't confirmed
     const existing = optimisticTimeoutRef.current.get(draggingTaskId);
     if (existing) clearTimeout(existing);
     optimisticTimeoutRef.current.set(draggingTaskId, setTimeout(() => {
@@ -318,199 +254,47 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
       });
     }, 10000));
 
-    // Resolve the actual phase for the moveTask call (e.g. analysis → spec)
     const actualPhase = resolveTargetPhase(targetPhase, task.phase);
     run(async () => {
       try {
         await moveTask(draggingTaskId, actualPhase);
       } catch (err) {
-        // CRITICAL: reconcile optimistic UI. Without revert+timeout-clear,
-        // the card stays in the wrong column until the 10s timeout fallback
-        // (or a successful re-move) cleans it up.
         clearOptimistic(draggingTaskId);
-        // Also drop the undo-stack entry — re-applying it via "Undo" would
-        // re-trigger the same failing Server Action.
-        undoStackRef.current = undoStackRef.current.filter(
-          a => a.taskId !== draggingTaskId,
-        );
-        const msg = formatActionError('move task', err);
-        setError(msg);
+        undoStackRef.current = undoStackRef.current.filter(a => a.taskId !== draggingTaskId);
+        setError(formatActionError('move task', err));
         throw err;
       }
     });
   }
 
+  function handleResetFilters() {
+    setSearchQuery('');
+    setPhaseFilter(new Set());
+    setSourceFilter(null);
+    setSortBy('newest');
+  }
+
   return (
     <div className="flex flex-col h-full bg-[#11131b]">
-      {/* Unified header row: Board title + filters + New Task */}
+      {/* Unified header row */}
       <div className="flex items-center flex-wrap gap-3 px-6 py-3 border-b bg-[#11131b] border-[#1e293b] shrink-0">
         <div className="flex items-center gap-2 shrink-0">
           <ConnectionIndicator connected={wsStatus === 'connected'} initial={wsStatus === 'connecting'} />
           <h1 className="text-lg font-bold text-white">Board</h1>
         </div>
 
-        {/* Search */}
-        <div className="relative flex-1 max-w-[200px]">
-          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search…"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-8 py-1.5 text-xs bg-[#1a1f2e] border border-[#334155] rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-[#2563eb]"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => { setSearchQuery(''); }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-sm leading-none"
-            >
-              ×
-            </button>
-          )}
-        </div>
-
-        {/* Phase filter */}
-        <div className="relative">
-          <button
-            onClick={() => { setShowPhaseDropdown(o => !o); setShowSourceDropdown(false); setShowSortDropdown(false); }}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
-              phaseFilter.size > 0
-                ? 'border-[#2563eb]/60 bg-[#2563eb]/10 text-blue-300'
-                : 'border-[#334155] bg-[#1a1f2e] text-slate-400 hover:text-slate-300'
-            }`}
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-            </svg>
-            Phase
-            {phaseFilter.size > 0 && (
-              <span className="bg-[#2563eb] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">{phaseFilter.size}</span>
-            )}
-          </button>
-          {showPhaseDropdown && (
-            <div className="absolute z-30 top-full left-0 mt-1 w-44 bg-[#1e2333] rounded-lg border border-[#1e293b] shadow-xl overflow-hidden">
-              {COLUMNS.map(col => (
-                <label key={col.phase} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#1a1f2e] transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={phaseFilter.has(col.phase)}
-                    onChange={e => {
-                      setPhaseFilter(prev => {
-                        const next = new Set(prev);
-                        if (e.target.checked) next.add(col.phase);
-                        else next.delete(col.phase);
-                        return next;
-                      });
-                    }}
-                    className="rounded border-[#334155] bg-[#11131b]"
-                  />
-                  <span className="text-xs text-slate-300">{col.label}</span>
-                </label>
-              ))}
-              {phaseFilter.size > 0 && (
-                <button
-                  onClick={() => setPhaseFilter(new Set())}
-                  className="w-full px-3 py-1.5 text-xs text-slate-400 hover:text-white border-t border-[#1e293b] transition-colors"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Source filter */}
-        <div className="relative">
-          <button
-            onClick={() => { setShowSourceDropdown(o => !o); setShowPhaseDropdown(false); setShowSortDropdown(false); }}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
-              sourceFilter
-                ? 'border-[#2563eb]/60 bg-[#2563eb]/10 text-blue-300'
-                : 'border-[#334155] bg-[#1a1f2e] text-slate-400 hover:text-slate-300'
-            }`}
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-            </svg>
-            Source
-            {sourceFilter && (
-              <span className="bg-[#2563eb] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">1</span>
-            )}
-          </button>
-          {showSourceDropdown && (
-            <div className="absolute z-30 top-full left-0 mt-1 w-44 bg-[#1e2333] rounded-lg border border-[#1e293b] shadow-xl overflow-hidden">
-              {[
-                { value: null, label: 'All sources' },
-                { value: 'ideation', label: 'Ideation' },
-                { value: 'competitor-analysis', label: 'Competitor Analysis' },
-              ].map(opt => (
-                <button
-                  key={opt.label}
-                  onClick={() => { setSourceFilter(opt.value); setShowSourceDropdown(false); }}
-                  className={`w-full text-left px-3 py-2 text-xs hover:bg-[#1a1f2e] transition-colors ${
-                    sourceFilter === opt.value ? 'text-blue-300 bg-[#1a1f2e]' : 'text-slate-300'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Sort */}
-        <div className="relative">
-          <button
-            onClick={() => { setShowSortDropdown(o => !o); setShowPhaseDropdown(false); setShowSourceDropdown(false); }}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors ${
-              sortBy !== 'newest'
-                ? 'border-[#2563eb]/60 bg-[#2563eb]/10 text-blue-300'
-                : 'border-[#334155] bg-[#1a1f2e] text-slate-400 hover:text-slate-300'
-            }`}
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
-            </svg>
-            Sort
-          </button>
-          {showSortDropdown && (
-            <div className="absolute z-30 top-full right-0 mt-1 w-36 bg-[#1e2333] rounded-lg border border-[#1e293b] shadow-xl overflow-hidden">
-              {[
-                { value: 'newest', label: 'Newest first' },
-                { value: 'oldest', label: 'Oldest first' },
-                { value: 'az', label: 'A → Z' },
-                { value: 'za', label: 'Z → A' },
-              ].map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => { setSortBy(opt.value as 'newest' | 'oldest' | 'az' | 'za'); setShowSortDropdown(false); }}
-                  className={`w-full text-left px-3 py-2 text-xs hover:bg-[#1a1f2e] transition-colors ${
-                    sortBy === opt.value ? 'text-blue-300 bg-[#1a1f2e]' : 'text-slate-300'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Clear all */}
-        {hasActiveFilters && (
-          <button
-            onClick={() => {
-              setSearchQuery('');
-              setPhaseFilter(new Set());
-              setSourceFilter(null);
-              setSortBy('newest');
-            }}
-            className="text-xs text-slate-500 hover:text-slate-300 transition-colors whitespace-nowrap"
-          >
-            Reset
-          </button>
-        )}
+        <KanbanFilters
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          phaseFilter={phaseFilter}
+          onPhaseFilterChange={setPhaseFilter}
+          sourceFilter={sourceFilter}
+          onSourceFilterChange={setSourceFilter}
+          sortBy={sortBy}
+          onSortChange={setSortBy}
+          hasActiveFilters={hasActiveFilters}
+          onReset={handleResetFilters}
+        />
 
         <button
           onClick={() => setShowDialog(true)}
@@ -520,27 +304,11 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
         </button>
       </div>
 
-      {/* Close dropdowns on outside click */}
-      { (showPhaseDropdown || showSourceDropdown || showSortDropdown) && (
-        <div
-          className="fixed inset-0 z-20"
-          onClick={() => { setShowPhaseDropdown(false); setShowSourceDropdown(false); setShowSortDropdown(false); }}
-          onKeyDown={e => { if (e.key === 'Escape') { setShowPhaseDropdown(false); setShowSourceDropdown(false); setShowSortDropdown(false); } }}
-          role="button"
-          tabIndex={0}
-        />
-      )}
-
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-3 px-6 py-2 bg-[#2563eb]/10 border-b border-[#2563eb]/30 shrink-0">
           <span className="text-xs text-blue-300 font-medium">{selectedIds.size} selected</span>
-          <button
-            onClick={clearSelection}
-            className="text-xs text-slate-400 hover:text-white transition-colors"
-          >
-            Deselect
-          </button>
+          <button onClick={clearSelection} className="text-xs text-slate-400 hover:text-white transition-colors">Deselect</button>
           <div className="w-px h-4 bg-[#334155]" />
           <span className="text-xs text-slate-400">Move to:</span>
           <select
@@ -554,16 +322,13 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
             ))}
           </select>
           <div className="w-px h-4 bg-[#334155]" />
-          <button
-            onClick={handleBulkDelete}
-            className="text-xs text-red-400 hover:text-red-300 transition-colors"
-          >
+          <button onClick={handleBulkDelete} className="text-xs text-red-400 hover:text-red-300 transition-colors">
             Delete selected
           </button>
         </div>
       )}
 
-      {/* Board columns — always full width */}
+      {/* Board columns */}
       <div className={`flex-1 min-h-0 relative ${selectedTaskId ? 'overflow-hidden' : ''}`}>
         <div className={`h-full overflow-x-auto ${selectedTaskId ? 'pointer-events-none select-none' : ''}`}>
           <div className="flex gap-3 p-4 h-full" style={{ minWidth: 'max-content' }}>
@@ -587,13 +352,9 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
                   onDrop={() => handleDrop(col.phase)}
                 >
                   <div className="flex items-center justify-between px-3 py-2.5 border-b border-[#1e293b]">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                      {col.label}
-                    </span>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">{col.label}</span>
                     <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full transition-colors ${
-                      isDropTarget && !isSameColumn
-                        ? 'bg-[#2563eb]/20 text-blue-300'
-                        : 'bg-[#1e293b] text-slate-500'
+                      isDropTarget && !isSameColumn ? 'bg-[#2563eb]/20 text-blue-300' : 'bg-[#1e293b] text-slate-500'
                     }`}>
                       {colTasks.length}
                     </span>
@@ -620,11 +381,7 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
                             <span className="text-white text-[10px] font-bold">✓</span>
                           </div>
                         )}
-                        <TaskCard
-                          task={task}
-                          onSelect={() => {}}
-                          isMoving={optimisticPhases.has(task.id)}
-                        />
+                        <TaskCard task={task} onSelect={() => {}} isMoving={optimisticPhases.has(task.id)} />
                       </div>
                       );
                     })}
@@ -635,172 +392,35 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
           </div>
         </div>
 
-        {/* Floating task window overlay */}
+        {/* Task modal */}
         {selectedTaskId && (
-          <div className="absolute inset-0 z-40 flex items-center justify-center p-6">
-            {/* Backdrop */}
-            <div
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-              onClick={() => setSelectedTaskId(null)}
-            />
-            {/* Window */}
-            <div
-              className="relative w-[800px] max-w-[95vw] h-full max-h-[700px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
-              onClick={e => e.stopPropagation()}
-            >
-              <TaskPanel
-                taskId={selectedTaskId}
-                onClose={() => setSelectedTaskId(null)}
-              />
-            </div>
-          </div>
+          <TaskModal taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
         )}
       </div>
 
-      {/* Error banner — surfaces Server Action failures (regression fix) */}
-      {error && (
-        <div
-          role="alert"
-          className="fixed top-4 right-4 z-50 max-w-md bg-red-950/90 border border-red-800 rounded-lg shadow-xl shadow-black/40 p-3 flex items-start gap-3"
-        >
-          <span className="text-red-400 font-bold shrink-0 mt-0.5">✗</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-red-300">Operation failed</p>
-            <p className="text-xs text-red-200/90 mt-0.5 break-words">{error}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setError(null)}
-            title="Dismiss"
-            className="shrink-0 text-red-400 hover:text-red-300 text-base leading-none px-1"
-          >
-            ×
-          </button>
-        </div>
-      )}
+      {/* Error banner */}
+      {error && <ErrorBanner error={error} onDismiss={() => setError(null)} floating />}
 
       {/* Undo toast */}
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 bg-[#1e2333] border border-[#334155] rounded-lg shadow-xl shadow-black/40 animate-toast-in">
           <span className="text-xs text-slate-300">{toast.text}</span>
           {toast.undoAction && (
-            <button
-              onClick={handleUndo}
-              className="text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors"
-            >
+            <button onClick={handleUndo} className="text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors">
               Undo
             </button>
           )}
-          <button
-            onClick={() => setToast(null)}
-            className="text-slate-500 hover:text-slate-300 text-sm leading-none"
-          >
-            ×
-          </button>
+          <button onClick={() => setToast(null)} className="text-slate-500 hover:text-slate-300 text-sm leading-none">×</button>
         </div>
       )}
 
       {showDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/60"
-            onClick={() => { setShowDialog(false); clearTemplate(); }}
-          />
-          <div className="relative bg-[#1e2333] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] p-6 w-full max-w-md mx-4">
-            <h2 className="text-base font-semibold text-white mb-4">
-              New Task
-            </h2>
-            <form action={handleCreate} className="space-y-4">
-              {/* Template selector */}
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Template <span className="font-normal text-slate-500">(optional)</span>
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {TEMPLATES.map(t => (
-                    <button
-                      key={t.name}
-                      type="button"
-                      onClick={() => selectTemplate(t.name)}
-                      className={`flex items-center gap-2 px-3 py-2 text-xs rounded-lg border transition-all ${
-                        selectedTemplate === t.name
-                          ? 'border-[#2563eb] bg-[#2563eb]/10 text-blue-300'
-                          : 'border-[#334155] bg-[#1a1f2e] text-slate-400 hover:text-slate-300 hover:border-[#475569]'
-                      }`}
-                    >
-                      <span className="text-sm">{t.icon}</span>
-                      {t.name}
-                    </button>
-                  ))}
-                </div>
-                {selectedTemplate && (
-                  <button
-                    type="button"
-                    onClick={clearTemplate}
-                    className="mt-2 text-xs text-slate-500 hover:text-slate-300 transition-colors"
-                  >
-                    Clear template
-                  </button>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
-                  Title
-                </label>
-                <input
-                  name="title"
-                  required
-                  placeholder="Add dark mode toggle"
-                  value={newTitle}
-                  onChange={e => setNewTitle(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-[#334155] rounded-lg bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] placeholder-slate-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
-                  Description
-                </label>
-                <textarea
-                  name="description"
-                  rows={4}
-                  placeholder="Describe what needs to be done..."
-                  value={newDesc}
-                  onChange={e => setNewDesc(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-[#334155] rounded-lg bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] placeholder-slate-500 resize-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
-                  Reference images <span className="font-normal text-slate-500">(optional)</span>
-                </label>
-                <input
-                  name="references"
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="w-full text-sm text-slate-400 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-[#1a1f2e] file:text-slate-300 hover:file:bg-[#1e293b]"
-                />
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => { setShowDialog(false); clearTemplate(); }}
-                  className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isPending}
-                  className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] transition-colors disabled:opacity-50"
-                >
-                  {isPending ? 'Creating...' : 'Create Task'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <NewTaskDialog
+          templates={TEMPLATES}
+          isPending={isPending}
+          onClose={() => setShowDialog(false)}
+          onSubmit={handleCreate}
+        />
       )}
     </div>
   );

@@ -125,7 +125,7 @@ Each call adds 3 listeners (`event`, `exit`, `raw`) to the singleton `processMan
 2. **Decompose `runImplement`** (`implement.ts:51-760`, one function). Natural seams already visible in the code: `ensureWorktree()`, `selectSubtasks()` (QA-flag / wakeup / synthetic-9999 logic), `runSubtaskSession()` (prompt build + scope check + deliverable check + wakeup detect), `integrateGroup()` (auto-commit + cherry-pick + recovery), `pushAndVerify()`, `applySensorGate()`. Each becomes unit-testable without the 3.5k-line mock scaffolding currently required.
 3. **Extract `updateSessionMap(specPath, key, sessionId)`.** The read-modify-write of `session_map.json` is copy-pasted 6× (phase-runners.ts ×3, implement.ts ×2, qa-review.ts ×1) — and only implement.ts serializes it with a lock.
 4. **`resolveBaseBranch(projectRoot)`** — one cached function wrapping `detectDefaultBranch`, used by every place in BUG-2's list.
-5. **Frontend splits.** `task-detail.tsx` (840), `kanban-board.tsx` (807), `roadmap-view.tsx` (736), `workflow-view.tsx` (602) each mix data plumbing, dialogs, and rendering; extract dialog components and per-column/per-tab subcomponents.
+5. **Frontend splits.** ✅ DONE (T27). Extracted 8 components: `copy-button`, `error-banner`, `task-modal`, `dep-picker`, `plan-subtasks`, `qa-report-view`, `new-task-dialog`, `kanban-filters`. Mega-components reduced: task-detail (710→350), kanban-board (670→450), roadmap-view (810→650), workflow-view (690→570).
 6. **`getTaskFull`** (`actions/tasks.ts:310-397`) reads ~12 files inline; extract a `taskArtifacts.ts` reader module shared with `getTaskArtifacts` (which duplicates half of it).
 7. **Two `fix-v4.js`/`fix-v5.js` scripts** in `teamai/scripts/` look like one-off migration leftovers — verify and delete.
 
@@ -200,7 +200,7 @@ Effort: **S** (<½ day) / **M** (½–2 days) / **L** (>2 days). Priority: **P0*
 | ID | Task | Effort |
 |----|------|--------|
 | T26 | **Shared orchestrator test harness.** Create `tests/utils/orchestrator-harness.ts` exporting the mock `processManager`/`container-manager`/fs-temp-project setup duplicated across the 5 big orchestrator suites; migrate `orchestrator.test.ts` and `orchestrator-robustness.test.ts` first. | M |
-| T27 | **Split mega-components** (§4.5): extract dialogs and panels from `task-detail.tsx` and `kanban-board.tsx` (~<300 lines per file target), preserving the props-over-fetch rule. | L |
+| T27 | **Split mega-components** (§4.5): extract dialogs and panels from `task-detail.tsx` and `kanban-board.tsx` (~<300 lines per file target), preserving the props-over-fetch rule. ✅ DONE. Extracted 8 sub-components (`copy-button`, `error-banner`, `task-modal`, `dep-picker`, `plan-subtasks`, `qa-report-view`, `new-task-dialog`, `kanban-filters`). All 4 mega-files reduced by 120–360 lines each. 2,555 tests pass, 0 type errors. | L ✅ |
 | T28 | **Extract shared task-artifact reader** for `getTaskFull`/`getTaskArtifacts` (§4.6). | S |
 | T29 | **Per-session waiters** (BUG-20): raise `processManager.setMaxListeners` and/or route `waitForCompletion` through a per-session EventEmitter created in `createSession`. | S |
 | T30 | **Delete or document `scripts/fix-v4.js` / `fix-v5.js`** and `scripts/update-phase.ts` if they are one-off migrations. | S |
