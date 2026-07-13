@@ -8,6 +8,7 @@
  */
 import { appendFileSync } from 'fs';
 import path from 'path';
+import { EventEmitter } from 'events';
 import { processManager } from '../process-manager';
 import { SessionExitedError } from './errors';
 import { log, error as logError } from '../logger';
@@ -51,10 +52,20 @@ export function waitForCompletion(
     let rateLimitResetsAt: number | null = null;
     let sessionLimitResetsAt: number | null = null;
 
+    // Per-session EventEmitter when available (BUG-20 / T29).
+    // Falls back to the global processManager emitter when the session
+    // emitter isn't available (e.g. in test mocks that predate T29).
+    const sessionEmitter =
+      typeof processManager.getSessionEmitter === 'function'
+        ? processManager.getSessionEmitter(sessionId)
+        : undefined;
+    const target: EventEmitter =
+      (sessionEmitter ?? processManager) as EventEmitter;
+
     const cleanup = () => {
-      processManager.off('event', onEvent);
-      processManager.off('exit', onExit);
-      processManager.off('raw', onRaw);
+      target.off('event', onEvent);
+      target.off('exit', onExit);
+      target.off('raw', onRaw);
     };
 
     const onRaw = ({ sessionId: sid, data }: { sessionId: string; data: string }) => {
@@ -96,9 +107,9 @@ export function waitForCompletion(
       else reject(new SessionExitedError(code));
     };
 
-    processManager.on('event', onEvent);
-    processManager.on('exit', onExit);
-    processManager.on('raw', onRaw);
+    target.on('event', onEvent);
+    target.on('exit', onExit);
+    target.on('raw', onRaw);
   });
 }
 
