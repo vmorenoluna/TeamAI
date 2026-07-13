@@ -22,7 +22,8 @@ import { useStreamProgress } from '@/hooks/use-stream-progress';
 import { ComplexityDots, PHASE_LABELS } from './roadmap-card';
 import { PhasedKanban } from './phased-kanban';
 export { PhasedKanban };
-import { TaskPanel, type FullData } from './task-panel';
+import { TaskModal } from './task-modal';
+import type { FullData } from './task-panel';
 import { PRIORITY_COLORS } from '@/constants/phases';
 import { RateLimitBanner } from './rate-limit-banner';
 import { StreamingOutput } from './streaming-output';
@@ -62,18 +63,15 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
     filename: string;
   } | null>(null);
 
-  // Cancel pending state
   const [rmCancelling, setRmCancelling] = useState(false);
   const [clCancelling, setClCancelling] = useState(false);
 
-  // Cache task data so reopening a task is instant (no re-fetch / loading flash)
   const taskCacheRef = useRef<Map<string, { data: FullData }>>(new Map());
-  // Cancel-requested signals to handle rapid start/stop race (Bug 2)
   const rmCancelRequestedRef = useRef(false);
-  const clCancelRequestedRef = useRef(false);  const rmStream = useSessionStream(rmSessionId);
+  const clCancelRequestedRef = useRef(false);
+  const rmStream = useSessionStream(rmSessionId);
   const clStream = useSessionStream(clSessionId);
 
-  // Rate-limit detection + auto-resume for roadmap and changelog
   const {
     rateLimited: rmRateLimited,
     rateLimitMessage: rmRateLimitMessage,
@@ -92,7 +90,6 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
     handleCancelAutoResume: handleCancelClAutoResume,
   } = useRateLimitAutoResume(clStream, handleGenerateChangelog, () => setClRunning(false));
 
-  // Accumulate progress text for terminal view
   const rmFullText = useStreamProgress(rmStream);
   const clFullText = useStreamProgress(clStream);
 
@@ -108,8 +105,6 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
   useEffect(() => {
     async function load() {
       if (noProject) return;
-
-      // Load history lists
       const [rpts, creps] = await Promise.all([
         getRoadmapReports().catch(() => [] as { filename: string; date: string }[]),
         getChangelogReports().catch(() => [] as { filename: string; date: string }[]),
@@ -117,7 +112,6 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
       setRmHistory(rpts);
       setClHistory(creps);
 
-      // Check for active sessions (reconnect): try sessionStorage first, then server-side global
       let activeRm: string | null = null;
       let activeCl: string | null = null;
       try { activeRm = sessionStorage.getItem('roadmap-session'); } catch { /* noop */ }
@@ -133,19 +127,15 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
 
       let rmAlive = false;
       if (activeRm) {
-        // Verify the session actually exists on the server before reconnecting.
-        // sessionStorage may contain a stale ID from a previous server run.
         rmAlive = await isRoadmapSessionAlive(activeRm).catch(() => false);
         if (rmAlive) {
           setRmSessionId(activeRm);
           setRmRunning(true);
         } else {
-          // Stale session — clear sessionStorage and don't reconnect
           try { sessionStorage.removeItem('roadmap-session'); } catch { /* noop */ }
         }
       }
       if (!rmAlive && rpts.length > 0) {
-        // Auto-load most recent roadmap
         try {
           const report = await getRoadmapReport(rpts[0].filename);
           setRmReport(report);
@@ -164,7 +154,6 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
         }
       }
       if (!clAlive && creps.length > 0) {
-        // Auto-load most recent changelog
         try {
           const md = await getLatestChangelog(creps[0].filename);
           setClMarkdown(md);
@@ -174,13 +163,10 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
     load();
   }, [noProject]);
 
-  // When roadmap result comes in, load the report
   useEffect(() => {
     if (!rmDone || !rmSessionId) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRmRunning(false);
-    // Reload history + auto-load most recent report
     (async () => {
+      setRmRunning(false);
       const rpts = await getRoadmapReports().catch(() => [] as { filename: string; date: string }[]);
       setRmHistory(rpts);
       if (rpts.length > 0) {
@@ -191,16 +177,13 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
         } catch { /* ignore */ }
       }
     })();
-    // Persist session ID so reconnect works on navigation
     try { sessionStorage.setItem('roadmap-session', rmSessionId); } catch { /* noop */ }
   }, [rmDone, rmSessionId]);
 
-  // When changelog result comes in, load the markdown
   useEffect(() => {
     if (!clDone || !clSessionId) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setClRunning(false);
     (async () => {
+      setClRunning(false);
       const creps = await getChangelogReports().catch(() => [] as { filename: string; date: string }[]);
       setClHistory(creps);
       if (creps.length > 0) {
@@ -213,18 +196,6 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
     try { sessionStorage.setItem('changelog-session', clSessionId); } catch { /* noop */ }
   }, [clDone, clSessionId]);
 
-  // Close the task window on Escape key
-  useEffect(() => {
-    if (!selectedTaskId) return;
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setSelectedTaskId(null);
-    }
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [selectedTaskId]);
-
-  // ── Handlers ─────────────────────────────────────────────────────────────
-
   const handleSelectTask = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
     setSelectedRoadmapItem(null);
@@ -232,8 +203,16 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
 
   const handleOpenRoadmapItem = useCallback((item: RoadmapItem, phaseKey: string, itemIndex: number) => {
     if (!rmFilename) return;
-    setSelectedTaskId(null); // Close task panel if open
+    setSelectedTaskId(null);
     setSelectedRoadmapItem({ item, phaseKey, itemIndex, filename: rmFilename });
+  }, [rmFilename]);
+
+  const refreshRoadmapReport = useCallback(async () => {
+    if (!rmFilename) return;
+    try {
+      const report = await getRoadmapReport(rmFilename);
+      setRmReport(report);
+    } catch { /* ignore */ }
   }, [rmFilename]);
 
   const handleConvertRoadmapItem = useCallback(async () => {
@@ -249,8 +228,7 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
         console.error('Failed to convert roadmap item:', e);
       }
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedRoadmapItem]);
+  }, [selectedRoadmapItem, refreshRoadmapReport]);
 
   function handleGenerateRoadmap() {
     rmCancelRequestedRef.current = false;
@@ -273,9 +251,7 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
   async function handleCancelRoadmap() {
     rmCancelRequestedRef.current = true;
     setRmCancelling(true);
-    try {
-      await cancelRoadmapGeneration('roadmap');
-    } catch { /* best-effort */ }
+    try { await cancelRoadmapGeneration('roadmap'); } catch { /* best-effort */ }
     setRmRunning(false);
     setRmSessionId(null);
     rmResetRateLimit();
@@ -304,9 +280,7 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
   async function handleCancelChangelog() {
     clCancelRequestedRef.current = true;
     setClCancelling(true);
-    try {
-      await cancelRoadmapGeneration('changelog');
-    } catch { /* best-effort */ }
+    try { await cancelRoadmapGeneration('changelog'); } catch { /* best-effort */ }
     setClRunning(false);
     setClSessionId(null);
     clResetRateLimit();
@@ -322,14 +296,6 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
     setRmFilename(filename);
   }
 
-  async function refreshRoadmapReport() {
-    if (!rmFilename) return;
-    try {
-      const report = await getRoadmapReport(rmFilename);
-      setRmReport(report);
-    } catch { /* ignore */ }
-  }
-
   async function handleSelectChangelogHistory(filename: string) {
     setClSessionId(null);
     setClRunning(false);
@@ -337,394 +303,180 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
     setClMarkdown(md);
   }
 
-  // ── Empty state ──────────────────────────────────────────────────────────
-
   if (noProject) {
     return (
       <div className="flex flex-col h-full p-6 bg-[#11131b]">
-        {/* Tabs */}
         <div className="flex gap-0 border-b border-[#1e293b] mb-4">
-          <button
-            onClick={() => persistTab('roadmap')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'roadmap'
-                ? 'border-[#2563eb] text-white'
-                : 'border-transparent text-slate-400 hover:text-slate-300'
-            }`}
-          >
-            Roadmap
-          </button>
-          <button
-            onClick={() => persistTab('changelog')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'changelog'
-                ? 'border-[#2563eb] text-white'
-                : 'border-transparent text-slate-400 hover:text-slate-300'
-            }`}
-          >
-            Changelog
-          </button>
+          <button onClick={() => persistTab('roadmap')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'roadmap' ? 'border-[#2563eb] text-white' : 'border-transparent text-slate-400 hover:text-slate-300'}`}>Roadmap</button>
+          <button onClick={() => persistTab('changelog')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'changelog' ? 'border-[#2563eb] text-white' : 'border-transparent text-slate-400 hover:text-slate-300'}`}>Changelog</button>
         </div>
         <p className="text-sm text-slate-400">Select or add a project from the sidebar to get started.</p>
       </div>
     );
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   return (
     <div className={`flex flex-col h-full p-6 bg-[#11131b] relative ${selectedTaskId ? 'overflow-hidden' : ''}`}>
       {/* Tab bar */}
       <div className="flex gap-0 border-b border-[#1e293b] mb-4 shrink-0">
-        <button
-          onClick={() => persistTab('roadmap')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'roadmap'
-              ? 'border-[#2563eb] text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-300'
-          }`}
-        >
-          Roadmap
-        </button>
-        <button
-          onClick={() => persistTab('changelog')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${            activeTab === 'changelog'
-                ? 'border-[#2563eb] text-white'
-                : 'border-transparent text-slate-400 hover:text-slate-300'
-            }`}
-        >
-          Changelog
-        </button>
+        <button onClick={() => persistTab('roadmap')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'roadmap' ? 'border-[#2563eb] text-white' : 'border-transparent text-slate-400 hover:text-slate-300'}`}>Roadmap</button>
+        <button onClick={() => persistTab('changelog')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'changelog' ? 'border-[#2563eb] text-white' : 'border-transparent text-slate-400 hover:text-slate-300'}`}>Changelog</button>
       </div>
 
       {/* Tab content */}
       <div className={`flex-1 overflow-y-auto min-h-0 ${selectedTaskId ? 'pointer-events-none select-none' : ''}`}>
         {activeTab === 'roadmap' && (
           <div className="flex flex-col gap-4">
-            {/* Controls */}
             <div className="flex items-center gap-4 flex-wrap">
               <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={skipCompetitors}
-                  onChange={e => setSkipCompetitors(e.target.checked)}
-                  className="rounded border-slate-300"
-                />
+                <input type="checkbox" checked={skipCompetitors} onChange={e => setSkipCompetitors(e.target.checked)} className="rounded border-slate-300" />
                 Skip competitor research
               </label>
-
-              <button
-                onClick={handleGenerateRoadmap}
-                disabled={isPending || rmRunning}
-                className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
-              >
+              <button onClick={handleGenerateRoadmap} disabled={isPending || rmRunning} className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors">
                 {rmRunning && !rmDone ? 'Generating…' : 'Generate Roadmap'}
               </button>
-
               {rmRunning && (
-                <button
-                  onClick={handleCancelRoadmap}
-                  disabled={rmCancelling}
-                  className="px-3 py-2 text-sm font-medium text-red-400 border border-red-800 rounded-lg hover:bg-red-950/30 disabled:opacity-40 transition-colors"
-                >
+                <button onClick={handleCancelRoadmap} disabled={rmCancelling} className="px-3 py-2 text-sm font-medium text-red-400 border border-red-800 rounded-lg hover:bg-red-950/30 disabled:opacity-40 transition-colors">
                   {rmCancelling ? 'Stopping…' : '✕ Stop'}
                 </button>
               )}
-
               {rmHistory.length > 0 && (
                 <div className="flex items-center gap-2 text-sm text-slate-400">
                   <span>History:</span>
-                  <select
-                    onChange={e => { if (e.target.value) handleSelectRoadmapHistory(e.target.value); }}
-                    defaultValue=""
-                    className="text-sm border border-[#334155] rounded px-2 py-1 bg-[#1a1f2e] text-slate-200"
-                  >
+                  <select onChange={e => { if (e.target.value) handleSelectRoadmapHistory(e.target.value); }} defaultValue="" className="text-sm border border-[#334155] rounded px-2 py-1 bg-[#1a1f2e] text-slate-200">
                     <option value="" disabled>Select a previous run</option>
-                    {rmHistory.map(r => (
-                      <option key={r.filename} value={r.filename}>{r.date}</option>
-                    ))}
+                    {rmHistory.map(r => (<option key={r.filename} value={r.filename}>{r.date}</option>))}
                   </select>
                 </div>
               )}
             </div>
 
-            {/* Rate-limit indicator */}
-            {rmRateLimited && (
-              <RateLimitBanner
-                message={rmRateLimitMessage}
-                autoResumeAt={rmAutoResumeAt}
-                countdown={rmCountdown}
-                onCancelAutoResume={handleCancelRmAutoResume}
-                onRetry={handleGenerateRoadmap}
-                disabled={isPending}
-              />
-            )}
+            {rmRateLimited && (<RateLimitBanner message={rmRateLimitMessage} autoResumeAt={rmAutoResumeAt} countdown={rmCountdown} onCancelAutoResume={handleCancelRmAutoResume} onRetry={handleGenerateRoadmap} disabled={isPending} />)}
+            {rmRunning && !rmRateLimited && rmStream.length > 0 && (<StreamingOutput text={rmFullText} eventCount={rmStream.length} className="max-h-80" />)}
+            {rmRunning && !rmRateLimited && rmStream.length === 0 && (<LoadingSpinner label="roadmap generation" />)}
 
-            {/* Streaming output — show full accumulated text while running */}
-            {rmRunning && !rmRateLimited && rmStream.length > 0 && (
-              <StreamingOutput text={rmFullText} eventCount={rmStream.length} className="max-h-80" />
-            )}
-
-            {/* Show "Running..." indicator when streaming but no events yet */}
-            {rmRunning && !rmRateLimited && rmStream.length === 0 && (
-              <LoadingSpinner label="roadmap generation" />
-            )}
-
-            {/* Phased kanban view */}
             {rmReport && rmFilename && (
-              <PhasedKanban
-                report={rmReport}
-                filename={rmFilename}
-                projectPath={projectPath}
-                onRefresh={refreshRoadmapReport}
-                onSelectTask={handleSelectTask}
-                onOpenRoadmapItem={handleOpenRoadmapItem}
-              />
+              <PhasedKanban report={rmReport} filename={rmFilename} projectPath={projectPath} onRefresh={refreshRoadmapReport} onSelectTask={handleSelectTask} onOpenRoadmapItem={handleOpenRoadmapItem} />
             )}
-
-            {/* Empty state */}
             {!rmRunning && !rmReport && !rmFullText && (
-              <p className="text-sm text-slate-400">
-                No roadmap generated yet. Click &apos;Generate Roadmap&apos; to start.
-              </p>
+              <p className="text-sm text-slate-400">No roadmap generated yet. Click &apos;Generate Roadmap&apos; to start.</p>
             )}
           </div>
         )}
 
         {activeTab === 'changelog' && (
           <div className="flex flex-col gap-4">
-            {/* Controls */}
             <div className="flex items-center gap-4 flex-wrap">
-              <button
-                onClick={handleGenerateChangelog}
-                disabled={isPending || clRunning}
-                className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
-              >
+              <button onClick={handleGenerateChangelog} disabled={isPending || clRunning} className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors">
                 {clRunning && !clDone ? 'Generating…' : 'Generate Changelog'}
               </button>
-
               {clRunning && (
-                <button
-                  onClick={handleCancelChangelog}
-                  disabled={clCancelling}
-                  className="px-3 py-2 text-sm font-medium text-red-400 border border-red-800 rounded-lg hover:bg-red-950/30 disabled:opacity-40 transition-colors"
-                >
+                <button onClick={handleCancelChangelog} disabled={clCancelling} className="px-3 py-2 text-sm font-medium text-red-400 border border-red-800 rounded-lg hover:bg-red-950/30 disabled:opacity-40 transition-colors">
                   {clCancelling ? 'Stopping…' : '✕ Stop'}
                 </button>
               )}
-
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <span>Previous changelogs:</span>
-                <select
-                  onChange={e => { if (e.target.value) handleSelectChangelogHistory(e.target.value); }}
-                  defaultValue=""
-                  disabled={clHistory.length === 0}
-                  className="text-sm border border-[#334155] rounded px-2 py-1 bg-[#1a1f2e] text-slate-200 disabled:opacity-40"
-                >
+                <select onChange={e => { if (e.target.value) handleSelectChangelogHistory(e.target.value); }} defaultValue="" disabled={clHistory.length === 0} className="text-sm border border-[#334155] rounded px-2 py-1 bg-[#1a1f2e] text-slate-200 disabled:opacity-40">
                   {clHistory.length === 0 ? (
                     <option value="" disabled>None generated yet</option>
                   ) : [
                     <option key="placeholder" value="" disabled>Select</option>,
-                    ...clHistory.map(c => (
-                      <option key={c.filename} value={c.filename}>{c.date}</option>
-                    ))
+                    ...clHistory.map(c => (<option key={c.filename} value={c.filename}>{c.date}</option>))
                   ]}
                 </select>
               </div>
             </div>
 
-            {/* Rate-limit indicator */}
-            {clRateLimited && (
-              <RateLimitBanner
-                message={clRateLimitMessage}
-                autoResumeAt={clAutoResumeAt}
-                countdown={clCountdown}
-                onCancelAutoResume={handleCancelClAutoResume}
-                onRetry={handleGenerateChangelog}
-                disabled={isPending}
-              />
-            )}
+            {clRateLimited && (<RateLimitBanner message={clRateLimitMessage} autoResumeAt={clAutoResumeAt} countdown={clCountdown} onCancelAutoResume={handleCancelClAutoResume} onRetry={handleGenerateChangelog} disabled={isPending} />)}
+            {clRunning && !clRateLimited && clStream.length > 0 && (<StreamingOutput text={clFullText} eventCount={clStream.length} className="max-h-80" />)}
+            {clRunning && !clRateLimited && clStream.length === 0 && (<LoadingSpinner label="changelog generation" />)}
 
-            {/* Streaming output — show full accumulated text while running */}
-            {clRunning && !clRateLimited && clStream.length > 0 && (
-              <StreamingOutput text={clFullText} eventCount={clStream.length} className="max-h-80" />
-            )}
-
-            {/* Show "Running..." indicator when streaming but no events yet */}
-            {clRunning && !clRateLimited && clStream.length === 0 && (
-              <LoadingSpinner label="changelog generation" />
-            )}
-
-            {/* Changelog result */}
             {clMarkdown && (
               <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-[60vh] overflow-y-auto">
-                <pre className="whitespace-pre-wrap font-mono text-xs text-slate-300 leading-relaxed">
-                  {clMarkdown}
-                </pre>
+                <pre className="whitespace-pre-wrap font-mono text-xs text-slate-300 leading-relaxed">{clMarkdown}</pre>
               </div>
             )}
-
-            {/* Empty state */}
             {!clRunning && !clMarkdown && !clFullText && (
-              <p className="text-sm text-slate-400">
-                No changelog generated yet. Click &apos;Generate Changelog&apos; to start.
-              </p>
+              <p className="text-sm text-slate-400">No changelog generated yet. Click &apos;Generate Changelog&apos; to start.</p>
             )}
           </div>
         )}
       </div>
 
-      {/* Floating task window overlay */}
+      {/* Task modal */}
       {selectedTaskId && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center p-6">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={() => setSelectedTaskId(null)}
-          />
-          {/* Window */}
-          <div              className="relative w-[800px] max-w-[95vw] max-h-[calc(100%-3rem)] h-[650px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
-            onClick={e => e.stopPropagation()}
-          >
-            <TaskPanel
-              taskId={selectedTaskId}
-              onClose={() => setSelectedTaskId(null)}
-              readonly
-              cachedData={taskCacheRef.current.get(selectedTaskId)?.data ?? undefined}
-              onDataLoaded={(data, tid) => {
-                taskCacheRef.current.set(tid, { data });
-              }}
-              onError={(errorMsg) => {
-                // Only handle "not found" errors - other errors (network, etc.) should not redirect
-                if (!errorMsg.includes('not found')) return;
-                // Task was deleted - auto-clear the stale linkedTaskId and show roadmap item detail
-                setSelectedTaskId(null);
-                if (rmReport && rmFilename) {
-                  for (const phaseKey of ['now', 'next', 'later', 'icebox'] as const) {
-                    const items = rmReport.phases[phaseKey];
-                    const idx = items.findIndex(item => item.linkedTaskId === selectedTaskId);
-                    if (idx !== -1) {
-                      // Clear the stale link automatically
-                      clearLinkedTaskId(rmFilename, idx, phaseKey);
-                      setSelectedRoadmapItem({
-                        item: items[idx],
-                        phaseKey,
-                        itemIndex: idx,
-                        filename: rmFilename,
-                      });
-                      return;
-                    }
-                  }
+        <TaskModal
+          taskId={selectedTaskId}
+          onClose={() => setSelectedTaskId(null)}
+          readonly
+          // eslint-disable-next-line react-hooks/refs -- intentional: read mutable cache during render for initial data optimization
+          cachedData={taskCacheRef.current.get(selectedTaskId)?.data}
+          onDataLoaded={(data, tid) => { taskCacheRef.current.set(tid, { data }); }}
+          onError={(errorMsg) => {
+            if (!errorMsg.includes('not found')) return;
+            setSelectedTaskId(null);
+            if (rmReport && rmFilename) {
+              for (const phaseKey of ['now', 'next', 'later', 'icebox'] as const) {
+                const items = rmReport.phases[phaseKey];
+                const idx = items.findIndex(item => item.linkedTaskId === selectedTaskId);
+                if (idx !== -1) {
+                  clearLinkedTaskId(rmFilename, idx, phaseKey);
+                  setSelectedRoadmapItem({ item: items[idx], phaseKey, itemIndex: idx, filename: rmFilename });
+                  return;
                 }
-              }}
-            />
-          </div>
-        </div>
+              }
+            }
+          }}
+        />
       )}
 
       {/* Roadmap item detail overlay */}
       {selectedRoadmapItem && (
         <div className="absolute inset-0 z-40 flex items-center justify-center p-6">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={() => setSelectedRoadmapItem(null)}
-          />
-          {/* Window */}
-          <div
-            className="relative w-[700px] h-[550px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in"
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Title bar */}
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelectedRoadmapItem(null)} />
+          <div className="relative w-[700px] h-[550px] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] bg-[#11131b] overflow-hidden flex flex-col animate-modal-in" onClick={e => e.stopPropagation()}>
             <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-[#1e293b] bg-[#1a1f2e]">
               <div className="flex items-center gap-3 min-w-0">
-                <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded ${PRIORITY_COLORS[selectedRoadmapItem.item.priority]}`}>
-                  {selectedRoadmapItem.item.priority}
-                </span>
-                <h2 className="text-base font-semibold text-white truncate">
-                  {selectedRoadmapItem.item.title}
-                </h2>
-                <span className="shrink-0 text-[10px] text-slate-500">
-                  {selectedRoadmapItem.item.category}
-                </span>
+                <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded ${PRIORITY_COLORS[selectedRoadmapItem.item.priority]}`}>{selectedRoadmapItem.item.priority}</span>
+                <h2 className="text-base font-semibold text-white truncate">{selectedRoadmapItem.item.title}</h2>
+                <span className="shrink-0 text-[10px] text-slate-500">{selectedRoadmapItem.item.category}</span>
               </div>
-              <button
-                onClick={() => setSelectedRoadmapItem(null)}
-                title="Close"
-                className="shrink-0 ml-3 w-7 h-7 flex items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-[#1e293b] transition-colors text-lg leading-none"
-              >
-                ×
-              </button>
+              <button onClick={() => setSelectedRoadmapItem(null)} title="Close" className="shrink-0 ml-3 w-7 h-7 flex items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-[#1e293b] transition-colors text-lg leading-none">×</button>
             </div>
-
-            {/* Content */}
             <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
-              {/* Source info */}
               <div className="flex items-center gap-3">
                 <span className="text-xs text-slate-500">Source:</span>
-                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                  selectedRoadmapItem.item.source === 'competitor-analysis'
-                    ? 'bg-amber-900/30 text-amber-400'
-                    : 'bg-blue-900/30 text-blue-400'
-                }`}>
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${selectedRoadmapItem.item.source === 'competitor-analysis' ? 'bg-amber-900/30 text-amber-400' : 'bg-blue-900/30 text-blue-400'}`}>
                   {selectedRoadmapItem.item.source === 'competitor-analysis' ? 'Competitor Analysis' : 'Ideation'}
                 </span>
-                {selectedRoadmapItem.item.competitive_context && (
-                  <span className="text-xs text-amber-400 italic">{selectedRoadmapItem.item.competitive_context}</span>
-                )}
+                {selectedRoadmapItem.item.competitive_context && (<span className="text-xs text-amber-400 italic">{selectedRoadmapItem.item.competitive_context}</span>)}
               </div>
-
-              {/* Complexity */}
               <div className="flex items-center gap-3">
                 <span className="text-xs text-slate-500">Complexity:</span>
                 <ComplexityDots value={selectedRoadmapItem.item.complexity} />
                 <span className="text-xs text-slate-400 tabular-nums">({selectedRoadmapItem.item.complexity}/5)</span>
               </div>
-
-              {/* Description */}
               <div>
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Description</h3>
-                <p className="text-sm text-slate-300 leading-relaxed">
-                  {selectedRoadmapItem.item.description}
-                </p>
+                <p className="text-sm text-slate-300 leading-relaxed">{selectedRoadmapItem.item.description}</p>
               </div>
-
-              {/* Affected files */}
               {selectedRoadmapItem.item.affected_files && selectedRoadmapItem.item.affected_files.length > 0 && (
                 <div>
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Affected Files</h3>
                   <ul className="space-y-1">
-                    {selectedRoadmapItem.item.affected_files.map((f, i) => (
-                      <li key={i} className="text-xs text-slate-400 font-mono bg-[#1a1f2e] px-2 py-1 rounded">
-                        {f}
-                      </li>
-                    ))}
+                    {selectedRoadmapItem.item.affected_files.map((f, i) => (<li key={i} className="text-xs text-slate-400 font-mono bg-[#1a1f2e] px-2 py-1 rounded">{f}</li>))}
                   </ul>
                 </div>
               )}
-
-              {/* Phase info */}
               <div className="flex items-center gap-3">
                 <span className="text-xs text-slate-500">Phase:</span>
-                <span className="text-xs text-slate-300">
-                  {(PHASE_LABELS as Record<string, string>)[selectedRoadmapItem.phaseKey] ?? selectedRoadmapItem.phaseKey}
-                </span>
+                <span className="text-xs text-slate-300">{(PHASE_LABELS as Record<string, string>)[selectedRoadmapItem.phaseKey] ?? selectedRoadmapItem.phaseKey}</span>
               </div>
             </div>
-
-            {/* Action bar */}
             <div className="shrink-0 flex items-center justify-end gap-3 px-5 py-3 border-t border-[#1e293b] bg-[#1a1f2e]">
-              <button
-                onClick={() => setSelectedRoadmapItem(null)}
-                className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
-              >
-                Close
-              </button>
-              <button
-                onClick={handleConvertRoadmapItem}
-                disabled={isPending}
-                className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors"
-              >
+              <button onClick={() => setSelectedRoadmapItem(null)} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">Close</button>
+              <button onClick={handleConvertRoadmapItem} disabled={isPending} className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors">
                 {isPending ? 'Converting…' : 'Convert to Ticket'}
               </button>
             </div>

@@ -1,19 +1,28 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 import { UnifiedTerminal } from './unified-terminal';
 import { ReviewPanel } from './review-panel';
 import { PhaseSyncer } from './phase-syncer';
+import { ErrorBanner } from './error-banner';
+import { DepPicker, TaskPill } from './dep-picker';
+import { PlanSubtasks } from './plan-subtasks';
+import { QAReportView } from './qa-report-view';
+import { CopyButton } from './copy-button';
 import { addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, restartCurrentPhase } from '@/app/actions/tasks';
 import { markAutoReviewed } from '@/app/actions/auto-mode';
 import type { Task } from '@/lib/task-store';
-import type { PlanData, PlanSubtask, QAReportData, QACriterion } from '@/lib/stream-types';
+import type { PlanData, QAReportData } from '@/lib/stream-types';
 import { formatActionError } from '@/lib/error-format';
 import { PHASE_BADGE, PHASE_LABELS, RESTARTABLE_PHASES } from '@/constants/phases';
 import { SpecDiffView } from './spec-diff-view';
+
+// Re-export sub-components for external consumers
+export { PlanSubtasks } from './plan-subtasks';
+export { QAReportView } from './qa-report-view';
 
 type Tab = 'overview' | 'terminal' | 'spec' | 'plan' | 'qa';
 
@@ -39,237 +48,12 @@ interface Props {
   readonly?: boolean;
 }
 
-function TaskPill({ task }: { task: Task }) {
-  const badge = PHASE_BADGE[task.phase] ?? PHASE_BADGE.backlog;
-  return (
-    <Link
-      href={`/task/${task.id}`}
-      className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#1e293b] bg-[#1e2333] hover:bg-[#1a1f2e] transition-colors text-sm"
-    >
-      <span className="font-medium text-white truncate">{task.title}</span>
-      <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${badge}`}>
-        {PHASE_LABELS[task.phase] ?? task.phase}
-      </span>
-    </Link>
-  );
-}
-
-function DepPicker({
-  label,
-  candidates,
-  selectedIds,
-  onToggle,
-}: {
-  label: string;
-  candidates: Task[];
-  selectedIds: string[];
-  onToggle: (id: string, checked: boolean) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handle(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', handle);
-    return () => document.removeEventListener('mousedown', handle);
-  }, []);
-
-  const filtered = candidates.filter(t =>
-    t.title.toLowerCase().includes(search.toLowerCase())
-  );
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => { setOpen(o => !o); setSearch(''); }}
-        className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md border border-[#334155] bg-[#1e2333] text-slate-300 hover:bg-[#1a1f2e] transition-colors"
-      >
-        + {label}
-      </button>
-
-      {open && (
-        <div className="absolute z-20 top-full left-0 mt-1.5 w-64 sm:w-72 max-w-[calc(100vw-4rem)] bg-[#1e2333] rounded-lg border border-[#1e293b] shadow-xl overflow-hidden">
-          <div className="p-2 border-b border-[#1e293b]">
-            <input
-              autoFocus
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search tasks…"
-              className="w-full px-2.5 py-1.5 text-sm bg-[#11131b] border border-[#334155] rounded text-white focus:outline-none focus:ring-1 focus:ring-[#2563eb]"
-            />
-          </div>
-          <ul className="max-h-64 overflow-y-auto py-1">
-            {filtered.length === 0 && (
-              <li className="px-3 py-2 text-xs text-slate-400">No tasks found.</li>
-            )}
-            {filtered.map(t => {
-              const checked = selectedIds.includes(t.id);
-              const badge = PHASE_BADGE[t.phase] ?? PHASE_BADGE.backlog;
-              return (
-                <li key={t.id}>
-                  <label className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-[#1a1f2e] transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={e => onToggle(t.id, e.target.checked)}
-                      className="rounded border-[#334155] bg-[#11131b]"
-                    />
-                    <span className="flex-1 text-sm text-slate-200 truncate">{t.title}</span>
-                    <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${badge}`}>
-                      {PHASE_LABELS[t.phase] ?? t.phase}
-                    </span>
-                  </label>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CopyButton({ text, label }: { text: string; label?: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(async () => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [text]);
-  return (
-    <button
-      onClick={handleCopy}
-      className="text-xs px-2 py-1 rounded border border-[#334155] text-slate-400 hover:text-white hover:border-[#475569] transition-colors"
-      title={`Copy ${label || 'content'} to clipboard`}
-    >
-      {copied ? '✓ Copied' : '📋 Copy'}
-    </button>
-  );
-}
-
-export function PlanSubtasks({ plan }: { plan: PlanData | null }) {
-  if (!plan?.subtasks?.length) return <p className="text-sm text-slate-400">No plan generated yet.</p>;
-  const completed = plan.subtasks.filter((s: PlanSubtask) => s.completed).length;
-  const total = plan.subtasks.length;
-  const planText = JSON.stringify(plan, null, 2);
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 mb-3">
-        <p className="text-xs text-slate-500">
-          {completed} / {total} subtasks completed
-        </p>
-        <CopyButton text={planText} label="plan" />
-        {completed > 0 && completed < total && (
-          <div className="flex-1 h-1.5 bg-[#1e293b] rounded-full overflow-hidden" data-testid="subtask-progress-track">
-            <div
-              className="h-full bg-[#2563eb] rounded-full transition-all duration-500"
-              style={{ width: `${(completed / total) * 100}%` }}
-              data-testid="subtask-progress-bar"
-            />
-          </div>
-        )}
-      </div>
-      {plan.subtasks.map((s: PlanSubtask, i: number) => (
-        <div key={i} data-testid="plan-subtask" className={`p-3 rounded-lg border transition-colors ${
-          s.completed
-            ? 'border-green-900/40 bg-green-950/20'
-            : 'border-[#1e293b] bg-[#11131b]'
-        }`}>
-          <div className="flex items-start gap-2.5">
-            {s.completed ? (
-              <span className="shrink-0 mt-0.5 text-green-500 text-sm font-bold">✓</span>
-            ) : (
-              <span className="shrink-0 mt-0.5 w-3.5 h-3.5 rounded-full border-2 border-slate-600" />
-            )}
-            <div className="flex-1 min-w-0">
-              <p className={`text-sm font-medium ${s.completed ? 'text-green-300 line-through decoration-green-700/50' : 'text-white'}`}>
-                {s.title}
-              </p>
-              {!s.completed && s.description && (
-                <p className="mt-1 text-xs text-slate-400">{s.description}</p>
-              )}
-              {!s.completed && s.files && s.files.length > 0 && (
-                <p className="mt-1 text-xs text-slate-400 font-mono">
-                  {s.files.join(', ')}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export function QAReportView({ qaReport, humanFeedback }: { qaReport: QAReportData | null; humanFeedback?: string | null }) {
-  if (!qaReport && !humanFeedback) return <p className="text-sm text-slate-400">No QA report generated yet.</p>;
-  const qaText = JSON.stringify(qaReport, null, 2);
-  return (
-    <div className="space-y-4">
-      {/* Human feedback banner */}
-      {humanFeedback && (
-        <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-amber-400 text-sm">👤</span>
-            <h3 className="text-sm font-semibold text-amber-300">Human Reviewer Feedback</h3>
-          </div>
-          <pre className="text-sm text-amber-200/90 whitespace-pre-wrap font-sans leading-relaxed">
-            {humanFeedback}
-          </pre>
-        </div>
-      )}
-
-      {qaReport && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className={`inline-flex items-center px-2.5 py-1 rounded text-sm font-bold ${
-              qaReport.overall === 'PASS'
-                ? 'bg-green-900/40 text-green-300'
-                : 'bg-red-900/40 text-red-300'
-            }`}>
-              {qaReport.overall}
-            </div>
-            <CopyButton text={qaText} label="QA report" />
-          </div>
-          {qaReport.criteria?.map((c: QACriterion, i: number) => (
-            <div key={i} className="flex items-start gap-2 text-sm">
-              <span className={`shrink-0 font-bold ${c.status === 'PASS' ? 'text-green-600' : 'text-red-600'}`}>
-                {c.status === 'PASS' ? '✓' : '✗'}
-              </span>
-              <div>
-                <p className="text-slate-300">{c.criterion || c.name}</p>
-                {c.notes && <p className="text-xs text-slate-400 mt-0.5">{c.notes}</p>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── SpecDiffView — side-by-side version comparison ─────────────────────────
-
-
-
-// ── Line-level diff for spec comparison ──────────────────────────────────
-
-
-// Valid tab IDs for hash-based navigation (<URL>#plan, etc.) — defined
-// outside the component to avoid recreating on every render.
 const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
 
 export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, onClose, readonly = false }: Props) {
   const router = useRouter();
   const { run, isPending } = useServerMutation();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
-  // Error banner — surfaces Server Action failures (regression fix:
-  // previously bare `await action()` calls let thrown errors vanish into
-  // useServerMutation's empty catch, so e.g. changing a dependency appeared
-  // to "do nothing" if the action threw).
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -283,7 +67,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
     window.addEventListener('hashchange', syncFromHash);
     return () => window.removeEventListener('hashchange', syncFromHash);
   }, []);
-  const [specVersion, setSpecVersion] = useState<string | null>(null); // null = current spec
+  const [specVersion, setSpecVersion] = useState<string | null>(null);
   const [compareMode, setCompareMode] = useState(false);
   const [leftVersion, setLeftVersion] = useState<string | null>(null);
   const [rightVersion, setRightVersion] = useState<string | null>(null);
@@ -368,9 +152,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
       try {
         await markAutoReviewed(task.id);
       } catch (err) {
-        setError(
-          formatActionError('mark task as reviewed', err),
-        );
+        setError(formatActionError('mark task as reviewed', err));
         throw err;
       }
     });
@@ -397,31 +179,11 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
     <div className="flex flex-col h-full">
       {!readonly && <PhaseSyncer />}
 
-      {/* Error banner — surfaces Server Action failures (regression fix) */}
-      {error && (
-        <div
-          role="alert"
-          className="shrink-0 mx-6 mt-3 rounded-lg border border-red-800/40 bg-red-950/30 p-3 flex items-start gap-3"
-        >
-          <span className="text-red-400 font-bold shrink-0 mt-0.5">✗</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-red-300">Action failed</p>
-            <p className="text-xs text-red-200/90 mt-0.5 break-words">{error}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setError(null)}
-            title="Dismiss"
-            className="shrink-0 text-red-400 hover:text-red-300 text-base leading-none px-1"
-          >
-            ×
-          </button>
-        </div>
-      )}
+      {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 
       {/* Header */}
       <div className={`shrink-0 px-6 pt-5 pb-0 ${readonly ? '' : 'border-b border-[#1e293b]'} bg-[#11131b]`}>
-        {/* Row 1: breadcrumb + phase badge + delete (hidden in readonly) */}
+        {/* Row 1: breadcrumb + phase badge + delete */}
         <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
           <Link href="/" className="text-xs text-slate-500 hover:text-slate-300 transition-colors shrink-0">
             ← Board
@@ -485,7 +247,9 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
           <p className="mb-2 text-sm text-slate-400">
             {task.description}
           </p>
-        )}            {/* Rate-limit banner */}
+        )}
+
+        {/* Rate-limit banner */}
         {!readonly && task.rateLimitedUntil && (
           <div className="mt-2 mb-1 flex items-center gap-2 text-xs bg-amber-950/30 border border-amber-800/50 text-amber-300 rounded-md px-3 py-1.5">
             <span>⏳</span>
@@ -497,7 +261,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
           </div>
         )}
 
-        {/* Auto-processed banner — shown for auto-done tasks not yet manually reviewed */}
+        {/* Auto-processed banner */}
         {!readonly && task.autoProcessed && !task.autoReviewed && task.phase === 'done' && (
           <div className="mt-2 mb-1 flex items-center gap-2 text-xs bg-amber-950/30 border border-amber-800/50 text-amber-300 rounded-md px-3 py-1.5">
             <span>🤖</span>
@@ -514,7 +278,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
           </div>
         )}
 
-        {/* Meta row: source (if any) + timestamps */}
+        {/* Meta row: source + timestamps */}
         <div className="flex items-center gap-3 flex-wrap mb-3">
           {task.source && (
             <>
@@ -538,7 +302,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
           </p>
         </div>
 
-        {/* Tabs (hidden in readonly) — scrollable at narrow widths */}
+        {/* Tabs */}
         {!readonly && (
           <div className="flex gap-0 overflow-x-auto -mx-6 px-6">
             {tabs.map(t => (
@@ -563,7 +327,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
         )}
       </div>
 
-      {/* Tab content — hidden entirely in readonly mode */}
+      {/* Tab content */}
       {!readonly && (
         <div className={`flex-1 min-h-0 ${activeTab === 'terminal' ? 'flex flex-col overflow-hidden' : 'overflow-auto'}`}>
 
@@ -578,21 +342,9 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                   <span className="text-red-400 text-sm font-bold">✗</span>
                   <h3 className="text-sm font-semibold text-red-300">Task Failed</h3>
                   <div className="ml-auto flex items-center gap-2">
+                    <CopyButton text={task.completionSummary || ''} />
                     <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        await navigator.clipboard.writeText(task.completionSummary || '');
-                      }}
-                      className="text-[10px] px-2 py-0.5 rounded border border-red-900/50 text-red-400 hover:text-red-300 hover:border-red-700 transition-colors"
-                      title="Copy summary to clipboard"
-                    >
-                      📋 Copy
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleInlineRetry();
-                      }}
+                      onClick={(e) => { e.stopPropagation(); handleInlineRetry(); }}
                       disabled={isPending}
                       data-testid="detail-retry-button"
                       className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-red-900/30 text-red-400 hover:bg-red-800/40 hover:text-red-300 transition-colors disabled:opacity-50 flex items-center gap-1"
@@ -613,7 +365,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
               </div>
             )}
 
-            {/* Review panel for awaiting-review and pr-open phases */}
+            {/* Review panel */}
             {(isAwaiting || isPrOpen) && (
               <ReviewPanel
                 taskId={task.id}
@@ -626,7 +378,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
               />
             )}
 
-            {/* PR link — always visible in the overview when a PR exists */}
+            {/* PR link */}
             {task.prUrl && (
               <section>
                 <a
@@ -644,7 +396,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
               </section>
             )}
 
-            {/* Depends on */}
+            {/* Dependencies */}
             <section>
               <div className="flex items-center gap-2 mb-3">
                 <DepPicker
@@ -735,12 +487,10 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
           <div className="p-6">
             {spec || (specVersions && Object.keys(specVersions).length > 0) ? (
               <>
-                {/* ── Header row: label + compare toggle + version selectors ── */}
                 <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-500">Specification</span>
 
-                    {/* Compare toggle button — show when 2+ total versions (current + snapshots) exist */}
                     {(() => {
                       const totalVersions = 1 + (specVersions ? Object.keys(specVersions).length : 0);
                       return totalVersions >= 2;
@@ -758,7 +508,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                       </button>
                     )}
 
-                    {/* Version selector (single — hidden in compare mode) */}
                     {!compareMode && specVersions && Object.keys(specVersions).length > 0 && (
                       <div className="flex items-center gap-0.5 ml-2">
                         <button
@@ -788,13 +537,11 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                     )}
                   </div>
 
-                  {/* Copy button */}
                   {!compareMode && (
                     <CopyButton text={specVersion && specVersions ? specVersions[specVersion] : (spec || '')} />
                   )}
                 </div>
 
-                {/* ── Compare mode: side-by-side diff ── */}
                 {compareMode && specVersions ? (
                   <SpecDiffView
                     spec={spec ?? ''}
@@ -805,7 +552,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                     onSetRight={setRightVersion}
                   />
                 ) : (
-                  /* ── Single-panel view ── */
                   <pre className="text-sm text-emerald-400 whitespace-pre-wrap font-mono leading-relaxed">
                     {specVersion && specVersions ? specVersions[specVersion] : spec}
                   </pre>
@@ -832,8 +578,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
         )}
       </div>
       )}
-
-      {/* Copy button helper */}
     </div>
   );
 }
