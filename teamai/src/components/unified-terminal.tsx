@@ -304,6 +304,8 @@ export function UnifiedTerminal({
 
       observer = new ResizeObserver(() => fitAddon.fit());
       observer.observe(container);
+    }).catch((err: unknown) => {
+      console.error('[UnifiedTerminal] Failed to load xterm modules:', err);
     });
 
     return () => {
