@@ -25,8 +25,14 @@ export interface AgentSession {
   /** The project root this session belongs to. Set from createSession opts. */
   projectRoot?: string;
   status: 'running' | 'idle' | 'done' | 'error';
-  /** Last time (epoch ms) the session produced stdout output. Used for stall detection (#8). */
+  /** Last time (epoch ms) the session produced stdout output. Used for stall detection. */
   lastOutputAt: number;
+  /**
+   * Per-session EventEmitter scoped to this session only.
+   * Used by {@link waitForCompletion} to avoid piling listeners
+   * on the global {@link processManager} emitter (BUG-20 / T29).
+   */
+  events: EventEmitter;
 }
 
 export class ProcessManager extends EventEmitter {
@@ -92,6 +98,10 @@ export class ProcessManager extends EventEmitter {
       });
     }
 
+    // Per-session EventEmitter so waitForCompletion doesn't pile listeners
+    // on the global processManager emitter (BUG-20 / T29).
+    const sessionEvents = new EventEmitter();
+
     // Parse NDJSON from stdout line by line
     const { logFile } = opts;
     let buffer = '';
@@ -105,9 +115,11 @@ export class ProcessManager extends EventEmitter {
           try {
             const event = JSON.parse(line);
             this.emit('event', { sessionId: id, event });
+            sessionEvents.emit('event', { sessionId: id, event });
             if (logFile) this._appendToLog(logFile, event);
           } catch {
             this.emit('raw', { sessionId: id, data: line });
+            sessionEvents.emit('raw', { sessionId: id, data: line });
           }
         }
       }
@@ -130,13 +142,16 @@ export class ProcessManager extends EventEmitter {
         try {
           const event = JSON.parse(buffer);
           this.emit('event', { sessionId: id, event });
+          sessionEvents.emit('event', { sessionId: id, event });
         } catch {
           this.emit('raw', { sessionId: id, data: buffer });
+          sessionEvents.emit('raw', { sessionId: id, data: buffer });
         }
       }
       const session = this.sessions.get(id);
       if (session) session.status = code === 0 ? 'done' : 'error';
       this.emit('exit', { sessionId: id, code });
+      sessionEvents.emit('exit', { sessionId: id, code });
     });
 
     this.sessions.set(id, {
@@ -148,6 +163,7 @@ export class ProcessManager extends EventEmitter {
       projectRoot: opts.projectRoot,
       status: 'running',
       lastOutputAt: now,
+      events: sessionEvents,
     });
 
     return id;
@@ -255,6 +271,11 @@ export class ProcessManager extends EventEmitter {
       }
     }
     return stalled;
+  }
+
+  /** Per-session EventEmitter — scoped to avoid listener pile-up on the global emitter. */
+  getSessionEmitter(sessionId: string): EventEmitter | undefined {
+    return this.sessions.get(sessionId)?.events;
   }
 
   // ── PTY terminal sessions ──────────────────────────────────────────────────

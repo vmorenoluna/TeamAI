@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ProcessManager } from '@/lib/process-manager';
+import { EventEmitter } from 'events';
 import type { AgentSession } from '@/lib/process-manager';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -35,6 +36,7 @@ function addMockSession(
     cwd: overrides.cwd ?? '/test',
     status: overrides.status ?? 'running',
     lastOutputAt: overrides.lastOutputAt ?? Date.now(),
+    events: new EventEmitter(),
   };
   (pm as unknown as AnySession).sessions.set(id, session);
   return session;
