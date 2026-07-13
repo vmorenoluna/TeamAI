@@ -126,7 +126,7 @@ Each call adds 3 listeners (`event`, `exit`, `raw`) to the singleton `processMan
 3. **Extract `updateSessionMap(specPath, key, sessionId)`.** The read-modify-write of `session_map.json` is copy-pasted 6× (phase-runners.ts ×3, implement.ts ×2, qa-review.ts ×1) — and only implement.ts serializes it with a lock.
 4. **`resolveBaseBranch(projectRoot)`** — one cached function wrapping `detectDefaultBranch`, used by every place in BUG-2's list.
 5. **Frontend splits.** ✅ DONE (T27). Extracted 8 components: `copy-button`, `error-banner`, `task-modal`, `dep-picker`, `plan-subtasks`, `qa-report-view`, `new-task-dialog`, `kanban-filters`. Mega-components reduced: task-detail (710→350), kanban-board (670→450), roadmap-view (810→650), workflow-view (690→570).
-6. **`getTaskFull`** (`actions/tasks.ts:310-397`) reads ~12 files inline; extract a `taskArtifacts.ts` reader module shared with `getTaskArtifacts` (which duplicates half of it).
+6. **`getTaskFull`** (`actions/tasks.ts:310-397`) reads ~12 files inline; extract a `taskArtifacts.ts` reader module shared with `getTaskArtifacts` (which duplicates half of it). ✅ DONE (T28). Extracted `src/lib/task-artifacts.ts` with `readCommonArtifacts(dir, projectPath, branch?)` returning `{spec, qaReport, humanFeedback, diff}`. Both functions now delegate shared reads; removed duplicate `readHumanFeedback` and `detectDefaultBranch` imports from tasks.ts. 2,563 tests pass.
 7. **Two `fix-v4.js`/`fix-v5.js` scripts** in `teamai/scripts/` look like one-off migration leftovers — verify and delete.
 
 ---
@@ -201,7 +201,7 @@ Effort: **S** (<½ day) / **M** (½–2 days) / **L** (>2 days). Priority: **P0*
 |----|------|--------|
 | T26 | **Shared orchestrator test harness.** Create `tests/utils/orchestrator-harness.ts` exporting the mock `processManager`/`container-manager`/fs-temp-project setup duplicated across the 5 big orchestrator suites; migrate `orchestrator.test.ts` and `orchestrator-robustness.test.ts` first. | M |
 | T27 | **Split mega-components** (§4.5): extract dialogs and panels from `task-detail.tsx` and `kanban-board.tsx` (~<300 lines per file target), preserving the props-over-fetch rule. ✅ DONE. Extracted 8 sub-components (`copy-button`, `error-banner`, `task-modal`, `dep-picker`, `plan-subtasks`, `qa-report-view`, `new-task-dialog`, `kanban-filters`). All 4 mega-files reduced by 120–360 lines each. 2,555 tests pass, 0 type errors. | L ✅ |
-| T28 | **Extract shared task-artifact reader** for `getTaskFull`/`getTaskArtifacts` (§4.6). | S |
+| T28 | **Extract shared task-artifact reader** for `getTaskFull`/`getTaskArtifacts` (§4.6). ✅ DONE. Created `src/lib/task-artifacts.ts` with `readCommonArtifacts()`; eliminated duplicate spec/qa/feedback/diff reads; rewrote tests to cover the new module directly. 2,563 tests pass, 0 type errors. | S ✅ |
 | T29 | **Per-session waiters** (BUG-20): raise `processManager.setMaxListeners` and/or route `waitForCompletion` through a per-session EventEmitter created in `createSession`. | S |
 | T30 | **Delete or document `scripts/fix-v4.js` / `fix-v5.js`** and `scripts/update-phase.ts` if they are one-off migrations. | S |
 | T31 | **e2e seed isolation**: give each spec its own seeded task fixtures so Playwright can run `workers > 1`. | M |

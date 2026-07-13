@@ -1,11 +1,12 @@
 'use server';
 
 import { TaskStore } from '@/lib/task-store';
-import { getOrchestrator, detectDefaultBranch } from '@/lib/orchestrator';
+import { getOrchestrator } from '@/lib/orchestrator';
+import { readCommonArtifacts } from '@/lib/task-artifacts';
 import { getActiveProjectPath } from './projects';
 import { processManager } from '@/lib/process-manager';
 import { revalidatePath } from 'next/cache';
-import type { PlanData, QAReportData } from '@/lib/stream-types';
+import type { PlanData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { getResumePhaseForFailedTask } from '@/lib/task-utils';
@@ -20,13 +21,6 @@ async function getStores() {
     orchestrator: getOrchestrator(projectPath),
     projectPath,
   };
-}
-
-export async function readHumanFeedback(dir: string): Promise<string | null> {
-  const path = join(dir, 'human_feedback.md');
-  if (!existsSync(path)) return null;
-  const raw = readFileSync(path, 'utf-8').replace(/^# Human Review Feedback\n\n/, '').trim();
-  return raw || null;
 }
 
 export async function createTask(formData: FormData) {
@@ -274,36 +268,7 @@ export async function getTaskArtifacts(taskId: string) {
   if (!task) throw new Error(`Task ${taskId} not found`);
 
   const dir = taskStore.getDirById(taskId);
-
-  const specPath = join(dir, 'spec.md');
-  const spec = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
-
-  const qaPath = join(dir, 'qa_report.json');
-  const qaReport = existsSync(qaPath)
-    ? JSON.parse(readFileSync(qaPath, 'utf-8'))
-    : null;
-
-  const humanFeedback = await readHumanFeedback(dir);
-
-  let diff: string | null = null;
-  if (task.branch) {
-    try {
-      const base = detectDefaultBranch(projectPath);
-      diff = execFileSync('git', ['diff', `${base}...${task.branch}`], {
-        cwd: projectPath,
-        encoding: 'utf-8',
-      });
-    } catch {
-      diff = null;
-    }
-  }
-  // Fallback: read pre-canned diff.txt from task directory (for demo / mocked tasks)
-  if (!diff) {
-    const diffPath = join(dir, 'diff.txt');
-    if (existsSync(diffPath)) diff = readFileSync(diffPath, 'utf-8');
-  }
-
-  return { spec, qaReport, humanFeedback, diff };
+  return readCommonArtifacts(dir, projectPath, task.branch);
 }
 
 export async function getTaskFull(taskId: string) {
@@ -319,35 +284,18 @@ export async function getTaskFull(taskId: string) {
 
   const dir = taskStore.getDirById(taskId);
 
-  const specPath = join(dir, 'spec.md');
-  const spec = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
+  // ── Common artifacts (spec, qa, feedback, diff) ──
+  const { spec, qaReport, humanFeedback, diff } = readCommonArtifacts(
+    dir,
+    projectPath,
+    task.branch,
+  );
 
   const planPath = join(dir, 'plan.json');
   let plan: PlanData | null = null;
   if (existsSync(planPath)) {
     try { plan = JSON.parse(readFileSync(planPath, 'utf-8')); } catch { /* skip */ }
   }
-
-  const qaPath = join(dir, 'qa_report.json');
-  let qaReport: QAReportData | null = null;
-  if (existsSync(qaPath)) {
-    try { qaReport = JSON.parse(readFileSync(qaPath, 'utf-8')); } catch { /* skip */ }
-  }
-
-  let diff: string | null = null;
-  if (task.branch) {
-    try {
-      const base = detectDefaultBranch(projectPath);
-      diff = execFileSync('git', ['diff', `${base}...${task.branch}`], { cwd: projectPath, encoding: 'utf-8' });
-    } catch { /* no diff yet */ }
-  }
-  // Fallback: read pre-canned diff.txt from task directory (for demo / mocked tasks)
-  if (!diff) {
-    const diffPath = join(dir, 'diff.txt');
-    if (existsSync(diffPath)) diff = readFileSync(diffPath, 'utf-8');
-  }
-
-  const humanFeedback = await readHumanFeedback(dir);
 
   const outputPath = join(dir, 'output.log');
   const agentOutput = existsSync(outputPath) ? readFileSync(outputPath, 'utf-8') : null;
