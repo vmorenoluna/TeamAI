@@ -37,7 +37,7 @@ vi.mock('child_process', () => ({
 }));
 
 vi.mock('../../src/lib/logger', () => ({
-  warn: mockWarn,
+  log: vi.fn(), error: vi.fn(), warn: mockWarn,
 }));
 
 vi.mock('../../src/lib/process-manager', () => ({

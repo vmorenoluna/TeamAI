@@ -54,7 +54,7 @@ vi.mock('../../src/lib/process-manager', () => ({
   containerSessionOpts: vi.fn(() => ({})),
 }));
 
-vi.mock('../../src/lib/logger', () => ({ warn: vi.fn() }));
+vi.mock('../../src/lib/logger', () => ({ log: vi.fn(), error: vi.fn(), warn: vi.fn() }));
 
 // hostToContainerPath mock: translate host paths inside the repo to
 // /workspaces/project equivalents — simulates runtime container-manager.

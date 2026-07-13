@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, existsSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { warn as logWarn } from './logger';
+import { warn as logWarn, log } from './logger';
 import { IN_PROGRESS_PHASES } from '@/constants/phases';
 import { projectStore } from './project-store';
 import { getWorktreeBase } from './orchestrator/helpers';
@@ -294,13 +294,13 @@ export async function autoResumeInterruptedTasks(): Promise<number> {
       if (task.rateLimitedUntil) {
         const expiresAt = new Date(task.rateLimitedUntil).getTime();
         if (expiresAt > Date.now()) {
-          console.log(`[auto-resume] Task ${task.taskId} "${task.title}" is still rate-limited until ${task.rateLimitedUntil} — skipping (will retry on expiry)`);
+          log('auto-resume', `Task ${task.taskId} "${task.title}" is still rate-limited until ${task.rateLimitedUntil} — skipping (will retry on expiry)`);
           continue;
         }
-        console.log(`[auto-resume] Task ${task.taskId} "${task.title}" rate limit expired (was ${task.rateLimitedUntil}) — resuming`);
+        log('auto-resume', `Task ${task.taskId} "${task.title}" rate limit expired (was ${task.rateLimitedUntil}) — resuming`);
       }
 
-      console.log(`[auto-resume] Resuming task ${task.taskId} "${task.title}" at phase ${task.phase} in ${task.projectName}`);
+      log('auto-resume', `Resuming task ${task.taskId} "${task.title}" at phase ${task.phase} in ${task.projectName}`);
       orchestrator.resumeTask(task.taskId).catch(err => {
         logWarn('auto-resume', `Task ${task.taskId} "${task.title}" failed to resume:`, err);
       });
@@ -350,8 +350,8 @@ export async function sweepStalledTasks(): Promise<number> {
   const stalledSessions = processManager.getStalledSessions(120_000);
   for (const session of stalledSessions) {
     try {
-      console.warn(
-        `[sweep] Session ${session.id} (task ${session.taskId}, role ${session.role}) ` +
+      logWarn('sweep',
+        `Session ${session.id} (task ${session.taskId}, role ${session.role}) ` +
         `stalled >2min with no output — killing`,
       );
       processManager.killSession(session.id);
@@ -401,7 +401,7 @@ export async function sweepStalledTasks(): Promise<number> {
           } catch { /* orchestrator not available — proceed */ }
 
           // Clear the stale rate-limit flag and re-queue
-          console.log(`[sweep] Task ${task.id} "${task.title}" has expired rate limit (was ${task.rateLimitedUntil}) — clearing and resuming`);
+          log('sweep', `Task ${task.id} "${task.title}" has expired rate limit (was ${task.rateLimitedUntil}) — clearing and resuming`);
           delete task.rateLimitedUntil;
           try { writeFileSync(taskFile, JSON.stringify(task, null, 2)); } catch { /* best-effort */ }
         } else {
@@ -424,7 +424,7 @@ export async function sweepStalledTasks(): Promise<number> {
           const staleThreshold = Date.now() - STALLED_TASK_THRESHOLD_MS;
           if (updatedAt > staleThreshold) continue; // recently updated, leave alone
 
-          console.log(`[sweep] Task ${task.id} "${task.title}" stalled >30min in phase "${task.phase}" — resuming`);
+          log('sweep', `Task ${task.id} "${task.title}" stalled >30min in phase "${task.phase}" — resuming`);
         }
 
         // Re-queue the task for resumption

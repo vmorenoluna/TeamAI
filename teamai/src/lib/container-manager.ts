@@ -222,7 +222,7 @@ export class ContainerManager extends EventEmitter {
       record.remoteWorkspaceFolder = remoteWorkspaceFolder;
       record.state = 'running';
       record.startPromise = null;
-      console.log(`[container] Started — id=${containerId} workspace=${remoteWorkspaceFolder}`);
+      log('container', `Started — id=${containerId} workspace=${remoteWorkspaceFolder}`);
       this._emit(record, 'running');
       this._watchEvents(record);
     } catch (err) {
@@ -316,7 +316,7 @@ export class ContainerManager extends EventEmitter {
   private _onContainerDied(record: ContainerRecord): void {
     if (record.state !== 'running') return; // single-restart guard
 
-    console.log(`[container] Container for ${record.projectRoot} died — attempting one restart`);
+    log('container', `Container for ${record.projectRoot} died — attempting one restart`);
     record.state = 'restarting';
     record.containerId = null;
     record.remoteWorkspaceFolder = null;

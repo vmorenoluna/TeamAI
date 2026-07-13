@@ -67,7 +67,7 @@ vi.mock('@/lib/task-store', () => {
   return { TaskStore };
 });
 
-vi.mock('@/lib/logger', () => ({ warn: vi.fn() }));
+vi.mock('@/lib/logger', () => ({ log: vi.fn(), error: vi.fn(), warn: vi.fn() }));
 
 vi.mock('@/lib/providers', () => ({ resolveProvider: vi.fn(), providerToSessionOpts: vi.fn() }));
 

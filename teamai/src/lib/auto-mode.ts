@@ -6,6 +6,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { projectStore } from './project-store';
 import { getToolPath } from './tool-checker';
+import { log, error as logError } from './logger';
 import { TERMINAL_PHASES, PAUSED_PHASES } from '@/constants/phases';
 
 interface AutoProjectState {
@@ -190,7 +191,7 @@ function _start(projectRoot: string, state: AutoProjectState): void {
   // Run an immediate tick to pick up any backlog tasks right away
   _tick(projectRoot, state);
 
-  console.log(`[auto-mode] Started for ${projectRoot} (max parallel: ${state.maxParallel})`);
+  log('auto-mode', `Started for ${projectRoot} (max parallel: ${state.maxParallel})`);
 }
 
 /**
@@ -214,7 +215,7 @@ function _autoApprove(taskId: string, projectRoot: string, state: AutoProjectSta
   } catch { /* best-effort — approval proceeds regardless */ }
   getOrchestrator(projectRoot).approveTask(taskId, 'pull-request')
     .catch(err => {
-      console.error(`[auto-mode] Failed to auto-approve task ${taskId}:`, err);
+      logError('auto-mode', `Failed to auto-approve task ${taskId}`, err);
       state.autoApprovedIds.delete(taskId);
     });
 }
@@ -256,7 +257,7 @@ function _adoptStalledTasks(projectRoot: string, state: AutoProjectState): void 
   }
 
   if (adopted > 0) {
-    console.log(`[auto-mode] Re-adopted ${adopted} stalled task(s) in paused phases`);
+    log('auto-mode', `Re-adopted ${adopted} stalled task(s) in paused phases`);
   }
 }
 
@@ -278,7 +279,7 @@ function _stop(state: AutoProjectState): void {
   state.autoApprovedIds.clear();
   state.startingIds.clear();
 
-  console.log('[auto-mode] Stopped');
+  log('auto-mode', 'Stopped');
 }
 
 function _tick(projectRoot: string, state: AutoProjectState): void {
@@ -329,10 +330,10 @@ function _tick(projectRoot: string, state: AutoProjectState): void {
     state.startingIds.add(task.id); // prevent duplicate pick until phase changes
     const orchestrator = getOrchestrator(projectRoot);
     orchestrator.resumeTask(task.id).catch(err => {
-      console.error(`[auto-mode] Failed to start task ${task.id}:`, err);
+      logError('auto-mode', `Failed to start task ${task.id}`, err);
       state.startingIds.delete(task.id);
     });
-    console.log(`[auto-mode] Started task: ${task.title} (${task.id})`);
+    log('auto-mode', `Started task: ${task.title} (${task.id})`);
   }
 }
 
@@ -352,7 +353,7 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
   const prNumber = prMatch ? prMatch[1] : mrMatch![1];
   const isGitLab = !!mrMatch;
 
-  console.log(`[auto-mode] Starting CI polling for ${isGitLab ? 'MR' : 'PR'} #${prNumber} (task ${taskId})`);
+  log('auto-mode', `Starting CI polling for ${isGitLab ? 'MR' : 'PR'} #${prNumber} (task ${taskId})`);
 
   const timer = setInterval(() => {
     if (!state.enabled) {
@@ -387,14 +388,14 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
         if (mrData.state !== 'opened') {
           clearInterval(timer);
           state.ciPollTimers.delete(taskId);
-          console.log(`[auto-mode] MR #${prNumber} closed without merge — stopping CI poll`);
+          log('auto-mode', `MR #${prNumber} closed without merge — stopping CI poll`);
           return;
         }
 
         // Check if pipeline (CI) passed
         const pipeline = mrData.head_pipeline;
         if (pipeline && pipeline.status === 'success') {
-          console.log(`[auto-mode] All CI checks passed for MR #${prNumber} — auto-merging`);
+          log('auto-mode', `All CI checks passed for MR #${prNumber} — auto-merging`);
           clearInterval(timer);
           state.ciPollTimers.delete(taskId);
 
@@ -402,10 +403,10 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
             execFileSync(getToolPath('glab'), ['mr', 'merge', prNumber], {
               cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
             });
-            console.log(`[auto-mode] MR #${prNumber} merged successfully`);
+            log('auto-mode', `MR #${prNumber} merged successfully`);
           } catch (mergeErr) {
             const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
-            console.error(`[auto-mode] Failed to merge MR #${prNumber}: ${msg}`);
+            logError('auto-mode', `Failed to merge MR #${prNumber}: ${msg}`);
             return;
           }
 
@@ -430,7 +431,7 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
           // PR closed without merge — stop polling
           clearInterval(timer);
           state.ciPollTimers.delete(taskId);
-          console.log(`[auto-mode] PR #${prNumber} closed without merge — stopping CI poll`);
+          log('auto-mode', `PR #${prNumber} closed without merge — stopping CI poll`);
           return;
         }
 
@@ -441,7 +442,7 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
         );
 
         if (allPassed) {
-          console.log(`[auto-mode] All CI checks passed for PR #${prNumber} — auto-merging`);
+          log('auto-mode', `All CI checks passed for PR #${prNumber} — auto-merging`);
           clearInterval(timer);
           state.ciPollTimers.delete(taskId);
 
@@ -449,10 +450,10 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
             execFileSync(getToolPath('gh'), ['pr', 'merge', prNumber, '--merge'], {
               cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
             });
-            console.log(`[auto-mode] PR #${prNumber} merged successfully`);
+            log('auto-mode', `PR #${prNumber} merged successfully`);
           } catch (mergeErr) {
             const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
-            console.error(`[auto-mode] Failed to merge PR #${prNumber}: ${msg}`);
+            logError('auto-mode', `Failed to merge PR #${prNumber}: ${msg}`);
             // Don't mark done if merge failed — leave for manual intervention
             return;
           }
@@ -463,7 +464,7 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
     } catch (err) {
       // Silently retry — gh/glab might be temporarily unavailable or rate-limited
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[auto-mode] CI poll error for ${isGitLab ? 'MR' : 'PR'} #${prNumber}: ${msg}`);
+      logError('auto-mode', `CI poll error for ${isGitLab ? 'MR' : 'PR'} #${prNumber}: ${msg}`);
     }
   }, 30_000); // poll every 30 seconds
 
@@ -482,9 +483,9 @@ function _finishTask(taskId: string, projectRoot: string, _state: AutoProjectSta
 
   const orchestrator = getOrchestrator(projectRoot);
   orchestrator.markTaskDone(taskId).then(() => {
-    console.log(`[auto-mode] Task ${taskId} marked as done (auto-processed)`);
+    log('auto-mode', `Task ${taskId} marked as done (auto-processed)`);
   }).catch(err => {
-    console.error(`[auto-mode] Failed to mark task ${taskId} as done:`, err);
+    logError('auto-mode', `Failed to mark task ${taskId} as done`, err);
   });
 }
 
@@ -520,7 +521,7 @@ export function restoreAutoModeStates(): number {
     const existing = projectStates.get(project.path);
     if (existing?.enabled) continue;
 
-    console.log(`[auto-mode] Restoring auto mode for ${project.name} (max parallel: ${saved.maxParallel})`);
+    log('auto-mode', `Restoring auto mode for ${project.name} (max parallel: ${saved.maxParallel})`);
     setAutoModeState(project.path, true, saved.maxParallel);
     restored++;
   }

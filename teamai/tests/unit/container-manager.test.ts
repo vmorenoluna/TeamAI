@@ -38,7 +38,7 @@ vi.mock('fs', () => ({
 
 vi.mock('../../src/lib/logger', () => ({
   error: mockLogError,
-  warn: mockLogWarn,
+  log: vi.fn(), warn: mockLogWarn,
 }));
 
 // ── Imports ──

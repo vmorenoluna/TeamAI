@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, readdirSync
 import { join } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
+import { error as logError } from './logger';
 
 /**
  * Resolve the TeamAI config directory. Precedence:
@@ -307,7 +308,7 @@ export class ProjectStore {
       try {
         writeFileSync(manifestPath, JSON.stringify({ version: 1, files: newManifest }, null, 2));
       } catch (err) {
-        console.error(`[ProjectStore] Failed to write scaffold manifest at ${manifestPath}:`, err);
+        logError('ProjectStore', `Failed to write scaffold manifest at ${manifestPath}`, err);
       }
     }
 

@@ -33,7 +33,7 @@ const mockOff = vi.hoisted(() => vi.fn((event: string, handler: any) => {
 
 const mockEmit = vi.hoisted(() => vi.fn());
 
-vi.mock('../../src/lib/logger', () => ({ warn: mockWarn, error: vi.fn() }));
+vi.mock('../../src/lib/logger', () => ({ log: vi.fn(), warn: mockWarn, error: vi.fn() }));
 
 vi.mock('../../src/lib/container-manager', () => ({
   readContainerConfig: vi.fn(() => ({ enabled: false })),
