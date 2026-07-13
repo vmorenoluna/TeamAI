@@ -10,6 +10,7 @@ import path from 'path';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy, QaReport } from './types';
 import { REVISION_CLEANUP_EXTRA } from './artifacts';
+import { TaskNotFoundError, PhaseTransitionError } from './errors';
 
 // ── Dependencies ──────────────────────────────────────────────────────────
 
@@ -58,10 +59,10 @@ export async function approveTask(
   deps: ReviewActionsDeps,
 ): Promise<void> {
   const task = deps.taskStore.getById(taskId);
-  if (!task) throw new Error(`Task ${taskId} not found`);
+  if (!task) throw new TaskNotFoundError(taskId);
   const phase = task.phase;
   if (phase !== 'awaiting-review') {
-    throw new Error(`cannot approve a task in ${phase} — must be awaiting-review`);
+    throw new PhaseTransitionError(taskId, phase, 'awaiting-review', 'approve');
   }
   const pipeline = deps.pipelines.get(taskId) ?? deps.restorePipeline(taskId, 'awaiting-review');
   pipeline.mergeStrategy = strategy;
@@ -88,10 +89,10 @@ export async function rejectTask(
   deps: ReviewActionsDeps,
 ): Promise<void> {
   const task = deps.taskStore.getById(taskId);
-  if (!task) throw new Error(`Task ${taskId} not found`);
+  if (!task) throw new TaskNotFoundError(taskId);
   const phase = task.phase;
   if (phase !== 'awaiting-review' && phase !== 'pr-open') {
-    throw new Error(`cannot reject a task in ${phase} — must be awaiting-review or pr-open`);
+    throw new PhaseTransitionError(taskId, phase, 'awaiting-review or pr-open', 'reject');
   }
 
   const pipeline = deps.pipelines.get(taskId) ?? deps.restorePipeline(taskId, phase);
