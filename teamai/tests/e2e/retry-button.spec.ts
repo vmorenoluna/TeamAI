@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { ensureProjectSelected, getSeedTaskId, requireSeedTaskId, scrollKanbanRight, SEED_DIR } from './helpers';
+import { ensureProjectSelected, getSeedTaskId, requireSeedTaskId, scrollKanbanRight, getActiveSeedDir } from './helpers';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
@@ -159,7 +159,7 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
     const taskId = getSeedTaskId(SEARCH_CRASH_SLUG);
     if (!taskId) return;
 
-    const taskPath = join(SEED_DIR, '.teamai', SEARCH_CRASH_SLUG, 'task.json');
+    const taskPath = join(getActiveSeedDir(), '.teamai', SEARCH_CRASH_SLUG, 'task.json');
     try {
       const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
       task.phase = 'failed';

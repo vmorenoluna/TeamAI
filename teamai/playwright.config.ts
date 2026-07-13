@@ -13,10 +13,11 @@ export default defineConfig({
   testDir: './tests/e2e',
   timeout: 30_000,
   retries: 0,
-  workers: 1,
-  // ^ Serial execution — retry-button.spec.ts modifies shared seed state
-  //   (completionSummary, phase) and would race with completion-summary.spec.ts
-  //   and task-detail.spec.ts reading the same failed task in parallel.
+  // Per-worker seed isolation (T31): each worker gets its own copy of the
+  // seed data, so tests that mutate state don't race.
+  // In CI: 2 workers. In dev: use E2E_MAX_WORKERS env var or default to 4.
+  workers: process.env.CI ? 2 : parseInt(process.env.E2E_MAX_WORKERS || '4', 10),
+  fullyParallel: true,
   globalSetup: require.resolve('./tests/e2e/playwright-setup.ts'),
   globalTeardown: require.resolve('./tests/e2e/playwright-teardown.ts'),
   use: {

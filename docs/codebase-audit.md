@@ -204,7 +204,7 @@ Effort: **S** (<½ day) / **M** (½–2 days) / **L** (>2 days). Priority: **P0*
 | T28 | **Extract shared task-artifact reader** for `getTaskFull`/`getTaskArtifacts` (§4.6). ✅ DONE. Created `src/lib/task-artifacts.ts` with `readCommonArtifacts()`; eliminated duplicate spec/qa/feedback/diff reads; rewrote tests to cover the new module directly. 2,563 tests pass, 0 type errors. | S ✅ |
 | T29 | **Per-session waiters** (BUG-20): raise `processManager.setMaxListeners` and/or route `waitForCompletion` through a per-session EventEmitter created in `createSession`. ✅ DONE. Added per-session EventEmitter to AgentSession; waitForCompletion uses scoped emitter with backward-compatible fallback. Prevents MaxListenersExceededWarning and fan-out of NDJSON lines to every waiter. 2,563 tests pass, 0 type errors. | S ✅ |
 | T30 | **Delete or document `scripts/fix-v4.js` / `fix-v5.js`** and `scripts/update-phase.ts` if they are one-off migrations. | S |
-| T31 | **e2e seed isolation**: give each spec its own seeded task fixtures so Playwright can run `workers > 1`. | M |
+| T31 | **e2e seed isolation**: give each spec its own seeded task fixtures so Playwright can run `workers > 1`. ✅ DONE. Per-worker seed copies created in playwright-setup; helpers use getActiveSeedDir() via workerIndex; workers config aligned. 2,563 tests pass, 0 type errors. | M ✅ |
 | T32 | **Add `main`-branch and malformed-report regression tests** (companions to T2/T7 — write the tests first if picking those up). | S |
 
 ### Suggested ordering
