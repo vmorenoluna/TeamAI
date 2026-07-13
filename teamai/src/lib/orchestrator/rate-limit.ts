@@ -10,6 +10,7 @@ import { appendFileSync } from 'fs';
 import path from 'path';
 import { processManager } from '../process-manager';
 import { SessionExitedError } from './errors';
+import { log, error as logError } from '../logger';
 
 import type { TaskStore } from '../task-store';
 import type { TaskPipeline } from './types';
@@ -150,7 +151,7 @@ export function handleRateLimit(
   });
 
   const mins = Math.ceil(waitMs / 60000);
-  console.log(`[rate-limit] Task ${pipeline.taskId} paused for ~${mins}min. Resuming at ${resetsAtISO}`);
+  log('rate-limit', `Task ${pipeline.taskId} paused for ~${mins}min. Resuming at ${resetsAtISO}`);
 
   // Track the timer so cancelPipeline can clear it
   if (pipeline.pendingTimer) clearTimeout(pipeline.pendingTimer);
@@ -158,7 +159,7 @@ export function handleRateLimit(
     // Before resuming, check if the task was manually moved to a terminal phase
     const task = deps.taskStore.getById(pipeline.taskId);
     if (!task || NO_RESUME_PHASES.has(task.phase)) {
-      console.log(`[rate-limit] Task ${pipeline.taskId} is in terminal phase "${task?.phase}" — skipping resume`);
+      log('rate-limit', `Task ${pipeline.taskId} is in terminal phase "${task?.phase}" — skipping resume`);
       deps.taskStore.update(pipeline.taskId, { rateLimitedUntil: undefined });
       deps.pipelines.delete(pipeline.taskId);
       deps.activeTasks.delete(pipeline.taskId);
@@ -168,12 +169,12 @@ export function handleRateLimit(
     // Verify the pipeline object hasn't been replaced (stale guard)
     const currentPipeline = deps.pipelines.get(pipeline.taskId);
     if (currentPipeline !== pipeline) {
-      console.log(`[rate-limit] Task ${pipeline.taskId} pipeline was replaced — skipping stale resume`);
+      log('rate-limit', `Task ${pipeline.taskId} pipeline was replaced — skipping stale resume`);
       deps.taskStore.update(pipeline.taskId, { rateLimitedUntil: undefined });
       return;
     }
 
-    console.log(`[rate-limit] Resuming task ${pipeline.taskId}`);
+    log('rate-limit', `Resuming task ${pipeline.taskId}`);
     deps.taskStore.update(pipeline.taskId, { rateLimitedUntil: undefined });
     let wasRateLimited = false;
     try {
@@ -186,7 +187,7 @@ export function handleRateLimit(
         const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
         appendFileSync(path.join(pipeline.specPath, 'output.log'),
           `\n[ERROR] Task failed after rate-limit retry: ${errMsg}\n`);
-        console.error(`[orchestrator] Task ${pipeline.taskId} failed after rate-limit retry:`, e);
+        logError('orchestrator', `Task ${pipeline.taskId} failed after rate-limit retry`, e);
         deps.advancePhase(pipeline, 'failed');
       }
     } finally {

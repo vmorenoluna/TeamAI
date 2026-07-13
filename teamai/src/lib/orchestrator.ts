@@ -21,7 +21,7 @@ import { runQaReview } from './orchestrator/qa-review';
 import { CLEANUP_ARTIFACTS } from './orchestrator/artifacts';
 import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec } from './orchestrator/review-actions';
 import { detectGitPlatform, isPrMerged, resolveBaseBranch } from './git-platform';
-import { warn as logWarn } from './logger';
+import { warn as logWarn, log, error as logError } from './logger';
 import type { PhaseContext } from './orchestrator/phase-context';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy } from './orchestrator/types';
@@ -270,11 +270,11 @@ export class Orchestrator {
           // Structured error — log with error code for observability
           appendFileSync(logFile, `\n[ERROR] Task failed [${e.code}]: ${e.message}\n`);
           if (e.stack) appendFileSync(logFile, `${e.stack}\n`);
-          console.error(`[orchestrator] Task ${taskId} failed [${e.code}]:`, e.message);
+          logError('orchestrator', `Task ${taskId} failed [${e.code}]`, e);
         } else {
           const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
           appendFileSync(logFile, `\n[ERROR] Task failed: ${errMsg}\n`);
-          console.error(`[orchestrator] Task ${taskId} failed:`, e);
+          logError('orchestrator', `Task ${taskId} failed`, e);
         }
         this.advancePhase(pipeline, 'failed');
       }
@@ -676,31 +676,31 @@ export class Orchestrator {
     this.pipelines.set(pipeline.taskId, pipeline);
 
     const mins = Math.ceil(waitMs / 60000);
-    console.log(`[wakeup] Task ${pipeline.taskId} paused for ~${mins}min. Resuming at ${pipeline.wakeupUntil}`);
+    log('wakeup', `Task ${pipeline.taskId} paused for ~${mins}min. Resuming at ${pipeline.wakeupUntil}`);
 
     // Track the timer so cancelPipeline can clear it
     if (pipeline.pendingTimer) clearTimeout(pipeline.pendingTimer);
     pipeline.pendingTimer = setTimeout(async () => {
       const task = this.taskStore.getById(pipeline.taskId);
       if (!task || NO_RESUME_PHASES.has(task.phase)) {
-        console.log(`[wakeup] Task ${pipeline.taskId} is in terminal phase "${task?.phase}" — skipping resume`);
+        log('wakeup', `Task ${pipeline.taskId} is in terminal phase "${task?.phase}" — skipping resume`);
         this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
         return;
       }
       const currentPipeline = this.pipelines.get(pipeline.taskId);
       if (currentPipeline !== pipeline) {
-        console.log(`[wakeup] Task ${pipeline.taskId} pipeline was replaced — skipping stale resume`);
+        log('wakeup', `Task ${pipeline.taskId} pipeline was replaced — skipping stale resume`);
         this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
         return;
       }
-      console.log(`[wakeup] Resuming task ${pipeline.taskId}`);
+      log('wakeup', `Resuming task ${pipeline.taskId}`);
       this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
       try {
         await this.executePhase(pipeline);
       } catch (e) {
         const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
         appendFileSync(path.join(pipeline.specPath, 'output.log'), `\n[ERROR] Task failed after wakeup: ${errMsg}\n`);
-        console.error(`[orchestrator] Task ${pipeline.taskId} failed after wakeup:`, e);
+        logError('orchestrator', `Task ${pipeline.taskId} failed after wakeup`, e);
         this.advancePhase(pipeline, 'failed');
       } finally {
         this.pipelines.delete(pipeline.taskId);

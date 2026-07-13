@@ -6,6 +6,7 @@ import * as pty from 'node-pty';
 import { readFileSync, existsSync, appendFileSync } from 'fs';
 import { containerManager, readContainerConfig, readContainerRemoteUser, hostToContainerPath } from './container-manager';
 import { getToolPath } from './tool-checker';
+import { log, warn } from './logger';
 
 
 export interface TerminalSession {
@@ -268,9 +269,9 @@ export class ProcessManager extends EventEmitter {
     // Read content inline to avoid Windows path issues with --append-system-prompt-file
     const roleContent = existsSync(roleFile) ? readFileSync(roleFile, 'utf-8') : '';
     if (roleContent) {
-      console.log(`[terminal ${id}] Role persona loaded from ${roleFile} (${roleContent.length} chars)`);
+      log(`terminal ${id}`, `Role persona loaded from ${roleFile} (${roleContent.length} chars)`);
     } else {
-      console.warn(`[terminal ${id}] Role file not found or empty: ${roleFile} — starting without role persona`);
+      warn(`terminal ${id}`, `Role file not found or empty: ${roleFile} — starting without role persona`);
     }
     const args = roleContent ? ['--append-system-prompt', roleContent] : [];
     if (opts.model) args.push('--model', opts.model);

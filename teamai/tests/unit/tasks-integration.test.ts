@@ -52,7 +52,7 @@ vi.mock('@/lib/process-manager', () => ({
 
 // Mock logger
 vi.mock('@/lib/logger', () => ({
-  warn: vi.fn(),
+  log: vi.fn(), warn: vi.fn(),
   error: vi.fn(),
 }));
 

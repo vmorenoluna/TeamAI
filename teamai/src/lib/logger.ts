@@ -1,8 +1,11 @@
 /**
  * Structured logger for TeamAI.
  *
- * Adheres to the existing convention of `[module]` prefixed messages.
- * In production, `log` and `warn` are suppressed; only `error` is emitted.
+ * All messages follow the `[module] message` convention.
+ * In production, `log`/`info`/`warn` are suppressed; only `error` is emitted.
+ *
+ * Use `log` or `info` for informational messages, `warn` for warnings,
+ * and `error` for errors that are always emitted.
  */
 
 const isDev = process.env.NODE_ENV !== 'production';
@@ -11,7 +14,7 @@ function format(module: string, message: string): string {
   return `[${module}] ${message}`;
 }
 
-/** Informational log — suppressed in production */
+/** Informational log — suppressed in production. Use `info` for the same behavior. */
 export function log(module: string, message: string, ...details: unknown[]): void {
   if (!isDev) return;
   if (details.length > 0) {
@@ -46,5 +49,8 @@ export function error(module: string, message: string, err?: unknown): void {
   }
 }
 
-const logger = { log, warn, error };
+/** Alias for `log` — informational message, suppressed in production */
+export const info = log;
+
+const logger = { log, info, warn, error };
 export default logger;
