@@ -13,6 +13,12 @@ type MergeStrategy = 'local-merge' | 'pull-request';
 /**
  * Atomically write JSON to a file: write to a .tmp file, then rename.
  * Prevents corruption if the process crashes mid-write.
+ *
+ * On Windows, the OS may hold a brief file lock after a prior operation
+ * (especially under antivirus scanners).  We retry with a capped spin so
+ * we never block the event loop for more than a few milliseconds per
+ * attempt.  Windows locks typically release in under 5 ms; total worst-
+ * case blocking is ~14 ms across 3 retries (2 ms → 4 ms → 8 ms).
  */
 function atomicWriteJson(filePath: string, data: unknown, retries = 3): void {
   const tmpPath = filePath + '.tmp';
@@ -23,9 +29,12 @@ function atomicWriteJson(filePath: string, data: unknown, retries = 3): void {
       return;
     } catch (err) {
       if (attempt === retries - 1 || !isRetryableError(err)) throw err;
-      // Windows may hold a file lock briefly — retry after a short delay
-      const waitUntil = Date.now() + 10 * (2 ** attempt);
-      while (Date.now() < waitUntil) { /* busy-wait */ }
+      // Windows may hold a file lock briefly — retry after a capped delay.
+      // Exponential backoff with a smaller base than before (was 10 ms ×
+      // 2^attempt, up to 70 ms total) to avoid blocking the event loop.
+      const delay = Math.min(10, 2 * (2 ** attempt)); // 2 ms, 4 ms, 8 ms
+      const waitUntil = Date.now() + delay;
+      while (Date.now() < waitUntil) { /* busy-wait — capped */ }
     }
   }
 }
