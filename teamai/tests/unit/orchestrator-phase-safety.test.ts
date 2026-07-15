@@ -214,6 +214,8 @@ describe('_scheduleWakeup — rate-limit protection in wakeup callback', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -221,6 +223,7 @@ describe('_scheduleWakeup — rate-limit protection in wakeup callback', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     project.clean();
   });
 
@@ -237,7 +240,7 @@ describe('_scheduleWakeup — rate-limit protection in wakeup callback', () => {
     const safeSpy = vi.spyOn(orch as AnyOrch, '_executePhaseSafe').mockResolvedValue(true);
 
     (orch as AnyOrch)._scheduleWakeup(pipeline);
-    await new Promise(r => setTimeout(r, 50));
+    await vi.runAllTimersAsync();
 
     expect(safeSpy).toHaveBeenCalled();
     // Pipeline should NOT be cleaned up (rate-limit guard worked)
@@ -260,7 +263,7 @@ describe('_scheduleWakeup — rate-limit protection in wakeup callback', () => {
     const safeSpy = vi.spyOn(orch as AnyOrch, '_executePhaseSafe').mockResolvedValue(false);
 
     (orch as AnyOrch)._scheduleWakeup(pipeline);
-    await new Promise(r => setTimeout(r, 50));
+    await vi.runAllTimersAsync();
 
     expect(safeSpy).toHaveBeenCalled();
     expect((orch as AnyOrch).pipelines.has(project.taskId)).toBe(false);
@@ -285,7 +288,7 @@ describe('_scheduleWakeup — rate-limit protection in wakeup callback', () => {
     const safeSpy = vi.spyOn(orch as AnyOrch, '_executePhaseSafe').mockResolvedValue(false);
 
     (orch as AnyOrch)._scheduleWakeup(pipeline);
-    await new Promise(r => setTimeout(r, 50));
+    await vi.runAllTimersAsync();
 
     expect(safeSpy).not.toHaveBeenCalled();
 
@@ -607,7 +610,8 @@ describe('SESSION CONTEXT header in implement prompt', () => {
       expect(prompt).toContain('Branch: feat/user-auth');
 
       fireEvent('event', { sessionId: 'sess-context-wakeup', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      // The event handler processes synchronously; the promise from
+      // runImplement will resolve once waitForCompletion finishes.
       await promise;
     } finally {
       executeSpy.mockRestore();
