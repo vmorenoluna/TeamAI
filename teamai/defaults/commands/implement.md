@@ -38,7 +38,7 @@ is `"cleanup"`. If so, you are in **cleanup-only rework mode**:
   - For git/file-system fixes: `git rm`, `git add`, `git mv`, committing missing files, etc.
   - For artifact fixes: run the specified script, verify the output meets the criterion's thresholds,
     `git add` the output, commit, and push.
-- Commit and push.
+- Commit your changes (do NOT push — the orchestrator handles pushing).
 - Print a summary of what was cleaned up or what artifact was produced.
 - Cleanup rework is complete — do not mark additional subtasks as complete.
 
@@ -119,7 +119,7 @@ re-read a file to verify an `Edit` that returned success.
    `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 5. If tests fail, fix the issues before proceeding.
 6. Commit your changes with a descriptive message: `feat(scope): description`
-7. Push the branch: `git push origin HEAD` (QA cannot verify unpushed commits).
+7. **Do NOT push.** The orchestrator pushes all commits at the end of the implement phase. Pushing from the agent sandbox will fail for lack of credentials and wastes calls. Commit your changes — the orchestrator handles the rest.
 8. Print a summary of what was changed and the test results.
 
 ## Rules
@@ -168,6 +168,12 @@ re-read a file to verify an `Edit` that returned success.
 
 When a subtask requires running a verification script (sweep, benchmark, end-to-end
 integration run) that takes more than ~30 seconds:
+
+**NEVER foreground a known-long job.** If the subtask description, spec, or your
+own estimate says a verification step will run longer than a few minutes, detach it
+from the very first attempt. Foregrounding it under the session timeout wastes a
+full session — it gets killed mid-run, the output is lost, and you have to re-launch
+it detached anyway. Detach from the start.
 
 1. Start it using `run_in_background: true` on the Bash tool call.
 2. Do any remaining non-blocking work (updating docs, minor edits) while it runs.
@@ -230,6 +236,12 @@ If the subtask requires running a sweep that **produces files you will commit** 
 If a background script (benchmark, sweep, data pipeline) is still running and
 won't complete before your session ends, write a `subtask_wakeup.json` file
 to the spec directory so the orchestrator can re-enter this subtask later:
+
+**Size the wakeup timeout realistically.** Use the actual throughput rate to
+estimate completion time. If the script processed N records in T minutes and
+has M remaining, set `wakeup_at` to at least `(M/N)*T` minutes from now with a
+20% safety margin. An optimistic guess produces a wakeup that fires while the
+script is still running, wasting another session on a re-entry that finds nothing.
 
 Write to `$TEAMAI_SPEC_DIR/subtask_wakeup.json`:
 

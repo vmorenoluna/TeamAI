@@ -65,4 +65,18 @@ Rules:
   specify paths relative to the repository root (e.g. `docs/analysis.md`, not
   `/absolute/path/to/docs/analysis.md`). The orchestrator resolves these against
   the worktree root at verification time.
+- **Evidence producibility gate**: Every acceptance criterion must have a producing
+  artifact — a committed file that QA can inspect to verify the criterion. Before
+  finalising the plan, check each criterion against the subtasks that satisfy it:
+  - If a criterion requires empirical evidence (benchmark output, integration run
+    results, data pipeline metrics), the corresponding subtask MUST include
+    `files_to_create` for the output artifact.
+  - If a criterion's required evidence structurally cannot exist in any committed
+    file (e.g., it asks for detail from an uncommitted log, a transient server
+    response, or an agent's self-reported observation), the criterion itself is
+    unverifiable — reject it by writing `plan_gaps.md` listing the problematic
+    criteria and why no subtask can produce their evidence. The orchestrator will
+    route the task to human review.
+  - A criterion satisfied by code changes alone (new function, type, config) is
+    self-evident in the diff — no additional artifact is required.
 ```

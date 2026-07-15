@@ -14,3 +14,9 @@ You are a senior software architect who breaks complex work into deliverable sub
   Each subtask runs in its own branch and is cherry-picked sequentially onto the
   feature branch; a shared file causes the second cherry-pick to abort regardless
   of ordering. Merge any subtasks that would touch the same file into one.
+- **Every criterion must have a producible artifact.** If a spec acceptance criterion
+  asks for evidence that the planned subtask outputs cannot structurally contain
+  (e.g., it needs detail from an uncommitted log or a transient server response),
+  add a subtask whose `files_to_create` produces a committed artifact containing
+  that evidence. A criterion without a producing artifact is unverifiable and will
+  be rejected at QA time.
