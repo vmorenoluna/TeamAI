@@ -129,6 +129,8 @@ describe('runQaReview — Gap 3: locked / manual override QA reports', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -136,6 +138,7 @@ describe('runQaReview — Gap 3: locked / manual override QA reports', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     project.clean();
   });
 
@@ -227,6 +230,8 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -234,6 +239,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     project.clean();
   });
 
@@ -436,6 +442,8 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -443,6 +451,7 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     project.clean();
   });
 
@@ -485,7 +494,7 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
 
       // Fire the result event so waitForCompletion resolves
       fireEvent('event', { sessionId: 'sess-qa-fail-bounce', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
 
       // Should bounce back to implement (qaAttempt < maxQaAttempts)
       expect(pipeline.phase).toBe('implement');
@@ -603,6 +612,8 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -621,6 +632,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     project.clean();
   });
 
@@ -667,7 +679,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
 
       // Resolve the implement subtask so the test can clean up
       fireEvent('event', { sessionId: 'sess-impl-restore', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -717,7 +729,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
       expect(existsSync(join(project.taskDir, 'qa_report_before_bounce.json'))).toBe(true);
 
       fireEvent('event', { sessionId: 'sess-impl-bounce-snap', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -749,7 +761,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
       expect(existsSync(join(project.taskDir, 'qa_report_before_failed.json'))).toBe(false);
 
       fireEvent('event', { sessionId: 'sess-impl-no-snap', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -796,7 +808,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
       expect(report.criteria[0].status).toBe('PASS');
 
       fireEvent('event', { sessionId: 'sess-impl-exists', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -837,7 +849,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
       expect(restored).toBe('not valid json {{{');
 
       fireEvent('event', { sessionId: 'sess-impl-malformed', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -887,7 +899,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
       expect(report.additional_issues[0].description).toContain('Memory leak');
 
       fireEvent('event', { sessionId: 'sess-impl-complex', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -938,6 +950,8 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -957,6 +971,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     project.clean();
   });
 
@@ -1010,7 +1025,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
 
       // Fire result event — waitForCompletion resolves, QA processes the report
       fireEvent('event', { sessionId: 'sess-e2e-qa1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
 
       // ── Assert Phase 1 results ──
       // Pipeline bounced to implement (qaAttempt < maxQaAttempts)
@@ -1080,7 +1095,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
 
         // Fire result event to complete implement
         fireEvent('event', { sessionId: 'sess-e2e-impl', event: { type: 'result' } });
-        await new Promise(r => setTimeout(r, 30));
+        await vi.advanceTimersByTimeAsync(30);
         await implPromise;
       } finally {
         executeSpy2.mockRestore();
@@ -1125,7 +1140,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(originalReport));
 
       fireEvent('event', { sessionId: 'sess-e2e-qa2', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
 
       expect(pipeline.phase).toBe('implement');
 
@@ -1168,7 +1183,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
         expect(existsSync(bounceSnapshotPath)).toBe(true);
 
         fireEvent('event', { sessionId: 'sess-e2e-impl2', event: { type: 'result' } });
-        await new Promise(r => setTimeout(r, 30));
+        await vi.advanceTimersByTimeAsync(30);
         await implPromise;
       } finally {
         executeSpy2.mockRestore();
@@ -1247,7 +1262,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
         expect(restored.overall).toBe('FAIL');
 
         fireEvent('event', { sessionId: 'sess-e2e-gap1-impl', event: { type: 'result' } });
-        await new Promise(r => setTimeout(r, 30));
+        await vi.advanceTimersByTimeAsync(30);
         await implPromise;
       } finally {
         executeSpy2.mockRestore();
@@ -1358,7 +1373,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
 
       // Complete implement
       fireEvent('event', { sessionId: 'sess-e2e-locked-impl', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await implPromise;
     } finally {
       executeSpy.mockRestore();
@@ -1450,7 +1465,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(failReport));
 
       fireEvent('event', { sessionId: 'sess-e2e-qa-fail', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
 
       // Phase 1 assertions
       expect(pipeline.phase).toBe('implement');
@@ -1493,11 +1508,11 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
 
         // Resolve all 3 flagged subtasks sequentially (groups loop is sequential)
         fireEvent('event', { sessionId: 'sess-e2e-impl-2', event: { type: 'result' } });
-        await new Promise(r => setTimeout(r, 20));
+        await vi.advanceTimersByTimeAsync(20);
         fireEvent('event', { sessionId: 'sess-e2e-impl-3', event: { type: 'result' } });
-        await new Promise(r => setTimeout(r, 20));
+        await vi.advanceTimersByTimeAsync(20);
         fireEvent('event', { sessionId: 'sess-e2e-impl-5', event: { type: 'result' } });
-        await new Promise(r => setTimeout(r, 30));
+        await vi.advanceTimersByTimeAsync(30);
 
         // Only 3 subtasks should be started (the flagged ones)
         expect(mockCreateSession).toHaveBeenCalledTimes(3);
@@ -1587,6 +1602,8 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -1605,6 +1622,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     project.clean();
   });
 
@@ -1645,7 +1663,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
 
       // Resolve the implement subtask
       fireEvent('event', { sessionId: 'sess-impl-push', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       // After implement subtask completes, git push should have been called
       const pushCalls = mockExecFileSync.mock.calls.filter(
@@ -1699,7 +1717,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
 
     // Fire event to resolve the implement subtask
     fireEvent('event', { sessionId: 'sess-impl-pushfail', event: { type: 'result' } });
-    await new Promise(r => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     // After push failure, task should go to 'failed'
     expect(pipeline.phase).toBe('failed');
@@ -1753,7 +1771,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     });
 
     fireEvent('event', { sessionId: 'sess-impl-divergent', event: { type: 'result' } });
-    await new Promise(r => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     // Should fail because heads don't match
     expect(pipeline.phase).toBe('failed');
@@ -1801,7 +1819,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
 
       // Resolve the implement subtask
       fireEvent('event', { sessionId: 'sess-impl-pr-exists', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       // Should NOT be failed — PR exists, push failure is non-fatal
       expect(pipeline.phase).not.toBe('failed');
@@ -1849,7 +1867,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     });
 
     fireEvent('event', { sessionId: 'sess-impl-no-pr', event: { type: 'result' } });
-    await new Promise(r => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     // Should fail — no PR exists, push failure is fatal
     expect(pipeline.phase).toBe('failed');
@@ -1892,7 +1910,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     });
 
     fireEvent('event', { sessionId: 'sess-impl-no-gh', event: { type: 'result' } });
-    await new Promise(r => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     // Should fail — gh unavailable, normal failure path
     expect(pipeline.phase).toBe('failed');
@@ -1917,6 +1935,8 @@ describe('runImplement — safety-net commit excludes .teamai/ (Bug 1)', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -1973,6 +1993,7 @@ describe('runImplement — safety-net commit excludes .teamai/ (Bug 1)', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     // Clean up only the mocks this describe block modified to prevent state
     // leakage. Do NOT use vi.resetAllMocks() — it nukes all hoisted mocks
     // (readContainerConfig, dockerAvailable, etc.) and breaks downstream tests.
@@ -2000,9 +2021,9 @@ describe('runImplement — safety-net commit excludes .teamai/ (Bug 1)', () => {
 
       // Resolve both coder sessions so the groups loop can complete
       fireEvent('event', { sessionId: 'sess-safety-net-st1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 20));
+      await vi.advanceTimersByTimeAsync(20);
       fireEvent('event', { sessionId: 'sess-safety-net-st2', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       // Verify the safety-net commit used git add with .teamai/ pathspec exclusion
       const addCalls = mockExecFileSync.mock.calls.filter(
@@ -2054,6 +2075,8 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -2070,6 +2093,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     project.clean();
   });
 
@@ -2116,7 +2140,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
 
       // Resolve the subtask
       fireEvent('event', { sessionId: 'sess-targeted', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -2160,15 +2184,15 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
 
       // Resolve subtask 1 so the loop can proceed to subtask 2
       fireEvent('event', { sessionId: 'sess-full-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 20));
+      await vi.advanceTimersByTimeAsync(20);
 
       // Resolve subtask 2
       fireEvent('event', { sessionId: 'sess-full-2', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 20));
+      await vi.advanceTimersByTimeAsync(20);
 
       // Resolve subtask 3
       fireEvent('event', { sessionId: 'sess-full-3', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
 
       // ALL 3 subtasks should be started
       expect(mockCreateSession).toHaveBeenCalledTimes(3);
@@ -2227,7 +2251,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
 
       // Resolve the synthetic subtask
       fireEvent('event', { sessionId: 'sess-synthetic', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
 
       await promise;
     } finally {
@@ -2321,9 +2345,9 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
 
       // Resolve both subtasks so the groups loop can complete
       fireEvent('event', { sessionId: 'sess-multi-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 20));
+      await vi.advanceTimersByTimeAsync(20);
       fireEvent('event', { sessionId: 'sess-multi-2', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
 
       // Only 2 subtasks should be started (the flagged ones)
       expect(mockCreateSession).toHaveBeenCalledTimes(2);
@@ -2427,7 +2451,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       expect(sendCalls[0][1]).toContain('SESSION CONTEXT');
       // Resolve the subtask
       fireEvent('event', { sessionId: 'sess-parallel-group', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -2487,6 +2511,8 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -2503,6 +2529,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     project.clean();
   });
 
@@ -2537,7 +2564,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       expect(existsSync(join(project.root, 'output/report.json'))).toBe(false);
 
       fireEvent('event', { sessionId: 'sess-deliverable', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       // Counter should be incremented
       expect(pipeline.deliverableFailCounts).toBeDefined();
@@ -2589,7 +2616,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       expect(prompt).toContain('You MUST create these files');
 
       fireEvent('event', { sessionId: 'sess-deliverable-reentry', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -2623,7 +2650,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
     });
 
     fireEvent('event', { sessionId: 'sess-deliverable-broken', event: { type: 'result' } });
-    await new Promise(r => setTimeout(r, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     // After 3rd failure, task should be 'failed'
     expect(pipeline.phase).toBe('failed');
@@ -2677,7 +2704,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       expect(existsSync(join(project.root, 'worktrees', 'test-task', 'output.txt'))).toBe(true);
 
       fireEvent('event', { sessionId: 'sess-deliverable-pass', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       // Counter entry should be deleted on pass
       expect(pipeline.deliverableFailCounts?.[4]).toBeUndefined();
@@ -2718,7 +2745,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       });
 
       fireEvent('event', { sessionId: 'sess-deliverable-wakeup', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       // Counter should NOT be incremented (wakeup takes priority)
       expect(pipeline.deliverableFailCounts).toBeUndefined();
@@ -2765,7 +2792,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       expect(existsSync(join(project.root, 'worktrees', 'test-task', 'out/c.json'))).toBe(false);
 
       fireEvent('event', { sessionId: 'sess-partial-files', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       // Counter should increment (any missing file triggers it)
       expect(pipeline.deliverableFailCounts![6]).toBe(1);
@@ -2811,7 +2838,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       expect(prompt).toContain('DELIVERABLE RE-VERIFICATION');
 
       fireEvent('event', { sessionId: 'sess-multi-reentry', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -2850,7 +2877,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       expect(prompt).not.toContain('DELIVERABLE RE-VERIFICATION');
 
       fireEvent('event', { sessionId: 'sess-first-run', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -2863,6 +2890,8 @@ describe('review-actions — unified counter reset (ADR 005)', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -2870,6 +2899,7 @@ describe('review-actions — unified counter reset (ADR 005)', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     project.clean();
   });
 
@@ -2997,6 +3027,8 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -3004,6 +3036,7 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     project.clean();
   });
 
@@ -3092,7 +3125,7 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
         expect(mockSendMessage).toHaveBeenCalled();
       });
       fireEvent('event', { sessionId: 'sess-crash-verify', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       expect(pipeline.deliverableFailCounts![10]).toBe(1);
 
@@ -3145,6 +3178,8 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -3160,6 +3195,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     project.clean();
   });
 
@@ -3195,7 +3231,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
       }));
 
       fireEvent('event', { sessionId: 'sess-wakeup-detect', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       // Wakeup file should be deleted after reading
       expect(existsSync(join(project.taskDir, 'subtask_wakeup.json'))).toBe(false);
@@ -3230,7 +3266,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
       writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), 'not valid json {{{');
 
       fireEvent('event', { sessionId: 'sess-wakeup-malformed', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       expect(existsSync(join(project.taskDir, 'subtask_wakeup.json'))).toBe(false);
       expect(pipeline.wakeupSubtaskId).toBeUndefined();
@@ -3247,6 +3283,8 @@ describe('runImplement — wakeup subtask isolation (ADR 002)', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -3262,6 +3300,7 @@ describe('runImplement — wakeup subtask isolation (ADR 002)', () => {
   });
 
   afterEach(() => { project.clean(); });
+    vi.useRealTimers();
 
   it('only re-enters the wakeup subtask — deferred subtasks are excluded', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
@@ -3292,7 +3331,7 @@ describe('runImplement — wakeup subtask isolation (ADR 002)', () => {
       expect(prompt).not.toContain('Subtask 1');
 
       fireEvent('event', { sessionId: 'sess-wakeup-isolate', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -3305,6 +3344,8 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -3320,6 +3361,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
   });
 
   afterEach(() => { project.clean(); });
+    vi.useRealTimers();
 
   it('injects WAKEUP RE-ENTRY header with background command and expected artifact', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
@@ -3344,7 +3386,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
       expect(prompt).toContain('output/sweep-results.json');
 
       fireEvent('event', { sessionId: 'sess-wakeup-prompt', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.advanceTimersByTimeAsync(30);
       await promise;
     } finally {
       executeSpy.mockRestore();
@@ -3357,6 +3399,8 @@ describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -3372,6 +3416,7 @@ describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
   });
 
   afterEach(() => { project.clean(); });
+    vi.useRealTimers();
 
   it('increments wakeupAttemptCount on each wakeup cycle', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
@@ -3392,7 +3437,7 @@ describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
       }));
 
       fireEvent('event', { sessionId: 'sess-wakeup-increment', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       expect(pipeline.wakeupAttemptCount).toBe(1);
 
@@ -3428,7 +3473,7 @@ describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
       }));
 
       fireEvent('event', { sessionId: 'sess-wakeup-cap', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
       await promise;
 
       // Circuit breaker fires in post-groups: wakeupAttemptCount>=3 → failed
@@ -3464,7 +3509,7 @@ describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
       expect(mockSendMessage.mock.calls[0][1]).toContain('WAKEUP RE-ENTRY');
 
       fireEvent('event', { sessionId: 'sess-wakeup-success', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      await vi.advanceTimersByTimeAsync(50);
 
       // Wakeup state should be cleared
       expect(pipeline.wakeupUntil).toBeUndefined();
@@ -3485,6 +3530,8 @@ describe('runImplement — wakeup state persistence (ADR 002)', () => {
   let orch: Orchestrator;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
     vi.clearAllMocks();
     onHandlers.clear();
     project = setupProject();
@@ -3492,6 +3539,7 @@ describe('runImplement — wakeup state persistence (ADR 002)', () => {
   });
 
   afterEach(() => { project.clean(); });
+    vi.useRealTimers();
 
   it('wakeup fields are persisted in pipeline_state.json', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, {
