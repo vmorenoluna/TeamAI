@@ -721,8 +721,15 @@ export class Orchestrator {
       }
       log('wakeup', `Resuming task ${pipeline.taskId}`);
       this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
+      // Clear the fired wakeup on the in-memory pipeline too — after this point
+      // wakeupUntil is only truthy if the resumed phase scheduled a NEW wakeup.
+      pipeline.wakeupUntil = undefined;
       const wasRateLimited = await this._executePhaseSafe(pipeline, 'after wakeup');
-      if (!wasRateLimited) {
+      // Guard cleanup like runTask does: if the resumed phase scheduled another
+      // wakeup (chained wakeup — background job still running), _scheduleWakeup
+      // re-acquired the lock and its timer owns cleanup; deleting here would
+      // orphan that timer ("pipeline was replaced" on fire) and hang the task.
+      if (!wasRateLimited && !pipeline.wakeupUntil) {
         this.pipelines.delete(pipeline.taskId);
         this.activeTasks.delete(pipeline.taskId);
       }
