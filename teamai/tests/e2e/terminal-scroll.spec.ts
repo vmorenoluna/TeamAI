@@ -13,13 +13,14 @@ test.describe('Terminal Scroll Behavior', () => {
       return;
     }
 
-    await page.goto(`/task/${taskId}`);
+    // Use hash-based navigation to go directly to the Terminal tab — avoids
+    // click unreliability when the page hasn't fully hydrated in parallel mode.
+    await page.goto(`/task/${taskId}#terminal`);
     await expect(page.locator('body')).toBeVisible();
 
-    // Wait for page to fully hydrate before clicking tabs
-    await page.waitForTimeout(2000);
-    await page.locator('button:has-text("Terminal")').first().click({ force: true, timeout: 10_000 });
-    await expect(page.locator('text=Agent Output').first()).toBeVisible({ timeout: 15_000 });
+    // Wait for React hydration, then verify the terminal container is mounted.
+    await expect(page.locator('h1').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
 
     // Wait for any xterm instances to initialise (terminal emulator + WebGL
     // renderer). Not all tasks have terminal output — if none rendered, skip.
