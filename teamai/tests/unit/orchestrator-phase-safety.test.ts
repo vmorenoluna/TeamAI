@@ -313,6 +313,74 @@ describe('_scheduleWakeup — rate-limit protection in wakeup callback', () => {
 
     if (pipeline.pendingTimer) clearTimeout(pipeline.pendingTimer);
   });
+
+  it('fires the wakeup callback exactly when the timer expires, not before', async () => {
+    // Set wakeup 5 seconds in the future — should NOT fire immediately.
+    const delayMs = 5000;
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      wakeupUntil: new Date(Date.now() + delayMs).toISOString(),
+      wakeupSubtaskId: 1,
+    });
+
+    (orch as AnyOrch).activeTasks.add(project.taskId);
+    (orch as AnyOrch).pipelines.set(project.taskId, pipeline);
+
+    const safeSpy = vi.spyOn(orch as AnyOrch, '_executePhaseSafe').mockResolvedValue(false);
+
+    (orch as AnyOrch)._scheduleWakeup(pipeline);
+
+    // Callback should NOT have fired yet — timer is 5 seconds away.
+    expect(safeSpy).not.toHaveBeenCalled();
+
+    // Advance time by just under the delay — still should not fire.
+    await vi.advanceTimersByTimeAsync(delayMs - 1000);
+    expect(safeSpy).not.toHaveBeenCalled();
+
+    // Advance the remaining time — callback should now fire.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(safeSpy).toHaveBeenCalledTimes(1);
+
+    // Pipeline should be cleaned up (normal completion, _executePhaseSafe returned false).
+    expect((orch as AnyOrch).pipelines.has(project.taskId)).toBe(false);
+    expect((orch as AnyOrch).activeTasks.has(project.taskId)).toBe(false);
+
+    safeSpy.mockRestore();
+  });
+
+  it('enforces the 5-minute minimum delay for excessively past timestamps', async () => {
+    // wakeupUntil is more than 5 minutes in the past — _scheduleWakeup
+    // should clamp waitMs to 5 minutes instead of firing immediately.
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      wakeupUntil: new Date(Date.now() - 10 * 60 * 1000).toISOString(), // 10 min ago
+      wakeupSubtaskId: 1,
+    });
+
+    (orch as AnyOrch).activeTasks.add(project.taskId);
+    (orch as AnyOrch).pipelines.set(project.taskId, pipeline);
+
+    const safeSpy = vi.spyOn(orch as AnyOrch, '_executePhaseSafe').mockResolvedValue(false);
+
+    (orch as AnyOrch)._scheduleWakeup(pipeline);
+
+    // Callback should NOT fire immediately — the 5-min minimum delay applies.
+    expect(safeSpy).not.toHaveBeenCalled();
+
+    // Advance by 4 minutes — still should not fire.
+    await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
+    expect(safeSpy).not.toHaveBeenCalled();
+
+    // Advance the remaining 1 minute — callback should now fire.
+    await vi.advanceTimersByTimeAsync(1 * 60 * 1000);
+    expect(safeSpy).toHaveBeenCalledTimes(1);
+
+    // Pipeline should be cleaned up (normal completion).
+    expect((orch as AnyOrch).pipelines.has(project.taskId)).toBe(false);
+    expect((orch as AnyOrch).activeTasks.has(project.taskId)).toBe(false);
+
+    safeSpy.mockRestore();
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════
