@@ -311,6 +311,10 @@ async function runSubtaskSession(
       'Your previous session was paused to wait for a background process.\n' +
       'Background command: ' + (pipeline.wakeupCommand || 'unknown') + '\n' +
       'Expected artifact to verify: ' + (pipeline.wakeupArtifact || 'unknown') + '\n\n' +
+      'CRITICAL: Run ALL verification commands, scripts, and servers from the current\n' +
+      'working directory (this worktree) — NOT from the base project root. The code in\n' +
+      'this worktree is your branch\'s revision; running from the project root would\n' +
+      'exercise the wrong code and produce meaningless results.\n\n' +
       'Check if the artifact exists and is complete. If it is: verify it, git add, commit,\n' +
       'and mark the subtask done. If it\'s missing or incomplete, first check whether the\n' +
       'background process is still running:\n' +
@@ -337,8 +341,33 @@ async function runSubtaskSession(
 
   const promptHeader = wakeupHeader || deliverableHeader;
 
+  // Resume-context header (#6): inject task/branch/subtask context so a
+  // restarted session doesn't pay a full re-read tax to reconstruct state.
+  let resumeContext = '## SESSION CONTEXT\n\n' +
+    'Task: ' + pipeline.description + '\n' +
+    'Branch: ' + pipeline.branch + '\n';
+
+  // Show completed subtasks so the agent knows what's already done
+  try {
+    const planPath = path.join(pipeline.specPath, 'plan.json');
+    if (existsSync(planPath)) {
+      const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+      if (plan.subtasks) {
+        const completed = plan.subtasks.filter((s: PlanSubtask) => s.completed);
+        resumeContext += 'Subtasks: ' + plan.subtasks.length + ' total';
+        if (completed.length > 0) resumeContext += ', ' + completed.length + ' already done (' +
+          completed.map((s: PlanSubtask) => '#' + s.id + ': ' + s.title).join(', ') + ')';
+        resumeContext += '\n';
+      }
+    }
+  } catch { /* best-effort */ }
+
+  resumeContext += 'Current: Subtask ' + subtask.id + ': ' + subtask.title + '\n';
+  resumeContext += 'Working directory: ' + cwd + ' (this is your git worktree)\n\n';
+
   const prompt =
     promptHeader +
+    resumeContext +
     (subtaskFeedback ? subtaskFeedback + '\n---\n' : '') +
     '/implement Subtask ' + subtask.id + ': ' + subtask.title + '\n\n' +
     subtask.description + '\n\n' +

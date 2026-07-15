@@ -4,7 +4,7 @@
  * deep test coupling and complex internal state dependencies.
  */
 import { execFileSync } from 'child_process';
-import { existsSync, readFileSync, unlinkSync, appendFileSync, rmSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, appendFileSync, rmSync } from 'fs';
 import path from 'path';
 import { processManager } from '../process-manager';
 import { TaskStore } from '../task-store';
@@ -29,6 +29,10 @@ export interface RebaseDeps {
 /**
  * Rebase the feature branch onto the latest origin/master before merge/PR.
  *
+ * Skips the rebase entirely when origin/<baseBranch> has not advanced
+ * past the worktree's HEAD — saves a redundant merger spawn and test
+ * suite run for a no-op (#3).
+ *
  * If the rebase has conflicts, spawns a merger agent to resolve them.
  * Returns true on success. On failure, the caller decides whether to throw
  * (merge path, where unresolved conflicts would corrupt the repo) or warn
@@ -42,6 +46,27 @@ export async function rebaseOntoLatestDefault(
 ): Promise<boolean> {
   try {
     execFileSync('git', ['fetch', 'origin', deps.baseBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
+  } catch {
+    appendFileSync(logFile, `\n[WARN] Could not fetch origin/${deps.baseBranch} — proceeding with rebase anyway\n`);
+  }
+
+  // Skip rebase when origin/<baseBranch> has not advanced past HEAD.
+  // This avoids spawning a redundant merger + full test suite for a no-op,
+  // which was wasting sessions on nearly every phase transition (#3).
+  try {
+    const count = execFileSync(
+      'git', ['rev-list', '--count', `HEAD..origin/${deps.baseBranch}`],
+      { cwd: worktreePath, encoding: 'utf-8', stdio: 'pipe' },
+    ).trim();
+    if (count === '0') {
+      appendFileSync(logFile, `\n[INFO] origin/${deps.baseBranch} has not advanced past HEAD — skipping rebase\n`);
+      return true;
+    }
+  } catch {
+    // Can't determine — proceed with rebase to be safe
+  }
+
+  try {
     deps.execGit(['rebase', `origin/${deps.baseBranch}`], worktreePath);
     appendFileSync(logFile, `\n[INFO] Feature branch rebased onto latest ${deps.baseBranch}\n`);
     return true;
@@ -162,6 +187,29 @@ export async function runPlanPhase(
   processManager.sendMessage(sessionId, `/plan ${deps.toAgentPath(pipeline.specPath)}/spec.md`);
   await deps.waitForCompletion(sessionId);
   processManager.killSession(sessionId);
+
+  // Evidence producibility gate (#4): if the planner rejected the spec's
+  // acceptance criteria as unverifiable (no producing artifact possible),
+  // route to human review instead of silently proceeding to implement.
+  // Write a minimal qa_report.json with spec_concerns so the review panel
+  // can render the familiar "Revise Spec" banner.
+  const planGapsPath = path.join(pipeline.specPath, 'plan_gaps.md');
+  if (existsSync(planGapsPath)) {
+    appendFileSync(logFile, '\n[GATE] Plan contains unverifiable acceptance criteria — routing to human review. See plan_gaps.md.\n');
+    try {
+      writeFileSync(path.join(pipeline.specPath, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [],
+        spec_concerns: [{
+          issue: 'Plan rejected unverifiable acceptance criteria',
+          reasoning: 'One or more spec acceptance criteria cannot be verified because no committed artifact can structurally contain their required evidence. See plan_gaps.md for details.',
+          suggested_fix: 'Revise the spec to make all criteria independently verifiable, then re-plan.',
+        }],
+      }, null, 2));
+    } catch { /* best-effort — the human can still read plan_gaps.md directly */ }
+    deps.advancePhase(pipeline, 'awaiting-review');
+    return;
+  }
 
   const baseBranch = resolveBaseBranch(deps.projectRoot);
   try {

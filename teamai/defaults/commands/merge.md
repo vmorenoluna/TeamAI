@@ -15,7 +15,11 @@ You are merging branch `{branch}` into the current branch using
 
 ## Instructions
 1. Run `git merge {branch} --no-commit` to attempt the merge.
-2. If there are no conflicts (merge succeeds cleanly), skip to step 4.
+2. If there are no conflicts (merge succeeds cleanly), check whether the merge
+   actually brought in any changes:
+   - If `git diff --cached` is empty (the branch was already up-to-date),
+     skip directly to the summary step — do NOT run the test suite.
+   - If the merge brought in real changes, skip to step 4.
 3. If there are conflicts, resolve each one semantically:
    - Read both versions of the conflicted code.
    - Understand the intent of each change.

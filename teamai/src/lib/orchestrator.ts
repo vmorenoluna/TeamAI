@@ -654,6 +654,32 @@ export class Orchestrator {
     });
   }
 
+  /**
+   * Execute a phase with rate-limit protection, shared by normal-path
+   * (runTask), rate-limit-resume (handleRateLimit), and wakeup-resume
+   * (_scheduleWakeup) so the three paths can't drift apart (#1).
+   *
+   * On RateLimitError: reschedules via handleRateLimit and returns true.
+   * On other errors: logs, advances to failed, and returns false.
+   * The caller should guard cleanup in finally blocks on the return value.
+   */
+  private async _executePhaseSafe(pipeline: TaskPipeline, errorContext: string): Promise<boolean> {
+    try {
+      await this.executePhase(pipeline);
+      return false;
+    } catch (e) {
+      if (e instanceof RateLimitError) {
+        this.handleRateLimit(pipeline, e.resetsAt);
+        return true;
+      }
+      const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
+      appendFileSync(path.join(pipeline.specPath, 'output.log'), `\n[ERROR] Task failed ${errorContext}: ${errMsg}\n`);
+      logError('orchestrator', `Task ${pipeline.taskId} failed ${errorContext}`, e);
+      this.advancePhase(pipeline, 'failed');
+      return false;
+    }
+  }
+
   /** Schedule a wakeup timer (ADR 002). Follows the handleRateLimit setTimeout pattern. */
   private _scheduleWakeup(pipeline: TaskPipeline): void {
     const wakeupAt = new Date(pipeline.wakeupUntil!).getTime();
@@ -695,14 +721,8 @@ export class Orchestrator {
       }
       log('wakeup', `Resuming task ${pipeline.taskId}`);
       this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
-      try {
-        await this.executePhase(pipeline);
-      } catch (e) {
-        const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
-        appendFileSync(path.join(pipeline.specPath, 'output.log'), `\n[ERROR] Task failed after wakeup: ${errMsg}\n`);
-        logError('orchestrator', `Task ${pipeline.taskId} failed after wakeup`, e);
-        this.advancePhase(pipeline, 'failed');
-      } finally {
+      const wasRateLimited = await this._executePhaseSafe(pipeline, 'after wakeup');
+      if (!wasRateLimited) {
         this.pipelines.delete(pipeline.taskId);
         this.activeTasks.delete(pipeline.taskId);
       }
