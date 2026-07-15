@@ -272,6 +272,41 @@ describe('_scheduleWakeup — rate-limit protection in wakeup callback', () => {
     safeSpy.mockRestore();
   });
 
+  it('keeps the pipeline lock when the resumed phase schedules another wakeup (chained wakeup)', async () => {
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      wakeupUntil: new Date(Date.now() - 1000).toISOString(), // already past — fires immediately
+      wakeupSubtaskId: 1,
+    });
+
+    (orch as AnyOrch).activeTasks.add(project.taskId);
+    (orch as AnyOrch).pipelines.set(project.taskId, pipeline);
+
+    // First resume: the background job is still running, so the phase schedules
+    // ANOTHER wakeup (as implement does via deps.scheduleWakeup). Second resume:
+    // the job completed — phase finishes normally.
+    const safeSpy = vi.spyOn(orch as AnyOrch, '_executePhaseSafe')
+      .mockImplementationOnce(async (p: any) => {
+        p.wakeupUntil = new Date(Date.now() + 60_000).toISOString();
+        (orch as AnyOrch)._scheduleWakeup(p);
+        return false;
+      })
+      .mockResolvedValue(false);
+
+    (orch as AnyOrch)._scheduleWakeup(pipeline);
+    await vi.runAllTimersAsync();
+
+    // Both wakeups must have resumed the phase. Pre-fix, the first callback's
+    // unconditional cleanup deleted the re-acquired lock, so the second timer
+    // found no pipeline and skipped as a "stale resume" — hanging the task.
+    expect(safeSpy).toHaveBeenCalledTimes(2);
+    // After the final (non-chaining) resume, cleanup proceeds normally.
+    expect((orch as AnyOrch).pipelines.has(project.taskId)).toBe(false);
+    expect((orch as AnyOrch).activeTasks.has(project.taskId)).toBe(false);
+
+    safeSpy.mockRestore();
+  });
+
   it('skips wakeup resume when task is in a terminal phase', async () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement',

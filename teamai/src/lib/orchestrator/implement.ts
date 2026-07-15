@@ -906,6 +906,14 @@ export async function runImplement(
           notes: 'Subtask ' + pipeline.wakeupSubtaskId + ' failed to produce artifact after ' + deps.getPipelineConfig().maxWakeupAttempts + ' wakeup attempts. Expected artifact: ' + (pipeline.wakeupArtifact || 'unknown'),
         }],
       }, null, 2));
+      // Clear wakeup state before failing: a truthy wakeupUntil with no armed
+      // timer would make the caller's cleanup guard skip releasing the
+      // pipeline/active-task lock, blocking any later retry of this task.
+      pipeline.wakeupUntil = undefined;
+      pipeline.wakeupSubtaskId = undefined;
+      pipeline.wakeupCommand = undefined;
+      pipeline.wakeupArtifact = undefined;
+      pipeline.wakeupAttemptCount = 0;
       deps.advancePhase(pipeline, 'failed');
       return;
     }
