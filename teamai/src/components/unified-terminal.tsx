@@ -444,9 +444,9 @@ export function UnifiedTerminal({
           the init effect never reruns on the same component instance, so
           the terminal stayed permanently blank while the filter chips (fed
           by roleStats, independent of DOM mount state) rendered normally. */}
-      <div className="relative flex-1 min-h-0 rounded-lg overflow-hidden border border-[#1e293b]">
+      <div className="relative flex-1 min-h-0 rounded-lg overflow-hidden border border-[#1e293b]" data-testid="terminal-container">
         {!hasAnyLog && (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400 pointer-events-none">
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400 pointer-events-none" data-testid="terminal-empty-state">
             No agent output yet. Run the pipeline to see terminal output.
           </div>
         )}

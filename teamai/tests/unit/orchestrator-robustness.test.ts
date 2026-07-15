@@ -1,9 +1,10 @@
 /**
  * Orchestrator robustness guardrail tests.
- * Tests the 5 gaps fixed for pipeline reliability:
- *   Gap 1 — QA verifies remote branch matches worktree (unpushed commits)
- *   Gap 2 — Implement phase mandatory git push
- *   Gap 3 — QA respects locked / manual-override qa_report.json
+ * Covers QA review guardrails and snapshot restore behaviour:
+ *   - QA verifies remote branch matches worktree (unpushed commits)
+ *   - Implement phase mandatory git push
+ *   - QA respects locked / manual-override qa_report.json
+ *   - Snapshot restore on QA bounce and task retry
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from 'fs';

@@ -1,10 +1,10 @@
 /**
- * Tests for P1, P2, and P3 pipeline reliability fixes:
- *   P1 #1 — _executePhaseSafe rate-limit protection
- *   P1 #1 — _scheduleWakeup rate-limit safety in wakeup callback
- *   P2 #3 — rebaseOntoLatestDefault skip when base hasn't advanced
- *   P2 #4 — runPlanPhase plan_gaps.md gate
- *   P3 #6 — resume-context header in implement prompt
+ * Tests for orchestrator phase execution safety and reliability:
+ *   _executePhaseSafe — rate-limit-safe phase execution wrapper
+ *   _scheduleWakeup  — rate-limit safety in wakeup callback
+ *   rebaseOntoLatestDefault — skip no-op rebases when base hasn't advanced
+ *   runPlanPhase — plan_gaps.md gate routes to human review
+ *   runSubtaskSession — SESSION CONTEXT header in subtask prompts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs';
@@ -120,10 +120,10 @@ function makePipeline(taskId: string, specPath: string, overrides: Record<string
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  P1 #1: _executePhaseSafe — rate-limit-safe phase execution helper
+//  _executePhaseSafe — rate-limit-safe phase execution helper
 // ═══════════════════════════════════════════════════════════════════════
 
-describe('P1: _executePhaseSafe — rate-limit protection', () => {
+describe('_executePhaseSafe — rate-limit protection', () => {
   let project: ReturnType<typeof setupProject>;
   let orch: Orchestrator;
 
@@ -206,10 +206,10 @@ describe('P1: _executePhaseSafe — rate-limit protection', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-//  P1 #1: _scheduleWakeup — rate-limit protection in wakeup callback
+//  _scheduleWakeup — rate-limit protection in wakeup callback
 // ═══════════════════════════════════════════════════════════════════════
 
-describe('P1: _scheduleWakeup — rate-limit protection in wakeup callback', () => {
+describe('_scheduleWakeup — rate-limit protection in wakeup callback', () => {
   let project: ReturnType<typeof setupProject>;
   let orch: Orchestrator;
 
@@ -313,12 +313,12 @@ describe('P1: _scheduleWakeup — rate-limit protection in wakeup callback', () 
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-//  P2 #3: rebaseOntoLatestDefault — skip when base hasn't advanced
+//  rebaseOntoLatestDefault — skip when base hasn't advanced
 // ═══════════════════════════════════════════════════════════════════════
 
 import { rebaseOntoLatestDefault, runPlanPhase } from '../../src/lib/orchestrator/phase-runners';
 
-describe('P2: rebaseOntoLatestDefault — skip no-op rebases (#3)', () => {
+describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
   let project: ReturnType<typeof setupProject>;
 
   beforeEach(() => {
@@ -394,10 +394,10 @@ describe('P2: rebaseOntoLatestDefault — skip no-op rebases (#3)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-//  P2 #4: runPlanPhase — plan_gaps.md gate routes to human review
+//  runPlanPhase — plan_gaps.md gate routes to human review
 // ═══════════════════════════════════════════════════════════════════════
 
-describe('P2: runPlanPhase — plan_gaps.md gate (#4)', () => {
+describe('runPlanPhase — plan_gaps.md gate', () => {
   let project: ReturnType<typeof setupProject>;
 
   beforeEach(() => {
@@ -496,10 +496,10 @@ describe('P2: runPlanPhase — plan_gaps.md gate (#4)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-//  P3 #6: Resume-context header in implement subtask prompt
+//  SESSION CONTEXT header in implement subtask prompt
 // ═══════════════════════════════════════════════════════════════════════
 
-describe('P3: Resume-context header in implement prompt (#6)', () => {
+describe('SESSION CONTEXT header in implement prompt', () => {
   let project: ReturnType<typeof setupProject>;
   let orch: Orchestrator;
 
