@@ -37,7 +37,7 @@ export function getWorktreePath(
 ): string | null {
   const task = taskStore.getById(taskId);
   if (!task || !task.branch) return null;
-  const slug = slugify(task.description);
+  const slug = task.slug ?? slugify(task.description);
   return path.join(worktreeBase, slug);
 }
 
