@@ -228,10 +228,13 @@ If the subtask requires running a sweep that **produces files you will commit** 
 ### When a background script won't finish before your session budget
 
 If a background script (benchmark, sweep, data pipeline) is still running and
-won't complete before your session ends, write a `subtask_wakeup.json` file
-to the spec directory so the orchestrator can re-enter this subtask later:
+won't complete before your session ends, write a `subtask_wakeup-st<ID>.json`
+file (where `<ID>` is your current subtask ID, e.g. `subtask_wakeup-st3.json`)
+to the spec directory so the orchestrator can re-enter this subtask later.
+The per-subtask filename prevents parallel subtasks from clobbering each
+other's wakeup schedules:
 
-Write to `$TEAMAI_SPEC_DIR/subtask_wakeup.json`:
+Write to `$TEAMAI_SPEC_DIR/subtask_wakeup-st<ID>.json` (subtask 3 shown):
 
 ```json
 {
@@ -254,7 +257,7 @@ after the wakeup time with a `⚠️ WAKEUP RE-ENTRY` header. When you re-enter:
 - If the artifact is missing or incomplete, check whether the background
   process is still running:
   - **Still running**: estimate remaining time, write an updated
-    `subtask_wakeup.json` with a new `wakeup_at`, and end.
+    `subtask_wakeup-st<ID>.json` with a new `wakeup_at`, and end.
   - **Crashed or exited with error**: do NOT write another wakeup file.
     Report the failure immediately — the orchestrator will advance the task
     to failed after 3 consecutive wakeup attempts without progress.

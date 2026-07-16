@@ -3276,6 +3276,106 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
       executeSpy.mockRestore();
     }
   });
+
+  it('detects per-subtask subtask_wakeup-st<id>.json (BUG-10)', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 4,
+        title: 'Run benchmark sweep',
+        description: 'Execute benchmark and save results',
+        files: ['src/bench.ts'],
+        acceptance_criteria: ['Benchmark completes'],
+      }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-st');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      writeFileSync(join(project.taskDir, 'subtask_wakeup-st4.json'), JSON.stringify({
+        subtask_id: 4,
+        wakeup_at: '2026-07-04T12:00:00Z',
+        background_command: 'python sweep.py',
+        expected_artifact: 'results/summary.jsonl',
+      }));
+
+      fireEvent('event', { sessionId: 'sess-wakeup-st', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(existsSync(join(project.taskDir, 'subtask_wakeup-st4.json'))).toBe(false);
+      expect(pipeline.wakeupSubtaskId).toBe(4);
+      expect(pipeline.wakeupUntil).toBe('2026-07-04T12:00:00Z');
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('adopts the EARLIEST wakeup when two parallel subtasks both schedule one (BUG-10)', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Sweep A', description: 'Run sweep A', files: ['src/a.ts'], acceptance_criteria: ['A done'], parallel_group: 1 },
+        { id: 2, title: 'Sweep B', description: 'Run sweep B', files: ['src/b.ts'], acceptance_criteria: ['B done'], parallel_group: 1 },
+      ],
+    }));
+
+    mockCreateSession
+      .mockResolvedValueOnce('sess-wake-a')
+      .mockResolvedValueOnce('sess-wake-b');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+
+      // Subtask 1 schedules a LATER wakeup; subtask 2 an EARLIER one.
+      writeFileSync(join(project.taskDir, 'subtask_wakeup-st1.json'), JSON.stringify({
+        subtask_id: 1,
+        wakeup_at: '2026-07-04T12:00:00Z',
+        background_command: 'python sweep_a.py',
+        expected_artifact: 'results/a.jsonl',
+      }));
+      writeFileSync(join(project.taskDir, 'subtask_wakeup-st2.json'), JSON.stringify({
+        subtask_id: 2,
+        wakeup_at: '2026-07-04T10:00:00Z',
+        background_command: 'python sweep_b.py',
+        expected_artifact: 'results/b.jsonl',
+      }));
+
+      fireEvent('event', { sessionId: 'sess-wake-a', event: { type: 'result' } });
+      fireEvent('event', { sessionId: 'sess-wake-b', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+
+      // Both per-subtask files consumed — neither handler deleted the other's file early
+      expect(existsSync(join(project.taskDir, 'subtask_wakeup-st1.json'))).toBe(false);
+      expect(existsSync(join(project.taskDir, 'subtask_wakeup-st2.json'))).toBe(false);
+
+      // Earliest wakeup wins regardless of handler completion order
+      expect(pipeline.wakeupSubtaskId).toBe(2);
+      expect(pipeline.wakeupUntil).toBe('2026-07-04T10:00:00Z');
+      expect(pipeline.wakeupAttemptCount).toBe(2);
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
 });
 
 describe('runImplement — wakeup subtask isolation (ADR 002)', () => {
