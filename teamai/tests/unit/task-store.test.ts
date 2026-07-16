@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { TaskStore, isRetryableError } from '@/lib/task-store';
 import { setupTaskStoreTest, makeTask, type TaskStoreTestEnv } from '../utils/task-store-harness';
@@ -508,6 +508,94 @@ describe('TaskStore', () => {
 
     it('throws when task is not found', () => {
       expect(() => store.getEvents('nonexistent')).toThrow();
+    });
+  });
+
+  describe('canonical slug (BUG-13 / T14)', () => {
+    it('stores a slug derived from the title on the task record', () => {
+      const t = createTask('Fix Login Bug', 'Something entirely different');
+      expect(t.slug).toBe('fix-login-bug');
+      expect(store.getById(t.id)?.slug).toBe('fix-login-bug');
+      expect(store.getDirById(t.id)).toBe(join(root, '.teamai', 'fix-login-bug'));
+    });
+
+    it('two tasks with identical titles get distinct dirs and slugs', () => {
+      const t1 = createTask('Same Title');
+      const t2 = createTask('Same Title');
+      const t3 = createTask('Same Title');
+      expect(t1.slug).toBe('same-title');
+      expect(t2.slug).toBe('same-title-2');
+      expect(t3.slug).toBe('same-title-3');
+      expect(store.getDirById(t1.id)).not.toBe(store.getDirById(t2.id));
+      expect(store.getDirById(t2.id)).not.toBe(store.getDirById(t3.id));
+    });
+
+    it('titles sharing a 40-char slug prefix do not collide', () => {
+      const longA = 'Refactor the authentication middleware to support rotating tokens';
+      const longB = 'Refactor the authentication middleware to support static tokens';
+      const t1 = createTask(longA);
+      const t2 = createTask(longB);
+      expect(t1.slug).not.toBe(t2.slug);
+      expect(store.getDirById(t1.id)).not.toBe(store.getDirById(t2.id));
+    });
+
+    it('falls back to "task" for titles that slugify to empty', () => {
+      const t = createTask('!!!', 'symbols only');
+      expect(t.slug).toBe('task');
+      expect(store.getDirById(t.id)).toBe(join(root, '.teamai', 'task'));
+    });
+  });
+
+  describe('directory index (BUG-16 / T20)', () => {
+    it('getById resolves repeatedly without rescanning results changing', () => {
+      const tasks = Array.from({ length: 20 }, (_, i) =>
+        store.create(`idx-${i}`, `Task number ${i}`, `Desc ${i}`));
+      for (const t of tasks) {
+        expect(store.getById(t.id)?.title).toBe(t.title);
+      }
+      // Second pass hits the warm index
+      for (const t of tasks) {
+        expect(store.getById(t.id)?.id).toBe(t.id);
+      }
+    });
+
+    it('picks up a task directory created externally (not via store.create)', () => {
+      createTask('Warm the index');
+      expect(store.getById('external-1')).toBeNull();
+
+      // Simulate another process (e.g. git pull) adding a task dir
+      const dir = join(root, '.teamai', 'external-task');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'task.json'), JSON.stringify({
+        id: 'external-1', title: 'External', description: 'From git pull',
+        phase: 'done', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      }));
+
+      expect(store.getById('external-1')?.title).toBe('External');
+      expect(store.getDirById('external-1')).toBe(dir);
+    });
+
+    it('recovers when a task.json is deleted behind the index', () => {
+      const t = createTask('Doomed task');
+      expect(store.getById(t.id)).not.toBeNull();
+
+      const dir = store.getDirById(t.id);
+      rmSync(join(dir, 'task.json'));
+
+      expect(store.getById(t.id)).toBeNull();
+      expect(() => store.getDirById(t.id)).toThrow(/not found/);
+    });
+
+    it('getDirById stays correct across delete and re-create with the same title', () => {
+      const t1 = createTask('Recycled title');
+      const dir1 = store.getDirById(t1.id);
+      store.delete(t1.id);
+      expect(() => store.getDirById(t1.id)).toThrow();
+
+      const t2 = createTask('Recycled title');
+      expect(store.getDirById(t2.id)).toBe(dir1); // same slug dir, new id
+      expect(store.getById(t1.id)).toBeNull();
+      expect(store.getById(t2.id)?.id).toBe(t2.id);
     });
   });
 });

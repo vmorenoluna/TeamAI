@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, rmSync, unlinkSync, renameSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, rmSync, unlinkSync, renameSync, statSync } from 'fs';
 
 export function isRetryableError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'code' in err
@@ -43,6 +43,10 @@ export interface Task {
   id: string;
   title: string;
   description: string;
+  /** Canonical slug (BUG-13): set at creation, unique among task dirs.
+   *  Used for the task directory, branch, and worktree names. Legacy tasks
+   *  (created before this field) fall back to slugify(description). */
+  slug?: string;
   phase: string;
   branch?: string;
   dependencies?: string[];     // IDs of tasks this task depends on
@@ -69,13 +73,65 @@ export interface Task {
 export class TaskStore {
   private specsDir: string;
 
+  /**
+   * In-memory id → directory index (BUG-16). Built lazily on first lookup;
+   * revalidated via the specs-dir mtime, which changes whenever a task
+   * directory is added or removed. Content edits inside an existing dir
+   * don't move tasks between dirs, so they can't stale the mapping.
+   */
+  private _dirIndex: Map<string, string> | null = null;
+  private _dirIndexMtimeMs = -1;
+
   constructor(projectPath: string) {
     this.specsDir = join(projectPath, '.teamai');
     mkdirSync(this.specsDir, { recursive: true });
   }
 
+  private _invalidateIndex(): void {
+    this._dirIndex = null;
+    this._dirIndexMtimeMs = -1;
+  }
+
+  private _ensureIndex(): Map<string, string> {
+    let mtimeMs = -1;
+    try { mtimeMs = statSync(this.specsDir).mtimeMs; } catch { /* dir missing */ }
+    if (this._dirIndex && mtimeMs === this._dirIndexMtimeMs) return this._dirIndex;
+
+    const index = new Map<string, string>();
+    if (existsSync(this.specsDir)) {
+      for (const d of readdirSync(this.specsDir, { withFileTypes: true })) {
+        if (!d.isDirectory()) continue;
+        const taskPath = join(this.specsDir, d.name, 'task.json');
+        if (!existsSync(taskPath)) continue;
+        try {
+          const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
+          if (task?.id) index.set(task.id, join(this.specsDir, d.name));
+        } catch { /* unreadable task.json — skip */ }
+      }
+    }
+    this._dirIndex = index;
+    this._dirIndexMtimeMs = mtimeMs;
+    return index;
+  }
+
+  /** Read a task.json from an indexed dir; null if missing/unparseable. */
+  private _readTaskAt(dir: string): Task | null {
+    try {
+      return JSON.parse(readFileSync(join(dir, 'task.json'), 'utf-8')) as Task;
+    } catch {
+      return null;
+    }
+  }
+
   create(id: string, title: string, description: string, source?: string, competitiveContext?: string): Task {
-    const slug = slugify(title);
+    // Canonical unique slug (BUG-13): two tasks whose titles share a 40-char
+    // prefix must not share a directory (and later a branch/worktree).
+    // A title of only symbols slugifies to hyphens — fall back to 'task'.
+    const base = slugify(title).replace(/^-+$/, '') || 'task';
+    let slug = base;
+    for (let n = 2; existsSync(join(this.specsDir, slug)); n++) {
+      slug = `${base}-${n}`;
+    }
     const dir = join(this.specsDir, slug);
     mkdirSync(dir, { recursive: true });
 
@@ -83,6 +139,7 @@ export class TaskStore {
       id,
       title,
       description,
+      slug,
       phase: 'backlog',
       source,
       competitiveContext,
@@ -91,6 +148,7 @@ export class TaskStore {
     };
 
     atomicWriteJson(join(dir, 'task.json'), task);
+    this._invalidateIndex();
     return task;
   }
 
@@ -130,18 +188,25 @@ export class TaskStore {
   }
 
   getById(id: string): Task | null {
-    return this.getAll().find(t => t.id === id) || null;
+    const dir = this._dirIndex ? this._ensureIndex().get(id) : undefined;
+    if (dir) {
+      const task = this._readTaskAt(dir);
+      if (task?.id === id) return task;
+      // Stale entry (task.json deleted/rewritten in place) — rebuild once.
+    }
+    this._invalidateIndex();
+    const freshDir = this._ensureIndex().get(id);
+    return freshDir ? this._readTaskAt(freshDir) : null;
   }
 
   getDirById(id: string): string {
-    const dirs = readdirSync(this.specsDir, { withFileTypes: true }).filter(d => d.isDirectory());
-    for (const d of dirs) {
-      const taskPath = join(this.specsDir, d.name, 'task.json');
-      if (existsSync(taskPath)) {
-        const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
-        if (task.id === id) return join(this.specsDir, d.name);
-      }
-    }
+    const dir = this._dirIndex ? this._ensureIndex().get(id) : undefined;
+    // Verify the indexed dir still holds THIS task — a dir can be recycled
+    // (deleted + re-created for another task) within one mtime tick.
+    if (dir && this._readTaskAt(dir)?.id === id) return dir;
+    this._invalidateIndex();
+    const freshDir = this._ensureIndex().get(id);
+    if (freshDir) return freshDir;
     throw new Error(`Task directory not found for id ${id}`);
   }
 
@@ -150,6 +215,7 @@ export class TaskStore {
     // Clean up any stale .tmp file that might remain from a failed atomic write
     try { const tmpPath = join(dir, 'task.json.tmp'); if (existsSync(tmpPath)) unlinkSync(tmpPath); } catch { /* best-effort */ }
     rmSync(dir, { recursive: true, force: true });
+    this._invalidateIndex();
   }
 
   // Remove pipeline artifacts at or after a given level so the pipeline can re-run from there.

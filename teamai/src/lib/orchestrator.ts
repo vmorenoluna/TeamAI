@@ -178,7 +178,7 @@ export class Orchestrator {
       // Merge/PR requires the worktree and branch to exist. If missing,
       // restart from the earliest phase needed to recreate them.
       const worktreeBase = this.getWorktreeBase();
-      const worktreePath = path.join(worktreeBase, slugify(task.description));
+      const worktreePath = path.join(worktreeBase, task.slug ?? slugify(task.description));
       const worktreeExists = existsSync(worktreePath);
       const branchExists = !!task.branch;
 
@@ -216,7 +216,9 @@ export class Orchestrator {
     this.activeTasks.add(taskId);
 
     const config = this.getPipelineConfig();
-    const slug = slugify(description);
+    // Canonical slug from the task record (BUG-13); legacy tasks fall back
+    // to the historical slugify(description) so existing branches still match.
+    const slug = this.taskStore.getById(taskId)?.slug ?? slugify(description);
     const branch = `feat/${slug}`;
     const worktreePath = path.join(this.getWorktreeBase(), slug);
     const specPath = this.taskStore.getDirById(taskId);
@@ -502,7 +504,7 @@ export class Orchestrator {
     if (task.phase !== requiredPhase) {
       throw new PhaseTransitionError(taskId, task.phase, requiredPhase, 'restore pipeline');
     }
-    const branch = task.branch ?? `feat/${slugify(task.description)}`;
+    const branch = task.branch ?? `feat/${task.slug ?? slugify(task.description)}`;
     const slug = branch.replace(/^feat\//, '');
     const pipeline: TaskPipeline = {
       taskId,
@@ -642,7 +644,7 @@ export class Orchestrator {
     const worktreeBase = getWorktreeBase(this.projectRoot);
     const task = this.taskStore.getById(taskId);
     if (!task || !task.branch) return null;
-    const slug = slugify(task.description);
+    const slug = task.slug ?? slugify(task.description);
     return path.join(worktreeBase, slug);
   }
 
