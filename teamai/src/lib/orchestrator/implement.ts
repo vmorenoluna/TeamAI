@@ -319,7 +319,7 @@ async function runSubtaskSession(
       'and mark the subtask done. If it\'s missing or incomplete, first check whether the\n' +
       'background process is still running:\n' +
       '- If the process is still running: estimate remaining time, write an updated\n' +
-      '  subtask_wakeup.json with a new wakeup_at, and end.\n' +
+      '  subtask_wakeup-st' + subtask.id + '.json with a new wakeup_at, and end.\n' +
       '- If the process has crashed or exited with an error: do NOT write another wakeup\n' +
       '  file. Report the failure immediately so the task can advance to failed without\n' +
       '  wasting the remaining wakeup attempts.\n\n';
@@ -427,10 +427,18 @@ async function runSubtaskSession(
       try {
         const wd = JSON.parse(readFileSync(wakeupPath, 'utf-8'));
         if (wd.subtask_id != null && wd.wakeup_at) {
-          pipeline.wakeupSubtaskId = wd.subtask_id;
-          pipeline.wakeupUntil = wd.wakeup_at;
-          pipeline.wakeupCommand = wd.background_command;
-          pipeline.wakeupArtifact = wd.expected_artifact;
+          // When parallel subtasks both schedule wakeups, adopt the EARLIEST
+          // wakeup_at (ADR 002) — the later sibling must not clobber an
+          // already-scheduled earlier wakeup. A re-schedule by the SAME
+          // subtask always wins (its previous wakeup_at is already in the past).
+          const existing = pipeline.wakeupUntil ? Date.parse(pipeline.wakeupUntil) : Infinity;
+          if (pipeline.wakeupSubtaskId == null || wd.subtask_id === pipeline.wakeupSubtaskId
+              || Date.parse(wd.wakeup_at) < existing) {
+            pipeline.wakeupSubtaskId = wd.subtask_id;
+            pipeline.wakeupUntil = wd.wakeup_at;
+            pipeline.wakeupCommand = wd.background_command;
+            pipeline.wakeupArtifact = wd.expected_artifact;
+          }
           pipeline.wakeupAttemptCount = (pipeline.wakeupAttemptCount || 0) + 1;
           wakeupDetected = true;
           appendFileSync(logFile, '[WAKEUP] Subtask ' + wd.subtask_id + ' wakeup scheduled for ' + wd.wakeup_at + ' (attempt ' + pipeline.wakeupAttemptCount + ') — background process: ' + (wd.background_command || 'unknown') + '\n');
