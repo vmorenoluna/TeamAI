@@ -806,6 +806,46 @@ describe('Auto Mode Integration', () => {
       );
     });
 
+    it('respects autoMergeMethod from pipeline.json when auto-merging (T11)', async () => {
+      vi.useFakeTimers();
+
+      // Configure squash strategy in pipeline.json
+      const { writeFileSync: wfs, mkdirSync: mds } = await import('fs');
+      const { join: j } = await import('path');
+      mds(j(testDir, '.teamai'), { recursive: true });
+      wfs(j(testDir, '.teamai', 'pipeline.json'), JSON.stringify({ autoMergeMethod: 'squash' }));
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({
+            state: 'OPEN',
+            statusCheckRollup: [{ conclusion: 'SUCCESS' }],
+          });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'merge') {
+          return 'Merged pull request #42';
+        }
+        return '';
+      });
+
+      const { TaskStore: TSq } = await import('@/lib/task-store');
+      new TSq(testDir).updatePhase(taskId, 'pr-open');
+      fireEvent('phase-change', { taskId, phase: 'pr-open', projectRoot: testDir });
+
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'gh', ['pr', 'merge', '42', '--squash'],
+        expect.objectContaining({ cwd: testDir }),
+      );
+    });
+
     it('persists autoProcessed: true to task.json after CI auto-merge', async () => {
       vi.useFakeTimers();
 
