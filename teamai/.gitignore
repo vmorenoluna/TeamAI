@@ -42,8 +42,7 @@ next-env.d.ts
 
 # Test artifacts
 .teamai-test-*
-.teamai-e2e-seed
-.teamai-e2e-seed-diag
+.teamai-e2e-seed*
 tests/.vitest-state.json
 # Temp scripts
 *.js
