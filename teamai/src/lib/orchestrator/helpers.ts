@@ -20,6 +20,8 @@ export interface PipelineConfig {
   sensors?: SensorsConfig;
   maxDeliverableFails: number;
   maxWakeupAttempts: number;
+  /** Merge strategy auto mode uses when auto-merging a green PR/MR (default 'merge'). */
+  autoMergeMethod?: 'merge' | 'squash' | 'rebase';
   /** When true, all pipeline processing is skipped — demo data stays pristine. */
   demo?: boolean;
 }
@@ -145,12 +147,13 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
         parallelSubtasks: typeof raw.parallelSubtasks === 'boolean' ? raw.parallelSubtasks : true,
         maxDeliverableFails: typeof raw.maxDeliverableFails === 'number' ? raw.maxDeliverableFails : 3,
         maxWakeupAttempts: typeof raw.maxWakeupAttempts === 'number' ? raw.maxWakeupAttempts : 3,
+        autoMergeMethod: raw.autoMergeMethod === 'squash' || raw.autoMergeMethod === 'rebase' ? raw.autoMergeMethod : 'merge',
         demo: typeof raw.demo === 'boolean' ? raw.demo : undefined,
         ...(sensors ? { sensors } : {}),
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
   }
-  return { maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 3 };
+  return { maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 3, autoMergeMethod: 'merge' };
 }
 
 // ── Session map ───────────────────────────────────────────────────────────

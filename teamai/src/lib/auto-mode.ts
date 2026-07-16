@@ -8,6 +8,7 @@ import { projectStore } from './project-store';
 import { getToolPath } from './tool-checker';
 import { log, error as logError } from './logger';
 import { TERMINAL_PHASES, PAUSED_PHASES } from '@/constants/phases';
+import { computePipelineConfig } from './orchestrator/helpers';
 
 interface AutoProjectState {
   enabled: boolean;
@@ -400,7 +401,11 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
           state.ciPollTimers.delete(taskId);
 
           try {
-            execFileSync(getToolPath('glab'), ['mr', 'merge', prNumber], {
+            const method = computePipelineConfig(projectRoot).autoMergeMethod ?? 'merge';
+            // glab defaults to a merge commit; squash/rebase need explicit flags
+            const mergeArgs = ['mr', 'merge', prNumber,
+              ...(method === 'squash' ? ['--squash'] : method === 'rebase' ? ['--rebase'] : [])];
+            execFileSync(getToolPath('glab'), mergeArgs, {
               cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
             });
             log('auto-mode', `MR #${prNumber} merged successfully`);
@@ -447,7 +452,8 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
           state.ciPollTimers.delete(taskId);
 
           try {
-            execFileSync(getToolPath('gh'), ['pr', 'merge', prNumber, '--merge'], {
+            const method = computePipelineConfig(projectRoot).autoMergeMethod ?? 'merge';
+            execFileSync(getToolPath('gh'), ['pr', 'merge', prNumber, `--${method}`], {
               cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
             });
             log('auto-mode', `PR #${prNumber} merged successfully`);
