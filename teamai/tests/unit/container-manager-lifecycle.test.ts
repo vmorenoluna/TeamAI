@@ -13,6 +13,14 @@ const { mockSpawn, mockExecFileSync } = vi.hoisted(() => ({
   mockExecFileSync: vi.fn(),
 }));
 
+// The devcontainer CLI is spawned via cross-spawn (spawn EINVAL fix for the
+// Windows .cmd shim); docker (events watcher) still uses child_process.spawn.
+const { mockCrossSpawn } = vi.hoisted(() => ({
+  mockCrossSpawn: vi.fn(),
+}));
+
+vi.mock('cross-spawn', () => ({ default: mockCrossSpawn }));
+
 const { mockExistsSync } = vi.hoisted(() => ({
   mockExistsSync: vi.fn(),
 }));
@@ -77,7 +85,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       });
 
       const mockProc = createMockSpawnProcess();
-      mockSpawn.mockReturnValue(mockProc);
+      mockCrossSpawn.mockReturnValue(mockProc);
 
       const promise = cm.ensureContainer('/test/project-local');
 
@@ -86,7 +94,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       await expect(promise).rejects.toThrow();
 
       // Should have been called with the local path (not just 'devcontainer')
-      expect(mockSpawn).toHaveBeenCalledWith(
+      expect(mockCrossSpawn).toHaveBeenCalledWith(
         expect.stringContaining('node_modules'),
         expect.any(Array),
         expect.any(Object),
@@ -98,37 +106,33 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       mockExistsSync.mockReturnValue(false);
 
       const mockProc = createMockSpawnProcess();
-      mockSpawn.mockReturnValue(mockProc);
+      mockCrossSpawn.mockReturnValue(mockProc);
 
       const promise = cm.ensureContainer('/test/project-default');
 
       mockProc.emit('error', new Error('ENOENT'));
       await expect(promise).rejects.toThrow();
 
-      // Should have been called with devcontainer (may have .cmd on Windows,
-      // quoted because the .cmd shim is spawned through a shell — EINVAL fix)
-      const callArg = mockSpawn.mock.calls[0][0];
-      expect(callArg).toMatch(/^"?devcontainer(\.cmd)?"?$/);
+      // Should have been called with devcontainer (may have .cmd on Windows)
+      const callArg = mockCrossSpawn.mock.calls[0][0];
+      expect(callArg).toMatch(/^devcontainer(\.cmd)?$/);
     });
 
-    it('spawns the .cmd shim through a shell with quoted args on Windows (spawn EINVAL fix)', async () => {
-      if (process.platform !== 'win32') return; // Windows-only spawn behavior
+    it('spawns the devcontainer CLI via cross-spawn, never child_process.spawn (spawn EINVAL fix)', async () => {
       mockExecFileSync.mockReturnValue('');
       mockExistsSync.mockReturnValue(false);
 
       const mockProc = createMockSpawnProcess();
-      mockSpawn.mockReturnValue(mockProc);
+      mockCrossSpawn.mockReturnValue(mockProc);
 
       const promise = cm.ensureContainer('/test/project-shell');
       mockProc.emit('error', new Error('ENOENT'));
       await expect(promise).rejects.toThrow();
 
-      // Node >=18.20/20.12/21.7 throws EINVAL when spawning .cmd/.bat without
-      // shell: true; the fix routes through a shell and quotes every argument.
-      const [bin, args, opts] = mockSpawn.mock.calls[0];
-      expect(opts.shell).toBe(true);
-      expect(bin).toBe('"devcontainer.cmd"');
-      for (const a of args as string[]) expect(a).toMatch(/^".*"$/);
+      // Node >=18.20/20.12/21.7 (CVE-2024-27980) throws EINVAL when spawning the
+      // Windows .cmd shim via child_process.spawn; cross-spawn handles it safely.
+      expect(mockCrossSpawn).toHaveBeenCalledTimes(1);
+      expect(mockSpawn).not.toHaveBeenCalled();
     });
   });
 
@@ -168,7 +172,8 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
     it('resolves when devcontainer up succeeds with valid NDJSON output', async () => {
       mockExecFileSync.mockReturnValue(''); // dockerAvailable = true
       const mockProc = createMockSpawnProcess();
-      mockSpawn.mockReturnValue(mockProc);
+      mockCrossSpawn.mockReturnValue(mockProc);
+      mockSpawn.mockReturnValue(createMockSpawnProcess()); // docker events watcher
 
       // Start ensureContainer (async) — it will await _doStart → _spawnDevcontainerUp
       const promise = cm.ensureContainer('/test/project');
@@ -188,21 +193,19 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
         remoteWorkspaceFolder: '/workspaces/project',
       });
 
-      // Check spawn was called with devcontainer binary and up args.
-      // On Windows the .cmd shim goes through a shell with quoted args
-      // (EINVAL fix), so strip surrounding quotes before comparing.
-      const [binArg, argsArg] = mockSpawn.mock.calls[0];
-      expect(binArg).toMatch(/devcontainer/);
-      const unquoted = (argsArg as string[]).map(a => a.replace(/^"|"$/g, ''));
-      expect(unquoted).toEqual(
+      // Check the devcontainer binary and up args went through cross-spawn
+      // with plain (unquoted) arguments — cross-spawn owns the .cmd escaping.
+      expect(mockCrossSpawn).toHaveBeenCalledWith(
+        expect.stringMatching(/devcontainer/),
         expect.arrayContaining(['up', '--workspace-folder', '/test/project', '--log-format', 'json']),
+        expect.any(Object),
       );
     });
 
     it('rejects when devcontainer process errors (e.g., binary not found)', async () => {
       mockExecFileSync.mockReturnValue('');
       const mockProc = createMockSpawnProcess();
-      mockSpawn.mockReturnValue(mockProc);
+      mockCrossSpawn.mockReturnValue(mockProc);
 
       const promise = cm.ensureContainer('/test/project');
 
@@ -214,7 +217,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
     it('rejects when devcontainer exits with non-zero code', async () => {
       mockExecFileSync.mockReturnValue('');
       const mockProc = createMockSpawnProcess();
-      mockSpawn.mockReturnValue(mockProc);
+      mockCrossSpawn.mockReturnValue(mockProc);
 
       const promise = cm.ensureContainer('/test/project');
 
@@ -227,7 +230,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
     it('rejects when devcontainer output has no result JSON', async () => {
       mockExecFileSync.mockReturnValue('');
       const mockProc = createMockSpawnProcess();
-      mockSpawn.mockReturnValue(mockProc);
+      mockCrossSpawn.mockReturnValue(mockProc);
 
       const promise = cm.ensureContainer('/test/project');
 
@@ -240,7 +243,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
     it('rejects when devcontainer outcome is not success', async () => {
       mockExecFileSync.mockReturnValue('');
       const mockProc = createMockSpawnProcess();
-      mockSpawn.mockReturnValue(mockProc);
+      mockCrossSpawn.mockReturnValue(mockProc);
 
       const promise = cm.ensureContainer('/test/project');
 
@@ -317,7 +320,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
 
       // First spawn call returns devcontainer up process
       // Second spawn call returns docker events watcher
-      mockSpawn.mockReturnValueOnce(devProc);
+      mockCrossSpawn.mockReturnValueOnce(devProc);
       mockSpawn.mockReturnValueOnce(watcherProc);
 
       // Start the container
@@ -337,7 +340,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       // This should trigger _onContainerDied which starts a restart
       // The restart will need a third spawn call for the new devcontainer up
       const restartProc = createMockSpawnProcess();
-      mockSpawn.mockReturnValueOnce(restartProc);
+      mockCrossSpawn.mockReturnValueOnce(restartProc);
 
       // The watcher emits data on stdout → triggers _onContainerDied
       watcherProc.stdout.emit('data', Buffer.from('die\n'));
@@ -346,7 +349,8 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       await new Promise(r => setTimeout(r, 10));
 
       // Should have spawned a new devcontainer up process (the restart)
-      expect(mockSpawn).toHaveBeenCalledTimes(3); // 2 from start + 1 from restart
+      expect(mockCrossSpawn).toHaveBeenCalledTimes(2); // devcontainer up: start + restart
+      expect(mockSpawn).toHaveBeenCalledTimes(1);      // docker events watcher
     });
 
     it('triggers restart when watcher exit event fires while container is running', async () => {
@@ -354,7 +358,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       const devProc = createMockSpawnProcess();
       const watcherProc = createMockSpawnProcess();
 
-      mockSpawn.mockReturnValueOnce(devProc);
+      mockCrossSpawn.mockReturnValueOnce(devProc);
       mockSpawn.mockReturnValueOnce(watcherProc);
 
       const ndJsonLine = JSON.stringify({
@@ -370,7 +374,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       await startPromise;
 
       const restartProc = createMockSpawnProcess();
-      mockSpawn.mockReturnValueOnce(restartProc);
+      mockCrossSpawn.mockReturnValueOnce(restartProc);
 
       // Fire the exit event on the watcher (simulates watcher process dying)
       watcherProc.emit('exit', 0);
@@ -378,7 +382,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       await new Promise(r => setTimeout(r, 10));
 
       // Should have spawned a new devcontainer up (the restart triggered by watcher exit)
-      expect(mockSpawn).toHaveBeenCalledTimes(3);
+      expect(mockCrossSpawn).toHaveBeenCalledTimes(2);
     });
 
     it('triggers restart when watcher error event fires while container is running', async () => {
@@ -386,7 +390,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       const devProc = createMockSpawnProcess();
       const watcherProc = createMockSpawnProcess();
 
-      mockSpawn.mockReturnValueOnce(devProc);
+      mockCrossSpawn.mockReturnValueOnce(devProc);
       mockSpawn.mockReturnValueOnce(watcherProc);
 
       const ndJsonLine = JSON.stringify({
@@ -402,7 +406,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       await startPromise;
 
       const restartProc = createMockSpawnProcess();
-      mockSpawn.mockReturnValueOnce(restartProc);
+      mockCrossSpawn.mockReturnValueOnce(restartProc);
 
       // Fire the error event on the watcher
       watcherProc.emit('error', new Error('stream connection lost'));
@@ -410,7 +414,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       await new Promise(r => setTimeout(r, 10));
 
       // Should have spawned a new devcontainer up (the restart triggered by watcher error)
-      expect(mockSpawn).toHaveBeenCalledTimes(3);
+      expect(mockCrossSpawn).toHaveBeenCalledTimes(2);
     });
 
     it('does not restart when container dies but state is not running', async () => {
@@ -418,7 +422,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       const devProc = createMockSpawnProcess();
       const watcherProc = createMockSpawnProcess();
 
-      mockSpawn.mockReturnValueOnce(devProc);
+      mockCrossSpawn.mockReturnValueOnce(devProc);
       mockSpawn.mockReturnValueOnce(watcherProc);
 
       const ndJsonLine = JSON.stringify({
@@ -440,7 +444,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       watcherProc.stdout.emit('data', Buffer.from('die\n'));
 
       // Should NOT have spawned an additional devcontainer process
-      expect(mockSpawn).toHaveBeenCalledTimes(2); // only the initial calls
+      expect(mockCrossSpawn).toHaveBeenCalledTimes(1); // only the initial devcontainer up
     });
 
     // Coverage: line 212 — _doStart failure during restart
@@ -449,7 +453,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       const devProc = createMockSpawnProcess();
       const watcherProc = createMockSpawnProcess();
 
-      mockSpawn.mockReturnValueOnce(devProc);
+      mockCrossSpawn.mockReturnValueOnce(devProc);
       mockSpawn.mockReturnValueOnce(watcherProc);
 
       const ndJsonLine = JSON.stringify({
@@ -466,7 +470,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
 
       // Make the restart spawn emit an error (simulates devcontainer binary failure)
       const failingProc = createMockSpawnProcess();
-      mockSpawn.mockReturnValueOnce(failingProc);
+      mockCrossSpawn.mockReturnValueOnce(failingProc);
 
       // Trigger _onContainerDied via watcher
       watcherProc.stdout.emit('data', Buffer.from('die\n'));
@@ -474,8 +478,8 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       // Small delay to let microtasks process
       await new Promise(r => setTimeout(r, 10));
 
-      // Should have spawned a 3rd devcontainer process for the restart
-      expect(mockSpawn).toHaveBeenCalledTimes(3);
+      // Should have spawned a 2nd devcontainer up for the restart
+      expect(mockCrossSpawn).toHaveBeenCalledTimes(2);
 
       // Now fail the restart by emitting error on the failing proc
       // Wait for the startPromise to reject, which exercises the .catch(() => {}) line

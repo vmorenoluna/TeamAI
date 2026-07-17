@@ -1,4 +1,5 @@
 import { spawn, execFileSync, ChildProcess } from 'child_process';
+import crossSpawn from 'cross-spawn';
 import { existsSync, readFileSync, appendFileSync, writeFileSync, mkdirSync } from 'fs';
 import { EventEmitter } from 'events';
 import path from 'path';
@@ -39,19 +40,6 @@ function devcontainerBin(): string {
   return existsSync(local) ? local : `devcontainer${ext}`;
 }
 
-/**
- * Spawn options for the devcontainer CLI. On Windows the CLI is a `.cmd`
- * shim, which Node (>=18.20/20.12/21.7, CVE-2024-27980) refuses to spawn
- * directly — it throws `spawn EINVAL` unless `shell: true` is passed.
- * With a shell, arguments are joined into a single command line, so each
- * one must be quoted to survive spaces in paths.
- */
-function devcontainerSpawnArgs(bin: string, args: string[]): { cmd: string; args: string[]; shell: boolean } {
-  const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin);
-  if (!needsShell) return { cmd: bin, args, shell: false };
-  const quote = (s: string) => `"${s.replace(/"/g, '""')}"`;
-  return { cmd: quote(bin), args: args.map(quote), shell: true };
-}
 
 // Check if Docker is available and running (cached per process lifetime)
 let _dockerAvailable: boolean | null = null;
@@ -251,8 +239,12 @@ export class ContainerManager extends EventEmitter {
 
   private _spawnDevcontainerUp(args: string[], projectRoot: string, logFile?: string): Promise<ContainerInfo> {
     return new Promise((resolve, reject) => {
-      const sp = devcontainerSpawnArgs(devcontainerBin(), args);
-      const proc = spawn(sp.cmd, sp.args, { stdio: ['ignore', 'pipe', 'pipe'], shell: sp.shell });
+      // cross-spawn, not child_process.spawn: on Windows the devcontainer CLI
+      // is a .cmd shim, which Node (>=18.20/20.12/21.7, CVE-2024-27980) refuses
+      // to spawn directly — it throws `spawn EINVAL`. cross-spawn routes .cmd/.bat
+      // through cmd.exe with proper metacharacter escaping; on other platforms it
+      // behaves identically to child_process.spawn.
+      const proc = crossSpawn(devcontainerBin(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '';
       let stderr = '';
 
