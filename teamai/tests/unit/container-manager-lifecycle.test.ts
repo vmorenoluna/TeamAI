@@ -105,9 +105,30 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       mockProc.emit('error', new Error('ENOENT'));
       await expect(promise).rejects.toThrow();
 
-      // Should have been called with devcontainer (may have .cmd on Windows)
+      // Should have been called with devcontainer (may have .cmd on Windows,
+      // quoted because the .cmd shim is spawned through a shell — EINVAL fix)
       const callArg = mockSpawn.mock.calls[0][0];
-      expect(callArg).toMatch(/^devcontainer(\.cmd)?$/);
+      expect(callArg).toMatch(/^"?devcontainer(\.cmd)?"?$/);
+    });
+
+    it('spawns the .cmd shim through a shell with quoted args on Windows (spawn EINVAL fix)', async () => {
+      if (process.platform !== 'win32') return; // Windows-only spawn behavior
+      mockExecFileSync.mockReturnValue('');
+      mockExistsSync.mockReturnValue(false);
+
+      const mockProc = createMockSpawnProcess();
+      mockSpawn.mockReturnValue(mockProc);
+
+      const promise = cm.ensureContainer('/test/project-shell');
+      mockProc.emit('error', new Error('ENOENT'));
+      await expect(promise).rejects.toThrow();
+
+      // Node >=18.20/20.12/21.7 throws EINVAL when spawning .cmd/.bat without
+      // shell: true; the fix routes through a shell and quotes every argument.
+      const [bin, args, opts] = mockSpawn.mock.calls[0];
+      expect(opts.shell).toBe(true);
+      expect(bin).toBe('"devcontainer.cmd"');
+      for (const a of args as string[]) expect(a).toMatch(/^".*"$/);
     });
   });
 
@@ -167,11 +188,14 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
         remoteWorkspaceFolder: '/workspaces/project',
       });
 
-      // Check spawn was called with devcontainer binary and up args
-      expect(mockSpawn).toHaveBeenCalledWith(
-        expect.stringMatching(/devcontainer/),
+      // Check spawn was called with devcontainer binary and up args.
+      // On Windows the .cmd shim goes through a shell with quoted args
+      // (EINVAL fix), so strip surrounding quotes before comparing.
+      const [binArg, argsArg] = mockSpawn.mock.calls[0];
+      expect(binArg).toMatch(/devcontainer/);
+      const unquoted = (argsArg as string[]).map(a => a.replace(/^"|"$/g, ''));
+      expect(unquoted).toEqual(
         expect.arrayContaining(['up', '--workspace-folder', '/test/project', '--log-format', 'json']),
-        expect.any(Object),
       );
     });
 
