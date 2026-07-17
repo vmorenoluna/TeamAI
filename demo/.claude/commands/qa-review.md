@@ -48,6 +48,7 @@ This means on a rework pass where only one criterion failed and its file was cha
    - If a criterion says "no occurrences of X remain": grep the relevant files and paste the result.
    - If a criterion says "Y is used instead of Z": read the file and confirm.
    - If a criterion requires empirical evidence from a script run (benchmark, integration test, etc.): read the committed output and confirm the results meet the criterion's thresholds. A coder claim of "mathematically verified" or theoretical justification does NOT satisfy an empirical criterion — mark it FAIL.
+   - **Unverifiable criterion detection**: If a criterion demands evidence that structurally cannot exist in any committed artifact (e.g., it asks for detail from an uncommitted log, a transient server response, or the coder's self-reported observation), do NOT mark it as a standard FAIL. Instead, add a `spec_concerns` entry: the spec/plan failed to provide a producing artifact for this criterion. The issue is that the criterion itself is unverifiable — the coder cannot fix this by changing code. Flagging it as a standard FAIL would guarantee a useless cleanup bounce.
    - Never infer a criterion is satisfied from the diff alone — verify against current code.
      - **After evaluating each criterion**: write the partial QA report to disk immediately
        (with `"overall": "IN_PROGRESS"` as a placeholder). This ensures that if the session
