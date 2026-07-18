@@ -291,7 +291,7 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
       </div>
 
       {selectedTaskId && (
-        <TaskModal taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
+        <TaskModal taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} projectPath={projectPath} />
       )}
     </div>
   );

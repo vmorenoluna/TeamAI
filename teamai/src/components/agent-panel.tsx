@@ -49,14 +49,14 @@ function formatEvent(event: StreamEvent): string | null {
 // surviving React StrictMode double-invoke and Fast Refresh ref preservation.
 const termWriteMap = new WeakMap<object, number>();
 
-export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialOutput?: string | null }) {
+export function AgentPanel({ taskId, initialOutput, project }: { taskId: string; initialOutput?: string | null; project?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<{ terminal: Terminal; fitAddon: FitAddon } | null>(null);
   const writtenRef = useRef(0);           // index into live events array
   const initialOutputRef = useRef(initialOutput); // always holds the latest value for the init callback
   // eslint-disable-next-line local/no-async-fetch-on-mount -- termReady is terminal init, not user-toggleable state
   const [termReady, setTermReady] = useState(false);
-  const events = useAgentStream(taskId);
+  const { events, connected } = useAgentStream(taskId, project);
   const userScrolledRef = useRef(false);
 
   // Initialise xterm once on mount
@@ -176,7 +176,16 @@ export function AgentPanel({ taskId, initialOutput }: { taskId: string; initialO
         <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           Agent Output
         </span>
-        <span className="text-xs text-slate-500">
+        <span className="text-xs text-slate-500 flex items-center gap-2">
+          {!connected && events.length > 0 && (
+            <span className="flex items-center gap-1.5 text-amber-400">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500" />
+              </span>
+              Reconnecting…
+            </span>
+          )}
           {events.length > 0 ? `${events.length} events` : initialOutput ? 'history' : '0 events'}
         </span>
       </div>

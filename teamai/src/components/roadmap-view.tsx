@@ -410,6 +410,7 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
           taskId={selectedTaskId}
           onClose={() => setSelectedTaskId(null)}
           readonly
+          projectPath={projectPath}
           // eslint-disable-next-line react-hooks/refs -- intentional: read mutable cache during render for initial data optimization
           cachedData={taskCacheRef.current.get(selectedTaskId)?.data}
           onDataLoaded={(data, tid) => { taskCacheRef.current.set(tid, { data }); }}

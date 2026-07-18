@@ -11,10 +11,11 @@ interface Props {
   cachedData?: FullData;
   onDataLoaded?: (data: FullData, taskId: string) => void;
   onError?: (error: string) => void;
+  projectPath?: string;
 }
 
 /** Floating modal overlay with TaskPanel — used by kanban, roadmap, and workflow views. */
-export function TaskModal({ taskId, onClose, readonly, cachedData, onDataLoaded, onError }: Props) {
+export function TaskModal({ taskId, onClose, readonly, cachedData, onDataLoaded, onError, projectPath }: Props) {
   // Close on Escape
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -43,6 +44,7 @@ export function TaskModal({ taskId, onClose, readonly, cachedData, onDataLoaded,
           cachedData={cachedData}
           onDataLoaded={onDataLoaded}
           onError={onError}
+          projectPath={projectPath}
         />
       </div>
     </div>

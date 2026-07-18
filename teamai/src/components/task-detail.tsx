@@ -44,13 +44,14 @@ interface Props {
   planLog?: string | null;
   mergeLog?: string | null;
   sessionMap?: Record<string, string>;
+  project?: string;
   onClose?: () => void;
   readonly?: boolean;
 }
 
 const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, onClose, readonly = false }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, project, onClose, readonly = false }: Props) {
   const router = useRouter();
   const { run, isPending } = useServerMutation();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -478,6 +479,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
               mergeLog={mergeLog ?? null}
               orchestratorLog={agentOutput ?? null}
               sessionMap={sessionMap}
+              project={project}
             />
           </div>
         )}
