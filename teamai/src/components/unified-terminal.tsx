@@ -56,6 +56,7 @@ interface Props {
   mergeLog: string | null;
   orchestratorLog: string | null;
   sessionMap?: Record<string, string>;
+  project?: string;
 }
 
 // ── Log parsing ─────────────────────────────────────────────────────────────
@@ -156,13 +157,13 @@ export function formatLiveEvent(event: StreamEvent): string | null {
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function UnifiedTerminal({
-  taskId, subtaskTerminals, qaLog, specLog, planLog, mergeLog, orchestratorLog, sessionMap,
+  taskId, subtaskTerminals, qaLog, specLog, planLog, mergeLog, orchestratorLog, sessionMap, project,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<{ terminal: Terminal; fitAddon: FitAddon } | null>(null);
   // eslint-disable-next-line local/no-async-fetch-on-mount
   const [termReady, setTermReady] = useState(false);
-  const events = useAgentStream(taskId);
+  const { events, connected } = useAgentStream(taskId, project);
   const userScrolledRef = useRef(false);
   const liveWrittenRef = useRef(0);
 
@@ -433,6 +434,20 @@ export function UnifiedTerminal({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* Reconnecting banner */}
+      {!connected && hasAnyLog && (
+        <div
+          className="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-950/50 border border-amber-800/50 text-amber-300 text-xs"
+          data-testid="terminal-reconnecting-banner"
+        >
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+          </span>
+          Reconnecting…
         </div>
       )}
 

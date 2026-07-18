@@ -394,7 +394,7 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
 
         {/* Task modal */}
         {selectedTaskId && (
-          <TaskModal taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
+          <TaskModal taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} projectPath={projectPath} />
         )}
       </div>
 

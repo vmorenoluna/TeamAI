@@ -49,9 +49,10 @@ vi.mock('@xterm/addon-fit', () => ({
 }));
 
 const mockUseAgentStreamReturn = vi.hoisted(() => [] as Array<{ sessionId: string; event: StreamEvent }>);
+const mockUseAgentStreamConnected = vi.hoisted(() => true);
 
 vi.mock('@/hooks/use-agent-stream', () => ({
-  useAgentStream: () => mockUseAgentStreamReturn,
+  useAgentStream: () => ({ events: mockUseAgentStreamReturn, connected: mockUseAgentStreamConnected }),
 }));
 
 // Mock ResizeObserver (not available in happy-dom)

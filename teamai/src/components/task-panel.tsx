@@ -7,13 +7,14 @@ import { useWebSocket } from '@/hooks/use-websocket';
 
 export type FullData = Awaited<ReturnType<typeof getTaskFull>>;
 
-export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedData, onDataLoaded }: {
+export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedData, onDataLoaded, projectPath }: {
   taskId: string;
   onClose: () => void;
   readonly?: boolean;
   onError?: (error: string) => void;
   cachedData?: FullData | null;
   onDataLoaded?: (data: FullData, taskId: string) => void;
+  projectPath?: string;
 }) {
   const [data, setData] = useState<FullData | null>(cachedData ?? null);
   const [loading, setLoading] = useState(!cachedData);
@@ -50,6 +51,7 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
   };
 
   useWebSocket({
+    project: projectPath,
     onMessage: (msg) => onMessageRef.current?.(msg),
   });
 
@@ -99,6 +101,7 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
             planLog={data.planLog}
             mergeLog={data.mergeLog}
             sessionMap={data.sessionMap}
+            project={projectPath}
             onClose={onClose}
             readonly={readonly}
           />
