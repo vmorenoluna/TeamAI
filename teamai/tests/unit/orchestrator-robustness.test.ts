@@ -3249,6 +3249,65 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
     }
   });
 
+  it('detects subtask_wakeup-st<id>.json during a QA-rework (cleanup) session, not just first-pass (regression)', async () => {
+    // A coder session running with QA feedback present (hasQaFeedback=true) can
+    // legitimately need to start a long background verification job — e.g.
+    // re-running a sweep after fixing the code — just like a first-pass
+    // session. The wakeup-file check used to be gated behind `!hasQaFeedback`,
+    // so a rework session's wakeup file was silently ignored: the orchestrator
+    // advanced straight to QA before the background job finished, and QA
+    // failed the subtask against incomplete/stale evidence — burning a QA
+    // attempt on a false negative unrelated to code or spec quality.
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 2,
+        title: 'Run post-fix isolation sweep and commit evidence',
+        description: 'Re-verify the fix against a fresh sweep',
+        files: ['src/bench.ts'],
+        acceptance_criteria: ['Evidence artifact committed'],
+        qa_flagged: true,
+      }],
+    }));
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nSubtask 2: evidence artifact is stale.\n');
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-qa-rework');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 1,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      writeFileSync(join(project.taskDir, 'subtask_wakeup-st2.json'), JSON.stringify({
+        subtask_id: 2,
+        wakeup_at: '2026-07-04T12:00:00Z',
+        background_command: 'python scripts/optimizer_sweep.py --batch',
+        expected_artifact: 'scripts/sweep_logs/evidence.log',
+      }));
+
+      fireEvent('event', { sessionId: 'sess-wakeup-qa-rework', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+
+      // Wakeup file should be detected and deleted, exactly as in the
+      // first-pass case — hasQaFeedback must not suppress this.
+      expect(existsSync(join(project.taskDir, 'subtask_wakeup-st2.json'))).toBe(false);
+      expect(pipeline.wakeupSubtaskId).toBe(2);
+      expect(pipeline.wakeupUntil).toBe('2026-07-04T12:00:00Z');
+      expect(pipeline.wakeupCommand).toBe('python scripts/optimizer_sweep.py --batch');
+      expect(pipeline.wakeupArtifact).toBe('scripts/sweep_logs/evidence.log');
+      expect(pipeline.wakeupAttemptCount).toBe(1);
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   it('handles malformed subtask_wakeup.json gracefully', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{ id: 1, title: 'Normal subtask', description: 'Do work', files: ['src/work.ts'], acceptance_criteria: ['Works'] }],

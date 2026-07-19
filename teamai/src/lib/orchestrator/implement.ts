@@ -304,9 +304,11 @@ async function runSubtaskSession(
   // ADR 002: Snapshot whether this subtask was a wakeup re-entry
   const wasWakeupReentry = pipeline.wakeupSubtaskId === subtask.id;
 
-  // ADR 002: Wakeup re-entry prompt header (takes priority over deliverable)
+  // ADR 002: Wakeup re-entry prompt header (takes priority over deliverable).
+  // NOT gated on hasQaFeedback — a QA-rework/cleanup session can just as
+  // legitimately be resuming a background job it scheduled itself.
   let wakeupHeader = '';
-  if (!hasQaFeedback && pipeline.wakeupSubtaskId === subtask.id) {
+  if (pipeline.wakeupSubtaskId === subtask.id) {
     wakeupHeader = '⚠️ WAKEUP RE-ENTRY\n\n' +
       'Your previous session was paused to wait for a background process.\n' +
       'Background command: ' + (pipeline.wakeupCommand || 'unknown') + '\n' +
@@ -417,9 +419,17 @@ async function runSubtaskSession(
     }
   }
 
-  // ADR 002: Check for wakeup file (engineer scheduled background work)
+  // ADR 002: Check for wakeup file (engineer scheduled background work).
+  // NOT gated on hasQaFeedback — a QA-rework/cleanup coder session can
+  // legitimately need to start a long verification job (e.g. re-running a
+  // sweep after a fix) just like a first-pass session. Gating this on
+  // hasQaFeedback silently dropped wakeup files written during rework: the
+  // coder would correctly schedule a wait, but the orchestrator would never
+  // look for the file, advance straight to QA before the job finished, and
+  // QA would then fail the subtask against incomplete/stale evidence —
+  // burning a QA attempt on a false negative unrelated to code or spec quality.
   let wakeupDetected = false;
-  if (!hasQaFeedback) {
+  {
     const wakeupPathId = path.join(pipeline.specPath, `subtask_wakeup-st${subtask.id}.json`);
     const wakeupPathLegacy = path.join(pipeline.specPath, 'subtask_wakeup.json');
     const wakeupPath = existsSync(wakeupPathId) ? wakeupPathId : (existsSync(wakeupPathLegacy) ? wakeupPathLegacy : null);
