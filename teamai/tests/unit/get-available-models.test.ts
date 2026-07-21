@@ -56,9 +56,10 @@ describe('getAvailableModels', () => {
 
   // ── Curated model list shape ────────────────────────────────────────
 
-  it('CURATED_MODELS.anthropic has only latest-gen models (opus, sonnet, haiku)', () => {
+  it('CURATED_MODELS.anthropic has all current-gen models (fable, opus, sonnet, haiku)', () => {
     const models = CURATED_MODELS.anthropic;
-    expect(models).toHaveLength(3);
+    expect(models).toHaveLength(4);
+    expect(models).toContain('claude-fable-5');
     expect(models).toContain('claude-opus-4-8');
     expect(models).toContain('claude-sonnet-4-6');
     expect(models).toContain('claude-haiku-4-5-20251001');
@@ -274,6 +275,7 @@ describe('getAvailableModels', () => {
       ok: true,
       json: async () => ({
         data: [{ id: 'claude-sonnet-4-6', type: 'model' }],
+        has_more: false,
       }),
     });
 
@@ -309,6 +311,7 @@ describe('getAvailableModels', () => {
           { id: 'claude-sonnet-4-6', type: 'model' },
           { id: 'claude-3-opus-20240229', type: 'model' },
         ],
+        has_more: false,
       }),
     });
 
@@ -337,6 +340,7 @@ describe('getAvailableModels', () => {
           { id: 'claude-3-5-sonnet-20241022', type: 'model' },
           { id: 'claude-opus-4-8', type: 'model' },
         ],
+        has_more: false,
       }),
     });
 
@@ -441,7 +445,7 @@ describe('getAvailableModels', () => {
     // API returns 200 but with an empty data array (no models match 'type=model' filter)
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ data: [] }),
+      json: async () => ({ data: [], has_more: false }),
     });
 
     const result = await getAvailableModels('anthropic');
@@ -464,6 +468,7 @@ describe('getAvailableModels', () => {
           { id: 'claude-3-sonnet-20240229', type: 'model' },
           { id: 'claude-3-haiku-20240307', type: 'model' },
         ],
+        has_more: false,
       }),
     });
 
@@ -496,6 +501,7 @@ describe('getAvailableModels', () => {
           { id: 'claude-3-sonnet-20240229', type: 'model' },
           { id: 'claude-3-haiku-20240307', type: 'model' },
         ],
+        has_more: false,
       }),
     });
 
@@ -542,6 +548,7 @@ describe('getAvailableModels', () => {
           { id: 'claude-sonnet-4-6', type: 'model' },
           { id: 'claude-haiku-4-5-20251001', type: 'model' },
         ],
+        has_more: false,
       }),
     });
 
@@ -549,6 +556,73 @@ describe('getAvailableModels', () => {
     // Dedup: sonnet and haiku are different families, both kept
     expect(result.models).toEqual(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6']);
     expect(mockFetch).toHaveBeenCalled();
+  });
+
+  // ── API pagination ───────────────────────────────────────────────
+
+  it('paginates through multiple pages using has_more and last_id cursor', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-anthropic');
+
+    // Page 1: 2 models, has_more=true, last_id points to next page
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            { id: 'claude-sonnet-4-6', type: 'model' },
+            { id: 'claude-haiku-4-5-20251001', type: 'model' },
+          ],
+          has_more: true,
+          last_id: 'claude-haiku-4-5-20251001',
+        }),
+      })
+      // Page 2: 1 model (fable), has_more=false — stops pagination
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            { id: 'claude-fable-5', type: 'model' },
+          ],
+          has_more: false,
+        }),
+      });
+
+    const result = await getAvailableModels('anthropic');
+
+    expect(result.error).toBeUndefined();
+    // All 3 families (haiku, sonnet, fable) from both pages, deduped
+    expect(result.models).toEqual([
+      'claude-fable-5',
+      'claude-haiku-4-5-20251001',
+      'claude-sonnet-4-6',
+    ]);
+
+    // Verify two pages were fetched
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    // Page 1: no after_id param
+    expect(mockFetch.mock.calls[0][0]).toBe('https://api.anthropic.com/v1/models?limit=100');
+    // Page 2: includes after_id cursor
+    expect(mockFetch.mock.calls[1][0]).toBe(
+      'https://api.anthropic.com/v1/models?limit=100&after_id=claude-haiku-4-5-20251001',
+    );
+  });
+
+  it('stops paginating when an intermediate page has has_more=false', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-anthropic');
+
+    // Single page response: has_more=false — no second fetch needed
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: [{ id: 'claude-opus-4-8', type: 'model' }],
+        has_more: false,
+      }),
+    });
+
+    const result = await getAvailableModels('anthropic');
+
+    expect(result.models).toEqual(['claude-opus-4-8']);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
 
