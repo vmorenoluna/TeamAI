@@ -4,9 +4,11 @@
  * Unit tests for usePhaseSync hook.
  *
  * Tests WebSocket message handling: phase-change events dispatch the
- * onPhaseChange callback + router.refresh(), other message types are
- * ignored, connection change forwarding, reconnect passthrough, and
- * edge cases (no opts, missing callbacks, ref stability).
+ * onPhaseChange callback + router.refresh(), subtask-progress events
+ * either dispatch onSubtaskProgress (targeted update, no refresh) or
+ * fall back to router.refresh(), other message types are ignored,
+ * connection change forwarding, reconnect passthrough, and edge cases
+ * (no opts, missing callbacks, ref stability).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -145,6 +147,175 @@ describe('usePhaseSync', () => {
       });
       expect(cb1).toHaveBeenCalledTimes(1); // not called again
       expect(cb2).toHaveBeenCalledWith('task-b', 'spec');
+    });
+  });
+
+  // ── Subtask progress event ──────────────────────────────────────────
+
+  describe('subtask-progress event', () => {
+    function subtaskProgressPayload(taskId: string, completed: number, total: number): Record<string, unknown> {
+      return { type: 'subtask-progress', taskId, completed, total };
+    }
+
+    // ── Fallback: no onSubtaskProgress callback → router.refresh() ──
+
+    it('falls back to router.refresh when onSubtaskProgress is not provided', () => {
+      renderHook(() => usePhaseSync());
+
+      act(() => {
+        gOnMessage!(subtaskProgressPayload('task-1', 3, 7));
+      });
+
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+    });
+
+    it('does NOT call onPhaseChange for subtask-progress (it is not a phase change)', () => {
+      const onPhaseChange = vi.fn();
+      renderHook(() => usePhaseSync({ onPhaseChange }));
+
+      act(() => {
+        gOnMessage!(subtaskProgressPayload('task-5', 2, 4));
+      });
+
+      expect(onPhaseChange).not.toHaveBeenCalled();
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+    });
+
+    it('handles multiple subtask-progress events in sequence (fallback)', () => {
+      renderHook(() => usePhaseSync());
+
+      act(() => {
+        gOnMessage!(subtaskProgressPayload('t1', 1, 5));
+        gOnMessage!(subtaskProgressPayload('t1', 2, 5));
+        gOnMessage!(subtaskProgressPayload('t1', 3, 5));
+        gOnMessage!(subtaskProgressPayload('t2', 4, 4));
+      });
+
+      expect(mockRouterRefresh).toHaveBeenCalledTimes(4);
+    });
+
+    it('works alongside phase-change events independently (fallback)', () => {
+      const onPhaseChange = vi.fn();
+      renderHook(() => usePhaseSync({ onPhaseChange }));
+
+      act(() => {
+        gOnMessage!(subtaskProgressPayload('task-a', 1, 3));
+        gOnMessage!(phaseChangePayload('task-a', 'qa-review'));
+        gOnMessage!(subtaskProgressPayload('task-b', 2, 2));
+      });
+
+      expect(onPhaseChange).toHaveBeenCalledOnce();
+      expect(onPhaseChange).toHaveBeenCalledWith('task-a', 'qa-review');
+      expect(mockRouterRefresh).toHaveBeenCalledTimes(3);
+    });
+
+    it('falls back when called with no options', () => {
+      const { result } = renderHook(() => usePhaseSync());
+      expect(result.current.reconnect).toBeDefined();
+
+      act(() => {
+        gOnMessage!(subtaskProgressPayload('task-nocb', 5, 10));
+      });
+
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+    });
+
+    it('falls back on subtask-progress with zero total (edge case)', () => {
+      renderHook(() => usePhaseSync());
+
+      act(() => {
+        gOnMessage!(subtaskProgressPayload('task-empty', 0, 0));
+      });
+
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+    });
+
+    // ── Targeted update: onSubtaskProgress callback provided ──
+
+    it('calls onSubtaskProgress callback with taskId, completed, and total', () => {
+      const onSubtaskProgress = vi.fn();
+      renderHook(() => usePhaseSync({ onSubtaskProgress }));
+
+      expect(gOnMessage).toBeDefined();
+      act(() => {
+        gOnMessage!(subtaskProgressPayload('task-42', 3, 5));
+      });
+
+      expect(onSubtaskProgress).toHaveBeenCalledWith('task-42', 3, 5);
+    });
+
+    it('skips router.refresh when onSubtaskProgress is provided (targeted update)', () => {
+      const onSubtaskProgress = vi.fn();
+      renderHook(() => usePhaseSync({ onSubtaskProgress }));
+
+      act(() => {
+        gOnMessage!(subtaskProgressPayload('task-tgt', 2, 4));
+      });
+
+      expect(onSubtaskProgress).toHaveBeenCalledWith('task-tgt', 2, 4);
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('handles multiple subtask-progress events when callback is provided', () => {
+      const onSubtaskProgress = vi.fn();
+      renderHook(() => usePhaseSync({ onSubtaskProgress }));
+
+      act(() => {
+        gOnMessage!(subtaskProgressPayload('t', 1, 3));
+        gOnMessage!(subtaskProgressPayload('t', 2, 3));
+        gOnMessage!(subtaskProgressPayload('t', 3, 3));
+      });
+
+      expect(onSubtaskProgress).toHaveBeenCalledTimes(3);
+      expect(onSubtaskProgress).toHaveBeenNthCalledWith(1, 't', 1, 3);
+      expect(onSubtaskProgress).toHaveBeenNthCalledWith(2, 't', 2, 3);
+      expect(onSubtaskProgress).toHaveBeenNthCalledWith(3, 't', 3, 3);
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('can update onSubtaskProgress callback between renders', () => {
+      const cb1 = vi.fn();
+      const cb2 = vi.fn();
+
+      const { rerender } = renderHook(
+        ({ cb }: { cb: (taskId: string, completed: number, total: number) => void }) =>
+          usePhaseSync({ onSubtaskProgress: cb }),
+        { initialProps: { cb: cb1 } }
+      );
+
+      act(() => {
+        gOnMessage!(subtaskProgressPayload('task-x', 1, 2));
+      });
+      expect(cb1).toHaveBeenCalledWith('task-x', 1, 2);
+      expect(cb2).not.toHaveBeenCalled();
+
+      rerender({ cb: cb2 });
+
+      act(() => {
+        gOnMessage!(subtaskProgressPayload('task-y', 2, 2));
+      });
+      expect(cb1).toHaveBeenCalledTimes(1);
+      expect(cb2).toHaveBeenCalledWith('task-y', 2, 2);
+    });
+
+    it('works alongside phase-change when both callbacks provided', () => {
+      const onPhaseChange = vi.fn();
+      const onSubtaskProgress = vi.fn();
+      renderHook(() => usePhaseSync({ onPhaseChange, onSubtaskProgress }));
+
+      act(() => {
+        gOnMessage!(subtaskProgressPayload('task-mix', 1, 3));
+        gOnMessage!(phaseChangePayload('task-mix', 'qa-review'));
+        gOnMessage!(subtaskProgressPayload('task-mix', 2, 3));
+      });
+
+      expect(onSubtaskProgress).toHaveBeenCalledTimes(2);
+      expect(onSubtaskProgress).toHaveBeenNthCalledWith(1, 'task-mix', 1, 3);
+      expect(onSubtaskProgress).toHaveBeenNthCalledWith(2, 'task-mix', 2, 3);
+      expect(onPhaseChange).toHaveBeenCalledOnce();
+      expect(onPhaseChange).toHaveBeenCalledWith('task-mix', 'qa-review');
+      // phase-change still triggers refresh, subtask-progress does not
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
     });
   });
 

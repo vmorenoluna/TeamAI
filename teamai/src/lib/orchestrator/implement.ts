@@ -559,6 +559,17 @@ async function runSubtaskSession(
       const tmpPath = cpPlanPath + '.tmp';
       writeFileSync(tmpPath, JSON.stringify(cpPlan, null, 2));
       renameSync(tmpPath, cpPlanPath);
+
+      // Emit subtask progress so the kanban counter updates live during implement.
+      // Without this, the UI only sees updated counts on phase-change or page refresh.
+      const subtasks = (cpPlan as { subtasks?: PlanSubtask[] }).subtasks ?? [];
+      const completed = subtasks.filter((s: PlanSubtask) => s.completed).length;
+      processManager.emit('subtask-progress', {
+        taskId: pipeline.taskId,
+        completed,
+        total: subtasks.length,
+        projectRoot: deps.projectRoot,
+      });
     } catch { /* best-effort */ }
   });
 }

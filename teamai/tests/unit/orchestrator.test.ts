@@ -4083,4 +4083,178 @@ describe('Orchestrator', () => {
       g.__orchestrators.clear();
     }
   });
+
+  // ── runImplement — subtask-progress event emission ────────────────
+
+  describe('runImplement — subtask-progress event emission', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date());
+      testData = setupTestProject();
+      // Write plan.json with subtasks so runImplement can process them
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{
+          id: 1,
+          title: 'Subtask One',
+          description: 'First subtask',
+          files: ['src/a.ts'],
+          acceptance_criteria: ['Works correctly'],
+        }],
+      }));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      if (testData) testData.clean(onHandlers);
+    });
+
+    it('emits subtask-progress via processManager after a subtask completes', async () => {
+      // Return empty string for git diff (scope check — no changed files),
+      // and a valid hash for rev-parse and other git commands.
+      mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+        if (args && args.includes('diff')) return ''; // scope check: no extra changes
+        return 'abc123\n'; // rev-parse HEAD, push, etc.
+      });
+      mockCreateSession.mockResolvedValue('sess-impl-sp');
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      // Spy on executePhase to prevent cascading into subsequent phases
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+      try {
+        const pipeline = makePipeline({
+          taskId: testData.taskId,
+          phase: 'implement',
+          specPath: testData.taskDir,
+          worktreePath: join(testData.root, 'worktrees', 'test-task'),
+          branch: testData.branchName,
+          qaAttempt: 0,
+          maxQaAttempts: 3,
+        });
+
+        const promise = (orch as AnyOrch).runImplement(pipeline);
+
+        // Wait for sendMessage — means the subtask session was created and prompt sent
+        await vi.waitFor(() => {
+          expect(mockSendMessage).toHaveBeenCalled();
+        });
+
+        expect(mockCreateSession).toHaveBeenCalled();
+
+        // Fire the result event to complete the subtask session
+        fireEvent('event', { sessionId: 'sess-impl-sp', event: { type: 'result' } });
+
+        // Wait for runImplement to fully complete — the planWriteLock microtask
+        // chain flushes during its completion, so subtask-progress is emitted by then
+        await promise;
+
+        // Verify subtask-progress was emitted with correct shape
+        expect(mockEmit).toHaveBeenCalledWith('subtask-progress', expect.objectContaining({
+          taskId: testData.taskId,
+          completed: 1,
+          total: 1,
+          projectRoot: testData.root,
+        }));
+      } finally {
+        executeSpy.mockRestore();
+      }
+    });
+
+    it('emits correct completed count when only some subtasks are done', async () => {
+      // Write a plan with 2 subtasks, 1 already completed. Only the non-completed
+      // subtask runs, so after completion we should see completed: 2, total: 2.
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [
+          { id: 1, title: 'Already done', description: '', files: ['src/a.ts'], acceptance_criteria: ['Works'], completed: true },
+          { id: 2, title: 'Current one', description: '', files: ['src/b.ts'], acceptance_criteria: ['Works'] },
+        ],
+      }));
+
+      // Return empty string for git diff (scope check — no changed files).
+      mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+        if (args && args.includes('diff')) return '';
+        return 'abc123\n';
+      });
+      mockCreateSession.mockResolvedValue('sess-impl-sp2');
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+      try {
+        const pipeline = makePipeline({
+          taskId: testData.taskId,
+          phase: 'implement',
+          specPath: testData.taskDir,
+          worktreePath: join(testData.root, 'worktrees', 'test-task'),
+          branch: testData.branchName,
+          qaAttempt: 0,
+          maxQaAttempts: 3,
+        });
+
+        const promise = (orch as AnyOrch).runImplement(pipeline);
+
+        await vi.waitFor(() => {
+          expect(mockSendMessage).toHaveBeenCalled();
+        });
+
+        fireEvent('event', { sessionId: 'sess-impl-sp2', event: { type: 'result' } });
+        await vi.advanceTimersByTimeAsync(50);
+
+        // Should show completed: 2 (1 pre-existing + 1 just completed), total: 2
+        expect(mockEmit).toHaveBeenCalledWith('subtask-progress', expect.objectContaining({
+          taskId: testData.taskId,
+          completed: 2,
+          total: 2,
+          projectRoot: testData.root,
+        }));
+
+        await promise;
+      } finally {
+        executeSpy.mockRestore();
+      }
+    });
+
+    it('includes projectRoot in the emitted event for WebSocket filtering', async () => {
+      // Return empty string for git diff (scope check — no changed files).
+      mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+        if (args && args.includes('diff')) return '';
+        return 'abc123\n';
+      });
+      mockCreateSession.mockResolvedValue('sess-impl-sp3');
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+      try {
+        const pipeline = makePipeline({
+          taskId: testData.taskId,
+          phase: 'implement',
+          specPath: testData.taskDir,
+          worktreePath: join(testData.root, 'worktrees', 'test-task'),
+          branch: testData.branchName,
+          qaAttempt: 0,
+          maxQaAttempts: 3,
+        });
+
+        const promise = (orch as AnyOrch).runImplement(pipeline);
+
+        await vi.waitFor(() => {
+          expect(mockSendMessage).toHaveBeenCalled();
+        });
+
+        fireEvent('event', { sessionId: 'sess-impl-sp3', event: { type: 'result' } });
+        await vi.advanceTimersByTimeAsync(50);
+
+        // The projectRoot must be present so server.ts can filter broadcasts by project
+        expect(mockEmit).toHaveBeenCalledWith('subtask-progress', expect.objectContaining({
+          projectRoot: testData.root,
+        }));
+
+        await promise;
+      } finally {
+        executeSpy.mockRestore();
+      }
+    });
+  });
 });

@@ -28,6 +28,12 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   const [optimisticPhases, setOptimisticPhases] = useState<Map<string, string>>(new Map());
   const optimisticTimeoutRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
+  // Live subtask progress counters — patched client-side from WebSocket events
+  // so the counter updates without a full page refresh during implement.
+  const [localSubtaskProgress, setLocalSubtaskProgress] = useState<
+    Map<string, { completed: number; total: number }>
+  >(new Map());
+
   const [searchQuery, setSearchQuery] = useState('');
   const [phaseFilter, setPhaseFilter] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
@@ -52,11 +58,25 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
     });
     const t = optimisticTimeoutRef.current.get(taskId);
     if (t) { clearTimeout(t); optimisticTimeoutRef.current.delete(taskId); }
+    // Also clear the local subtask progress — the next router.refresh()
+    // triggered by the phase change will bring fresh server data.
+    setLocalSubtaskProgress(prev => {
+      const next = new Map(prev);
+      next.delete(taskId);
+      return next;
+    });
   }, []);
 
   usePhaseSync({
     project: projectPath,
     onPhaseChange: (taskId) => clearOptimistic(taskId),
+    onSubtaskProgress: (taskId, completed, total) => {
+      setLocalSubtaskProgress(prev => {
+        const next = new Map(prev);
+        next.set(taskId, { completed, total });
+        return next;
+      });
+    },
     onConnectionChange: (connected) => setWsStatus(connected ? 'connected' : 'disconnected'),
   });
 
@@ -363,6 +383,13 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
                     {colTasks.map((task) => {
                       const globalIdx = filteredTaskList().findIndex(t => t.id === task.id);
                       const isSelected = selectedIds.has(task.id);
+                      // Merge live subtask progress from WebSocket events into the
+                      // server-provided task data so the counter updates without a full
+                      // page refresh.  Falls back to the server value when not overridden.
+                      const localProgress = localSubtaskProgress.get(task.id);
+                      const displayTask = localProgress
+                        ? { ...task, subtaskProgress: localProgress }
+                        : task;
                       return (
                       <div
                         key={task.id}
@@ -381,7 +408,7 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
                             <span className="text-white text-[10px] font-bold">✓</span>
                           </div>
                         )}
-                        <TaskCard task={task} onSelect={() => {}} isMoving={optimisticPhases.has(task.id)} />
+                        <TaskCard task={displayTask} onSelect={() => {}} isMoving={optimisticPhases.has(task.id)} />
                       </div>
                       );
                     })}

@@ -39,6 +39,19 @@ vi.mock('../../src/lib/process-manager', () => ({
   },
 }));
 
+// Mock container-manager so getWorktreeBase doesn't try to probe Docker.
+vi.mock('../../src/lib/container-manager', () => ({
+  readContainerConfig: () => ({ enabled: false, explicit: false }),
+  readContainerRemoteUser: () => 'node',
+  containerManager: {
+    ensureContainer: vi.fn(),
+    getRunningContainer: () => null,
+  },
+  hostToContainerPath: (p: string) => p,
+  dockerAvailable: () => false,
+  _resetDockerAvailableCache: vi.fn(),
+}));
+
 // Helper: readdirSync and statSync have overloaded signatures that make
 // mockImplementation require a type assertion. These wrappers contain the
 // narrow `as any` casts so each test doesn't need to repeat them.
