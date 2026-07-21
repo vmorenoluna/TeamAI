@@ -28,6 +28,21 @@ vi.mock('os', async () => {
   };
 });
 
+// Mock container-manager so getWorktreeBase doesn't try to probe Docker.
+// recovery.ts imports getWorktreeBase from orchestrator/helpers which calls
+// readContainerConfig → dockerAvailable, which fails without a Docker daemon.
+vi.mock('../../src/lib/container-manager', () => ({
+  readContainerConfig: () => ({ enabled: false, explicit: false }),
+  readContainerRemoteUser: () => 'node',
+  containerManager: {
+    ensureContainer: vi.fn(),
+    getRunningContainer: () => null,
+  },
+  hostToContainerPath: (p: string) => p,
+  dockerAvailable: () => false,
+  _resetDockerAvailableCache: vi.fn(),
+}));
+
 // ── Orchestrator mock for auto-resume integration tests ─────────────────────
 
 const mockOrchResumeTask = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));

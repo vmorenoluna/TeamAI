@@ -84,6 +84,12 @@ app.prepare().then(() => {
     broadcastToProject(data, msg);
   });
 
+  // Broadcast subtask-progress events so the kanban counter updates live during implement
+  processManager.on('subtask-progress', (data: { taskId: string; completed: number; total: number; projectRoot?: string }) => {
+    const msg = JSON.stringify({ type: 'subtask-progress', taskId: data.taskId, completed: data.completed, total: data.total });
+    broadcastToProject(data, msg);
+  });
+
   // Broadcast container lifecycle state changes to clients viewing the relevant project
   containerManager.on('container-state', (data: { projectRoot: string; state: string }) => {
     const msg = JSON.stringify({ type: 'container-state', projectRoot: data.projectRoot, state: data.state });
