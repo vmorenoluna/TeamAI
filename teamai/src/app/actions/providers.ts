@@ -238,21 +238,38 @@ async function fetchModelsFromProvider(provider: string): Promise<{ models: stri
         return { models: [], error: 'ANTHROPIC_API_KEY not set — using curated model list' };
       }
       try {
-        const res = await fetch('https://api.anthropic.com/v1/models', {
-          headers: {
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-          },
-        });
-        if (!res.ok) {
-          logError('providers', `Anthropic API returned ${res.status}`);
-          return { models: [], error: `Anthropic API returned ${res.status}` };
+        // Paginate through all available models. Default page size is 20;
+        // we request 100 (the max) to minimise round-trips, then follow
+        // the after_id cursor until has_more is false.
+        const allModels: Array<{ id: string; display_name?: string; type: string }> = [];
+        let afterId: string | undefined;
+        let hasMore = true;
+        const baseUrl = 'https://api.anthropic.com/v1/models?limit=100';
+
+        while (hasMore) {
+          const url = afterId ? `${baseUrl}&after_id=${afterId}` : baseUrl;
+          const res = await fetch(url, {
+            headers: {
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+            },
+          });
+          if (!res.ok) {
+            logError('providers', `Anthropic API returned ${res.status}`);
+            return { models: [], error: `Anthropic API returned ${res.status}` };
+          }
+          const json = await res.json() as {
+            data: Array<{ id: string; display_name?: string; type: string }>;
+            has_more: boolean;
+            last_id?: string;
+          };
+          allModels.push(...json.data.filter(m => m.type === 'model'));
+          hasMore = json.has_more;
+          afterId = json.last_id;
         }
-        const json = await res.json() as { data: Array<{ id: string; display_name?: string; type: string }> };
-        const allModels = json.data
-          .filter(m => m.type === 'model')
-          .map(m => m.id);
-        const models = deduplicateByLatestFamily(allModels);
+
+        const modelIds = allModels.map(m => m.id);
+        const models = deduplicateByLatestFamily(modelIds);
         return { models };
       } catch (err) {
         logError('providers', 'Failed to fetch Anthropic models', err);

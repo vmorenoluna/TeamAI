@@ -182,6 +182,7 @@ describe('getAvailableModels Integration', () => {
             { id: 'claude-haiku-4-5-20251001', type: 'model' },
             { id: 'claude-3-5-sonnet-20241022', type: 'model' }, // deduped: older sonnet loses to claude-sonnet-4-6
           ],
+          has_more: false,
         }),
       });
 
@@ -376,6 +377,7 @@ describe('getAvailableModels Integration', () => {
             { id: 'claude-sonnet-4-6', type: 'model' },
             { id: 'claude-haiku-4-5-20251001', type: 'model' },
           ],
+          has_more: false,
         }),
       });
 
@@ -429,6 +431,7 @@ describe('getAvailableModels Integration', () => {
         ok: true,
         json: async () => ({
           data: [{ id: 'claude-opus-4-8', type: 'model' }],
+          has_more: false,
         }),
       });
 
