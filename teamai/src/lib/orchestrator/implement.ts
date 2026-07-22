@@ -1143,7 +1143,6 @@ export function isInfraError(errMsg: string): boolean {
   return lower.includes('not a git repository')
     || lower.includes('no such container')
     || lower.includes('cannot connect to the docker daemon')
-    || lower.includes('enoent')
     || lower.includes('spawn docker enoent');
 }
 
