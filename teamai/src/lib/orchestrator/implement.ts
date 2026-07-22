@@ -999,6 +999,22 @@ function checkCherryPickInProgress(worktreePath: string): boolean {
 }
 
 /**
+ * Detect infrastructure-class errors that are retryable (dead container,
+ * Docker daemon not reachable, etc.) vs genuine git errors that aren't.
+ * Defect 3: without this, a dead-container error like
+ * "fatal: not a git repository: (null)" is misclassified as an
+ * unrecoverable cherry-pick failure.
+ */
+function isInfraError(errMsg: string): boolean {
+  const lower = errMsg.toLowerCase();
+  return lower.includes('not a git repository')
+    || lower.includes('no such container')
+    || lower.includes('cannot connect to the docker daemon')
+    || lower.includes('enoent')
+    || lower.includes('spawn docker enoent');
+}
+
+/**
  * Attempt to cherry-pick a st-branch into the main worktree with auto-recovery.
  *
  * Tier 1: Normal `git cherry-pick`.
@@ -1023,6 +1039,36 @@ async function tryCherryPickWithRecovery(
   } catch (firstErr) {
     const firstMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
     appendFileSync(logFile, '[WORKTREE] Cherry-pick failed for subtask ' + subtaskId + ': ' + firstMsg + '\n');
+
+    // Defect 3: detect infra-class errors (dead container, Docker unreachable)
+    // and retry after reprovisioning before giving up. These are trivially
+    // retryable once the container is back, unlike genuine git conflicts.
+    if (!checkCherryPickInProgress(pipeline.worktreePath) && isInfraError(firstMsg)) {
+      try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+
+      // Check if container mode is active and attempt reprovision
+      if (readContainerConfig(deps.projectRoot).enabled) {
+        for (let retry = 0; retry < 2; retry++) {
+          appendFileSync(logFile, '[WORKTREE] Infra error detected — reprovisioning container and retrying cherry-pick (attempt ' + (retry + 1) + '/2)\n');          try {
+                await containerManager.ensureContainer(deps.projectRoot, logFile);
+                await new Promise(r => setTimeout(r, 1000)); // brief backoff for container stabilisation
+                deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
+            appendFileSync(logFile, '[WORKTREE] Cherry-pick recovered after infra retry for subtask ' + subtaskId + '\n');
+            return true;
+          } catch (retryErr) {
+            const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+            appendFileSync(logFile, '[WORKTREE] Cherry-pick retry ' + (retry + 1) + ' failed: ' + retryMsg + '\n');
+            try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+          }
+        }
+        appendFileSync(logFile, '[WORKTREE] Infra retries exhausted for subtask ' + subtaskId + ' — cannot auto-recover\n');
+        return false;
+      }
+
+      // Not in container mode — nothing to reprovision
+      appendFileSync(logFile, '[WORKTREE] Cherry-pick hard-failed (not a conflict) — cannot auto-recover subtask ' + subtaskId + '\n');
+      return false;
+    }
   }
 
   // Check whether this is a recoverable conflict or a hard failure
