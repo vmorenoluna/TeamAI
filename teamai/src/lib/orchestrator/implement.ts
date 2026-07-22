@@ -829,14 +829,29 @@ export async function runImplement(
         const stWorktreePath = pipeline.worktreePath + '-st' + subtask.id;
         const stBranch = pipeline.branch + '-st' + subtask.id;
 
+        // Defect 4: auto-recover unintegrated commits from a previous run
+        // before force-deleting the branch. Without this, a retry after a
+        // mid-implement failure silently discards finished subtask work that
+        // was never cherry-picked onto the feature branch.
+        const canRecreate = _recoverSubtaskBranchBeforeDelete(pipeline, deps, logFile, stBranch, subtask);
+
+        // Clean up old worktree directory (common to both paths)
         try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch { /* best-effort */ }
         if (existsSync(stWorktreePath)) {
           try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
           try { execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
         }
-        try { execFileSync('git', ['branch', '-D', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
 
-        deps.execGit(['worktree', 'add', stWorktreePath, '-b', stBranch, pipeline.branch], deps.projectRoot);
+        if (canRecreate) {
+          try { execFileSync('git', ['branch', '-D', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+          deps.execGit(['worktree', 'add', stWorktreePath, '-b', stBranch, pipeline.branch], deps.projectRoot);
+        } else {
+          // Branch preserved — create worktree from existing branch (no -b).
+          // The merger agent in integrateGroup will handle conflicts when
+          // cherry-picking back onto pipeline.branch.
+          deps.execGit(['worktree', 'add', stWorktreePath, stBranch], deps.projectRoot);
+          appendFileSync(logFile, '\n[WORKTREE] Created worktree from preserved branch ' + stBranch + ' (conflict resolution deferred to merger agent)\n');
+        }
 
         if (containerWorkspace) {
           deps.patchWorktreeGitFile(stWorktreePath, containerWorkspace);
@@ -985,6 +1000,83 @@ export async function runImplement(
 // ═══════════════════════════════════════════════════════════════════════════
 //  Cherry-pick recovery helpers
 // ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Auto-recover unintegrated commits from a per-subtask branch before it gets
+ * force-deleted during worktree setup. Defect 4: without this, a retry after a
+ * mid-implement failure silently discards finished subtask work that was never
+ * cherry-picked onto the feature branch.
+ *
+ * If the branch exists, has commits ahead of pipeline.branch, and the subtask
+ * isn't marked completed, this attempts to cherry-pick those commits into the
+ * main worktree. On success the content is safe on pipeline.branch and the
+ * branch can be safely deleted and recreated.
+ *
+ * @returns true if the branch can be safely deleted and recreated (recovery
+ *          succeeded or was not needed), false if recovery failed and the
+ *          branch should be preserved for the merger agent to handle.
+ */
+function _recoverSubtaskBranchBeforeDelete(
+  pipeline: ImplementPipeline,
+  deps: ImplementDeps,
+  logFile: string,
+  stBranch: string,
+  subtask: PlanSubtask,
+): boolean {
+  // Skip if subtask is already marked complete — its work was already integrated
+  if (subtask.completed) return true;
+
+  // Check if the branch exists
+  let branchExists = false;
+  try {
+    execFileSync('git', ['rev-parse', '--verify', stBranch], {
+      cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
+    });
+    branchExists = true;
+  } catch { /* branch doesn't exist — nothing to recover */ }
+  if (!branchExists) return true;
+
+  // Check for unintegrated commits on the st-branch
+  let logOutput = '';
+  try {
+    logOutput = execFileSync('git', [
+      'log', pipeline.branch + '..' + stBranch, '--oneline',
+    ], { cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe' }).trim();
+  } catch {
+    // Can't compare — err on the side of preservation to avoid silent data loss
+    return false;
+  }
+  if (!logOutput) return true;
+
+  const commits = logOutput.split('\n').filter(Boolean);
+  appendFileSync(logFile,
+    '\n[WORKTREE] Found ' + commits.length + ' unintegrated commit(s) on ' + stBranch +
+    ' (subtask ' + subtask.id + ' not marked complete) — auto-recovering:\n' +
+    commits.map(c => '  ' + c).join('\n') + '\n'
+  );
+
+  // Attempt to cherry-pick the commits into the main worktree
+  try {
+    deps.execGit(
+      ['cherry-pick', pipeline.branch + '..' + stBranch],
+      pipeline.worktreePath,
+    );
+    appendFileSync(logFile,
+      '[WORKTREE] Auto-recovered ' + commits.length + ' commit(s) from ' + stBranch +
+      ' onto ' + pipeline.branch + ' — branch can be safely recreated\n'
+    );
+    return true;
+  } catch (cpErr) {
+    const cpMsg = cpErr instanceof Error ? cpErr.message : String(cpErr);
+    appendFileSync(logFile,
+      '[WORKTREE] Cherry-pick recovery conflicted for ' + stBranch + ': ' + cpMsg + '\n' +
+      '[WORKTREE] Branch ' + stBranch + ' preserved as-is — merger agent will resolve during cherry-pick phase\n'
+    );
+    // Abort any in-progress cherry-pick
+    try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+    return false;
+  }
+}
 
 /** Check whether a cherry-pick is currently in progress (CHERRY_PICK_HEAD exists). */
 function checkCherryPickInProgress(worktreePath: string): boolean {
