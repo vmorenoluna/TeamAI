@@ -16,7 +16,7 @@ import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
 import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError, SessionKilledError } from './orchestrator/errors';
 import { NO_RESUME_PHASES } from '@/constants/phases';
-import { runImplement } from './orchestrator/implement';
+import { runImplement, _recoverStBranchCommits } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
 import { CLEANUP_ARTIFACTS } from './orchestrator/artifacts';
 import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec } from './orchestrator/review-actions';
@@ -612,6 +612,8 @@ export class Orchestrator {
     const pipelineBranch = task.branch;
     const worktreePath = this.getWorktreePath(taskId);
     const worktreeExists = worktreePath && existsSync(worktreePath);
+    const logFile = path.join(dir, 'output.log');
+    const execGitFn = (args: string[], hostCwd: string) => this._execGit(args, hostCwd);
 
     let dirty = false;
 
@@ -620,52 +622,52 @@ export class Orchestrator {
 
       const stBranch = `${pipelineBranch}-st${subtask.id}`;
 
-      // Check if this subtask had an isolated branch (multi-group indicator).
-      // If no st-branch exists, work was done directly in the main worktree
-      // (non-multi-group) — completed: true is always durable.
+      // Check branch existence first — non-multi-group subtasks
+      // (no -stN branch) are always safe, regardless of worktree state.
+      // Only multi-group subtasks with an isolated branch need reconciliation.
       let stBranchExists = false;
       try {
         execFileSync('git', ['rev-parse', '--verify', stBranch], {
           cwd: this.projectRoot, encoding: 'utf-8', stdio: 'pipe',
         });
         stBranchExists = true;
-      } catch { /* no st-branch → non-multi-group, leave completed: true */ }
+      } catch { /* no st-branch → non-multi-group, completed: true is durable */ }
 
-      if (!stBranchExists) continue; // safe — non-multi-group, work is on pipeline.branch
+      if (!stBranchExists) continue; // safe — non-multi-group
 
-      // Check if commits are already on the pipeline branch.
-      // An empty log means integration already ran (integrateGroup succeeded).
-      let hasUnintegratedCommits = false;
-      try {
-        const logOutput = execFileSync('git', [
-          'log', pipelineBranch + '..' + stBranch, '--oneline',
-        ], { cwd: this.projectRoot, encoding: 'utf-8', stdio: 'pipe' }).trim();
-        hasUnintegratedCommits = !!logOutput;
-      } catch {
-        // Can't compare — err on the side of reset to avoid silently trusting
-        // a potentially misleading completed flag.
-        hasUnintegratedCommits = true;
+      // Multi-group subtask: need a worktree to cherry-pick into.
+      // Without one, we can't integrate — reset this subtask only.
+      if (!worktreeExists) {
+        appendFileSync(logFile,
+          '[STOP] Subtask ' + subtask.id + ' has unintegrated commits on ' + stBranch +
+          ' but worktree is missing — resetting completed: false\n'
+        );
+        subtask.completed = false;
+        dirty = true;
+        continue;
       }
 
-      if (!hasUnintegratedCommits) continue; // already integrated, safe
+      // Delegate to the shared recovery helper (Defects 4 & 8).
+      const result = _recoverStBranchCommits(
+        this.projectRoot, execGitFn, logFile,
+        pipelineBranch, stBranch, worktreePath, subtask.id,
+      );
 
-      // Attempt to cherry-pick forward into the main worktree so this
-      // subtask's work is durably on the feature branch.
-      if (worktreeExists) {
-        try {
-          this._execGit(
-            ['cherry-pick', pipelineBranch + '..' + stBranch],
-            worktreePath,
+      if (result.recovered) {
+        if (result.commits.length > 0) {
+          appendFileSync(logFile,
+            '[STOP] Subtask ' + subtask.id + ' commits recovered onto ' +
+            pipelineBranch + ' — keeping completed: true\n'
           );
-          // Success — commits are now on pipeline.branch, keep completed: true
-          continue;
-        } catch {
-          // Conflict or error — abort and reset this subtask only
-          try { this._execGit(['cherry-pick', '--abort'], worktreePath); } catch { /* best-effort */ }
         }
+        continue; // safe — completed: true is durable
       }
 
       // Couldn't integrate — reset this subtask only
+      appendFileSync(logFile,
+        '[STOP] Subtask ' + subtask.id + ' recovery failed (' +
+        result.commits.length + ' commits on ' + stBranch + ') — resetting completed: false\n'
+      );
       subtask.completed = false;
       dirty = true;
     }
