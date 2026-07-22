@@ -1029,6 +1029,9 @@ export interface StBranchRecoveryResult {
  * @param stBranch     The per-subtask branch (e.g. feat/my-slug-st1).
  * @param worktreePath The main worktree path to cherry-pick into.
  * @param subtaskId    For log context only.
+ *
+ * @internal — exported for use by {@link Orchestrator._reconcileSubtaskCompletionsOnStop}
+ *             and unit tests. Not part of the public API.
  */
 export function _recoverStBranchCommits(
   projectRoot: string,
@@ -1101,6 +1104,8 @@ export function _recoverStBranchCommits(
  * @returns true if the branch can be safely deleted and recreated (recovery
  *          succeeded or was not needed), false if recovery failed and the
  *          branch should be preserved for the merger agent to handle.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
  */
 export function _recoverSubtaskBranchBeforeDelete(
   pipeline: ImplementPipeline,
@@ -1137,6 +1142,8 @@ function checkCherryPickInProgress(worktreePath: string): boolean {
  * Defect 3: without this, a dead-container error like
  * "fatal: not a git repository: (null)" is misclassified as an
  * unrecoverable cherry-pick failure.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
  */
 export function isInfraError(errMsg: string): boolean {
   const lower = errMsg.toLowerCase();
@@ -1154,6 +1161,9 @@ export function isInfraError(errMsg: string): boolean {
  *
  * Returns true if the cherry-pick succeeded (cleanly or via agent recovery),
  * false if recovery was exhausted and manual intervention is needed.
+ *
+ * @internal — exported for use by {@link integrateGroup} and unit tests.
+ *             Not part of the public API.
  */
 export async function tryCherryPickWithRecovery(
   pipeline: ImplementPipeline,
@@ -1260,7 +1270,10 @@ export async function tryCherryPickWithRecovery(
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Build the description string for synthetic subtask 9999.
- *  This is exported so tests can verify the header is present. */
+ *
+ * @internal — exported for unit tests to verify the header is present.
+ *             Not part of the public API.
+ */
 export function buildSyntheticReworkDescription(qaContent: string): string {
   return (
     '⚠️ ALL PLAN SUBTASKS ARE DONE — THIS IS TARGETED REWORK, NOT FRESH IMPLEMENTATION.\n\n' +
