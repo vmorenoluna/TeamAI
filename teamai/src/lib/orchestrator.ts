@@ -559,18 +559,13 @@ export class Orchestrator {
       }
     }
 
-    // Reset subtask completions if stopping during/after implement so they re-run from scratch
+    // Reconcile subtask completions if stopping during/after implement.
+    // Defect 8: instead of blindly resetting all completions, reconcile
+    // multi-group subtasks whose completed: true may only exist on an
+    // isolated -stN branch — cherry-pick forward if possible, only reset
+    // what can't be integrated.
     if (startIndex >= pipelineOrder.indexOf('implement')) {
-      const planPath = path.join(dir, 'plan.json');
-      if (existsSync(planPath)) {
-        try {
-          const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
-          if (plan.subtasks) {
-            for (const s of plan.subtasks) s.completed = false;
-          }
-          writeFileSync(planPath, JSON.stringify(plan, null, 2));
-        } catch { /* best-effort */ }
-      }
+      this._reconcileSubtaskCompletionsOnStop(taskId, dir);
     }
 
     // Clean the worktree for plan/implement phases so the next run starts with a clean slate
@@ -580,6 +575,103 @@ export class Orchestrator {
     } else if (currentPhase === 'implement') {
       // Worktree has partial changes — discard them
       this._cleanWorktree(taskId);
+    }
+  }
+
+  /**
+   * Reconcile subtask completed flags against durable git state before
+   * pausing a task (Stop).
+   *
+   * Defect 8: the old code blindly set completed=false for every subtask,
+   * discarding bookkeeping for subtasks whose commits are genuinely present
+   * on the feature branch.  The naive fix — "just don't reset completed" —
+   * is unsafe for multi-group subtasks: checkpoint #1 (runSubtaskSession)
+   * writes completed=true to plan.json *before* integrateGroup cherry-picks
+   * the st-branch back onto pipeline.branch.  If Stop fires in that window,
+   * the code only exists on a -stN branch that Defect 4's retry logic would
+   * eventually recover, but treating it as durably done is wrong.
+   *
+   * Strategy per subtask:
+   *  1. Non-multi-group (no -stN branch) → completed=true is always durable.
+   *  2. Multi-group + commits already on pipeline.branch → durable, keep.
+   *  3. Multi-group + commits only on -stN branch → try cherry-pick forward
+   *     into the main worktree.  Success → keep.  Failure → reset *this
+   *     subtask only* (not the whole task).
+   */
+  private _reconcileSubtaskCompletionsOnStop(taskId: string, dir: string): void {
+    const planPath = path.join(dir, 'plan.json');
+    if (!existsSync(planPath)) return;
+
+    const task = this.taskStore.getById(taskId);
+    if (!task?.branch) return;
+
+    let plan: { subtasks?: Array<{ id: number; completed?: boolean }> };
+    try { plan = JSON.parse(readFileSync(planPath, 'utf-8')); } catch { return; }
+    if (!plan.subtasks) return;
+
+    const pipelineBranch = task.branch;
+    const worktreePath = this.getWorktreePath(taskId);
+    const worktreeExists = worktreePath && existsSync(worktreePath);
+
+    let dirty = false;
+
+    for (const subtask of plan.subtasks) {
+      if (!subtask.completed) continue;
+
+      const stBranch = `${pipelineBranch}-st${subtask.id}`;
+
+      // Check if this subtask had an isolated branch (multi-group indicator).
+      // If no st-branch exists, work was done directly in the main worktree
+      // (non-multi-group) — completed: true is always durable.
+      let stBranchExists = false;
+      try {
+        execFileSync('git', ['rev-parse', '--verify', stBranch], {
+          cwd: this.projectRoot, encoding: 'utf-8', stdio: 'pipe',
+        });
+        stBranchExists = true;
+      } catch { /* no st-branch → non-multi-group, leave completed: true */ }
+
+      if (!stBranchExists) continue; // safe — non-multi-group, work is on pipeline.branch
+
+      // Check if commits are already on the pipeline branch.
+      // An empty log means integration already ran (integrateGroup succeeded).
+      let hasUnintegratedCommits = false;
+      try {
+        const logOutput = execFileSync('git', [
+          'log', pipelineBranch + '..' + stBranch, '--oneline',
+        ], { cwd: this.projectRoot, encoding: 'utf-8', stdio: 'pipe' }).trim();
+        hasUnintegratedCommits = !!logOutput;
+      } catch {
+        // Can't compare — err on the side of reset to avoid silently trusting
+        // a potentially misleading completed flag.
+        hasUnintegratedCommits = true;
+      }
+
+      if (!hasUnintegratedCommits) continue; // already integrated, safe
+
+      // Attempt to cherry-pick forward into the main worktree so this
+      // subtask's work is durably on the feature branch.
+      if (worktreeExists) {
+        try {
+          this._execGit(
+            ['cherry-pick', pipelineBranch + '..' + stBranch],
+            worktreePath,
+          );
+          // Success — commits are now on pipeline.branch, keep completed: true
+          continue;
+        } catch {
+          // Conflict or error — abort and reset this subtask only
+          try { this._execGit(['cherry-pick', '--abort'], worktreePath); } catch { /* best-effort */ }
+        }
+      }
+
+      // Couldn't integrate — reset this subtask only
+      subtask.completed = false;
+      dirty = true;
+    }
+
+    if (dirty) {
+      try { writeFileSync(planPath, JSON.stringify(plan, null, 2)); } catch { /* best-effort */ }
     }
   }
 

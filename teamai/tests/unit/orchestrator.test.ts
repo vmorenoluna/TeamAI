@@ -2668,7 +2668,7 @@ describe('Orchestrator', () => {
       expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(false);
     });
 
-    it('clears QA artifacts and resets subtask completions for implement phase', () => {
+    it('clears QA artifacts and preserves non-multi-group completions for implement phase', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -2687,10 +2687,132 @@ describe('Orchestrator', () => {
       expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
       expect(existsSync(join(testData.taskDir, 'completion_summary.md'))).toBe(false);
 
+      // Non-multi-group (no st-branch) → completed stays true (Defect 8)
       const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
-      expect(plan.subtasks[0].completed).toBe(false);
+      expect(plan.subtasks[0].completed).toBe(true);
       expect(existsSync(join(testData.taskDir, 'spec.md'))).toBe(true);
       expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(true);
+    });
+
+    it('preserves non-multi-group completed subtasks with branch set (Defect 8)', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      // Give task a branch and slug so reconcile can find the worktree
+      (orch as AnyOrch).taskStore.update(testData.taskId, {
+        branch: 'feat/test-reconcile',
+        slug: 'test-reconcile',
+      });
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [
+          { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: true },
+          { id: 2, title: 'S2', description: '', files: [], acceptance_criteria: [], completed: false },
+        ],
+      }));
+
+      // All git rev-parse calls fail (no st-branch) → non-multi-group → completed preserved
+      mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
+
+      orch.cleanupTaskArtifacts(testData.taskId, 'implement');
+
+      const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(true);
+      expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(false);
+    });
+
+    it('resets multi-group subtask when cherry-pick fails, keeps others (Defect 8)', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      (orch as AnyOrch).taskStore.update(testData.taskId, {
+        branch: 'feat/test-reconcile',
+        slug: 'test-reconcile',
+      });
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [
+          { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: true },
+          { id: 2, title: 'S2', description: '', files: [], acceptance_criteria: [], completed: true },
+        ],
+      }));
+
+      // Create worktree at the actual path used by getWorktreePath
+      const wtPath = orch.getWorktreePath(testData.taskId)!;
+      mkdirSync(wtPath, { recursive: true });
+
+      // Mock: st-branch exists + has commits, but cherry-pick always fails
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args?.[0] === 'rev-parse') return 'abc\n';
+        if (cmd === 'git' && args?.[0] === 'log') return 'abc unintegrated\n';
+        if (cmd === 'git' && args?.[0] === 'cherry-pick' && args?.[1] !== '--abort') {
+          throw new Error('CONFLICT');
+        }
+        return '';
+      });
+
+      orch.cleanupTaskArtifacts(testData.taskId, 'implement');
+
+      // Both subtasks had st-branches and both cherry-picks failed → both reset
+      const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(false);
+      expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(false);
+
+      try { rmSync(wtPath, { recursive: true, force: true }); } catch {}
+    });
+
+    it('preserves st-branch subtask when cherry-pick succeeds (Defect 8)', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      (orch as AnyOrch).taskStore.update(testData.taskId, {
+        branch: 'feat/test-reconcile',
+        slug: 'test-reconcile',
+      });
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [
+          { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: true },
+        ],
+      }));
+
+      // Create worktree at the actual path
+      const wtPath = orch.getWorktreePath(testData.taskId)!;
+      mkdirSync(wtPath, { recursive: true });
+
+      // Mock: st-branch exists + has commits + cherry-pick succeeds
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args?.[0] === 'rev-parse') return 'abc\n';
+        if (cmd === 'git' && args?.[0] === 'log') return 'abc unintegrated\n';
+        if (cmd === 'git' && args?.[0] === 'cherry-pick') return ''; // success
+        return '';
+      });
+
+      orch.cleanupTaskArtifacts(testData.taskId, 'implement');
+
+      const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks[0].completed).toBe(true);
+
+      try { rmSync(wtPath, { recursive: true, force: true }); } catch {}
+    });
+
+    it('skips reconciliation when task has no branch (safe fallback)', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [
+          { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: true },
+        ],
+      }));
+
+      // No branch on task → reconcile returns early, leaving completed as-is
+      orch.cleanupTaskArtifacts(testData.taskId, 'implement');
+
+      const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
+      // Subtask stays completed — no branch means we can't reconcile, so we
+      // preserve the flag rather than resetting it (Defect 8 semantics)
+      expect(plan.subtasks[0].completed).toBe(true);
     });
 
     it('no-ops when phase is not in pipeline order', () => {
