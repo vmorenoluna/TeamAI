@@ -78,7 +78,7 @@ export class ProcessManager extends EventEmitter {
       claudeArgs.push('--dangerously-skip-permissions');
 
       const remoteUser = readContainerRemoteUser(opts.projectRoot);
-      proc = spawn('docker', [
+      proc = spawn(getToolPath('docker'), [
         'exec', '-i',
         '-u', remoteUser,            // use the devcontainer's remoteUser from devcontainer.json
         '-w', containerCwd,

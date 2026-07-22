@@ -42,6 +42,7 @@ vi.mock('crypto', () => ({
 // ── Imports ──
 
 import { ProcessManager, containerSessionOpts } from '../../src/lib/process-manager';
+import { getToolPath } from '../../src/lib/tool-checker';
 
 // ── Helpers ──
 
@@ -95,7 +96,7 @@ describe('ProcessManager createSession — Docker container mode', () => {
 
     // Should spawn docker exec with the right args
     expect(mockSpawn).toHaveBeenCalledWith(
-      'docker',
+      getToolPath('docker'),
       expect.arrayContaining([
         'exec', '-i',
         '-u', 'node',
@@ -131,7 +132,7 @@ describe('ProcessManager createSession — Docker container mode', () => {
     });
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      'docker',
+      getToolPath('docker'),
       expect.arrayContaining([
         '-e', 'ANTHROPIC_API_KEY=sk-xxx',
         '-e', 'MODEL=claude-4',
@@ -154,7 +155,7 @@ describe('ProcessManager createSession — Docker container mode', () => {
 
     expect(mockEnsureContainer).not.toHaveBeenCalled();
     expect(mockSpawn).toHaveBeenCalledWith(
-      'claude',
+      getToolPath('claude'),
       expect.arrayContaining(['-p', '--input-format', 'stream-json', '--output-format', 'stream-json']),
       expect.objectContaining({ cwd: '/host/project/src' }),
     );
@@ -174,7 +175,7 @@ describe('ProcessManager createSession — Docker container mode', () => {
     });
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      'claude',
+      getToolPath('claude'),
       expect.arrayContaining(['--permission-mode', 'someMode']),
       expect.any(Object),
     );
@@ -224,7 +225,7 @@ describe('ProcessManager createSession — Docker container mode', () => {
     });
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      'docker',
+      getToolPath('docker'),
       expect.arrayContaining(['--model', 'deepseek/deepseek-v4']),
       expect.any(Object),
     );
