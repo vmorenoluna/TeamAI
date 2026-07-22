@@ -3752,12 +3752,15 @@ describe('Defect 3 — isInfraError (infra vs git error detection)', () => {
     expect(isInfraError('Cannot connect to the Docker daemon at unix:///var/run/docker.sock')).toBe(true);
   });
 
-  it('detects "ENOENT" as infra error', () => {
+  it('detects "spawn docker ENOENT" as infra error', () => {
     expect(isInfraError('spawn docker ENOENT')).toBe(true);
   });
 
-  it('detects plain ENOENT in error message', () => {
-    expect(isInfraError('Error: spawn git ENOENT')).toBe(true);
+  it('does NOT flag non-docker ENOENT as infra error', () => {
+    // spawn git ENOENT is a host tool issue, not a container-infra problem
+    expect(isInfraError('Error: spawn git ENOENT')).toBe(false);
+    // file-not-found errors are genuine git problems, not infra
+    expect(isInfraError("ENOENT: no such file or directory, open 'src/foo.ts'")).toBe(false);
   });
 
   it('is case-insensitive', () => {
