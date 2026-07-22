@@ -79,6 +79,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator, getOrchestrator } from '../../src/lib/orchestrator';
+import { getToolPath } from '../../src/lib/tool-checker';
 import { processManager } from '../../src/lib/process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache, readContainerRemoteUser } from '../../src/lib/container-manager';
 
@@ -825,7 +826,7 @@ describe('Orchestrator', () => {
       (orch as AnyOrch)._execGit(['status'], testData.root);
 
       expect(mockExecFileSync).toHaveBeenCalledWith(
-        'docker',
+        getToolPath('docker'),
         expect.arrayContaining(['exec', '-u', 'node', 'cont-abc', 'git', 'status']),
       );
     });
@@ -853,7 +854,7 @@ describe('Orchestrator', () => {
         '/workspace',
       );
       expect(mockExecFileSync).toHaveBeenCalledWith(
-        'docker',
+        getToolPath('docker'),
         expect.arrayContaining(['git', 'add', '/workspace/some/file']),
       );
     });
@@ -876,7 +877,7 @@ describe('Orchestrator', () => {
       // hostToContainerPath should not have been called with this path
       // The path won't startWith projectRoot, so it passes through as-is
       expect(mockExecFileSync).toHaveBeenCalledWith(
-        'docker',
+        getToolPath('docker'),
         expect.arrayContaining(['git', 'add', '/tmp/external-file']),
       );
     });

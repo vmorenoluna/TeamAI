@@ -85,6 +85,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { getOrchestrator } from '../../src/lib/orchestrator';
+import { getToolPath } from '../../src/lib/tool-checker';
 import { readContainerConfig, containerManager, hostToContainerPath, readContainerRemoteUser } from '../../src/lib/container-manager';
 
 type AnyOrch = any;
@@ -596,7 +597,8 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
 
       (orch as AnyOrch)._execGit(['rebase', 'origin/master'], env.worktreePath);
 
-      const dockerCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === 'docker');
+      const dockerPath = getToolPath('docker');
+      const dockerCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === dockerPath);
       expect(dockerCall).toBeDefined();
       const envVars = extractDockerEnvVars(dockerCall![1] as string[]);
       expect(envVars['GIT_DIR']).toBe(`/workspaces/project/.git/worktrees/${env.worktreeName}`);
@@ -624,8 +626,9 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       const originalContent = `gitdir: ${hostRoot}/.git/worktrees/${env.worktreeName}\n`;
       writeFileSync(join(env.worktreePath, '.git'), originalContent);
 
+      const dockerPath = getToolPath('docker');
       mockExecFileSync.mockImplementation((cmd: string) => {
-        if (cmd === 'docker') throw new Error('rebase conflict');
+        if (cmd === dockerPath) throw new Error('rebase conflict');
         return '';
       });
 
@@ -692,7 +695,7 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       (orch as AnyOrch)._execGit(['status'], env.worktreePath);
 
       expect(mockExecFileSync).toHaveBeenCalledWith(
-        'docker',
+        getToolPath('docker'),
         expect.arrayContaining(['-u', 'customuser']),
       );
     });

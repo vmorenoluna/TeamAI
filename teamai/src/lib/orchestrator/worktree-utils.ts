@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from 'fs';
 import path from 'path';
 import { readContainerConfig, readContainerRemoteUser, containerManager, hostToContainerPath } from '../container-manager';
+import { getToolPath } from '../tool-checker';
 
 /**
  * Verify the worktree is a valid git worktree (#4).
@@ -184,7 +185,7 @@ export function execGit(args: string[], hostCwd: string, projectRoot: string): v
       const remoteUser = readContainerRemoteUser(projectRoot);
       const gitEnv = worktreeGitEnv(hostCwd, projectRoot, info.remoteWorkspaceFolder);
       const envFlags = Object.entries(gitEnv).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-      execFileSync('docker', ['exec', '-u', remoteUser, ...envFlags, '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
+      execFileSync(getToolPath('docker'), ['exec', '-u', remoteUser, ...envFlags, '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
       return;
     }
   }
