@@ -4048,3 +4048,126 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
     expect(result).toBe(false);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+//  _recoverStBranchCommits — direct tests
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('_recoverStBranchCommits (shared helper)', () => {
+  let project: ReturnType<typeof setupProject>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    project = setupProject();
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  it('returns recovered:true with empty commits when st-branch does not exist', () => {
+    mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
+
+    const execGitFn = vi.fn();
+    const result = _recoverStBranchCommits(
+      project.root, execGitFn, '/tmp/log',
+      'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
+    );
+
+    expect(result).toEqual({ recovered: true, commits: [] });
+    expect(execGitFn).not.toHaveBeenCalled();
+    // Should have called git rev-parse only
+    expect(mockExecFileSync).toHaveBeenCalledWith('git', ['rev-parse', '--verify', 'feat/main-st1'], expect.anything());
+  });
+
+  it('returns recovered:true with empty commits when branch exists but no unintegrated commits', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('abc123\n')  // rev-parse
+      .mockReturnValueOnce('');          // log — empty = no unintegrated commits
+
+    const execGitFn = vi.fn();
+    const result = _recoverStBranchCommits(
+      project.root, execGitFn, '/tmp/log',
+      'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
+    );
+
+    expect(result).toEqual({ recovered: true, commits: [] });
+    expect(execGitFn).not.toHaveBeenCalled();
+  });
+
+  it('returns recovered:false with empty commits when git log throws', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('abc123\n')                    // rev-parse
+      .mockImplementationOnce(() => { throw new Error('bad revision'); }); // log fails
+
+    const execGitFn = vi.fn();
+    const result = _recoverStBranchCommits(
+      project.root, execGitFn, '/tmp/log',
+      'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
+    );
+
+    expect(result).toEqual({ recovered: false, commits: [] });
+    expect(execGitFn).not.toHaveBeenCalled(); // cherry-pick not attempted
+  });
+
+  it('cherry-picks successfully and returns commits', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('abc123\n')                         // rev-parse
+      .mockReturnValueOnce('abc123 fix bug\ndef456 add test\n'); // log
+
+    const execGitFn = vi.fn(); // doesn't throw = cherry-pick success
+    const result = _recoverStBranchCommits(
+      project.root, execGitFn, '/tmp/log',
+      'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
+    );
+
+    expect(result.recovered).toBe(true);
+    expect(result.commits).toEqual(['abc123 fix bug', 'def456 add test']);
+    expect(execGitFn).toHaveBeenCalledWith(
+      ['cherry-pick', 'feat/main..feat/main-st1'],
+      '/tmp/worktree',
+    );
+  });
+
+  it('aborts and returns recovered:false with commits on cherry-pick conflict', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('abc123\n')                         // rev-parse
+      .mockReturnValueOnce('abc123 fix bug\n');                 // log
+
+    const execGitFn = vi.fn()
+      .mockImplementationOnce(() => { throw new Error('CONFLICT'); }); // cherry-pick fails
+
+    const result = _recoverStBranchCommits(
+      project.root, execGitFn, '/tmp/log',
+      'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
+    );
+
+    expect(result.recovered).toBe(false);
+    expect(result.commits).toEqual(['abc123 fix bug']); // commits still returned for logging
+    // Should have aborted the cherry-pick
+    expect(execGitFn).toHaveBeenCalledWith(['cherry-pick', '--abort'], '/tmp/worktree');
+  });
+
+  it('passes correct git args to execFileSync (rev-parse in projectRoot, log with range)', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('abc\n')
+      .mockReturnValueOnce('');
+
+    const execGitFn = vi.fn();
+    _recoverStBranchCommits(
+      project.root, execGitFn, '/tmp/log',
+      'feat/main', 'feat/main-st1', '/tmp/worktree', 42,
+    );
+
+    // Verify rev-parse was called with correct args
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'git', ['rev-parse', '--verify', 'feat/main-st1'],
+      expect.objectContaining({ cwd: project.root }),
+    );
+    // Verify log was called with the correct range
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'git', ['log', 'feat/main..feat/main-st1', '--oneline'],
+      expect.objectContaining({ cwd: project.root }),
+    );
+  });
+});
