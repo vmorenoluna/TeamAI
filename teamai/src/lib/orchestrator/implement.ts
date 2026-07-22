@@ -1001,16 +1001,102 @@ export async function runImplement(
 //  Cherry-pick recovery helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  Shared st-branch recovery (Defects 4 & 8)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Result of recovering unintegrated commits from a per-subtask -stN branch. */
+export interface StBranchRecoveryResult {
+  /** True if recovery succeeded or was not needed (safe to delete/recreate). */
+  recovered: boolean;
+  /** The commit SHAs found (empty if nothing to recover). */
+  commits: string[];
+}
+
+/**
+ * Check a per-subtask -stN branch for unintegrated commits and attempt to
+ * cherry-pick them onto the pipeline branch's main worktree.
+ *
+ * Shared by Defect 4 (`_recoverSubtaskBranchBeforeDelete` — called during
+ * worktree setup) and Defect 8 (`_reconcileSubtaskCompletionsOnStop` —
+ * called when a task is stopped mid-implement).
+ *
+ * @param projectRoot  The git repository root (for branch-existence checks).
+ * @param execGitFn    Container-aware git executor (host-mode git for direct
+ *                     calls, docker exec git in container mode).
+ * @param logFile      Where to write recovery log lines (best-effort).
+ * @param pipelineBranch  The main feature branch (e.g. feat/my-slug).
+ * @param stBranch     The per-subtask branch (e.g. feat/my-slug-st1).
+ * @param worktreePath The main worktree path to cherry-pick into.
+ * @param subtaskId    For log context only.
+ */
+export function _recoverStBranchCommits(
+  projectRoot: string,
+  execGitFn: (args: string[], hostCwd: string) => void,
+  logFile: string,
+  pipelineBranch: string,
+  stBranch: string,
+  worktreePath: string,
+  subtaskId: number,
+): StBranchRecoveryResult {
+  const none: StBranchRecoveryResult = { recovered: true, commits: [] };
+
+  // Check if the branch exists
+  let branchExists = false;
+  try {
+    execFileSync('git', ['rev-parse', '--verify', stBranch], {
+      cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe',
+    });
+    branchExists = true;
+  } catch { /* branch doesn't exist — nothing to recover */ }
+  if (!branchExists) return none;
+
+  // Check for unintegrated commits on the st-branch
+  let logOutput = '';
+  try {
+    logOutput = execFileSync('git', [
+      'log', pipelineBranch + '..' + stBranch, '--oneline',
+    ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe' }).trim();
+  } catch {
+    // Can't compare — err on the side of preservation to avoid silent data loss
+    return { recovered: false, commits: [] };
+  }
+  if (!logOutput) return none;
+
+  const commits = logOutput.split('\n').filter(Boolean);
+  appendFileSync(logFile,
+    '\n[WORKTREE] Found ' + commits.length + ' unintegrated commit(s) on ' + stBranch +
+    ' (subtask ' + subtaskId + ') — auto-recovering:\n' +
+    commits.map(c => '  ' + c).join('\n') + '\n'
+  );
+
+  // Attempt to cherry-pick the commits into the main worktree
+  try {
+    execGitFn(['cherry-pick', pipelineBranch + '..' + stBranch], worktreePath);
+    appendFileSync(logFile,
+      '[WORKTREE] Auto-recovered ' + commits.length + ' commit(s) from ' + stBranch +
+      ' onto ' + pipelineBranch + '\n'
+    );
+    return { recovered: true, commits };
+  } catch (cpErr) {
+    const cpMsg = cpErr instanceof Error ? cpErr.message : String(cpErr);
+    appendFileSync(logFile,
+      '[WORKTREE] Cherry-pick recovery conflicted for ' + stBranch + ': ' + cpMsg + '\n' +
+      '[WORKTREE] Branch ' + stBranch + ' preserved as-is — merger agent will resolve during cherry-pick phase\n'
+    );
+    // Abort any in-progress cherry-pick
+    try { execGitFn(['cherry-pick', '--abort'], worktreePath); } catch { /* best-effort */ }
+    return { recovered: false, commits };
+  }
+}
+
 /**
  * Auto-recover unintegrated commits from a per-subtask branch before it gets
  * force-deleted during worktree setup. Defect 4: without this, a retry after a
  * mid-implement failure silently discards finished subtask work that was never
  * cherry-picked onto the feature branch.
  *
- * If the branch exists, has commits ahead of pipeline.branch, and the subtask
- * isn't marked completed, this attempts to cherry-pick those commits into the
- * main worktree. On success the content is safe on pipeline.branch and the
- * branch can be safely deleted and recreated.
+ * Delegates to {@link _recoverStBranchCommits} for the shared recovery logic.
  *
  * @returns true if the branch can be safely deleted and recreated (recovery
  *          succeeded or was not needed), false if recovery failed and the
@@ -1026,56 +1112,11 @@ export function _recoverSubtaskBranchBeforeDelete(
   // Skip if subtask is already marked complete — its work was already integrated
   if (subtask.completed) return true;
 
-  // Check if the branch exists
-  let branchExists = false;
-  try {
-    execFileSync('git', ['rev-parse', '--verify', stBranch], {
-      cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
-    });
-    branchExists = true;
-  } catch { /* branch doesn't exist — nothing to recover */ }
-  if (!branchExists) return true;
-
-  // Check for unintegrated commits on the st-branch
-  let logOutput = '';
-  try {
-    logOutput = execFileSync('git', [
-      'log', pipeline.branch + '..' + stBranch, '--oneline',
-    ], { cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe' }).trim();
-  } catch {
-    // Can't compare — err on the side of preservation to avoid silent data loss
-    return false;
-  }
-  if (!logOutput) return true;
-
-  const commits = logOutput.split('\n').filter(Boolean);
-  appendFileSync(logFile,
-    '\n[WORKTREE] Found ' + commits.length + ' unintegrated commit(s) on ' + stBranch +
-    ' (subtask ' + subtask.id + ' not marked complete) — auto-recovering:\n' +
-    commits.map(c => '  ' + c).join('\n') + '\n'
+  const result = _recoverStBranchCommits(
+    deps.projectRoot, deps.execGit, logFile,
+    pipeline.branch, stBranch, pipeline.worktreePath, subtask.id,
   );
-
-  // Attempt to cherry-pick the commits into the main worktree
-  try {
-    deps.execGit(
-      ['cherry-pick', pipeline.branch + '..' + stBranch],
-      pipeline.worktreePath,
-    );
-    appendFileSync(logFile,
-      '[WORKTREE] Auto-recovered ' + commits.length + ' commit(s) from ' + stBranch +
-      ' onto ' + pipeline.branch + ' — branch can be safely recreated\n'
-    );
-    return true;
-  } catch (cpErr) {
-    const cpMsg = cpErr instanceof Error ? cpErr.message : String(cpErr);
-    appendFileSync(logFile,
-      '[WORKTREE] Cherry-pick recovery conflicted for ' + stBranch + ': ' + cpMsg + '\n' +
-      '[WORKTREE] Branch ' + stBranch + ' preserved as-is — merger agent will resolve during cherry-pick phase\n'
-    );
-    // Abort any in-progress cherry-pick
-    try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
-    return false;
-  }
+  return result.recovered;
 }
 
 /** Check whether a cherry-pick is currently in progress (CHERRY_PICK_HEAD exists). */
