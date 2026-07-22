@@ -1016,7 +1016,7 @@ export async function runImplement(
  *          succeeded or was not needed), false if recovery failed and the
  *          branch should be preserved for the merger agent to handle.
  */
-function _recoverSubtaskBranchBeforeDelete(
+export function _recoverSubtaskBranchBeforeDelete(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
   logFile: string,
@@ -1097,7 +1097,7 @@ function checkCherryPickInProgress(worktreePath: string): boolean {
  * "fatal: not a git repository: (null)" is misclassified as an
  * unrecoverable cherry-pick failure.
  */
-function isInfraError(errMsg: string): boolean {
+export function isInfraError(errMsg: string): boolean {
   const lower = errMsg.toLowerCase();
   return lower.includes('not a git repository')
     || lower.includes('no such container')
@@ -1115,7 +1115,7 @@ function isInfraError(errMsg: string): boolean {
  * Returns true if the cherry-pick succeeded (cleanly or via agent recovery),
  * false if recovery was exhausted and manual intervention is needed.
  */
-async function tryCherryPickWithRecovery(
+export async function tryCherryPickWithRecovery(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
   logFile: string,
