@@ -1061,7 +1061,7 @@ export function _recoverStBranchCommits(
       'log', pipelineBranch + '..' + stBranch, '--oneline',
     ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe' }).trim();
   } catch {
-    // Can't compare — err on the side of preservation to avoid silent data loss
+    // Can't verify — assume recovery is not possible so caller can decide fallback
     return { recovered: false, commits: [] };
   }
   if (!logOutput) return none;
