@@ -1241,6 +1241,7 @@ describe('sweepStalledTasks', () => {
     const projectPath = '/test/project';
     const teamaiDir = join(projectPath, '.teamai');
     const taskFile = join(teamaiDir, 'my-task', 'task.json');
+    const outputLog = join(teamaiDir, 'my-task', 'output.log');
     const recentDate = new Date(Date.now() - 5 * 60_000).toISOString();
 
     vi.mocked(existsSync).mockImplementation((p) => {
@@ -1248,6 +1249,7 @@ describe('sweepStalledTasks', () => {
       if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
       if (path === teamaiDir) return true;
       if (path === taskFile) return true;
+      if (path === outputLog) return true; // output.log exists — pipeline is running
       return false;
     });
     vi.mocked(readFileSync).mockImplementation((p) => {
@@ -1262,6 +1264,8 @@ describe('sweepStalledTasks', () => {
       if (String(p) === teamaiDir) return ['my-task'];
       return [];
     });
+    // statSync for output.log returns recent mtime — pipeline is active
+    mockStatSync(() => ({ isDirectory: () => false, mtimeMs: Date.now() - 60_000 } as any));
 
     const count = await sweepStalledTasks();
     expect(count).toBe(0);
