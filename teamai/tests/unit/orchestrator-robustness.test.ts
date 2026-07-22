@@ -74,7 +74,8 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator } from '../../src/lib/orchestrator';
-import { buildSyntheticReworkDescription } from '../../src/lib/orchestrator/implement';
+import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete } from '../../src/lib/orchestrator/implement';
+import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
 
 const fireEvent = createFireEvent(onHandlers);
 
@@ -3731,5 +3732,316 @@ describe('runImplement — wakeup state persistence (ADR 002)', () => {
     expect(restored.wakeupCommand).toBe('python long-script.py');
     expect(restored.wakeupArtifact).toBe('reports/final.md');
     expect(restored.wakeupAttemptCount).toBe(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Defect 3 — isInfraError: detect Docker/infra errors vs git errors
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('Defect 3 — isInfraError (infra vs git error detection)', () => {
+  it('detects "not a git repository" as infra error', () => {
+    expect(isInfraError('fatal: not a git repository: (null)')).toBe(true);
+  });
+
+  it('detects "No such container" as infra error', () => {
+    expect(isInfraError('docker: Error response from daemon: No such container: abc123')).toBe(true);
+  });
+
+  it('detects "Cannot connect to the Docker daemon" as infra error', () => {
+    expect(isInfraError('Cannot connect to the Docker daemon at unix:///var/run/docker.sock')).toBe(true);
+  });
+
+  it('detects "ENOENT" as infra error', () => {
+    expect(isInfraError('spawn docker ENOENT')).toBe(true);
+  });
+
+  it('detects plain ENOENT in error message', () => {
+    expect(isInfraError('Error: spawn git ENOENT')).toBe(true);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isInfraError('FATAL: NOT A GIT REPOSITORY')).toBe(true);
+    expect(isInfraError('Cannot Connect To The Docker Daemon')).toBe(true);
+    expect(isInfraError('No Such Container: deadbeef')).toBe(true);
+  });
+
+  it('does NOT flag genuine git errors', () => {
+    expect(isInfraError('error: could not apply abc123... some commit')).toBe(false);
+    expect(isInfraError('CONFLICT (content): Merge conflict in src/file.ts')).toBe(false);
+    expect(isInfraError('fatal: refusing to merge unrelated histories')).toBe(false);
+    expect(isInfraError('error: Your local changes would be overwritten')).toBe(false);
+    expect(isInfraError('')).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Defect 3 — tryCherryPickWithRecovery: infra-vs-conflict routing
+// ═══════════════════════════════════════════════════════════════════════
+// Note: The full infra retry loop (ensureContainer + setTimeout backoff)
+// is tested indirectly via integration tests. These unit tests verify the
+// core routing decisions (infra vs conflict) without exercising the async
+// retry loop which requires careful mock orchestration.
+
+describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
+  let project: ReturnType<typeof setupProject>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  function makeDeps(overrides: Partial<ImplementDeps> = {}): ImplementDeps {
+    return {
+      projectRoot: project.root,
+      execGit: vi.fn(),
+      gitPush: vi.fn(),
+      persistAndEmitPhase: vi.fn(),
+      advancePhase: vi.fn(),
+      savePipelineState: vi.fn(),
+      executePhase: vi.fn(),
+      sessionOpts: vi.fn() as any,
+      waitForCompletion: vi.fn(),
+      patchWorktreeGitFile: vi.fn(),
+      isWorktreeHealthy: vi.fn(() => true),
+      cleanStaleSubtaskWorktrees: vi.fn(),
+      restoreQaReportFromSnapshot: vi.fn(),
+      restoreHumanFeedbackFromSnapshot: vi.fn(),
+      writeQaFeedback: vi.fn(),
+      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 10 })),
+      phaseHeader: vi.fn(),
+      planWriteLock: { current: Promise.resolve() },
+      scheduleWakeup: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  function makeImplPipeline(overrides: Record<string, any> = {}): ImplementPipeline {
+    return {
+      taskId: project.taskId,
+      description: 'infra test',
+      phase: 'implement',
+      specPath: project.taskDir,
+      worktreePath: join(project.root, 'worktrees', 'infra-test'),
+      branch: 'feat/infra-test',
+      qaAttempt: 0,
+      maxQaAttempts: 3,
+      specRevision: 0,
+      ...overrides,
+    };
+  }
+
+  it('falls through to hard-fail when infra error detected but not in container mode', async () => {
+    const deps = makeDeps();
+    deps.execGit = vi.fn()
+      .mockImplementationOnce(() => { throw new Error('fatal: not a git repository: (null)'); });
+
+    // checkCherryPickInProgress → not in progress (no CHERRY_PICK_HEAD)
+    mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
+
+    // readContainerConfig returns enabled: false (default mock) — not in container mode
+    const { readContainerConfig } = await import('../../src/lib/container-manager');
+    vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
+
+    const pipeline = makeImplPipeline();
+    const result = await tryCherryPickWithRecovery(pipeline, deps, join(project.root, 'output.log'), 'feat/infra-test-st1', 1);
+
+    // Not in container mode → infra retry path skipped → hard fail
+    expect(result).toBe(false);
+  });
+
+  it('does NOT enter infra retry path for genuine git merge conflicts', async () => {
+    const deps = makeDeps();
+    deps.execGit = vi.fn()
+      .mockImplementationOnce(() => { throw new Error('CONFLICT (content): Merge conflict in file.ts'); });
+
+    // CHERRY_PICK_HEAD exists → infra path guard "!checkCherryPickInProgress" is false
+    mockExecFileSync.mockReturnValue('abc123\n');
+
+    const { readContainerConfig, containerManager } = await import('../../src/lib/container-manager');
+    vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+
+    // The merger agent path will spawn a session and call waitForCompletion.
+    // Mock waitForCompletion to hang (it'll be cleaned up by afterEach).
+    // The key assertion: ensureContainer was NOT called (no infra retry).
+    let resolveCompletion: () => void;
+    deps.waitForCompletion = vi.fn(() => new Promise<void>(r => { resolveCompletion = r; }));
+    mockCreateSession.mockResolvedValue('sess-merger-conflict');
+
+    const pipeline = makeImplPipeline();
+    const resultPromise = tryCherryPickWithRecovery(pipeline, deps, join(project.root, 'output.log'), 'feat/infra-test-st1', 1);
+
+    // Wait for the merger agent to be spawned
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
+
+    // Infra retry path was NOT entered (CHERRY_PICK_HEAD existed, so the
+    // guard "!checkCherryPickInProgress && isInfraError" was false)
+    expect(containerManager.ensureContainer).not.toHaveBeenCalled();
+
+    // Now simulate merger resolving the conflict
+    mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
+    resolveCompletion!();
+    const result = await resultPromise;
+    expect(result).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Defect 4 — _recoverSubtaskBranchBeforeDelete: auto-recover commits
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
+  let project: ReturnType<typeof setupProject>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  function makeDeps(overrides: Partial<ImplementDeps> = {}): ImplementDeps {
+    return {
+      projectRoot: project.root,
+      execGit: vi.fn(),
+      gitPush: vi.fn(),
+      persistAndEmitPhase: vi.fn(),
+      advancePhase: vi.fn(),
+      savePipelineState: vi.fn(),
+      executePhase: vi.fn(),
+      sessionOpts: vi.fn() as any,
+      waitForCompletion: vi.fn(),
+      patchWorktreeGitFile: vi.fn(),
+      isWorktreeHealthy: vi.fn(() => true),
+      cleanStaleSubtaskWorktrees: vi.fn(),
+      restoreQaReportFromSnapshot: vi.fn(),
+      restoreHumanFeedbackFromSnapshot: vi.fn(),
+      writeQaFeedback: vi.fn(),
+      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 10 })),
+      phaseHeader: vi.fn(),
+      planWriteLock: { current: Promise.resolve() },
+      scheduleWakeup: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  function makeImplPipeline(overrides: Record<string, any> = {}): ImplementPipeline {
+    return {
+      taskId: project.taskId,
+      description: 'recover test',
+      phase: 'implement',
+      specPath: project.taskDir,
+      worktreePath: join(project.root, 'worktrees', 'recover-test'),
+      branch: 'feat/recover-test',
+      qaAttempt: 0,
+      maxQaAttempts: 3,
+      specRevision: 0,
+      ...overrides,
+    };
+  }
+
+  it('returns true when subtask is already completed (skip)', () => {
+    const deps = makeDeps();
+    const pipeline = makeImplPipeline();
+    const subtask = { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: true };
+
+    const result = _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
+
+    expect(result).toBe(true); // safe to delete — subtask was already integrated
+    expect(mockExecFileSync).not.toHaveBeenCalled(); // no git calls needed
+  });
+
+  it('returns true when st-branch does not exist', () => {
+    const deps = makeDeps();
+    const pipeline = makeImplPipeline();
+    const subtask = { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: false };
+
+    mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
+
+    const result = _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
+
+    expect(result).toBe(true); // safe — nothing to recover
+  });
+
+  it('returns true when st-branch exists but has no unintegrated commits (already on pipeline.branch)', () => {
+    const deps = makeDeps();
+    const pipeline = makeImplPipeline();
+    const subtask = { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: false };
+
+    // rev-parse succeeds (branch exists), log returns empty (no unintegrated commits)
+    mockExecFileSync
+      .mockReturnValueOnce('abc123\n') // rev-parse
+      .mockReturnValueOnce(''); // log — empty
+
+    const result = _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
+
+    expect(result).toBe(true); // already integrated, safe
+  });
+
+  it('attempts cherry-pick and returns true on success', () => {
+    const deps = makeDeps();
+    const pipeline = makeImplPipeline();
+    const subtask = { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: false };
+
+    // rev-parse succeeds, log returns commits
+    mockExecFileSync
+      .mockReturnValueOnce('abc123\n') // rev-parse
+      .mockReturnValueOnce('abc123 unintegrated commit\n'); // log
+
+    deps.execGit = vi.fn(); // succeeds (doesn't throw)
+
+    const result = _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
+
+    expect(result).toBe(true);
+    expect(deps.execGit).toHaveBeenCalledWith(
+      ['cherry-pick', 'feat/recover-test..feat/recover-test-st1'],
+      pipeline.worktreePath,
+    );
+  });
+
+  it('returns false when cherry-pick conflicts, preserving branch for merger', () => {
+    const deps = makeDeps();
+    const pipeline = makeImplPipeline();
+    const subtask = { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: false };
+
+    // rev-parse succeeds, log returns commits
+    mockExecFileSync
+      .mockReturnValueOnce('abc123\n')
+      .mockReturnValueOnce('abc123 unintegrated commit\n');
+
+    deps.execGit = vi.fn()
+      .mockImplementationOnce(() => { throw new Error('CONFLICT'); }); // cherry-pick fails
+
+    const result = _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
+
+    expect(result).toBe(false); // preservation
+    // Should have called cherry-pick --abort
+    expect(deps.execGit).toHaveBeenCalledWith(['cherry-pick', '--abort'], pipeline.worktreePath);
+  });
+
+  it('returns false when git log comparison fails (err on side of preservation)', () => {
+    const deps = makeDeps();
+    const pipeline = makeImplPipeline();
+    const subtask = { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: false };
+
+    // rev-parse succeeds, log throws (e.g., pipeline.branch doesn't exist as a ref)
+    mockExecFileSync
+      .mockReturnValueOnce('abc123\n') // rev-parse
+      .mockImplementationOnce(() => { throw new Error('bad revision'); }); // log fails
+
+    const result = _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
+
+    // Err on side of preservation — don't delete branch if we can't verify
+    expect(result).toBe(false);
   });
 });
