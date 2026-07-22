@@ -82,17 +82,30 @@ function saveToolsConfig(cfg: ToolsConfig): void {
 
 // ── Detection cache ─────────────────────────────────────────────────────────
 
+// Positive results (found=true) are cached for the process lifetime.
+// Negative results expire after 60s — a tool like Docker may not be on PATH
+// when the server first boots but become available seconds later. Without TTL,
+// a single failed check permanently disables the tool for the process lifetime.
+const TOOL_CHECK_NEGATIVE_TTL_MS = 60_000;
+
 const _detectionCache = new Map<ToolName, ToolStatus>();
+const _detectionTimestamps = new Map<ToolName, number>();
 
 export function _resetToolCheckCache(): void {
   _detectionCache.clear();
+  _detectionTimestamps.clear();
 }
 
 // ── Single tool check ───────────────────────────────────────────────────────
 
 export function checkTool(name: ToolName): ToolStatus {
   const cached = _detectionCache.get(name);
-  if (cached) return cached;
+  if (cached) {
+    if (cached.found) return cached;
+    // Negative result — check TTL before returning cached failure
+    const checkedAt = _detectionTimestamps.get(name) || 0;
+    if ((Date.now() - checkedAt) < TOOL_CHECK_NEGATIVE_TTL_MS) return cached;
+  }
 
   const def = TOOL_DEFAULTS[name];
   const config = loadToolsConfig();
@@ -159,6 +172,7 @@ export function checkTool(name: ToolName): ToolStatus {
   };
 
   _detectionCache.set(name, status);
+  _detectionTimestamps.set(name, Date.now());
   return status;
 }
 
