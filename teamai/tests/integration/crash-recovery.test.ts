@@ -1336,8 +1336,9 @@ describe('Crash Recovery Integration', () => {
       vi.resetModules();
     });
 
-    it('resets plan.json completions and cleans worktree when stopping at implement', () => {
-      // Setup: plan.json with some completed subtasks
+    it('preserves non-multi-group completed subtasks on Stop at implement (Defect 8)', () => {
+      // Setup: plan.json with some completed subtasks — no st-branches exist
+      // (non-multi-group), so completed: true is durable.
       createPlan(specPath, [
         { id: 1, completed: true },
         { id: 2, completed: true },
@@ -1350,9 +1351,12 @@ describe('Crash Recovery Integration', () => {
       // Stop at 'implement'
       (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'implement');
 
-      // Plan.json should still exist but all subtasks reset to false
+      // Non-multi-group completed subtasks stay completed (Defect 8 fix).
+      // Only subtask 3 was already false.
       const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
-      expect(plan.subtasks.every((s: any) => s.completed === false)).toBe(true);
+      expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(true);
+      expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(true);
+      expect(plan.subtasks.find((s: any) => s.id === 3).completed).toBe(false);
 
       // Output.log should be removed
       const outputPath = join(specPath, 'output.log');
@@ -1380,7 +1384,7 @@ describe('Crash Recovery Integration', () => {
       expect(existsSync(planJson)).toBe(false);
     });
 
-    it('deletes QA artifacts and resets completions when stopping at qa-review', () => {
+    it('deletes QA artifacts and preserves non-multi-group completions when stopping at qa-review', () => {
       // Setup: QA artifacts exist + plan with completions
       createPlan(specPath, [
         { id: 1, completed: true },
@@ -1403,10 +1407,11 @@ describe('Crash Recovery Integration', () => {
       expect(existsSync(qaFeedback)).toBe(false);
       expect(existsSync(completionSummary)).toBe(false);
 
-      // Plan.json completions reset
+      // Non-multi-group completed subtasks stay completed (Defect 8)
       const planPath = join(specPath, 'plan.json');
       const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
-      expect(plan.subtasks.every((s: any) => s.completed === false)).toBe(true);
+      expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(true);
+      expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(true);
     });
 
     it('deletes spec.md and plan.json when stopping at spec phase', () => {
