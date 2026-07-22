@@ -10,7 +10,7 @@ import { appendFileSync } from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
 import { processManager } from '../process-manager';
-import { SessionExitedError } from './errors';
+import { SessionExitedError, SessionKilledError } from './errors';
 import { log, error as logError } from '../logger';
 
 import type { TaskStore } from '../task-store';
@@ -98,13 +98,24 @@ export function waitForCompletion(
       }
     };
 
-    const onExit = ({ sessionId: sid, code }: { sessionId: string; code: number | null }) => {
+    const onExit = ({ sessionId: sid, code, signal }: { sessionId: string; code: number | null; signal?: string | null }) => {
       if (sid !== sessionId) return;
       cleanup();
-      if (sessionLimitResetsAt) reject(new RateLimitError(sessionLimitResetsAt));
-      else if (code === 0 || code === null) resolve();
-      else if (rateLimitResetsAt) reject(new RateLimitError(rateLimitResetsAt));
-      else reject(new SessionExitedError(code));
+      // Defect 7: a killed session (signal non-null) is never a successful
+      // completion. Signal-killed processes report code=null, which the old
+      // handler resolved as success — causing the pipeline to deadlock
+      // indefinitely with no Retry button and no failure path.
+      if (signal) {
+        reject(new SessionKilledError(signal));
+      } else if (sessionLimitResetsAt) {
+        reject(new RateLimitError(sessionLimitResetsAt));
+      } else if (code === 0) {
+        resolve();
+      } else if (rateLimitResetsAt) {
+        reject(new RateLimitError(rateLimitResetsAt));
+      } else {
+        reject(new SessionExitedError(code ?? -1));
+      }
     };
 
     target.on('event', onEvent);

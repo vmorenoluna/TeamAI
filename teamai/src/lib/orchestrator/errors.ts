@@ -95,3 +95,14 @@ export class SessionExitedError extends OrchestratorError {
     this.name = 'SessionExitedError';
   }
 }
+
+/** Thrown when a Claude CLI session was terminated by a signal (SIGTERM/SIGKILL).
+ *  A killed session is never a successful completion — this error propagates
+ *  through the pipeline so the task advances to 'failed' rather than hanging
+ *  forever in a deadlocked state. Defect 7. */
+export class SessionKilledError extends OrchestratorError {
+  constructor(public readonly signal: string) {
+    super(`Session killed by signal ${signal}`, 'SESSION_KILLED');
+    this.name = 'SessionKilledError';
+  }
+}

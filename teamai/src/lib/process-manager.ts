@@ -137,7 +137,7 @@ export class ProcessManager extends EventEmitter {
       this.emit('error', { sessionId: id, error: text });
     });
 
-    proc.on('exit', (code) => {
+    proc.on('exit', (code, signal) => {
       if (buffer.trim()) {
         try {
           const event = JSON.parse(buffer);
@@ -150,8 +150,8 @@ export class ProcessManager extends EventEmitter {
       }
       const session = this.sessions.get(id);
       if (session) session.status = code === 0 ? 'done' : 'error';
-      this.emit('exit', { sessionId: id, code });
-      sessionEvents.emit('exit', { sessionId: id, code });
+      this.emit('exit', { sessionId: id, code, signal });
+      sessionEvents.emit('exit', { sessionId: id, code, signal });
     });
 
     this.sessions.set(id, {

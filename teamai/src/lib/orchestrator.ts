@@ -14,7 +14,7 @@ import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWo
 import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
 import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
-import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError } from './orchestrator/errors';
+import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError, SessionKilledError } from './orchestrator/errors';
 import { NO_RESUME_PHASES } from '@/constants/phases';
 import { runImplement } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
@@ -263,6 +263,13 @@ export class Orchestrator {
     try {
       await this.executePhase(pipeline);
     } catch (e) {
+      if (e instanceof SessionKilledError && !this.pipelines.has(taskId)) {
+        // Defect 7: the pipeline was already cancelled (e.g. stopTask killed
+        // the session). The cancelled session's exit event fired with a signal,
+        // causing waitForCompletion to reject with SessionKilledError. Don't
+        // overwrite the phase that stopTask already set to 'backlog'.
+        return;
+      }
       if (e instanceof RateLimitError) {
         rateLimited = true;
         this.handleRateLimit(pipeline, e.resetsAt);
