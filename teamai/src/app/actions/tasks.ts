@@ -8,7 +8,7 @@ import { processManager } from '@/lib/process-manager';
 import { revalidatePath } from 'next/cache';
 import type { PlanData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
-import { appendFileSync, existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'fs';
 import { getResumePhaseForFailedTask } from '@/lib/task-utils';
 import { join, resolve } from 'path';
 import { execFileSync } from 'child_process';
@@ -110,6 +110,13 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
 
   // Clear completionSummary so the failure indicator disappears
   taskStore.update(taskId, { completionSummary: undefined });
+
+  // Clear output.log for a fresh terminal view on retry.
+  // resumeTask does this too — retryTask (the UI's Retry button path) was
+  // missing it, so old log content from the failed run was appended to,
+  // not replaced. Defect 6 part 2.
+  const outputPath = join(dir, 'output.log');
+  try { if (existsSync(outputPath)) unlinkSync(outputPath); } catch { /* best-effort */ }
 
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
   orchestrator.moveTaskToPhase(taskId, resumePhase).catch(console.error);

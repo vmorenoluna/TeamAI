@@ -262,6 +262,13 @@ const AUTO_RESUME_DEBOUNCE_MS = 15_000; // 15 seconds
  *  are considered stuck and eligible for auto-resume. */
 const STALLED_TASK_THRESHOLD_MS = 30 * 60_000; // 30 minutes
 
+/** Threshold for detecting abandoned in-flight phases — if output.log hasn't
+ *  been touched in this long and there's no active pipeline, the task was
+ *  likely orphaned by a server crash between retryTask writing the phase and
+ *  the pipeline actually starting. Real pipeline work writes to output.log
+ *  continuously. Defect 6 part 1. */
+const ABANDONED_PHASE_THRESHOLD_MS = 5 * 60_000; // 5 minutes
+
 /** @internal Reset the auto-resume debounce timer (used in tests). */
 export function _resetAutoResumeDebounce(): void {
   _lastAutoResumeTime = 0;
@@ -422,9 +429,43 @@ export async function sweepStalledTasks(): Promise<number> {
           // Check last-updated time: if task hasn't been touched recently
           const updatedAt = task.updatedAt ? new Date(task.updatedAt).getTime() : 0;
           const staleThreshold = Date.now() - STALLED_TASK_THRESHOLD_MS;
-          if (updatedAt > staleThreshold) continue; // recently updated, leave alone
 
-          log('sweep', `Task ${task.id} "${task.title}" stalled >30min in phase "${task.phase}" — resuming`);
+          let shouldResume = false;
+          let reason = '';
+
+          if (updatedAt <= staleThreshold) {
+            // >30 minutes since last update — classic stall
+            shouldResume = true;
+            reason = `stalled >30min in phase "${task.phase}"`;
+          } else {
+            // Defect 6 part 1: detect tasks abandoned mid-phase — the phase was
+            // written to disk but the pipeline never started (e.g. server crash
+            // between retryTask writing task.json and the actual pipeline work).
+            // Real pipeline work writes to output.log continuously, so a stale
+            // log file means nothing is actually running.
+            const outputLogPath = join(teamaiDir, entry, 'output.log');
+            if (existsSync(outputLogPath)) {
+              try {
+                const logStat = statSync(outputLogPath);
+                const logStaleMs = Date.now() - logStat.mtimeMs;
+                if (logStaleMs >= ABANDONED_PHASE_THRESHOLD_MS) {
+                  shouldResume = true;
+                  reason = `output.log untouched for ${Math.round(logStaleMs / 60_000)}min — phase "${task.phase}" was written but pipeline never started`;
+                }
+              } catch { /* can't stat — skip */ }
+            } else {
+              // No output.log at all but task is in active phase — likely
+              // the phase was written to task.json just before the server died
+              if (updatedAt < Date.now() - ABANDONED_PHASE_THRESHOLD_MS) {
+                shouldResume = true;
+                reason = `no output.log and phase "${task.phase}" set ${Math.round((Date.now() - updatedAt) / 60_000)}min ago — likely abandoned on startup`;
+              }
+            }
+          }
+
+          if (!shouldResume) continue;
+
+          log('sweep', `Task ${task.id} "${task.title}" ${reason} — resuming`);
         }
 
         // Re-queue the task for resumption
