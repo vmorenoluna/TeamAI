@@ -193,10 +193,26 @@ export class ContainerManager extends EventEmitter {
 
   // Returns the running container info synchronously — for use in orchestrator git commands.
   // Falls back to a Docker label scan when the in-memory record is absent (e.g. server restart).
+  // Before trusting a cached 'running' record, performs a cheap liveness check to detect
+  // containers that died without the event watcher noticing (e.g. Docker Desktop restart, OOM).
   getRunningContainer(projectRoot: string): ContainerInfo | null {
     const r = this.records.get(projectRoot);
     if (r?.state === 'running' && r.containerId && r.remoteWorkspaceFolder) {
-      return { containerId: r.containerId, remoteWorkspaceFolder: r.remoteWorkspaceFolder };
+      // Liveness check: verify the container is actually still running.
+      // docker inspect is a cheap local call (sub-100ms) — well worth avoiding
+      // the misdiagnosis of infra failures as git problems downstream.
+      if (this._isContainerAlive(r.containerId)) {
+        return { containerId: r.containerId, remoteWorkspaceFolder: r.remoteWorkspaceFolder };
+      }
+      // Container died without the event watcher catching it — transition to stopped
+      // and fall through to the scan below. ensureContainer() will handle the restart.
+      log('container', `Container for ${projectRoot} is not actually running (stale record) — marking stopped`);
+      r.state = 'stopped';
+      r.containerId = null;
+      r.remoteWorkspaceFolder = null;
+      r.eventWatcher?.kill();
+      r.eventWatcher = null;
+      this._emit(r, 'stopped');
     }
     const info = this._findRunningContainerSync(projectRoot);
     if (info) {
@@ -207,6 +223,18 @@ export class ContainerManager extends EventEmitter {
       this.records.set(projectRoot, record);
     }
     return info;
+  }
+
+  /** Check whether a container is actually running via docker inspect. */
+  private _isContainerAlive(containerId: string): boolean {
+    try {
+      const result = execFileSync(getToolPath('docker'), [
+        'inspect', '--format', '{{.State.Running}}', containerId,
+      ], { encoding: 'utf-8', timeout: 5000 }).trim();
+      return result === 'true';
+    } catch {
+      return false;
+    }
   }
 
   private async _doStart(record: ContainerRecord, logFile?: string): Promise<void> {
