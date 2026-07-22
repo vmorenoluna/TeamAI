@@ -41,22 +41,43 @@ function devcontainerBin(): string {
 }
 
 
-// Check if Docker is available and running (cached per process lifetime)
+// Check if Docker is available and running.
+// Positive results are cached for the process lifetime (Docker disappearing
+// mid-session is rare and handled by Defect 1's container liveness check).
+// Negative results expire after 60s — Docker Desktop may not have finished
+// starting when the server boots (common after a machine reboot). Without
+// TTL, a single failed check at startup permanently disables container mode.
+const DOCKER_AVAILABLE_NEGATIVE_TTL_MS = 60_000;
 let _dockerAvailable: boolean | null = null;
+let _dockerAvailableCheckedAt: number = 0;
 
 /** @internal Reset the docker-available cache (used in tests) */
 export function _resetDockerAvailableCache(): void {
   _dockerAvailable = null;
+  _dockerAvailableCheckedAt = 0;
 }
 
 export function dockerAvailable(): boolean {
-  if (_dockerAvailable !== null) return _dockerAvailable;
+  const now = Date.now();
+  if (_dockerAvailable === true) return true;
+  if (_dockerAvailable === false && (now - _dockerAvailableCheckedAt) < DOCKER_AVAILABLE_NEGATIVE_TTL_MS) {
+    return false;
+  }
+  const wasCachedNegative = _dockerAvailable === false;
   try {
     execFileSync(getToolPath('docker'), ['info'], { stdio: 'ignore', timeout: 2000 });
     _dockerAvailable = true;
+    _dockerAvailableCheckedAt = 0;
+    if (wasCachedNegative) {
+      log('container', 'Docker is now available — container mode re-enabled');
+    }
   } catch (err) {
     _dockerAvailable = false;
-    logWarn('container', 'docker info check failed', err);
+    _dockerAvailableCheckedAt = now;
+    // Only log on first failure to avoid spamming every 60s on retry
+    if (!wasCachedNegative) {
+      logWarn('container', 'docker info check failed', err);
+    }
   }
   return _dockerAvailable;
 }
