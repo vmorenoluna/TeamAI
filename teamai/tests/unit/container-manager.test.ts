@@ -159,7 +159,7 @@ describe('ContainerManager', () => {
       expect(cm.getRunningContainer('/test')).toBeNull();
     });
 
-    it('returns container info when container is running', () => {
+    it('returns container info when container is running (liveness check passes)', () => {
       (cm as any).records.set('/test', {
         projectRoot: '/test',
         state: 'running',
@@ -168,8 +168,82 @@ describe('ContainerManager', () => {
         startPromise: null,
         eventWatcher: null,
       });
+      // Liveness check: docker inspect returns true
+      mockExecFileSync.mockReturnValueOnce('true\n');
       const info = cm.getRunningContainer('/test');
       expect(info).toEqual({ containerId: 'abc123', remoteWorkspaceFolder: '/workspace' });
+    });
+
+    it('returns null when cached record says running but container is actually dead', () => {
+      (cm as any).records.set('/test', {
+        projectRoot: '/test',
+        state: 'running',
+        containerId: 'abc123',
+        remoteWorkspaceFolder: '/workspace',
+        startPromise: null,
+        eventWatcher: null,
+      });
+      // Liveness check: docker inspect returns false — container died
+      mockExecFileSync.mockReturnValueOnce('false\n');
+      // Fallback scan also finds nothing
+      mockExecFileSync.mockReturnValueOnce('');
+
+      const info = cm.getRunningContainer('/test');
+      expect(info).toBeNull();
+
+      // Verify the record was transitioned to stopped
+      const record = (cm as any).records.get('/test');
+      expect(record.state).toBe('stopped');
+      expect(record.containerId).toBeNull();
+      expect(record.remoteWorkspaceFolder).toBeNull();
+    });
+
+    it('kills the eventWatcher when stale record is detected', () => {
+      const mockWatcher = { kill: vi.fn() };
+      (cm as any).records.set('/test', {
+        projectRoot: '/test',
+        state: 'running',
+        containerId: 'abc123',
+        remoteWorkspaceFolder: '/workspace',
+        startPromise: null,
+        eventWatcher: mockWatcher,
+      });
+      // Liveness check fails — container is dead
+      mockExecFileSync.mockReturnValueOnce('false\n');
+      // Fallback scan also finds nothing
+      mockExecFileSync.mockReturnValueOnce('');
+
+      cm.getRunningContainer('/test');
+      expect(mockWatcher.kill).toHaveBeenCalled();
+
+      // Verify eventWatcher was cleared on the record
+      const record = (cm as any).records.get('/test');
+      expect(record.eventWatcher).toBeNull();
+    });
+
+    it('falls through to Docker scan when cached record is stale but container restarted', () => {
+      (cm as any).records.set('/test', {
+        projectRoot: '/test',
+        state: 'running',
+        containerId: 'abc123',
+        remoteWorkspaceFolder: '/workspace',
+        startPromise: null,
+        eventWatcher: null,
+      });
+      // Liveness check: docker inspect fails (container gone)
+      mockExecFileSync.mockImplementationOnce(() => { throw new Error('No such container'); });
+      // Fallback scan finds a *new* container instance
+      mockExecFileSync
+        .mockReturnValueOnce('new-container-id')
+        .mockReturnValueOnce(JSON.stringify([
+          { Source: '/test', Destination: '/workspaces/test' },
+        ]));
+
+      const info = cm.getRunningContainer('/test');
+      expect(info).toEqual({
+        containerId: 'new-container-id',
+        remoteWorkspaceFolder: '/workspaces/test',
+      });
     });
   });
 
@@ -348,6 +422,7 @@ describe('ContainerManager — getRunningContainer fallback scan', () => {
   });
 
   it('falls back to Docker label scan when no in-memory record', () => {
+    // No liveness check needed — no in-memory record to validate
     mockExecFileSync
       .mockReturnValueOnce('container-found')
       .mockReturnValueOnce(JSON.stringify([
