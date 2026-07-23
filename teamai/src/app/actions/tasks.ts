@@ -134,8 +134,11 @@ export async function stopTask(taskId: string): Promise<{ success: boolean; erro
   // Cancel the running pipeline
   orchestrator.cancelPipeline(taskId);
 
-  // Clean up artifacts: keep completed phase artifacts, remove in-progress ones
-  orchestrator.cleanupTaskArtifacts(taskId, task.phase);
+  // Clean up artifacts: keep completed phase artifacts, remove in-progress ones.
+  // Awaited — Defect 8's reconciliation may retry cherry-picks after an infra
+  // hiccup (reprovisioning the container), so this must settle before the
+  // task moves to 'backlog' below.
+  await orchestrator.cleanupTaskArtifacts(taskId, task.phase);
 
   // Move to backlog
   taskStore.updatePhase(taskId, 'backlog');

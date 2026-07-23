@@ -1336,7 +1336,7 @@ describe('Crash Recovery Integration', () => {
       vi.resetModules();
     });
 
-    it('preserves non-multi-group completed subtasks on Stop at implement (Defect 8)', () => {
+    it('preserves non-multi-group completed subtasks on Stop at implement (Defect 8)', async () => {
       // Setup: plan.json with some completed subtasks — no st-branches exist
       // (non-multi-group), so completed: true is durable.
       createPlan(specPath, [
@@ -1349,7 +1349,7 @@ describe('Crash Recovery Integration', () => {
       expect(existsSync(planPath)).toBe(true);
 
       // Stop at 'implement'
-      (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'implement');
+      await (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'implement');
 
       // Non-multi-group completed subtasks stay completed (Defect 8 fix).
       // Only subtask 3 was already false.
@@ -1361,11 +1361,11 @@ describe('Crash Recovery Integration', () => {
       // Output.log should be removed
       const outputPath = join(specPath, 'output.log');
       writeFileSync(outputPath, 'some output');
-      (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'implement');
+      await (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'implement');
       expect(existsSync(outputPath)).toBe(false);
     });
 
-    it('deletes plan.json but preserves spec.md when stopping at plan phase', () => {
+    it('deletes plan.json but preserves spec.md when stopping at plan phase', async () => {
       // Setup: spec + plan artifacts exist
       writeFileSync(join(specPath, 'spec.md'), '# Spec\n');
       createPlan(specPath);
@@ -1376,7 +1376,7 @@ describe('Crash Recovery Integration', () => {
       expect(existsSync(planJson)).toBe(true);
 
       // Stop at 'plan'
-      (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'plan');
+      await (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'plan');
 
       // spec.md is from the 'spec' phase (before 'plan') so it's preserved.
       // plan.json is from 'plan' phase — deleted.
@@ -1384,7 +1384,7 @@ describe('Crash Recovery Integration', () => {
       expect(existsSync(planJson)).toBe(false);
     });
 
-    it('deletes QA artifacts and preserves non-multi-group completions when stopping at qa-review', () => {
+    it('deletes QA artifacts and preserves non-multi-group completions when stopping at qa-review', async () => {
       // Setup: QA artifacts exist + plan with completions
       createPlan(specPath, [
         { id: 1, completed: true },
@@ -1400,7 +1400,7 @@ describe('Crash Recovery Integration', () => {
       expect(existsSync(qaReport)).toBe(true);
 
       // Stop at 'qa-review'
-      (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'qa-review');
+      await (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'qa-review');
 
       // QA files deleted
       expect(existsSync(qaReport)).toBe(false);
@@ -1414,7 +1414,7 @@ describe('Crash Recovery Integration', () => {
       expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(true);
     });
 
-    it('deletes spec.md and plan.json when stopping at spec phase', () => {
+    it('deletes spec.md and plan.json when stopping at spec phase', async () => {
       writeFileSync(join(specPath, 'spec.md'), '# Spec\n');
       writeFileSync(join(specPath, 'plan.json'), '{}');
 
@@ -1424,13 +1424,13 @@ describe('Crash Recovery Integration', () => {
       expect(existsSync(planJson)).toBe(true);
 
       // Stop at 'spec'
-      (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'spec');
+      await (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'spec');
 
       expect(existsSync(specMd)).toBe(false);
       expect(existsSync(planJson)).toBe(false);
     });
 
-    it('no-ops when phase is not in the pipeline order', () => {
+    it('no-ops when phase is not in the pipeline order', async () => {
       // Setup: artifacts exist
       writeFileSync(join(specPath, 'spec.md'), '# Spec\n');
       writeFileSync(join(specPath, 'plan.json'), '{}');
@@ -1439,9 +1439,9 @@ describe('Crash Recovery Integration', () => {
       const planJson = join(specPath, 'plan.json');
 
       // Stop at a phase not in the pipeline config (e.g. 'backlog')
-      expect(() => {
-        (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'backlog');
-      }).not.toThrow();
+      await expect(
+        (orch as AnyOrch).cleanupTaskArtifacts(taskId, 'backlog')
+      ).resolves.toBeUndefined();
 
       // Artifacts should still exist
       expect(existsSync(specMd)).toBe(true);

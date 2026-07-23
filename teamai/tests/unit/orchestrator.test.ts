@@ -2639,7 +2639,7 @@ describe('Orchestrator', () => {
   // ── cleanupTaskArtifacts ──────────────────────────────────────────
 
   describe('cleanupTaskArtifacts', () => {
-    it('clears spec-phase artifacts (spec.md, plan.json, output.log)', () => {
+    it('clears spec-phase artifacts (spec.md, plan.json, output.log)', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -2647,14 +2647,14 @@ describe('Orchestrator', () => {
       writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
       writeFileSync(join(testData.taskDir, 'output.log'), 'output');
 
-      orch.cleanupTaskArtifacts(testData.taskId, 'spec');
+      await orch.cleanupTaskArtifacts(testData.taskId, 'spec');
 
       expect(existsSync(join(testData.taskDir, 'spec.md'))).toBe(false);
       expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(false);
       expect(existsSync(join(testData.taskDir, 'output.log'))).toBe(false);
     });
 
-    it('clears plan artifacts but preserves spec.md', () => {
+    it('clears plan artifacts but preserves spec.md', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -2662,13 +2662,13 @@ describe('Orchestrator', () => {
       writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
       writeFileSync(join(testData.taskDir, 'output.log'), 'output');
 
-      orch.cleanupTaskArtifacts(testData.taskId, 'plan');
+      await orch.cleanupTaskArtifacts(testData.taskId, 'plan');
 
       expect(existsSync(join(testData.taskDir, 'spec.md'))).toBe(true);
       expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(false);
     });
 
-    it('clears QA artifacts and preserves non-multi-group completions for implement phase', () => {
+    it('clears QA artifacts and preserves non-multi-group completions for implement phase', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -2681,7 +2681,7 @@ describe('Orchestrator', () => {
       writeFileSync(join(testData.taskDir, 'completion_summary.md'), 'summary');
       writeFileSync(join(testData.taskDir, 'output.log'), 'output');
 
-      orch.cleanupTaskArtifacts(testData.taskId, 'implement');
+      await orch.cleanupTaskArtifacts(testData.taskId, 'implement');
 
       expect(existsSync(join(testData.taskDir, 'qa_report.json'))).toBe(false);
       expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
@@ -2694,7 +2694,7 @@ describe('Orchestrator', () => {
       expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(true);
     });
 
-    it('preserves non-multi-group completed subtasks with branch set (Defect 8)', () => {
+    it('preserves non-multi-group completed subtasks with branch set (Defect 8)', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -2714,14 +2714,14 @@ describe('Orchestrator', () => {
       // All git rev-parse calls fail (no st-branch) → non-multi-group → completed preserved
       mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
 
-      orch.cleanupTaskArtifacts(testData.taskId, 'implement');
+      await orch.cleanupTaskArtifacts(testData.taskId, 'implement');
 
       const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
       expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(true);
       expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(false);
     });
 
-    it('resets multi-group subtask when cherry-pick fails, keeps others (Defect 8)', () => {
+    it('resets multi-group subtask when cherry-pick fails, keeps others (Defect 8)', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -2751,7 +2751,7 @@ describe('Orchestrator', () => {
         return '';
       });
 
-      orch.cleanupTaskArtifacts(testData.taskId, 'implement');
+      await orch.cleanupTaskArtifacts(testData.taskId, 'implement');
 
       // Both subtasks had st-branches and both cherry-picks failed → both reset
       const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
@@ -2761,7 +2761,7 @@ describe('Orchestrator', () => {
       try { rmSync(wtPath, { recursive: true, force: true }); } catch {}
     });
 
-    it('preserves st-branch subtask when cherry-pick succeeds (Defect 8)', () => {
+    it('preserves st-branch subtask when cherry-pick succeeds (Defect 8)', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -2788,7 +2788,7 @@ describe('Orchestrator', () => {
         return '';
       });
 
-      orch.cleanupTaskArtifacts(testData.taskId, 'implement');
+      await orch.cleanupTaskArtifacts(testData.taskId, 'implement');
 
       const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
       expect(plan.subtasks[0].completed).toBe(true);
@@ -2796,7 +2796,7 @@ describe('Orchestrator', () => {
       try { rmSync(wtPath, { recursive: true, force: true }); } catch {}
     });
 
-    it('skips reconciliation when task has no branch (safe fallback)', () => {
+    it('skips reconciliation when task has no branch (safe fallback)', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -2807,7 +2807,7 @@ describe('Orchestrator', () => {
       }));
 
       // No branch on task → reconcile returns early, leaving completed as-is
-      orch.cleanupTaskArtifacts(testData.taskId, 'implement');
+      await orch.cleanupTaskArtifacts(testData.taskId, 'implement');
 
       const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
       // Subtask stays completed — no branch means we can't reconcile, so we
@@ -2815,21 +2815,21 @@ describe('Orchestrator', () => {
       expect(plan.subtasks[0].completed).toBe(true);
     });
 
-    it('no-ops when phase is not in pipeline order', () => {
+    it('no-ops when phase is not in pipeline order', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'output.log'), 'output');
-      orch.cleanupTaskArtifacts(testData.taskId, 'nonexistent-phase');
+      await orch.cleanupTaskArtifacts(testData.taskId, 'nonexistent-phase');
 
       expect(existsSync(join(testData.taskDir, 'output.log'))).toBe(true);
     });
 
-    it('handles missing artifacts gracefully (does not throw)', () => {
+    it('handles missing artifacts gracefully (does not throw)', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
-      expect(() => orch.cleanupTaskArtifacts(testData.taskId, 'qa-review')).not.toThrow();
+      await expect(orch.cleanupTaskArtifacts(testData.taskId, 'qa-review')).resolves.toBeUndefined();
     });
   });
 
