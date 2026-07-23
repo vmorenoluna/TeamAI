@@ -42,7 +42,19 @@ interface SubtaskTerminalInfo {
 
 interface ParsedLine {
   role: string;
+  /** Display-only HH:MM:SS, unchanged regardless of source format. */
   timestamp: string;
+  /**
+   * Chronological sort key. Dated lines (`[YYYY-MM-DDTHH:MM:SS]`, written
+   * since timestamps started including the date) sort correctly across day
+   * boundaries. Legacy lines (`[HH:MM:SS]` only, from before that change)
+   * carry a '0000-00-00T'-prefixed key so old, undated content always
+   * sorts before anything dated — never masquerading as "most recent" just
+   * because its bare clock time happens to be numerically later in the day
+   * (e.g. a stale 22:58 line from two days ago outranking a fresh 14:25
+   * line from today under naive HH:MM:SS string comparison).
+   */
+  sortKey: string;
   text: string;
   prefixed: string;
 }
@@ -61,7 +73,23 @@ interface Props {
 
 // ── Log parsing ─────────────────────────────────────────────────────────────
 
-const TS_RE = /^\[(\d{2}:\d{2}:\d{2})\]\s/;
+// Current format: `[YYYY-MM-DDTHH:MM:SS] ...` (process-manager.ts writes the
+// full ISO date-time). Legacy format: `[HH:MM:SS] ...`, from before dates
+// were included — still present in log files written prior to that change.
+const TS_RE_DATED = /^\[(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\]\s/;
+const TS_RE_LEGACY = /^\[(\d{2}:\d{2}:\d{2})\]\s/;
+
+function parseTimestamp(line: string): { display: string; sortKey: string; rest: string } {
+  const dated = line.match(TS_RE_DATED);
+  if (dated) {
+    return { display: dated[2], sortKey: `${dated[1]}T${dated[2]}`, rest: line.slice(dated[0].length) };
+  }
+  const legacy = line.match(TS_RE_LEGACY);
+  if (legacy) {
+    return { display: legacy[1], sortKey: `0000-00-00T${legacy[1]}`, rest: line.slice(legacy[0].length) };
+  }
+  return { display: '00:00:00', sortKey: '', rest: line };
+}
 
 export function parseRoleLog(role: string, content: string | null): ParsedLine[] {
   if (!content) return [];
@@ -73,11 +101,9 @@ export function parseRoleLog(role: string, content: string | null): ParsedLine[]
 
   for (const line of lines) {
     if (!line.trim()) continue;
-    const m = line.match(TS_RE);
-    const ts = m ? m[1] : '00:00:00';
-    const text = m ? line.slice(m[0].length) : line;
-    const prefixed = `\x1b[90m[${ts}]\x1b[0m ${ansi}[${label}]\x1b[0m ${text}\r\n`;
-    result.push({ role, timestamp: ts, text, prefixed });
+    const { display, sortKey, rest } = parseTimestamp(line);
+    const prefixed = `\x1b[90m[${display}]\x1b[0m ${ansi}[${label}]\x1b[0m ${rest}\r\n`;
+    result.push({ role, timestamp: display, sortKey, text: rest, prefixed });
   }
 
   return result;
@@ -93,25 +119,31 @@ export function parseCoderLogs(subtaskTerminals: SubtaskTerminalInfo[]): ParsedL
     if (!st.log) continue;
     const lines = st.log.split('\n');
     const contentLines: ParsedLine[] = [];
-    let firstTs = '00:00:00';
+    let firstDisplay = '00:00:00';
+    let firstSortKey = '';
+    let sawTimestamp = false;
     for (const line of lines) {
       if (!line.trim()) continue;
-      const m = line.match(TS_RE);
-      const ts = m ? m[1] : '00:00:00';
-      if (firstTs === '00:00:00' && ts !== '00:00:00') firstTs = ts;
-      const text = m ? line.slice(m[0].length) : line;
+      const { display, sortKey, rest } = parseTimestamp(line);
+      if (!sawTimestamp && display !== '00:00:00') {
+        firstDisplay = display;
+        firstSortKey = sortKey;
+        sawTimestamp = true;
+      }
       contentLines.push({
         role: 'coder',
-        timestamp: ts,
-        text,
-        prefixed: `\x1b[90m[${ts}]\x1b[0m ${ansi}[${label}]\x1b[0m ${text}\r\n`,
+        timestamp: display,
+        sortKey,
+        text: rest,
+        prefixed: `\x1b[90m[${display}]\x1b[0m ${ansi}[${label}]\x1b[0m ${rest}\r\n`,
       });
     }
     result.push({
       role: 'coder',
-      timestamp: firstTs,
+      timestamp: firstDisplay,
+      sortKey: firstSortKey,
       text: `═══ Subtask ${st.id}: ${st.title} ═══`,
-      prefixed: `\x1b[90m[${firstTs}]\x1b[0m \x1b[33;1m═══ Subtask ${st.id}: ${st.title} ═══\x1b[0m\r\n`,
+      prefixed: `\x1b[90m[${firstDisplay}]\x1b[0m \x1b[33;1m═══ Subtask ${st.id}: ${st.title} ═══\x1b[0m\r\n`,
     });
     result.push(...contentLines);
   }
@@ -199,7 +231,7 @@ export function UnifiedTerminal({
         all.push(...lines);
       }
     }
-    all.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    all.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
     return all.map(l => l.prefixed).join('');
   }, [roleLogMap, selectedRoles]);
 
