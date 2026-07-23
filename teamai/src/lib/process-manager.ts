@@ -131,7 +131,10 @@ export class ProcessManager extends EventEmitter {
     proc.stderr!.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
       if (logFile) {
-        const ts = new Date().toISOString().slice(11, 19);
+        // Full date-time (YYYY-MM-DDTHH:MM:SS), not just HH:MM:SS — a task
+        // whose logs span multiple days (retries, QA bounces) needs the
+        // date to sort correctly. See _appendToLog for the matching write.
+        const ts = new Date().toISOString().slice(0, 19);
         appendFileSync(logFile, `[${ts}] [STDERR] ${text}`);
       }
       this.emit('error', { sessionId: id, error: text });
@@ -189,7 +192,9 @@ export class ProcessManager extends EventEmitter {
         text = `\n⚠ ${event.error}\n`;
       }
       if (text) {
-        const ts = new Date().toISOString().slice(11, 19); // HH:MM:SS
+        // YYYY-MM-DDTHH:MM:SS — see the stderr handler above for why the
+        // date matters, not just the time.
+        const ts = new Date().toISOString().slice(0, 19);
         appendFileSync(logFile, `[${ts}] ${text}`);
       }
     } catch { /* best-effort */ }

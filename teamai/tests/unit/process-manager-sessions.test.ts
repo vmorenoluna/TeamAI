@@ -363,7 +363,7 @@ describe('ProcessManager — Full Coverage', () => {
       });
       expect(mockAppendFileSync).toHaveBeenCalledWith(
         '/tmp/test.log',
-        expect.stringMatching(/^\[\d{2}:\d{2}:\d{2}\] ◆ Session started — claude-sonnet-4\n$/),
+        expect.stringMatching(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\] ◆ Session started — claude-sonnet-4\n$/),
       );
     });
 
@@ -379,7 +379,7 @@ describe('ProcessManager — Full Coverage', () => {
       });
       expect(mockAppendFileSync).toHaveBeenCalledWith(
         '/tmp/test.log',
-        expect.stringMatching(/^\[\d{2}:\d{2}:\d{2}\] Hello world▶ bash\n$/),
+        expect.stringMatching(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\] Hello world▶ bash\n$/),
       );
     });
 
@@ -392,7 +392,7 @@ describe('ProcessManager — Full Coverage', () => {
       });
       expect(mockAppendFileSync).toHaveBeenCalledWith(
         '/tmp/test.log',
-        expect.stringMatching(/^\[\d{2}:\d{2}:\d{2}\] \n✓ Done — \$0\.0123 \(1500ms\)\n$/),
+        expect.stringMatching(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\] \n✓ Done — \$0\.0123 \(1500ms\)\n$/),
       );
     });
 
@@ -405,7 +405,7 @@ describe('ProcessManager — Full Coverage', () => {
       });
       expect(mockAppendFileSync).toHaveBeenCalledWith(
         '/tmp/test.log',
-        expect.stringMatching(/^\[\d{2}:\d{2}:\d{2}\] \n✗ Failed: Invalid API key\n$/),
+        expect.stringMatching(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\] \n✗ Failed: Invalid API key\n$/),
       );
     });
 
@@ -417,7 +417,7 @@ describe('ProcessManager — Full Coverage', () => {
       });
       expect(mockAppendFileSync).toHaveBeenCalledWith(
         '/tmp/test.log',
-        expect.stringMatching(/^\[\d{2}:\d{2}:\d{2}\] \n✗ Failed: unknown error\n$/),
+        expect.stringMatching(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\] \n✗ Failed: unknown error\n$/),
       );
     });
 
@@ -457,7 +457,7 @@ describe('ProcessManager — Full Coverage', () => {
       });
       expect(mockAppendFileSync).toHaveBeenCalledWith(
         '/tmp/test.log',
-        expect.stringMatching(/^\[\d{2}:\d{2}:\d{2}\] \n✓ Done \(100ms\)\n$/),
+        expect.stringMatching(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\] \n✓ Done \(100ms\)\n$/),
       );
     });
   });

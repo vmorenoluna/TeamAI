@@ -168,6 +168,57 @@ describe('parseRoleLog', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  Dated vs legacy timestamp format — sortKey
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// process-manager.ts writes `[YYYY-MM-DDTHH:MM:SS]` timestamps (full ISO
+// date-time) so cross-day sorting works correctly. Log files written before
+// that change still contain the old `[HH:MM:SS]` (time-only) format. Both
+// must keep parsing correctly, and — critically — a legacy line's sortKey
+// must never let it outrank dated content just because its bare clock value
+// happens to be numerically later in the day.
+
+describe('dated vs legacy timestamp format (sortKey)', () => {
+  it('parses the dated format, splitting display time from the full sortable date-time', () => {
+    const result = parseRoleLog('qa', '[2026-07-23T14:25:35] Fresh QA output');
+    expect(result[0].timestamp).toBe('14:25:35');
+    expect(result[0].sortKey).toBe('2026-07-23T14:25:35');
+    expect(result[0].text).toBe('Fresh QA output');
+  });
+
+  it('parses the legacy time-only format, anchoring sortKey before all dated content', () => {
+    const result = parseRoleLog('coder', '[22:58:26] Stale output from a prior day');
+    expect(result[0].timestamp).toBe('22:58:26');
+    expect(result[0].sortKey).toBe('0000-00-00T22:58:26');
+  });
+
+  it('assigns an empty sortKey (sorts first) to lines with no timestamp at all', () => {
+    const result = parseRoleLog('spec', 'No timestamp here');
+    expect(result[0].sortKey).toBe('');
+  });
+
+  it('orders a stale legacy line before a chronologically-later dated line, despite a numerically larger raw clock value', () => {
+    // Regression for the reported bug: a task retried across multiple days
+    // has some subtask logs still in the legacy format (e.g. a subtask that
+    // last ran two days ago, ending at 22:58) and newer role logs in the
+    // dated format (e.g. today's QA review at 14:25). Naive HH:MM:SS string
+    // comparison ranks "22:58:26" after "14:25:35" — making two-day-old
+    // content look like the most recent line in the terminal, forever.
+    const legacy = parseRoleLog('coder', '[22:58:26] Stale — two days ago')[0];
+    const dated = parseRoleLog('qa', '[2026-07-23T14:25:35] Fresh — today')[0];
+    const sorted = [legacy, dated].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    expect(sorted.map(l => l.text)).toEqual(['Stale — two days ago', 'Fresh — today']);
+  });
+
+  it('orders dated lines across different days correctly', () => {
+    const day1 = parseRoleLog('qa', '[2026-07-21T23:00:00] Day 1 late')[0];
+    const day2 = parseRoleLog('qa', '[2026-07-22T01:00:00] Day 2 early')[0];
+    const sorted = [day1, day2].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    expect(sorted.map(l => l.text)).toEqual(['Day 1 late', 'Day 2 early']);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  parseCoderLogs
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -226,6 +277,21 @@ describe('parseCoderLogs', () => {
     ]);
     // separator + 2 non-blank lines
     expect(result).toHaveLength(3);
+  });
+
+  it('uses the dated sortKey for the separator when subtask content uses the dated format', () => {
+    const result = parseCoderLogs([
+      { id: 1, title: 'T', log: '[2026-07-23T10:00:05] First' },
+    ]);
+    expect(result[0].timestamp).toBe('10:00:05');
+    expect(result[0].sortKey).toBe('2026-07-23T10:00:05');
+  });
+
+  it('anchors the separator sortKey before dated content when the subtask log is legacy-format', () => {
+    const result = parseCoderLogs([
+      { id: 1, title: 'T', log: '[10:00:05] First' },
+    ]);
+    expect(result[0].sortKey).toBe('0000-00-00T10:00:05');
   });
 });
 
@@ -534,6 +600,38 @@ describe('UnifiedTerminal — component', () => {
 
       const specBtn = screen.getByText('Spec (Analyst)').closest('button')!;
       expect(specBtn.className).toContain('border-purple-500');
+    });
+  });
+
+  // ── Cross-day log ordering (regression) ─────────────────────────────────
+  //
+  // Regression test for a task whose terminal appeared permanently frozen
+  // on a two-day-old line. A coder subtask log (legacy `[HH:MM:SS]` format)
+  // ended with "You've hit your session limit" at 22:58 two days ago; a QA
+  // review retried today produces fresh dated-format lines starting at
+  // 14:25. Under the old plain-string HH:MM:SS sort, "22:58:26" > "14:25:35"
+  // lexically, so the stale line always rendered last (i.e. looked like the
+  // newest output) no matter how much fresh content arrived afterward.
+
+  describe('cross-day log ordering (regression)', () => {
+    it('renders a fresh dated-format line after a stale legacy-format line with a numerically later clock time', async () => {
+      render(<UnifiedTerminal {...makeDefaultProps({
+        subtaskTerminals: [
+          { id: 2, title: 'Fix oscillation', log: '[22:58:26] You\'ve hit your session limit' },
+        ],
+        qaLog: '[2026-07-23T14:25:35] QA review started',
+      })} />);
+
+      await waitFor(() => {
+        expect(mockTerminalWrite).toHaveBeenCalled();
+      });
+      const written = mockTerminalWrite.mock.calls.map(c => String(c[0] ?? '')).join('');
+
+      const staleIdx = written.indexOf('session limit');
+      const freshIdx = written.indexOf('QA review started');
+      expect(staleIdx).toBeGreaterThanOrEqual(0);
+      expect(freshIdx).toBeGreaterThanOrEqual(0);
+      expect(freshIdx).toBeGreaterThan(staleIdx);
     });
   });
 
