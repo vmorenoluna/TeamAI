@@ -535,7 +535,7 @@ export class Orchestrator {
    * Artifacts from phases BEFORE the given phase are kept as-is.
    * Called by stopTask before moving the task to backlog.
    */
-  cleanupTaskArtifacts(taskId: string, currentPhase: string): void {
+  async cleanupTaskArtifacts(taskId: string, currentPhase: string): Promise<void> {
     const dir = this.taskStore.getDirById(taskId);
     const pipelineOrder = ['spec', 'plan', 'implement', 'qa-review', 'merge'];
     const startIndex = pipelineOrder.indexOf(currentPhase);
@@ -565,7 +565,7 @@ export class Orchestrator {
     // isolated -stN branch — cherry-pick forward if possible, only reset
     // what can't be integrated.
     if (startIndex >= pipelineOrder.indexOf('implement')) {
-      this._reconcileSubtaskCompletionsOnStop(taskId, dir);
+      await this._reconcileSubtaskCompletionsOnStop(taskId, dir);
     }
 
     // Clean the worktree for plan/implement phases so the next run starts with a clean slate
@@ -598,7 +598,7 @@ export class Orchestrator {
    *     into the main worktree.  Success → keep.  Failure → reset *this
    *     subtask only* (not the whole task).
    */
-  private _reconcileSubtaskCompletionsOnStop(taskId: string, dir: string): void {
+  private async _reconcileSubtaskCompletionsOnStop(taskId: string, dir: string): Promise<void> {
     const planPath = path.join(dir, 'plan.json');
     if (!existsSync(planPath)) return;
 
@@ -648,7 +648,7 @@ export class Orchestrator {
       }
 
       // Delegate to the shared recovery helper (Defects 4 & 8).
-      const result = _recoverStBranchCommits(
+      const result = await _recoverStBranchCommits(
         this.projectRoot, execGitFn, logFile,
         pipelineBranch, stBranch, worktreePath, subtask.id,
       );

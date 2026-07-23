@@ -3953,30 +3953,30 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
     };
   }
 
-  it('returns true when subtask is already completed (skip)', () => {
+  it('returns true when subtask is already completed (skip)', async () => {
     const deps = makeDeps();
     const pipeline = makeImplPipeline();
     const subtask = { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: true };
 
-    const result = _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
+    const result = await _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
 
     expect(result).toBe(true); // safe to delete — subtask was already integrated
     expect(mockExecFileSync).not.toHaveBeenCalled(); // no git calls needed
   });
 
-  it('returns true when st-branch does not exist', () => {
+  it('returns true when st-branch does not exist', async () => {
     const deps = makeDeps();
     const pipeline = makeImplPipeline();
     const subtask = { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: false };
 
     mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
 
-    const result = _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
+    const result = await _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
 
     expect(result).toBe(true); // safe — nothing to recover
   });
 
-  it('returns true when st-branch exists but has no unintegrated commits (already on pipeline.branch)', () => {
+  it('returns true when st-branch exists but has no unintegrated commits (already on pipeline.branch)', async () => {
     const deps = makeDeps();
     const pipeline = makeImplPipeline();
     const subtask = { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: false };
@@ -3986,12 +3986,12 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
       .mockReturnValueOnce('abc123\n') // rev-parse
       .mockReturnValueOnce(''); // log — empty
 
-    const result = _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
+    const result = await _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
 
     expect(result).toBe(true); // already integrated, safe
   });
 
-  it('attempts cherry-pick and returns true on success', () => {
+  it('attempts cherry-pick and returns true on success', async () => {
     const deps = makeDeps();
     const pipeline = makeImplPipeline();
     const subtask = { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: false };
@@ -4003,7 +4003,7 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
 
     deps.execGit = vi.fn(); // succeeds (doesn't throw)
 
-    const result = _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
+    const result = await _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
 
     expect(result).toBe(true);
     expect(deps.execGit).toHaveBeenCalledWith(
@@ -4012,7 +4012,7 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
     );
   });
 
-  it('returns false when cherry-pick conflicts, preserving branch for merger', () => {
+  it('returns false when cherry-pick conflicts, preserving branch for merger', async () => {
     const deps = makeDeps();
     const pipeline = makeImplPipeline();
     const subtask = { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: false };
@@ -4025,14 +4025,14 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
     deps.execGit = vi.fn()
       .mockImplementationOnce(() => { throw new Error('CONFLICT'); }); // cherry-pick fails
 
-    const result = _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
+    const result = await _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
 
     expect(result).toBe(false); // preservation
     // Should have called cherry-pick --abort
     expect(deps.execGit).toHaveBeenCalledWith(['cherry-pick', '--abort'], pipeline.worktreePath);
   });
 
-  it('returns false when git log comparison fails (err on side of preservation)', () => {
+  it('returns false when git log comparison fails (err on side of preservation)', async () => {
     const deps = makeDeps();
     const pipeline = makeImplPipeline();
     const subtask = { id: 1, title: 'S1', description: '', files: [], acceptance_criteria: [], completed: false };
@@ -4042,7 +4042,7 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
       .mockReturnValueOnce('abc123\n') // rev-parse
       .mockImplementationOnce(() => { throw new Error('bad revision'); }); // log fails
 
-    const result = _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
+    const result = await _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
 
     // Err on side of preservation — don't delete branch if we can't verify
     expect(result).toBe(false);
@@ -4065,11 +4065,11 @@ describe('_recoverStBranchCommits (shared helper)', () => {
     project.clean();
   });
 
-  it('returns recovered:true with empty commits when st-branch does not exist', () => {
+  it('returns recovered:true with empty commits when st-branch does not exist', async () => {
     mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
 
     const execGitFn = vi.fn();
-    const result = _recoverStBranchCommits(
+    const result = await _recoverStBranchCommits(
       project.root, execGitFn, '/tmp/log',
       'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
     );
@@ -4080,13 +4080,13 @@ describe('_recoverStBranchCommits (shared helper)', () => {
     expect(mockExecFileSync).toHaveBeenCalledWith('git', ['rev-parse', '--verify', 'feat/main-st1'], expect.anything());
   });
 
-  it('returns recovered:true with empty commits when branch exists but no unintegrated commits', () => {
+  it('returns recovered:true with empty commits when branch exists but no unintegrated commits', async () => {
     mockExecFileSync
       .mockReturnValueOnce('abc123\n')  // rev-parse
       .mockReturnValueOnce('');          // log — empty = no unintegrated commits
 
     const execGitFn = vi.fn();
-    const result = _recoverStBranchCommits(
+    const result = await _recoverStBranchCommits(
       project.root, execGitFn, '/tmp/log',
       'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
     );
@@ -4095,13 +4095,13 @@ describe('_recoverStBranchCommits (shared helper)', () => {
     expect(execGitFn).not.toHaveBeenCalled();
   });
 
-  it('returns recovered:false with empty commits when git log throws', () => {
+  it('returns recovered:false with empty commits when git log throws', async () => {
     mockExecFileSync
       .mockReturnValueOnce('abc123\n')                    // rev-parse
       .mockImplementationOnce(() => { throw new Error('bad revision'); }); // log fails
 
     const execGitFn = vi.fn();
-    const result = _recoverStBranchCommits(
+    const result = await _recoverStBranchCommits(
       project.root, execGitFn, '/tmp/log',
       'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
     );
@@ -4110,13 +4110,13 @@ describe('_recoverStBranchCommits (shared helper)', () => {
     expect(execGitFn).not.toHaveBeenCalled(); // cherry-pick not attempted
   });
 
-  it('cherry-picks successfully and returns commits', () => {
+  it('cherry-picks successfully and returns commits', async () => {
     mockExecFileSync
       .mockReturnValueOnce('abc123\n')                         // rev-parse
       .mockReturnValueOnce('abc123 fix bug\ndef456 add test\n'); // log
 
     const execGitFn = vi.fn(); // doesn't throw = cherry-pick success
-    const result = _recoverStBranchCommits(
+    const result = await _recoverStBranchCommits(
       project.root, execGitFn, '/tmp/log',
       'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
     );
@@ -4129,7 +4129,7 @@ describe('_recoverStBranchCommits (shared helper)', () => {
     );
   });
 
-  it('aborts and returns recovered:false with commits on cherry-pick conflict', () => {
+  it('aborts and returns recovered:false with commits on cherry-pick conflict', async () => {
     mockExecFileSync
       .mockReturnValueOnce('abc123\n')                         // rev-parse
       .mockReturnValueOnce('abc123 fix bug\n');                 // log
@@ -4137,7 +4137,7 @@ describe('_recoverStBranchCommits (shared helper)', () => {
     const execGitFn = vi.fn()
       .mockImplementationOnce(() => { throw new Error('CONFLICT'); }); // cherry-pick fails
 
-    const result = _recoverStBranchCommits(
+    const result = await _recoverStBranchCommits(
       project.root, execGitFn, '/tmp/log',
       'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
     );
@@ -4148,13 +4148,13 @@ describe('_recoverStBranchCommits (shared helper)', () => {
     expect(execGitFn).toHaveBeenCalledWith(['cherry-pick', '--abort'], '/tmp/worktree');
   });
 
-  it('passes correct git args to execFileSync (rev-parse in projectRoot, log with range)', () => {
+  it('passes correct git args to execFileSync (rev-parse in projectRoot, log with range)', async () => {
     mockExecFileSync
       .mockReturnValueOnce('abc\n')
       .mockReturnValueOnce('');
 
     const execGitFn = vi.fn();
-    _recoverStBranchCommits(
+    await _recoverStBranchCommits(
       project.root, execGitFn, '/tmp/log',
       'feat/main', 'feat/main-st1', '/tmp/worktree', 42,
     );
@@ -4169,5 +4169,110 @@ describe('_recoverStBranchCommits (shared helper)', () => {
       'git', ['log', 'feat/main..feat/main-st1', '--oneline'],
       expect.objectContaining({ cwd: project.root }),
     );
+  });
+
+  // ── Infra-retry path (Defect 3 parity — gap found in code review) ──────
+  // _recoverStBranchCommits shares the "dead container is retryable, not a
+  // genuine conflict" logic added for Defect 3's tryCherryPickWithRecovery,
+  // but had its own separate cherry-pick call site that didn't originally
+  // apply it. These tests exercise that retry loop directly (with fake
+  // timers to skip the real backoff delay), rather than punting on it like
+  // the equivalent Defect 3 tests do.
+
+  it('recovers after reprovisioning the container on an infra-class cherry-pick failure', async () => {
+    vi.useFakeTimers();
+    try {
+      mockExecFileSync
+        .mockReturnValueOnce('abc123\n') // rev-parse
+        .mockReturnValueOnce('abc123 unintegrated commit\n'); // log
+
+      const { readContainerConfig, containerManager } = await import('../../src/lib/container-manager');
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(containerManager.ensureContainer).mockResolvedValue({
+        containerId: 'cont-recovered', remoteWorkspaceFolder: '/workspaces/project',
+      });
+
+      let cherryPickAttempt = 0;
+      const execGitFn = vi.fn((args: string[]) => {
+        if (args[0] === 'cherry-pick' && args[1] !== '--abort') {
+          cherryPickAttempt++;
+          if (cherryPickAttempt === 1) {
+            throw new Error('fatal: not a git repository: (null)');
+          }
+          return; // retry succeeds
+        }
+        // '--abort' — no-op
+      });
+
+      const resultPromise = _recoverStBranchCommits(
+        project.root, execGitFn, '/tmp/log',
+        'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
+      );
+      await vi.advanceTimersByTimeAsync(1000); // skip the 1s backoff
+      const result = await resultPromise;
+
+      expect(result).toEqual({ recovered: true, commits: ['abc123 unintegrated commit'] });
+      expect(containerManager.ensureContainer).toHaveBeenCalledTimes(1);
+      expect(cherryPickAttempt).toBe(2); // 1 failed attempt + 1 successful retry
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('exhausts infra retries and returns recovered:false when the container never comes back', async () => {
+    vi.useFakeTimers();
+    try {
+      mockExecFileSync
+        .mockReturnValueOnce('abc123\n') // rev-parse
+        .mockReturnValueOnce('abc123 unintegrated commit\n'); // log
+
+      const { readContainerConfig, containerManager } = await import('../../src/lib/container-manager');
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(containerManager.ensureContainer).mockResolvedValue({
+        containerId: 'cont-still-broken', remoteWorkspaceFolder: '/workspaces/project',
+      });
+
+      const execGitFn = vi.fn((args: string[]) => {
+        if (args[0] === 'cherry-pick' && args[1] !== '--abort') {
+          throw new Error('fatal: not a git repository: (null)'); // always fails
+        }
+      });
+
+      const resultPromise = _recoverStBranchCommits(
+        project.root, execGitFn, '/tmp/log',
+        'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
+      );
+      await vi.advanceTimersByTimeAsync(1000); // 1st retry backoff
+      await vi.advanceTimersByTimeAsync(1000); // 2nd retry backoff
+      const result = await resultPromise;
+
+      // Preserved (not deleted) — commits are still reported for logging,
+      // matching the non-infra conflict path's contract.
+      expect(result).toEqual({ recovered: false, commits: ['abc123 unintegrated commit'] });
+      expect(containerManager.ensureContainer).toHaveBeenCalledTimes(2); // both retries attempted
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not attempt infra retry when container mode is disabled', async () => {
+    mockExecFileSync
+      .mockReturnValueOnce('abc123\n') // rev-parse
+      .mockReturnValueOnce('abc123 unintegrated commit\n'); // log
+
+    const { readContainerConfig, containerManager } = await import('../../src/lib/container-manager');
+    vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
+
+    const execGitFn = vi.fn(() => {
+      throw new Error('fatal: not a git repository: (null)');
+    });
+
+    const result = await _recoverStBranchCommits(
+      project.root, execGitFn, '/tmp/log',
+      'feat/main', 'feat/main-st1', '/tmp/worktree', 1,
+    );
+
+    expect(result).toEqual({ recovered: false, commits: ['abc123 unintegrated commit'] });
+    expect(containerManager.ensureContainer).not.toHaveBeenCalled();
   });
 });

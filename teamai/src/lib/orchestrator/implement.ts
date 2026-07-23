@@ -833,7 +833,7 @@ export async function runImplement(
         // before force-deleting the branch. Without this, a retry after a
         // mid-implement failure silently discards finished subtask work that
         // was never cherry-picked onto the feature branch.
-        const canRecreate = _recoverSubtaskBranchBeforeDelete(pipeline, deps, logFile, stBranch, subtask);
+        const canRecreate = await _recoverSubtaskBranchBeforeDelete(pipeline, deps, logFile, stBranch, subtask);
 
         // Clean up old worktree directory (common to both paths)
         try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch { /* best-effort */ }
@@ -1030,10 +1030,17 @@ export interface StBranchRecoveryResult {
  * @param worktreePath The main worktree path to cherry-pick into.
  * @param subtaskId    For log context only.
  *
+ * On a dead-container/infra-class cherry-pick failure (Defect 3 parity),
+ * reprovisions the container via `containerManager.ensureContainer()` and
+ * retries up to 2 times before falling back to preserving the branch as-is.
+ * Without this, a transient infra hiccup at exactly the moment of recovery
+ * (worktree setup or Stop) would be misdiagnosed as a genuine conflict and
+ * cause an avoidable reset/preserve instead of a trivial retry.
+ *
  * @internal — exported for use by {@link Orchestrator._reconcileSubtaskCompletionsOnStop}
  *             and unit tests. Not part of the public API.
  */
-export function _recoverStBranchCommits(
+export async function _recoverStBranchCommits(
   projectRoot: string,
   execGitFn: (args: string[], hostCwd: string) => void,
   logFile: string,
@@ -1041,7 +1048,7 @@ export function _recoverStBranchCommits(
   stBranch: string,
   worktreePath: string,
   subtaskId: number,
-): StBranchRecoveryResult {
+): Promise<StBranchRecoveryResult> {
   const none: StBranchRecoveryResult = { recovered: true, commits: [] };
 
   // Check if the branch exists
@@ -1083,12 +1090,40 @@ export function _recoverStBranchCommits(
     return { recovered: true, commits };
   } catch (cpErr) {
     const cpMsg = cpErr instanceof Error ? cpErr.message : String(cpErr);
+    // Abort any in-progress cherry-pick before deciding how to handle the failure
+    try { execGitFn(['cherry-pick', '--abort'], worktreePath); } catch { /* best-effort */ }
+
+    // Defect 3 parity: a dead-container/infra error here is trivially
+    // retryable once the container is back — don't treat it the same as a
+    // genuine content conflict that needs the merger agent.
+    if (isInfraError(cpMsg) && readContainerConfig(projectRoot).enabled) {
+      for (let retry = 0; retry < 2; retry++) {
+        appendFileSync(logFile,
+          '[WORKTREE] Infra error recovering ' + stBranch + ' — reprovisioning container and retrying (attempt ' + (retry + 1) + '/2)\n'
+        );
+        try {
+          await containerManager.ensureContainer(projectRoot, logFile);
+          await new Promise(r => setTimeout(r, 1000)); // brief backoff for container stabilisation
+          execGitFn(['cherry-pick', pipelineBranch + '..' + stBranch], worktreePath);
+          appendFileSync(logFile,
+            '[WORKTREE] Auto-recovered ' + commits.length + ' commit(s) from ' + stBranch +
+            ' onto ' + pipelineBranch + ' after infra retry\n'
+          );
+          return { recovered: true, commits };
+        } catch (retryErr) {
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          appendFileSync(logFile, '[WORKTREE] Recovery retry ' + (retry + 1) + ' for ' + stBranch + ' failed: ' + retryMsg + '\n');
+          try { execGitFn(['cherry-pick', '--abort'], worktreePath); } catch { /* best-effort */ }
+        }
+      }
+      appendFileSync(logFile, '[WORKTREE] Infra retries exhausted for ' + stBranch + ' — cannot auto-recover\n');
+      return { recovered: false, commits };
+    }
+
     appendFileSync(logFile,
       '[WORKTREE] Cherry-pick recovery conflicted for ' + stBranch + ': ' + cpMsg + '\n' +
       '[WORKTREE] Branch ' + stBranch + ' preserved as-is — merger agent will resolve during cherry-pick phase\n'
     );
-    // Abort any in-progress cherry-pick
-    try { execGitFn(['cherry-pick', '--abort'], worktreePath); } catch { /* best-effort */ }
     return { recovered: false, commits };
   }
 }
@@ -1107,17 +1142,17 @@ export function _recoverStBranchCommits(
  *
  * @internal — exported for unit tests only. Not part of the public API.
  */
-export function _recoverSubtaskBranchBeforeDelete(
+export async function _recoverSubtaskBranchBeforeDelete(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
   logFile: string,
   stBranch: string,
   subtask: PlanSubtask,
-): boolean {
+): Promise<boolean> {
   // Skip if subtask is already marked complete — its work was already integrated
   if (subtask.completed) return true;
 
-  const result = _recoverStBranchCommits(
+  const result = await _recoverStBranchCommits(
     deps.projectRoot, deps.execGit, logFile,
     pipeline.branch, stBranch, pipeline.worktreePath, subtask.id,
   );
@@ -1191,10 +1226,11 @@ export async function tryCherryPickWithRecovery(
       // Check if container mode is active and attempt reprovision
       if (readContainerConfig(deps.projectRoot).enabled) {
         for (let retry = 0; retry < 2; retry++) {
-          appendFileSync(logFile, '[WORKTREE] Infra error detected — reprovisioning container and retrying cherry-pick (attempt ' + (retry + 1) + '/2)\n');          try {
-                await containerManager.ensureContainer(deps.projectRoot, logFile);
-                await new Promise(r => setTimeout(r, 1000)); // brief backoff for container stabilisation
-                deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
+          appendFileSync(logFile, '[WORKTREE] Infra error detected — reprovisioning container and retrying cherry-pick (attempt ' + (retry + 1) + '/2)\n');
+          try {
+            await containerManager.ensureContainer(deps.projectRoot, logFile);
+            await new Promise(r => setTimeout(r, 1000)); // brief backoff for container stabilisation
+            deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
             appendFileSync(logFile, '[WORKTREE] Cherry-pick recovered after infra retry for subtask ' + subtaskId + '\n');
             return true;
           } catch (retryErr) {

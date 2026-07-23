@@ -1112,7 +1112,7 @@ describe('resetAllCounters — persistedCriterionFailCounts clearing', () => {
     expect(restored!.persistedCriterionFailCounts!['Criterion B']).toBe(4);
   });
 
-  it('cleanupTaskArtifacts for qa-review phase deletes qa_report_before_bounce.json', () => {
+  it('cleanupTaskArtifacts for qa-review phase deletes qa_report_before_bounce.json', async () => {
     // Write the bounce snapshot
     writeFileSync(join(project.taskDir, 'qa_report_before_bounce.json'), JSON.stringify({
       overall: 'FAIL',
@@ -1122,7 +1122,7 @@ describe('resetAllCounters — persistedCriterionFailCounts clearing', () => {
     expect(existsSync(join(project.taskDir, 'qa_report_before_bounce.json'))).toBe(true);
 
     // Call cleanupTaskArtifacts for qa-review phase
-    (orch as AnyOrch).cleanupTaskArtifacts(project.taskId, 'qa-review');
+    await (orch as AnyOrch).cleanupTaskArtifacts(project.taskId, 'qa-review');
 
     // The bounce snapshot should be deleted
     expect(existsSync(join(project.taskDir, 'qa_report_before_bounce.json'))).toBe(false);
