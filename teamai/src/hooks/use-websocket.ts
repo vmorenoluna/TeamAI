@@ -9,7 +9,11 @@ export interface UseWebSocketOptions {
   onMessage?: (data: Record<string, unknown>) => void;
   /** Called when the connection state changes. */
   onConnectionChange?: (connected: boolean) => void;
-  /** Maximum reconnection attempts (default 10). */
+  /**
+   * Number of exponential-backoff attempts before reconnection settles into
+   * a flat retry at `maxReconnectDelayMs` (default 10). Reconnection never
+   * stops entirely — after this many tries it just stops growing the delay.
+   */
   maxReconnectAttempts?: number;
   /** Base delay in ms (default 500). */
   baseReconnectDelayMs?: number;
@@ -51,12 +55,20 @@ export function useWebSocket(opts?: UseWebSocketOptions) {
     const resolvedUrl = project ? `${baseUrl}?project=${encodeURIComponent(project)}` : baseUrl;
 
     function scheduleReconnect() {
-      if (closed || reconnectAttempt >= maxReconnectAttempts) return;
+      if (closed) return;
       reconnectAttempt++;
-      const delay = Math.min(
-        baseReconnectDelayMs * Math.pow(2, reconnectAttempt - 1) + Math.random() * 1000,
-        maxReconnectDelayMs,
-      );
+      // Exponential backoff (with jitter) for the first `maxReconnectAttempts`
+      // tries; after that, keep retrying forever at the max interval instead
+      // of giving up. A long-lived tab (open across a dev-server restart, a
+      // container reprovision, or any outage over ~90s) must reconnect on
+      // its own — the alternative is a terminal view that silently freezes
+      // with no way to recover short of a manual page reload.
+      const delay = reconnectAttempt > maxReconnectAttempts
+        ? maxReconnectDelayMs
+        : Math.min(
+            baseReconnectDelayMs * Math.pow(2, reconnectAttempt - 1) + Math.random() * 1000,
+            maxReconnectDelayMs,
+          );
       reconnectTimer = setTimeout(() => {
         if (!closed) createConnection();
       }, delay);
