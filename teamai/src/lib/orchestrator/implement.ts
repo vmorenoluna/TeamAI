@@ -178,21 +178,25 @@ export function selectSubtasks(
     }
   }
 
-  // Only re-run QA-flagged subtasks on bounce-back
+  // Only re-run QA-flagged subtasks on bounce-back. The synthetic rework
+  // subtask (id 9999, see below) is excluded from this real-subtask pool:
+  // every bounce that reaches the fallback must synthesise a fresh one from
+  // the *current* qa_feedback.md, never replay a stale persisted copy.
+  const realSubtasks = plan.subtasks.filter((s: PlanSubtask) => s.id !== 9999);
   const subtasksToRun = hasQaFeedback
-    ? plan.subtasks.filter((s: PlanSubtask) => s.qa_flagged)
-    : plan.subtasks.filter((s: PlanSubtask) => !s.completed);
+    ? realSubtasks.filter((s: PlanSubtask) => s.qa_flagged)
+    : realSubtasks.filter((s: PlanSubtask) => !s.completed);
 
   let effectiveSubtasks: PlanSubtask[];
   if (hasQaFeedback && subtasksToRun.length === 0) {
     const allFiles: string[] = [...new Set<string>(
-      plan.subtasks.flatMap((s: PlanSubtask) => s.files ?? [])
+      realSubtasks.flatMap((s: PlanSubtask) => s.files ?? [])
     )];
     let qaContent = '';
     try { qaContent = readFileSync(qaFeedbackPath, 'utf-8'); } catch { /* best-effort */ }
     const logFile = path.join(pipeline.specPath, 'output.log');
     appendFileSync(logFile, '\n[QA-FALLBACK] Criterion matching flagged no subtasks — synthesising targeted rework subtask from qa_feedback.md\n');
-    effectiveSubtasks = [{
+    const synthesizedSubtask: PlanSubtask = {
       id: 9999,
       title: 'QA Rework: fix failing criteria (criterion matching found no flagged subtasks)',
       description: buildSyntheticReworkDescription(qaContent),
@@ -202,7 +206,22 @@ export function selectSubtasks(
       parallel_group: 'QA-REWORK',
       qa_flagged: true,
       completed: false,
-    }];
+    };
+    effectiveSubtasks = [synthesizedSubtask];
+
+    // Persist the synthesized subtask into plan.json (upserting over any
+    // stale 9999 entry from a prior bounce). Without this, plan.json's
+    // subtasks array never mentions id 9999, and getTaskFull() — which
+    // reads output-st<id>.log only for ids present in plan.subtasks — can
+    // never surface output-st9999.log to the UI's terminal tab. The coder
+    // tab would then be stuck showing whichever real subtask last ran,
+    // forever, regardless of how many QA-rework bounces happen afterward.
+    plan.subtasks = [...realSubtasks, synthesizedSubtask];
+    try {
+      const tmpPath = planPath + '.tmp';
+      writeFileSync(tmpPath, JSON.stringify(plan, null, 2));
+      renameSync(tmpPath, planPath);
+    } catch { /* best-effort — pipeline proceeds even if this write fails */ }
   } else {
     effectiveSubtasks = subtasksToRun;
   }

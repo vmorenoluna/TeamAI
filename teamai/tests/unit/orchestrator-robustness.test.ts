@@ -2255,6 +2255,88 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       await vi.advanceTimersByTimeAsync(30);
 
       await promise;
+
+      // The synthesized subtask must be persisted into plan.json, not just
+      // held in memory — getTaskFull() reads output-st<id>.log only for ids
+      // present in plan.subtasks, so without this the UI's terminal tab can
+      // never discover output-st9999.log and stays stuck showing whichever
+      // real subtask last ran.
+      const planAfter = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      const synthetic = planAfter.subtasks.find((s: { id: number }) => s.id === 9999);
+      expect(synthetic).toBeDefined();
+      expect(synthetic.completed).toBe(true);
+      // qa_flagged is cleared by the post-completion cleanup, same as any
+      // other subtask that finishes successfully (see the dedicated
+      // "cleans up qa_flagged markers" test below).
+      expect(synthetic.qa_flagged).toBeUndefined();
+      // Original subtasks are untouched
+      expect(planAfter.subtasks.find((s: { id: number }) => s.id === 1).completed).toBe(true);
+      expect(planAfter.subtasks.find((s: { id: number }) => s.id === 2).completed).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('re-synthesises a fresh rework subtask on a second bounce instead of replaying the persisted one', async () => {
+    // Scenario: a first QA-fallback bounce already persisted subtask 9999
+    // (completed, describing stale feedback). A second bounce arrives with
+    // NEW qa_feedback.md content and still no real subtask flagged. The
+    // fallback must synthesise fresh content from the current feedback —
+    // not skip synthesis because a completed 9999 entry already exists.
+    const planPath = join(project.taskDir, 'plan.json');
+    writeFileSync(planPath, JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Add login', description: 'Build login page', files: ['src/login.ts'], acceptance_criteria: ['Works'], completed: true },
+        {
+          id: 9999,
+          title: 'QA Rework: fix failing criteria (criterion matching found no flagged subtasks)',
+          description: 'STALE — from the first bounce',
+          files: ['src/login.ts'],
+          depends_on: [],
+          acceptance_criteria: ['All criteria listed in the QA feedback above are satisfied'],
+          parallel_group: 'QA-REWORK',
+          qa_flagged: true,
+          completed: true,
+        },
+      ],
+    }));
+
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nSecond bounce — brand new failure');
+
+    mockCreateSession.mockResolvedValue('sess-synthetic-2');
+
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 2,
+      maxQaAttempts: 3,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
+
+      // Fresh synthesis must run — not a no-op skip because 9999 already exists
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+      const prompt = mockSendMessage.mock.calls[0][1];
+      expect(prompt).toContain('Second bounce — brand new failure');
+      expect(prompt).not.toContain('STALE — from the first bounce');
+
+      fireEvent('event', { sessionId: 'sess-synthetic-2', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(30);
+      await promise;
+
+      // plan.json must have exactly one 9999 entry (upserted, not duplicated)
+      // and it must carry the new description, not the stale one.
+      const planAfter = JSON.parse(readFileSync(planPath, 'utf-8'));
+      const syntheticEntries = planAfter.subtasks.filter((s: { id: number }) => s.id === 9999);
+      expect(syntheticEntries).toHaveLength(1);
+      expect(syntheticEntries[0].description).not.toContain('STALE — from the first bounce');
+      expect(syntheticEntries[0].completed).toBe(true);
     } finally {
       executeSpy.mockRestore();
     }
