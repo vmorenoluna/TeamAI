@@ -22,12 +22,23 @@ When a subtask requires running a script, server, or service to verify your work
 - **Run from the worktree.** Start everything from your current working directory (the task's git worktree), NOT the base project root. The worktree contains your branch's code — running from the project root exercises the wrong revision and produces meaningless results.
 - **Use dynamic ports.** When starting a local server, bind to port 0 (OS-assigned free port) so each concurrent task gets an isolated instance. Never hardcode a fixed shared port. Read the actual bound port from the process output to address the service.
 - **Never kill what you didn't start.** Do NOT use `kill`, `fuser -k`, `taskkill`, or equivalent against any port or process. Another task's agent may be using it. Only stop processes you yourself spawned in this session.
-- **Stop your own instances.** When verification is complete, explicitly tear down any server or service you started. Track its PID so teardown targets exactly your instance.
-- **Size wakeup timeouts realistically.** If you need to schedule a wakeup for a
-  background job, estimate its completion time from actual throughput data — not
-  an optimistic guess. An undersized wakeup fires before the job finishes,
-  wasting a session on a re-entry that can do nothing but write another wakeup file.
-  Always add a 20% safety margin to your estimate.
+- **Stop your own instances — unless the job needs to outlive this session.** For verification that finishes within your current turn, explicitly tear down any server or service you started, tracking its PID so teardown targets exactly your instance. For a job long enough to need a wakeup (below), do the opposite: **detach it** (`nohup <command> > job.log 2>&1 & disown`) so it keeps running after your session ends — a bare `&` alone only backgrounds within your current shell and dies the instant your session exits, which silently discards all progress. Write its log and PID file inside the worktree, not a container-local temp path, so they survive even if the container is reprovisioned during a long wait.
+- **Pausing and resuming a long job — write a wakeup file, do not call an interactive `ScheduleWakeup`-style tool.** Any such tool is an interactive-session feature and is a no-op in this pipeline. The orchestrator's own resume mechanism only understands one thing: a file named `subtask_wakeup-st<your subtask id>.json`, written to the task's `.teamai/{slug}/` directory, with this exact shape:
+  ```json
+  {
+    "subtask_id": <your subtask id, integer>,
+    "wakeup_at": "<ISO8601 timestamp>",
+    "background_command": "<the exact command you launched, for your own reference on wakeup>",
+    "expected_artifact": "<path to the file that should exist once the job is done>"
+  }
+  ```
+  **Size `wakeup_at` realistically** — estimate completion from actual throughput data the job itself reports, not an optimistic guess, and add a 20% safety margin. An undersized wakeup fires before the job finishes, wasting a session on a re-entry that can do nothing but write another wakeup file.
+
+  The orchestrator re-enters you at `wakeup_at` with a `⚠️ WAKEUP RE-ENTRY` header. On re-entry, check whether the detached process (via its PID file) is still alive:
+  - **Still running**: read its latest reported progress, reschedule — write a fresh `subtask_wakeup-st<id>.json` with an updated `wakeup_at`, and end again.
+  - **Finished**: verify the output and mark the subtask done.
+  - **Crashed or exited with an error**: do NOT write another wakeup file — report the failure immediately so the task can advance to `failed` without burning the remaining wakeup attempts on a job that's never coming back.
+- **Committing verification artifacts.** If a required verification artifact isn't showing up as committed even though you ran `git add`, check whether the project's own `.gitignore` is silently excluding it (a common pattern for anything under a `logs/` or similar directory) — an artifact your task is specifically required to commit is an intentional exception, so force it: `git add -f <path>`. A commit that "succeeds" without the file actually staged is a task-failing trap: nothing downstream can verify a criterion whose evidence never made it into the diff.
 
 ## Guardrails
 - If the task description is ambiguous, read the spec for clarification rather than guessing.
