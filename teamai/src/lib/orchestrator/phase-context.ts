@@ -70,7 +70,7 @@ export interface PhaseContext {
   autoReviseSpec: (pipeline: TaskPipeline) => Promise<void>;
 
   // ── Config ──
-  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxDeliverableFails: number; maxWakeupAttempts: number };
+  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxDeliverableFails: number; maxWakeupAttempts: number; maxStallRecoveries: number };
 
   // ── Plan write lock ──
   /** Mutable reference to the plan-write serialisation lock. */

@@ -55,6 +55,14 @@ export interface AgentSession {
    */
   toolInFlight: boolean;
   /**
+   * Set by killSession's optional `reason` param. Lets a consumer of the
+   * resulting SessionKilledError (see waitForCompletion) distinguish a
+   * stall-detector kill (recoverable — the coder gets a chance to react)
+   * from a deliberate stop (stopTask/cancelPipeline — must never trigger an
+   * automatic retry). Undefined for any kill that doesn't pass a reason.
+   */
+  killReason?: 'stalled';
+  /**
    * Per-session EventEmitter scoped to this session only.
    * Used by {@link waitForCompletion} to avoid piling listeners
    * on the global {@link processManager} emitter (BUG-20 / T29).
@@ -243,10 +251,17 @@ export class ProcessManager extends EventEmitter {
 
   /**
    * Kill a session's subprocess.
+   *
+   * @param reason When set to 'stalled' (only sweepStalledTasks' stall-detector kill
+   * does this), the resulting SessionKilledError carries the same reason so
+   * runSubtaskSession can offer the coder a recovery retry instead of
+   * failing the task outright. Omit for a deliberate stop (stopTask /
+   * cancelPipeline) — those must never trigger an automatic retry.
    */
-  killSession(sessionId: string): void {
+  killSession(sessionId: string, reason?: 'stalled'): void {
     const session = this.sessions.get(sessionId);
     if (session) {
+      if (reason) session.killReason = reason;
       session.process.kill('SIGTERM');
       // SIGKILL fallback after a grace period if the process ignores SIGTERM
       // Use exitCode instead of process.killed (killed is set synchronously by SIGTERM above)

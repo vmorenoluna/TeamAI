@@ -249,10 +249,12 @@ export class Orchestrator {
       if (savedState.mergeStrategy) pipeline.mergeStrategy = savedState.mergeStrategy;
       if (savedState.qaAttempt !== undefined) pipeline.qaAttempt = savedState.qaAttempt;
       if (savedState.deliverableFailCounts !== undefined) pipeline.deliverableFailCounts = savedState.deliverableFailCounts;
+      if (savedState.stallRecoveryCounts !== undefined) pipeline.stallRecoveryCounts = savedState.stallRecoveryCounts;
       if (savedState.wakeupUntil !== undefined) pipeline.wakeupUntil = savedState.wakeupUntil;
       if (savedState.wakeupSubtaskId !== undefined) pipeline.wakeupSubtaskId = savedState.wakeupSubtaskId;
       if (savedState.wakeupCommand !== undefined) pipeline.wakeupCommand = savedState.wakeupCommand;
       if (savedState.wakeupArtifact !== undefined) pipeline.wakeupArtifact = savedState.wakeupArtifact;
+      if (savedState.wakeupProgressPath !== undefined) pipeline.wakeupProgressPath = savedState.wakeupProgressPath;
       if (savedState.wakeupAttemptCount !== undefined) pipeline.wakeupAttemptCount = savedState.wakeupAttemptCount;
       if (savedState.persistedCriterionFailCounts !== undefined) pipeline.persistedCriterionFailCounts = savedState.persistedCriterionFailCounts;
       if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;

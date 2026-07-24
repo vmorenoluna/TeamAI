@@ -10,7 +10,7 @@
 import { execFileSync } from 'child_process';
 import { getToolPath } from '../tool-checker';
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, rmSync } from 'fs';
-import { PipelineConfigError, WorktreeError, PushVerificationError } from './errors';
+import { PipelineConfigError, WorktreeError, PushVerificationError, SessionKilledError } from './errors';
 import { readJsonFile } from '../json-io';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
@@ -45,7 +45,7 @@ export interface ImplementDeps {
   restoreQaReportFromSnapshot: (specPath: string) => void;
   restoreHumanFeedbackFromSnapshot: (specPath: string) => void;
   writeQaFeedback: (pipeline: ImplementPipeline, report: QaReport) => void;
-  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxDeliverableFails: number; maxWakeupAttempts: number };
+  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxDeliverableFails: number; maxWakeupAttempts: number; maxStallRecoveries: number };
   phaseHeader: (logFile: string, phase: string) => void;
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
@@ -308,18 +308,6 @@ async function runSubtaskSession(
   }
 
   const subtaskLogFile = path.join(pipeline.specPath, `output-st${subtask.id}.log`);
-  let sessionId: string;
-  try {
-    sessionId = await processManager.createSession(deps.sessionOpts(coderRole, cwd, pipeline.taskId, subtaskLogFile));
-    // Serialised through a lock so parallel subtasks don't race on the JSON file.
-    sessionMapLock.current = sessionMapLock.current.then(() => {
-      updateSessionMap(pipeline.specPath, String(subtask.id), sessionId);
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    appendFileSync(logFile, '\n[ERROR] Session creation failed for subtask ' + subtask.id + ': ' + msg + '\n');
-    throw err;
-  }
 
   const qaOnlyCriteria = hasQaFeedback
     ? subtask.acceptance_criteria.filter(ac => ac.includes('[QA CORRECTION') || ac.includes('[QA ISSUE'))
@@ -413,7 +401,10 @@ async function runSubtaskSession(
         'After fixing all issues, run the FULL test suite to verify no regressions.\n'
       : '');
 
-  // Snapshot HEAD before the agent session starts (for post-session scope check)
+  // Snapshot HEAD before the agent session starts (for post-session scope check).
+  // Taken once, before the FIRST attempt — a stall-recovery retry (below)
+  // must measure the cumulative diff across every attempt on this subtask,
+  // not just the last one.
   let preSessionHead = '';
   try {
     preSessionHead = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -421,9 +412,76 @@ async function runSubtaskSession(
     }).trim();
   } catch { /* best-effort — scope check is skipped if snapshot fails */ }
 
-  processManager.sendMessage(sessionId, prompt);
+  // Stall-detector-kill recovery loop. A session killed for stalling
+  // (killReason 'stalled' — 30+ min with a tool call in flight and zero
+  // output) doesn't necessarily mean the work is unrecoverable: the command
+  // may have actually finished, or the coder may just need to diagnose why
+  // it hung. Give it a bounded number of fresh-session retries before
+  // failing outright. A deliberate stop (killReason unset) is never
+  // retried — it rethrows immediately, exactly as before this loop existed.
+  let sessionId: string;
+  let stallRecoveryHeader = '';
+  for (;;) {
+    try {
+      sessionId = await processManager.createSession(deps.sessionOpts(coderRole, cwd, pipeline.taskId, subtaskLogFile));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      appendFileSync(logFile, '\n[ERROR] Session creation failed for subtask ' + subtask.id + ': ' + msg + '\n');
+      throw err;
+    }
+    // Serialised through a lock so parallel subtasks don't race on the JSON file.
+    sessionMapLock.current = sessionMapLock.current.then(() => {
+      updateSessionMap(pipeline.specPath, String(subtask.id), sessionId);
+    });
 
-  await deps.waitForCompletion(sessionId);
+    processManager.sendMessage(sessionId, stallRecoveryHeader + prompt);
+
+    try {
+      await deps.waitForCompletion(sessionId);
+      break;
+    } catch (err) {
+      if (!(err instanceof SessionKilledError) || err.reason !== 'stalled') throw err;
+
+      if (!pipeline.stallRecoveryCounts) pipeline.stallRecoveryCounts = {};
+      const attemptCount = (pipeline.stallRecoveryCounts[subtask.id] || 0) + 1;
+      pipeline.stallRecoveryCounts[subtask.id] = attemptCount;
+      const maxRecoveries = deps.getPipelineConfig().maxStallRecoveries;
+
+      if (attemptCount >= maxRecoveries) {
+        appendFileSync(logFile, '[STALL-RECOVERY] Subtask ' + subtask.id + ' exceeded stall-recovery cap (' + maxRecoveries + ') — advancing to failed\n');
+        const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+        writeFileSync(reportPath, JSON.stringify({
+          overall: 'FAIL',
+          criteria: [{
+            criterion: 'Session repeatedly stalled',
+            name: 'Session repeatedly stalled',
+            status: 'FAIL',
+            notes: 'Subtask ' + subtask.id + ' had its session killed for stalling (no output for 30+ minutes with a tool running) ' + maxRecoveries + ' time(s) in a row. This may indicate a genuine hang introduced by the change (an infinite loop, unbounded recursion, a non-terminating solver configuration) rather than an environment issue.',
+          }],
+        }, null, 2));
+        deps.advancePhase(pipeline, 'failed');
+        return;
+      }
+
+      appendFileSync(logFile, '[STALL-RECOVERY] Subtask ' + subtask.id + ' session killed (stalled, no output 30+min) — retrying with a fresh session (attempt ' + attemptCount + '/' + maxRecoveries + ')\n');
+      stallRecoveryHeader = '⚠️ SESSION RECOVERED AFTER STALL-KILL (attempt ' + attemptCount + '/' + maxRecoveries + ')\n\n' +
+        'Your previous session for this subtask was terminated by the orchestrator — it\n' +
+        'produced no output for over 30 minutes while a tool was running. Two distinct\n' +
+        'possibilities, and you need to tell them apart before doing anything else:\n\n' +
+        '1. The command was simply slow and unrelated to your changes (a cold compile, a\n' +
+        '   large test suite, a slow network call) — check git status/git diff for what\n' +
+        '   you\'d already done, and whether re-running the command now completes in a\n' +
+        '   reasonable time. If so, continue or re-run as needed.\n\n' +
+        '2. Your own change caused a genuine hang or pathological slowdown — an infinite\n' +
+        '   loop, unbounded recursion, a solver configuration that no longer terminates,\n' +
+        '   a resource leak, a join that becomes combinatorial. Re-running the exact same\n' +
+        '   command blind wastes your remaining attempts if this is the real cause — look\n' +
+        '   for it specifically. If you find one, fix the root cause (this is a code bug\n' +
+        '   in your own change, not a spec or environment issue) and verify the fix with\n' +
+        '   a bounded/timeout-guarded run before resuming normal work.\n\n';
+      // Loop and retry with a fresh session.
+    }
+  }
 
   processManager.killSession(sessionId);
 
@@ -540,6 +598,9 @@ async function runSubtaskSession(
     } else {
       if (pipeline.deliverableFailCounts?.[subtask.id] !== undefined) {
         delete pipeline.deliverableFailCounts[subtask.id];
+      }
+      if (pipeline.stallRecoveryCounts?.[subtask.id] !== undefined) {
+        delete pipeline.stallRecoveryCounts[subtask.id];
       }
       completedIds.push(subtask.id);
     }

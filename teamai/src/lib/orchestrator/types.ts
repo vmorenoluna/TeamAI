@@ -27,6 +27,12 @@ export interface TaskPipeline {
   sessionId?: string;
   /** Per-subtask counter of consecutive files_to_create failures. Key = subtask ID, value = count. */
   deliverableFailCounts?: Record<number, number>;
+  /** Per-subtask counter of stall-detector kills recovered from (session
+   *  killed with killReason 'stalled', then retried with a fresh session).
+   *  Key = subtask ID, value = count. Capped by maxStallRecoveries — once
+   *  exceeded, the subtask fails with a clear reason instead of retrying
+   *  forever against a command that's genuinely, repeatedly too slow. */
+  stallRecoveryCounts?: Record<number, number>;
   /** ISO timestamp — wakeup scheduled until this time (ADR 002) */
   wakeupUntil?: string;
   /** Subtask ID that triggered the wakeup (ADR 002) */
