@@ -419,6 +419,119 @@ describe('_scheduleWakeup — rate-limit protection in wakeup callback', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+//  triggerEarlyWakeup — end a wakeup wait early (stale progress log)
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('triggerEarlyWakeup — end a pending wakeup wait immediately', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    project.clean();
+  });
+
+  it('fires the wakeup immediately, without waiting for wakeupUntil', async () => {
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      wakeupUntil: new Date(Date.now() + 3600_000).toISOString(), // 1 hour away — should NOT need to elapse
+      wakeupSubtaskId: 1,
+    });
+
+    (orch as AnyOrch).activeTasks.add(project.taskId);
+    (orch as AnyOrch).pipelines.set(project.taskId, pipeline);
+    const safeSpy = vi.spyOn(orch as AnyOrch, '_executePhaseSafe').mockResolvedValue(false);
+
+    (orch as AnyOrch)._scheduleWakeup(pipeline);
+    expect(safeSpy).not.toHaveBeenCalled(); // confirms the 1h timer really is pending
+
+    const triggered = (orch as AnyOrch).triggerEarlyWakeup(project.taskId, 'progress log stale for 20min');
+    expect(triggered).toBe(true);
+
+    // _fireWakeup is invoked fire-and-forget (void this._fireWakeup(...)) —
+    // let its internal microtasks/awaits settle before asserting.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(safeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels the original pending timer so it never also fires', async () => {
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      wakeupUntil: new Date(Date.now() + 3600_000).toISOString(),
+      wakeupSubtaskId: 1,
+    });
+
+    (orch as AnyOrch).activeTasks.add(project.taskId);
+    (orch as AnyOrch).pipelines.set(project.taskId, pipeline);
+    const safeSpy = vi.spyOn(orch as AnyOrch, '_executePhaseSafe').mockResolvedValue(false);
+
+    (orch as AnyOrch)._scheduleWakeup(pipeline);
+    (orch as AnyOrch).triggerEarlyWakeup(project.taskId, 'progress log stale');
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Advancing all the way past the original 1h window must NOT cause a
+    // second fire — the early trigger already cancelled that timer.
+    await vi.advanceTimersByTimeAsync(3600_000 + 1000);
+
+    expect(safeSpy).toHaveBeenCalledTimes(1);
+    safeSpy.mockRestore();
+  });
+
+  it('logs the reason to the task output.log so it is visible in the terminal tab', () => {
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      wakeupUntil: new Date(Date.now() + 3600_000).toISOString(),
+      wakeupSubtaskId: 1,
+    });
+
+    (orch as AnyOrch).activeTasks.add(project.taskId);
+    (orch as AnyOrch).pipelines.set(project.taskId, pipeline);
+    vi.spyOn(orch as AnyOrch, '_executePhaseSafe').mockResolvedValue(false);
+    (orch as AnyOrch)._scheduleWakeup(pipeline);
+
+    (orch as AnyOrch).triggerEarlyWakeup(
+      project.taskId,
+      "progress log sweep_progress.log hasn't been modified in 20min — background job appears dead",
+    );
+
+    const outputLog = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+    expect(outputLog).toContain('[WAKEUP] Ending wait early');
+    expect(outputLog).toContain("hasn't been modified in 20min");
+  });
+
+  it('returns false and does nothing when there is no live pipeline for the task', () => {
+    // Task not registered in-memory at all (e.g. a stale disk read racing a
+    // server restart) — must not throw, must not fabricate a resume.
+    const triggered = (orch as AnyOrch).triggerEarlyWakeup('nonexistent-task-id', 'progress log stale');
+    expect(triggered).toBe(false);
+  });
+
+  it('returns false and does nothing when the pipeline has no wakeup armed', () => {
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      wakeupUntil: undefined,
+    });
+    (orch as AnyOrch).activeTasks.add(project.taskId);
+    (orch as AnyOrch).pipelines.set(project.taskId, pipeline);
+
+    const safeSpy = vi.spyOn(orch as AnyOrch, '_executePhaseSafe');
+    const triggered = (orch as AnyOrch).triggerEarlyWakeup(project.taskId, 'progress log stale');
+
+    expect(triggered).toBe(false);
+    expect(safeSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 //  rebaseOntoLatestDefault — skip when base hasn't advanced
 // ═══════════════════════════════════════════════════════════════════════
 

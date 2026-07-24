@@ -276,6 +276,14 @@ const ABANDONED_PHASE_THRESHOLD_MS = 5 * 60_000; // 5 minutes
  *  caught quickly. */
 const SESSION_IDLE_STALL_THRESHOLD_MS = 2 * 60_000; // 2 minutes
 
+/** Threshold for treating a wakeup-pending background job's own progress
+ *  log as stale — i.e. the job most likely died. Checked against the log's
+ *  own mtime, not the scheduled `wakeup_at`, so a dead process is caught
+ *  well before the full wait window elapses rather than only when the
+ *  coder wakes up naturally. Generous relative to a sweep's own per-cell
+ *  cadence (seconds), tight relative to a 1-2h wait. */
+const WAKEUP_PROGRESS_STALE_THRESHOLD_MS = 15 * 60_000; // 15 minutes
+
 /** Threshold for killing a session that has a tool call in flight
  *  (`AgentSession.toolInFlight`). The CLI emits nothing between issuing a
  *  Bash tool call and that call returning, so a single slow-but-legitimate
@@ -418,6 +426,46 @@ export async function sweepStalledTasks(): Promise<number> {
 
         // Only consider tasks in active pipeline phases
         if (!IN_PROGRESS_PHASES.has(task.phase)) continue;
+
+        // Check 0: task is mid-wakeup-wait (ADR 002) for a background job
+        // with a known progress log — verify that log is still fresh
+        // rather than blindly trusting the full scheduled wait. A stale
+        // log (no writes in WAKEUP_PROGRESS_STALE_THRESHOLD_MS) means the
+        // background process most likely died; end the wait early so the
+        // coder can assess and report failure now instead of after the
+        // full window elapses. This task is either already handled by the
+        // wakeup path or not eligible for the checks below either way, so
+        // it always falls through to the next task afterward.
+        if (task.wakeupUntil && new Date(task.wakeupUntil).getTime() > Date.now()) {
+          try {
+            const statePath = join(teamaiDir, entry, '.pipeline_state.json');
+            if (existsSync(statePath)) {
+              const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+              if (state.wakeupProgressPath && state.worktreePath) {
+                const progressLogPath = join(state.worktreePath, state.wakeupProgressPath);
+                // If the log doesn't exist yet, the job may have only just
+                // started — that's not staleness, just don't check yet.
+                if (existsSync(progressLogPath)) {
+                  const staleForMs = Date.now() - statSync(progressLogPath).mtimeMs;
+                  if (staleForMs > WAKEUP_PROGRESS_STALE_THRESHOLD_MS) {
+                    const staleMin = Math.round(staleForMs / 60_000);
+                    try {
+                      const orchestrator = getOrchestrator(project.path);
+                      const triggered = orchestrator.triggerEarlyWakeup(
+                        task.id,
+                        `progress log ${state.wakeupProgressPath} hasn't been modified in ${staleMin}min — background job appears dead`,
+                      );
+                      if (triggered) {
+                        log('sweep', `Task ${task.id} "${task.title}" wakeup ended early — progress log stale for ${staleMin}min`);
+                      }
+                    } catch { /* orchestrator not available — leave for the scheduled wakeup */ }
+                  }
+                }
+              }
+            }
+          } catch { /* best-effort — never let this check block the rest of the sweep */ }
+          continue;
+        }
 
         // Check 1: expired rate limit — the timeout was lost
         if (task.rateLimitedUntil) {

@@ -783,6 +783,41 @@ export class Orchestrator {
     }
   }
 
+  /**
+   * Fire a wakeup — resume the paused pipeline right now. Shared by the
+   * scheduled setTimeout callback (_scheduleWakeup) and triggerEarlyWakeup
+   * (a stale background-job progress log decided not to wait out the rest
+   * of the window), so the two paths can't drift apart.
+   */
+  private async _fireWakeup(pipeline: TaskPipeline): Promise<void> {
+    const task = this.taskStore.getById(pipeline.taskId);
+    if (!task || NO_RESUME_PHASES.has(task.phase)) {
+      log('wakeup', `Task ${pipeline.taskId} is in terminal phase "${task?.phase}" — skipping resume`);
+      this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
+      return;
+    }
+    const currentPipeline = this.pipelines.get(pipeline.taskId);
+    if (currentPipeline !== pipeline) {
+      log('wakeup', `Task ${pipeline.taskId} pipeline was replaced — skipping stale resume`);
+      this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
+      return;
+    }
+    log('wakeup', `Resuming task ${pipeline.taskId}`);
+    this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
+    // Clear the fired wakeup on the in-memory pipeline too — after this point
+    // wakeupUntil is only truthy if the resumed phase scheduled a NEW wakeup.
+    pipeline.wakeupUntil = undefined;
+    const wasRateLimited = await this._executePhaseSafe(pipeline, 'after wakeup');
+    // Guard cleanup like runTask does: if the resumed phase scheduled another
+    // wakeup (chained wakeup — background job still running), _scheduleWakeup
+    // re-acquired the lock and its timer owns cleanup; deleting here would
+    // orphan that timer ("pipeline was replaced" on fire) and hang the task.
+    if (!wasRateLimited && !pipeline.wakeupUntil) {
+      this.pipelines.delete(pipeline.taskId);
+      this.activeTasks.delete(pipeline.taskId);
+    }
+  }
+
   /** Schedule a wakeup timer (ADR 002). Follows the handleRateLimit setTimeout pattern. */
   private _scheduleWakeup(pipeline: TaskPipeline): void {
     const wakeupAt = new Date(pipeline.wakeupUntil!).getTime();
@@ -809,34 +844,36 @@ export class Orchestrator {
 
     // Track the timer so cancelPipeline can clear it
     if (pipeline.pendingTimer) clearTimeout(pipeline.pendingTimer);
-    pipeline.pendingTimer = setTimeout(async () => {
-      const task = this.taskStore.getById(pipeline.taskId);
-      if (!task || NO_RESUME_PHASES.has(task.phase)) {
-        log('wakeup', `Task ${pipeline.taskId} is in terminal phase "${task?.phase}" — skipping resume`);
-        this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
-        return;
-      }
-      const currentPipeline = this.pipelines.get(pipeline.taskId);
-      if (currentPipeline !== pipeline) {
-        log('wakeup', `Task ${pipeline.taskId} pipeline was replaced — skipping stale resume`);
-        this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
-        return;
-      }
-      log('wakeup', `Resuming task ${pipeline.taskId}`);
-      this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
-      // Clear the fired wakeup on the in-memory pipeline too — after this point
-      // wakeupUntil is only truthy if the resumed phase scheduled a NEW wakeup.
-      pipeline.wakeupUntil = undefined;
-      const wasRateLimited = await this._executePhaseSafe(pipeline, 'after wakeup');
-      // Guard cleanup like runTask does: if the resumed phase scheduled another
-      // wakeup (chained wakeup — background job still running), _scheduleWakeup
-      // re-acquired the lock and its timer owns cleanup; deleting here would
-      // orphan that timer ("pipeline was replaced" on fire) and hang the task.
-      if (!wasRateLimited && !pipeline.wakeupUntil) {
-        this.pipelines.delete(pipeline.taskId);
-        this.activeTasks.delete(pipeline.taskId);
-      }
-    }, waitMs);
+    pipeline.pendingTimer = setTimeout(() => { void this._fireWakeup(pipeline); }, waitMs);
+  }
+
+  /**
+   * End a pending wakeup wait immediately instead of waiting for
+   * `wakeupUntil` — re-enters the coder right away with the same
+   * `⚠️ WAKEUP RE-ENTRY` prompt it would have gotten naturally. Used by
+   * sweepStalledTasks() (recovery.ts) when a background job's own progress
+   * log has gone stale: no point waiting out a window we have good reason
+   * to believe is already over. The coder itself still makes the actual
+   * "is this really dead" call — this only decides not to blindly wait.
+   *
+   * Logs to the task's own output.log (not just the server console) so the
+   * decision is visible in the ticket's terminal tab, not just server logs.
+   *
+   * @returns true if a pending wakeup was found and triggered; false if
+   * there was nothing to trigger (task not live in memory right now, or no
+   * wakeup currently armed) — the caller should not assume the task will
+   * resume in that case.
+   */
+  triggerEarlyWakeup(taskId: string, reason: string): boolean {
+    const pipeline = this.pipelines.get(taskId);
+    if (!pipeline || !pipeline.wakeupUntil) return false;
+    if (pipeline.pendingTimer) clearTimeout(pipeline.pendingTimer);
+    try {
+      appendFileSync(path.join(pipeline.specPath, 'output.log'), `\n[WAKEUP] Ending wait early — ${reason}\n`);
+    } catch { /* best-effort */ }
+    log('wakeup', `Task ${taskId} early wakeup triggered — ${reason}`);
+    void this._fireWakeup(pipeline);
+    return true;
   }
 
 }

@@ -35,6 +35,14 @@ export interface TaskPipeline {
   wakeupCommand?: string;
   /** Artifact the engineer should verify on re-entry (ADR 002) */
   wakeupArtifact?: string;
+  /**
+   * Path (relative to the worktree) to the background job's own progress
+   * log, if the coder provided one. Lets the periodic sweep
+   * (recovery.ts sweepStalledTasks) detect a dead background process from
+   * its real output — the log going stale — and end the wait early
+   * instead of blindly waiting out the full `wakeupUntil` window.
+   */
+  wakeupProgressPath?: string;
   /** Consecutive wakeup attempts for the current subtask (ADR 002) */
   wakeupAttemptCount?: number;
   /** Map of FAIL criterion text → number of consecutive QA cycles it has appeared unchanged.
