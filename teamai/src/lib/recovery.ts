@@ -269,6 +269,19 @@ const STALLED_TASK_THRESHOLD_MS = 30 * 60_000; // 30 minutes
  *  continuously. Defect 6 part 1. */
 const ABANDONED_PHASE_THRESHOLD_MS = 5 * 60_000; // 5 minutes
 
+/** Threshold for killing a session with no stdout output at all — i.e. no
+ *  NDJSON event of any kind, not even a tool_use. A coder session emits
+ *  nothing between issuing a Bash tool call and that call returning, so any
+ *  single slow-but-legitimate command (a cold `sbt compile`/`sbt test` on a
+ *  Scala/Timefold project routinely runs several minutes with zero
+ *  intermediate output, a slow HTTP call, a big git operation) looks
+ *  identical to a genuinely hung session under this metric. 2 minutes was
+ *  observed killing sessions mid-investigation that were making real
+ *  progress on a single silent command — not stuck, just quiet. This only
+ *  needs to be loose enough to tolerate normal silent work; a truly dead
+ *  session still gets caught, just after more patience. */
+const SESSION_STALL_THRESHOLD_MS = 10 * 60_000; // 10 minutes
+
 /** @internal Reset the auto-resume debounce timer (used in tests). */
 export function _resetAutoResumeDebounce(): void {
   _lastAutoResumeTime = 0;
@@ -353,13 +366,13 @@ export async function sweepStalledTasks(): Promise<number> {
   // Dynamic import processManager to avoid circular dependency
   const { processManager } = await import('./process-manager');
 
-  // ── Kill hung sessions (>2 min no output) ──────────────────────────
-  const stalledSessions = processManager.getStalledSessions(120_000);
+  // ── Kill hung sessions (>10 min no output) ──────────────────────────
+  const stalledSessions = processManager.getStalledSessions(SESSION_STALL_THRESHOLD_MS);
   for (const session of stalledSessions) {
     try {
       logWarn('sweep',
         `Session ${session.id} (task ${session.taskId}, role ${session.role}) ` +
-        `stalled >2min with no output — killing`,
+        `stalled >10min with no output — killing`,
       );
       processManager.killSession(session.id);
     } catch (err) {
