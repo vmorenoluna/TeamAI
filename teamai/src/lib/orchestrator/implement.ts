@@ -480,10 +480,12 @@ async function runSubtaskSession(
             pipeline.wakeupUntil = wd.wakeup_at;
             pipeline.wakeupCommand = wd.background_command;
             pipeline.wakeupArtifact = wd.expected_artifact;
+            pipeline.wakeupProgressPath = wd.progress_log_path;
           }
           pipeline.wakeupAttemptCount = (pipeline.wakeupAttemptCount || 0) + 1;
           wakeupDetected = true;
-          appendFileSync(logFile, '[WAKEUP] Subtask ' + wd.subtask_id + ' wakeup scheduled for ' + wd.wakeup_at + ' (attempt ' + pipeline.wakeupAttemptCount + ') — background process: ' + (wd.background_command || 'unknown') + '\n');
+          appendFileSync(logFile, '[WAKEUP] Subtask ' + wd.subtask_id + ' wakeup scheduled for ' + wd.wakeup_at + ' (attempt ' + pipeline.wakeupAttemptCount + ') — background process: ' + (wd.background_command || 'unknown') +
+            (wd.progress_log_path ? ' — progress log: ' + wd.progress_log_path : '') + '\n');
         }
       } catch {
         appendFileSync(logFile, '[WAKEUP] Malformed subtask_wakeup.json — treating as missing\n');
@@ -549,6 +551,7 @@ async function runSubtaskSession(
     pipeline.wakeupSubtaskId = undefined;
     pipeline.wakeupCommand = undefined;
     pipeline.wakeupArtifact = undefined;
+    pipeline.wakeupProgressPath = undefined;
     pipeline.wakeupAttemptCount = 0;
     pipeline._wakeupJustCompleted = true;
     appendFileSync(logFile, '[WAKEUP] Subtask ' + subtask.id + ' completed after wakeup — clearing wakeup state\n');
@@ -989,6 +992,7 @@ export async function runImplement(
       pipeline.wakeupSubtaskId = undefined;
       pipeline.wakeupCommand = undefined;
       pipeline.wakeupArtifact = undefined;
+      pipeline.wakeupProgressPath = undefined;
       pipeline.wakeupAttemptCount = 0;
       deps.advancePhase(pipeline, 'failed');
       return;

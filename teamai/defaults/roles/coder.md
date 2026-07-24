@@ -29,10 +29,13 @@ When a subtask requires running a script, server, or service to verify your work
     "subtask_id": <your subtask id, integer>,
     "wakeup_at": "<ISO8601 timestamp>",
     "background_command": "<the exact command you launched, for your own reference on wakeup>",
-    "expected_artifact": "<path to the file that should exist once the job is done>"
+    "expected_artifact": "<path to the file that should exist once the job is done>",
+    "progress_log_path": "<path to the job's own log file, relative to the worktree root — omit if it doesn't produce one>"
   }
   ```
   **Size `wakeup_at` realistically** — estimate completion from actual throughput data the job itself reports, not an optimistic guess, and add a 20% safety margin. An undersized wakeup fires before the job finishes, wasting a session on a re-entry that can do nothing but write another wakeup file.
+
+  **Include `progress_log_path` whenever the job writes one.** The orchestrator's own periodic sweep checks that file's freshness while you're asleep and ends the wait early — re-entering you sooner — if it goes stale, instead of always waiting out the full `wakeup_at` window on a job that may have already died.
 
   The orchestrator re-enters you at `wakeup_at` with a `⚠️ WAKEUP RE-ENTRY` header. On re-entry, check whether the detached process (via its PID file) is still alive:
   - **Still running**: read its latest reported progress, reschedule — write a fresh `subtask_wakeup-st<id>.json` with an updated `wakeup_at`, and end again.

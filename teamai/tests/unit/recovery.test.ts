@@ -23,6 +23,7 @@ const mockOrchResumeTask = vi.fn();
 const mockGetOrchestrator = vi.fn();
 const mockIsTaskActive = vi.fn();
 const mockSweepResumeTask = vi.fn();
+const mockTriggerEarlyWakeup = vi.fn<[string, string], boolean>(() => false);
 const mockGetAllSessions = vi.fn();
 const mockGetStalledSessions = vi.fn<[number?, number?], { id: string; taskId: string; role: string; toolInFlight?: boolean }[]>(() => []);
 const mockKillSession = vi.fn();
@@ -1089,9 +1090,11 @@ describe('sweepStalledTasks', () => {
     mockGetOrchestrator.mockReturnValue({
       isTaskActive: mockIsTaskActive,
       resumeTask: mockSweepResumeTask,
+      triggerEarlyWakeup: mockTriggerEarlyWakeup,
     });
     mockIsTaskActive.mockReturnValue(false);
     mockSweepResumeTask.mockResolvedValue(undefined);
+    mockTriggerEarlyWakeup.mockReturnValue(false);
     mockGetAllSessions.mockReturnValue([]);
     mockGetStalledSessions.mockReturnValue([]);
     mockKillSession.mockClear();
@@ -1403,5 +1406,130 @@ describe('sweepStalledTasks', () => {
     await sweepStalledTasks();
 
     expect(mockGetStalledSessions).toHaveBeenCalledWith(2 * 60_000, 30 * 60_000);
+  });
+
+  // ── Wakeup progress-log freshness check ──────────────────────────────
+  //
+  // A task mid-wakeup-wait for a detached background job (the sweep) whose
+  // coder provided a progress_log_path gets checked here: if that log has
+  // gone stale, end the wait early via triggerEarlyWakeup rather than
+  // blindly waiting out the full wakeup_at window.
+
+  describe('wakeup progress-log freshness', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskDir = join(teamaiDir, 'my-task');
+    const taskFile = join(taskDir, 'task.json');
+    const statePath = join(taskDir, '.pipeline_state.json');
+    const worktreePath = '/test/worktrees/my-task';
+    const progressLogPath = join(worktreePath, 'sweep_progress.log');
+
+    function setUpFiles(opts: {
+      wakeupUntil: string | undefined;
+      state?: Record<string, unknown>;
+      progressLogExists?: boolean;
+      progressLogMtimeMs?: number;
+    }) {
+      vi.mocked(existsSync).mockImplementation((p) => {
+        const path = String(p);
+        if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+        if (path === teamaiDir) return true;
+        if (path === taskFile) return true;
+        if (path === statePath) return opts.state !== undefined;
+        if (path === progressLogPath) return opts.progressLogExists ?? false;
+        return false;
+      });
+      vi.mocked(readFileSync).mockImplementation((p) => {
+        const path = String(p);
+        if (path === join('/mock/home', '.teamai', 'projects.json'))
+          return JSON.stringify([{ name: 'test', path: projectPath }]);
+        if (path === taskFile)
+          return JSON.stringify({ id: 't1', title: 'Test', phase: 'implement', wakeupUntil: opts.wakeupUntil });
+        if (path === statePath) return JSON.stringify(opts.state ?? {});
+        return '';
+      });
+      vi.mocked(statSync).mockImplementation((p) => {
+        if (String(p) === progressLogPath) {
+          return { mtimeMs: opts.progressLogMtimeMs } as ReturnType<typeof statSync>;
+        }
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      });
+      mockReaddir((p) => (String(p) === teamaiDir ? ['my-task'] : []));
+    }
+
+    it('ends the wait early when the progress log has gone stale (>15min)', async () => {
+      setUpFiles({
+        wakeupUntil: new Date(Date.now() + 3600_000).toISOString(), // 1h still to go
+        state: { wakeupProgressPath: 'sweep_progress.log', worktreePath },
+        progressLogExists: true,
+        progressLogMtimeMs: Date.now() - 20 * 60_000, // 20 min stale
+      });
+      mockTriggerEarlyWakeup.mockReturnValue(true);
+
+      await sweepStalledTasks();
+
+      expect(mockTriggerEarlyWakeup).toHaveBeenCalledTimes(1);
+      const [taskId, reason] = mockTriggerEarlyWakeup.mock.calls[0];
+      expect(taskId).toBe('t1');
+      expect(reason).toContain('sweep_progress.log');
+      expect(reason).toContain('20min');
+    });
+
+    it('does not trigger when the progress log is fresh', async () => {
+      setUpFiles({
+        wakeupUntil: new Date(Date.now() + 3600_000).toISOString(),
+        state: { wakeupProgressPath: 'sweep_progress.log', worktreePath },
+        progressLogExists: true,
+        progressLogMtimeMs: Date.now() - 30_000, // 30s ago — fresh
+      });
+
+      await sweepStalledTasks();
+
+      expect(mockTriggerEarlyWakeup).not.toHaveBeenCalled();
+    });
+
+    it('does not trigger when no wakeupProgressPath was provided (backward compatible)', async () => {
+      setUpFiles({
+        wakeupUntil: new Date(Date.now() + 3600_000).toISOString(),
+        state: { worktreePath }, // no wakeupProgressPath
+      });
+
+      await sweepStalledTasks();
+
+      expect(mockTriggerEarlyWakeup).not.toHaveBeenCalled();
+    });
+
+    it('does not treat a not-yet-created progress log as stale', async () => {
+      setUpFiles({
+        wakeupUntil: new Date(Date.now() + 3600_000).toISOString(),
+        state: { wakeupProgressPath: 'sweep_progress.log', worktreePath },
+        progressLogExists: false, // job hasn't written its first line yet
+      });
+
+      await sweepStalledTasks();
+
+      expect(mockTriggerEarlyWakeup).not.toHaveBeenCalled();
+    });
+
+    it('does not run the freshness check for a task with no pending wakeup', async () => {
+      setUpFiles({ wakeupUntil: undefined });
+
+      await sweepStalledTasks();
+
+      expect(mockTriggerEarlyWakeup).not.toHaveBeenCalled();
+    });
+
+    it('does not run the freshness check once wakeupUntil has already passed (natural timer about to fire)', async () => {
+      setUpFiles({
+        wakeupUntil: new Date(Date.now() - 1000).toISOString(), // already due
+        state: { wakeupProgressPath: 'sweep_progress.log', worktreePath },
+        progressLogExists: true,
+        progressLogMtimeMs: Date.now() - 20 * 60_000,
+      });
+
+      await sweepStalledTasks();
+
+      expect(mockTriggerEarlyWakeup).not.toHaveBeenCalled();
+    });
   });
 });

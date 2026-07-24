@@ -44,6 +44,7 @@ function resetAllCounters(pipeline: TaskPipeline): void {
   pipeline.wakeupSubtaskId = undefined;
   pipeline.wakeupCommand = undefined;
   pipeline.wakeupArtifact = undefined;
+  pipeline.wakeupProgressPath = undefined;
 }
 
 // ── Public functions ──────────────────────────────────────────────────────
