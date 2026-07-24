@@ -4,6 +4,7 @@ import { warn as logWarn, log } from './logger';
 import { IN_PROGRESS_PHASES } from '@/constants/phases';
 import { projectStore } from './project-store';
 import { getWorktreeBase } from './orchestrator/helpers';
+import { restoreWorktreeGitFileToHostPaths } from './orchestrator/worktree-utils';
 import { REQUIRED_ARTIFACTS } from './orchestrator/artifacts';
 
 export interface InterruptedTask {
@@ -37,6 +38,7 @@ export interface StartupRecoveryReport {
   orphanedWorktrees: OrphanedWorktree[];
   autoClearedRateLimits: number;
   artifactInconsistencies: ArtifactInconsistency[];
+  restoredWorktrees: number;
 }
 
 /**
@@ -150,6 +152,84 @@ export function findOrphanedWorktrees(): OrphanedWorktree[] {
   }
 
   return orphaned;
+}
+
+/**
+ * Restore any worktree whose `.git` file (or its host-side back-reference
+ * under `<projectRoot>/.git/worktrees/<name>/gitdir`) is still pointing at
+ * container-style paths, back to host-resolvable ones.
+ *
+ * patchWorktreeGitFile (worktree-utils.ts) deliberately rewrites both to
+ * container form so `docker exec` git commands work while a coder session
+ * is running — but today the only place that reverses it is the
+ * artifact-commit success path (commitArtifactsToWorktree), reached only
+ * when a task finishes cleanly. Any interruption before that point — a
+ * killed session, a crashed/reprovisioned container, or the TeamAI server
+ * process itself being terminated (Ctrl+C, a crash, a machine restart) —
+ * leaves the worktree stuck container-shaped: unusable from host-side git
+ * (`git status`, `git worktree list` show it as "prunable") until
+ * something restores it.
+ *
+ * Called once on server startup (startupCleanup), which makes this
+ * unconditional and safe regardless of *why* or *how* the previous run
+ * ended — there is no in-memory state to reason about after a restart, so
+ * every worktree just gets checked and fixed if needed.
+ * restoreWorktreeGitFileToHostPaths is itself a no-op for a worktree
+ * that's already host-correct, so this never disturbs a healthy worktree.
+ *
+ * @returns the number of worktrees that needed restoring.
+ */
+export function restoreContainerPatchedWorktrees(): number {
+  const projects = _loadProjects();
+  let restored = 0;
+  const reportedPaths = new Set<string>();
+
+  for (const project of projects) {
+    const worktreesDir = getWorktreeBase(project.path);
+    if (!existsSync(worktreesDir)) continue;
+
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(worktreesDir);
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const wtPath = join(worktreesDir, entry);
+      if (reportedPaths.has(wtPath)) continue;
+      reportedPaths.add(wtPath);
+
+      try {
+        if (!statSync(wtPath).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+
+      const gitFile = join(wtPath, '.git');
+      if (!existsSync(gitFile)) continue;
+
+      let gitdir: string;
+      try {
+        const content = readFileSync(gitFile, 'utf-8').trim();
+        if (!content.startsWith('gitdir:')) continue;
+        gitdir = content.slice('gitdir:'.length).trim();
+      } catch {
+        continue;
+      }
+
+      // Already resolvable from the host — nothing to restore.
+      if (existsSync(gitdir)) continue;
+
+      try {
+        restoreWorktreeGitFileToHostPaths(wtPath, project.path);
+        restored++;
+        log('sweep', `Restored container-patched worktree git metadata: ${wtPath}`);
+      } catch { /* best-effort */ }
+    }
+  }
+
+  return restored;
 }
 
 /**
@@ -350,6 +430,11 @@ export async function autoResumeInterruptedTasks(): Promise<number> {
 }
 
 export function startupCleanup(staleSessionCount: number): StartupRecoveryReport {
+  // Repair worktree git metadata first — findOrphanedWorktrees and anything
+  // downstream that touches these worktrees works with host-resolvable
+  // paths either way, but fixing them first means the rest of startup
+  // never has to reason about a worktree stuck in container-shaped form.
+  const restoredWorktrees = restoreContainerPatchedWorktrees();
   const interruptedTasks = findInterruptedTasks();
   const orphanedWorktrees = findOrphanedWorktrees();
   const autoClearedRateLimits = autoClearExpiredRateLimits();
@@ -361,6 +446,7 @@ export function startupCleanup(staleSessionCount: number): StartupRecoveryReport
     orphanedWorktrees,
     autoClearedRateLimits,
     artifactInconsistencies,
+    restoredWorktrees,
   };
 }
 
