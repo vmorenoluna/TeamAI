@@ -166,6 +166,19 @@ export function selectSubtasks(
   }
   const plan = planResult.data!;
 
+  // Normalize array fields the planner can legitimately omit — e.g. a subtask
+  // that only creates new files via files_to_create (nothing existing to
+  // modify) has no reason to include an empty `files: []`. The PlanSubtask
+  // type declares these required because everything downstream assumes they
+  // exist; enforce that invariant here, once, right after parsing, instead of
+  // guarding every individual consumer (several .join() call sites in this
+  // file crash outright on undefined otherwise).
+  for (const s of plan.subtasks) {
+    s.files ??= [];
+    s.acceptance_criteria ??= [];
+    s.depends_on ??= [];
+  }
+
   const qaFeedbackPath = path.join(pipeline.specPath, 'qa_feedback.md');
   const humanFeedbackPath = path.join(pipeline.specPath, 'human_feedback.md');
   const hasQaFeedback = existsSync(qaFeedbackPath);
