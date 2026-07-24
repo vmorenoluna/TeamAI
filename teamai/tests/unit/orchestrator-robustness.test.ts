@@ -3893,6 +3893,156 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════
+//  Wakeup inside a multi-subtask parallel group (ADR 002 x parallel groups)
+// ═══════════════════════════════════════════════════════════════════════
+// Regression coverage for a real production failure: a group with 2
+// subtasks where one schedules a wakeup (long-running sweep, no commits
+// yet) and the other finishes normally. Before this fix, integrateGroup
+// cherry-picked BOTH subtasks immediately — the wakeup subtask's branch had
+// zero commits, so `git cherry-pick <empty range>` hard-failed with "empty
+// commit set passed" and the whole task was marked failed.
+
+describe('runImplement — wakeup inside a multi-subtask group defers only the pending subtask', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull'
+            || args[0] === 'rebase' || args[0] === 'cherry-pick') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'branch') return '';
+        if (args[0] === 'worktree') return '';
+        if (args[0] === 'status') return '';
+      }
+      return '';
+    });
+
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Run baseline sweep', description: 'Run pre-fix sweep and commit evidence', files: ['scripts/sweep.py'], acceptance_criteria: ['Sweep runs'], parallel_group: 1 },
+        { id: 2, title: 'Implement fix', description: 'Implement the suppression constraint', files: ['src/fix.ts'], acceptance_criteria: ['Constraint added'], parallel_group: 1 },
+      ],
+    }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    project.clean();
+  });
+
+  it('cherry-picks and completes the finished sibling, leaves the wakeup subtask branch untouched, and pauses instead of failing', async () => {
+    mockCreateSession
+      .mockResolvedValueOnce('sess-group-st1')
+      .mockResolvedValueOnce('sess-group-st2');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+
+      // Subtask 1's sweep hasn't finished — it schedules a wakeup instead of
+      // committing anything. Subtask 2 finishes normally.
+      writeFileSync(join(project.taskDir, 'subtask_wakeup-st1.json'), JSON.stringify({
+        subtask_id: 1,
+        wakeup_at: '2026-07-04T12:00:00Z',
+        background_command: 'python sweep.py',
+        expected_artifact: 'results/sweep.jsonl',
+        progress_log_path: 'sweep_progress.log',
+      }));
+
+      fireEvent('event', { sessionId: 'sess-group-st1', event: { type: 'result' } });
+      fireEvent('event', { sessionId: 'sess-group-st2', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+
+      // Pipeline pauses for the wakeup — it must NOT fail.
+      expect(pipeline.phase).not.toBe('failed');
+      expect(pipeline.wakeupSubtaskId).toBe(1);
+      expect(pipeline.wakeupUntil).toBe('2026-07-04T12:00:00Z');
+
+      // Subtask 2 (finished) was cherry-picked; subtask 1 (still pending) was not.
+      const cherryPickCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'git' && Array.isArray(call[1]) && call[1][0] === 'cherry-pick' && call[1][1] !== '--abort',
+      );
+      expect(cherryPickCalls.some((c: any[]) => (c[1][1] as string).endsWith('-st2'))).toBe(true);
+      expect(cherryPickCalls.some((c: any[]) => (c[1][1] as string).endsWith('-st1'))).toBe(false);
+
+      // Subtask 2's branch was force-deleted twice (once during initial
+      // per-subtask worktree setup, once during post-cherry-pick cleanup);
+      // subtask 1's branch was only ever touched by setup — cleanup skipped
+      // it because its wakeup is still pending.
+      const branchDeleteCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'git' && Array.isArray(call[1]) && call[1][0] === 'branch' && call[1][1] === '-D',
+      );
+      const st1Deletes = branchDeleteCalls.filter((c: any[]) => (c[1][2] as string).endsWith('-st1'));
+      const st2Deletes = branchDeleteCalls.filter((c: any[]) => (c[1][2] as string).endsWith('-st2'));
+      expect(st1Deletes.length).toBe(1);
+      expect(st2Deletes.length).toBe(2);
+
+      // Subtask 2 marked complete in plan.json; subtask 1 is not.
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(true);
+      expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBeFalsy();
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('resumes the wakeup subtask in its preserved isolated worktree once the group has collapsed to just that subtask', async () => {
+    // Simulate: subtask 2 already completed/integrated in a prior round;
+    // subtask 1 is the sole remaining subtask, resuming after its wakeup fired.
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Run baseline sweep', description: 'Run pre-fix sweep and commit evidence', files: ['scripts/sweep.py'], acceptance_criteria: ['Sweep runs'], parallel_group: 1 },
+        { id: 2, title: 'Implement fix', description: 'Implement the suppression constraint', files: ['src/fix.ts'], acceptance_criteria: ['Constraint added'], parallel_group: 1, completed: true },
+      ],
+    }));
+
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+    const stWorktreePath = worktreePath + '-st1';
+    mkdirSync(stWorktreePath, { recursive: true });
+
+    mockCreateSession.mockResolvedValueOnce('sess-resume-st1');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath,
+      wakeupSubtaskId: 1, wakeupCommand: 'python sweep.py', wakeupArtifact: 'results/sweep.jsonl', wakeupAttemptCount: 1,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockCreateSession).toHaveBeenCalled(); });
+
+      // The resumed session must run in the preserved isolated worktree —
+      // not fall back to the main pipeline worktree, where the sweep's
+      // progress log and expected artifact don't exist.
+      expect(mockCreateSession.mock.calls[0][0].cwd).toBe(stWorktreePath);
+
+      fireEvent('event', { sessionId: 'sess-resume-st1', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+});
+
 describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
   let project: ReturnType<typeof setupProject>;
   let orch: Orchestrator;
