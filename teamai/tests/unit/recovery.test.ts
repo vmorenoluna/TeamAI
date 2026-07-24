@@ -24,7 +24,7 @@ const mockGetOrchestrator = vi.fn();
 const mockIsTaskActive = vi.fn();
 const mockSweepResumeTask = vi.fn();
 const mockGetAllSessions = vi.fn();
-const mockGetStalledSessions = vi.fn<[], { id: string; taskId: string; role: string }[]>(() => []);
+const mockGetStalledSessions = vi.fn<[number?], { id: string; taskId: string; role: string }[]>(() => []);
 const mockKillSession = vi.fn();
 
 vi.mock('../../src/lib/orchestrator', () => ({
@@ -34,7 +34,7 @@ vi.mock('../../src/lib/orchestrator', () => ({
 vi.mock('../../src/lib/process-manager', () => ({
   processManager: {
     getAllSessions: (...args: unknown[]) => mockGetAllSessions(...args as []),
-    getStalledSessions: (_timeoutMs: number) => mockGetStalledSessions(),
+    getStalledSessions: (timeoutMs: number) => mockGetStalledSessions(timeoutMs),
     killSession: (sessionId: string) => mockKillSession(sessionId),
   },
 }));
@@ -1368,7 +1368,7 @@ describe('sweepStalledTasks', () => {
     expect(mockSweepResumeTask).toHaveBeenCalledWith('t1');
   });
 
-  it('kills sessions stalled >2min with no output', async () => {
+  it('kills sessions stalled >10min with no output', async () => {
     vi.mocked(existsSync).mockReturnValue(false); // prevent project scanning
     mockGetStalledSessions.mockReturnValue([
       { id: 'sess-abc', taskId: 't1', role: 'coder' },
@@ -1378,5 +1378,18 @@ describe('sweepStalledTasks', () => {
     // No project tasks were swept, so count stays 0 — session kills are side-effect only
     expect(count).toBe(0);
     expect(mockKillSession).toHaveBeenCalledWith('sess-abc');
+  });
+
+  it('uses a 10-minute (not 2-minute) stall threshold', async () => {
+    // Regression: 2 minutes of silence is routine for a single slow-but-alive
+    // tool call (a cold sbt compile/test, a slow HTTP call) — sessions were
+    // being killed mid-investigation despite making real progress. Locks in
+    // the widened threshold so it can't silently regress back to 120s.
+    vi.mocked(existsSync).mockReturnValue(false);
+    mockGetStalledSessions.mockReturnValue([]);
+
+    await sweepStalledTasks();
+
+    expect(mockGetStalledSessions).toHaveBeenCalledWith(10 * 60_000);
   });
 });
