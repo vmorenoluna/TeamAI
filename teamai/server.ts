@@ -156,6 +156,9 @@ app.prepare().then(() => {
     const report = startupCleanup(staleSessions.length);
 
     const parts: string[] = [];
+    if (report.restoredWorktrees > 0) {
+      parts.push(`${report.restoredWorktrees} worktree(s) restored from container-patched state`);
+    }
     if (report.interruptedTasks.length > 0) {
       parts.push(`${report.interruptedTasks.length} interrupted task(s)`);
     }

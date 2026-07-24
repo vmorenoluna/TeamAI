@@ -14,7 +14,7 @@ vi.mock('fs', () => ({
   writeFileSync: vi.fn(),
 }));
 
-import { findInterruptedTasks, findOrphanedWorktrees, startupCleanup, autoClearExpiredRateLimits, reconcileTaskArtifacts, autoResumeInterruptedTasks, _resetAutoResumeDebounce, sweepStalledTasks } from '../../src/lib/recovery';
+import { findInterruptedTasks, findOrphanedWorktrees, restoreContainerPatchedWorktrees, startupCleanup, autoClearExpiredRateLimits, reconcileTaskArtifacts, autoResumeInterruptedTasks, _resetAutoResumeDebounce, sweepStalledTasks } from '../../src/lib/recovery';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
@@ -51,6 +51,11 @@ vi.mock('../../src/lib/container-manager', () => ({
   hostToContainerPath: (p: string) => p,
   dockerAvailable: () => false,
   _resetDockerAvailableCache: vi.fn(),
+}));
+
+const mockRestoreWorktreeGitFileToHostPaths = vi.fn();
+vi.mock('../../src/lib/orchestrator/worktree-utils', () => ({
+  restoreWorktreeGitFileToHostPaths: (...args: unknown[]) => mockRestoreWorktreeGitFileToHostPaths(...args),
 }));
 
 // Helper: readdirSync and statSync have overloaded signatures that make
@@ -415,6 +420,131 @@ describe('findOrphanedWorktrees', () => {
   });
 });
 
+// ── restoreContainerPatchedWorktrees ────────────────────────────────────
+//
+// A worktree's .git file (and its host-side back-reference) is
+// deliberately rewritten to container-style paths (patchWorktreeGitFile)
+// while a coder session runs inside a devcontainer. The only place that
+// reverses this today is the artifact-commit success path — any
+// interruption before that (a killed session, a crashed container, or the
+// TeamAI server process itself being terminated) leaves the worktree
+// stuck container-shaped. This is the startup-time repair for that: safe
+// regardless of *why* the previous run ended, since there's no in-memory
+// state to reason about after a restart.
+
+describe('restoreContainerPatchedWorktrees', () => {
+  beforeEach(() => {
+    mockRestoreWorktreeGitFileToHostPaths.mockClear();
+  });
+
+  it('returns 0 when no projects exist', () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+    expect(restoreContainerPatchedWorktrees()).toBe(0);
+    expect(mockRestoreWorktreeGitFileToHostPaths).not.toHaveBeenCalled();
+  });
+
+  it('restores a worktree whose .git file points to an unresolvable (container-style) gitdir', () => {
+    const projectPath = '/test/project';
+    const wtDir = join(projectPath, '..', 'worktrees');
+    const wtPath = join(wtDir, 'stuck-slug');
+    const gitFile = join(wtPath, '.git');
+    const containerGitdir = '/workspaces/formell/.git/worktrees/stuck-slug';
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === wtDir) return true;
+      if (path === gitFile) return true;
+      if (path === containerGitdir) return false; // unresolvable from the host
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === gitFile) return `gitdir: ${containerGitdir}\n`;
+      return '';
+    });
+    mockReaddir((p) => (String(p) === wtDir ? ['stuck-slug'] : []));
+    mockStatSync(() => ({ isDirectory: () => true }));
+
+    const count = restoreContainerPatchedWorktrees();
+
+    expect(count).toBe(1);
+    expect(mockRestoreWorktreeGitFileToHostPaths).toHaveBeenCalledWith(wtPath, projectPath);
+  });
+
+  it('does not touch a worktree whose .git file already resolves on the host', () => {
+    const projectPath = '/test/project';
+    const wtDir = join(projectPath, '..', 'worktrees');
+    const wtPath = join(wtDir, 'healthy-slug');
+    const gitFile = join(wtPath, '.git');
+    const hostGitdir = join(projectPath, '.git', 'worktrees', 'healthy-slug');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === wtDir) return true;
+      if (path === gitFile) return true;
+      if (path === hostGitdir) return true; // already host-resolvable
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === gitFile) return `gitdir: ${hostGitdir}\n`;
+      return '';
+    });
+    mockReaddir((p) => (String(p) === wtDir ? ['healthy-slug'] : []));
+    mockStatSync(() => ({ isDirectory: () => true }));
+
+    const count = restoreContainerPatchedWorktrees();
+
+    expect(count).toBe(0);
+    expect(mockRestoreWorktreeGitFileToHostPaths).not.toHaveBeenCalled();
+  });
+
+  it('skips a worktree directory with no .git file', () => {
+    const projectPath = '/test/project';
+    const wtDir = join(projectPath, '..', 'worktrees');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === wtDir) return true;
+      return false; // .git file (and everything else) absent
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      return '';
+    });
+    mockReaddir((p) => (String(p) === wtDir ? ['no-git-slug'] : []));
+    mockStatSync(() => ({ isDirectory: () => true }));
+
+    expect(restoreContainerPatchedWorktrees()).toBe(0);
+    expect(mockRestoreWorktreeGitFileToHostPaths).not.toHaveBeenCalled();
+  });
+
+  it('does not crash and continues past a project whose worktrees dir cannot be read', () => {
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      return true; // worktreesDir "exists" but reading it will throw
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: '/test/project' }]);
+      return '';
+    });
+    mockReaddir(() => { throw new Error('cannot read worktrees'); });
+
+    expect(restoreContainerPatchedWorktrees()).toBe(0);
+    expect(mockRestoreWorktreeGitFileToHostPaths).not.toHaveBeenCalled();
+  });
+});
+
 describe('startupCleanup', () => {
   it('returns unified report', () => {
     vi.mocked(existsSync).mockReturnValue(false);
@@ -426,6 +556,7 @@ describe('startupCleanup', () => {
       orphanedWorktrees: [],
       autoClearedRateLimits: 0,
       artifactInconsistencies: [],
+      restoredWorktrees: 0,
     });
   });
 });
