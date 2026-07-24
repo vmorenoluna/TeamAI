@@ -2204,6 +2204,60 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
     }
   });
 
+  it('does not crash when a planner-authored subtask omits files (create-only via files_to_create)', async () => {
+    // Regression: a subtask whose only file interaction is CREATING a new
+    // file (files_to_create) has no reason for the planner to also include
+    // an empty `files: []` — but runSubtaskSession's prompt builder used to
+    // do an unguarded `subtask.files.join(', ')`, crashing the entire
+    // implement phase with "Cannot read properties of undefined (reading
+    // 'join')" the moment a real planner session omitted the field. Selected
+    // subtasks must be normalized so files/acceptance_criteria/depends_on
+    // are always arrays regardless of what the planner actually wrote.
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        {
+          id: 1,
+          title: 'Run sweep and commit evidence log',
+          description: 'Run the sweep and commit the evidence artifact.',
+          files_to_create: ['scripts/sweep_logs/evidence.log'],
+          depends_on: [],
+          acceptance_criteria: ['Evidence file is committed'],
+          // `files` deliberately omitted — this is the exact shape that crashed.
+        },
+      ],
+    }));
+
+    mockCreateSession.mockResolvedValueOnce('sess-no-files');
+
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      maxQaAttempts: 3,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
+
+      // The prompt must have built successfully (no crash) with an empty
+      // Files: line rather than throwing on undefined.join().
+      const prompt = mockSendMessage.mock.calls[0][1];
+      expect(prompt).toContain('Files: \n');
+
+      fireEvent('event', { sessionId: 'sess-no-files', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(30);
+
+      await expect(promise).resolves.toBeUndefined();
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   it('synthesises a targeted rework subtask when QA feedback exists but no subtasks are flagged', async () => {
     // Scenario: QA feedback exists, but criterion matching flagged no subtasks.
     // The orchestrator synthesises a single targeted rework subtask from the
