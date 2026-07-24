@@ -16,6 +16,22 @@ export interface TerminalSession {
   projectPath: string;
 }
 
+/**
+ * True if a parsed stdout event is an assistant message dispatching at
+ * least one tool call. The CLI's stream-json protocol emits this event the
+ * moment a tool is invoked, then nothing further until that tool's result
+ * comes back as part of the next event — so this is the signal that
+ * explains an otherwise-suspicious stdout gap.
+ */
+function isToolDispatchEvent(event: unknown): boolean {
+  if (!event || typeof event !== 'object') return false;
+  const e = event as { type?: unknown; message?: { content?: unknown } };
+  if (e.type !== 'assistant') return false;
+  const content = e.message?.content;
+  if (!Array.isArray(content)) return false;
+  return content.some((b: unknown) => !!b && typeof b === 'object' && (b as { type?: unknown }).type === 'tool_use');
+}
+
 export interface AgentSession {
   id: string;
   process: ChildProcess;
@@ -27,6 +43,17 @@ export interface AgentSession {
   status: 'running' | 'idle' | 'done' | 'error';
   /** Last time (epoch ms) the session produced stdout output. Used for stall detection. */
   lastOutputAt: number;
+  /**
+   * True when the most recent stdout event was an assistant message
+   * dispatching a tool call whose result hasn't arrived yet. The CLI emits
+   * nothing while a tool executes — a single Bash call (a cold `sbt
+   * compile`/`sbt test`, a slow network request) can legitimately produce
+   * no output for many minutes. Stall detection uses this to apply a much
+   * more generous timeout while a tool is genuinely running, vs. a tight
+   * one when the session is idle (no tool in flight, no new message —
+   * silence there really is suspicious). See getStalledSessions.
+   */
+  toolInFlight: boolean;
   /**
    * Per-session EventEmitter scoped to this session only.
    * Used by {@link waitForCompletion} to avoid piling listeners
@@ -110,6 +137,7 @@ export class ProcessManager extends EventEmitter {
       buffer += chunk.toString();
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
+      const session = this.sessions.get(id);
       for (const line of lines) {
         if (line.trim()) {
           try {
@@ -117,6 +145,7 @@ export class ProcessManager extends EventEmitter {
             this.emit('event', { sessionId: id, event });
             sessionEvents.emit('event', { sessionId: id, event });
             if (logFile) this._appendToLog(logFile, event);
+            if (session) session.toolInFlight = isToolDispatchEvent(event);
           } catch {
             this.emit('raw', { sessionId: id, data: line });
             sessionEvents.emit('raw', { sessionId: id, data: line });
@@ -124,7 +153,6 @@ export class ProcessManager extends EventEmitter {
         }
       }
       // Update heartbeat on output
-      const session = this.sessions.get(id);
       if (session) session.lastOutputAt = Date.now();
     });
 
@@ -166,6 +194,7 @@ export class ProcessManager extends EventEmitter {
       projectRoot: opts.projectRoot,
       status: 'running',
       lastOutputAt: now,
+      toolInFlight: false,
       events: sessionEvents,
     });
 
@@ -263,15 +292,26 @@ export class ProcessManager extends EventEmitter {
   }
 
   /**
-   * Return sessions that have produced no output for longer than `timeoutMs`.
-   * These sessions may be stalled/hung and need intervention (#8).
+   * Return sessions that have produced no output for longer than the
+   * applicable threshold. These sessions may be stalled/hung and need
+   * intervention (#8).
+   *
+   * Two thresholds, not one: a session with a tool call in flight
+   * (`toolInFlight`) is expected to be silent for as long as that single
+   * command takes — a cold compile, a full test run, a slow network call.
+   * A session that is idle (no tool running, and hasn't sent a new message)
+   * has no such excuse; silence there is a genuine stall signal and should
+   * be caught quickly. `toolTimeoutMs` defaults to `idleTimeoutMs` so a
+   * single-argument call preserves the old one-threshold-for-everyone
+   * behavior.
    */
-  getStalledSessions(timeoutMs: number = 120_000): AgentSession[] {
+  getStalledSessions(idleTimeoutMs: number = 120_000, toolTimeoutMs: number = idleTimeoutMs): AgentSession[] {
     const now = Date.now();
     const stalled: AgentSession[] = [];
     for (const session of this.sessions.values()) {
       if (session.status !== 'running') continue;
-      if (now - session.lastOutputAt > timeoutMs) {
+      const threshold = session.toolInFlight ? toolTimeoutMs : idleTimeoutMs;
+      if (now - session.lastOutputAt > threshold) {
         stalled.push(session);
       }
     }
