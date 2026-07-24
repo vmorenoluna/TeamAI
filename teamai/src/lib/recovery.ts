@@ -394,7 +394,7 @@ export async function sweepStalledTasks(): Promise<number> {
         `Session ${session.id} (task ${session.taskId}, role ${session.role}) ` +
         `stalled (${kind}) with no output — killing`,
       );
-      processManager.killSession(session.id);
+      processManager.killSession(session.id, 'stalled');
     } catch (err) {
       logWarn('sweep', `Failed to kill stalled session ${session.id}:`, err);
     }

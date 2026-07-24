@@ -16,12 +16,13 @@ import { createFireEvent, AnyOrch } from '../utils/orchestrator-harness';
 
 // ── Hoisted mocks ──
 
-const { onHandlers, mockCreateSession, mockSendMessage, mockKillSession, mockEmit } = vi.hoisted(() => ({
+const { onHandlers, mockCreateSession, mockSendMessage, mockKillSession, mockEmit, mockGetSession } = vi.hoisted(() => ({
   onHandlers: new Map<string, Array<(...args: any[]) => void>>(),
   mockCreateSession: vi.fn(),
   mockSendMessage: vi.fn(),
   mockKillSession: vi.fn(),
   mockEmit: vi.fn(),
+  mockGetSession: vi.fn(),
 }));
 
 const mockExecFileSync = vi.hoisted(() => vi.fn());
@@ -47,7 +48,7 @@ vi.mock('../../src/lib/process-manager', () => ({
     createSession: (...args: any[]) => mockCreateSession(...args),
     sendMessage: (...args: any[]) => mockSendMessage(...args),
     killSession: (...args: any[]) => mockKillSession(...args),
-    getSession: vi.fn(),
+    getSession: (...args: any[]) => mockGetSession(...args),
     getAllSessions: vi.fn(() => []),
     getStaleSessions: vi.fn(() => []),
     removeStaleSession: vi.fn(),
@@ -3022,6 +3023,208 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════
+//  runSubtaskSession — stall-detector-kill recovery
+// ═══════════════════════════════════════════════════════════════════════
+//
+// getStalledSessions' tool-in-flight ceiling (30min) kills a session that's
+// legitimately still working, not just a hung one. Without recovery, that
+// kill propagates straight to 'failed' with no chance for the coder to
+// react — the killed process might have actually finished, or the coder
+// might just need to diagnose a genuine hang it introduced. These tests
+// cover the retry-with-fresh-session loop, the cap, and that a deliberate
+// stop (no kill reason) is never auto-retried.
+
+describe('runImplement — stall-detector-kill recovery', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+      }
+      return '';
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    project.clean();
+  });
+
+  it('retries with a fresh session and completes when a stall-killed session recovers', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 1,
+        title: 'Run full test suite',
+        description: 'Run the full sbt test suite',
+        files: ['src/Foo.scala'],
+        acceptance_criteria: ['Tests pass'],
+      }],
+    }));
+
+    mockCreateSession
+      .mockResolvedValueOnce('sess-stalled')
+      .mockResolvedValueOnce('sess-recovered');
+    // Only the FIRST session was killed for stalling — the retry session,
+    // if it were also killed, wouldn't carry this reason.
+    mockGetSession.mockImplementation((id: string) =>
+      id === 'sess-stalled' ? { killReason: 'stalled' } : undefined);
+
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalledTimes(1);
+      });
+
+      // First attempt's prompt carries no recovery header.
+      expect(mockSendMessage.mock.calls[0][1]).not.toContain('SESSION RECOVERED AFTER STALL-KILL');
+
+      // Kill it as the stall-detector would: exit with a signal, no result event.
+      fireEvent('exit', { sessionId: 'sess-stalled', code: null, signal: 'SIGTERM' });
+      await vi.advanceTimersByTimeAsync(30);
+
+      // A second, fresh session must have been created and messaged.
+      await vi.waitFor(() => {
+        expect(mockCreateSession).toHaveBeenCalledTimes(2);
+        expect(mockSendMessage).toHaveBeenCalledTimes(2);
+      });
+      const retryPrompt = mockSendMessage.mock.calls[1][1];
+      expect(retryPrompt).toContain('SESSION RECOVERED AFTER STALL-KILL (attempt 1/3)');
+      expect(retryPrompt).toContain('Your own change caused a genuine hang');
+      expect(pipeline.stallRecoveryCounts).toEqual({ 1: 1 });
+
+      // The retry session completes normally.
+      fireEvent('event', { sessionId: 'sess-recovered', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(30);
+      await promise;
+
+      // Successful completion clears the counter and marks the subtask done.
+      expect(pipeline.stallRecoveryCounts![1]).toBeUndefined();
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks[0].completed).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('advances to failed with a FAIL qa_report.json after exceeding maxStallRecoveries', async () => {
+    writeFileSync(join(project.root, '.teamai', 'pipeline.json'), JSON.stringify({
+      phases: ['spec', 'plan', 'implement', 'qa-review', 'merge'],
+      maxQaAttempts: 3,
+      parallelSubtasks: true,
+      maxStallRecoveries: 1,
+    }));
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 1,
+        title: 'Run full test suite',
+        description: 'Run the full sbt test suite',
+        files: ['src/Foo.scala'],
+        acceptance_criteria: ['Tests pass'],
+      }],
+    }));
+
+    // maxStallRecoveries: 1 means the cap is hit on the very first kill — no
+    // retry session is ever created, so only one value is ever consumed here.
+    // (A leftover, never-consumed mockResolvedValueOnce would survive
+    // vi.clearAllMocks() — it only clears call history, not queued
+    // implementations — and leak into the next test's first createSession
+    // call, causing a session-id mismatch there.)
+    mockCreateSession.mockResolvedValueOnce('sess-1');
+    mockGetSession.mockReturnValue({ killReason: 'stalled' });
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    const promise = (orch as AnyOrch).runImplement(pipeline);
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    // maxStallRecoveries: 1 — the first kill already brings attemptCount to
+    // 1, which meets the cap, so this fails immediately with no retry session.
+    fireEvent('exit', { sessionId: 'sess-1', code: null, signal: 'SIGTERM' });
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(pipeline.phase).toBe('failed');
+    expect(pipeline.stallRecoveryCounts).toEqual({ 1: 1 });
+    expect(mockCreateSession).toHaveBeenCalledTimes(1); // no retry session was created
+
+    const reportPath = join(project.taskDir, 'qa_report.json');
+    expect(existsSync(reportPath)).toBe(true);
+    const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+    expect(report.overall).toBe('FAIL');
+    expect(report.criteria[0].name).toBe('Session repeatedly stalled');
+    expect(report.criteria[0].notes).toContain('1 time(s)');
+
+    await promise;
+  });
+
+  it('does not retry a deliberate stop (no kill reason) — propagates exactly as before', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 1,
+        title: 'Run full test suite',
+        description: 'Run the full sbt test suite',
+        files: ['src/Foo.scala'],
+        acceptance_criteria: ['Tests pass'],
+      }],
+    }));
+
+    mockCreateSession.mockResolvedValueOnce('sess-stopped');
+    // No killReason set — simulates stopTask/cancelPipeline, not the stall detector.
+    mockGetSession.mockReturnValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    const promise = (orch as AnyOrch).runImplement(pipeline);
+    // Attach a no-op catch immediately — the assertion below observes the
+    // same promise via expect().rejects, but without this, the rejection
+    // (which fires as soon as the exit event below is processed) races an
+    // as-yet-unattached handler and vitest reports it as an unhandled
+    // rejection even though the test itself passes.
+    promise.catch(() => {});
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent('exit', { sessionId: 'sess-stopped', code: null, signal: 'SIGTERM' });
+    await vi.advanceTimersByTimeAsync(50);
+
+    // No retry session, no stall-recovery bookkeeping, no "Session repeatedly
+    // stalled" report — the error must propagate unhandled, same as pre-fix.
+    expect(mockCreateSession).toHaveBeenCalledTimes(1);
+    expect(pipeline.stallRecoveryCounts).toBeUndefined();
+
+    await expect(promise).rejects.toThrow('Session killed by signal SIGTERM');
+  });
+});
+
 describe('review-actions — unified counter reset (ADR 005)', () => {
   let project: ReturnType<typeof setupProject>;
   let orch: Orchestrator;
@@ -3952,7 +4155,7 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
       restoreQaReportFromSnapshot: vi.fn(),
       restoreHumanFeedbackFromSnapshot: vi.fn(),
       writeQaFeedback: vi.fn(),
-      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 10 })),
+      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 10, maxStallRecoveries: 3 })),
       phaseHeader: vi.fn(),
       planWriteLock: { current: Promise.resolve() },
       scheduleWakeup: vi.fn(),
@@ -4066,7 +4269,7 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
       restoreQaReportFromSnapshot: vi.fn(),
       restoreHumanFeedbackFromSnapshot: vi.fn(),
       writeQaFeedback: vi.fn(),
-      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 10 })),
+      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 10, maxStallRecoveries: 3 })),
       phaseHeader: vi.fn(),
       planWriteLock: { current: Promise.resolve() },
       scheduleWakeup: vi.fn(),

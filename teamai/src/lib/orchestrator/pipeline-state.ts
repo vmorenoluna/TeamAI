@@ -45,6 +45,7 @@ export function savePipelineState(pipeline: TaskPipeline): void {
       mergeStrategy: pipeline.mergeStrategy,
       qaAttempt: pipeline.qaAttempt,
       deliverableFailCounts: pipeline.deliverableFailCounts,
+      stallRecoveryCounts: pipeline.stallRecoveryCounts,
       wakeupUntil: pipeline.wakeupUntil,
       wakeupSubtaskId: pipeline.wakeupSubtaskId,
       wakeupCommand: pipeline.wakeupCommand,
