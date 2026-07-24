@@ -36,6 +36,7 @@ function addMockSession(
     cwd: overrides.cwd ?? '/test',
     status: overrides.status ?? 'running',
     lastOutputAt: overrides.lastOutputAt ?? Date.now(),
+    toolInFlight: overrides.toolInFlight ?? false,
     events: new EventEmitter(),
   };
   (pm as unknown as AnySession).sessions.set(id, session);
@@ -601,6 +602,58 @@ describe('ProcessManager — getStalledSessions', () => {
     // Default 120s timeout: not stalled (30s < 120s)
     expect(pm.getStalledSessions()).toEqual([]);
     // Custom 20s timeout: stalled (30s > 20s)
+    expect(pm.getStalledSessions(20_000)).toHaveLength(1);
+  });
+
+  // ── Two-tier threshold: idle vs. tool-in-flight ─────────────────────────
+  //
+  // A session silent because a tool call is running (a slow compile, a slow
+  // HTTP request) is not the same as a session silent for no reason. Using
+  // one flat threshold for both was killing sessions mid-tool-call despite
+  // real progress. getStalledSessions now takes two thresholds and picks
+  // per-session based on toolInFlight.
+
+  it('applies the idle threshold to a session with no tool in flight', () => {
+    const pm = new ProcessManager();
+    (pm as unknown as AnySession).sessions.clear();
+    addMockSession(pm, 'sess-idle', {
+      status: 'running', toolInFlight: false, lastOutputAt: Date.now() - 150_000, // 2.5 min
+    });
+    // 2.5min exceeds a 2min idle threshold even though it's under a 30min tool threshold
+    const stalled = pm.getStalledSessions(2 * 60_000, 30 * 60_000);
+    expect(stalled).toHaveLength(1);
+    expect(stalled[0].id).toBe('sess-idle');
+  });
+
+  it('applies the (longer) tool threshold, not the idle threshold, to a session with a tool in flight', () => {
+    const pm = new ProcessManager();
+    (pm as unknown as AnySession).sessions.clear();
+    addMockSession(pm, 'sess-running', {
+      status: 'running', toolInFlight: true, lastOutputAt: Date.now() - 150_000, // 2.5 min
+    });
+    // 2.5min would exceed the 2min idle threshold, but this session has a
+    // tool in flight — it must use the 30min tool threshold instead and NOT
+    // be flagged as stalled.
+    const stalled = pm.getStalledSessions(2 * 60_000, 30 * 60_000);
+    expect(stalled).toEqual([]);
+  });
+
+  it('still kills a tool-in-flight session once it exceeds the (longer) tool threshold', () => {
+    const pm = new ProcessManager();
+    (pm as unknown as AnySession).sessions.clear();
+    addMockSession(pm, 'sess-truly-hung', {
+      status: 'running', toolInFlight: true, lastOutputAt: Date.now() - 31 * 60_000,
+    });
+    const stalled = pm.getStalledSessions(2 * 60_000, 30 * 60_000);
+    expect(stalled).toHaveLength(1);
+    expect(stalled[0].id).toBe('sess-truly-hung');
+  });
+
+  it('defaults the tool threshold to the idle threshold when only one argument is given (backward compatible)', () => {
+    const pm = new ProcessManager();
+    (pm as unknown as AnySession).sessions.clear();
+    addMockSession(pm, 'sess-running', { status: 'running', toolInFlight: true, lastOutputAt: Date.now() - 30_000 });
+    // Single-arg call: both idle and tool thresholds are 20s regardless of toolInFlight
     expect(pm.getStalledSessions(20_000)).toHaveLength(1);
   });
 });

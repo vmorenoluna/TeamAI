@@ -269,18 +269,26 @@ const STALLED_TASK_THRESHOLD_MS = 30 * 60_000; // 30 minutes
  *  continuously. Defect 6 part 1. */
 const ABANDONED_PHASE_THRESHOLD_MS = 5 * 60_000; // 5 minutes
 
-/** Threshold for killing a session with no stdout output at all — i.e. no
- *  NDJSON event of any kind, not even a tool_use. A coder session emits
- *  nothing between issuing a Bash tool call and that call returning, so any
- *  single slow-but-legitimate command (a cold `sbt compile`/`sbt test` on a
- *  Scala/Timefold project routinely runs several minutes with zero
- *  intermediate output, a slow HTTP call, a big git operation) looks
- *  identical to a genuinely hung session under this metric. 2 minutes was
- *  observed killing sessions mid-investigation that were making real
- *  progress on a single silent command — not stuck, just quiet. This only
- *  needs to be loose enough to tolerate normal silent work; a truly dead
- *  session still gets caught, just after more patience. */
-const SESSION_STALL_THRESHOLD_MS = 10 * 60_000; // 10 minutes
+/** Threshold for killing an IDLE session with no stdout output — no tool
+ *  call in flight, no new message. There's no legitimate reason for a
+ *  session to go quiet while it isn't waiting on a tool: this really is a
+ *  stall signal (a crashed process, a broken connection) and should be
+ *  caught quickly. */
+const SESSION_IDLE_STALL_THRESHOLD_MS = 2 * 60_000; // 2 minutes
+
+/** Threshold for killing a session that has a tool call in flight
+ *  (`AgentSession.toolInFlight`). The CLI emits nothing between issuing a
+ *  Bash tool call and that call returning, so a single slow-but-legitimate
+ *  command (a cold `sbt compile`/`sbt test` on a Scala/Timefold project, a
+ *  slow HTTP call, a big git operation) looks identical to a hung session
+ *  under a flat no-output metric — this was observed directly, killing a
+ *  session mid-investigation that was making real progress on one silent
+ *  command, not stuck. Using the actual "is a tool running" signal instead
+ *  of a single bigger number means idle stalls are still caught fast while
+ *  genuine long-running work gets real headroom; a tool call that somehow
+ *  never returns (e.g. a sweep the coder forgot to detach, despite being
+ *  instructed to) is still eventually caught here. */
+const SESSION_TOOL_STALL_THRESHOLD_MS = 30 * 60_000; // 30 minutes
 
 /** @internal Reset the auto-resume debounce timer (used in tests). */
 export function _resetAutoResumeDebounce(): void {
@@ -366,13 +374,17 @@ export async function sweepStalledTasks(): Promise<number> {
   // Dynamic import processManager to avoid circular dependency
   const { processManager } = await import('./process-manager');
 
-  // ── Kill hung sessions (>10 min no output) ──────────────────────────
-  const stalledSessions = processManager.getStalledSessions(SESSION_STALL_THRESHOLD_MS);
+  // ── Kill hung sessions (idle >2min, or tool-in-flight >30min, no output) ──
+  const stalledSessions = processManager.getStalledSessions(
+    SESSION_IDLE_STALL_THRESHOLD_MS,
+    SESSION_TOOL_STALL_THRESHOLD_MS,
+  );
   for (const session of stalledSessions) {
     try {
+      const kind = session.toolInFlight ? 'tool-in-flight >30min' : 'idle >2min';
       logWarn('sweep',
         `Session ${session.id} (task ${session.taskId}, role ${session.role}) ` +
-        `stalled >10min with no output — killing`,
+        `stalled (${kind}) with no output — killing`,
       );
       processManager.killSession(session.id);
     } catch (err) {

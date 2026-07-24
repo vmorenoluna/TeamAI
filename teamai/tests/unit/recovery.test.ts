@@ -24,7 +24,7 @@ const mockGetOrchestrator = vi.fn();
 const mockIsTaskActive = vi.fn();
 const mockSweepResumeTask = vi.fn();
 const mockGetAllSessions = vi.fn();
-const mockGetStalledSessions = vi.fn<[number?], { id: string; taskId: string; role: string }[]>(() => []);
+const mockGetStalledSessions = vi.fn<[number?, number?], { id: string; taskId: string; role: string; toolInFlight?: boolean }[]>(() => []);
 const mockKillSession = vi.fn();
 
 vi.mock('../../src/lib/orchestrator', () => ({
@@ -34,7 +34,7 @@ vi.mock('../../src/lib/orchestrator', () => ({
 vi.mock('../../src/lib/process-manager', () => ({
   processManager: {
     getAllSessions: (...args: unknown[]) => mockGetAllSessions(...args as []),
-    getStalledSessions: (timeoutMs: number) => mockGetStalledSessions(timeoutMs),
+    getStalledSessions: (idleTimeoutMs: number, toolTimeoutMs: number) => mockGetStalledSessions(idleTimeoutMs, toolTimeoutMs),
     killSession: (sessionId: string) => mockKillSession(sessionId),
   },
 }));
@@ -1368,10 +1368,10 @@ describe('sweepStalledTasks', () => {
     expect(mockSweepResumeTask).toHaveBeenCalledWith('t1');
   });
 
-  it('kills sessions stalled >10min with no output', async () => {
+  it('kills sessions stalled >2min idle with no output', async () => {
     vi.mocked(existsSync).mockReturnValue(false); // prevent project scanning
     mockGetStalledSessions.mockReturnValue([
-      { id: 'sess-abc', taskId: 't1', role: 'coder' },
+      { id: 'sess-abc', taskId: 't1', role: 'coder', toolInFlight: false },
     ]);
 
     const count = await sweepStalledTasks();
@@ -1380,16 +1380,28 @@ describe('sweepStalledTasks', () => {
     expect(mockKillSession).toHaveBeenCalledWith('sess-abc');
   });
 
-  it('uses a 10-minute (not 2-minute) stall threshold', async () => {
-    // Regression: 2 minutes of silence is routine for a single slow-but-alive
-    // tool call (a cold sbt compile/test, a slow HTTP call) — sessions were
-    // being killed mid-investigation despite making real progress. Locks in
-    // the widened threshold so it can't silently regress back to 120s.
+  it('kills sessions stalled >30min with a tool in flight', async () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+    mockGetStalledSessions.mockReturnValue([
+      { id: 'sess-xyz', taskId: 't1', role: 'coder', toolInFlight: true },
+    ]);
+
+    const count = await sweepStalledTasks();
+    expect(count).toBe(0);
+    expect(mockKillSession).toHaveBeenCalledWith('sess-xyz');
+  });
+
+  it('uses a 2-minute idle threshold and a 30-minute tool-in-flight threshold, not a single 2-minute threshold for everyone', async () => {
+    // Regression: a flat 2-minute no-output threshold killed sessions
+    // mid-investigation while a single slow-but-alive tool call (a cold sbt
+    // compile/test, a slow HTTP call) was legitimately still running. Locks
+    // in the two-tier thresholds so idle stalls stay tightly bounded while
+    // genuine tool-running silence gets real headroom.
     vi.mocked(existsSync).mockReturnValue(false);
     mockGetStalledSessions.mockReturnValue([]);
 
     await sweepStalledTasks();
 
-    expect(mockGetStalledSessions).toHaveBeenCalledWith(10 * 60_000);
+    expect(mockGetStalledSessions).toHaveBeenCalledWith(2 * 60_000, 30 * 60_000);
   });
 });

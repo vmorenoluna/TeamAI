@@ -225,6 +225,97 @@ describe('ProcessManager — Full Coverage', () => {
     });
   });
 
+  // ── createSession: toolInFlight tracking (stall-detection signal) ────────
+  //
+  // getStalledSessions applies a much longer timeout while a tool call is in
+  // flight than while the session is idle. That distinction only works if
+  // toolInFlight is actually set/cleared correctly as NDJSON events stream
+  // in from the CLI.
+
+  describe('createSession — toolInFlight tracking', () => {
+    it('sets toolInFlight when an assistant event dispatches a tool_use', async () => {
+      const proc = mockChildProcess();
+      const sessionId = await pm.createSession({ taskId: 'task-1', role: 'coder', cwd: '/test' });
+
+      proc._emitStdout(JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] },
+      }) + '\n');
+
+      const session = (pm as unknown as AnyPM).sessions.get(sessionId);
+      expect(session.toolInFlight).toBe(true);
+    });
+
+    it('clears toolInFlight once the next event is a text-only assistant message', async () => {
+      const proc = mockChildProcess();
+      const sessionId = await pm.createSession({ taskId: 'task-1', role: 'coder', cwd: '/test' });
+
+      proc._emitStdout(JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] },
+      }) + '\n');
+      expect((pm as unknown as AnyPM).sessions.get(sessionId).toolInFlight).toBe(true);
+
+      // Next event arrives only once the tool call has actually resolved —
+      // a plain text response with no further tool_use means nothing is
+      // pending anymore.
+      proc._emitStdout(JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Done, tests pass.' }] },
+      }) + '\n');
+
+      expect((pm as unknown as AnyPM).sessions.get(sessionId).toolInFlight).toBe(false);
+    });
+
+    it('clears toolInFlight on a result event', async () => {
+      const proc = mockChildProcess();
+      const sessionId = await pm.createSession({ taskId: 'task-1', role: 'coder', cwd: '/test' });
+
+      proc._emitStdout(JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] },
+      }) + '\n');
+      proc._emitStdout(JSON.stringify({ type: 'result', subtype: 'success', duration_ms: 100 }) + '\n');
+
+      expect((pm as unknown as AnyPM).sessions.get(sessionId).toolInFlight).toBe(false);
+    });
+
+    it('stays true across back-to-back tool_use dispatches (chained tool calls)', async () => {
+      const proc = mockChildProcess();
+      const sessionId = await pm.createSession({ taskId: 'task-1', role: 'coder', cwd: '/test' });
+
+      proc._emitStdout(JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }] },
+      }) + '\n');
+      proc._emitStdout(JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't2', name: 'Bash', input: {} }] },
+      }) + '\n');
+
+      expect((pm as unknown as AnyPM).sessions.get(sessionId).toolInFlight).toBe(true);
+    });
+
+    it('defaults toolInFlight to false for a newly created session', async () => {
+      mockChildProcess();
+      const sessionId = await pm.createSession({ taskId: 'task-1', role: 'coder', cwd: '/test' });
+      expect((pm as unknown as AnyPM).sessions.get(sessionId).toolInFlight).toBe(false);
+    });
+
+    it('does not throw and leaves toolInFlight unchanged on malformed JSON', async () => {
+      const proc = mockChildProcess();
+      const sessionId = await pm.createSession({ taskId: 'task-1', role: 'coder', cwd: '/test' });
+
+      proc._emitStdout(JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] },
+      }) + '\n');
+      expect(() => proc._emitStdout('not json at all\n')).not.toThrow();
+
+      expect((pm as unknown as AnyPM).sessions.get(sessionId).toolInFlight).toBe(true);
+    });
+  });
+
   // ── createSession: stderr ─────────────────────────────────────────────────
 
   describe('createSession — stderr handling', () => {
