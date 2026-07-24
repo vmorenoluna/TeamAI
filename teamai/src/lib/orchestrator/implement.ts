@@ -690,10 +690,12 @@ async function integrateGroup(
   scopeViolations: Set<number>,
   subtaskWorktrees: Map<number, string>,
   logFile: string,
-  isMultiGroup: boolean,
 ): Promise<boolean> {
-  // Cherry-pick successful commits back to main worktree
-  if (isMultiGroup) {
+  // Cherry-pick successful commits back to main worktree. subtaskWorktrees
+  // is the source of truth for "this subtask worked in an isolated
+  // worktree this round" — true both for a genuine multi-subtask group and
+  // for a lone subtask resuming after a wakeup in a now-collapsed group.
+  if (subtaskWorktrees.size > 0) {
     // Pre-cherry-pick: auto-commit any uncommitted changes in the main worktree.
     try {
       const statusOut = execFileSync('git', ['status', '--porcelain'], {
@@ -714,6 +716,11 @@ async function integrateGroup(
 
     for (let i = 0; i < results.length; i++) {
       if (results[i].status !== 'fulfilled') continue;
+      if (!subtaskWorktrees.has(subtasks[i].id)) continue;
+      if (subtasks[i].id === pipeline.wakeupSubtaskId) {
+        appendFileSync(logFile, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' — wakeup pending\n');
+        continue;
+      }
       if (scopeViolations.has(subtasks[i].id)) {
         appendFileSync(logFile, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' (scope violation)\n');
         continue;
@@ -731,18 +738,22 @@ async function integrateGroup(
     }
   }
 
-  // Clean up per-subtask worktrees
-  if (isMultiGroup) {
-    for (const stWorktreePath of subtaskWorktrees.values()) {
+  // Clean up per-subtask worktrees — but never the one still waiting on a
+  // wakeup (its background job depends on that worktree surviving).
+  if (subtaskWorktrees.size > 0) {
+    let cleanedCount = 0;
+    for (const [id, stWorktreePath] of subtaskWorktrees.entries()) {
+      if (id === pipeline.wakeupSubtaskId) continue;
       try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch {
         try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
         try { execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
       }
+      try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+      cleanedCount++;
     }
-    for (const subtask of subtasks) {
-      try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + subtask.id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+    if (cleanedCount > 0) {
+      appendFileSync(logFile, '\n[WORKTREE] Cleaned up ' + cleanedCount + ' per-subtask worktree(s)\n');
     }
-    appendFileSync(logFile, '\n[WORKTREE] Cleaned up ' + subtaskWorktrees.size + ' per-subtask worktree(s)\n');
   }
 
   return true;
@@ -913,14 +924,13 @@ export async function runImplement(
     const isMultiGroup = deps.getPipelineConfig().parallelSubtasks !== false && subtasks.length >= 2;
     const subtaskWorktrees = new Map<number, string>();
     let containerWorkspace: string | undefined;
+    if (readContainerConfig(deps.projectRoot).enabled) {
+      const info = containerManager.getRunningContainer(deps.projectRoot);
+      containerWorkspace = info?.remoteWorkspaceFolder || undefined;
+    }
 
     // Per-subtask worktree isolation
     if (isMultiGroup) {
-      if (readContainerConfig(deps.projectRoot).enabled) {
-        const info = containerManager.getRunningContainer(deps.projectRoot);
-        containerWorkspace = info?.remoteWorkspaceFolder || undefined;
-      }
-
       for (const subtask of subtasks) {
         const stWorktreePath = pipeline.worktreePath + '-st' + subtask.id;
         const stBranch = pipeline.branch + '-st' + subtask.id;
@@ -956,6 +966,30 @@ export async function runImplement(
         subtaskWorktrees.set(subtask.id, stWorktreePath);
         appendFileSync(logFile, '\n[WORKTREE] Created isolated worktree for subtask ' + subtask.id + ' at ' + stWorktreePath + '\n');
       }
+    } else {
+      // Group has collapsed to a single remaining subtask. Normally that
+      // means it works directly in pipeline.worktreePath — but if this lone
+      // subtask is resuming after a wakeup that was originally scheduled
+      // from an isolated per-subtask worktree (it started life in a
+      // multi-subtask group; sibling(s) have since completed and dropped
+      // out of the group), it must keep working in that SAME isolated
+      // worktree. Falling back to pipeline.worktreePath would strand the
+      // resumed session away from the background job's progress log and
+      // expected artifact, which live relative to the isolated worktree.
+      const resuming = subtasks.find(s => s.id === pipeline.wakeupSubtaskId);
+      if (resuming) {
+        const stWorktreePath = pipeline.worktreePath + '-st' + resuming.id;
+        if (existsSync(stWorktreePath)) {
+          subtaskWorktrees.set(resuming.id, stWorktreePath);
+          if (containerWorkspace) {
+            // Idempotent — cheap insurance in case the worktree was reset to
+            // host paths since the wakeup was scheduled (e.g. a server
+            // restart running restoreContainerPatchedWorktrees()).
+            deps.patchWorktreeGitFile(stWorktreePath, containerWorkspace);
+          }
+          appendFileSync(logFile, '\n[WORKTREE] Resuming subtask ' + resuming.id + ' in its preserved isolated worktree at ' + stWorktreePath + '\n');
+        }
+      }
     }
 
     const scopeViolations = new Set<number>();
@@ -964,7 +998,7 @@ export async function runImplement(
     const subtaskHandler = (subtask: PlanSubtask) =>
       runSubtaskSession(
         pipeline, deps, subtask,
-        isMultiGroup ? subtaskWorktrees.get(subtask.id)! : pipeline.worktreePath,
+        subtaskWorktrees.get(subtask.id) ?? pipeline.worktreePath,
         logFile,
         hasQaFeedback, hasHumanFeedback, humanFeedbackPath,
         completedIds, scopeViolations, sessionMapLock,
@@ -992,7 +1026,7 @@ export async function runImplement(
     // Cherry-pick from subtask worktrees back to main, then cleanup
     const ok = await integrateGroup(
       pipeline, deps, subtasks, results, scopeViolations,
-      subtaskWorktrees, logFile, isMultiGroup,
+      subtaskWorktrees, logFile,
     );
     if (!ok) {
       throw new WorktreeError(
@@ -1017,6 +1051,12 @@ export async function runImplement(
         } catch { /* best-effort */ }
       });
     }
+
+    // A subtask in this group scheduled a wakeup — stop starting further
+    // groups (their depends_on may not even be satisfiable yet) and fall
+    // through to the Phase 4 logic below, which schedules the wakeup timer
+    // and returns.
+    if (pipeline.wakeupUntil) break;
   }
 
   // ── Phase 4: Post-groups logic ──
