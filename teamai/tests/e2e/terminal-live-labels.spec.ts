@@ -20,6 +20,8 @@ const TASK_SLUG = 'test-terminal-live-event-labels';
 const TEST_SESSION_ID = 'test-coder-session-42';
 
 test.describe('Terminal Live Event Labels', () => {
+  test.setTimeout(60_000);
+
   test.beforeEach(async ({ page }) => {
     await ensureProjectSelected(page);
 
@@ -47,12 +49,12 @@ test.describe('Terminal Live Event Labels', () => {
     await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
 
     // Wait for xterm to initialise and render parsed log content.
-    await page.waitForTimeout(3000);
-
-    // parsed logs always get labels via parseRoleLog
+    // Use expect.poll rather than a fixed waitForTimeout so the test
+    // naturally adapts to slow dynamic xterm imports under parallel load.
+    await expect.poll(() => getXtermText(page), { timeout: 20_000 })
+      .toContain('Session started');
     const initialText = await getXtermText(page);
     expect(initialText).toContain('[Orchestrator]');
-    expect(initialText).toContain('Session started');
   });
 
   test('live assistant event appears with [Coder] label in open terminal', async ({ page }) => {
@@ -61,7 +63,13 @@ test.describe('Terminal Live Event Labels', () => {
     await page.goto(`/task/${taskId}#terminal`);
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
-    await page.waitForTimeout(3000);
+    await expect.poll(() => getXtermText(page), { timeout: 20_000 })
+      .toContain('Session started');
+
+    // Wait for the WebSocket to connect before injecting live events.
+    // The reconnecting banner is visible when !connected && hasAnyLog;
+    // it disappears once the WebSocket handshake completes.
+    await expect(page.getByTestId('terminal-reconnecting-banner')).not.toBeVisible({ timeout: 15_000 });
 
     // Inject a live event via the test endpoint. The server broadcasts
     // directly to all WebSocket clients — bypassing the agentHandler's
@@ -83,15 +91,16 @@ test.describe('Terminal Live Event Labels', () => {
     });
 
     expect(response.ok).toBe(true);
+    const injectBody = await response.json() as { clients: number };
+    expect(injectBody.clients, 'No WebSocket clients connected — event was not broadcast').toBeGreaterThan(0);
 
     // Wait for the event to be broadcast via WebSocket, processed by
     // useAgentStream, rendered by formatLiveEventWithLabel, and written
     // into the xterm buffer.
-    await page.waitForTimeout(2000);
-
+    await expect.poll(() => getXtermText(page), { timeout: 15_000 })
+      .toContain('E2E-LIVE-MARKER');
     const updatedText = await getXtermText(page);
     expect(updatedText).toContain('[Coder]');
-    expect(updatedText).toContain('E2E-LIVE-MARKER');
   });
 
   test('live result event appears with [Coder] label and Done text', async ({ page }) => {
@@ -100,7 +109,11 @@ test.describe('Terminal Live Event Labels', () => {
     await page.goto(`/task/${taskId}#terminal`);
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
-    await page.waitForTimeout(3000);
+    await expect.poll(() => getXtermText(page), { timeout: 20_000 })
+      .toContain('Session started');
+
+    // Wait for the WebSocket to connect before injecting live events.
+    await expect(page.getByTestId('terminal-reconnecting-banner')).not.toBeVisible({ timeout: 15_000 });
 
     // Result events have leading \r\n in their body. formatLiveEventWithLabel
     // moves \r\n before the label prefix so the label stays on the same
@@ -122,12 +135,11 @@ test.describe('Terminal Live Event Labels', () => {
     });
 
     expect(response.ok).toBe(true);
-    await page.waitForTimeout(2000);
-
+    const injectBody = await response.json() as { clients: number };
+    expect(injectBody.clients, 'No WebSocket clients connected — event was not broadcast').toBeGreaterThan(0);
+    await expect.poll(() => getXtermText(page), { timeout: 15_000 })
+      .toContain('Done');
     const updatedText = await getXtermText(page);
-    // Both the label and the result line should be present.
-    // xterm may split them across rows, but both must appear.
     expect(updatedText).toContain('[Coder]');
-    expect(updatedText).toContain('Done');
   });
 });

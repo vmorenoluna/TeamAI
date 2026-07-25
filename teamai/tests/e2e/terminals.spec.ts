@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
 test.describe('Terminals Page', () => {
+  test.setTimeout(60_000);
+
   test.beforeEach(async ({ page }) => {
     await ensureProjectSelected(page);
   });
