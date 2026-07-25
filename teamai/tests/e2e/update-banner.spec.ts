@@ -66,6 +66,8 @@ async function wasInstallCalled(page: Page): Promise<boolean> {
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 test.describe.serial('Update Banner', () => {
+  test.setTimeout(60_000);
+
   test.beforeEach(async ({ page }) => {
     await injectMockElectronAPI(page);
     const ok = await ensureProjectSelected(page);

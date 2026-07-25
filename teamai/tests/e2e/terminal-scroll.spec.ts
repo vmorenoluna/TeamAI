@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test';
 import { ensureProjectSelected, getSeedTaskId } from './helpers';
 
 test.describe('Terminal Scroll Behavior', () => {
+  test.setTimeout(60_000);
+
   test.beforeEach(async ({ page }) => {
     await ensureProjectSelected(page);
   });

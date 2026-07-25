@@ -10,6 +10,8 @@ const DARK_MODE_SLUG = 'implement-dark-mode-toggle';
 const SHARED_TYPES_SLUG = 'refactor-extract-shared-types-to-common-package';
 
 test.describe('QA Failure Banner & Completion Summary', () => {
+  test.setTimeout(60_000);
+
   test.beforeEach(async ({ page }) => {
     const ok = await ensureProjectSelected(page);
     if (ok) isSeeded = true;

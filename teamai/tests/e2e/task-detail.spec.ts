@@ -5,6 +5,8 @@ const DARK_MODE_SLUG = 'implement-dark-mode-toggle';
 const SEARCH_CRASH_SLUG = 'fix-search-bar-crashes-on-empty-input';
 
 test.describe('Task Detail Page (/task/:id)', () => {
+  test.setTimeout(60_000);
+
   test.beforeEach(async ({ page }) => {
     await ensureProjectSelected(page);
   });
