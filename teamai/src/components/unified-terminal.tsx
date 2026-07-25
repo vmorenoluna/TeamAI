@@ -32,6 +32,17 @@ const ROLES: RoleDef[] = [
 
 const ROLE_MAP = new Map(ROLES.map(r => [r.key, r]));
 
+/** Map any sessionMap key (role name or subtask id) to its canonical role key.
+ *  Known roles (qa, spec, plan, merge) map to themselves; everything else
+ *  (e.g. subtask ids like "1", "2") maps to 'coder'. */
+function resolveRoleKey(sessionMapKey: string): string {
+  if (sessionMapKey === 'qa') return 'qa';
+  if (sessionMapKey === 'spec') return 'spec';
+  if (sessionMapKey === 'plan') return 'plan';
+  if (sessionMapKey === 'merge') return 'merge';
+  return 'coder';
+}
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 interface SubtaskTerminalInfo {
@@ -184,6 +195,25 @@ export function formatLiveEvent(event: StreamEvent): string | null {
     default:
       return null;
   }
+}
+
+/** Format a live event with the role label and timestamp prefix, matching
+ *  the appearance of parsed log lines from parseRoleLog / parseCoderLogs.
+ *  Leading \r\n in the body (e.g. from result/error events) is moved before
+ *  the label so the label stays on the same visual line as the content. */
+export function formatLiveEventWithLabel(
+  event: StreamEvent,
+  roleLabel: string,
+  ansiColor: string,
+): string | null {
+  const body = formatLiveEvent(event);
+  if (!body) return null;
+  const now = new Date();
+  const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+  const prefix = `\x1b[90m[${ts}]\x1b[0m ${ansiColor}[${roleLabel}]\x1b[0m `;
+  // Move any leading \r\n before the label so the content stays next to it.
+  if (body.startsWith('\r\n')) return `\r\n${prefix}${body.slice(2)}`;
+  return `${prefix}${body}`;
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -357,16 +387,22 @@ export function UnifiedTerminal({
     if (!sessionMap) return new Set<string>();
     const ids = new Set<string>();
     for (const [k, v] of Object.entries(sessionMap)) {
-      let role: string;
-      if (k === 'qa') role = 'qa';
-      else if (k === 'spec') role = 'spec';
-      else if (k === 'plan') role = 'plan';
-      else if (k === 'merge') role = 'merge';
-      else role = 'coder';
-      if (selectedRoles.has(role)) ids.add(v);
+      if (selectedRoles.has(resolveRoleKey(k))) ids.add(v);
     }
     return ids;
   }, [sessionMap, selectedRoles]);
+
+  // ── Reverse map: sessionId → { label, ansiColor } for live-event labels ─
+
+  const sessionRoleMap = useMemo(() => {
+    const map = new Map<string, { label: string; ansiColor: string }>();
+    if (!sessionMap) return map;
+    for (const [k, v] of Object.entries(sessionMap)) {
+      const def = ROLE_MAP.get(resolveRoleKey(k));
+      if (def) map.set(v, { label: def.label, ansiColor: def.ansiColor });
+    }
+    return map;
+  }, [sessionMap]);
 
   // ── Write interleaved output ──────────────────────────────────────────
 
@@ -400,7 +436,14 @@ export function UnifiedTerminal({
 
     let pendingWrites = 0;
     for (let i = liveWrittenRef.current; i < filteredEvents.length; i++) {
-      const text = formatLiveEvent(filteredEvents[i].event);
+      const { sessionId, event } = filteredEvents[i];
+      // Look up the role label for this session; fall back to plain format
+      // if sessionMap isn't available or the session isn't mapped (e.g.
+      // events arriving before the session_map.json was written to disk).
+      const roleInfo = sessionRoleMap.get(sessionId);
+      const text = roleInfo
+        ? formatLiveEventWithLabel(event, roleInfo.label, roleInfo.ansiColor)
+        : formatLiveEvent(event);
       if (text) {
         pendingWrites++;
         terminal.write(text, () => {
@@ -413,7 +456,7 @@ export function UnifiedTerminal({
     if (filteredEvents.length > 0 && pendingWrites === 0 && !userScrolledRef.current) {
       terminal.scrollToBottom();
     }
-  }, [events, termReady, selectedSessionIds, sessionMap]);
+  }, [events, termReady, selectedSessionIds, sessionMap, sessionRoleMap]);
 
   // ── Render ────────────────────────────────────────────────────────────
 

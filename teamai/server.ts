@@ -14,6 +14,26 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   const server = createServer((req, res) => {
+    // ── Test-only endpoint: inject a synthetic agent event for E2E testing ──
+    if (process.env.NODE_ENV === 'test' && req.method === 'POST' && req.url === '/api/test/emit-agent-event') {
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body);
+          const msg = JSON.stringify(payload);
+          for (const client of wss.clients) {
+            if (client.readyState === WebSocket.OPEN) client.send(msg);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, clients: wss.clients.size }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: String(err) }));
+        }
+      });
+      return;
+    }
     handle(req, res, parse(req.url!, true));
   });
 

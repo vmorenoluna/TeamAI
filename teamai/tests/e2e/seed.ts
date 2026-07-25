@@ -125,6 +125,12 @@ const SAMPLE_TASKS: SeedTask[] = [
     phase: 'backlog',
   },
   {
+    title: 'Test: terminal live event labels',
+    description: 'Verify live streaming events show agent labels in real-time',
+    phase: 'implement',
+    spec: '# Spec: Terminal Live Event Labels\n\n## Overview\nTerminal must show agent labels on live streaming events.\n\n## Requirements\n- Live events arriving via WebSocket must be prefixed with [Role] label',
+  },
+  {
     title: 'Fix: search bar crashes on empty input',
     description: 'Search bar crashes with "Cannot read property of undefined" when submitted empty',
     phase: 'failed',

@@ -73,6 +73,7 @@ import {
   parseRoleLog,
   parseCoderLogs,
   formatLiveEvent,
+  formatLiveEventWithLabel,
 } from '@/components/unified-terminal';
 import type { StreamEvent } from '@/lib/stream-types';
 
@@ -417,6 +418,249 @@ describe('formatLiveEvent', () => {
   it('returns null for unknown event type', () => {
     const result = formatLiveEvent({ type: 'unknown' } as unknown as StreamEvent);
     expect(result).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  formatLiveEventWithLabel
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('formatLiveEventWithLabel', () => {
+  const ROLE_LABEL = 'Coder';
+  const ANSI_COLOR = '\x1b[33m'; // amber for coder
+
+  // ── Helpers ─────────────────────────────────────────────────────────────
+
+  /** Match the timestamp component: \x1b[90m[HH:MM:SS]\x1b[0m */
+  const TS_RE = /\x1b\[90m\[\d{2}:\d{2}:\d{2}\]\x1b\[0m/;
+
+  // ── Null returns ───────────────────────────────────────────────────────
+
+  it('returns null when formatLiveEvent returns null (unknown event type)', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'unknown' } as unknown as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).toBeNull();
+  });
+
+  it('returns null for system event with non-init subtype', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'system', subtype: 'notification' } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).toBeNull();
+  });
+
+  it('returns null for assistant with no content blocks', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'assistant', message: { content: [] } } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).toBeNull();
+  });
+
+  // ── Timestamp & label prefix ───────────────────────────────────────────
+
+  it('prepends dim timestamp and coloured role label to assistant text', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Hello world' }] } } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).not.toBeNull();
+    // Must start with a timestamp in dim ANSI.
+    expect(result!).toMatch(TS_RE);
+    // Must include the role label in the given colour.
+    expect(result!).toContain('\x1b[33m[Coder]\x1b[0m');
+    // The body text follows the prefix.
+    expect(result!).toContain('Hello world');
+    // Timestamp, label, then body — in that order.
+    const tsIdx = result!.indexOf('\x1b[90m[');
+    const labelIdx = result!.indexOf('[Coder]');
+    const textIdx = result!.indexOf('Hello world');
+    expect(tsIdx).toBeLessThan(labelIdx);
+    expect(labelIdx).toBeLessThan(textIdx);
+  });
+
+  it('formats system init event with label and model name', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'system', subtype: 'init', model: 'claude-haiku' } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).not.toBeNull();
+    expect(result!).toContain('[Coder]');
+    expect(result!).toContain('Session started');
+    expect(result!).toContain('claude-haiku');
+  });
+
+  it('formats tool_use event with label and tool name', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'bash' }] } } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).not.toBeNull();
+    expect(result!).toContain('[Coder]');
+    expect(result!).toContain('▶ bash');
+  });
+
+  it('formats error event with label and error message', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'error', error: 'Connection refused' } as StreamEvent,
+      'QA Review',
+      '\x1b[93m',
+    );
+    expect(result).not.toBeNull();
+    expect(result!).toContain('[QA Review]');
+    expect(result!).toContain('⚠');
+    expect(result!).toContain('Connection refused');
+  });
+
+  // ── Leading \r\n handling (result events) ────────────────────────────
+
+  it('moves leading \\r\\n before the label prefix for result success events', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'result', subtype: 'success', duration_ms: 500, total_cost_usd: 0.01 } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).not.toBeNull();
+    // The \r\n should come BEFORE the timestamp+label, not between label and content.
+    expect(result!).toMatch(/^\r\n/);
+    // The label must appear on the same line as the "Done" content.
+    const afterCrlf = result!.slice(2);
+    expect(afterCrlf).toContain('[Coder]');
+    expect(afterCrlf).toContain('✓ Done');
+    // Content after the label prefix (strip timestamp + label) should be the result line.
+    const bodyAfterPrefix = afterCrlf.replace(/\x1b\[90m\[\d{2}:\d{2}:\d{2}\]\x1b\[0m \x1b\[33m\[Coder\]\x1b\[0m /, '');
+    expect(bodyAfterPrefix).not.toMatch(/^\r\n/); // body no longer starts with \r\n
+    expect(bodyAfterPrefix).toContain('✓ Done');
+  });
+
+  it('moves leading \\r\\n before the label prefix for result failure events', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'result', subtype: 'error', result: 'timeout' } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).not.toBeNull();
+    expect(result!).toMatch(/^\r\n/);
+    const afterCrlf = result!.slice(2);
+    expect(afterCrlf).toContain('[Coder]');
+    expect(afterCrlf).toContain('✗ Failed');
+  });
+
+  // ── Timestamp format ──────────────────────────────────────────────────
+
+  it('produces a zero-padded HH:MM:SS timestamp', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'x' }] } } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).not.toBeNull();
+    // Timestamp must be exactly 8 digits + colons inside dim ANSI brackets.
+    expect(result!).toMatch(/\x1b\[90m\[\d{2}:\d{2}:\d{2}\]\x1b\[0m/);
+    // Should not contain single-digit components (unpadded).
+    const tsMatch = result!.match(/\[(\d{2}:\d{2}:\d{2})\]/);
+    expect(tsMatch).not.toBeNull();
+    const [hh, mm, ss] = tsMatch![1].split(':').map(Number);
+    expect(hh).toBeGreaterThanOrEqual(0);
+    expect(hh).toBeLessThan(24);
+    expect(mm).toBeGreaterThanOrEqual(0);
+    expect(mm).toBeLessThan(60);
+    expect(ss).toBeGreaterThanOrEqual(0);
+    expect(ss).toBeLessThan(60);
+  });
+
+  // ── Role label & ANSI colour ──────────────────────────────────────────
+
+  it('uses the provided roleLabel and ansiColor for the label prefix', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Test' }] } } as StreamEvent,
+      'Spec (Analyst)',
+      '\x1b[35m',
+    );
+    expect(result).not.toBeNull();
+    expect(result!).toContain('\x1b[35m[Spec (Analyst)]\x1b[0m');
+  });
+
+  it('handles multi-line assistant text (newlines → \\r\\n in body)', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Line 1\nLine 2' }] } } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).not.toBeNull();
+    // The first line gets the label prefix; subsequent lines don't.
+    expect(result!).toContain('[Coder]');
+    expect(result!).toContain('Line 1\r\nLine 2');
+  });
+
+  it('handles mixed assistant blocks (text + tool_use)', () => {
+    const result = formatLiveEventWithLabel(
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'text', text: 'Running' },
+            { type: 'tool_use', name: 'read_file' },
+          ],
+        },
+      } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).not.toBeNull();
+    expect(result!).toContain('[Coder]');
+    expect(result!).toContain('Running');
+    expect(result!).toContain('▶ read_file');
+    // Label appears only once (on the first line), not before each block.
+    const labelCount = (result!.match(/\[Coder\]/g) ?? []).length;
+    expect(labelCount).toBe(1);
+  });
+
+  it('handles result success without cost field', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'result', subtype: 'success', duration_ms: 100 } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).not.toBeNull();
+    expect(result!).toMatch(/^\r\n/);
+    expect(result!).toContain('✓ Done');
+    expect(result!).toContain('(100ms)');
+    expect(result!).not.toContain('$');
+  });
+
+  it('handles result failure with fallback when result field missing', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'result', subtype: 'error' } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).not.toBeNull();
+    expect(result!).toContain('unknown error');
+  });
+
+  it('places the label adjacent to content for events without leading \\r\\n (error events)', () => {
+    const result = formatLiveEventWithLabel(
+      { type: 'error', error: 'Something broke' } as StreamEvent,
+      ROLE_LABEL,
+      ANSI_COLOR,
+    );
+    expect(result).not.toBeNull();
+    // No leading \r\n — the label should be directly before the error content.
+    expect(result!).not.toMatch(/^\r\n/);
+    // The label and content should appear in correct order.
+    const labelIdx = result!.indexOf('[Coder]');
+    const errIdx = result!.indexOf('Something broke');
+    expect(labelIdx).toBeLessThan(errIdx);
   });
 });
 

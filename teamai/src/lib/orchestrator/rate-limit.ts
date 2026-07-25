@@ -6,10 +6,9 @@
  *  - waitForCompletion — Promise-based session completion with rate-limit detection
  *  - handleRateLimit  — setTimeout-based retry with stale-pipeline guards
  */
-import { appendFileSync } from 'fs';
-import path from 'path';
 import { EventEmitter } from 'events';
 import { processManager } from '../process-manager';
+import { logToOutput } from './helpers';
 import { SessionExitedError, SessionKilledError } from './errors';
 import { log, error as logError } from '../logger';
 
@@ -211,7 +210,7 @@ export function handleRateLimit(
         deps.handleRateLimit(pipeline, e.resetsAt);
       } else {
         const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
-        appendFileSync(path.join(pipeline.specPath, 'output.log'),
+        logToOutput(pipeline.specPath,
           `\n[ERROR] Task failed after rate-limit retry: ${errMsg}\n`);
         logError('orchestrator', `Task ${pipeline.taskId} failed after rate-limit retry`, e);
         deps.advancePhase(pipeline, 'failed');

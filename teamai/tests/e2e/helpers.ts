@@ -7,7 +7,7 @@
 
 import { expect, type Page, test } from '@playwright/test';
 import { resolve, join } from 'path';
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { getTestServerUrl } from '../../scripts/servers';
 
 /** Base seed project path — must match seed.ts */
@@ -124,5 +124,36 @@ export async function scrollKanbanRight(page: Page): Promise<void> {
   await page.evaluate(() => {
     const container = document.querySelector('.overflow-x-auto');
     if (container) (container as HTMLElement).scrollLeft = (container as HTMLElement).scrollWidth;
+  });
+}
+
+/**
+ * Write a session_map.json to the given seed task's directory so the
+ * UnifiedTerminal component's live-events pipeline is active.
+ */
+export function writeTestSessionMap(slug: string, map: Record<string, string>): void {
+  const seedDir = getActiveSeedDir();
+  const taskDir = join(seedDir, '.teamai', slug);
+  mkdirSync(taskDir, { recursive: true });
+  writeFileSync(join(taskDir, 'session_map.json'), JSON.stringify(map, null, 2));
+}
+
+/**
+ * Write a sample log file to a seed task so the terminal has content to render.
+ */
+export function writeTestLogFile(slug: string, filename: string, content: string): void {
+  const seedDir = getActiveSeedDir();
+  const taskDir = join(seedDir, '.teamai', slug);
+  mkdirSync(taskDir, { recursive: true });
+  writeFileSync(join(taskDir, filename), content);
+}
+
+/**
+ * Read all visible text from the xterm terminal's DOM rows.
+ */
+export async function getXtermText(page: Page): Promise<string> {
+  return await page.evaluate(() => {
+    const rows = document.querySelectorAll('.xterm-rows > div');
+    return Array.from(rows).map(r => (r as HTMLElement).innerText).join('\n');
   });
 }

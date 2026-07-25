@@ -73,12 +73,38 @@ export function extractPrUrl(logFile: string): string | null {
   return null;
 }
 
+// ── Pure: timestamp helpers ────────────────────────────────────────────────
+
+/** Format a YYYY-MM-DDTHH:MM:SS timestamp matching process-manager.ts format. */
+function formatTimestamp(): string {
+  return new Date().toISOString().slice(0, 19);
+}
+
+/**
+ * Append a timestamped message to the task's output.log.
+ *
+ * Any leading \n in the message is preserved before the timestamp (for
+ * visual spacing in the log), then the timestamp is written in the same
+ * `[YYYY-MM-DDTHH:MM:SS]` format that process-manager.ts uses, so
+ * parseTimestamp() in unified-terminal.tsx picks it up and sorts lines
+ * chronologically.
+ */
+export function logToOutput(specPath: string, message: string): void {
+  try {
+    const logFile = path.join(specPath, 'output.log');
+    const leadingNewlines = message.match(/^\n+/)?.[0] ?? '';
+    const body = message.slice(leadingNewlines.length);
+    appendFileSync(logFile, `${leadingNewlines}[${formatTimestamp()}] ${body}`);
+  } catch { /* best-effort */ }
+}
+
 // ── Pure: phase header ────────────────────────────────────────────────────
 
-/** Write a phase separator header to the log file. */
+/** Write a timestamped phase separator header to the log file. */
 export function phaseHeader(logFile: string, phase: string): void {
   try {
-    appendFileSync(logFile, `\n${'─'.repeat(40)}\n▶ ${phase.toUpperCase()}\n${'─'.repeat(40)}\n`);
+    // Split into header line + separator dashes, timestamp goes on the header line
+    appendFileSync(logFile, `\n[${formatTimestamp()}] ${'─'.repeat(40)}\n▶ ${phase.toUpperCase()}\n${'─'.repeat(40)}\n`);
   } catch (err) { logWarn('orchestrator', 'Failed to write phase header to log file', err); }
 }
 
@@ -98,8 +124,7 @@ export function restoreQaReportFromSnapshot(specPath: string): void {
       try {
         const snapshot = readFileSync(snapshotPath, 'utf-8');
         writeFileSync(reportPath, snapshot);
-        const logFile = path.join(specPath, 'output.log');
-        appendFileSync(logFile, `\n[GUARD] Restored qa_report.json from ${snapName} — file was deleted\n`);
+        logToOutput(specPath, `\n[GUARD] Restored qa_report.json from ${snapName} — file was deleted\n`);
         break; // use the first available snapshot
       } catch { /* best-effort */ }
     }
@@ -118,8 +143,7 @@ export function restoreHumanFeedbackFromSnapshot(specPath: string): void {
     try {
       const snapshot = readFileSync(snapshotPath, 'utf-8');
       writeFileSync(feedbackPath, snapshot);
-      const logFile = path.join(specPath, 'output.log');
-      appendFileSync(logFile, `\n[GUARD] Restored human_feedback.md from human_feedback_before_bounce.md — file was deleted\n`);
+      logToOutput(specPath, `\n[GUARD] Restored human_feedback.md from human_feedback_before_bounce.md — file was deleted\n`);
     } catch { /* best-effort */ }
   }
 }
