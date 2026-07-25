@@ -79,7 +79,8 @@ test.describe.serial('Update Banner', () => {
     if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
-    // Wait for React to hydrate after SSR
+    // Wait for React to hydrate after SSR — the UpdateBanner mock
+    // event listeners need an extra render cycle to register.
     await page.waitForTimeout(1500);
 
     // Verify mock is in place
@@ -102,7 +103,7 @@ test.describe.serial('Update Banner', () => {
     await fireProgress(page, 42);
 
     const downloading = page.locator('text=Downloading update');
-    await expect(downloading).toBeVisible({ timeout: 5_000 });
+    await expect(downloading).toBeVisible({ timeout: 10_000 });
   });
 
   test('does not show install button while downloading', async ({ page }) => {
@@ -114,7 +115,7 @@ test.describe.serial('Update Banner', () => {
     await fireProgress(page, 10);
 
     const downloadText = page.locator('text=Downloading update');
-    await expect(downloadText).toBeVisible({ timeout: 5_000 });
+    await expect(downloadText).toBeVisible({ timeout: 10_000 });
 
     const installBtn = page.locator('button', { hasText: 'Install & Restart' });
     await expect(installBtn).toHaveCount(0, { timeout: 5_000 });

@@ -40,20 +40,16 @@ test.describe('Task Detail Page (/task/:id)', () => {
 
     // Navigate directly to each tab via URL hash — avoids click unreliability
     await page.goto(`/task/${taskId}#spec`);
-    await page.waitForTimeout(500);
     await expect(page.locator('body')).toBeVisible();
     await expect(page.locator('text=No spec generated').first()).toBeVisible({ timeout: 10_000 });
 
     await page.goto(`/task/${taskId}#plan`);
-    await page.waitForTimeout(500);
     await expect(page.locator('text=No plan generated yet').first()).toBeVisible({ timeout: 10_000 });
 
     await page.goto(`/task/${taskId}#qa`);
-    await page.waitForTimeout(500);
     await expect(page.locator('text=No QA report generated').first()).toBeVisible({ timeout: 10_000 });
 
     await page.goto(`/task/${taskId}#overview`);
-    await page.waitForTimeout(500);
     await expect(page.locator('text=No dependencies set').first()).toBeVisible({ timeout: 10_000 });
   });
 
