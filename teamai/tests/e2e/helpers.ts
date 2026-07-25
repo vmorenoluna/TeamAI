@@ -5,7 +5,7 @@
  * from here instead of duplicating the logic.
  */
 
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 import { resolve, join } from 'path';
 import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { getTestServerUrl } from '../../scripts/servers';
@@ -146,6 +146,29 @@ export function writeTestLogFile(slug: string, filename: string, content: string
   const taskDir = join(seedDir, '.teamai', slug);
   mkdirSync(taskDir, { recursive: true });
   writeFileSync(join(taskDir, filename), content);
+}
+
+/**
+ * Click a button repeatedly until a target element becomes visible.
+ *
+ * Handles React hydration races where the server-rendered button is in
+ * the DOM immediately but the onClick handler is not attached until
+ * React hydrates — a single click can fire into the void.
+ *
+ * @param button  Locator for the button to click.
+ * @param target  Locator for the element that should appear after clicking.
+ * @param options Optional overrides for the outer retry timeout (default
+ *                15 s) and inner poll interval (default 500 ms).
+ */
+export async function clickUntilVisible(
+  button: Locator,
+  target: Locator,
+  options?: { timeout?: number; pollInterval?: number },
+): Promise<void> {
+  await expect(async () => {
+    await button.click();
+    await expect(target).toBeVisible({ timeout: options?.pollInterval ?? 500 });
+  }).toPass({ timeout: options?.timeout ?? 15_000 });
 }
 
 /**
