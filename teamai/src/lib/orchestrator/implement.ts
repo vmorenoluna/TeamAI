@@ -1344,6 +1344,27 @@ export async function tryCherryPickWithRecovery(
   stBranch: string,
   subtaskId: number,
 ): Promise<boolean> {
+  // Guard against an empty cherry-pick range. `git cherry-pick` hard-errors
+  // on zero commits ("empty commit set passed") instead of treating it as a
+  // no-op. A subtask can legitimately reach this point with no commits yet
+  // for reasons other than a live wakeup (a deliverable-verification
+  // failure, a scope violation, or a session that simply didn't produce
+  // anything) — in all of those cases there is nothing to integrate, so
+  // skip the git call entirely rather than crashing the whole group's
+  // integration over it. Checked via projectRoot (never container-patched,
+  // unlike a per-subtask worktree) so this works regardless of container
+  // mode. If the check itself fails, fall through and let the real
+  // cherry-pick attempt surface the actual error.
+  try {
+    const log = execFileSync('git', ['log', pipeline.branch + '..' + stBranch, '--oneline'], {
+      cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
+    }).trim();
+    if (!log) {
+      appendFileSync(logFile, '\n[WORKTREE] Subtask ' + subtaskId + ' branch ' + stBranch + ' has no new commits — nothing to cherry-pick\n');
+      return true;
+    }
+  } catch { /* best-effort — fall through to the real attempt */ }
+
   // Tier 1: Normal cherry-pick
   try {
     appendFileSync(logFile, '\n[WORKTREE] Cherry-picking commits from ' + stBranch + ' onto ' + pipeline.branch + '\n');

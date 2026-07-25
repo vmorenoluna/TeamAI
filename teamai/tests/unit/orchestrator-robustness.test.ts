@@ -3917,6 +3917,13 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
 
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (Array.isArray(args)) {
+        // Subtask 2 actually finishes and commits — its cherry-pick range is
+        // non-empty. (Subtask 1's range is never queried: it's excluded from
+        // cherry-pick before tryCherryPickWithRecovery's empty-range check
+        // even runs, because its wakeup is still pending.)
+        if (args[0] === 'log' && typeof args[1] === 'string' && args[1].endsWith('-st2')) {
+          return 'def2222 constraint fix\n';
+        }
         if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull'
             || args[0] === 'rebase' || args[0] === 'cherry-pick') return '';
         if (args[0] === 'rev-parse') return 'abc123\n';
@@ -4036,6 +4043,122 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
 
       fireEvent('event', { sessionId: 'sess-resume-st1', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Empty cherry-pick range — any non-completed subtask, not just wakeups
+// ═══════════════════════════════════════════════════════════════════════
+// Regression coverage for a second real production failure on the same
+// ticket: after the wakeup fix above, a QA-rework pass hit the identical
+// "empty commit set passed" crash for a completely different reason — a
+// subtask that failed its deliverable-verification check (never wrote its
+// declared files_to_create) made zero commits, same as a still-pending
+// wakeup subtask, but wasn't excluded from cherry-pick because it isn't a
+// wakeup. tryCherryPickWithRecovery now checks for an empty commit range
+// before ever invoking `git cherry-pick`, so this is fixed at the git-
+// operation layer rather than by enumerating every "didn't complete" reason.
+
+describe('runImplement — deliverable-verification failure inside a multi-subtask group', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        // Simulate real git: CHERRY_PICK_HEAD doesn't exist when nothing is mid-cherry-pick.
+        if (args[0] === 'rev-parse' && args[1] === '--verify' && args[2] === 'CHERRY_PICK_HEAD') {
+          throw new Error('fatal: needed a single revision');
+        }
+        // Subtask 2 made no commits — cherry-picking its (would-be) empty
+        // range is exactly what crashed with "empty commit set passed" in
+        // production. Subtask 1 has a real commit to integrate.
+        if (args[0] === 'log' && typeof args[1] === 'string') {
+          if (args[1].endsWith('-st2')) return '';
+          if (args[1].endsWith('-st1')) return 'abc1111 evidence commit\n';
+        }
+        if (args[0] === 'cherry-pick' && args[1] !== '--abort' && typeof args[1] === 'string' && args[1].endsWith('-st2')) {
+          throw new Error('error: empty commit set passed\nfatal: cherry-pick failed');
+        }
+        if (args[0] === 'cherry-pick' && args[1] === '--abort') {
+          throw new Error('error: no cherry-pick or revert in progress\nfatal: cherry-pick failed');
+        }
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull'
+            || args[0] === 'rebase' || args[0] === 'cherry-pick') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'branch') return '';
+        if (args[0] === 'worktree') return '';
+        if (args[0] === 'status') return '';
+      }
+      return '';
+    });
+
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Run baseline sweep', description: 'Run pre-fix sweep and commit evidence', files: ['scripts/sweep.py'], acceptance_criteria: ['Sweep runs'], parallel_group: 1 },
+        {
+          id: 2, title: 'Implement fix', description: 'Implement the suppression constraint',
+          files: ['src/fix.ts'], acceptance_criteria: ['Constraint added'], parallel_group: 1,
+          files_to_create: ['scripts/sweep_logs/post-fix-abab-fix.log'],
+        },
+      ],
+    }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    project.clean();
+  });
+
+  it('skips the empty cherry-pick instead of crashing the whole group', async () => {
+    mockCreateSession
+      .mockResolvedValueOnce('sess-deliv-st1')
+      .mockResolvedValueOnce('sess-deliv-st2');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+
+      // Neither subtask writes the declared deliverable file (nothing on
+      // disk creates it in this mocked environment) — subtask 2's session
+      // just ends without having produced it.
+      fireEvent('event', { sessionId: 'sess-deliv-st1', event: { type: 'result' } });
+      fireEvent('event', { sessionId: 'sess-deliv-st2', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+
+      // Must not crash the task — this is the exact bug being fixed.
+      expect(pipeline.phase).not.toBe('failed');
+
+      // Subtask 1 (real commit) was actually cherry-picked; subtask 2's
+      // empty range was skipped before ever calling `git cherry-pick`.
+      const cherryPickCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'git' && Array.isArray(call[1]) && call[1][0] === 'cherry-pick' && call[1][1] !== '--abort',
+      );
+      expect(cherryPickCalls.some((c: any[]) => (c[1][1] as string).endsWith('-st1'))).toBe(true);
+      expect(cherryPickCalls.some((c: any[]) => (c[1][1] as string).endsWith('-st2'))).toBe(false);
+
+      // Subtask 1 completed; subtask 2 failed deliverable verification and stayed incomplete.
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(true);
+      expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBeFalsy();
+      expect(pipeline.deliverableFailCounts?.[2]).toBe(1);
+
       await promise;
     } finally {
       executeSpy.mockRestore();
