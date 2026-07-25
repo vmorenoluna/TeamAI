@@ -9,7 +9,7 @@ import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitF
 import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelineState, pipelineAdvancePhase } from './orchestrator/pipeline-state';
 import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedback';
 import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './orchestrator/phase-runners';
-import { parseSessionLimitReset, extractPrUrl, phaseHeader, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, computePipelineConfig, buildSessionOpts, type PipelineConfig } from './orchestrator/helpers';
+import { parseSessionLimitReset, extractPrUrl, phaseHeader, logToOutput, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, computePipelineConfig, buildSessionOpts, type PipelineConfig } from './orchestrator/helpers';
 import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn } from './orchestrator/worktree-ops';
 import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
 import { gitPush } from './orchestrator/git-push';
@@ -276,15 +276,14 @@ export class Orchestrator {
         rateLimited = true;
         this.handleRateLimit(pipeline, e.resetsAt);
       } else {
-        const logFile = path.join(pipeline.specPath, 'output.log');
         if (e instanceof OrchestratorError) {
           // Structured error — log with error code for observability
-          appendFileSync(logFile, `\n[ERROR] Task failed [${e.code}]: ${e.message}\n`);
-          if (e.stack) appendFileSync(logFile, `${e.stack}\n`);
+          logToOutput(pipeline.specPath, `\n[ERROR] Task failed [${e.code}]: ${e.message}\n`);
+          if (e.stack) logToOutput(pipeline.specPath, `${e.stack}\n`);
           logError('orchestrator', `Task ${taskId} failed [${e.code}]`, e);
         } else {
           const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
-          appendFileSync(logFile, `\n[ERROR] Task failed: ${errMsg}\n`);
+          logToOutput(pipeline.specPath, `\n[ERROR] Task failed: ${errMsg}\n`);
           logError('orchestrator', `Task ${taskId} failed`, e);
         }
         this.advancePhase(pipeline, 'failed');
@@ -778,7 +777,7 @@ export class Orchestrator {
         return true;
       }
       const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
-      appendFileSync(path.join(pipeline.specPath, 'output.log'), `\n[ERROR] Task failed ${errorContext}: ${errMsg}\n`);
+      logToOutput(pipeline.specPath, `\n[ERROR] Task failed ${errorContext}: ${errMsg}\n`);
       logError('orchestrator', `Task ${pipeline.taskId} failed ${errorContext}`, e);
       this.advancePhase(pipeline, 'failed');
       return false;
@@ -871,7 +870,7 @@ export class Orchestrator {
     if (!pipeline || !pipeline.wakeupUntil) return false;
     if (pipeline.pendingTimer) clearTimeout(pipeline.pendingTimer);
     try {
-      appendFileSync(path.join(pipeline.specPath, 'output.log'), `\n[WAKEUP] Ending wait early — ${reason}\n`);
+      logToOutput(pipeline.specPath, `\n[WAKEUP] Ending wait early — ${reason}\n`);
     } catch { /* best-effort */ }
     log('wakeup', `Task ${taskId} early wakeup triggered — ${reason}`);
     void this._fireWakeup(pipeline);
