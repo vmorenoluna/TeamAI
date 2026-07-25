@@ -1,7 +1,8 @@
 import { execFileSync } from 'child_process';
-import { appendFileSync } from 'fs';
 import { warn as logWarn } from './logger';
 import { getToolPath } from './tool-checker';
+import { logToOutput } from './orchestrator/helpers';
+import path from 'path';
 
 /**
  * Detect the Git hosting platform from the remote origin URL.
@@ -181,9 +182,10 @@ export function createPRViaCLI(
   logFile: string,
 ): string | null {
   const defaultBranch = detectDefaultBranch(projectRoot);
+  const specPath = path.dirname(logFile);
 
   if (platform === 'github') {
-    appendFileSync(logFile, `[PR] Creating GitHub PR via gh CLI: ${branch} → ${defaultBranch}\n`);
+    logToOutput(specPath, `[PR] Creating GitHub PR via gh CLI: ${branch} → ${defaultBranch}\n`);
     const result = execFileSync(getToolPath('gh'), [
       'pr', 'create',
       '--title', title,
@@ -192,12 +194,12 @@ export function createPRViaCLI(
       '--head', branch,
     ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 30_000 });
     const url = result.trim();
-    appendFileSync(logFile, `[PR] Created: ${url}\n`);
+    logToOutput(specPath, `[PR] Created: ${url}\n`);
     return url;
   }
 
   if (platform === 'gitlab') {
-    appendFileSync(logFile, `[PR] Creating GitLab MR via glab CLI: ${branch} → ${defaultBranch}\n`);
+    logToOutput(specPath, `[PR] Creating GitLab MR via glab CLI: ${branch} → ${defaultBranch}\n`);
     const result = execFileSync(getToolPath('glab'), [
       'mr', 'create',
       '--title', title,
@@ -207,12 +209,12 @@ export function createPRViaCLI(
       '--yes',
     ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 30_000 });
     const url = result.trim();
-    appendFileSync(logFile, `[PR] Created: ${url}\n`);
+    logToOutput(specPath, `[PR] Created: ${url}\n`);
     return url;
   }
 
   // Bitbucket / unknown: no standard CLI — return null for caller to handle
-  appendFileSync(logFile, `[PR] Platform "${platform}" has no standard CLI — cannot auto-create PR\n`);
+  logToOutput(specPath, `[PR] Platform "${platform}" has no standard CLI — cannot auto-create PR\n`);
   return null;
 }
 

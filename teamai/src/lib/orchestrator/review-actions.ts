@@ -5,11 +5,12 @@
  * All functions use dependency injection — the orchestrator passes its
  * internal state (taskStore, pipelines, etc.) as callbacks.
  */
-import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs';
 import path from 'path';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy, QaReport } from './types';
 import { REVISION_CLEANUP_EXTRA } from './artifacts';
+import { logToOutput } from './helpers';
 import { TaskNotFoundError, PhaseTransitionError } from './errors';
 
 // ── Dependencies ──────────────────────────────────────────────────────────
@@ -142,14 +143,13 @@ export async function autoReviseSpec(
   deps: ReviewActionsDeps,
 ): Promise<void> {
   const specPath = pipeline.specPath;
-  const logFile = path.join(specPath, 'output.log');
 
   // Guard: max 3 spec revisions before falling back to human review.
   // Prevents infinite loops when the analyst produces the same flawed spec.
   pipeline.specRevision++;
   if (pipeline.specRevision > 3) {
     try {
-      appendFileSync(logFile, `\n[REFINE] Max spec revisions (3) reached — pausing for human review\n`);
+      logToOutput(specPath, `\n[REFINE] Max spec revisions (3) reached — pausing for human review\n`);
     } catch { /* best-effort */ }
     deps.advancePhase(pipeline, 'awaiting-review');
     return;
@@ -199,7 +199,7 @@ export async function autoReviseSpec(
   deps.savePipelineState(pipeline);
 
   try {
-    appendFileSync(logFile, `\n[REFINE] Spec concerns detected — auto-revising spec with analyst (revision ${pipeline.specRevision}/3)\n`);
+    logToOutput(specPath, `\n[REFINE] Spec concerns detected — auto-revising spec with analyst (revision ${pipeline.specRevision}/3)\n`);
   } catch { /* best-effort */ }
   deps.advancePhase(pipeline, 'spec');
   await deps.executePhase(pipeline);

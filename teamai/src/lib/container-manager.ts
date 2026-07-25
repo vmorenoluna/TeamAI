@@ -1,10 +1,11 @@
 import { spawn, execFileSync, ChildProcess } from 'child_process';
 import crossSpawn from 'cross-spawn';
-import { existsSync, readFileSync, appendFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { EventEmitter } from 'events';
 import path from 'path';
 import { warn as logWarn, log } from './logger';
 import { getToolPath } from './tool-checker';
+import { logToOutput } from './orchestrator/helpers';
 
 export type ContainerState = 'stopped' | 'starting' | 'running' | 'restarting' | 'generating' | 'validating';
 
@@ -298,9 +299,10 @@ export class ContainerManager extends EventEmitter {
       let stderr = '';
 
       // Parse devcontainer JSON log lines in real-time to stream progress
+      const specPath = logFile ? path.dirname(logFile) : undefined;
       const writeToLog = (msg: string) => {
-        if (!logFile) return;
-        try { appendFileSync(logFile, msg); } catch { /* best-effort */ }
+        if (!specPath) return;
+        logToOutput(specPath, msg);
       };
 
       proc.stdout?.on('data', (d: Buffer) => {

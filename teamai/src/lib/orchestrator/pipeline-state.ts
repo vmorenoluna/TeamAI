@@ -16,7 +16,8 @@ export function rotateOutputLog(logFile: string): void {
       const content = readFileSync(logFile, 'utf-8');
       const truncated = content.slice(-KEEP_SIZE);
       writeFileSync(logFile, truncated);
-      appendFileSync(logFile, `\n── LOG TRUNCATED (${stat.size} → ${KEEP_SIZE} bytes) ──\n`);
+      const ts = new Date().toISOString().slice(0, 19);
+      appendFileSync(logFile, `\n[${ts}] ── LOG TRUNCATED (${stat.size} → ${KEEP_SIZE} bytes) ──\n`);
     }
   } catch { /* best-effort */ }
 }

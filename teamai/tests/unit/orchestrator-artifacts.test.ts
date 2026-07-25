@@ -244,7 +244,7 @@ describe('_commitArtifactsToWorktree', () => {
     expect(logContent).toContain('No artifacts to commit');
   });
 
-  it('throws when the specPath directory does not exist (no log file can be created)', () => {
+  it('does not crash when the specPath directory does not exist (logToOutput swallows ENOENT)', () => {
     testData = setupTestProject();
     const orch = makeOrch(testData.root);
 
@@ -258,9 +258,10 @@ describe('_commitArtifactsToWorktree', () => {
       worktreePath,
     });
 
-    // _phaseHeader catches the write failure, but the appendFileSync at
-    // the copied===0 branch does not — it throws ENOENT.
-    expect(() => (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline)).toThrow();
+    // logToOutput wraps appendFileSync with try/catch so missing
+    // directories don't crash the pipeline — the function should
+    // complete without throwing.
+    expect(() => (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline)).not.toThrow();
   });
 
   // ── Gitignore-blocked ─────────────────────────────────────────────

@@ -6,8 +6,8 @@
  * and bounce-back to implement.
  */
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'fs';
-import { updateSessionMap } from './helpers';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { updateSessionMap, logToOutput } from './helpers';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
 import { resolveBaseBranch } from '../git-platform';
@@ -43,7 +43,7 @@ export async function runQaReview(
   deps.persistAndEmitPhase(pipeline);
   pipeline.qaAttempt++;
   deps.savePipelineState(pipeline);
-  const logFile = path.join(pipeline.specPath, 'output.log');
+  const logFile = path.join(pipeline.specPath, 'output.log'); // kept for deps.phaseHeader and deps.gitPush
   const qaLogFile = path.join(pipeline.specPath, 'output-qa.log');
   deps.phaseHeader(logFile, `qa-review (attempt ${pipeline.qaAttempt})`);
 
@@ -53,13 +53,13 @@ export async function runQaReview(
     try {
       const existingReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
       if (existingReport.locked === true) {
-        appendFileSync(logFile, '\n[INFO] qa_report.json is locked — skipping QA review\n');
+        logToOutput(pipeline.specPath, '\n[INFO] qa_report.json is locked — skipping QA review\n');
         deps.advancePhase(pipeline, 'awaiting-review');
         return;
       }
       if (existingReport.reviewedBy && typeof existingReport.reviewedBy === 'string' &&
           existingReport.reviewedBy.toLowerCase().includes('manual override')) {
-        appendFileSync(logFile, '\n[INFO] qa_report.json has manual override — skipping QA review\n');
+        logToOutput(pipeline.specPath, '\n[INFO] qa_report.json has manual override — skipping QA review\n');
         deps.advancePhase(pipeline, 'awaiting-review');
         return;
       }
@@ -78,14 +78,14 @@ export async function runQaReview(
     }).trim();
     hasUnpushed = unpushed.length > 0;
     if (hasUnpushed) {
-      appendFileSync(logFile, `\n[QA-PRECHECK] Unpushed commits detected on ${pipeline.branch}:\n${unpushed}\n`);
+      logToOutput(pipeline.specPath, `\n[QA-PRECHECK] Unpushed commits detected on ${pipeline.branch}:\n${unpushed}\n`);
       try {
         deps.gitPush(['push', 'origin', pipeline.branch], logFile);
-        appendFileSync(logFile, '[QA-PRECHECK] Pushed unpushed commits successfully — remote matches worktree\n');
+        logToOutput(pipeline.specPath, '[QA-PRECHECK] Pushed unpushed commits successfully — remote matches worktree\n');
         hasUnpushed = false;
       } catch (pushErr) {
         const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
-        appendFileSync(logFile, `[QA-PRECHECK] Auto-push failed: ${pushMsg}\n`);
+        logToOutput(pipeline.specPath, `[QA-PRECHECK] Auto-push failed: ${pushMsg}\n`);
       }
     }
   } catch { /* branch doesn't exist on remote */ }
@@ -103,7 +103,7 @@ export async function runQaReview(
       }],
     };
     writeFileSync(reportPath, JSON.stringify(failReport, null, 2));
-    appendFileSync(logFile, '[QA-PRECHECK] FAIL — unpushed commits detected, engineer must push first\n');
+    logToOutput(pipeline.specPath, '[QA-PRECHECK] FAIL — unpushed commits detected, engineer must push first\n');
 
     if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
       deps.writeCompletionSummary(pipeline);
@@ -155,7 +155,7 @@ export async function runQaReview(
   if (reportResult.error) {
     // QA agent produced no readable report — write a structured FAIL and
     // follow the normal bounce/fail budget instead of crashing with ENOENT.
-    appendFileSync(logFile, `\n[QA-ERROR] QA agent did not produce a readable report: ${reportResult.error.message}\n`);
+    logToOutput(pipeline.specPath, `\n[QA-ERROR] QA agent did not produce a readable report: ${reportResult.error.message}\n`);
     const failReport: QaReport = {
       overall: 'FAIL',
       criteria: [{
@@ -231,26 +231,26 @@ export async function runQaReview(
           // detection: previous cycle (at least 1) + current cycle = 2 total.
           const prevTotal = pipeline.persistedCriterionFailCounts[name] || 1;
           pipeline.persistedCriterionFailCounts[name] = prevTotal + 1;
-          appendFileSync(logFile, `\n[QA-ESCALATE] Persisted FAIL criterion detected: "${name}" has failed ${pipeline.persistedCriterionFailCounts[name]} times in a row\n`);
+          logToOutput(pipeline.specPath, `\n[QA-ESCALATE] Persisted FAIL criterion detected: "${name}" has failed ${pipeline.persistedCriterionFailCounts[name]} times in a row\n`);
         }
       }
       // Remove criteria that are no longer failing (they got fixed)
       for (const name of Object.keys(pipeline.persistedCriterionFailCounts)) {
         if (!currentFailNames.has(name)) {
           delete pipeline.persistedCriterionFailCounts[name];
-          appendFileSync(logFile, `\n[QA-ESCALATE] Criterion "${name}" resolved — removed from persisted failures tracking\n`);
+          logToOutput(pipeline.specPath, `\n[QA-ESCALATE] Criterion "${name}" resolved — removed from persisted failures tracking\n`);
         }
       }
     }
 
     // FAIL-type router
     if (report.fail_type === 'cleanup') {
-      appendFileSync(logFile, '\n[QA-ROUTER] fail_type=cleanup — routing to implement for automated mechanical fix\n');
+      logToOutput(pipeline.specPath, '\n[QA-ROUTER] fail_type=cleanup — routing to implement for automated mechanical fix\n');
       const failCriteria = report.criteria?.filter(c => c.status === 'FAIL') || [];
       for (const c of failCriteria) {
-        appendFileSync(logFile, `[QA-ROUTER] Cleanup required: ${c.fix_needed || c.notes || c.criterion}\n`);
+        logToOutput(pipeline.specPath, `[QA-ROUTER] Cleanup required: ${c.fix_needed || c.notes || c.criterion}\n`);
       }
-      appendFileSync(logFile, '[QA-ROUTER] Cleanup fix is automated — executing via implement cleanup-only rework mode\n');
+      logToOutput(pipeline.specPath, '[QA-ROUTER] Cleanup fix is automated — executing via implement cleanup-only rework mode\n');
     }
 
     deps.writeQaFeedback(pipeline, report);

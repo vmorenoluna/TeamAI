@@ -9,7 +9,7 @@
  */
 import { execFileSync } from 'child_process';
 import { getToolPath } from '../tool-checker';
-import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, renameSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync, renameSync, rmSync } from 'fs';
 import { PipelineConfigError, WorktreeError, PushVerificationError, SessionKilledError } from './errors';
 import { readJsonFile } from '../json-io';
 import path from 'path';
@@ -17,7 +17,7 @@ import { processManager, type AgentSession } from '../process-manager';
 import { readContainerConfig, containerManager, dockerAvailable, _resetDockerAvailableCache } from '../container-manager';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { rebaseOntoLatestDefault } from './phase-runners';
-import { updateSessionMap } from './helpers';
+import { updateSessionMap, logToOutput } from './helpers';
 import { resolveBaseBranch } from '../git-platform';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
@@ -160,8 +160,7 @@ export function selectSubtasks(
   const planPath = path.join(pipeline.specPath, 'plan.json');
   const planResult = readJsonFile<{ subtasks: PlanSubtask[] }>(planPath, { required: true });
   if (planResult.error) {
-    const logFile = path.join(pipeline.specPath, 'output.log');
-    appendFileSync(logFile, `\n[ERROR] Cannot read plan.json: ${planResult.error.message}\n`);
+    logToOutput(pipeline.specPath, `\n[ERROR] Cannot read plan.json: ${planResult.error.message}\n`);
     throw new PipelineConfigError(`Plan file is missing or invalid at ${planPath}: ${planResult.error.message}. The planner must produce a valid plan.json before implement can proceed.`);
   }
   const plan = planResult.data!;
@@ -207,8 +206,7 @@ export function selectSubtasks(
     )];
     let qaContent = '';
     try { qaContent = readFileSync(qaFeedbackPath, 'utf-8'); } catch { /* best-effort */ }
-    const logFile = path.join(pipeline.specPath, 'output.log');
-    appendFileSync(logFile, '\n[QA-FALLBACK] Criterion matching flagged no subtasks — synthesising targeted rework subtask from qa_feedback.md\n');
+    logToOutput(pipeline.specPath, '\n[QA-FALLBACK] Criterion matching flagged no subtasks — synthesising targeted rework subtask from qa_feedback.md\n');
     const synthesizedSubtask: PlanSubtask = {
       id: 9999,
       title: 'QA Rework: fix failing criteria (criterion matching found no flagged subtasks)',
@@ -300,11 +298,11 @@ async function runSubtaskSession(
       const preResult = await runSensors(pipelineConfig.sensors.pre_subtask, 'pre_subtask', {
         cwd, specPath: pipeline.specPath, files: subtask.files || [], subtaskId: subtask.id, logFile,
       });
-      if (!preResult.allPassed) appendFileSync(logFile, sensorRunSummary(preResult));
+      if (!preResult.allPassed) logToOutput(pipeline.specPath, sensorRunSummary(preResult));
     }
   } catch (preSensorErr) {
     const msg = preSensorErr instanceof Error ? preSensorErr.message : String(preSensorErr);
-    appendFileSync(logFile, '\n[SENSOR:pre_subtask] pre-subtask sensors failed (non-blocking): ' + msg + '\n');
+    logToOutput(pipeline.specPath, '\n[SENSOR:pre_subtask] pre-subtask sensors failed (non-blocking): ' + msg + '\n');
   }
 
   const subtaskLogFile = path.join(pipeline.specPath, `output-st${subtask.id}.log`);
@@ -426,7 +424,7 @@ async function runSubtaskSession(
       sessionId = await processManager.createSession(deps.sessionOpts(coderRole, cwd, pipeline.taskId, subtaskLogFile));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      appendFileSync(logFile, '\n[ERROR] Session creation failed for subtask ' + subtask.id + ': ' + msg + '\n');
+      logToOutput(pipeline.specPath, '\n[ERROR] Session creation failed for subtask ' + subtask.id + ': ' + msg + '\n');
       throw err;
     }
     // Serialised through a lock so parallel subtasks don't race on the JSON file.
@@ -448,7 +446,7 @@ async function runSubtaskSession(
       const maxRecoveries = deps.getPipelineConfig().maxStallRecoveries;
 
       if (attemptCount >= maxRecoveries) {
-        appendFileSync(logFile, '[STALL-RECOVERY] Subtask ' + subtask.id + ' exceeded stall-recovery cap (' + maxRecoveries + ') — advancing to failed\n');
+        logToOutput(pipeline.specPath, '[STALL-RECOVERY] Subtask ' + subtask.id + ' exceeded stall-recovery cap (' + maxRecoveries + ') — advancing to failed\n');
         const reportPath = path.join(pipeline.specPath, 'qa_report.json');
         writeFileSync(reportPath, JSON.stringify({
           overall: 'FAIL',
@@ -463,7 +461,7 @@ async function runSubtaskSession(
         return;
       }
 
-      appendFileSync(logFile, '[STALL-RECOVERY] Subtask ' + subtask.id + ' session killed (stalled, no output 30+min) — retrying with a fresh session (attempt ' + attemptCount + '/' + maxRecoveries + ')\n');
+      logToOutput(pipeline.specPath, '[STALL-RECOVERY] Subtask ' + subtask.id + ' session killed (stalled, no output 30+min) — retrying with a fresh session (attempt ' + attemptCount + '/' + maxRecoveries + ')\n');
       stallRecoveryHeader = '⚠️ SESSION RECOVERED AFTER STALL-KILL (attempt ' + attemptCount + '/' + maxRecoveries + ')\n\n' +
         'Your previous session for this subtask was terminated by the orchestrator — it\n' +
         'produced no output for over 30 minutes while a tool was running. Two distinct\n' +
@@ -497,7 +495,7 @@ async function runSubtaskSession(
 
       if (violations.length > 0) {
         scopeViolations.add(subtask.id);
-        appendFileSync(logFile,
+        logToOutput(pipeline.specPath,
           '\n[SCOPE] Subtask ' + subtask.id + ' modified files outside its assigned scope:\n' +
           violations.map(f => '  - ' + f).join('\n') + '\n' +
           '[SCOPE] Assigned files: ' + ((subtask.files || []).join(', ') || '(none)') + '\n'
@@ -505,7 +503,7 @@ async function runSubtaskSession(
       }
     } catch (scopeErr) {
       const scopeMsg = scopeErr instanceof Error ? scopeErr.message : String(scopeErr);
-      appendFileSync(logFile, '\n[SCOPE] Could not verify file scope (git diff failed: ' + scopeMsg + ')\n');
+      logToOutput(pipeline.specPath, '\n[SCOPE] Could not verify file scope (git diff failed: ' + scopeMsg + ')\n');
     }
   }
 
@@ -542,11 +540,11 @@ async function runSubtaskSession(
           }
           pipeline.wakeupAttemptCount = (pipeline.wakeupAttemptCount || 0) + 1;
           wakeupDetected = true;
-          appendFileSync(logFile, '[WAKEUP] Subtask ' + wd.subtask_id + ' wakeup scheduled for ' + wd.wakeup_at + ' (attempt ' + pipeline.wakeupAttemptCount + ') — background process: ' + (wd.background_command || 'unknown') +
+          logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + wd.subtask_id + ' wakeup scheduled for ' + wd.wakeup_at + ' (attempt ' + pipeline.wakeupAttemptCount + ') — background process: ' + (wd.background_command || 'unknown') +
             (wd.progress_log_path ? ' — progress log: ' + wd.progress_log_path : '') + '\n');
         }
       } catch {
-        appendFileSync(logFile, '[WAKEUP] Malformed subtask_wakeup.json — treating as missing\n');
+        logToOutput(pipeline.specPath, '[WAKEUP] Malformed subtask_wakeup.json — treating as missing\n');
       }
       try { unlinkSync(wakeupPath); } catch { /* best-effort */ }
     }
@@ -559,7 +557,7 @@ async function runSubtaskSession(
     for (const file of subtask.files_to_create) {
       if (!existsSync(path.join(cwd, file))) {
         skipCompletion = true;
-        appendFileSync(logFile, '\n[VERIFY] Subtask ' + subtask.id + ': expected file/directory missing — ' + file + '\n');
+        logToOutput(pipeline.specPath, '\n[VERIFY] Subtask ' + subtask.id + ': expected file/directory missing — ' + file + '\n');
       }
     }
     if (skipCompletion) {
@@ -568,7 +566,7 @@ async function runSubtaskSession(
       const count = (pipeline.deliverableFailCounts[subtask.id] || 0) + 1;
       pipeline.deliverableFailCounts[subtask.id] = count;
       const missingFiles = subtask.files_to_create.filter(f => !existsSync(path.join(cwd, f))).join(', ');
-      appendFileSync(logFile, '[VERIFY] Subtask ' + subtask.id + ' failed deliverable verification (attempt ' + count + '/' + maxFails + ') — missing: ' + missingFiles + '\n');
+      logToOutput(pipeline.specPath, '[VERIFY] Subtask ' + subtask.id + ' failed deliverable verification (attempt ' + count + '/' + maxFails + ') — missing: ' + missingFiles + '\n');
       if (count >= maxFails) {
         const reportPath = path.join(pipeline.specPath, 'qa_report.json');
         writeFileSync(reportPath, JSON.stringify({
@@ -580,7 +578,7 @@ async function runSubtaskSession(
             notes: 'Subtask ' + subtask.id + ' failed deliverable verification ' + maxFails + ' times. Missing files: ' + missingFiles,
           }],
         }, null, 2));
-        appendFileSync(logFile, '[VERIFY] Subtask ' + subtask.id + ' exceeded deliverable verification cap (' + maxFails + ') — advancing to failed\n');
+        logToOutput(pipeline.specPath, '[VERIFY] Subtask ' + subtask.id + ' exceeded deliverable verification cap (' + maxFails + ') — advancing to failed\n');
         deps.advancePhase(pipeline, 'failed');
         return;
       }
@@ -594,7 +592,7 @@ async function runSubtaskSession(
   if (!skipCompletion) {
     if (scopeViolations.has(subtask.id)) {
       skipCompletion = true;
-      appendFileSync(logFile, '[SCOPE] Subtask ' + subtask.id + ' rejected — will re-run with scope enforcement\n');
+      logToOutput(pipeline.specPath, '[SCOPE] Subtask ' + subtask.id + ' rejected — will re-run with scope enforcement\n');
     } else {
       if (pipeline.deliverableFailCounts?.[subtask.id] !== undefined) {
         delete pipeline.deliverableFailCounts[subtask.id];
@@ -615,7 +613,7 @@ async function runSubtaskSession(
     pipeline.wakeupProgressPath = undefined;
     pipeline.wakeupAttemptCount = 0;
     pipeline._wakeupJustCompleted = true;
-    appendFileSync(logFile, '[WAKEUP] Subtask ' + subtask.id + ' completed after wakeup — clearing wakeup state\n');
+    logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + subtask.id + ' completed after wakeup — clearing wakeup state\n');
     return;
   }
 
@@ -626,7 +624,7 @@ async function runSubtaskSession(
       const postResult = await runSensors(pipelineConfig.sensors.post_subtask, 'post_subtask', {
         cwd, specPath: pipeline.specPath, files: subtask.files || [], subtaskId: subtask.id, logFile,
       });
-      appendFileSync(logFile, sensorRunSummary(postResult));
+      logToOutput(pipeline.specPath, sensorRunSummary(postResult));
       if (!postResult.allPassed) {
         const sensorReportPath = path.join(pipeline.specPath, 'sensor_report-st' + subtask.id + '.json');
         const failMsg = postResult.reports.filter(r => !r.passed).map(r => r.sensor + ': ' + (r.error || 'exit ' + r.exitCode)).join('; ');
@@ -639,7 +637,7 @@ async function runSubtaskSession(
     }
   } catch (postSensorErr) {
     const msg = postSensorErr instanceof Error ? postSensorErr.message : String(postSensorErr);
-    appendFileSync(logFile, '\n[SENSOR:post_subtask] post-subtask sensors error: ' + msg + '\n');
+    logToOutput(pipeline.specPath, '\n[SENSOR:post_subtask] post-subtask sensors error: ' + msg + '\n');
   }
 
   deps.planWriteLock.current = deps.planWriteLock.current.then(() => {
@@ -702,27 +700,27 @@ async function integrateGroup(
         cwd: pipeline.worktreePath, encoding: 'utf-8', stdio: 'pipe',
       }).trim();
       if (statusOut) {
-        appendFileSync(logFile, '\n[WORKTREE] Main worktree has uncommitted changes — auto-committing before cherry-pick:\n' + statusOut + '\n');
+        logToOutput(pipeline.specPath, '\n[WORKTREE] Main worktree has uncommitted changes — auto-committing before cherry-pick:\n' + statusOut + '\n');
         execFileSync('git', ['add', '-A', '--', '.', ':!.teamai'], { cwd: pipeline.worktreePath, stdio: 'pipe' });
         execFileSync('git', ['commit', '-m', 'chore: auto-save worktree state before cherry-pick'], {
           cwd: pipeline.worktreePath, stdio: 'pipe',
         });
-        appendFileSync(logFile, '[WORKTREE] Auto-committed uncommitted changes\n');
+        logToOutput(pipeline.specPath, '[WORKTREE] Auto-committed uncommitted changes\n');
       }
     } catch (statusErr) {
       const errMsg = statusErr instanceof Error ? statusErr.message : String(statusErr);
-      appendFileSync(logFile, '\n[WORKTREE] Could not check/commit worktree status (git failed: ' + errMsg + '), proceeding with cherry-pick\n');
+      logToOutput(pipeline.specPath, '\n[WORKTREE] Could not check/commit worktree status (git failed: ' + errMsg + '), proceeding with cherry-pick\n');
     }
 
     for (let i = 0; i < results.length; i++) {
       if (results[i].status !== 'fulfilled') continue;
       if (!subtaskWorktrees.has(subtasks[i].id)) continue;
       if (subtasks[i].id === pipeline.wakeupSubtaskId) {
-        appendFileSync(logFile, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' — wakeup pending\n');
+        logToOutput(pipeline.specPath, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' — wakeup pending\n');
         continue;
       }
       if (scopeViolations.has(subtasks[i].id)) {
-        appendFileSync(logFile, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' (scope violation)\n');
+        logToOutput(pipeline.specPath, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' (scope violation)\n');
         continue;
       }
       const stBranch = pipeline.branch + '-st' + subtasks[i].id;
@@ -730,8 +728,8 @@ async function integrateGroup(
         pipeline, deps, logFile, stBranch, subtasks[i].id,
       );
       if (!cherrySuccess) {
-        appendFileSync(logFile, '\n[WORKTREE] Retained ' + subtaskWorktrees.size + ' per-subtask worktree(s) and branches for manual recovery (auto-recovery exhausted).\n');
-        appendFileSync(logFile, '[WORKTREE] Branches preserved: ' + subtasks.map(s => pipeline.branch + '-st' + s.id).join(', ') + '\n');
+        logToOutput(pipeline.specPath, '\n[WORKTREE] Retained ' + subtaskWorktrees.size + ' per-subtask worktree(s) and branches for manual recovery (auto-recovery exhausted).\n');
+        logToOutput(pipeline.specPath, '[WORKTREE] Branches preserved: ' + subtasks.map(s => pipeline.branch + '-st' + s.id).join(', ') + '\n');
         // Don't clean up — preserve work for manual recovery
         return false;
       }
@@ -752,7 +750,7 @@ async function integrateGroup(
       cleanedCount++;
     }
     if (cleanedCount > 0) {
-      appendFileSync(logFile, '\n[WORKTREE] Cleaned up ' + cleanedCount + ' per-subtask worktree(s)\n');
+      logToOutput(pipeline.specPath, '\n[WORKTREE] Cleaned up ' + cleanedCount + ' per-subtask worktree(s)\n');
     }
   }
 
@@ -776,7 +774,7 @@ export function pushAndVerify(
   deps.phaseHeader(logFile, 'implement — push to remote');
   try {
     deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
-    appendFileSync(logFile, '[PUSH] Successfully pushed ' + pipeline.branch + ' to origin\n');
+    logToOutput(pipeline.specPath, '[PUSH] Successfully pushed ' + pipeline.branch + ' to origin\n');
 
     // Verify remote HEAD
     try {
@@ -789,15 +787,15 @@ export function pushAndVerify(
       if (localHead !== remoteHead) {
         throw new PushVerificationError('Push succeeded but HEADs differ — local=' + localHead + ' remote=' + remoteHead, 'HEAD_MISMATCH');
       }
-      appendFileSync(logFile, '[PUSH] Verified remote HEAD matches local HEAD\n');
+      logToOutput(pipeline.specPath, '[PUSH] Verified remote HEAD matches local HEAD\n');
     } catch (verifyErr) {
       const verifyMsg = verifyErr instanceof Error ? verifyErr.message : String(verifyErr);
-      appendFileSync(logFile, '[PUSH] Remote verification failed: ' + verifyMsg + '\n');
+      logToOutput(pipeline.specPath, '[PUSH] Remote verification failed: ' + verifyMsg + '\n');
       throw verifyErr;
     }
   } catch (pushErr) {
     const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
-    appendFileSync(logFile, '[PUSH] Push failed: ' + pushMsg + '\n');
+    logToOutput(pipeline.specPath, '[PUSH] Push failed: ' + pushMsg + '\n');
 
     let prExists = false;
     try {
@@ -806,13 +804,13 @@ export function pushAndVerify(
       }).trim();
       if (prCheck) {
         prExists = true;
-        appendFileSync(logFile, '[PUSH] PR already exists for branch ' + pipeline.branch + ': ' + prCheck + ' — push failure is non-fatal\n');
-        appendFileSync(logFile, '[PUSH] Code is already in the PR — advancing to QA review\n');
+        logToOutput(pipeline.specPath, '[PUSH] PR already exists for branch ' + pipeline.branch + ': ' + prCheck + ' — push failure is non-fatal\n');
+        logToOutput(pipeline.specPath, '[PUSH] Code is already in the PR — advancing to QA review\n');
       }
     } catch { /* gh unavailable or no PR exists — fall through to normal failure */ }
 
     if (!prExists) {
-      appendFileSync(logFile, '[PUSH] Task cannot advance — engineer must be able to push before QA can verify\n');
+      logToOutput(pipeline.specPath, '[PUSH] Task cannot advance — engineer must be able to push before QA can verify\n');
       const reportPath = path.join(pipeline.specPath, 'qa_report.json');
       writeFileSync(reportPath, JSON.stringify({
         overall: 'FAIL',
@@ -841,7 +839,6 @@ export function pushAndVerify(
 export async function applySensorGate(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
-  logFile: string,
 ): Promise<boolean> {
   const planPath = path.join(pipeline.specPath, 'plan.json');
   const allSensorFailures: { subtask: string; sensor: string; error: string; fix_needed: string }[] = [];
@@ -862,7 +859,7 @@ export async function applySensorGate(
   }
 
   if (allSensorFailures.length > 0) {
-    appendFileSync(logFile, '\n[SENSOR-GATE] post_subtask sensors failed (' + allSensorFailures.length + ' failure(s)) — bouncing to implement for sensor fixes\n');
+    logToOutput(pipeline.specPath, '\n[SENSOR-GATE] post_subtask sensors failed (' + allSensorFailures.length + ' failure(s)) — bouncing to implement for sensor fixes\n');
     deps.writeQaFeedback(pipeline, {
       overall: 'FAIL',
       fail_type: 'cleanup',
@@ -907,7 +904,7 @@ export async function runImplement(
 
   // Skip implement if all subtasks complete and not in QA rework
   if (!hasQaFeedback && effectiveSubtasks.length === 0 && plan.subtasks.length > 0) {
-    appendFileSync(logFile, '\n[SKIP] All subtasks already completed — skipping implement, advancing to QA review\n');
+    logToOutput(pipeline.specPath, '\n[SKIP] All subtasks already completed — skipping implement, advancing to QA review\n');
     deps.advancePhase(pipeline, 'qa-review');
     await deps.executePhase(pipeline);
     return;
@@ -956,7 +953,7 @@ export async function runImplement(
           // The merger agent in integrateGroup will handle conflicts when
           // cherry-picking back onto pipeline.branch.
           deps.execGit(['worktree', 'add', stWorktreePath, stBranch], deps.projectRoot);
-          appendFileSync(logFile, '\n[WORKTREE] Created worktree from preserved branch ' + stBranch + ' (conflict resolution deferred to merger agent)\n');
+          logToOutput(pipeline.specPath, '\n[WORKTREE] Created worktree from preserved branch ' + stBranch + ' (conflict resolution deferred to merger agent)\n');
         }
 
         if (containerWorkspace) {
@@ -964,7 +961,7 @@ export async function runImplement(
         }
 
         subtaskWorktrees.set(subtask.id, stWorktreePath);
-        appendFileSync(logFile, '\n[WORKTREE] Created isolated worktree for subtask ' + subtask.id + ' at ' + stWorktreePath + '\n');
+        logToOutput(pipeline.specPath, '\n[WORKTREE] Created isolated worktree for subtask ' + subtask.id + ' at ' + stWorktreePath + '\n');
       }
     } else {
       // Group has collapsed to a single remaining subtask. Normally that
@@ -987,7 +984,7 @@ export async function runImplement(
             // restart running restoreContainerPatchedWorktrees()).
             deps.patchWorktreeGitFile(stWorktreePath, containerWorkspace);
           }
-          appendFileSync(logFile, '\n[WORKTREE] Resuming subtask ' + resuming.id + ' in its preserved isolated worktree at ' + stWorktreePath + '\n');
+          logToOutput(pipeline.specPath, '\n[WORKTREE] Resuming subtask ' + resuming.id + ' in its preserved isolated worktree at ' + stWorktreePath + '\n');
         }
       }
     }
@@ -1075,7 +1072,7 @@ export async function runImplement(
   // ADR 002: Wakeup timer — pause implement phase until wakeup time
   if (pipeline.wakeupUntil) {
     if ((pipeline.wakeupAttemptCount || 0) >= deps.getPipelineConfig().maxWakeupAttempts) {
-      appendFileSync(logFile, '[WAKEUP] Subtask ' + pipeline.wakeupSubtaskId + ' exceeded wakeup attempt cap (' + deps.getPipelineConfig().maxWakeupAttempts + ') — advancing to failed\n');
+      logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + pipeline.wakeupSubtaskId + ' exceeded wakeup attempt cap (' + deps.getPipelineConfig().maxWakeupAttempts + ') — advancing to failed\n');
       const reportPath = path.join(pipeline.specPath, 'qa_report.json');
       writeFileSync(reportPath, JSON.stringify({
         overall: 'FAIL',
@@ -1127,7 +1124,7 @@ export async function runImplement(
   if (pipeline.phase === 'failed') return;
 
   // Sensor gate: check per-subtask sensor reports
-  const bounced = await applySensorGate(pipeline, deps, logFile);
+  const bounced = await applySensorGate(pipeline, deps);
   if (bounced) return;
 
   deps.advancePhase(pipeline, 'qa-review');
@@ -1186,6 +1183,7 @@ export async function _recoverStBranchCommits(
   worktreePath: string,
   subtaskId: number,
 ): Promise<StBranchRecoveryResult> {
+  const specPath = path.dirname(logFile);
   const none: StBranchRecoveryResult = { recovered: true, commits: [] };
 
   // Check if the branch exists
@@ -1211,7 +1209,7 @@ export async function _recoverStBranchCommits(
   if (!logOutput) return none;
 
   const commits = logOutput.split('\n').filter(Boolean);
-  appendFileSync(logFile,
+  logToOutput(specPath,
     '\n[WORKTREE] Found ' + commits.length + ' unintegrated commit(s) on ' + stBranch +
     ' (subtask ' + subtaskId + ') — auto-recovering:\n' +
     commits.map(c => '  ' + c).join('\n') + '\n'
@@ -1220,7 +1218,7 @@ export async function _recoverStBranchCommits(
   // Attempt to cherry-pick the commits into the main worktree
   try {
     execGitFn(['cherry-pick', pipelineBranch + '..' + stBranch], worktreePath);
-    appendFileSync(logFile,
+    logToOutput(specPath,
       '[WORKTREE] Auto-recovered ' + commits.length + ' commit(s) from ' + stBranch +
       ' onto ' + pipelineBranch + '\n'
     );
@@ -1235,29 +1233,29 @@ export async function _recoverStBranchCommits(
     // genuine content conflict that needs the merger agent.
     if (isInfraError(cpMsg) && readContainerConfig(projectRoot).enabled) {
       for (let retry = 0; retry < 2; retry++) {
-        appendFileSync(logFile,
+        logToOutput(specPath,
           '[WORKTREE] Infra error recovering ' + stBranch + ' — reprovisioning container and retrying (attempt ' + (retry + 1) + '/2)\n'
         );
         try {
           await containerManager.ensureContainer(projectRoot, logFile);
           await new Promise(r => setTimeout(r, 1000)); // brief backoff for container stabilisation
           execGitFn(['cherry-pick', pipelineBranch + '..' + stBranch], worktreePath);
-          appendFileSync(logFile,
+          logToOutput(specPath,
             '[WORKTREE] Auto-recovered ' + commits.length + ' commit(s) from ' + stBranch +
             ' onto ' + pipelineBranch + ' after infra retry\n'
           );
           return { recovered: true, commits };
         } catch (retryErr) {
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-          appendFileSync(logFile, '[WORKTREE] Recovery retry ' + (retry + 1) + ' for ' + stBranch + ' failed: ' + retryMsg + '\n');
+          logToOutput(specPath, '[WORKTREE] Recovery retry ' + (retry + 1) + ' for ' + stBranch + ' failed: ' + retryMsg + '\n');
           try { execGitFn(['cherry-pick', '--abort'], worktreePath); } catch { /* best-effort */ }
         }
       }
-      appendFileSync(logFile, '[WORKTREE] Infra retries exhausted for ' + stBranch + ' — cannot auto-recover\n');
+      logToOutput(specPath, '[WORKTREE] Infra retries exhausted for ' + stBranch + ' — cannot auto-recover\n');
       return { recovered: false, commits };
     }
 
-    appendFileSync(logFile,
+    logToOutput(specPath,
       '[WORKTREE] Cherry-pick recovery conflicted for ' + stBranch + ': ' + cpMsg + '\n' +
       '[WORKTREE] Branch ' + stBranch + ' preserved as-is — merger agent will resolve during cherry-pick phase\n'
     );
@@ -1360,20 +1358,20 @@ export async function tryCherryPickWithRecovery(
       cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
     }).trim();
     if (!log) {
-      appendFileSync(logFile, '\n[WORKTREE] Subtask ' + subtaskId + ' branch ' + stBranch + ' has no new commits — nothing to cherry-pick\n');
+      logToOutput(pipeline.specPath, '\n[WORKTREE] Subtask ' + subtaskId + ' branch ' + stBranch + ' has no new commits — nothing to cherry-pick\n');
       return true;
     }
   } catch { /* best-effort — fall through to the real attempt */ }
 
   // Tier 1: Normal cherry-pick
   try {
-    appendFileSync(logFile, '\n[WORKTREE] Cherry-picking commits from ' + stBranch + ' onto ' + pipeline.branch + '\n');
+    logToOutput(pipeline.specPath, '\n[WORKTREE] Cherry-picking commits from ' + stBranch + ' onto ' + pipeline.branch + '\n');
     deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
-    appendFileSync(logFile, '[WORKTREE] Cherry-pick succeeded for subtask ' + subtaskId + '\n');
+    logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick succeeded for subtask ' + subtaskId + '\n');
     return true;
   } catch (firstErr) {
     const firstMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
-    appendFileSync(logFile, '[WORKTREE] Cherry-pick failed for subtask ' + subtaskId + ': ' + firstMsg + '\n');
+    logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick failed for subtask ' + subtaskId + ': ' + firstMsg + '\n');
 
     // Defect 3: detect infra-class errors (dead container, Docker unreachable)
     // and retry after reprovisioning before giving up. These are trivially
@@ -1384,25 +1382,25 @@ export async function tryCherryPickWithRecovery(
       // Check if container mode is active and attempt reprovision
       if (readContainerConfig(deps.projectRoot).enabled) {
         for (let retry = 0; retry < 2; retry++) {
-          appendFileSync(logFile, '[WORKTREE] Infra error detected — reprovisioning container and retrying cherry-pick (attempt ' + (retry + 1) + '/2)\n');
+          logToOutput(pipeline.specPath, '[WORKTREE] Infra error detected — reprovisioning container and retrying cherry-pick (attempt ' + (retry + 1) + '/2)\n');
           try {
             await containerManager.ensureContainer(deps.projectRoot, logFile);
             await new Promise(r => setTimeout(r, 1000)); // brief backoff for container stabilisation
             deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
-            appendFileSync(logFile, '[WORKTREE] Cherry-pick recovered after infra retry for subtask ' + subtaskId + '\n');
+            logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick recovered after infra retry for subtask ' + subtaskId + '\n');
             return true;
           } catch (retryErr) {
             const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-            appendFileSync(logFile, '[WORKTREE] Cherry-pick retry ' + (retry + 1) + ' failed: ' + retryMsg + '\n');
+            logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick retry ' + (retry + 1) + ' failed: ' + retryMsg + '\n');
             try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
           }
         }
-        appendFileSync(logFile, '[WORKTREE] Infra retries exhausted for subtask ' + subtaskId + ' — cannot auto-recover\n');
+        logToOutput(pipeline.specPath, '[WORKTREE] Infra retries exhausted for subtask ' + subtaskId + ' — cannot auto-recover\n');
         return false;
       }
 
       // Not in container mode — nothing to reprovision
-      appendFileSync(logFile, '[WORKTREE] Cherry-pick hard-failed (not a conflict) — cannot auto-recover subtask ' + subtaskId + '\n');
+      logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick hard-failed (not a conflict) — cannot auto-recover subtask ' + subtaskId + '\n');
       return false;
     }
   }
@@ -1410,7 +1408,7 @@ export async function tryCherryPickWithRecovery(
   // Check whether this is a recoverable conflict or a hard failure
   if (!checkCherryPickInProgress(pipeline.worktreePath)) {
     try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
-    appendFileSync(logFile, '[WORKTREE] Cherry-pick hard-failed (not a conflict) — cannot auto-recover subtask ' + subtaskId + '\n');
+    logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick hard-failed (not a conflict) — cannot auto-recover subtask ' + subtaskId + '\n');
     return false;
   }
 
@@ -1419,9 +1417,9 @@ export async function tryCherryPickWithRecovery(
     const conflictedFiles = execFileSync('git', ['diff', '--name-only', '--diff-filter=U'], {
       cwd: pipeline.worktreePath, encoding: 'utf-8', stdio: 'pipe',
     }).trim();
-    appendFileSync(logFile, '[WORKTREE] Conflicted files: ' + (conflictedFiles || '(none listed)') + '\n');
+    logToOutput(pipeline.specPath, '[WORKTREE] Conflicted files: ' + (conflictedFiles || '(none listed)') + '\n');
   } catch { /* best-effort — proceed with merger */ }
-  appendFileSync(logFile, '[WORKTREE] Cherry-pick has conflicts — spawning merger agent for subtask ' + subtaskId + '\n');
+  logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick has conflicts — spawning merger agent for subtask ' + subtaskId + '\n');
   try {
     const mergeLogFile = path.join(pipeline.specPath, 'output-merge.log');
     const mergeSessionId = await processManager.createSession(
@@ -1444,16 +1442,16 @@ export async function tryCherryPickWithRecovery(
     processManager.killSession(mergeSessionId);
 
     if (checkCherryPickInProgress(pipeline.worktreePath)) {
-      appendFileSync(logFile, '[WORKTREE] Merger finished but cherry-pick still in progress for subtask ' + subtaskId + ' — aborting\n');
+      logToOutput(pipeline.specPath, '[WORKTREE] Merger finished but cherry-pick still in progress for subtask ' + subtaskId + ' — aborting\n');
       try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
       return false;
     }
 
-    appendFileSync(logFile, '[WORKTREE] Merger agent resolved cherry-pick conflicts for subtask ' + subtaskId + '\n');
+    logToOutput(pipeline.specPath, '[WORKTREE] Merger agent resolved cherry-pick conflicts for subtask ' + subtaskId + '\n');
     return true;
   } catch (mergeErr) {
     const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
-    appendFileSync(logFile, '[WORKTREE] Merger agent failed for subtask ' + subtaskId + ': ' + mergeMsg + '\n');
+    logToOutput(pipeline.specPath, '[WORKTREE] Merger agent failed for subtask ' + subtaskId + ': ' + mergeMsg + '\n');
     try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
     return false;
   }
