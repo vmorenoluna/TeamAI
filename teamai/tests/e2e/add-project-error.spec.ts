@@ -29,19 +29,14 @@ async function openAddDialog(page: Page) {
   // (including the + button) render in the layout.
   await ensureProjectSelected(page);
 
-  // Wait for React hydration — the + button is SSR'd but needs the
-  // onClick handler attached. Playwright's built-in actionability check
-  // (scroll into view, stable position) is usually enough, but a short
-  // sleep ensures the client component's useEffect/hydration completed.
-  // NOTE: avoid waitForLoadState('networkidle') — the app has WebSocket
-  // connections (processManager) that keep the network busy indefinitely.
-  const addBtn = page.locator('button[title="Add project"]');
-  await expect(addBtn).toBeVisible({ timeout: 10_000 });
-  await page.waitForTimeout(500);
-  await addBtn.click();
-  await expect(page.locator('[role="dialog"][aria-label="Add Project"]')).toBeVisible({
-    timeout: 5_000,
-  });
+  // Click repeatedly until React hydration completes and the dialog
+  // appears.  The server-rendered button is in the DOM immediately but
+  // the onClick handler is not attached until React hydrates — a single
+  // click can fire into the void.
+  await expect(async () => {
+    await page.locator('button[title="Add project"]').click();
+    await expect(page.locator('[role="dialog"][aria-label="Add Project"]')).toBeVisible({ timeout: 500 });
+  }).toPass({ timeout: 15_000 });
 }
 
 /** Stable selector for the Add Project modal — uses aria-label, not Tailwind class. */

@@ -25,14 +25,14 @@ test.describe('Terminals Page', () => {
     await page.goto('/terminals');
     await expect(page.locator('body')).toBeVisible({ timeout: 10_000 });
 
-    // Let the page fully hydrate before interacting
-    await page.waitForTimeout(1000);
-
-    // Click the New Terminal button using its test id
-    await page.getByTestId('new-terminal-btn').click({ force: true });
-
-    // Dialog should appear - wait for backdrop to confirm it opened
-    await expect(page.getByTestId('dialog-backdrop')).toBeVisible({ timeout: 5_000 });
+    // Click repeatedly until React hydration completes and the dialog
+    // appears.  The server-rendered button is in the DOM immediately but
+    // the onClick handler is not attached until React hydrates — a single
+    // click can fire into the void.
+    await expect(async () => {
+      await page.getByTestId('new-terminal-btn').click();
+      await expect(page.getByTestId('dialog-backdrop')).toBeVisible({ timeout: 500 });
+    }).toPass({ timeout: 15_000 });
     await expect(page.locator('h2:has-text("New Terminal")')).toBeVisible({ timeout: 3_000 });
     await expect(page.locator('select').first()).toBeVisible({ timeout: 3_000 });
 
