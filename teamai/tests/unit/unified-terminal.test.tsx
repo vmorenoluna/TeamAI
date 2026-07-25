@@ -937,6 +937,150 @@ describe('UnifiedTerminal — component', () => {
     });
   });
 
+  // ── Independent dependency graphs: selectedSessionIds vs sessionRoleMap ────
+  //
+  // selectedSessionIds (depends on [sessionMap, selectedRoles]) and
+  // sessionRoleMap (depends on [sessionMap]) must have independent dependency
+  // graphs. Toggling a filter chip changes selectedRoles → selectedSessionIds
+  // recomputes → interleaved-output effect re-runs (correct: filters content).
+  // BUT sessionRoleMap must NOT recompute — it only depends on sessionMap,
+  // which hasn't changed. If someone refactors sessionRoleMap to depend on
+  // selectedRoles (merging the two memos), the live-events effect would get
+  // a new sessionRoleMap reference on every chip toggle, unnecessarily
+  // re-processing all events instead of just filtering by session.
+  //
+  // These tests verify the behavioural consequence: after a chip toggle,
+  // selectedSessionIds correctly filters parsed content while new live events
+  // still receive role labels from sessionRoleMap (proving it survived the
+  // toggle with its session→role mappings intact).
+
+  describe('selectedSessionIds and sessionRoleMap independent dependency graphs', () => {
+    const sessionMap = {
+      qa: 'session-qa',
+      orchestrator: 'session-orch',
+    };
+
+    it('deselecting a role filters its parsed content, and new live events still get labels from sessionRoleMap', async () => {
+      const originalLength = mockUseAgentStreamReturn.length;
+      try {
+        // Push initial live events bound to QA and Orchestrator sessions.
+        mockUseAgentStreamReturn.push(
+          { sessionId: 'session-qa', event: { type: 'system', subtype: 'init', model: 'claude-sonnet' } as StreamEvent },
+          { sessionId: 'session-orch', event: { type: 'system', subtype: 'init', model: 'orch-model' } as StreamEvent },
+        );
+
+        render(
+          <UnifiedTerminal
+            {...makeDefaultProps({
+              sessionMap,
+              qaLog: '[12:00:01] QA parsed content',
+              orchestratorLog: '[12:00:02] Orch parsed content',
+            })}
+          />
+        );
+
+        // Wait for xterm init + initial writes.
+        await waitFor(() => {
+          expect(mockTerminalReset).toHaveBeenCalled();
+        });
+
+        // Both roles' parsed content and initial live events present.
+        const initial = mockTerminalWrite.mock.calls.map(c => String(c[0] ?? '')).join('');
+        expect(initial).toContain('[QA Review]');
+        expect(initial).toContain('QA parsed content');
+        expect(initial).toContain('[Orchestrator]');
+        expect(initial).toContain('Orch parsed content');
+        expect(initial).toContain('claude-sonnet');
+        expect(initial).toContain('orch-model');
+
+        // Push a new live event for the QA session BEFORE toggling chips.
+        // This event hasn't been processed yet (liveWrittenRef is past it).
+        // When the chip toggle triggers the live-events effect to re-run,
+        // it will pick up this new event and label it via sessionRoleMap —
+        // proving the session→role lookup still resolves correctly even
+        // after selectedRoles changed (i.e. the two memos are independent).
+        mockUseAgentStreamReturn.push(
+          { sessionId: 'session-qa', event: { type: 'assistant', message: { content: [{ type: 'text', text: 'New QA event after push' }] } } as StreamEvent },
+        );
+
+        // ── Toggle off Orchestrator ──
+        // selectedRoles changes → selectedSessionIds recomputes → both
+        // effects re-run. The live-events effect processes the newly-pushed
+        // QA event via sessionRoleMap.
+        vi.clearAllMocks();
+        const orchBtn = screen.getByText('Orchestrator').closest('button')!;
+        fireEvent.click(orchBtn);
+
+        await waitFor(() => {
+          expect(mockTerminalReset).toHaveBeenCalled();
+        });
+
+        const afterToggle = mockTerminalWrite.mock.calls.map(c => String(c[0] ?? '')).join('');
+        // Orchestrator parsed content filtered out (selectedSessionIds).
+        expect(afterToggle).not.toContain('Orch parsed content');
+        // QA parsed content still present.
+        expect(afterToggle).toContain('[QA Review]');
+        expect(afterToggle).toContain('QA parsed content');
+        // New live event also got the [QA Review] label — sessionRoleMap
+        // survived the chip toggle with its session→role mappings intact.
+        expect(afterToggle).toContain('[QA Review]');
+        expect(afterToggle).toContain('New QA event after push');
+      } finally {
+        mockUseAgentStreamReturn.length = originalLength;
+      }
+    });
+
+    it('reselection round-trip restores parsed content via selectedSessionIds with sessionMap present', async () => {
+      render(
+        <UnifiedTerminal
+          {...makeDefaultProps({
+            sessionMap,
+            qaLog: '[12:00:01] QA parsed content',
+            orchestratorLog: '[12:00:02] Orch parsed content',
+          })}
+        />
+      );
+
+      await waitFor(() => {
+        expect(mockTerminalReset).toHaveBeenCalled();
+      });
+
+      // Initial: both roles present.
+      let output = mockTerminalWrite.mock.calls.map(c => String(c[0] ?? '')).join('');
+      expect(output).toContain('[QA Review]');
+      expect(output).toContain('QA parsed content');
+      expect(output).toContain('[Orchestrator]');
+      expect(output).toContain('Orch parsed content');
+
+      // Deselect QA.
+      vi.clearAllMocks();
+      const qaBtn = screen.getByText('QA Review').closest('button')!;
+      fireEvent.click(qaBtn);
+
+      await waitFor(() => {
+        expect(mockTerminalReset).toHaveBeenCalled();
+      });
+
+      output = mockTerminalWrite.mock.calls.map(c => String(c[0] ?? '')).join('');
+      expect(output).not.toContain('QA parsed content');
+      expect(output).toContain('Orch parsed content');
+
+      // Reselect QA — selectedSessionIds re-includes QA sessions.
+      vi.clearAllMocks();
+      fireEvent.click(qaBtn);
+
+      await waitFor(() => {
+        expect(mockTerminalReset).toHaveBeenCalled();
+      });
+
+      output = mockTerminalWrite.mock.calls.map(c => String(c[0] ?? '')).join('');
+      expect(output).toContain('[QA Review]');
+      expect(output).toContain('QA parsed content');
+      expect(output).toContain('[Orchestrator]');
+      expect(output).toContain('Orch parsed content');
+    });
+  });
+
   // ── Filter effect re-runs without TDZ ─────────────────────────────────────
   //
   // Regression test for the bug where `const selectedSessionIds = useMemo(...)`

@@ -9,9 +9,9 @@
  * exec needed for the git add/commit commands.
  */
 import { execFileSync } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, copyFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync } from 'fs';
 import path from 'path';
-import { phaseHeader } from './helpers';
+import { phaseHeader, logToOutput } from './helpers';
 import type { TaskPipeline } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ export const ARTIFACT_EXCLUDE = new Set([
  * ARTIFACT_EXCLUDE by filename at every depth. Mirrors directory
  * structure and returns the total number of files copied.
  */
-function copyArtifactsRecursive(sourceDir: string, destDir: string, logFile: string): number {
+function copyArtifactsRecursive(sourceDir: string, destDir: string, specPath: string): number {
   let count = 0;
   const entries = readdirSync(sourceDir, { withFileTypes: true });
   for (const entry of entries) {
@@ -49,9 +49,9 @@ function copyArtifactsRecursive(sourceDir: string, destDir: string, logFile: str
     const destPath = path.join(destDir, entry.name);
     if (entry.isDirectory()) {
       mkdirSync(destPath, { recursive: true });
-      const subCount = copyArtifactsRecursive(srcPath, destPath, logFile);
+      const subCount = copyArtifactsRecursive(srcPath, destPath, specPath);
       if (subCount > 0) {
-        appendFileSync(logFile, `[ARTIFACTS] Copied directory ${entry.name}/ (${subCount} file(s))\n`);
+        logToOutput(specPath, `[ARTIFACTS] Copied directory ${entry.name}/ (${subCount} file(s))\n`);
         count += subCount;
       }
     } else if (entry.isFile()) {
@@ -93,7 +93,7 @@ export function commitArtifactsToWorktree(
   const sourceDir = pipeline.specPath;
   let copied = 0;
   if (existsSync(sourceDir)) {
-    copied = copyArtifactsRecursive(sourceDir, targetDir, logFile);
+    copied = copyArtifactsRecursive(sourceDir, targetDir, pipeline.specPath);
   }
 
   // ── Rewrite task.json phase to "done" in the committed copy ──
@@ -108,7 +108,7 @@ export function commitArtifactsToWorktree(
   }
 
   if (copied === 0) {
-    appendFileSync(logFile, '[ARTIFACTS] No artifacts to commit\n');
+    logToOutput(pipeline.specPath, '[ARTIFACTS] No artifacts to commit\n');
     return;
   }
 
@@ -128,15 +128,15 @@ export function commitArtifactsToWorktree(
   } catch (gitErr) {
     const msg = gitErr instanceof Error ? gitErr.message : String(gitErr);
     if (/nothing\s+to\s+commit.*working\s+tree\s+clean/i.test(msg)) {
-      appendFileSync(logFile, '[ARTIFACTS] Already committed — no new changes\n');
+      logToOutput(pipeline.specPath, '[ARTIFACTS] Already committed — no new changes\n');
       return;
     }
     if (/nothing\s+added\s+to\s+commit/i.test(msg)) {
-      appendFileSync(logFile, '[ARTIFACTS] Warning: .teamai/ appears to be gitignored — skipping artifact commit\n');
+      logToOutput(pipeline.specPath, '[ARTIFACTS] Warning: .teamai/ appears to be gitignored — skipping artifact commit\n');
       return;
     }
     throw gitErr;
   }
 
-  appendFileSync(logFile, `[ARTIFACTS] Committed ${copied} artifact file(s) to worktree\n`);
+  logToOutput(pipeline.specPath, `[ARTIFACTS] Committed ${copied} artifact file(s) to worktree\n`);
 }

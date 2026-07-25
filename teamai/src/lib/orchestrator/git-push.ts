@@ -9,8 +9,9 @@
  * injection works for authenticated pulls.
  */
 import { execFileSync } from 'child_process';
-import { appendFileSync } from 'fs';
 import { getToolPath } from '../tool-checker';
+import { logToOutput } from './helpers';
+import path from 'path';
 
 /**
  * Push (or pull) a branch to/from origin, injecting a GitHub OAuth token
@@ -20,6 +21,7 @@ import { getToolPath } from '../tool-checker';
  * not authenticated.
  */
 export function gitPush(projectRoot: string, pushArgs: string[], logFile: string): void {
+  const specPath = path.dirname(logFile);
   const noPromptEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
 
   // Helper: obtain the gh OAuth token.
@@ -72,7 +74,7 @@ export function gitPush(projectRoot: string, pushArgs: string[], logFile: string
 
       // Tier 1: On first auth failure with a gh token, refresh and retry once.
       if (attempt === 0 && t && AUTH_RE.test(raw)) {
-        appendFileSync(logFile,
+        logToOutput(specPath,
           '[GIT] gh token rejected by remote — attempting gh auth refresh\n');
         let freshToken = null;
         try {
@@ -84,11 +86,11 @@ export function gitPush(projectRoot: string, pushArgs: string[], logFile: string
         } catch (refreshErr) {
           const refreshMsg = refreshErr instanceof Error
             ? refreshErr.message : String(refreshErr);
-          appendFileSync(logFile, `[GIT] gh auth refresh failed: ${refreshMsg}\n`);
+          logToOutput(specPath, `[GIT] gh auth refresh failed: ${refreshMsg}\n`);
         }
 
         if (freshToken) {
-          appendFileSync(logFile, '[GIT] Token refreshed — retrying\n');
+          logToOutput(specPath, '[GIT] Token refreshed — retrying\n');
           _exec(freshToken, 1);
           return;
         }
@@ -96,7 +98,7 @@ export function gitPush(projectRoot: string, pushArgs: string[], logFile: string
 
       // Tier 2: gh token still rejected — fall back to system credential helper.
       if (attempt <= 1 && t && AUTH_RE.test(raw)) {
-        appendFileSync(logFile,
+        logToOutput(specPath,
           '[GIT] gh token rejected — falling back to system credential helper\n');
         _exec('', 2);
         return;
@@ -108,9 +110,9 @@ export function gitPush(projectRoot: string, pushArgs: string[], logFile: string
 
   // Log token availability
   if (token) {
-    appendFileSync(logFile, '[GIT] Using gh OAuth token via http.extraheader\n');
+    logToOutput(specPath, '[GIT] Using gh OAuth token via http.extraheader\n');
   } else {
-    appendFileSync(logFile,
+    logToOutput(specPath,
       '[GIT] gh token not available — falling back to default credential helper\n');
   }
 

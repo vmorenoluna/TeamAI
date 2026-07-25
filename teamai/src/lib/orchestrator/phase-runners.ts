@@ -4,14 +4,14 @@
  * deep test coupling and complex internal state dependencies.
  */
 import { execFileSync } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, appendFileSync, rmSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, rmSync } from 'fs';
 import path from 'path';
 import { processManager } from '../process-manager';
 import { TaskStore } from '../task-store';
 import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody } from '../git-platform';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
-import { updateSessionMap } from './helpers';
+import { updateSessionMap, logToOutput } from './helpers';
 import { WorktreeError, PipelineConfigError } from './errors';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
@@ -47,7 +47,7 @@ export async function rebaseOntoLatestDefault(
   try {
     execFileSync('git', ['fetch', 'origin', deps.baseBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
   } catch {
-    appendFileSync(logFile, `\n[WARN] Could not fetch origin/${deps.baseBranch} — proceeding with rebase anyway\n`);
+    logToOutput(path.dirname(logFile), `\n[WARN] Could not fetch origin/${deps.baseBranch} — proceeding with rebase anyway\n`);
   }
 
   // Skip rebase when origin/<baseBranch> has not advanced past HEAD.
@@ -59,7 +59,7 @@ export async function rebaseOntoLatestDefault(
       { cwd: worktreePath, encoding: 'utf-8', stdio: 'pipe' },
     ).trim();
     if (count === '0') {
-      appendFileSync(logFile, `\n[INFO] origin/${deps.baseBranch} has not advanced past HEAD — skipping rebase\n`);
+      logToOutput(path.dirname(logFile), `\n[INFO] origin/${deps.baseBranch} has not advanced past HEAD — skipping rebase\n`);
       return true;
     }
   } catch {
@@ -68,11 +68,11 @@ export async function rebaseOntoLatestDefault(
 
   try {
     deps.execGit(['rebase', `origin/${deps.baseBranch}`], worktreePath);
-    appendFileSync(logFile, `\n[INFO] Feature branch rebased onto latest ${deps.baseBranch}\n`);
+    logToOutput(path.dirname(logFile), `\n[INFO] Feature branch rebased onto latest ${deps.baseBranch}\n`);
     return true;
   } catch {
     try { deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* ignore */ }
-    appendFileSync(logFile, '\n[INFO] Rebase had conflicts — spawning merger to resolve via git merge\n');
+    logToOutput(path.dirname(logFile), '\n[INFO] Rebase had conflicts — spawning merger to resolve via git merge\n');
     try {
       const mergeLogFile = path.join(path.dirname(logFile), 'output-merge.log');
       const mergeSessionId = await processManager.createSession(
@@ -82,11 +82,11 @@ export async function rebaseOntoLatestDefault(
       processManager.sendMessage(mergeSessionId, `/merge origin/${deps.baseBranch}`);
       await deps.waitForCompletion(mergeSessionId);
       processManager.killSession(mergeSessionId);
-      appendFileSync(logFile, '\n[INFO] Merger resolved rebase conflicts\n');
+      logToOutput(path.dirname(logFile), '\n[INFO] Merger resolved rebase conflicts\n');
       return true;
     } catch (mergeErr) {
       const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
-      appendFileSync(logFile, `\n[WARN] Merger could not resolve rebase conflicts: ${mergeMsg}\n`);
+      logToOutput(path.dirname(logFile), `\n[WARN] Merger could not resolve rebase conflicts: ${mergeMsg}\n`);
       return false;
     }
   }
@@ -195,7 +195,7 @@ export async function runPlanPhase(
   // can render the familiar "Revise Spec" banner.
   const planGapsPath = path.join(pipeline.specPath, 'plan_gaps.md');
   if (existsSync(planGapsPath)) {
-    appendFileSync(logFile, '\n[GATE] Plan contains unverifiable acceptance criteria — routing to human review. See plan_gaps.md.\n');
+    logToOutput(pipeline.specPath, '\n[GATE] Plan contains unverifiable acceptance criteria — routing to human review. See plan_gaps.md.\n');
     try {
       writeFileSync(path.join(pipeline.specPath, 'qa_report.json'), JSON.stringify({
         overall: 'FAIL',
@@ -289,7 +289,7 @@ export async function runMergePhase(
       files: allFiles,
       logFile,
     });
-    appendFileSync(logFile, sensorRunSummary(mergeResult));
+    logToOutput(pipeline.specPath, sensorRunSummary(mergeResult));
     if (!mergeResult.allPassed) {
       const failMsg = mergeResult.reports.filter(r => !r.passed).map(r => r.sensor + ': ' + (r.error || 'exit ' + r.exitCode)).join('; ');
       throw new PipelineConfigError('Pre-merge sensors failed: ' + failMsg, 'PRE_MERGE_SENSORS_FAILED');
@@ -299,13 +299,13 @@ export async function runMergePhase(
   // Try direct merge first — only spawn agent on conflict
   let mergeSucceeded = false;
   try {
-    appendFileSync(logFile, `[MERGE] Attempting direct merge of ${pipeline.branch} into ${baseBranch}\n`);
+    logToOutput(pipeline.specPath, `[MERGE] Attempting direct merge of ${pipeline.branch} into ${baseBranch}\n`);
     deps.execGit(['merge', pipeline.branch, '--no-edit'], deps.projectRoot);
     mergeSucceeded = true;
-    appendFileSync(logFile, `[MERGE] Direct merge succeeded — no conflicts\n`);
+    logToOutput(pipeline.specPath, `[MERGE] Direct merge succeeded — no conflicts\n`);
   } catch {
     try { deps.execGit(['merge', '--abort'], deps.projectRoot); } catch { /* best-effort */ }
-    appendFileSync(logFile, `[MERGE] Merge had conflicts — spawning merger agent\n`);
+    logToOutput(pipeline.specPath, `[MERGE] Merge had conflicts — spawning merger agent\n`);
   }
 
   if (!mergeSucceeded) {
@@ -350,9 +350,9 @@ export async function runCreatePRPhase(
     { projectRoot: deps.projectRoot, execGit: deps.execGit, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
   );
   if (rebaseOk) {
-    appendFileSync(logFile, '\n[INFO] PR will be conflict-free\n');
+    logToOutput(pipeline.specPath, '\n[INFO] PR will be conflict-free\n');
   } else {
-    appendFileSync(logFile, '\n[WARN] PR may require manual conflict resolution\n');
+    logToOutput(pipeline.specPath, '\n[WARN] PR may require manual conflict resolution\n');
   }
 
   deps.commitArtifactsToWorktree(pipeline);
@@ -364,7 +364,7 @@ export async function runCreatePRPhase(
   // Check for existing open PR first — avoid creating duplicates
   let prUrl: string | null = checkExistingPRViaCLI(platform, pipeline.branch, deps.projectRoot);
   if (prUrl) {
-    appendFileSync(logFile, `[PR] Open PR already exists for branch ${pipeline.branch}: ${prUrl}\n`);
+    logToOutput(pipeline.specPath, `[PR] Open PR already exists for branch ${pipeline.branch}: ${prUrl}\n`);
   } else {
     // Create PR directly via CLI (gh / glab) instead of spawning a merger agent
     const body = buildPRBody(pipeline.description, specContent);
