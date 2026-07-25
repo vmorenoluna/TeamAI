@@ -38,9 +38,8 @@ test.describe('QA Failure Banner & Completion Summary', () => {
     await page.goto(`/task/${taskId}`);
     await expect(page.locator('body')).toBeVisible();
 
-    // Navigate to Plan tab directly via URL hash — wait for useEffect to sync
+    // Navigate to Plan tab directly via URL hash
     await page.goto(`/task/${taskId}#plan`);
-    await page.waitForTimeout(500);
 
     // Plan subtasks should render
     await expect(page.locator('[data-testid="plan-subtask"]').first()).toBeVisible({ timeout: 15_000 });
@@ -83,7 +82,6 @@ test.describe('QA Failure Banner & Completion Summary', () => {
     const taskId = requireSeedTaskId(SHARED_TYPES_SLUG);
     await page.goto(`/task/${taskId}#plan`);
     await expect(page.locator('body')).toBeVisible();
-    await page.waitForTimeout(500);
     await expect(page.locator('[data-testid="plan-subtask"]').first()).toBeVisible({ timeout: 15_000 });
 
     await expect(page.locator('text=3 / 3 subtasks completed')).toBeVisible({ timeout: 5_000 });
@@ -103,7 +101,6 @@ test.describe('QA Failure Banner & Completion Summary', () => {
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}#plan`);
     await expect(page.locator('body')).toBeVisible();
-    await page.waitForTimeout(500);
     await expect(page.locator('text=No plan generated yet')).toBeVisible({ timeout: 10_000 });
   });
 

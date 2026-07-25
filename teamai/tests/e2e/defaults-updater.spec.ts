@@ -88,7 +88,6 @@ test.describe.serial('DefaultsUpdater', () => {
       expect(computeChecksum(currentDefaultsContent)).toBe(manifest.files['commands/implement.md']);
 
       // ── UI verification: amber banner disappears after sync ─────────
-      await page.waitForTimeout(500);
       await expect(page.locator('text=Defaults update available')).not.toBeVisible({ timeout: 20_000 });
     } finally {
       writeFileWithRetry(defaultImplSrc, backup);

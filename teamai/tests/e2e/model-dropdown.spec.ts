@@ -46,12 +46,11 @@ test.describe('Model Dropdown', () => {
 
       await expect(page.locator('text=Models').first()).toBeVisible({ timeout: 10_000 });
 
-      // Wait for loading to finish
-      await page.waitForTimeout(1_500);
-
-      // Find the first refresh button and click it
+      // Wait for the refresh button to become interactive — the server
+      // action that loads curated models may still be in flight, keeping
+      // the button disabled until models are resolved.
       const refreshButtons = page.locator('button[title*="Refresh"]');
-      await expect(refreshButtons.first()).toBeEnabled({ timeout: 5_000 });
+      await expect(refreshButtons.first()).toBeEnabled({ timeout: 10_000 });
 
       // Click the first refresh button — should reload models
       await refreshButtons.first().click();
