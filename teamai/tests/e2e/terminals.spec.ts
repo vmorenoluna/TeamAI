@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ensureProjectSelected } from './helpers';
+import { clickUntilVisible, ensureProjectSelected } from './helpers';
 
 test.describe('Terminals Page', () => {
   test.setTimeout(60_000);
@@ -27,12 +27,11 @@ test.describe('Terminals Page', () => {
 
     // Click repeatedly until React hydration completes and the dialog
     // appears.  The server-rendered button is in the DOM immediately but
-    // the onClick handler is not attached until React hydrates — a single
-    // click can fire into the void.
-    await expect(async () => {
-      await page.getByTestId('new-terminal-btn').click();
-      await expect(page.getByTestId('dialog-backdrop')).toBeVisible({ timeout: 500 });
-    }).toPass({ timeout: 15_000 });
+    // the onClick handler is not attached until React hydrates.
+    await clickUntilVisible(
+      page.getByTestId('new-terminal-btn'),
+      page.getByTestId('dialog-backdrop'),
+    );
     await expect(page.locator('h2:has-text("New Terminal")')).toBeVisible({ timeout: 3_000 });
     await expect(page.locator('select').first()).toBeVisible({ timeout: 3_000 });
 

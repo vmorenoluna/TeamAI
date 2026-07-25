@@ -21,7 +21,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { tmpdir } from 'os';
-import { ensureProjectSelected } from './helpers';
+import { clickUntilVisible, ensureProjectSelected } from './helpers';
 
 /** Open the Add Project dialog (helper, not a test). */
 async function openAddDialog(page: Page) {
@@ -29,14 +29,10 @@ async function openAddDialog(page: Page) {
   // (including the + button) render in the layout.
   await ensureProjectSelected(page);
 
-  // Click repeatedly until React hydration completes and the dialog
-  // appears.  The server-rendered button is in the DOM immediately but
-  // the onClick handler is not attached until React hydrates — a single
-  // click can fire into the void.
-  await expect(async () => {
-    await page.locator('button[title="Add project"]').click();
-    await expect(page.locator('[role="dialog"][aria-label="Add Project"]')).toBeVisible({ timeout: 500 });
-  }).toPass({ timeout: 15_000 });
+  await clickUntilVisible(
+    page.locator('button[title="Add project"]'),
+    page.locator('[role="dialog"][aria-label="Add Project"]'),
+  );
 }
 
 /** Stable selector for the Add Project modal — uses aria-label, not Tailwind class. */

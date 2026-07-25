@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ensureProjectSelected } from './helpers';
+import { clickUntilVisible, ensureProjectSelected } from './helpers';
 
 test.describe('Model Dropdown', () => {
   test.describe('Settings Page - Provider Config', () => {
@@ -82,18 +82,13 @@ test.describe('Model Dropdown', () => {
 
       await page.goto('/terminals');
 
-      // Wait for the page to fully hydrate (Terminals page is client-rendered)
-      await expect(page.locator('text=Terminals').first()).toBeVisible({ timeout: 15_000 });
-      await page.waitForTimeout(1_000);
-
-      // Click the "+ New Terminal" button using accessible role
-      const newBtn = page.getByRole('button', { name: /New Terminal/ });
-      await expect(newBtn).toBeVisible({ timeout: 10_000 });
-      await newBtn.click();
-
-      // Wait for the dialog — with generous timeout for client hydration
-      const dialogOpen = await page.getByTestId('dialog-backdrop').waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false);
-      if (!dialogOpen) { test.skip(true, 'Terminals dialog did not open in this environment'); return; }
+      // Click repeatedly until React hydration completes and the dialog
+      // appears.  The server-rendered button is in the DOM immediately but
+      // the onClick handler is not attached until React hydrates.
+      await clickUntilVisible(
+        page.getByRole('button', { name: /New Terminal/ }),
+        page.getByTestId('dialog-backdrop'),
+      );
 
       await expect(page.locator('h2:has-text("New Terminal")')).toBeVisible({ timeout: 3_000 });
       await expect(page.getByRole('button', { name: 'Open' }).first()).toBeVisible({ timeout: 3_000 });
@@ -109,15 +104,12 @@ test.describe('Model Dropdown', () => {
 
       await page.goto('/terminals');
 
-      // Wait for the page to fully hydrate
-      await expect(page.locator('text=Terminals').first()).toBeVisible({ timeout: 15_000 });
-      await page.waitForTimeout(1_000);
-
-      const newBtn = page.getByRole('button', { name: /New Terminal/ });
-      await newBtn.click();
-
-      const dialogOpen = await page.getByTestId('dialog-backdrop').waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false);
-      if (!dialogOpen) { test.skip(true, 'Terminals dialog did not open in this environment'); return; }
+      // Click repeatedly until React hydration completes and the dialog
+      // appears (same retry pattern as the first dialog test).
+      await clickUntilVisible(
+        page.getByRole('button', { name: /New Terminal/ }),
+        page.getByTestId('dialog-backdrop'),
+      );
 
       // Use page.evaluate to click the backdrop — React event delegation
       // can miss Playwright clicks on overlays due to pointer-events layers.
