@@ -170,13 +170,3 @@ export async function clickUntilVisible(
     await expect(target).toBeVisible({ timeout: options?.pollInterval ?? 500 });
   }).toPass({ timeout: options?.timeout ?? 15_000 });
 }
-
-/**
- * Read all visible text from the xterm terminal's DOM rows.
- */
-export async function getXtermText(page: Page): Promise<string> {
-  return await page.evaluate(() => {
-    const rows = document.querySelectorAll('.xterm-rows > div');
-    return Array.from(rows).map(r => (r as HTMLElement).innerText).join('\n');
-  });
-}
