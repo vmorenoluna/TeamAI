@@ -796,6 +796,87 @@ describe('Orchestrator', () => {
     });
   });
 
+  // ── _restoreSpecRevision ──────────────────────────────────────────
+
+  describe('_restoreSpecRevision', () => {
+    beforeEach(() => {
+      testData = setupTestProject();
+    });
+
+    it('returns 0 when no pipeline state file and no spec snapshots exist', () => {
+      const orch = makeOrch(testData.root, getOrchestrator);
+      // No .pipeline_state.json, no spec_v{N}.md files on disk
+      const result = (orch as AnyOrch)._restoreSpecRevision(testData.taskId);
+      expect(result).toBe(0);
+    });
+
+    it('returns specRevision from .pipeline_state.json (primary path)', () => {
+      const statePath = join(testData.taskDir, '.pipeline_state.json');
+      writeFileSync(statePath, JSON.stringify({
+        specRevision: 2,
+        taskId: testData.taskId,
+        phase: 'spec',
+      }, null, 2));
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreSpecRevision(testData.taskId);
+      expect(result).toBe(2);
+    });
+
+    it('ignores .pipeline_state.json with specRevision <= 0 and falls back to disk', () => {
+      // Write state file with specRevision: 0 (should be ignored)
+      const statePath = join(testData.taskDir, '.pipeline_state.json');
+      writeFileSync(statePath, JSON.stringify({
+        specRevision: 0,
+        taskId: testData.taskId,
+      }, null, 2));
+
+      // Create spec_v1.md and spec_v2.md on disk (fallback path)
+      writeFileSync(join(testData.taskDir, 'spec_v1.md'), '# Spec v1');
+      writeFileSync(join(testData.taskDir, 'spec_v2.md'), '# Spec v2');
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreSpecRevision(testData.taskId);
+      expect(result).toBe(2);
+    });
+
+    it('falls back to counting spec_v{N}.md snapshots when no state file exists', () => {
+      // Create spec_v1.md and spec_v2.md on disk (no .pipeline_state.json)
+      writeFileSync(join(testData.taskDir, 'spec_v1.md'), '# Spec v1');
+      writeFileSync(join(testData.taskDir, 'spec_v2.md'), '# Spec v2');
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreSpecRevision(testData.taskId);
+      expect(result).toBe(2);
+    });
+
+    it('returns the highest snapshot number for contiguous snapshots', () => {
+      // autoReviseSpec always increments specRevision sequentially,
+      // so snapshots are guaranteed to be contiguous.  Test that the
+      // sequential-break loop correctly counts all of them, including
+      // beyond the old v <= 3 hardcoded limit that was removed.
+      for (const v of [1, 2, 3, 4, 5]) {
+        writeFileSync(join(testData.taskDir, `spec_v${v}.md`), `# Spec v${v}`);
+      }
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreSpecRevision(testData.taskId);
+      expect(result).toBe(5);
+    });
+
+    it('handles corrupt .pipeline_state.json gracefully via fallback', () => {
+      const statePath = join(testData.taskDir, '.pipeline_state.json');
+      writeFileSync(statePath, 'not valid json {{{');
+
+      // Create spec_v1.md on disk for the fallback
+      writeFileSync(join(testData.taskDir, 'spec_v1.md'), '# Spec v1');
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreSpecRevision(testData.taskId);
+      expect(result).toBe(1);
+    });
+  });
+
   // ── _execGit ───────────────────────────────────────────────────────
 
   describe('_execGit', () => {

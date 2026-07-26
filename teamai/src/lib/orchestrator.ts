@@ -257,6 +257,7 @@ export class Orchestrator {
       if (savedState.wakeupProgressPath !== undefined) pipeline.wakeupProgressPath = savedState.wakeupProgressPath;
       if (savedState.wakeupAttemptCount !== undefined) pipeline.wakeupAttemptCount = savedState.wakeupAttemptCount;
       if (savedState.persistedCriterionFailCounts !== undefined) pipeline.persistedCriterionFailCounts = savedState.persistedCriterionFailCounts;
+      if (savedState.specRevision !== undefined) pipeline.specRevision = savedState.specRevision;
       if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;
     }
 
@@ -523,13 +524,50 @@ export class Orchestrator {
       branch,
       qaAttempt: 0,
       maxQaAttempts: this.getPipelineConfig().maxQaAttempts,
-      specRevision: 0,
+      specRevision: this._restoreSpecRevision(taskId),
     };
     this.pipelines.set(taskId, pipeline);
     return pipeline;
   }
 
   private getWorktreeBase(): string { return getWorktreeBase(this.projectRoot); }
+
+  /**
+   * Restore specRevision from persistent state or by counting on-disk snapshots.
+   *
+   * When the in-memory pipeline is destroyed (runTask completes, server restarts),
+   * restorePipeline() and the retry/restart paths create a fresh pipeline with
+   * specRevision: 0. This method recovers the real revision count so the next
+   * autoReviseSpec() call creates spec_v{N+1}.md instead of overwriting
+   * spec_v1.md repeatedly.
+   *
+   * Precedence:
+   *   1. .pipeline_state.json (persisted by savePipelineState during autoReviseSpec)
+   *   2. Count existing spec_v{N}.md files on disk (robust fallback)
+   */
+  private _restoreSpecRevision(taskId: string): number {
+    const dir = this.taskStore.getDirById(taskId);
+    // Prefer the persisted pipeline state (most accurate)
+    try {
+      const statePath = path.join(dir, '.pipeline_state.json');
+      if (existsSync(statePath)) {
+        const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+        if (typeof state.specRevision === 'number' && state.specRevision > 0) {
+          return state.specRevision;
+        }
+      }
+    } catch { /* fall through to on-disk counting */ }
+    // Fallback: count spec_v{N}.md files on disk
+    let maxN = 0;
+    for (let v = 1; ; v++) {
+      if (existsSync(path.join(dir, `spec_v${v}.md`))) {
+        maxN = v;
+      } else {
+        break;
+      }
+    }
+    return maxN;
+  }
 
   /**
    * Clean up artifacts from the given phase and beyond (inclusive).

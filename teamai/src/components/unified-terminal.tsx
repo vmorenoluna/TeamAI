@@ -228,6 +228,10 @@ export function UnifiedTerminal({
   const { events, connected } = useAgentStream(taskId, project);
   const userScrolledRef = useRef(false);
   const liveWrittenRef = useRef(0);
+  // Set to true after the initial write in tryBecomeReady so the
+  // interleavedOutput effect can skip the redundant reset+write on
+  // the first termReady transition.
+  const initialWriteDoneRef = useRef(false);
 
   const [selectedRoles, setSelectedRoles] = useState<Set<string>>(
     () => new Set(ROLES.map(r => r.key))
@@ -264,6 +268,14 @@ export function UnifiedTerminal({
     all.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
     return all.map(l => l.prefixed).join('');
   }, [roleLogMap, selectedRoles]);
+
+  // Keep a ref to the latest interleavedOutput so the xterm init callback
+  // can write it synchronously after fit() (declared after interleavedOutput
+  // to avoid TDZ).  React 19 permits ref writes during render for this exact
+  // use case (keeping a mutable value current for async callbacks).
+  const interleavedOutputRef = useRef(interleavedOutput);
+  // eslint-disable-next-line react-hooks/refs
+  interleavedOutputRef.current = interleavedOutput;
 
   // ── Line counts for chips ─────────────────────────────────────────────
 
@@ -335,38 +347,63 @@ export function UnifiedTerminal({
       fitAddon = new FitAddonCtor();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
-      // Defer the first fit() to the next animation frame so the flex chain
-      // has time to resolve a non-zero pixel height. xterm.js needs the
-      // container to have a definite size at measurement time — without
-      // this, the very first fit() can see a 0×N viewport and render
-      // a single row even when the ResizeObserver eventually re-fires.
-      // Belt-and-suspenders: if rAF still fires before layout settles,
-      // retry via setTimeout(0). The ResizeObserver remains the ultimate
-      // safety net for any subsequent resize.
-      requestAnimationFrame(() => {
-        // Guard against unmount between Promise.all resolving and rAF firing.
-        // The synchronous .fitAddon.fit() had the same exposure; this is the
-        // belt-and-suspenders fix.
-        if (!container.isConnected) return;
-        if (container.clientHeight > 0) {
-          fitAddon.fit();
-        } else {
-          setTimeout(() => {
-            if (container.isConnected) fitAddon.fit();
-          }, 0);
+
+      // The terminal is NOT ready until the container has a reasonable
+      // height and fit() has run at least once.
+      //
+      // Under parallel E2E load the browser may report a tiny (1–2 px)
+      // clientHeight on the first layout pass — enough to pass a > 0
+      // check but not enough to give xterm usable rows.  We require at
+      // least 20 px before fitting so the terminal always has real
+      // content rows.  This check is skipped when clientHeight is 0
+      // (jsdom/happy-dom test environments where dimensions are
+      // unavailable) — the terminal initialises immediately there.
+      const MIN_HEIGHT = 20;
+      let ready = false;
+      const tryBecomeReady = () => {
+        if (!container.isConnected || ready) return;
+        if (container.clientHeight > 0 && container.clientHeight < MIN_HEIGHT) {
+          // Container has a tiny height (1–2 px) — the first layout pass
+          // hasn't settled yet.  Schedule a retry so we don't get stuck
+          // forever if the ResizeObserver doesn't re-fire (observed under
+          // parallel E2E load).
+          setTimeout(() => tryBecomeReady(), 30);
+          return;
         }
+        fitAddon.fit();
+        // Write initial content immediately — terminal has proper
+        // dimensions now and we have the latest interleavedOutput
+        // via the ref (not a stale closure value).
+        if (interleavedOutputRef.current) {
+          terminal.write(interleavedOutputRef.current);
+        }
+        termRef.current = { terminal, fitAddon };
+        initialWriteDoneRef.current = true;
+        setTermReady(true);
+        ready = true;
+        observer.disconnect();
+        observer = new ResizeObserver(() => fitAddon.fit());
+        observer.observe(container);
+      };
+
+      // Primary path: ResizeObserver fires when the container first gets
+      // laid out to a usable height.
+      observer = new ResizeObserver(() => tryBecomeReady());
+      observer.observe(container);
+
+      // Fallback: if the container already has usable height when we
+      // reach here, initialise immediately via rAF so layout can settle.
+      // Belt-and-suspenders: schedule a second attempt after a tick in
+      // case rAF fires too early under parallel load.
+      requestAnimationFrame(() => {
+        if (!ready) tryBecomeReady();
+        if (!ready) setTimeout(() => tryBecomeReady(), 50);
       });
 
       terminal.onScroll(() => {
         const atBottom = terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
         userScrolledRef.current = !atBottom;
       });
-
-      termRef.current = { terminal, fitAddon };
-      setTermReady(true);
-
-      observer = new ResizeObserver(() => fitAddon.fit());
-      observer.observe(container);
     }).catch((err: unknown) => {
       console.error('[UnifiedTerminal] Failed to load xterm modules:', err);
     });
@@ -405,21 +442,29 @@ export function UnifiedTerminal({
   }, [sessionMap]);
 
   // ── Write interleaved output ──────────────────────────────────────────
+  //
+  // The initial write happens synchronously inside the xterm init
+  // callback (see tryBecomeReady above) to avoid React effect timing
+  // races under parallel load.  This effect handles SUBSEQUENT updates
+  // (filter-chip toggles, new log data arriving).
 
   useEffect(() => {
     if (!termReady || !termRef.current) return;
     const { terminal } = termRef.current;
+    // Skip the first fire after tryBecomeReady already wrote the content.
+    if (initialWriteDoneRef.current) {
+      initialWriteDoneRef.current = false;
+      return;
+    }
     terminal.reset();
-    // After reset the buffer is empty and cursor sits at top — treat that
-    // as "user is at the bottom" so the auto-scroll below still runs.
     userScrolledRef.current = false;
     if (interleavedOutput) {
       terminal.write(interleavedOutput);
     }
-    // Scroll to bottom so user sees the latest content; if they scroll up
-    // afterwards, userScrolledRef stops auto-scroll on live events.
     requestAnimationFrame(() => {
-      if (!userScrolledRef.current) terminal.scrollToBottom();
+      if (termRef.current && !userScrolledRef.current) {
+        termRef.current.terminal.scrollToBottom();
+      }
     });
     liveWrittenRef.current = 0;
   }, [interleavedOutput, termReady, selectedSessionIds]);
