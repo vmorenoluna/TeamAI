@@ -48,6 +48,8 @@ Each command template injects the role at runtime: the Claude subprocess is told
 ### Renderer
 React application in `src/app/`. shadcn/ui components go in `src/components/ui/`. Path alias `@/*` maps to `src/*`. Tailwind CSS 4. Terminal output renders via xterm.js (dependency already installed).
 
+The `UnifiedTerminal` component (`src/components/unified-terminal.tsx`) uses **deferred initialisation**: it waits for the container to reach a usable height (≥20px) via `ResizeObserver` + `requestAnimationFrame` + `setTimeout` retry before fitting the terminal and marking it ready (`termReady`). A single React effect (deps: `[interleavedOutput, termReady, selectedSessionIds]`) handles ALL terminal writes — the initial content is written after `termReady` becomes true, guaranteeing the parsed log output is available from React's render cycle. This avoids timing races between the async xterm init callbacks and React's hydration/lifecycle.
+
 ### Data-Flow Pattern: Props Over Async Fetch
 
 **Components must never `useEffect` + async-fetch their own state on mount.** An ESLint rule (`local/no-async-fetch-on-mount`) enforces this.
@@ -143,6 +145,13 @@ The spec revision workflow allows a human reviewer to fix the spec itself (rathe
 5. **After revision**: The revised spec flows through plan → implement → QA normally. If QA now passes, the task goes to `awaiting-review` for final approval.
 
 **How retry integrates**: Ensure the project's `.claude/commands/` has the updated templates (synced from `defaults/commands/`) — then clicking **Retry** on any previously-failed task works seamlessly. It resumes from the last real phase using the updated command templates (with spec-gap detection) on the next run. No manual migration needed.
+
+**Revision counter persistence**: The `specRevision` counter tracks how many times the spec has been revised for a given task (max 3 before falling back to human review). Without persistence, server restarts or pipeline recreation would reset it to 0, causing the next revision to overwrite `spec_v1.md` instead of creating `spec_v{N+1}.md`.
+
+- **Increment**: `autoReviseSpec()` in `src/lib/orchestrator/review-actions.ts` increments `pipeline.specRevision` before snapshotting.
+- **Save**: `savePipelineState()` in `src/lib/orchestrator/pipeline-state.ts` writes `specRevision` to `.pipeline_state.json` alongside other crash-recovery state.
+- **Restore**: `_restoreSpecRevision()` in `src/lib/orchestrator.ts` recovers the counter from `.pipeline_state.json` (primary) or by counting existing `spec_v{N}.md` files on disk (fallback). Called from both `restorePipeline()` and `runTask()`'s crash-recovery path (`restorePipelineState`).
+- **Guard**: At `specRevision > 3`, `autoReviseSpec` stops revising and advances to `awaiting-review` for human intervention.
 
 ### QA Report Issues
 
