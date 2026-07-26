@@ -5,15 +5,6 @@
  * Regression test for the bug where `formatLiveEvent` lacked the `[Role]`
  * prefix that `parseRoleLog` always includes for disk-based logs. Live events
  * arriving via WebSocket would render without a label until the page refreshed.
- *
- * NOTE: These tests are marked fixme (skipped) in the full parallel suite
- * because xterm's dynamic import (@xterm/xterm + @xterm/addon-fit) under
- * 4-worker contention never renders content within any practical timeout.
- * The terminal-empty-state diagnostic confirms logs ARE parsed by SSR, but
- * xterm rows stay whitespace-only.  The tests pass reliably when run
- * individually (`npx playwright test tests/e2e/terminal-live-labels.spec.ts`).
- * When the infrastructure is upgraded (fewer workers, or the xterm import
- * race is resolved), remove the .fixme() annotations.
  */
 import { test, expect } from '@playwright/test';
 import { getTestServerUrl } from '../../scripts/servers';
@@ -29,6 +20,10 @@ const TASK_SLUG = 'test-terminal-live-event-labels';
 const TEST_SESSION_ID = 'test-coder-session-42';
 
 test.describe('Terminal Live Event Labels', () => {
+  // Run serially — these tests write files + inject live events via WebSocket
+  // and fail with timeout under parallel load when other workers contend for
+  // the shared dev server's WebSocket connections and xterm dynamic imports.
+  test.describe.configure({ mode: 'serial' });
   test.setTimeout(90_000);
 
   test.beforeEach(async ({ page }) => {
@@ -48,6 +43,15 @@ test.describe('Terminal Live Event Labels', () => {
     await ensureProjectSelected(page);
   });
 
+  // NOTE: The first test is marked fixme (skipped in the full parallel suite)
+  // because xterm's dynamic import (@xterm/xterm + @xterm/addon-fit) under
+  // worker contention never renders content within any practical timeout.
+  // The terminal-init refactor (deferred init via ResizeObserver + rAF
+  // fallback + MIN_HEIGHT retry) fixed the 1-2px clientHeight edge case but
+  // cannot resolve the underlying dynamic-import contention that affects all
+  // xterm-using tests under parallel Playwright workers.  The test passes
+  // reliably when run individually.  When the infrastructure is upgraded
+  // (fewer workers, or the xterm import race is resolved), remove .fixme().
   test.fixme('parsed log content shows [Orchestrator] label on initial render', async ({ page }) => {
     const taskId = requireSeedTaskId(TASK_SLUG);
 
@@ -76,7 +80,7 @@ test.describe('Terminal Live Event Labels', () => {
     expect(initialText).toContain('[Orchestrator]');
   });
 
-  test.fixme('live assistant event appears with [Coder] label in open terminal', async ({ page }) => {
+  test('live assistant event appears with [Coder] label in open terminal', async ({ page }) => {
     const taskId = requireSeedTaskId(TASK_SLUG);
 
     await page.goto(`/task/${taskId}#terminal`);
@@ -128,7 +132,7 @@ test.describe('Terminal Live Event Labels', () => {
     expect(updatedText).toContain('[Coder]');
   });
 
-  test.fixme('live result event appears with [Coder] label and Done text', async ({ page }) => {
+  test('live result event appears with [Coder] label and Done text', async ({ page }) => {
     const taskId = requireSeedTaskId(TASK_SLUG);
 
     await page.goto(`/task/${taskId}#terminal`);
