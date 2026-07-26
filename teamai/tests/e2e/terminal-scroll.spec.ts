@@ -4,11 +4,19 @@ import { ensureProjectSelected, getSeedTaskId } from './helpers';
 test.describe('Terminal Scroll Behavior', () => {
   test.setTimeout(60_000);
 
-  test.beforeEach(async ({ page }) => {
-    await ensureProjectSelected(page);
+  let isSeeded = false;
+
+  test.beforeAll(async ({ browser }) => {
+    const page = await browser.newPage();
+    isSeeded = await ensureProjectSelected(page);
+    await page.close();
   });
 
   test('terminal tab renders agent panel on full page', async ({ page }) => {
+    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
+
+    await ensureProjectSelected(page);
+
     const taskId = getSeedTaskId('implement-dark-mode-toggle');
     if (!taskId) {
       test.skip(true, 'Seed task not found on disk');
