@@ -15,8 +15,13 @@ export default defineConfig({
   retries: 0,
   // Per-worker seed isolation (T31): each worker gets its own copy of the
   // seed data, so tests that mutate state don't race.
-  // In CI: 2 workers. In dev: use E2E_MAX_WORKERS env var or default to 4.
-  workers: process.env.CI ? 2 : parseInt(process.env.E2E_MAX_WORKERS || '4', 10),
+  // Defaults to 2 workers.  The dev server (a single Next.js process) can't
+  // reliably handle 4 concurrent browser sessions making heavy SSR requests
+  // (xterm pages with dynamic imports + WebSocket), which causes the
+  // terminal-live-labels test to time out with an empty buffer.  Override
+  // with E2E_MAX_WORKERS=4 for faster local runs when the terminal test
+  // isn't required, or when running a single spec file.
+  workers: process.env.CI ? 2 : parseInt(process.env.E2E_MAX_WORKERS || '2', 10),
   fullyParallel: true,
   globalSetup: require.resolve('./tests/e2e/playwright-setup.ts'),
   globalTeardown: require.resolve('./tests/e2e/playwright-teardown.ts'),

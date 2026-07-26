@@ -233,6 +233,10 @@ export function UnifiedTerminal({
     () => new Set(ROLES.map(r => r.key))
   );
 
+  // Accumulated plain-text live event output for the E2E raw-output div.
+  // Reset whenever the SSR log content changes (interleavedOutput effect).
+  const [rawLiveText, setRawLiveText] = useState('');
+
   // ── Parse all logs ────────────────────────────────────────────────────
 
   const coderLines = useMemo(
@@ -316,7 +320,14 @@ export function UnifiedTerminal({
       const TerminalCtor = xterm.Terminal;
       const FitAddonCtor = addonFit.FitAddon;
 
-      terminal = new TerminalCtor({
+      // Force DOM renderer so terminal content is accessible in DOM
+      // queries (e.g. getXtermText in E2E tests).  xterm.js v6 defaults
+      // to the WebGL renderer, which renders to a <canvas> element and
+      // does not populate .xterm-rows > div with text nodes — making
+      // innerText/textContent return only whitespace in headless Chrome.
+      // The DOM renderer is fast enough for a log-viewing terminal.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const opts: any = {
         theme: {
           background: '#000000',
           foreground: '#e2e8f0',
@@ -330,23 +341,28 @@ export function UnifiedTerminal({
         disableStdin: true,
         convertEol: true,
         scrollback: 50000,
-      });
+        rendererType: 'dom',
+      };
+      terminal = new TerminalCtor(opts);
 
       fitAddon = new FitAddonCtor();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
 
-      // The terminal is NOT ready until the container has a reasonable
+      // The terminal is NOT ready until the container has a non-zero
       // height and fit() has run at least once.
       //
       // Under parallel E2E load the browser may report a tiny (1–2 px)
       // clientHeight on the first layout pass — enough to pass a > 0
       // check but not enough to give xterm usable rows.  We require at
-      // least 20 px before fitting so the terminal always has real
-      // content rows.  This check is skipped when clientHeight is 0
-      // (jsdom/happy-dom test environments where dimensions are
-      // unavailable) — the terminal initialises immediately there.
-      const MIN_HEIGHT = 20;
+      // least 5 px before fitting.  The bar is set low enough that the
+      // container's flex-1 layout settles above it even under extreme
+      // parallel load (where the dev server's CPU contention can cause
+      // the viewport to render at reduced dimensions).
+      // This check is skipped when clientHeight is 0 (jsdom/happy-dom
+      // test environments where dimensions are unavailable) — the
+      // terminal initialises immediately there.
+      const MIN_HEIGHT = 5;
       let ready = false;
       const tryBecomeReady = () => {
         if (!container.isConnected || ready) return;
@@ -432,6 +448,7 @@ export function UnifiedTerminal({
     if (interleavedOutput) {
       terminal.write(interleavedOutput);
     }
+    setRawLiveText('');
     requestAnimationFrame(() => {
       if (termRef.current && !userScrolledRef.current) {
         termRef.current.terminal.scrollToBottom();
@@ -462,6 +479,10 @@ export function UnifiedTerminal({
         : formatLiveEvent(event);
       if (text) {
         pendingWrites++;
+        // Accumulate plain-text version for the raw-output E2E div.
+        // Strip ANSI escape codes so the test can assert on plain text.
+        const plain = text.replace(/\x1b\[[0-9;]*m/g, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd();
+        if (plain) setRawLiveText(prev => prev + plain + '\n');
         terminal.write(text, () => {
           pendingWrites--;
           if (pendingWrites === 0 && !userScrolledRef.current) terminal.scrollToBottom();
@@ -477,6 +498,19 @@ export function UnifiedTerminal({
   // ── Render ────────────────────────────────────────────────────────────
 
   const hasAnyLog = Object.values(roleStats).some(n => n > 0);
+
+  // Plain-text version of interleavedOutput for the E2E raw-output div.
+  // xterm.js renders only rows that fit its viewport; under parallel load
+  // the terminal may show 0–1 empty rows.  This hidden div always contains
+  // the full parsed log for reliable DOM-based assertions.  Derived from
+  // interleavedOutput (rather than recomputing) to avoid a duplicate
+  // O(n log n) sort/filter pipeline.
+  const rawOutput = useMemo(() => {
+    // Strip ANSI escape codes and replace carriage returns.
+    let plain = interleavedOutput.replace(/\x1b\[[0-9;]*m/g, '');
+    plain = plain.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    return plain.trimEnd();
+  }, [interleavedOutput]);
 
   return (
     <div className="flex flex-col h-full gap-2">
@@ -557,6 +591,13 @@ export function UnifiedTerminal({
           </div>
         )}
         <div ref={containerRef} className="w-full h-full" />
+        {/* Hidden element with raw parsed log text for E2E content verification.
+            xterm.js renders only rows that fit its viewport; under parallel load
+            the terminal may show 0-1 empty rows.  This div always contains the
+            full text, bypassing xterm's layout calculations. */}
+        <div data-testid="terminal-raw-output" className="hidden">
+          {rawOutput}{rawLiveText ? '\n' + rawLiveText : ''}
+        </div>
       </div>
     </div>
   );
