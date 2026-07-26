@@ -979,9 +979,9 @@ describe('UnifiedTerminal — component', () => {
           />
         );
 
-        // Wait for terminal to write initial content (deferred init).
+        // Wait for xterm init + initial writes.
         await waitFor(() => {
-          expect(mockTerminalWrite).toHaveBeenCalled();
+          expect(mockTerminalReset).toHaveBeenCalled();
         });
 
         // Both roles' parsed content and initial live events present.
@@ -1042,7 +1042,7 @@ describe('UnifiedTerminal — component', () => {
       );
 
       await waitFor(() => {
-        expect(mockTerminalWrite).toHaveBeenCalled();
+        expect(mockTerminalReset).toHaveBeenCalled();
       });
 
       // Initial: both roles present.
@@ -1128,16 +1128,13 @@ describe('UnifiedTerminal — component', () => {
       return { ...view, errorSpy };
     }
 
-    // Helper: wait until the terminal has written its initial content.
-    // Under the new deferred-init model, tryBecomeReady() writes the
-    // initial interleaved output directly via terminal.write() before
-    // setting termReady, so the interleaved-output effect skips on the
-    // first mount (initialWriteDoneRef gate).  Wait for terminal.write()
-    // — the first observable side-effect — instead of terminal.reset()
-    // which only fires on subsequent chip toggles.
+    // Helper: wait until at least one interleaved-output effect run has
+    // happened for the current state. The effect is async (terminal init
+    // Promise resolves on a microtask, then setTermReady triggers another
+    // render, then rAF for scrollToBottom). `waitFor` polls until ready.
     async function waitForNextReset() {
       await waitFor(() => {
-        expect(mockTerminalWrite).toHaveBeenCalled();
+        expect(mockTerminalReset).toHaveBeenCalled();
       });
     }
 
@@ -1374,7 +1371,7 @@ describe('UnifiedTerminal — component', () => {
         // other tests use, inlined here since renderFull() always passes
         // sessionMap).
         await waitFor(() => {
-          expect(mockTerminalWrite).toHaveBeenCalled();
+          expect(mockTerminalReset).toHaveBeenCalled();
         });
 
         // ── Verify BOTH effects' writes happened on mount ──

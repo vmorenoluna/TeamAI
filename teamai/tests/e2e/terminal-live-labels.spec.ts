@@ -43,26 +43,20 @@ test.describe('Terminal Live Event Labels', () => {
     await ensureProjectSelected(page);
   });
 
-  // NOTE: The first test is marked fixme (skipped in the full parallel suite)
-  // because xterm's dynamic import (@xterm/xterm + @xterm/addon-fit) under
-  // worker contention never renders content within any practical timeout.
-  // The terminal-init refactor (deferred init via ResizeObserver + rAF
-  // fallback + MIN_HEIGHT retry) fixed the 1-2px clientHeight edge case but
-  // cannot resolve the underlying dynamic-import contention that affects all
-  // xterm-using tests under parallel Playwright workers.  The test passes
-  // reliably when run individually.  When the infrastructure is upgraded
-  // (fewer workers, or the xterm import race is resolved), remove .fixme().
+  // NOTE: The first test is marked fixme because under parallel Playwright
+  // workers the dev server sometimes serves SSR content without the log
+  // output (the terminal renders but with an empty buffer — getXtermText
+  // returns whitespace).  This is a server-side SSR timing issue, not a
+  // component rendering bug: the empty-state overlay IS hidden (hasAnyLog
+  // is true) and .xterm-rows exist, but interleavedOutput is empty.
+  // The test passes reliably when run individually or with --workers=1.
+  // When the dev server SSR reliability under load improves, remove .fixme().
   test.fixme('parsed log content shows [Orchestrator] label on initial render', async ({ page }) => {
     const taskId = requireSeedTaskId(TASK_SLUG);
 
-    // Open the terminal tab directly via URL hash.
-    await page.goto(`/task/${taskId}#terminal`);
-    await expect(page.locator('h1').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
-
-    // Fresh navigation guarantees the server does a full SSR with the
-    // output.log and session_map.json we just wrote to disk.  A bare
-    // reload() can drop the #terminal fragment under parallel load.
+    // Single navigation — the beforeEach already primes the server by
+    // navigating to / (via ensureProjectSelected) and writing files to
+    // the per-worker seed dir before we reach here.
     await page.goto(`/task/${taskId}#terminal`);
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
@@ -71,9 +65,13 @@ test.describe('Terminal Live Event Labels', () => {
     // read output.log — agentOutput was null/empty.
     await expect(page.getByTestId('terminal-empty-state')).not.toBeVisible({ timeout: 10_000 });
 
-    // Wait for xterm to initialise and render parsed log content.
-    // Uses expect.poll rather than a fixed waitForTimeout so the test
-    // naturally adapts to slow dynamic xterm imports.
+    // Wait for xterm rows to exist in the DOM before polling content.
+    // Under parallel load the dynamic import + ResizeObserver + React
+    // hydration can take a moment; waiting for rows avoids polling
+    // against an uninitialised terminal.
+    await page.waitForSelector('.xterm-rows', { timeout: 20_000 });
+
+    // Wait for xterm to render parsed log content.
     await expect.poll(() => getXtermText(page), { timeout: 30_000 })
       .toContain('Session started');
     const initialText = await getXtermText(page);
@@ -86,11 +84,8 @@ test.describe('Terminal Live Event Labels', () => {
     await page.goto(`/task/${taskId}#terminal`);
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
-
-    await page.goto(`/task/${taskId}#terminal`);
-    await expect(page.locator('h1').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('terminal-empty-state')).not.toBeVisible({ timeout: 10_000 });
+    await page.waitForSelector('.xterm-rows', { timeout: 20_000 });
 
     await expect.poll(() => getXtermText(page), { timeout: 30_000 })
       .toContain('Session started');
@@ -138,11 +133,8 @@ test.describe('Terminal Live Event Labels', () => {
     await page.goto(`/task/${taskId}#terminal`);
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
-
-    await page.goto(`/task/${taskId}#terminal`);
-    await expect(page.locator('h1').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('terminal-empty-state')).not.toBeVisible({ timeout: 10_000 });
+    await page.waitForSelector('.xterm-rows', { timeout: 20_000 });
 
     await expect.poll(() => getXtermText(page), { timeout: 30_000 })
       .toContain('Session started');
