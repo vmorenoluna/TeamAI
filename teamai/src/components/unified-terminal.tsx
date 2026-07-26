@@ -228,10 +228,6 @@ export function UnifiedTerminal({
   const { events, connected } = useAgentStream(taskId, project);
   const userScrolledRef = useRef(false);
   const liveWrittenRef = useRef(0);
-  // Set to true after the initial write in tryBecomeReady so the
-  // interleavedOutput effect can skip the redundant reset+write on
-  // the first termReady transition.
-  const initialWriteDoneRef = useRef(false);
 
   const [selectedRoles, setSelectedRoles] = useState<Set<string>>(
     () => new Set(ROLES.map(r => r.key))
@@ -268,14 +264,6 @@ export function UnifiedTerminal({
     all.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
     return all.map(l => l.prefixed).join('');
   }, [roleLogMap, selectedRoles]);
-
-  // Keep a ref to the latest interleavedOutput so the xterm init callback
-  // can write it synchronously after fit() (declared after interleavedOutput
-  // to avoid TDZ).  React 19 permits ref writes during render for this exact
-  // use case (keeping a mutable value current for async callbacks).
-  const interleavedOutputRef = useRef(interleavedOutput);
-  // eslint-disable-next-line react-hooks/refs
-  interleavedOutputRef.current = interleavedOutput;
 
   // ── Line counts for chips ─────────────────────────────────────────────
 
@@ -371,14 +359,7 @@ export function UnifiedTerminal({
           return;
         }
         fitAddon.fit();
-        // Write initial content immediately — terminal has proper
-        // dimensions now and we have the latest interleavedOutput
-        // via the ref (not a stale closure value).
-        if (interleavedOutputRef.current) {
-          terminal.write(interleavedOutputRef.current);
-        }
         termRef.current = { terminal, fitAddon };
-        initialWriteDoneRef.current = true;
         setTermReady(true);
         ready = true;
         observer.disconnect();
@@ -442,20 +423,10 @@ export function UnifiedTerminal({
   }, [sessionMap]);
 
   // ── Write interleaved output ──────────────────────────────────────────
-  //
-  // The initial write happens synchronously inside the xterm init
-  // callback (see tryBecomeReady above) to avoid React effect timing
-  // races under parallel load.  This effect handles SUBSEQUENT updates
-  // (filter-chip toggles, new log data arriving).
 
   useEffect(() => {
     if (!termReady || !termRef.current) return;
     const { terminal } = termRef.current;
-    // Skip the first fire after tryBecomeReady already wrote the content.
-    if (initialWriteDoneRef.current) {
-      initialWriteDoneRef.current = false;
-      return;
-    }
     terminal.reset();
     userScrolledRef.current = false;
     if (interleavedOutput) {
