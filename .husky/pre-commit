@@ -23,6 +23,9 @@ if git diff --cached --name-only | grep -qx "teamai/package.json"; then
   cd ..
 fi
 
-# Run typecheck, lint, then tests on every commit
-cd teamai && npx tsc --noEmit && npx lint-staged && npx vitest run --exclude 'tests/integration/**'
+# Run typecheck, lint, then unit + integration tests on every commit.
+# For a comprehensive check before pushing, also run:
+#   cd teamai && npm run test:all
+# (includes E2E and changelog tests that take longer)
+cd teamai && npx tsc --noEmit && npx lint-staged && npx vitest run
 # test

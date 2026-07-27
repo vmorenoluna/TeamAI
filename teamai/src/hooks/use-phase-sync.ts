@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWebSocket } from './use-websocket';
 
@@ -11,6 +11,10 @@ interface UsePhaseSyncOptions {
    *  When omitted, router.refresh() is called as a fallback. */
   onSubtaskProgress?: (taskId: string, completed: number, total: number) => void;
   onConnectionChange?: (connected: boolean) => void;
+  /** Debounce window in ms for router.refresh() calls (default 300).
+   *  Rapid phase-change events (e.g. auto mode processing multiple tasks)
+   *  are batched into a single refresh. */
+  refreshDebounceMs?: number;
 }
 
 export function usePhaseSync(opts?: UsePhaseSyncOptions) {
@@ -25,12 +29,26 @@ export function usePhaseSync(opts?: UsePhaseSyncOptions) {
   // eslint-disable-next-line react-hooks/refs
   onConnectionChangeRef.current = opts?.onConnectionChange;
 
+  // Debounced router.refresh() — batches rapid phase-change events.
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debounceMs = opts?.refreshDebounceMs ?? 300;
+
+  // Cleanup the debounce timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
+
   const { reconnect } = useWebSocket({
     project: opts?.project,
     onMessage: useCallback((data: Record<string, unknown>) => {
       if (data.type === 'phase-change') {
         onPhaseChangeRef.current?.(data.taskId as string, data.phase as string);
-        router.refresh();
+        if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = setTimeout(() => {
+          router.refresh();
+        }, debounceMs);
       } else if (data.type === 'subtask-progress') {
         if (onSubtaskProgressRef.current) {
           onSubtaskProgressRef.current(
@@ -42,7 +60,7 @@ export function usePhaseSync(opts?: UsePhaseSyncOptions) {
           router.refresh();
         }
       }
-    }, [router]),
+    }, [router, debounceMs]),
     onConnectionChange: useCallback(
       (connected: boolean) => onConnectionChangeRef.current?.(connected),
       [],

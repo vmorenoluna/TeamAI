@@ -29,6 +29,32 @@ npx tsx scripts/test-process-manager.ts
 >
 > **Talking to the dev server from a script or test?** Don't hardcode `localhost:3002` — import `getDevServerUrl()` from the same `teamai/scripts/servers.ts` (which reads the `PORT` literal from `package.json`'s `dev` script).
 
+### Pre-Commit Testing
+
+**Before every commit, run the full test suite:**
+
+```bash
+cd teamai && npm run precommit
+```
+
+This runs `test:all` which chains: **typecheck → lint → unit + integration tests → E2E tests → changelog test**. The pre-commit hook (`./.husky/pre-commit`) runs a fast subset automatically (typecheck + lint-staged + vitest), but does NOT run E2E or changelog tests — those must be run manually before pushing.
+
+Individual test commands:
+
+```bash
+cd teamai
+npm run typecheck        # tsc --noEmit
+npm run lint             # eslint --max-warnings 0
+npm run test:unit        # vitest run --exclude 'tests/integration/**'
+npm run test:integration # vitest run --include 'tests/integration/**'
+npm run test             # vitest run (unit + integration)
+npm run test:e2e         # playwright test
+npm run test:changelog   # bash tests/unit/changelog-parsing.test.sh
+npm run test:all         # typecheck + lint + vitest + playwright + changelog
+npm run test:coverage    # vitest --coverage + playwright E2E (combined report)
+npm run precommit        # alias for test:all with a banner
+```
+
 ## Architecture
 
 ### Main Process

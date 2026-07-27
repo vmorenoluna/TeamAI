@@ -52,9 +52,26 @@ interface SeedTask {
   qaReport?: {
     overall: 'PASS' | 'FAIL';
     criteria: Array<{ name: string; status: string; notes: string }>;
-    issues: Array<{ severity: string; message: string }>;
+    spec_concerns?: Array<{ issue: string; reasoning: string; suggested_fix?: string }>;
+    issues?: Array<{ severity: string; message: string }>;
   };
   completionSummary?: string;
+  /** Git branch name for tasks in implement/merge/create-pr/pr-open phases. */
+  branch?: string;
+  /** PR/MR URL for tasks in pr-open/merge phases. */
+  prUrl?: string;
+  /** Auto-mode: true when auto mode marked the task as done. */
+  autoProcessed?: boolean;
+  /** Auto-mode: true when user has manually reviewed the auto-done task. */
+  autoReviewed?: boolean;
+  /** ISO timestamp — pipeline paused by API rate limit. */
+  rateLimitedUntil?: string;
+  /** IDs of tasks this task depends on (blocked by). */
+  dependencies?: string[];
+  /** Human reviewer feedback for awaiting-review tasks. */
+  humanFeedback?: string;
+  /** Write a session_map.json to simulate an active pipeline session. */
+  sessionMap?: Record<string, string>;
 }
 
 // ── Sample Data ────────────────────────────────────────────────────────
@@ -69,6 +86,7 @@ const SAMPLE_TASKS: SeedTask[] = [
     title: 'Fix: login button not visible on mobile',
     description: 'The login button is hidden behind the navbar on small screens',
     phase: 'implement',
+    branch: 'feat/fix-login-button-not-visible-on-mobile',
     spec: '# Spec: Fix login button mobile visibility\n\n## Background\nLogin button is hidden behind navbar on screens < 768px.\n\n## Requirements\n- Button must be visible at all breakpoints\n- Navbar z-index must not overlap interactive elements',
     plan: {
       subtasks: [
@@ -155,6 +173,120 @@ const SAMPLE_TASKS: SeedTask[] = [
     },
     completionSummary: '# Completion Summary\n\nTask failed after reaching max QA attempts (3/3).\n\n## Plan Subtasks\n\n- [x] **Add empty guard clause** — COMPLETED\n- [ ] **Add validation test** — NOT COMPLETED\n\n## Last QA Report\n\nOverall: **FAIL**\n\n| Criterion | Status | Notes |\n|-----------|--------|-------|\n| Empty input handled without crash | PASS | |\n| Shows helpful error message to user | FAIL | No user-facing message shown |\n| Edge cases covered (whitespace, special chars) | FAIL | Only basic empty string handled |\n\n## Issues\n\n- [warning] No toast/notification shown on empty submit\n- [warning] Whitespace-only input not handled',
   },
+  // ── Tasks for missing pipeline phases (BDD coverage) ────────────────
+  {
+    title: 'Feat: Add user profile page',
+    description: 'Create a user profile page showing account details and settings',
+    phase: 'spec',
+    spec: '# Spec: User Profile Page\n\n## Background\nUsers need a dedicated profile page to view and manage their account.\n\n## Requirements\n- Display user name, email, avatar\n- Show account creation date\n- Link to settings page\n- Responsive layout for mobile',
+  },
+  {
+    title: 'Feat: Add pagination to task list',
+    description: 'Add server-side pagination to the task list API and UI',
+    phase: 'plan',
+    spec: '# Spec: Task List Pagination\n\n## Requirements\n- API accepts ?page and ?limit params\n- Response includes total count\n- UI shows page controls\n- Default 20 items per page',
+    plan: {
+      subtasks: [
+        { id: 1, title: 'Add pagination params to API', description: 'Accept page and limit query params', files: ['src/app/api/tasks/route.ts'], acceptance_criteria: ['API returns paginated results'] },
+        { id: 2, title: 'Add page controls UI', description: 'Render page number buttons', files: ['src/components/pagination.tsx'], acceptance_criteria: ['Page controls render with correct page count'] },
+        { id: 3, title: 'Wire up state', description: 'Connect pagination to task store', files: ['src/hooks/use-paginated-tasks.ts'], acceptance_criteria: ['Clicking page button loads correct page'] },
+      ],
+    },
+  },
+  {
+    title: 'Fix: Navbar dropdown z-index conflict',
+    description: 'Navbar dropdown menus appear behind page content on certain pages',
+    phase: 'awaiting-review',
+    spec: '# Spec: Fix Navbar Dropdown Z-Index\n\n## Requirements\n- Dropdowns must appear above all page content\n- Must not break sticky header behavior',
+    plan: {
+      subtasks: [
+        { id: 1, title: 'Audit z-indexes', description: 'Map all z-index values in the app', files: ['docs/z-index-map.md'], acceptance_criteria: ['All z-index values documented'], completed: true },
+        { id: 2, title: 'Fix stacking contexts', description: 'Resolve conflicting stacking contexts', files: ['src/components/navbar.tsx', 'src/app/globals.css'], acceptance_criteria: ['Dropdown renders above all content'], completed: true },
+      ],
+    },
+    qaReport: {
+      overall: 'PASS',
+      criteria: [
+        { name: 'Dropdown renders above all content', status: 'PASS', notes: 'Verified at 1920px and 375px' },
+        { name: 'Sticky header still works', status: 'PASS', notes: 'Header sticks on scroll' },
+      ],
+    },
+    humanFeedback: '# Human Review\n\nThe fix looks good. The dropdown now renders above the hero section.\n\nPlease also check the mobile nav menu — it has a separate z-index stack.\n\nApproved for merge.',
+  },
+  {
+    title: 'Feat: Add real-time WebSocket notifications',
+    description: 'Add in-app notification toasts for task status changes',
+    phase: 'create-pr',
+    branch: 'feat/add-real-time-websocket-notifications',
+    spec: '# Spec: Real-Time Notifications\n\n## Requirements\n- Toast notification on task phase change\n- Clickable toast to navigate to task\n- Dismissible with close button',
+    plan: {
+      subtasks: [
+        { id: 1, title: 'Create notification store', description: 'Zustand store for notification state', files: ['src/lib/notification-store.ts'], acceptance_criteria: ['Store holds notification queue'], completed: true },
+        { id: 2, title: 'Build toast component', description: 'Animated toast notification UI', files: ['src/components/toast.tsx'], acceptance_criteria: ['Toast renders, animates in, and dismisses'], completed: true },
+        { id: 3, title: 'Wire up WebSocket events', description: 'Subscribe to phase-change events', files: ['src/hooks/use-notifications.ts'], acceptance_criteria: ['Toast appears on phase change'], completed: true },
+      ],
+    },
+  },
+  {
+    title: 'Refactor: Migrate API to v2 endpoints',
+    description: 'Migrate all internal API consumers from v1 to v2 endpoint paths',
+    phase: 'pr-open',
+    branch: 'feat/refactor-migrate-api-to-v2-endpoints',
+    prUrl: 'https://github.com/teamai/TeamAI/pull/142',
+    spec: '# Spec: API v2 Migration\n\n## Requirements\n- All internal calls use /api/v2/ prefix\n- v1 endpoints preserved for backwards compat\n- No breaking changes to external consumers',
+    plan: {
+      subtasks: [
+        { id: 1, title: 'Create v2 route handlers', description: 'Duplicate v1 handlers under /api/v2/', files: ['src/app/api/v2/tasks/route.ts'], acceptance_criteria: ['v2 endpoints return same data'], completed: true },
+        { id: 2, title: 'Update internal consumers', description: 'Change all fetch calls to /api/v2/', files: ['src/app/actions/*.ts'], acceptance_criteria: ['All internal calls use v2'], completed: true },
+        { id: 3, title: 'Add deprecation headers', description: 'Add warning headers to v1 endpoints', files: ['src/app/api/v1/route.ts'], acceptance_criteria: ['v1 responses include deprecation header'], completed: true },
+      ],
+    },
+  },
+  {
+    title: 'Fix: Merge conflict in shared utils',
+    description: 'Resolve git merge conflict in src/lib/utils.ts between feature branches',
+    phase: 'merge',
+    branch: 'feat/fix-merge-conflict-in-shared-utils',
+    prUrl: 'https://github.com/teamai/TeamAI/pull/150',
+    spec: '# Spec: Resolve Merge Conflict\n\n## Background\nTwo feature branches modified the same slugify function.\n\n## Requirements\n- Merge both changes without losing functionality\n- All tests pass after resolution',
+    plan: {
+      subtasks: [
+        { id: 1, title: 'Resolve slugify conflict', description: 'Merge both versions of slugify', files: ['src/lib/utils.ts'], acceptance_criteria: ['Both slugify features work'], completed: true },
+        { id: 2, title: 'Run full test suite', description: 'All tests pass after merge', files: [], acceptance_criteria: ['0 test failures'], completed: true },
+      ],
+    },
+  },
+  // ── Additional behavioral test data ────────────────────────────────
+  {
+    title: 'Auto: Update deprecated dependencies',
+    description: 'Auto-processed task that was merged by CI — needs manual review',
+    phase: 'done',
+    branch: 'feat/auto-update-deprecated-dependencies',
+    autoProcessed: true,
+    autoReviewed: false,
+    spec: '# Spec: Dependency Update\n\n## Requirements\n- Update all deprecated npm packages\n- No breaking changes',
+    plan: {
+      subtasks: [
+        { id: 1, title: 'Audit dependencies', description: 'Run npm audit and list deprecated packages', files: ['package.json'], acceptance_criteria: ['Audit report generated'], completed: true },
+        { id: 2, title: 'Update packages', description: 'Update to latest compatible versions', files: ['package.json'], acceptance_criteria: ['No security vulnerabilities'], completed: true },
+      ],
+    },
+  },
+  {
+    title: 'Fix: Rate-limited API token refresh',
+    description: 'API token refresh endpoint hitting rate limits during heavy usage',
+    phase: 'implement',
+    branch: 'feat/fix-rate-limited-api-token-refresh',
+    rateLimitedUntil: new Date(Date.now() + 3600000).toISOString(),
+    spec: '# Spec: Rate-Limited Token Refresh\n\n## Requirements\n- Implement exponential backoff\n- Queue requests during rate limit period',
+    plan: {
+      subtasks: [
+        { id: 1, title: 'Add backoff logic', description: 'Implement exponential backoff', files: ['src/lib/api-client.ts'], acceptance_criteria: ['Requests retry with increasing delay'], completed: true },
+        { id: 2, title: 'Add request queue', description: 'Queue and batch requests', files: ['src/lib/request-queue.ts'], acceptance_criteria: ['Requests queued during rate limit'] },
+      ],
+    },
+    sessionMap: { '2': 'session-rate-limited-99' },
+  },
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -185,9 +317,13 @@ function writeTask(dir: string, taskId: string, seed: SeedTask): void {
       createdAt: new Date(Date.now() - Math.random() * 86400000 * 7).toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    if (seed.completionSummary) {
-      task.completionSummary = seed.completionSummary;
-    }
+    if (seed.completionSummary) task.completionSummary = seed.completionSummary;
+    if (seed.branch) task.branch = seed.branch;
+    if (seed.prUrl) task.prUrl = seed.prUrl;
+    if (seed.autoProcessed !== undefined) task.autoProcessed = seed.autoProcessed;
+    if (seed.autoReviewed !== undefined) task.autoReviewed = seed.autoReviewed;
+    if (seed.rateLimitedUntil) task.rateLimitedUntil = seed.rateLimitedUntil;
+    if (seed.dependencies) task.dependencies = seed.dependencies;
   writeFileSync(join(dir, 'task.json'), JSON.stringify(task, null, 2));
 
   // Write realistic phase-change events based on current phase
@@ -202,11 +338,10 @@ function writeTask(dir: string, taskId: string, seed: SeedTask): void {
 
 /** Build a realistic chain of phase events for the given current phase. */
 function buildEventChain(currentPhase: string): string[] {
-  const ALL_PHASES = ['backlog', 'spec', 'plan', 'implement', 'qa-review', 'failed', 'done'];
+  const ALL_PHASES = ['backlog', 'spec', 'plan', 'implement', 'qa-review', 'awaiting-review', 'create-pr', 'pr-open', 'merge', 'failed', 'done'];
   const idx = ALL_PHASES.indexOf(currentPhase);
   if (idx <= 0) return ['backlog', currentPhase];
-  // For intermediate phases, include all steps up to and including the current one
-  return ALL_PHASES.slice(0, idx + 1).filter(p => !['awaiting-review', 'merge', 'create-pr'].includes(p));
+  return ALL_PHASES.slice(0, idx + 1);
 }
 
 function writeSpec(dir: string, seed: SeedTask): void {
@@ -230,6 +365,18 @@ function writeQaReport(dir: string, seed: SeedTask): void {
 function writeCompletionSummary(dir: string, seed: SeedTask): void {
   if (seed.completionSummary) {
     writeFileSync(join(dir, 'completion_summary.md'), seed.completionSummary);
+  }
+}
+
+function writeHumanFeedback(dir: string, seed: SeedTask): void {
+  if (seed.humanFeedback) {
+    writeFileSync(join(dir, 'human_feedback.md'), seed.humanFeedback);
+  }
+}
+
+function writeSessionMap(dir: string, seed: SeedTask): void {
+  if (seed.sessionMap) {
+    writeFileSync(join(dir, 'session_map.json'), JSON.stringify(seed.sessionMap, null, 2));
   }
 }
 
@@ -420,6 +567,8 @@ async function main(): Promise<void> {
     }
 
     writeCompletionSummary(taskDir, seed);
+    writeHumanFeedback(taskDir, seed);
+    writeSessionMap(taskDir, seed);
 
     createdTasks.push({ id: taskId, title: seed.title, slug });
     console.log(`  ✓ ${seed.title} → ${seed.phase}`);

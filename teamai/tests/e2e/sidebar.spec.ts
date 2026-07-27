@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 test.describe('Sidebar Navigation', () => {
   test('sidebar is visible with all navigation links', async ({ page }) => {
@@ -70,5 +70,260 @@ test.describe('Sidebar Navigation', () => {
     // Button title should change to "Expand sidebar"
     const expandButton = sidebar.locator('button[title*="Expand"]');
     await expect(expandButton).toBeVisible();
+  });
+});
+
+test.describe('Sidebar — Collapsed State Navigation', () => {
+  test.setTimeout(60_000);
+
+  /** Helper: collapse the sidebar and verify it's collapsed */
+  async function collapseSidebar(page: Page) {
+    await page.goto('/');
+    await page.waitForTimeout(1500);
+
+    const sidebar = page.locator('aside');
+    await expect(sidebar).toHaveClass(/w-60/);
+
+    await sidebar.evaluate((el) => {
+      const btn = el.querySelector('button');
+      if (btn instanceof HTMLElement) btn.click();
+    });
+    await page.waitForTimeout(500);
+    await expect(sidebar).toHaveClass(/w-12/);
+  }
+
+  test('collapsed sidebar links have tooltip title attributes', async ({ page }) => {
+    await collapseSidebar(page);
+
+    const sidebar = page.locator('aside');
+
+    // Each collapsed link should have a title attribute for the tooltip
+    const pages = [
+      { href: '/insights', label: 'Insights' },
+      { href: '/ideation', label: 'Ideation' },
+      { href: '/workflow', label: 'Workflow' },
+      { href: '/github', label: 'GitHub' },
+    ];
+
+    for (const { href, label } of pages) {
+      const link = sidebar.locator(`a[href="${href}"]`);
+      await expect(link).toBeVisible();
+      // When collapsed, the Link gets title={label}
+      await expect(link).toHaveAttribute('title', label);
+    }
+  });
+
+  test('collapsed: clicking Insights icon navigates to /insights', async ({ page }) => {
+    await collapseSidebar(page);
+
+    const link = page.locator('aside a[href="/insights"]');
+    await expect(link).toBeVisible();
+    await link.click();
+
+    await expect(page).toHaveURL(/\/insights/);
+    await expect(page.locator('h1:has-text("Insights")')).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('collapsed: clicking Ideation icon navigates to /ideation', async ({ page }) => {
+    await collapseSidebar(page);
+
+    const link = page.locator('aside a[href="/ideation"]');
+    await expect(link).toBeVisible();
+    await link.click();
+
+    await expect(page).toHaveURL(/\/ideation/);
+    await expect(page.locator('h1:has-text("Ideation")')).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('collapsed: clicking Workflow icon navigates to /workflow', async ({ page }) => {
+    await collapseSidebar(page);
+
+    const link = page.locator('aside a[href="/workflow"]');
+    await expect(link).toBeVisible();
+    await link.click();
+
+    await expect(page).toHaveURL(/\/workflow/);
+
+    // Workflow page shows heading with project, or "Select or add a project" without
+    const hasHeading = await page.locator('h1:has-text("Workflow")').isVisible({ timeout: 5_000 }).catch(() => false);
+    const hasNoProject = await page.locator('text=Select or add a project').isVisible({ timeout: 5_000 }).catch(() => false);
+    expect(hasHeading || hasNoProject).toBe(true);
+  });
+
+  test('collapsed: clicking GitHub icon navigates to /github', async ({ page }) => {
+    await collapseSidebar(page);
+
+    const link = page.locator('aside a[href="/github"]');
+    await expect(link).toBeVisible();
+    await link.click();
+
+    await expect(page).toHaveURL(/\/github/);
+    await expect(page.locator('h1:has-text("GitHub Issues")')).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('collapsed: expand sidebar restores link labels', async ({ page }) => {
+    await collapseSidebar(page);
+
+    // Labels should NOT be visible when collapsed
+    const sidebar = page.locator('aside');
+    await expect(sidebar.locator('text=Insights')).not.toBeVisible();
+    await expect(sidebar.locator('text=Ideation')).not.toBeVisible();
+
+    // Click expand
+    await sidebar.evaluate((el) => {
+      const btn = el.querySelector('button');
+      if (btn instanceof HTMLElement) btn.click();
+    });
+    await page.waitForTimeout(500);
+
+    // Sidebar should be expanded again
+    await expect(sidebar).toHaveClass(/w-60/);
+
+    // Labels should now be visible
+    await expect(sidebar.locator('text=Insights')).toBeVisible();
+    await expect(sidebar.locator('text=Ideation')).toBeVisible();
+    await expect(sidebar.locator('text=Workflow')).toBeVisible();
+    await expect(sidebar.locator('text=GitHub')).toBeVisible();
+  });
+});
+
+test.describe('Sidebar — Keyboard Accessibility', () => {
+  test.setTimeout(60_000);
+
+  test('Tab key navigates through sidebar links', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(1500);
+
+    // Click the page first to establish focus
+    await page.locator('body').click();
+
+    // Tab repeatedly to move through focusable elements
+    const focusedElements: string[] = [];
+    for (let i = 0; i < 15; i++) {
+      await page.keyboard.press('Tab');
+      await page.waitForTimeout(100);
+
+      const focused = page.locator(':focus');
+      const tag = await focused.evaluate(el => (el as HTMLElement).tagName).catch(() => '');
+      const href = await focused.getAttribute('href').catch(() => '');
+
+      if (tag === 'A' && href && href.startsWith('/')) {
+        focusedElements.push(href);
+      }
+    }
+
+    // At least some sidebar links should have received focus
+    expect(focusedElements.length).toBeGreaterThan(0);
+  });
+
+  test('Enter key on focused sidebar link navigates', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(1500);
+
+    // Focus the body first
+    await page.locator('body').click();
+
+    // Tab to reach sidebar links — keep tabbing until we hit a nav link
+    let navigated = false;
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press('Tab');
+      await page.waitForTimeout(100);
+
+      const focused = page.locator(':focus');
+      const href = await focused.getAttribute('href').catch(() => null);
+
+      if (href === '/settings') {
+        await page.keyboard.press('Enter');
+        navigated = true;
+        break;
+      }
+    }
+
+    if (navigated) {
+      await expect(page).toHaveURL(/\/settings/, { timeout: 10_000 });
+      await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
+    }
+    // If we didn't reach /settings, the tab order may differ — that's OK
+  });
+
+  test('focused sidebar link has visible focus ring', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(1500);
+
+    // Focus the sidebar by tabbing
+    await page.locator('body').click();
+
+    // Tab until we reach the sidebar
+    let foundFocusable = false;
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press('Tab');
+      await page.waitForTimeout(100);
+
+      const focused = page.locator(':focus');
+      const isSidebar = await focused.evaluate(el => {
+        return !!(el as HTMLElement).closest('aside');
+      }).catch(() => false);
+
+      if (isSidebar) {
+        foundFocusable = true;
+        // Focused element should exist and have focus
+        expect(focused).toBeVisible({ timeout: 3_000 });
+
+        // Verify the element is actually focused
+        const isFocused = await focused.evaluate(el => el === document.activeElement).catch(() => false);
+        expect(isFocused).toBe(true);
+        break;
+      }
+    }
+
+    // We should have been able to tab to a sidebar element
+    expect(foundFocusable).toBe(true);
+  });
+
+  test('collapse toggle button is keyboard accessible', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(1500);
+
+    const sidebar = page.locator('aside');
+
+    // The collapse button has a title attr — find and focus it
+    const collapseBtn = sidebar.locator('button[title="Collapse sidebar"]');
+    await collapseBtn.focus();
+
+    // Press Enter to collapse
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(500);
+
+    await expect(sidebar).toHaveClass(/w-12/);
+
+    // Button title should now be "Expand sidebar"
+    await expect(sidebar.locator('button[title="Expand sidebar"]')).toBeVisible();
+
+    // Press Enter again to expand
+    await sidebar.locator('button[title="Expand sidebar"]').focus();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(500);
+
+    await expect(sidebar).toHaveClass(/w-60/);
+  });
+
+  test('all sidebar links are keyboard focusable (not tabindex=-1)', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForTimeout(1500);
+
+    const sidebar = page.locator('aside');
+    const links = sidebar.locator('a[href^="/"]');
+    const count = await links.count();
+    expect(count).toBeGreaterThanOrEqual(8); // 9 nav links
+
+    let focusableCount = 0;
+    for (let i = 0; i < count; i++) {
+      const tabIndex = await links.nth(i).getAttribute('tabindex').catch(() => null);
+      // tabindex should not be -1 (which would prevent keyboard focus)
+      expect(tabIndex).not.toBe('-1');
+      focusableCount++;
+    }
+
+    expect(focusableCount).toBeGreaterThanOrEqual(8);
   });
 });

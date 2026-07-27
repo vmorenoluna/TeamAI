@@ -94,16 +94,26 @@ describe('usePhaseSync', () => {
     });
 
     it('calls router.refresh after a phase-change', () => {
+      vi.useFakeTimers();
       renderHook(() => usePhaseSync());
 
       act(() => {
         gOnMessage!(phaseChangePayload('task-1', 'done'));
       });
 
+      // Not called immediately — debounced
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
       expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
 
     it('handles multiple phase-change events in sequence', () => {
+      vi.useFakeTimers();
       const onPhaseChange = vi.fn();
       renderHook(() => usePhaseSync({ onPhaseChange }));
 
@@ -117,7 +127,16 @@ describe('usePhaseSync', () => {
       expect(onPhaseChange).toHaveBeenNthCalledWith(1, 't1', 'spec');
       expect(onPhaseChange).toHaveBeenNthCalledWith(2, 't2', 'plan');
       expect(onPhaseChange).toHaveBeenNthCalledWith(3, 't1', 'implement');
-      expect(mockRouterRefresh).toHaveBeenCalledTimes(3);
+      // Not called yet — debounced
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      // All 3 batched into 1 refresh
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
 
     it('can update onPhaseChange callback between renders', () => {
@@ -195,6 +214,7 @@ describe('usePhaseSync', () => {
     });
 
     it('works alongside phase-change events independently (fallback)', () => {
+      vi.useFakeTimers();
       const onPhaseChange = vi.fn();
       renderHook(() => usePhaseSync({ onPhaseChange }));
 
@@ -206,7 +226,16 @@ describe('usePhaseSync', () => {
 
       expect(onPhaseChange).toHaveBeenCalledOnce();
       expect(onPhaseChange).toHaveBeenCalledWith('task-a', 'qa-review');
-      expect(mockRouterRefresh).toHaveBeenCalledTimes(3);
+      // subtask-progress events (no callback) trigger immediate refreshes: 2
+      // phase-change is debounced, not yet fired
+      expect(mockRouterRefresh).toHaveBeenCalledTimes(2);
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(mockRouterRefresh).toHaveBeenCalledTimes(3); // +1 debounced phase-change
+      vi.useRealTimers();
     });
 
     it('falls back when called with no options', () => {
@@ -299,6 +328,7 @@ describe('usePhaseSync', () => {
     });
 
     it('works alongside phase-change when both callbacks provided', () => {
+      vi.useFakeTimers();
       const onPhaseChange = vi.fn();
       const onSubtaskProgress = vi.fn();
       renderHook(() => usePhaseSync({ onPhaseChange, onSubtaskProgress }));
@@ -314,8 +344,15 @@ describe('usePhaseSync', () => {
       expect(onSubtaskProgress).toHaveBeenNthCalledWith(2, 'task-mix', 2, 3);
       expect(onPhaseChange).toHaveBeenCalledOnce();
       expect(onPhaseChange).toHaveBeenCalledWith('task-mix', 'qa-review');
-      // phase-change still triggers refresh, subtask-progress does not
+      // subtask-progress does not trigger refresh, phase-change is debounced
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
       expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
   });
 
@@ -415,6 +452,7 @@ describe('usePhaseSync', () => {
     });
 
     it('handles both phase-change and connection-change callbacks independently', () => {
+      vi.useFakeTimers();
       const onPhaseChange = vi.fn();
       const onConnectionChange = vi.fn();
       renderHook(() => usePhaseSync({ onPhaseChange, onConnectionChange }));
@@ -432,6 +470,13 @@ describe('usePhaseSync', () => {
       expect(onPhaseChange).toHaveBeenCalledTimes(2);
       expect(onPhaseChange).toHaveBeenNthCalledWith(1, 'task-x', 'qa-review');
       expect(onPhaseChange).toHaveBeenNthCalledWith(2, 'task-y', 'merge');
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
   });
 
@@ -456,21 +501,125 @@ describe('usePhaseSync', () => {
 
   // ── Edge cases ───────────────────────────────────────────────────────
 
+  describe('debounce behaviour', () => {
+    it('batches multiple rapid phase-change events into a single refresh', () => {
+      vi.useFakeTimers();
+      renderHook(() => usePhaseSync());
+
+      // Fire 5 phase-change events in rapid succession
+      act(() => {
+        gOnMessage!(phaseChangePayload('t1', 'spec'));
+        gOnMessage!(phaseChangePayload('t2', 'spec'));
+        gOnMessage!(phaseChangePayload('t3', 'spec'));
+        gOnMessage!(phaseChangePayload('t4', 'spec'));
+        gOnMessage!(phaseChangePayload('t5', 'spec'));
+      });
+
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
+    });
+
+    it('resets the debounce window on each new phase-change event', () => {
+      vi.useFakeTimers();
+      renderHook(() => usePhaseSync());
+
+      act(() => {
+        gOnMessage!(phaseChangePayload('t1', 'spec'));
+      });
+
+      // Advance halfway
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      // Another event resets the timer
+      act(() => {
+        gOnMessage!(phaseChangePayload('t2', 'plan'));
+      });
+
+      // Advance to where the first timer would have fired
+      act(() => {
+        vi.advanceTimersByTime(100);
+      });
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+
+      // Advance to the second timer's fire time
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
+    });
+
+    it('respects custom refreshDebounceMs option', () => {
+      vi.useFakeTimers();
+      renderHook(() => usePhaseSync({ refreshDebounceMs: 100 }));
+
+      act(() => {
+        gOnMessage!(phaseChangePayload('t1', 'done'));
+      });
+
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(100);
+      });
+
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
+    });
+
+    it('cleans up the debounce timer on unmount', () => {
+      vi.useFakeTimers();
+      const { unmount } = renderHook(() => usePhaseSync());
+
+      act(() => {
+        gOnMessage!(phaseChangePayload('t1', 'spec'));
+      });
+
+      unmount();
+
+      // Timer should be cleared — advancing should not call refresh
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+  });
+
+  // ── Edge cases ───────────────────────────────────────────────────────
+
   describe('edge cases', () => {
     it('works when called with no options', () => {
+      vi.useFakeTimers();
       const { result } = renderHook(() => usePhaseSync());
 
       // Should not throw
       expect(result.current.reconnect).toBeDefined();
 
-      // Phase-change should still trigger router.refresh even without callback
+      // Phase-change should still trigger router.refresh even without callback (debounced)
       act(() => {
         gOnMessage!(phaseChangePayload('task-nocb', 'done'));
       });
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
       expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
 
     it('works when called with undefined opts', () => {
+      vi.useFakeTimers();
       const { result } = renderHook(() => usePhaseSync(undefined));
 
       expect(result.current.reconnect).toBeDefined();
@@ -479,10 +628,17 @@ describe('usePhaseSync', () => {
       act(() => {
         gOnMessage!(phaseChangePayload('task-undef', 'backlog'));
       });
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
       expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
 
     it('does not throw when onPhaseChange is not provided', () => {
+      vi.useFakeTimers();
       const { result } = renderHook(() => usePhaseSync({}));
 
       expect(result.current.reconnect).toBeDefined();
@@ -490,8 +646,14 @@ describe('usePhaseSync', () => {
       act(() => {
         gOnMessage!(phaseChangePayload('task-null', 'implement'));
       });
-      // router.refresh still called because it's unconditional
+      // router.refresh still called (debounced)
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
       expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
     });
 
     it('does not throw when onConnectionChange is not provided', () => {

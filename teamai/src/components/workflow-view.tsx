@@ -135,7 +135,7 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
       const key = arrowKey(from, to); const h = isHovered(key);
       arrows.push(
         <g key={key}>
-          <line x1={CENTER_X} y1={nodeY(fi) + NODE_H} x2={CENTER_X} y2={nodeY(ti) - 6} stroke="transparent" strokeWidth="14" className="cursor-pointer" onMouseEnter={() => setHoveredTransition(key)} onMouseLeave={() => setHoveredTransition(null)} />
+          <line x1={CENTER_X} y1={nodeY(fi) + NODE_H} x2={CENTER_X} y2={nodeY(ti) - 6} stroke="transparent" strokeWidth="14" className="cursor-pointer pointer-events-auto" onMouseEnter={() => setHoveredTransition(key)} onMouseLeave={() => setHoveredTransition(null)} />
           <line x1={CENTER_X} y1={nodeY(fi) + NODE_H} x2={CENTER_X} y2={nodeY(ti) - 6} className={`transition-all duration-200 ${baseClass} ${h ? hoverClass : ''}`} markerEnd={h ? 'url(#arrow-down-hover)' : 'url(#arrow-down)'} />
         </g>);
     };
@@ -148,8 +148,8 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
       const d = `M ${RIGHT_X + 2},${sy} C ${cx},${sy} ${cx},${ty} ${RIGHT_X + 6},${ty}`;
       arrows.push(
         <g key={key}>
-          <path d={d} fill="none" stroke="transparent" strokeWidth="14" className="cursor-pointer" onMouseEnter={() => setHoveredTransition(key)} onMouseLeave={() => setHoveredTransition(null)} />
-          <path d={d} fill="none" className={`transition-all duration-200 ${baseClass} ${h ? hoverClass : ''}`} markerEnd={h ? 'url(#arrow-right-hover)' : 'url(#arrow-right)'} />
+          <path d={d} fill="none" stroke="transparent" strokeWidth="14" className="cursor-pointer pointer-events-auto" onMouseEnter={() => setHoveredTransition(key)} onMouseLeave={() => setHoveredTransition(null)} />
+          <path d={d} fill="none" className={`transition-all duration-200 ${baseClass} ${h ? hoverClass : ''} pointer-events-none`} markerEnd={h ? 'url(#arrow-right-hover)' : 'url(#arrow-right)'} />
         </g>);
     };
 
@@ -162,10 +162,10 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
       const d = `M ${LEFT_X - 2},${sy} C ${cx},${sy} ${cx},${ty} ${LEFT_X},${ty}`;
       arrows.push(
         <g key={key}>
-          <path d={d} fill="none" stroke="transparent" strokeWidth="14" className="cursor-pointer" onMouseEnter={() => setHoveredTransition(key)} onMouseLeave={() => setHoveredTransition(null)} />
-          <path d={d} fill="none" className={`transition-all duration-200 ${baseClass} ${h ? hoverClass : ''}`} markerEnd={`url(#${h ? markerHover : marker})`} />
+          <path d={d} fill="none" stroke="transparent" strokeWidth="14" className="cursor-pointer pointer-events-auto" onMouseEnter={() => setHoveredTransition(key)} onMouseLeave={() => setHoveredTransition(null)} />
+          <path d={d} fill="none" className={`transition-all duration-200 ${baseClass} ${h ? hoverClass : ''} pointer-events-none`} markerEnd={`url(#${h ? markerHover : marker})`} />
         </g>);
-      if (label) { arrows.push(<text key={`${key}-label`} x={lx} y={midY} fill={h ? (textFill ?? '#94a3b8') : (textFill ?? '#94a3b8')} textAnchor="middle" dominantBaseline="central" className={`text-[9px] font-medium transition-all duration-200 ${h ? 'opacity-100' : 'opacity-60'}`}>{label}</text>); }
+      if (label) { arrows.push(<text key={`${key}-label`} x={lx} y={midY} fill={h ? (textFill ?? '#94a3b8') : (textFill ?? '#94a3b8')} textAnchor="middle" dominantBaseline="central" className={`text-[9px] font-medium transition-all duration-200 pointer-events-none ${h ? 'opacity-100' : 'opacity-60'}`}>{label}</text>); }
     };
 
     for (const [from, to] of FORWARD_TRANSITIONS) {
@@ -244,7 +244,7 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
               <div className="flex items-center justify-center h-full text-sm text-slate-500">No tickets yet — create one from the Board.</div>
             ) : (
               <>
-                <svg className="absolute inset-0 overflow-visible" width={RIGHT_X + CURVE_OFFSET + 10} height={diagramHeight}>
+                <svg className="absolute inset-0 overflow-visible pointer-events-none" width={RIGHT_X + CURVE_OFFSET + 10} height={diagramHeight}>
                   <defs>
                     <marker id="arrow-down" viewBox="0 0 10 10" refX="5" refY="0" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse"><polygon points="0,0 5,10 10,0" className="fill-slate-600" /></marker>
                     <marker id="arrow-down-hover" viewBox="0 0 10 10" refX="5" refY="0" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse"><polygon points="0,0 5,10 10,0" className="fill-slate-400" /></marker>
@@ -268,7 +268,7 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
                   const hasActive = tasks.some(wt => wt.isActive);
                   const isHovered = hoveredPhase === phase.phase;
                   return (
-                    <div key={phase.phase} className={`absolute rounded-lg transition-all duration-150 ${hasActive ? 'animate-pulse-glow' : ''}`} style={{ top: nodeY(idx), left: LEFT_MARGIN, width: NODE_W, height: NODE_H }} onMouseEnter={() => handlePhaseEnter(phase.phase)} onMouseLeave={handlePhaseLeave}>
+                    <div key={phase.phase} data-testid={`phase-node-${phase.phase}`} className={`absolute rounded-lg transition-all duration-150 ${hasActive ? 'animate-pulse-glow' : ''}`} style={{ top: nodeY(idx), left: LEFT_MARGIN, width: NODE_W, height: NODE_H }} onMouseEnter={() => handlePhaseEnter(phase.phase)} onMouseLeave={handlePhaseLeave}>
                       <div className={`h-full flex items-center px-3 rounded-lg border-2 text-xs font-semibold cursor-pointer transition-all ${hasTasks ? `${phase.color} text-white border-opacity-100` : 'border-slate-700 bg-slate-800/50 text-slate-500'} ${isHovered ? 'scale-105 shadow-lg shadow-black/30' : ''}`}>
                         <div className="flex items-center justify-between"><span>{phase.label}</span>{hasTasks && (<span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${isHovered ? 'bg-white/20 text-white' : 'bg-slate-700/50 text-slate-400'}`}>{tasks.length}</span>)}</div>
                       </div>
@@ -277,7 +277,7 @@ export function WorkflowView({ workflowTasks, projectPath }: Props) {
                 })}
 
                 {otherTasks.length > 0 && (
-                  <div key="other" className={`absolute rounded-lg transition-all duration-150 ${otherTasks.some(wt => wt.isActive) ? 'animate-pulse-glow' : ''}`} style={{ top: nodeY(PIPELINE_PHASES.length), left: LEFT_MARGIN, width: NODE_W, height: NODE_H }} onMouseEnter={() => handlePhaseEnter('__other__')} onMouseLeave={handlePhaseLeave}>
+                  <div key="other" data-testid="phase-node-other" className={`absolute rounded-lg transition-all duration-150 ${otherTasks.some(wt => wt.isActive) ? 'animate-pulse-glow' : ''}`} style={{ top: nodeY(PIPELINE_PHASES.length), left: LEFT_MARGIN, width: NODE_W, height: NODE_H }} onMouseEnter={() => handlePhaseEnter('__other__')} onMouseLeave={handlePhaseLeave}>
                     <div className={`h-full flex items-center px-3 rounded-lg border-2 border-dashed border-slate-600 bg-slate-800/40 text-xs font-semibold text-slate-400 cursor-pointer transition-all ${hoveredPhase === '__other__' ? 'scale-105 shadow-lg shadow-black/30' : ''}`}>
                       <div className="flex items-center justify-between"><span>Other</span><span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${hoveredPhase === '__other__' ? 'bg-white/20 text-white' : 'bg-slate-700/50 text-slate-400'}`}>{otherTasks.length}</span></div>
                     </div>

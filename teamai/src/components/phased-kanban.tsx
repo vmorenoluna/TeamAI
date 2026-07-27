@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   convertToTask,
   deleteRoadmapItem,
@@ -131,16 +131,23 @@ export function PhasedKanban({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allLinkedIds.join(',')]);
 
-  // Real-time sync: update linked status when a kanban task phase changes
+  // Real-time sync: re-fetch all linked statuses when any linked task's
+  // phase changes — ensures title and other fields stay current, not just phase.
+  // Uses a request-ID counter to ignore stale responses when overlapping
+  // fetches complete out of order.
+  const statusReqIdRef = useRef(0);
   usePhaseSync({
     project: projectPath,
-    onPhaseChange: (taskId, phase) => {
+    onPhaseChange: (taskId) => {
       if (allLinkedIds.includes(taskId)) {
-        setLinkedStatuses(prev => {
-          const existing = prev[taskId];
-          if (!existing) return prev;
-          return { ...prev, [taskId]: { ...existing, phase } };
-        });
+        const reqId = ++statusReqIdRef.current;
+        getLinkedTaskStatuses(allLinkedIds)
+          .then(result => {
+            if (reqId === statusReqIdRef.current) {
+              setLinkedStatuses(prev => ({ ...prev, ...result }));
+            }
+          })
+          .catch(() => { /* best-effort — existing data stays */ });
       }
     },
   });

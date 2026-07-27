@@ -39,13 +39,17 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
 
   useEffect(() => {
     if (!task.branch) {
+      Promise.resolve().then(() => {
+        setWtStatus({ exists: false, path: null });
+        setWtChecking(false);
+      });
       return;
     }
     checkTaskWorktree(task.id).then(status => {
       setWtStatus(status);
       setWtChecking(false);
     });
-  }, [task.id, task.branch]);
+  }, [task.id, task.branch, task.phase]);
 
   async function handleDeleteWorktree(e: React.MouseEvent) {
     e.stopPropagation();
