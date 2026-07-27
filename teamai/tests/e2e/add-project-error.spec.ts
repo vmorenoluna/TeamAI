@@ -65,7 +65,8 @@ test.describe('Add Project dialog — error surfacing (Electron close/reopen reg
     // We accept either the raw fetch error ("Failed to fetch") or the
     // generic fallback ("Failed to add project") — depending on what
     // Chromium reports for the abort.
-    await expect(page.locator('text=/Failed to fetch|Failed to add project/i')).toBeVisible({
+    // Scoped to the dialog to avoid matching Next.js dev error overlay.
+    await expect(page.locator(DIALOG).locator('text=/Failed to fetch|Failed to add project/i')).toBeVisible({
       timeout: 10_000,
     });
 

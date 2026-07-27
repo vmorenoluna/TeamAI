@@ -123,6 +123,10 @@ jobs:
         run: |
           sudo lsof -ti:3000 | xargs -r sudo kill -9 2>/dev/null || true
           echo "Port 3000 cleared for E2E tests"
+      - name: Kill stale servers on port 3001
+        run: |
+          sudo lsof -ti:3001 | xargs -r sudo kill -9 2>/dev/null || true
+          echo "Port 3001 cleared for E2E tests"
       - name: Run full test suite
         run: npm run test:all
         env:
@@ -149,6 +153,10 @@ jobs:
         run: |
           sudo lsof -ti:3000 | xargs -r sudo kill -9 2>/dev/null || true
           echo "Port 3000 cleared for E2E tests"
+      - name: Kill stale servers on port 3001
+        run: |
+          sudo lsof -ti:3001 | xargs -r sudo kill -9 2>/dev/null || true
+          echo "Port 3001 cleared for E2E tests"
       - name: Run coverage suite
         run: npm run test:coverage
         env:

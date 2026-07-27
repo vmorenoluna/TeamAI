@@ -58,6 +58,7 @@ function startServer() {
 
     const env = {
       ...process.env,
+      PORT: String(PORT),
       ...(isDev ? {} : {
         NODE_ENV: 'production',
         // NOTE: Not using ELECTRON_RUN_AS_NODE here — the server needs

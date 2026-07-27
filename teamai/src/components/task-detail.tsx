@@ -58,6 +58,12 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Mark the component as hydrated so E2E tests can wait for React
+    // to attach event handlers before interacting with SSR-rendered
+    // elements (e.g., CopyButton on the Overview tab).
+    const root = document.getElementById('task-detail-root');
+    if (root) root.setAttribute('data-hydrated', 'true');
+
     const syncFromHash = () => {
       const hash = window.location.hash.replace(/^#/, '');
       if (hash && VALID_TABS.includes(hash as Tab)) {
@@ -177,7 +183,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   const dependentIds = dependents.map(t => t.id);
 
   return (
-    <div className="flex flex-col h-full">
+    <div id="task-detail-root" className="flex flex-col h-full">
       {!readonly && <PhaseSyncer />}
 
       {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
