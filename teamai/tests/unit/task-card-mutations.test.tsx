@@ -319,6 +319,67 @@ describe('TaskCard mutation handlers', () => {
     });
   });
 
+  // ── Worktree status re-check on phase change ────────────────────────
+
+  describe('worktree status re-check', () => {
+    it('re-checks worktree when task.phase changes', async () => {
+      mockCheckWorktree.mockResolvedValue({ exists: true, path: '/tmp/wt/feature' });
+
+      const { rerender } = render(
+        <TaskCard
+          task={makeTask({ id: 'wt-1', phase: 'implement', branch: 'feature/test' })}
+          onSelect={vi.fn()}
+        />
+      );
+
+      await waitFor(() => {
+        expect(mockCheckWorktree).toHaveBeenCalledWith('wt-1');
+      });
+
+      const callCountBefore = mockCheckWorktree.mock.calls.length;
+
+      // Re-render with a different phase — should trigger re-check
+      rerender(
+        <TaskCard
+          task={makeTask({ id: 'wt-1', phase: 'done', branch: 'feature/test' })}
+          onSelect={vi.fn()}
+        />
+      );
+
+      await waitFor(() => {
+        expect(mockCheckWorktree.mock.calls.length).toBeGreaterThan(callCountBefore);
+      });
+    });
+
+    it('resets worktree status when branch becomes undefined', async () => {
+      mockCheckWorktree.mockResolvedValue({ exists: true, path: '/tmp/wt/feature' });
+
+      const { rerender } = render(
+        <TaskCard
+          task={makeTask({ id: 'wt-1', phase: 'implement', branch: 'feature/test' })}
+          onSelect={vi.fn()}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTitle(/Delete worktree/)).toBeInTheDocument();
+      });
+
+      // Re-render with branch undefined (e.g., worktree deleted externally)
+      rerender(
+        <TaskCard
+          task={makeTask({ id: 'wt-1', phase: 'done', branch: undefined })}
+          onSelect={vi.fn()}
+        />
+      );
+
+      // The worktree delete button should no longer be visible
+      await waitFor(() => {
+        expect(screen.queryByTitle(/Delete worktree/)).not.toBeInTheDocument();
+      });
+    });
+  });
+
   // ── Button visibility by phase ───────────────────────────────────────
 
   describe('button visibility', () => {

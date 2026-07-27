@@ -72,29 +72,8 @@ jobs:
       - name: CHANGELOG parsing
         run: bash tests/unit/changelog-parsing.test.sh
 
-  test-e2e:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: teamai
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: teamai/package-lock.json
-      - run: npm ci
-      - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
-      - name: Kill stale servers on port 3000
-        run: |
-          sudo lsof -ti:3000 | xargs -r sudo kill -9 2>/dev/null || true
-          echo "Port 3000 cleared for E2E tests"
-      - name: Run E2E tests
-        run: npx playwright test
-        env:
-          CI: 'true'
+  # Fast parallel checks for quick feedback on PRs.
+  # The `test-all` job below runs the full canonical suite independently.
 
   # AI review: runs after checks pass, only on PRs, only if API key is set
   ai-review:
@@ -121,9 +100,70 @@ jobs:
           REPO: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
 
-  # Enable auto-merge when all checks pass (including AI review and E2E)
+  # Run the exact same command developers use locally: `npm run test:all`.
+  # Serves as the single canonical CI gate — if this passes, all checks pass.
+  # Runs independently (not gated on the fast parallel jobs) to avoid
+  # redundant re-execution of typecheck/lint/vitest/changelog.
+  test-all:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: teamai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: teamai/package-lock.json
+      - run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+      - name: Kill stale servers on port 3000
+        run: |
+          sudo lsof -ti:3000 | xargs -r sudo kill -9 2>/dev/null || true
+          echo "Port 3000 cleared for E2E tests"
+      - name: Run full test suite
+        run: npm run test:all
+        env:
+          CI: 'true'
+
+  # Generate and upload code coverage reports as a CI artifact.
+  # Runs independently of the auto-merge gate — coverage is informational.
+  test-coverage:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: teamai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: teamai/package-lock.json
+      - run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+      - name: Kill stale servers on port 3000
+        run: |
+          sudo lsof -ti:3000 | xargs -r sudo kill -9 2>/dev/null || true
+          echo "Port 3000 cleared for E2E tests"
+      - name: Run coverage suite
+        run: npm run test:coverage
+        env:
+          CI: 'true'
+      - name: Upload coverage HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: teamai/coverage/
+          retention-days: 7
+
+  # Enable auto-merge when all checks pass (including AI review and test-all)
   auto-merge:
-    needs: [typecheck, lint, test, test-changelog, test-e2e, ai-review]
+    needs: [test-all, ai-review]
     if: success() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:

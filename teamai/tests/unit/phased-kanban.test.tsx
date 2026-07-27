@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { RoadmapReport, RoadmapItem } from '@/app/actions/roadmap';
 
@@ -277,6 +277,74 @@ describe('PhasedKanban', () => {
 
       // No items have linkedTaskId, so should not call
       expect(mockGetLinkedTaskStatuses).not.toHaveBeenCalled();
+    });
+
+    it('re-fetches all linked statuses when a linked task phase changes', async () => {
+      const report = makeReport();
+      report.phases.now[0] = roadItem({
+        ...report.phases.now[0],
+        linkedTaskId: 'task-linked',
+      });
+
+      // First call resolves with initial data
+      mockGetLinkedTaskStatuses.mockResolvedValueOnce({
+        'task-linked': { phase: 'spec', title: 'My Linked Task' },
+      });
+
+      renderComponent(report);
+
+      await waitFor(() => {
+        expect(mockGetLinkedTaskStatuses).toHaveBeenCalledTimes(1);
+      });
+
+      // Simulate a phase-change WebSocket event for the linked task
+      const { usePhaseSync } = await import('@/hooks/use-phase-sync');
+      const phaseSyncCalls = (usePhaseSync as unknown as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = phaseSyncCalls[phaseSyncCalls.length - 1];
+      const opts = lastCall?.[0] as { onPhaseChange?: (taskId: string, phase: string) => void } | undefined;
+
+      // Set up the next resolve before triggering
+      mockGetLinkedTaskStatuses.mockResolvedValueOnce({
+        'task-linked': { phase: 'implement', title: 'My Linked Task' },
+      });
+
+      // Trigger the phase-change callback
+      await act(async () => {
+        opts?.onPhaseChange?.('task-linked', 'implement');
+      });
+
+      expect(mockGetLinkedTaskStatuses).toHaveBeenCalledTimes(2);
+    });
+
+    it('does nothing when phase-change fires for a non-linked task', async () => {
+      const report = makeReport();
+      report.phases.now[0] = roadItem({
+        ...report.phases.now[0],
+        linkedTaskId: 'task-linked',
+      });
+
+      mockGetLinkedTaskStatuses.mockResolvedValueOnce({
+        'task-linked': { phase: 'spec', title: 'My Linked Task' },
+      });
+
+      renderComponent(report);
+
+      await waitFor(() => {
+        expect(mockGetLinkedTaskStatuses).toHaveBeenCalledTimes(1);
+      });
+
+      // Simulate a phase-change for a DIFFERENT (non-linked) task
+      const { usePhaseSync } = await import('@/hooks/use-phase-sync');
+      const phaseSyncCalls = (usePhaseSync as unknown as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = phaseSyncCalls[phaseSyncCalls.length - 1];
+      const opts = lastCall?.[0] as { onPhaseChange?: (taskId: string, phase: string) => void } | undefined;
+
+      await act(async () => {
+        opts?.onPhaseChange?.('unrelated-task', 'implement');
+      });
+
+      // Should NOT have re-fetched — the task isn't in allLinkedIds
+      expect(mockGetLinkedTaskStatuses).toHaveBeenCalledTimes(1);
     });
   });
 
