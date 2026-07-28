@@ -10,18 +10,15 @@ import { ensureProjectSelected, scrollKanbanRight, clickUntilVisible, getSeedTas
 
 // ── Seed slugs ─────────────────────────────────────────────────────────
 
-let isSeeded = false;
-
 test.describe('Kanban — Task Creation', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('opens + New Task dialog and shows template options', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await clickUntilVisible(
@@ -39,7 +36,6 @@ test.describe('Kanban — Task Creation', () => {
   });
 
   test('New Task dialog: selecting a template fills title and description', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await clickUntilVisible(
@@ -62,7 +58,6 @@ test.describe('Kanban — Task Creation', () => {
   });
 
   test('New Task dialog: Cancel button closes the dialog', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await clickUntilVisible(
@@ -79,12 +74,11 @@ test.describe('Kanban — Search & Filter', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('search box filters task cards by title text', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -101,7 +95,6 @@ test.describe('Kanban — Search & Filter', () => {
   });
 
   test('search box filters by description text as well', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -120,7 +113,6 @@ test.describe('Kanban — Search & Filter', () => {
   });
 
   test('phase filter dropdown shows and can select phases', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -137,7 +129,6 @@ test.describe('Kanban — Search & Filter', () => {
   });
 
   test('sort dropdown shows options and can change sort order', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -160,7 +151,6 @@ test.describe('Kanban — Search & Filter', () => {
   });
 
   test('Reset button clears all active filters', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -189,12 +179,11 @@ test.describe('Kanban — Play & Stop Buttons', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('backlog task cards show ▶ Start button', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -204,7 +193,6 @@ test.describe('Kanban — Play & Stop Buttons', () => {
   });
 
   test('active task cards (implement) show ■ Stop button', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -213,7 +201,6 @@ test.describe('Kanban — Play & Stop Buttons', () => {
   });
 
   test('done task cards do NOT show Play or Stop buttons', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -223,7 +210,6 @@ test.describe('Kanban — Play & Stop Buttons', () => {
   });
 
   test('failed task cards show retry button instead of Play/Stop', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await scrollKanbanRight(page);
@@ -239,12 +225,11 @@ test.describe('Kanban — Bulk Selection & Actions', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('Ctrl+click selects multiple task cards', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -262,7 +247,6 @@ test.describe('Kanban — Bulk Selection & Actions', () => {
   });
 
   test('bulk action bar shows Deselect and Delete buttons', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -280,7 +264,6 @@ test.describe('Kanban — Bulk Selection & Actions', () => {
   });
 
   test('Deselect button clears the selection', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -306,12 +289,11 @@ test.describe('Kanban — Task Card UI Elements', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('active task shows spinner icon', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -321,7 +303,6 @@ test.describe('Kanban — Task Card UI Elements', () => {
   });
 
   test('backlog and done tasks do NOT show spinner', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -335,7 +316,6 @@ test.describe('Kanban — Task Card UI Elements', () => {
   });
 
   test('task cards show correct phase badge per phase', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -358,7 +338,6 @@ test.describe('Kanban — Task Card UI Elements', () => {
   });
 
   test('subtask progress badge shows correct counts', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -379,7 +358,6 @@ test.describe('Kanban — Task Card UI Elements', () => {
   });
 
   test('backlog task without plan does NOT show subtask badge', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -388,7 +366,6 @@ test.describe('Kanban — Task Card UI Elements', () => {
   });
 
   test('failed task card shows failure indicator', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await scrollKanbanRight(page);
@@ -400,7 +377,6 @@ test.describe('Kanban — Task Card UI Elements', () => {
   });
 
   test('rate-limited task shows hourglass instead of spinner', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -419,7 +395,6 @@ test.describe('Kanban — Task Card UI Elements', () => {
   });
 
   test('auto-processed done task shows Auto badge', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -433,7 +408,6 @@ test.describe('Kanban — Task Card UI Elements', () => {
   });
 
   test('task cards show relative timestamp', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -448,12 +422,11 @@ test.describe('Kanban — Column Layout', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('each column header shows correct label', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -463,7 +436,6 @@ test.describe('Kanban — Column Layout', () => {
   });
 
   test('column count badges reflect actual task count', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -474,7 +446,6 @@ test.describe('Kanban — Column Layout', () => {
   });
 
   test('spec-phase task appears in Analysis column', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -487,7 +458,6 @@ test.describe('Kanban — Column Layout', () => {
   });
 
   test('awaiting-review task appears in Review column', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -500,7 +470,6 @@ test.describe('Kanban — Column Layout', () => {
   });
 
   test('pr-open and merge tasks appear in Review column', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -518,12 +487,11 @@ test.describe('Kanban — Connection & Error States', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('connection indicator is visible in the header', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -533,7 +501,6 @@ test.describe('Kanban — Connection & Error States', () => {
   });
 
   test('kanban survives page refresh', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await expect(page.locator('[data-testid="task-card"]').first()).toBeVisible({ timeout: 10_000 });
@@ -550,12 +517,11 @@ test.describe('Kanban — New Task Submission', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('submitting new task after selecting a template shows Create Task button', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await clickUntilVisible(
@@ -573,7 +539,6 @@ test.describe('Kanban — New Task Submission', () => {
   });
 
   test('Create Task button submits and closes dialog', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await clickUntilVisible(
@@ -608,12 +573,11 @@ test.describe('Kanban — Task Deletion Flow', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('clicking delete button on task card opens confirmation', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -639,7 +603,6 @@ test.describe('Kanban — Task Deletion Flow', () => {
   });
 
   test('bulk delete shows Delete selected button', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -661,12 +624,11 @@ test.describe('Kanban — Review Panel Interactions', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('awaiting-review task detail shows Merge Locally and Open Pull Request buttons', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     // "Navbar dropdown" is in awaiting-review phase
     const taskId = getSeedTaskId('fix-navbar-dropdown-z-index-conflict');
@@ -682,7 +644,6 @@ test.describe('Kanban — Review Panel Interactions', () => {
   });
 
   test('Request Changes button expands feedback textarea', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = getSeedTaskId('fix-navbar-dropdown-z-index-conflict');
     if (!taskId) { test.skip(true, 'Navbar dropdown task not seeded'); return; }
@@ -705,7 +666,6 @@ test.describe('Kanban — Review Panel Interactions', () => {
   });
 
   test('Cancel request changes hides textarea', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = getSeedTaskId('fix-navbar-dropdown-z-index-conflict');
     if (!taskId) { test.skip(true, 'Navbar dropdown task not seeded'); return; }
@@ -726,7 +686,6 @@ test.describe('Kanban — Review Panel Interactions', () => {
   });
 
   test('Send Back button is disabled without feedback text', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = getSeedTaskId('fix-navbar-dropdown-z-index-conflict');
     if (!taskId) { test.skip(true, 'Navbar dropdown task not seeded'); return; }

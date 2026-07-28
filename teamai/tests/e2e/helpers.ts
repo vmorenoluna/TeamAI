@@ -73,7 +73,14 @@ export function getAllSeedTaskIds(): Map<string, string> {
  * Cookie-based selection is faster, more reliable, and avoids timeout
  * issues with slow page renders.
  */
-export async function ensureProjectSelected(page: Page): Promise<boolean> {
+/**
+ * Set the activeProject cookie and verify the kanban board renders.
+ *
+ * Throws if the seed data didn't load — there's no per-test skip fallback.
+ * The playwright-setup.ts globalSetup already throws on seed failure, so
+ * this is a redundant safety check that fails fast with a clear message.
+ */
+export async function ensureProjectSelected(page: Page): Promise<void> {
   const seedDir = getActiveSeedDir();
   // Set the active project cookie directly — the server reads this to
   // resolve getActiveProjectPath(). Bypasses UI hunting entirely.
@@ -85,14 +92,9 @@ export async function ensureProjectSelected(page: Page): Promise<boolean> {
 
   await page.goto('/');
 
-  // Backlog column header confirms the kanban board loaded
-  const backlog = page.locator('text=Backlog').first();
-  try {
-    await expect(backlog).toBeVisible({ timeout: 30_000 });
-    return true;
-  } catch {
-    return false;
-  }
+  // Backlog column header confirms the kanban board loaded.
+  // If this fails, seed data is missing — fail the entire test run.
+  await expect(page.locator('text=Backlog').first()).toBeVisible({ timeout: 30_000 });
 }
 
 /**

@@ -1,16 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
 import { ensureProjectSelected, requireSeedTaskId, scrollKanbanRight } from './helpers';
 
-let isSeeded = false;
 
 const SEARCH_CRASH_SLUG = 'fix-search-bar-crashes-on-empty-input';
 
 test.describe.serial('Retry Button on Failed Tasks', () => {
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    if (ok) isSeeded = true;
-    else isSeeded = false;
-  });
+  await ensureProjectSelected(page);
+});
 
   async function logAllTaskCards(page: Page) {
     const cards = page.locator('[data-testid="task-card"]');
@@ -24,8 +21,6 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
   }
 
   test('shows retry button on failed task card', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     await page.goto('/');
     await logAllTaskCards(page);
     await scrollKanbanRight(page);
@@ -40,8 +35,6 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
   });
 
   test('shows failure indicator alongside retry button on failed task', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     await page.goto('/');
     await logAllTaskCards(page);
     await scrollKanbanRight(page);
@@ -56,8 +49,6 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
   });
 
   test('does not show retry button on non-failed tasks', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     await page.goto('/');
     await logAllTaskCards(page);
 
@@ -77,8 +68,6 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
   });
 
   test('shows retry button in task detail panel for failed tasks', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     const taskId = requireSeedTaskId(SEARCH_CRASH_SLUG);
     await page.goto(`/task/${taskId}`);
     await expect(page.locator('body')).toBeVisible();

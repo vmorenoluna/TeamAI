@@ -21,13 +21,11 @@ const MOBILE = { width: 375, height: 812 };   // iPhone X
 const TABLET = { width: 768, height: 1024 };   // iPad
 const DESKTOP = { width: 1440, height: 900 };  // Standard desktop
 
-let isSeeded = false;
-
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 async function setupSeeded(page: Page) {
-  const ok = await ensureProjectSelected(page);
-  isSeeded = ok;
+  await ensureProjectSelected(page);
+
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
@@ -60,7 +58,6 @@ test.describe('Responsive — Sidebar', () => {
   });
 
   test('kanban board renders at mobile width', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.setViewportSize(MOBILE);
     await page.goto('/');
@@ -101,7 +98,6 @@ test.describe('Responsive — Task Detail', () => {
   });
 
   test('task detail tabs are visible at tablet width', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.setViewportSize(TABLET);
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
@@ -116,7 +112,6 @@ test.describe('Responsive — Task Detail', () => {
   });
 
   test('task detail is readable at mobile width', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.setViewportSize(MOBILE);
     const taskId = requireSeedTaskId(SEARCH_CRASH_SLUG);
@@ -137,7 +132,6 @@ test.describe('Responsive — Settings', () => {
   });
 
   test('settings sections render at tablet width', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.setViewportSize(TABLET);
     await page.goto('/settings');
@@ -151,7 +145,6 @@ test.describe('Responsive — Settings', () => {
   });
 
   test('provider config select dropdowns work at mobile width', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.setViewportSize(MOBILE);
     await page.goto('/settings');
@@ -172,7 +165,6 @@ test.describe('Responsive — Page Refresh Survivability', () => {
   });
 
   test('kanban survives refresh at mobile width', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.setViewportSize(MOBILE);
     await page.goto('/');
@@ -183,7 +175,6 @@ test.describe('Responsive — Page Refresh Survivability', () => {
   });
 
   test('kanban survives refresh at tablet width', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.setViewportSize(TABLET);
     await page.goto('/');

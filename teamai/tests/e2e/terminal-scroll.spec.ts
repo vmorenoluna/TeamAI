@@ -4,16 +4,13 @@ import { ensureProjectSelected, getSeedTaskId } from './helpers';
 test.describe('Terminal Scroll Behavior', () => {
   test.setTimeout(60_000);
 
-  let isSeeded = false;
-
   test.beforeAll(async ({ browser }) => {
     const page = await browser.newPage();
-    isSeeded = await ensureProjectSelected(page);
+  await ensureProjectSelected(page);
     await page.close();
   });
 
   test('terminal tab renders agent panel on full page', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await ensureProjectSelected(page);
 

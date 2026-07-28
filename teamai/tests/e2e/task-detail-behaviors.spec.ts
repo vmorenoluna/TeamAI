@@ -17,18 +17,15 @@ const NAVBAR_DROPDOWN_SLUG = 'fix-navbar-dropdown-z-index-conflict';
 const AUTO_DEPS_SLUG = 'auto-update-deprecated-dependencies';
 const RATE_LIMITED_SLUG = 'fix-rate-limited-api-token-refresh';
 
-let isSeeded = false;
-
 test.describe('Task Detail — Page Rendering', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('renders all 5 tabs for backlog task', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -41,7 +38,6 @@ test.describe('Task Detail — Page Rendering', () => {
   });
 
   test('shows task title and phase badge', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -51,7 +47,6 @@ test.describe('Task Detail — Page Rendering', () => {
   });
 
   test('shows breadcrumb back to board', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -62,7 +57,6 @@ test.describe('Task Detail — Page Rendering', () => {
   });
 
   test('shows task ID in monospace font', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -77,7 +71,6 @@ test.describe('Task Detail — Page Rendering', () => {
   });
 
   test('task description is displayed when present', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(SEARCH_CRASH_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -86,7 +79,6 @@ test.describe('Task Detail — Page Rendering', () => {
   });
 
   test('shows created and updated timestamps', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -100,12 +92,11 @@ test.describe('Task Detail — Tab Content', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('Overview tab shows "No dependencies set" when none exist', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}#overview`);
@@ -114,7 +105,6 @@ test.describe('Task Detail — Tab Content', () => {
   });
 
   test('Spec tab shows spec content when spec exists', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}#spec`);
@@ -123,7 +113,6 @@ test.describe('Task Detail — Tab Content', () => {
   });
 
   test('Spec tab shows "No spec generated" when no spec exists', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     // "Export tasks as CSV" is a backlog task without a spec
     const { getSeedTaskId } = await import('./helpers');
@@ -135,7 +124,6 @@ test.describe('Task Detail — Tab Content', () => {
   });
 
   test('Plan tab shows subtasks with completion status', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}#plan`);
@@ -145,7 +133,6 @@ test.describe('Task Detail — Tab Content', () => {
   });
 
   test('Plan tab shows all subtasks completed for done tasks', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(SHARED_TYPES_SLUG);
     await page.goto(`/task/${taskId}#plan`);
@@ -154,7 +141,6 @@ test.describe('Task Detail — Tab Content', () => {
   });
 
   test('Terminal tab renders the terminal container', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}#terminal`);
@@ -168,12 +154,11 @@ test.describe('Task Detail — Failed Task', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('shows completion summary banner and retry button', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(SEARCH_CRASH_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -184,7 +169,6 @@ test.describe('Task Detail — Failed Task', () => {
   });
 
   test('shows QA report on QA tab with FAIL status', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(SEARCH_CRASH_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -200,12 +184,11 @@ test.describe('Task Detail — Review Panel (awaiting-review)', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('awaiting-review task shows review panel in Overview', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(NAVBAR_DROPDOWN_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -218,7 +201,6 @@ test.describe('Task Detail — Review Panel (awaiting-review)', () => {
   });
 
   test('shows human feedback content in review panel', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(NAVBAR_DROPDOWN_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -238,12 +220,11 @@ test.describe('Task Detail — Spec Version Tab', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('spec tab shows spec content', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}#spec`);
@@ -256,12 +237,11 @@ test.describe('Task Detail — Phase-Specific UI', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('restart button is visible for restartable phases', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     // Login button task is in "implement" phase — restartable
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
@@ -273,7 +253,6 @@ test.describe('Task Detail — Phase-Specific UI', () => {
   });
 
   test('rate-limit banner shows when rateLimitedUntil is set', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(RATE_LIMITED_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -283,7 +262,6 @@ test.describe('Task Detail — Phase-Specific UI', () => {
   });
 
   test('auto-processed task shows review banner', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(AUTO_DEPS_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -294,7 +272,6 @@ test.describe('Task Detail — Phase-Specific UI', () => {
   });
 
   test('PR link is shown in header when prUrl is set', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     // "Migrate API to v2" has prUrl
     const { getSeedTaskId } = await import('./helpers');
@@ -309,7 +286,6 @@ test.describe('Task Detail — Phase-Specific UI', () => {
   });
 
   test('delete task button is visible', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -322,12 +298,11 @@ test.describe('Task Detail — Dep Picker (Dependency Management)', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('depends_on section shows "+ Depends on" button', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -340,7 +315,6 @@ test.describe('Task Detail — Dep Picker (Dependency Management)', () => {
   });
 
   test('clicking "+ Depends on" opens task search dropdown', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -356,7 +330,6 @@ test.describe('Task Detail — Dep Picker (Dependency Management)', () => {
   });
 
   test('shows "No tasks found" when search has no matches', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -378,7 +351,6 @@ test.describe('Task Detail — Dep Picker (Dependency Management)', () => {
   });
 
   test('clicking outside dep picker closes the dropdown', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -397,7 +369,6 @@ test.describe('Task Detail — Dep Picker (Dependency Management)', () => {
   });
 
   test('blocked_by section shows "+ Blocked by" button', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -408,7 +379,6 @@ test.describe('Task Detail — Dep Picker (Dependency Management)', () => {
   });
 
   test('depends_on with existing dependency shows TaskPill', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     // Use a task that has dependencies set (login button depends on shared types)
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);

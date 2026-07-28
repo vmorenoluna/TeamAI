@@ -12,18 +12,15 @@
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
-let isSeeded = false;
-
 test.describe('Error Boundary — Normal Operation', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('kanban board renders without error boundary fallback', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -41,7 +38,6 @@ test.describe('Error Boundary — Normal Operation', () => {
   });
 
   test('task detail page renders without error boundary fallback', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     // Navigate to a known task
     await page.goto('/');
@@ -60,7 +56,6 @@ test.describe('Error Boundary — Normal Operation', () => {
   });
 
   test('settings page renders without error boundary fallback', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await page.waitForTimeout(1500);
@@ -72,7 +67,6 @@ test.describe('Error Boundary — Normal Operation', () => {
   });
 
   test('navigating between pages rapidly does not trigger error boundary', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const pages = ['/', '/settings', '/workflow', '/insights', '/'];
 
@@ -87,7 +81,6 @@ test.describe('Error Boundary — Normal Operation', () => {
   });
 
   test('page survives refresh without error boundary fallback', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     // Refresh multiple pages
     await page.goto('/');

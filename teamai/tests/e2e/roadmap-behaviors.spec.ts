@@ -11,8 +11,6 @@ import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { getActiveSeedDir } from './helpers';
 
-let isSeeded = false;
-
 // ── Helpers ───────────────────────────────────────────────────────────
 
 /** Write a minimal roadmap JSON to the seed project so the roadmap page has data. */
@@ -98,12 +96,11 @@ test.describe('Roadmap — Page Rendering', () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('page loads and shows all 4 phase columns', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
 
@@ -113,14 +110,12 @@ test.describe('Roadmap — Page Rendering', () => {
   });
 
   test('shows executive summary when present', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
     await expect(page.locator('text=Q3 roadmap focusing on UX improvements')).toBeVisible({ timeout: 10_000 });
   });
 
   test('shows competitor analysis notice when run', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
     await expect(page.locator('text=Competitor analysis was run')).toBeVisible({ timeout: 5_000 });
@@ -128,7 +123,6 @@ test.describe('Roadmap — Page Rendering', () => {
   });
 
   test('column count badges match item counts', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
 
@@ -138,7 +132,6 @@ test.describe('Roadmap — Page Rendering', () => {
   });
 
   test('shows "No items" for empty columns', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
     // All 4 columns have items in our seed, so this tests the rendering
@@ -154,12 +147,11 @@ test.describe('Roadmap — Item Cards', () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('item cards render with title and category', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
 
@@ -168,7 +160,6 @@ test.describe('Roadmap — Item Cards', () => {
   });
 
   test('item cards have priority badges', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
 
@@ -177,7 +168,6 @@ test.describe('Roadmap — Item Cards', () => {
   });
 
   test('item cards show Convert to ticket button for unlinked items', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
 
@@ -187,7 +177,6 @@ test.describe('Roadmap — Item Cards', () => {
   });
 
   test('clicking Convert to ticket shows Converting state', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
 
@@ -207,12 +196,11 @@ test.describe('Roadmap — Bulk Selection', () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('toggling a card checkbox selects it and shows bulk bar', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
 
@@ -231,7 +219,6 @@ test.describe('Roadmap — Bulk Selection', () => {
   });
 
   test('Clear button removes selection and hides bulk bar', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
 
@@ -247,7 +234,6 @@ test.describe('Roadmap — Bulk Selection', () => {
   });
 
   test('column-level checkbox selects all selectable items in that column', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
 
@@ -319,12 +305,11 @@ test.describe('Roadmap — Linked Status Display', () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('linked task shows phase status on roadmap card', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/roadmap');
 

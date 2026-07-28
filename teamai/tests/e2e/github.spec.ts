@@ -7,14 +7,12 @@
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
-let isSeeded = false;
-
 test.describe('GitHub Issues Page', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('sidebar navigation: clicking GitHub link navigates to /github and shows heading', async ({ page }) => {
@@ -56,7 +54,6 @@ test.describe('GitHub Issues Page', () => {
   });
 
   test('page loads and shows GitHub Issues heading', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/github');
 
@@ -64,7 +61,6 @@ test.describe('GitHub Issues Page', () => {
   });
 
   test('shows MCP configuration description', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/github');
 
@@ -73,7 +69,6 @@ test.describe('GitHub Issues Page', () => {
   });
 
   test('shows List Open Issues button', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/github');
 
@@ -83,7 +78,6 @@ test.describe('GitHub Issues Page', () => {
   });
 
   test('shows empty state prompt', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/github');
 
@@ -91,7 +85,6 @@ test.describe('GitHub Issues Page', () => {
   });
 
   test('page survives refresh', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/github');
     await expect(page.locator('h1:has-text("GitHub Issues")')).toBeVisible({ timeout: 10_000 });
@@ -107,8 +100,8 @@ test.describe('GitHub — Import Interaction', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   // NOTE: These tests verify UI state transitions when the GitHub MCP
@@ -116,7 +109,6 @@ test.describe('GitHub — Import Interaction', () => {
   // MCP server the session may succeed and these assertions won't hold.
 
   test('clicking List Open Issues leads to error state without MCP server', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/github');
 
@@ -134,7 +126,6 @@ test.describe('GitHub — Import Interaction', () => {
   });
 
   test('List Open Issues button is available for retry after failure', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/github');
 

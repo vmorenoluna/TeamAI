@@ -10,8 +10,6 @@ import { ensureProjectSelected, requireSeedTaskId } from './helpers';
 const LOGIN_BUTTON_SLUG = 'fix-login-button-not-visible-on-mobile';
 const SEARCH_CRASH_SLUG = 'fix-search-bar-crashes-on-empty-input';
 
-let isSeeded = false;
-
 test.describe('Copy Button — Spec Tab', () => {
   test.setTimeout(60_000);
 
@@ -19,12 +17,11 @@ test.describe('Copy Button — Spec Tab', () => {
     // Grant clipboard permissions — required for navigator.clipboard.writeText()
     // to succeed in headless Chromium.
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('copy button is visible on spec tab for tasks with specs', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}#spec`);
@@ -37,7 +34,6 @@ test.describe('Copy Button — Spec Tab', () => {
   });
 
   test('clicking copy button on spec tab toggles to Copied state', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}#spec`);
@@ -53,7 +49,6 @@ test.describe('Copy Button — Spec Tab', () => {
   });
 
   test('copy button reverts to Copy after 2 seconds', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}#spec`);
@@ -78,12 +73,11 @@ test.describe('Copy Button — Completion Summary', () => {
 
   test.beforeEach(async ({ page }) => {
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('copy button visible on failed task completion summary', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(SEARCH_CRASH_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -96,7 +90,6 @@ test.describe('Copy Button — Completion Summary', () => {
   });
 
   test('clicking copy on completion summary toggles to Copied', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(SEARCH_CRASH_SLUG);
     await page.goto(`/task/${taskId}`);
@@ -124,12 +117,11 @@ test.describe('Copy Button — Plan Tab', () => {
 
   test.beforeEach(async ({ page }) => {
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('copy button visible on plan subtasks for tasks with plans', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}#plan`);
@@ -142,7 +134,6 @@ test.describe('Copy Button — Plan Tab', () => {
   });
 
   test('clicking copy on plan subtasks toggles to Copied', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}#plan`);

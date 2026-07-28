@@ -1,8 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
-let isSeeded = false;
-
 // ── Mock electronAPI injection ──────────────────────────────────────────────
 
 /**
@@ -70,13 +68,10 @@ test.describe.serial('Update Banner', () => {
 
   test.beforeEach(async ({ page }) => {
     await injectMockElectronAPI(page);
-    const ok = await ensureProjectSelected(page);
-    if (ok) isSeeded = true;
-    else isSeeded = false;
-  });
+  await ensureProjectSelected(page);
+});
 
   test('banner is hidden when no update activity', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     // Wait for React to hydrate after SSR — the UpdateBanner mock
@@ -95,7 +90,6 @@ test.describe.serial('Update Banner', () => {
   });
 
   test('shows download progress when download-progress fires', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -107,7 +101,6 @@ test.describe.serial('Update Banner', () => {
   });
 
   test('does not show install button while downloading', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -122,7 +115,6 @@ test.describe.serial('Update Banner', () => {
   });
 
   test('shows ready state when update-ready fires', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -137,7 +129,6 @@ test.describe.serial('Update Banner', () => {
   });
 
   test('clicking install button calls installUpdate', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
