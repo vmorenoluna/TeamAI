@@ -119,24 +119,34 @@ test.describe('Insights — Chat Interaction', () => {
   test.beforeEach(async ({ page }) => {
     await ensureProjectSelected(page);
 
-  });
-
-  // NOTE: These tests verify the UI error-path behavior by mocking
-  // getOrCreateInsightsSession to fail via route interception.
-  // Only server action POSTs are intercepted — RSC page data loads
-  // via GET and are unaffected.
-
-  test('chat input renders with a textarea', async ({ page }) => {
+    // Mock: abort server actions on /insights to simulate chat session
+    // creation failure.  The InsightsChat component calls
+    // getOrCreateInsightsSession on mount; aborting the POST triggers
+    // the error path.  Only server action POSTs are intercepted — RSC
+    // page data loads via GET and are unaffected.
+    await page.route('**/insights', async (route) => {
+      const req = route.request();
+      if (req.method() === 'POST' && req.headers()['next-action']) {
+        await route.abort('failed');
+        return;
+      }
+      await route.continue();
+    });
 
     await page.goto('/insights');
+  });
+
+  // NOTE: The beforeEach mocks all server action POSTs on /insights,
+  // so getOrCreateInsightsSession always fails.  This makes error-path
+  // assertions deterministic regardless of orchestrator health.
+
+  test('chat input renders with a textarea', async ({ page }) => {
 
     const textarea = page.locator('textarea');
     await expect(textarea).toBeVisible({ timeout: 10_000 });
   });
 
   test('Send button is disabled when chat session is unavailable', async ({ page }) => {
-
-    await page.goto('/insights');
 
     // When getOrCreateInsightsSession fails, sessionId stays null
     // and the Send button should be disabled.
@@ -146,38 +156,12 @@ test.describe('Insights — Chat Interaction', () => {
 
   test('shows error banner when chat session creation fails', async ({ page }) => {
 
-    // Mock: abort server actions on /insights to simulate session creation failure.
-    // The InsightsChat component calls getOrCreateInsightsSession on mount;
-    // aborting the POST triggers the error banner.
-    await page.route('**/insights', async (route) => {
-      const req = route.request();
-      if (req.method() === 'POST' && req.headers()['next-action']) {
-        await route.abort('failed');
-        return;
-      }
-      await route.continue();
-    });
-
-    await page.goto('/insights');
-
     // Session creation fails → error alert appears
     const alert = page.locator('[role="alert"]');
     await expect(alert).toBeVisible({ timeout: 10_000 });
   });
 
   test('error banner dismiss button clears the error', async ({ page }) => {
-
-    // Mock: abort server actions to force session creation failure
-    await page.route('**/insights', async (route) => {
-      const req = route.request();
-      if (req.method() === 'POST' && req.headers()['next-action']) {
-        await route.abort('failed');
-        return;
-      }
-      await route.continue();
-    });
-
-    await page.goto('/insights');
 
     const alert = page.locator('[role="alert"]');
     await expect(alert).toBeVisible({ timeout: 10_000 });
