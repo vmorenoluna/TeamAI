@@ -101,14 +101,6 @@ test.describe('Ideation — Scan Interaction', () => {
   test.beforeEach(async ({ page }) => {
     await ensureProjectSelected(page);
 
-  });
-
-  // NOTE: These tests verify UI state transitions when no orchestrator
-  // is running (startIdeationScan fails). In CI with a live orchestrator
-  // the scan may succeed and the error assertions won't hold.
-
-  test('clicking Run Scan shows error when scan fails', async ({ page }) => {
-
     await page.goto('/ideation');
     await expect(page.locator('h1:has-text("Ideation")')).toBeVisible({ timeout: 10_000 });
 
@@ -123,6 +115,14 @@ test.describe('Ideation — Scan Interaction', () => {
       }
       await route.continue();
     });
+  });
+
+  // NOTE: These tests verify UI error-path behavior.  The beforeEach
+  // mocks all server action POSTs on /ideation to simulate scan failure,
+  // so the error UI ("Scan failed") always appears regardless of
+  // orchestrator health.
+
+  test('clicking Run Scan shows error when scan fails', async ({ page }) => {
 
     const scanBtn = page.locator('button:has-text("Run Scan")');
     await expect(scanBtn).toBeVisible({ timeout: 10_000 });
@@ -132,19 +132,6 @@ test.describe('Ideation — Scan Interaction', () => {
   });
 
   test('Run Scan button is re-enabled after scan failure', async ({ page }) => {
-
-    await page.goto('/ideation');
-    await expect(page.locator('h1:has-text("Ideation")')).toBeVisible({ timeout: 10_000 });
-
-    // Mock: abort server actions on /ideation to simulate scan failure
-    await page.route('**/ideation', async (route) => {
-      const req = route.request();
-      if (req.method() === 'POST' && req.headers()['next-action']) {
-        await route.abort('failed');
-        return;
-      }
-      await route.continue();
-    });
 
     const scanBtn = page.locator('button:has-text("Run Scan")');
     await scanBtn.click();
@@ -156,19 +143,6 @@ test.describe('Ideation — Scan Interaction', () => {
   });
 
   test('new scan attempt clears previous error before showing new one', async ({ page }) => {
-
-    await page.goto('/ideation');
-    await expect(page.locator('h1:has-text("Ideation")')).toBeVisible({ timeout: 10_000 });
-
-    // Mock: abort server actions on /ideation to simulate scan failure
-    await page.route('**/ideation', async (route) => {
-      const req = route.request();
-      if (req.method() === 'POST' && req.headers()['next-action']) {
-        await route.abort('failed');
-        return;
-      }
-      await route.continue();
-    });
 
     const scanBtn = page.locator('button:has-text("Run Scan")');
     await scanBtn.click();
