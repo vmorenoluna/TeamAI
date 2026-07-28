@@ -51,10 +51,7 @@ test.describe('Kanban — Real-time Phase Change Updates', () => {
       }),
     });
 
-    if (!resp.ok) {
-      test.skip(true, 'WebSocket test API not available');
-      return;
-    }
+    expect(resp.ok, `WebSocket test API returned ${resp.status}`).toBe(true);
 
     // Wait for the debounced router.refresh() (300 ms window) + React re-render.
     await page.waitForTimeout(1000);
@@ -109,10 +106,7 @@ test.describe('Kanban — Real-time Subtask Progress Updates', () => {
       }),
     });
 
-    if (!resp.ok) {
-      test.skip(true, 'WebSocket test API not available');
-      return;
-    }
+    expect(resp.ok, `WebSocket test API returned ${resp.status}`).toBe(true);
 
     // The badge should update to 2/2 ✓ via the localSubtaskProgress override
     await expect(progressBadge).toHaveText('2/2 ✓', { timeout: 10_000 });

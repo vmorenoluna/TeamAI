@@ -51,13 +51,6 @@ test.describe('Analytics Dashboard', () => {
   test('analytics page renders dashboard components when project is active', async ({ page }) => {
     await page.goto('/analytics');
 
-    // Check if the analytics failed to load (project not active case handled in beforeEach)
-    const errorState = page.locator('text=Failed to load analytics');
-    if (await errorState.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      test.skip(true, 'No active project selected — analytics not available');
-      return;
-    }
-
     // Wait for the loading spinner to disappear
     const loading = page.locator('text=Computing analytics');
     await loading.waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => {});
@@ -88,13 +81,6 @@ test.describe('Analytics Dashboard', () => {
 
   test('analytics page shows data when tasks exist', async ({ page }) => {
     await page.goto('/analytics');
-
-    // Check if analytics failed to load
-    const errorState = page.locator('text=Failed to load analytics');
-    if (await errorState.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      test.skip(true, 'No active project selected — analytics not available');
-      return;
-    }
 
     // Wait for loading to finish
     const loading = page.locator('text=Computing analytics');

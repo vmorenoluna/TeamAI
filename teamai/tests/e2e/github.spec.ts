@@ -102,43 +102,44 @@ test.describe('GitHub — Import Interaction', () => {
   test.beforeEach(async ({ page }) => {
     await ensureProjectSelected(page);
 
+    await page.goto('/github');
+    await expect(page.locator('h1:has-text("GitHub Issues")')).toBeVisible({ timeout: 10_000 });
+
+    // Mock: abort server actions on /github to simulate MCP server absence.
+    // Only intercept POSTs with the next-action header (server actions),
+    // leaving RSC GET requests for page data untouched.
+    await page.route('**/github', async (route) => {
+      const req = route.request();
+      if (req.method() === 'POST' && req.headers()['next-action']) {
+        await route.abort('failed');
+        return;
+      }
+      await route.continue();
+    });
   });
 
-  // NOTE: These tests verify UI state transitions when the GitHub MCP
-  // server is not configured (startIssueList fails). In CI with a live
-  // MCP server the session may succeed and these assertions won't hold.
+  // NOTE: These tests verify UI error-path behavior.  The beforeEach
+  // mocks all server action POSTs on /github to simulate MCP server
+  // absence, so the error UI always appears regardless of MCP state.
 
   test('clicking List Open Issues leads to error state without MCP server', async ({ page }) => {
-
-    await page.goto('/github');
 
     const listBtn = page.locator('button:has-text("List Open Issues")');
     await expect(listBtn).toBeVisible({ timeout: 10_000 });
 
     await listBtn.click();
 
-    // Without MCP server, startIssueList() fails → error state visible
-    try {
-      await expect(page.locator('text=Failed')).toBeVisible({ timeout: 15_000 });
-    } catch {
-      test.skip(true, 'MCP server available — listing succeeded, no error');
-    }
+    // startIssueList() fails → error state visible
+    await expect(page.locator('text=Failed')).toBeVisible({ timeout: 15_000 });
   });
 
   test('List Open Issues button is available for retry after failure', async ({ page }) => {
-
-    await page.goto('/github');
 
     const listBtn = page.locator('button:has-text("List Open Issues")');
     await listBtn.click();
 
     // Wait for the error state to resolve
-    try {
-      await expect(page.locator('text=Failed')).toBeVisible({ timeout: 15_000 });
-    } catch {
-      test.skip(true, 'MCP server available — listing succeeded, no error to retry');
-      return;
-    }
+    await expect(page.locator('text=Failed')).toBeVisible({ timeout: 15_000 });
 
     // The button should be visible again for retry
     await expect(listBtn).toBeVisible({ timeout: 5_000 });
