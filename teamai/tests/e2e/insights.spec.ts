@@ -124,10 +124,10 @@ test.describe('Insights — Chat Interaction', () => {
     // getOrCreateInsightsSession on mount; aborting the POST triggers
     // the error path.  Only server action POSTs are intercepted — RSC
     // page data loads via GET and are unaffected.
-    await page.route('**/insights', async (route) => {
+    await page.route('**', async (route) => {
       const req = route.request();
       if (req.method() === 'POST' && req.headers()['next-action']) {
-        await route.abort('failed');
+        await route.fulfill({ status: 500, contentType: 'text/plain', body: 'Internal Server Error' });
         return;
       }
       await route.continue();
@@ -157,13 +157,15 @@ test.describe('Insights — Chat Interaction', () => {
   test('shows error banner when chat session creation fails', async ({ page }) => {
 
     // Session creation fails → error alert appears
-    const alert = page.locator('[role="alert"]');
+    // Use :has(button) to avoid matching Next.js route announcer (also role=alert)
+    const alert = page.locator('[role="alert"]:has(button)');
     await expect(alert).toBeVisible({ timeout: 10_000 });
   });
 
   test('error banner dismiss button clears the error', async ({ page }) => {
 
-    const alert = page.locator('[role="alert"]');
+    // Use :has(button) to avoid matching Next.js route announcer (also role=alert)
+    const alert = page.locator('[role="alert"]:has(button)');
     await expect(alert).toBeVisible({ timeout: 10_000 });
 
     // Click the dismiss button inside the alert.
