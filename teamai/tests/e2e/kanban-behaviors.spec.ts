@@ -6,7 +6,7 @@
  * task card UI elements (spinner, phase badge, progress badge, hourglass).
  */
 import { test, expect } from '@playwright/test';
-import { ensureProjectSelected, scrollKanbanRight, clickUntilVisible, getSeedTaskId } from './helpers';
+import { ensureProjectSelected, scrollKanbanRight, clickUntilVisible, requireSeedTaskId } from './helpers';
 
 // ── Seed slugs ─────────────────────────────────────────────────────────
 
@@ -235,7 +235,7 @@ test.describe('Kanban — Bulk Selection & Actions', () => {
 
     const cards = page.locator('[data-testid="task-card"]');
     const count = await cards.count();
-    if (count < 2) { test.skip(true, 'Not enough cards for multi-select test'); return; }
+    expect(count).toBeGreaterThanOrEqual(2);
 
     // Ctrl+click first card
     await cards.first().click({ modifiers: ['Control'] });
@@ -252,7 +252,7 @@ test.describe('Kanban — Bulk Selection & Actions', () => {
 
     const cards = page.locator('[data-testid="task-card"]');
     const count = await cards.count();
-    if (count < 2) { test.skip(true, 'Not enough cards'); return; }
+    expect(count).toBeGreaterThanOrEqual(2);
 
     // Select two cards via Ctrl+click
     await cards.first().click({ modifiers: ['Control'] });
@@ -269,7 +269,7 @@ test.describe('Kanban — Bulk Selection & Actions', () => {
 
     const cards = page.locator('[data-testid="task-card"]');
     const count = await cards.count();
-    if (count < 1) { test.skip(true, 'Not enough cards'); return; }
+    expect(count).toBeGreaterThanOrEqual(1);
 
     // Ctrl+click one card
     await cards.first().click({ modifiers: ['Control'] });
@@ -381,12 +381,7 @@ test.describe('Kanban — Task Card UI Elements', () => {
     await page.goto('/');
 
     const rateLimitedCard = page.locator('[data-testid="task-card"]', { hasText: 'Rate-limited API' });
-    if (await rateLimitedCard.count() === 0) {
-      test.skip(true, 'Rate-limited task not seeded');
-      return;
-    }
-
-    // Should show hourglass, not spinner
+    await expect(rateLimitedCard).toBeVisible({ timeout: 10_000 });
     const hourglass = rateLimitedCard.locator('[data-testid="hourglass-icon"]');
     await expect(hourglass).toBeVisible({ timeout: 5_000 });
 
@@ -399,10 +394,7 @@ test.describe('Kanban — Task Card UI Elements', () => {
     await page.goto('/');
 
     const autoCard = page.locator('[data-testid="task-card"]', { hasText: 'Update deprecated dependencies' });
-    if (await autoCard.count() === 0) {
-      test.skip(true, 'Auto-processed task not seeded');
-      return;
-    }
+    await expect(autoCard).toBeVisible({ timeout: 10_000 });
 
     await expect(autoCard.locator('text=Auto')).toBeVisible({ timeout: 5_000 });
   });
@@ -608,7 +600,7 @@ test.describe('Kanban — Task Deletion Flow', () => {
 
     const cards = page.locator('[data-testid="task-card"]');
     const count = await cards.count();
-    if (count < 2) { test.skip(true, 'Not enough cards'); return; }
+    expect(count).toBeGreaterThanOrEqual(2);
 
     // Select two cards
     await cards.first().click({ modifiers: ['Control'] });
@@ -631,8 +623,7 @@ test.describe('Kanban — Review Panel Interactions', () => {
   test('awaiting-review task detail shows Merge Locally and Open Pull Request buttons', async ({ page }) => {
 
     // "Navbar dropdown" is in awaiting-review phase
-    const taskId = getSeedTaskId('fix-navbar-dropdown-z-index-conflict');
-    if (!taskId) { test.skip(true, 'Navbar dropdown task not seeded'); return; }
+    const taskId = requireSeedTaskId('fix-navbar-dropdown-z-index-conflict');
 
     await page.goto(`/task/${taskId}`);
     await page.waitForTimeout(1500);
@@ -645,8 +636,7 @@ test.describe('Kanban — Review Panel Interactions', () => {
 
   test('Request Changes button expands feedback textarea', async ({ page }) => {
 
-    const taskId = getSeedTaskId('fix-navbar-dropdown-z-index-conflict');
-    if (!taskId) { test.skip(true, 'Navbar dropdown task not seeded'); return; }
+    const taskId = requireSeedTaskId('fix-navbar-dropdown-z-index-conflict');
 
     await page.goto(`/task/${taskId}`);
     await page.waitForTimeout(1500);
@@ -667,8 +657,7 @@ test.describe('Kanban — Review Panel Interactions', () => {
 
   test('Cancel request changes hides textarea', async ({ page }) => {
 
-    const taskId = getSeedTaskId('fix-navbar-dropdown-z-index-conflict');
-    if (!taskId) { test.skip(true, 'Navbar dropdown task not seeded'); return; }
+    const taskId = requireSeedTaskId('fix-navbar-dropdown-z-index-conflict');
 
     await page.goto(`/task/${taskId}`);
     await page.waitForTimeout(1500);
@@ -687,8 +676,7 @@ test.describe('Kanban — Review Panel Interactions', () => {
 
   test('Send Back button is disabled without feedback text', async ({ page }) => {
 
-    const taskId = getSeedTaskId('fix-navbar-dropdown-z-index-conflict');
-    if (!taskId) { test.skip(true, 'Navbar dropdown task not seeded'); return; }
+    const taskId = requireSeedTaskId('fix-navbar-dropdown-z-index-conflict');
 
     await page.goto(`/task/${taskId}`);
     await page.waitForTimeout(1500);

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ensureProjectSelected, getSeedTaskId } from './helpers';
+import { ensureProjectSelected, requireSeedTaskId } from './helpers';
 
 test.describe('Terminal Scroll Behavior', () => {
   test.setTimeout(60_000);
@@ -14,11 +14,7 @@ test.describe('Terminal Scroll Behavior', () => {
 
     await ensureProjectSelected(page);
 
-    const taskId = getSeedTaskId('implement-dark-mode-toggle');
-    if (!taskId) {
-      test.skip(true, 'Seed task not found on disk');
-      return;
-    }
+    const taskId = requireSeedTaskId('implement-dark-mode-toggle');
 
     // Use hash-based navigation to go directly to the Terminal tab — avoids
     // click unreliability when the page hasn't fully hydrated in parallel mode.

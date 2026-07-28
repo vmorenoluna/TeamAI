@@ -115,9 +115,7 @@ test.describe('Task Detail — Tab Content', () => {
   test('Spec tab shows "No spec generated" when no spec exists', async ({ page }) => {
 
     // "Export tasks as CSV" is a backlog task without a spec
-    const { getSeedTaskId } = await import('./helpers');
-    const taskId = getSeedTaskId('feat-export-tasks-as-csv');
-    if (!taskId) { test.skip(true, 'Export tasks as CSV not seeded'); return; }
+    const taskId = requireSeedTaskId('feat-export-tasks-as-csv');
 
     await page.goto(`/task/${taskId}#spec`);
     await expect(page.locator('text=No spec generated')).toBeVisible({ timeout: 10_000 });
@@ -274,9 +272,7 @@ test.describe('Task Detail — Phase-Specific UI', () => {
   test('PR link is shown in header when prUrl is set', async ({ page }) => {
 
     // "Migrate API to v2" has prUrl
-    const { getSeedTaskId } = await import('./helpers');
-    const taskId = getSeedTaskId('refactor-migrate-api-to-v2-endpoints');
-    if (!taskId) { test.skip(true, 'Migrate API task not seeded'); return; }
+    const taskId = requireSeedTaskId('refactor-migrate-api-to-v2-endpoints');
 
     await page.goto(`/task/${taskId}`);
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 10_000 });

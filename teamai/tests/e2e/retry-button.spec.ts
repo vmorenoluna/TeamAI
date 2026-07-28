@@ -74,8 +74,7 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
 
     // Wait for the detail retry button to appear (panel loads async data)
     const detailRetryButton = page.locator('[data-testid="detail-retry-button"]');
-    const found = await detailRetryButton.waitFor({ state: 'attached', timeout: 15_000 }).then(() => true).catch(() => false);
-    if (!found) { test.skip(true, 'Detail retry button not in panel'); return; }
+    await expect(detailRetryButton).toBeAttached({ timeout: 15_000 });
 
     await expect(detailRetryButton).toBeVisible({ timeout: 5_000 });
     await expect(detailRetryButton).toHaveText(/Retry/);

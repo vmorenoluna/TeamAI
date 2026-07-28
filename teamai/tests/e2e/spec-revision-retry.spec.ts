@@ -8,7 +8,6 @@ import { ensureProjectSelected, getActiveSeedDir } from './helpers';
 test.describe('Spec Revision — Command Template Verification', () => {
   test('seed project has updated qa-review.md with spec-gap detection (Step 6)', () => {
     const seedDir = getActiveSeedDir();
-    if (!existsSync(seedDir)) { test.skip(true, 'E2E seed directory not found'); return; }
 
     const qaReviewPath = join(seedDir, '.claude', 'commands', 'qa-review.md');
     expect(existsSync(qaReviewPath), 'qa-review.md should exist in seed project').toBe(true);
@@ -21,7 +20,6 @@ test.describe('Spec Revision — Command Template Verification', () => {
 
   test('seed project has updated spec.md with Revision Mode', () => {
     const seedDir = getActiveSeedDir();
-    if (!existsSync(seedDir)) { test.skip(true, 'E2E seed directory not found'); return; }
 
     const specPath = join(seedDir, '.claude', 'commands', 'spec.md');
     expect(existsSync(specPath), 'spec.md should exist in seed project').toBe(true);
