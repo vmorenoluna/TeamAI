@@ -48,12 +48,19 @@ npm run lint             # eslint --max-warnings 0
 npm run test:unit        # vitest run --exclude 'tests/integration/**'
 npm run test:integration # vitest run --include 'tests/integration/**'
 npm run test             # vitest run (unit + integration)
-npm run test:e2e         # playwright test
+npm run test:e2e         # playwright test (full suite, ~30 min)
+npm run test:e2e:smoke   # playwright test (5 critical specs, ~2 min)
 npm run test:changelog   # bash tests/unit/changelog-parsing.test.sh
 npm run test:all         # typecheck + lint + vitest + playwright + changelog
 npm run test:coverage    # vitest --coverage + playwright E2E (combined report)
 npm run precommit        # alias for test:all with a banner
 ```
+
+> **Always use `npm run test:e2e` (or `test:e2e:smoke`), never `npx playwright test` directly.**
+> The `pretest:e2e` hook runs port 3001 cleanup which prevents orphaned server
+> processes from blocking subsequent test runs.  The smoke suite covers the 5
+> most critical areas (sidebar, task detail, kanban, settings, workflow) and
+> completes in ~2 minutes — ideal for pre-commit verification.
 
 ## Architecture
 
