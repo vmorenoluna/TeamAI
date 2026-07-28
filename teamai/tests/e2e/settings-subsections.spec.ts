@@ -38,12 +38,13 @@ test.describe('Settings — Container Configuration', () => {
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
-    // The container status badge may show "Stopped", "Running", etc.
+    // The status badge only renders when the container toggle is enabled.
+    // If enabled, verify it's visible; if not, the toggle being present is sufficient.
     const statusLabel = page.locator('text=Container status');
-    // This only appears if container is enabled; skip if not
     const count = await statusLabel.count();
-    // Test passes regardless — just verifying no crash
-    expect(count).toBeGreaterThanOrEqual(0);
+    if (count > 0) {
+      await expect(statusLabel).toBeVisible({ timeout: 3_000 });
+    }
   });
 });
 
@@ -105,8 +106,7 @@ test.describe('Settings — Role Editor', () => {
 
     // At least one role should be listed (analyst, planner, coder, etc.)
     const roleCount = await page.locator('text=analyst').count();
-    // If roles load, we should have some; otherwise skip gracefully
-    expect(roleCount).toBeGreaterThanOrEqual(0);
+    expect(roleCount, 'analyst role must be present in settings').toBeGreaterThan(0);
   });
 
   test('clicking a role row expands the editor with textarea', async ({ page }) => {
