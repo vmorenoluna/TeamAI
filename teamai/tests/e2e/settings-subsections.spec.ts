@@ -5,7 +5,7 @@
  * These are all rendered on /settings when a project is selected.
  */
 import { test, expect } from '@playwright/test';
-import { ensureProjectSelected } from './helpers';
+import { ensureProjectSelected, clickUntilVisible } from './helpers';
 
 test.describe('Settings — Container Configuration', () => {
   test.setTimeout(60_000);
@@ -115,23 +115,17 @@ test.describe('Settings — Role Editor', () => {
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
     // The RoleEditor component renders a <button> with the filename as text.
-    // Click it to expand and reveal the textarea.
+    // Use clickUntilVisible to handle React hydration races.
     const roleBtn = page.locator('button:has-text(".md")').first();
-    await expect(roleBtn).toBeVisible({ timeout: 5_000 });
-    await roleBtn.click();
-    await page.waitForTimeout(500);
-
-    // After clicking, the textarea inside the expanded editor should appear
     const textarea = page.locator('textarea').first();
-    await expect(textarea).toBeVisible({ timeout: 5_000 });
+    await clickUntilVisible(roleBtn, textarea);
 
-    // Reset to default button
-    const resetBtn = page.locator('button:has-text("Reset to default")');
-    await expect(resetBtn).toBeVisible({ timeout: 5_000 });
-
-    // Save button
-    const saveBtn = page.locator('button:has-text("Save")');
-    await expect(saveBtn).toBeVisible({ timeout: 5_000 });
+    // After clicking, reset and save buttons appear inside the expanded editor.
+    // Scope to the textarea's container to avoid matching other Save buttons
+    // (Save Pipeline Config, Save Provider Config) on the settings page.
+    const editorContainer = textarea.locator('..').locator('..');
+    await expect(editorContainer.locator('button:has-text("Reset to default")')).toBeVisible({ timeout: 5_000 });
+    await expect(editorContainer.locator('button:has-text("Save")')).toBeVisible({ timeout: 5_000 });
   });
 
   test('clicking expanded role row collapses it again', async ({ page }) => {
@@ -140,20 +134,16 @@ test.describe('Settings — Role Editor', () => {
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
     const roleBtn = page.locator('button:has-text(".md")').first();
-    const roleCount = await roleBtn.count();
-    expect(roleCount, 'Role rows must be present in settings').toBeGreaterThan(0);
+    const textarea = page.locator('textarea').first();
 
     // Expand
-    await roleBtn.click();
-    await page.waitForTimeout(500);
-    await expect(page.locator('textarea').first()).toBeVisible({ timeout: 3_000 });
+    await clickUntilVisible(roleBtn, textarea);
 
     // Collapse — click same button again
     await roleBtn.click();
-    await page.waitForTimeout(300);
 
     // Textarea should be gone
-    await expect(page.locator('textarea').first()).not.toBeVisible({ timeout: 3_000 });
+    await expect(textarea).not.toBeVisible({ timeout: 3_000 });
   });
 });
 
@@ -170,11 +160,11 @@ test.describe('Settings — Tool Settings', () => {
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
-    await expect(page.locator('text=Tool Paths')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('text=Tool Paths').first()).toBeVisible({ timeout: 5_000 });
 
     // At minimum, should show claude and git tool rows
-    await expect(page.locator('text=Claude')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('text=Git')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('text=Claude').first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('text=Git').first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('Recheck button refreshes tool status', async ({ page }) => {
@@ -188,7 +178,7 @@ test.describe('Settings — Tool Settings', () => {
 
     // Should still show tool rows after refresh
     await page.waitForTimeout(1000);
-    await expect(page.locator('text=Claude')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('text=Claude').first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('Edit button appears on tool rows', async ({ page }) => {
@@ -225,7 +215,7 @@ test.describe('Settings — Projects Defaults', () => {
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
     // Should show at least the seeded project's sync status
-    await expect(page.locator('text=E2E Test Project')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('text=E2E Test Project').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('Refresh button is present in projects section', async ({ page }) => {

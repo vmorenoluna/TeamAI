@@ -94,7 +94,14 @@ export async function ensureProjectSelected(page: Page): Promise<void> {
 
   // Backlog column header confirms the kanban board loaded.
   // If this fails, seed data is missing — fail the entire test run.
-  await expect(page.locator('text=Backlog').first()).toBeVisible({ timeout: 30_000 });
+  // Retry once with a reload to handle server-side degradation (e.g.,
+  // Docker API timeouts from ContainerConfigEditor queries).
+  try {
+    await expect(page.locator('text=Backlog').first()).toBeVisible({ timeout: 15_000 });
+  } catch {
+    await page.reload();
+    await expect(page.locator('text=Backlog').first()).toBeVisible({ timeout: 25_000 });
+  }
 }
 
 /**
