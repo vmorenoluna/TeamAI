@@ -207,7 +207,7 @@ test.describe('Roadmap — Bulk Selection', () => {
     // Click the first item checkbox (skip column-level checkboxes, first 4)
     const checkboxes = page.locator('input[type="checkbox"]');
     const count = await checkboxes.count();
-    if (count < 5) { test.skip(true, 'Not enough checkboxes'); return; }
+    expect(count).toBeGreaterThanOrEqual(5);
 
     // Click the 5th checkbox (first item checkbox after 4 column headers)
     await checkboxes.nth(4).click();
@@ -224,7 +224,7 @@ test.describe('Roadmap — Bulk Selection', () => {
 
     const checkboxes = page.locator('input[type="checkbox"]');
     const count = await checkboxes.count();
-    if (count < 5) { test.skip(true, 'Not enough checkboxes'); return; }
+    expect(count).toBeGreaterThanOrEqual(5);
 
     await checkboxes.nth(4).click();
     await expect(page.locator('text=1 item selected')).toBeVisible({ timeout: 5_000 });

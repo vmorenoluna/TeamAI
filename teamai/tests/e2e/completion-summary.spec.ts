@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ensureProjectSelected, ensureTaskCardVisible, requireSeedTaskId, scrollKanbanRight } from './helpers';
+import { ensureProjectSelected, requireSeedTaskId, scrollKanbanRight } from './helpers';
 
 
 // ── Seed slugs (must match seed.ts slugify) ────────────────────────────
@@ -95,12 +95,8 @@ test.describe('QA Failure Banner & Completion Summary', () => {
     await page.goto('/');
     await scrollKanbanRight(page);
 
-    if (!await ensureTaskCardVisible(page, 'search bar crashes')) {
-      test.skip(true, 'Failed task not seeded');
-      return;
-    }
-
     const failedCard = page.locator('[data-testid="task-card"]', { hasText: 'search bar crashes' });
+    await expect(failedCard).toBeVisible({ timeout: 10_000 });
     const failureIndicator = failedCard.locator('[data-testid="failure-indicator"]');
     await expect(failureIndicator).toBeVisible({ timeout: 5_000 });
     await expect(failureIndicator).toHaveAttribute('title', 'Task failed');
@@ -109,12 +105,8 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   test('kanban card shows subtask progress badge for tasks with plans', async ({ page }) => {
     await page.goto('/');
 
-    if (!await ensureTaskCardVisible(page, 'login button')) {
-      test.skip(true, 'Task with plan not seeded');
-      return;
-    }
-
     const taskCard = page.locator('[data-testid="task-card"]', { hasText: 'login button' });
+    await expect(taskCard).toBeVisible({ timeout: 10_000 });
     const progressBadge = taskCard.locator('[data-testid="subtask-progress-badge"]');
     await expect(progressBadge).toBeVisible({ timeout: 5_000 });
     await expect(progressBadge).toHaveText('1/2 ✓');
@@ -124,12 +116,8 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   test('kanban card shows green subtask badge when all subtasks completed', async ({ page }) => {
     await page.goto('/');
 
-    if (!await ensureTaskCardVisible(page, 'Extract shared types')) {
-      test.skip(true, 'Done task with plan not seeded');
-      return;
-    }
-
     const taskCard = page.locator('[data-testid="task-card"]', { hasText: 'Extract shared types' });
+    await expect(taskCard).toBeVisible({ timeout: 10_000 });
     const progressBadge = taskCard.locator('[data-testid="subtask-progress-badge"]');
     await expect(progressBadge).toBeVisible({ timeout: 5_000 });
     await expect(progressBadge).toHaveText('3/3 ✓');
@@ -139,12 +127,8 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   test('backlog kanban cards without plans have no subtask progress badge', async ({ page }) => {
     await page.goto('/');
 
-    if (!await ensureTaskCardVisible(page, 'dark mode toggle')) {
-      test.skip(true, 'Backlog task not seeded');
-      return;
-    }
-
     const taskCard = page.locator('[data-testid="task-card"]', { hasText: 'dark mode toggle' });
+    await expect(taskCard).toBeVisible({ timeout: 10_000 });
     const progressBadge = taskCard.locator('[data-testid="subtask-progress-badge"]');
     await expect(progressBadge).toHaveCount(0);
   });
