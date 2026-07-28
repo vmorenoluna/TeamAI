@@ -121,9 +121,8 @@ test.describe('Settings — Role Editor', () => {
     await clickUntilVisible(roleBtn, textarea);
 
     // After clicking, reset and save buttons appear inside the expanded editor.
-    // Scope to the textarea's container to avoid matching other Save buttons
-    // (Save Pipeline Config, Save Provider Config) on the settings page.
-    const editorContainer = textarea.locator('..').locator('..');
+    // Scoped via data-testid to avoid matching other Save buttons on the page.
+    const editorContainer = page.locator('[data-testid="role-editor-content"]');
     await expect(editorContainer.locator('button:has-text("Reset to default")')).toBeVisible({ timeout: 5_000 });
     await expect(editorContainer.locator('button:has-text("Save")')).toBeVisible({ timeout: 5_000 });
   });

@@ -57,7 +57,7 @@ export function RoleEditor({ role }: { role: RoleDefinition }) {
       </button>
 
       {open && (
-        <div className="p-4 bg-[#11131b] space-y-3">
+        <div data-testid="role-editor-content" className="p-4 bg-[#11131b] space-y-3">
           <textarea
             value={content}
             onChange={e => setContent(e.target.value)}
