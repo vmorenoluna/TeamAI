@@ -12,18 +12,15 @@
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
-let isSeeded = false;
-
 test.describe('Global Banners — Recovery Banner', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('recovery banner is NOT visible when no interrupted tasks exist', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -45,7 +42,6 @@ test.describe('Global Banners — Recovery Banner', () => {
   });
 
   test('recovery banner dismiss mechanism exists when shown', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -68,7 +64,6 @@ test.describe('Global Banners — Recovery Banner', () => {
   });
 
   test('recovery banner survives page refresh after dismiss', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -106,12 +101,11 @@ test.describe('Global Banners — Missing Tools Banner', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('missing tools banner appears when CLI tools not found', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -129,7 +123,6 @@ test.describe('Global Banners — Missing Tools Banner', () => {
   });
 
   test('missing tools banner has dismiss button', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -153,7 +146,6 @@ test.describe('Global Banners — Missing Tools Banner', () => {
   });
 
   test('missing tools banner links to Settings → Tool Paths', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -176,12 +168,11 @@ test.describe('Global Banners — Rate Limit Banner', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('rate limit banner has data-testid when shown', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     // Check multiple pages where the rate limit banner can appear
     const pages = ['/', '/insights', '/ideation'];
@@ -199,7 +190,6 @@ test.describe('Global Banners — Rate Limit Banner', () => {
   });
 
   test('rate limit banner is NOT visible under normal conditions', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -210,7 +200,6 @@ test.describe('Global Banners — Rate Limit Banner', () => {
   });
 
   test('kanban board works normally when rate limit banner is not present', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);

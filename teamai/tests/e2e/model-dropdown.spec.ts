@@ -4,8 +4,7 @@ import { clickUntilVisible, ensureProjectSelected } from './helpers';
 test.describe('Model Dropdown', () => {
   test.describe('Settings Page - Provider Config', () => {
     test('model dropdown loads with curated models', async ({ page }) => {
-      const ok = await ensureProjectSelected(page);
-      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
+      await ensureProjectSelected(page);
 
       await page.goto('/settings');
 
@@ -16,8 +15,7 @@ test.describe('Model Dropdown', () => {
     });
 
     test('model select shows options after curated models load', async ({ page }) => {
-      const ok = await ensureProjectSelected(page);
-      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
+      await ensureProjectSelected(page);
 
       await page.goto('/settings');
 
@@ -39,8 +37,7 @@ test.describe('Model Dropdown', () => {
     });
 
     test('refresh button triggers model reload', async ({ page }) => {
-      const ok = await ensureProjectSelected(page);
-      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
+      await ensureProjectSelected(page);
 
       await page.goto('/settings');
 
@@ -61,8 +58,7 @@ test.describe('Model Dropdown', () => {
     });
 
     test('Save Provider Config button is present and clickable', async ({ page }) => {
-      const ok = await ensureProjectSelected(page);
-      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
+      await ensureProjectSelected(page);
 
       await page.goto('/settings');
 
@@ -76,8 +72,7 @@ test.describe('Model Dropdown', () => {
 
   test.describe('Terminals Page - New Terminal Dialog', () => {
     test('New Terminal dialog opens with heading and action buttons', async ({ page }) => {
-      const ok = await ensureProjectSelected(page);
-      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
+      await ensureProjectSelected(page);
 
       await page.goto('/terminals');
 
@@ -98,8 +93,7 @@ test.describe('Model Dropdown', () => {
     });
 
     test('dialog closes when clicking backdrop', async ({ page }) => {
-      const ok = await ensureProjectSelected(page);
-      if (!ok) { test.skip(true, 'E2E Test Project not found'); return; }
+      await ensureProjectSelected(page);
 
       await page.goto('/terminals');
 

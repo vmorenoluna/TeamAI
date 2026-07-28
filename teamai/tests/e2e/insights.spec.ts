@@ -8,14 +8,12 @@
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
-let isSeeded = false;
-
 test.describe('Insights Page', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('sidebar navigation: clicking Insights link navigates to /insights and shows heading', async ({ page }) => {
@@ -57,7 +55,6 @@ test.describe('Insights Page', () => {
   });
 
   test('page loads and shows Insights heading', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/insights');
 
@@ -65,7 +62,6 @@ test.describe('Insights Page', () => {
   });
 
   test('shows stats cards (Total Tasks, Completed, In Progress, Failed)', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/insights');
 
@@ -75,7 +71,6 @@ test.describe('Insights Page', () => {
   });
 
   test('shows completion rate bar with percentage', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/insights');
 
@@ -85,7 +80,6 @@ test.describe('Insights Page', () => {
   });
 
   test('shows phase distribution section with stacked bar', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/insights');
 
@@ -97,7 +91,6 @@ test.describe('Insights Page', () => {
   });
 
   test('shows InsightsChat component with input field', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/insights');
 
@@ -109,7 +102,6 @@ test.describe('Insights Page', () => {
   });
 
   test('page survives refresh', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/insights');
     await expect(page.locator('h1:has-text("Insights")')).toBeVisible({ timeout: 10_000 });
@@ -125,8 +117,8 @@ test.describe('Insights — Chat Interaction', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   // NOTE: These tests verify the UI error-path behavior when no
@@ -135,7 +127,6 @@ test.describe('Insights — Chat Interaction', () => {
   // the error banner / disabled-Send assertions will not hold.
 
   test('chat input renders with a textarea', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/insights');
 
@@ -144,7 +135,6 @@ test.describe('Insights — Chat Interaction', () => {
   });
 
   test('Send button is disabled when chat session is unavailable', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/insights');
 
@@ -155,7 +145,6 @@ test.describe('Insights — Chat Interaction', () => {
   });
 
   test('shows error banner when chat session creation fails', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/insights');
 
@@ -169,7 +158,6 @@ test.describe('Insights — Chat Interaction', () => {
   });
 
   test('error banner dismiss button clears the error', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/insights');
 

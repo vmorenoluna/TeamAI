@@ -7,8 +7,6 @@
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
-let isSeeded = false;
-
 test.describe('Project Selector', () => {
   test.setTimeout(60_000);
 
@@ -16,12 +14,11 @@ test.describe('Project Selector', () => {
     // First visit the base page to ensure the app loads
     await page.goto('/');
     await page.waitForTimeout(1000);
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('project tabs show the seeded project name', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -34,7 +31,6 @@ test.describe('Project Selector', () => {
   });
 
   test('active project tab shows blue bottom border', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -46,7 +42,6 @@ test.describe('Project Selector', () => {
   });
 
   test('Add Project button ("+") opens the dialog', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -83,7 +78,6 @@ test.describe('Project Selector', () => {
   });
 
   test('Cancel button closes the Add Project dialog', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -104,7 +98,6 @@ test.describe('Project Selector', () => {
   });
 
   test('dialog closes when clicking backdrop', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -127,7 +120,6 @@ test.describe('Project Selector', () => {
   });
 
   test('Browse button opens Directory Browser', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -154,7 +146,6 @@ test.describe('Project Selector', () => {
   });
 
   test('Browse dialog Cancel closes directory browser', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -180,7 +171,6 @@ test.describe('Project Selector', () => {
   });
 
   test('project tab hover shows remove (×) button', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);

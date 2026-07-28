@@ -10,14 +10,11 @@
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
-let isSeeded = false;
 
 test.describe('Analytics Dashboard', () => {
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    if (ok) isSeeded = true;
-    else isSeeded = false;
-  });
+  await ensureProjectSelected(page);
+});
 
   test('page loads and shows analytics header', async ({ page }) => {
     await page.goto('/analytics');
@@ -52,8 +49,6 @@ test.describe('Analytics Dashboard', () => {
   });
 
   test('analytics page renders dashboard components when project is active', async ({ page }) => {
-    test.skip(!isSeeded, 'E2E Test Project not found');
-
     await page.goto('/analytics');
 
     // Check if the analytics failed to load (project not active case handled in beforeEach)
@@ -92,8 +87,6 @@ test.describe('Analytics Dashboard', () => {
   });
 
   test('analytics page shows data when tasks exist', async ({ page }) => {
-    test.skip(!isSeeded, 'E2E Test Project not found');
-
     await page.goto('/analytics');
 
     // Check if analytics failed to load

@@ -7,18 +7,15 @@
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
-let isSeeded = false;
-
 test.describe('Settings — Container Configuration', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('container toggle switch is visible', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -29,7 +26,6 @@ test.describe('Settings — Container Configuration', () => {
   });
 
   test('container toggle has accessible label text', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -38,7 +34,6 @@ test.describe('Settings — Container Configuration', () => {
   });
 
   test('container status badge is shown when enabled', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -56,12 +51,11 @@ test.describe('Settings — Pipeline Configuration', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('pipeline config Max QA attempts input is visible', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -74,7 +68,6 @@ test.describe('Settings — Pipeline Configuration', () => {
   });
 
   test('pipeline config Parallel subtasks checkbox is visible', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -86,7 +79,6 @@ test.describe('Settings — Pipeline Configuration', () => {
   });
 
   test('Save Pipeline Config button is present', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -100,12 +92,11 @@ test.describe('Settings — Role Editor', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('role editor section shows agent role names', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -119,7 +110,6 @@ test.describe('Settings — Role Editor', () => {
   });
 
   test('clicking a role row expands the editor with textarea', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -145,7 +135,6 @@ test.describe('Settings — Role Editor', () => {
   });
 
   test('clicking expanded role row collapses it again', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -175,12 +164,11 @@ test.describe('Settings — Tool Settings', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('tool settings section shows tool status list', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -193,7 +181,6 @@ test.describe('Settings — Tool Settings', () => {
   });
 
   test('Recheck button refreshes tool status', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -208,7 +195,6 @@ test.describe('Settings — Tool Settings', () => {
   });
 
   test('Edit button appears on tool rows', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -224,12 +210,11 @@ test.describe('Settings — Projects Defaults', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('projects settings section is visible', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -238,7 +223,6 @@ test.describe('Settings — Projects Defaults', () => {
   });
 
   test('shows project sync status table', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
@@ -248,7 +232,6 @@ test.describe('Settings — Projects Defaults', () => {
   });
 
   test('Refresh button is present in projects section', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });

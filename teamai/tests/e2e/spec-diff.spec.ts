@@ -14,18 +14,15 @@ import { ensureProjectSelected, requireSeedTaskId } from './helpers';
 
 const TASK_SLUG = 'add-dark-mode-toggle-to-settings'; // may have spec revisions
 
-let isSeeded = false;
-
 test.describe('Spec Diff View', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('task detail page shows Compare toggle when spec versions exist', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     let taskId: string;
     try {
@@ -50,7 +47,6 @@ test.describe('Spec Diff View', () => {
   });
 
   test('clicking Compare toggle shows version selectors', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     let taskId: string;
     try {
@@ -84,7 +80,6 @@ test.describe('Spec Diff View', () => {
   });
 
   test('diff view shows left and right columns with content', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     let taskId: string;
     try {
@@ -121,7 +116,6 @@ test.describe('Spec Diff View', () => {
   });
 
   test('diff view shows added lines in green and removed in red', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     let taskId: string;
     try {

@@ -19,18 +19,15 @@ import { ensureProjectSelected, requireSeedTaskId } from './helpers';
 const TASK_SLUG = 'test-terminal-live-event-labels';
 const LOGIN_BUTTON_SLUG = 'fix-login-button-not-visible-on-mobile';
 
-let isSeeded = false;
-
 test.describe('Kanban — Real-time Phase Change Updates', () => {
   test.setTimeout(90_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('phase-change WebSocket event triggers kanban card column update', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(TASK_SLUG);
     const serverUrl = getTestServerUrl();
@@ -81,12 +78,11 @@ test.describe('Kanban — Real-time Subtask Progress Updates', () => {
   test.setTimeout(90_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('subtask-progress WebSocket event updates kanban badge without page refresh', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     const serverUrl = getTestServerUrl();
@@ -127,12 +123,11 @@ test.describe('Kanban — Connection Indicator', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('connection indicator is rendered in the board header', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 
@@ -141,7 +136,6 @@ test.describe('Kanban — Connection Indicator', () => {
   });
 
   test('kanban board remains interactive after extended idle', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await expect(page.locator('[data-testid="task-card"]').first()).toBeVisible({ timeout: 10_000 });

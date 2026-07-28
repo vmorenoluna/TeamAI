@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected, ensureTaskCardVisible, requireSeedTaskId, scrollKanbanRight } from './helpers';
 
-let isSeeded = false;
 
 // ── Seed slugs (must match seed.ts slugify) ────────────────────────────
 const SEARCH_CRASH_SLUG = 'fix-search-bar-crashes-on-empty-input';
@@ -13,14 +12,10 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    if (ok) isSeeded = true;
-    else isSeeded = false;
-  });
+  await ensureProjectSelected(page);
+});
 
   test('shows completion summary banner for failed tasks', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     const taskId = requireSeedTaskId(SEARCH_CRASH_SLUG);
     await page.goto(`/task/${taskId}`);
     await expect(page.locator('body')).toBeVisible();
@@ -32,8 +27,6 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   });
 
   test('completed subtasks show checkmarks and progress bar', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}`);
     await expect(page.locator('body')).toBeVisible();
@@ -57,8 +50,6 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   });
 
   test('failed task shows QA report with FAIL overall', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     const taskId = requireSeedTaskId(SEARCH_CRASH_SLUG);
     await page.goto(`/task/${taskId}`);
     await expect(page.locator('body')).toBeVisible();
@@ -77,8 +68,6 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   });
 
   test('done task shows all subtasks completed', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     const taskId = requireSeedTaskId(SHARED_TYPES_SLUG);
     await page.goto(`/task/${taskId}#plan`);
     await expect(page.locator('body')).toBeVisible();
@@ -96,8 +85,6 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   });
 
   test('backlog task shows "no plan generated yet" message', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}#plan`);
     await expect(page.locator('body')).toBeVisible();
@@ -105,8 +92,6 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   });
 
   test('failure indicator shows on kanban task card for failed tasks', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     await page.goto('/');
     await scrollKanbanRight(page);
 
@@ -122,8 +107,6 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   });
 
   test('kanban card shows subtask progress badge for tasks with plans', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     await page.goto('/');
 
     if (!await ensureTaskCardVisible(page, 'login button')) {
@@ -139,8 +122,6 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   });
 
   test('kanban card shows green subtask badge when all subtasks completed', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     await page.goto('/');
 
     if (!await ensureTaskCardVisible(page, 'Extract shared types')) {
@@ -156,8 +137,6 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   });
 
   test('backlog kanban cards without plans have no subtask progress badge', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
-
     await page.goto('/');
 
     if (!await ensureTaskCardVisible(page, 'dark mode toggle')) {

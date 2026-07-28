@@ -36,15 +36,11 @@ test.describe('Spec Revision — Command Template Verification', () => {
 // ── UI verification (no orchestrator invocation) ──
 
 test.describe('Spec Revision — UI Elements', () => {
-  let isSeeded = false;
-
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
   });
 
   test('retry button is absent on non-failed tasks (backlog, done)', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
 

@@ -11,18 +11,15 @@
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
-let isSeeded = false;
-
 test.describe('Auto Mode Toggle', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('auto mode button is visible when project is selected', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -33,7 +30,6 @@ test.describe('Auto Mode Toggle', () => {
   });
 
   test('auto mode button shows Start state by default (off)', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -48,7 +44,6 @@ test.describe('Auto Mode Toggle', () => {
   });
 
   test('clicking auto mode button toggles it on', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -73,7 +68,6 @@ test.describe('Auto Mode Toggle', () => {
   });
 
   test('auto mode button survives page refresh', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/');
     await page.waitForTimeout(1500);
@@ -91,7 +85,6 @@ test.describe('Auto Mode Toggle', () => {
   });
 
   test('no project: auto mode disabled with No project tooltip', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     // First verify it works with a project
     await page.goto('/');

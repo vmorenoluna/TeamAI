@@ -7,14 +7,12 @@
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
-let isSeeded = false;
-
 test.describe('Ideation Page', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('sidebar navigation: clicking Ideation link navigates to /ideation and shows heading', async ({ page }) => {
@@ -56,7 +54,6 @@ test.describe('Ideation Page', () => {
   });
 
   test('page loads and shows Ideation heading', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/ideation');
 
@@ -64,7 +61,6 @@ test.describe('Ideation Page', () => {
   });
 
   test('shows description subtext', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/ideation');
 
@@ -72,7 +68,6 @@ test.describe('Ideation Page', () => {
   });
 
   test('shows Run Scan button', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/ideation');
 
@@ -82,7 +77,6 @@ test.describe('Ideation Page', () => {
   });
 
   test('shows empty state prompt before scan', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/ideation');
 
@@ -90,7 +84,6 @@ test.describe('Ideation Page', () => {
   });
 
   test('page survives refresh', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/ideation');
     await expect(page.locator('h1:has-text("Ideation")')).toBeVisible({ timeout: 10_000 });
@@ -106,8 +99,8 @@ test.describe('Ideation — Scan Interaction', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   // NOTE: These tests verify UI state transitions when no orchestrator
@@ -115,7 +108,6 @@ test.describe('Ideation — Scan Interaction', () => {
   // the scan may succeed and the error assertions won't hold.
 
   test('clicking Run Scan shows error when scan fails', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/ideation');
 
@@ -132,7 +124,6 @@ test.describe('Ideation — Scan Interaction', () => {
   });
 
   test('Run Scan button is re-enabled after scan failure', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/ideation');
 
@@ -151,7 +142,6 @@ test.describe('Ideation — Scan Interaction', () => {
   });
 
   test('new scan attempt clears previous error before showing new one', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/ideation');
 

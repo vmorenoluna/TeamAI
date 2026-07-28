@@ -8,14 +8,12 @@
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
 
-let isSeeded = false;
-
 test.describe('Workflow Page', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('sidebar navigation: clicking Workflow link navigates to /workflow and shows heading', async ({ page }) => {
@@ -61,7 +59,6 @@ test.describe('Workflow Page', () => {
   });
 
   test('page loads and shows Workflow heading', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/workflow');
 
@@ -69,7 +66,6 @@ test.describe('Workflow Page', () => {
   });
 
   test('shows legend with all transition types', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/workflow');
 
@@ -79,7 +75,6 @@ test.describe('Workflow Page', () => {
   });
 
   test('shows description subtext', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/workflow');
 
@@ -87,7 +82,6 @@ test.describe('Workflow Page', () => {
   });
 
   test('renders SVG pipeline diagram', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/workflow');
 
@@ -97,7 +91,6 @@ test.describe('Workflow Page', () => {
   });
 
   test('page survives refresh', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/workflow');
     await expect(page.locator('h1:has-text("Workflow")')).toBeVisible({ timeout: 10_000 });
@@ -113,12 +106,11 @@ test.describe('Workflow — Diagram Interaction', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    const ok = await ensureProjectSelected(page);
-    isSeeded = ok;
+    await ensureProjectSelected(page);
+
   });
 
   test('phase nodes render with labels and count badges', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/workflow');
 
@@ -130,7 +122,6 @@ test.describe('Workflow — Diagram Interaction', () => {
   });
 
   test('hovering on a phase node shows popover with ticket count', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     // networkidle ensures React hydration is complete before we hover
     await page.goto('/workflow', { waitUntil: 'networkidle' });
@@ -149,7 +140,6 @@ test.describe('Workflow — Diagram Interaction', () => {
   });
 
   test('hovering on Done phase shows completed task cards in popover', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/workflow', { waitUntil: 'networkidle' });
     await page.waitForTimeout(500);
@@ -165,7 +155,6 @@ test.describe('Workflow — Diagram Interaction', () => {
   });
 
   test('hovering on a single-task phase shows popover with one ticket', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/workflow', { waitUntil: 'networkidle' });
     await page.waitForTimeout(500);
@@ -184,7 +173,6 @@ test.describe('Workflow — Diagram Interaction', () => {
   });
 
   test('popover header shows phase label as h3', async ({ page }) => {
-    if (!isSeeded) { test.skip(true, 'E2E Test Project not found'); return; }
 
     await page.goto('/workflow', { waitUntil: 'networkidle' });
     await page.waitForTimeout(500);
