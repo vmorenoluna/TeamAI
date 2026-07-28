@@ -88,17 +88,16 @@ test.describe('Kanban — Search & Filter', () => {
 
     await page.goto('/');
 
-    // Type a partial title that matches specific tasks
+    // Type a partial title that only matches the "keyboard shortcuts" card
     const searchInput = page.locator('input[placeholder="Search…"]');
-    await searchInput.fill('keyboard');
+    await searchInput.fill('keyboard shortcuts');
+    await page.waitForTimeout(500);
 
     // "keyboard shortcuts" card should be visible
     await expect(page.locator('[data-testid="task-card"]', { hasText: 'keyboard shortcuts' })).toBeVisible({ timeout: 5_000 });
 
-    // Cards without "keyboard" in title should be filtered out
-    // (search may match description text, so we check the overall card count)
-    const filteredCards = page.locator('[data-testid="task-card"]');
-    await expect(filteredCards).not.toHaveCount(0);
+    // Cards without "keyboard shortcuts" in title should be filtered out
+    await expect(page.locator('[data-testid="task-card"]', { hasText: 'dark mode toggle' })).toHaveCount(0);
   });
 
   test('search box filters by description text as well', async ({ page }) => {
@@ -166,17 +165,12 @@ test.describe('Kanban — Search & Filter', () => {
     await page.goto('/');
 
     // Set a search filter
-    await page.locator('input[placeholder="Search…"]').fill('keyboard');
+    await page.locator('input[placeholder="Search…"]').fill('keyboard shortcuts');
     await page.waitForTimeout(500);
 
-    // Reset button should appear (or at least search input should be filled)
+    // Reset button should appear when a filter is active
     const resetBtn = page.locator('button:has-text("Reset")');
-    const resetCount = await resetBtn.count();
-    if (resetCount === 0) {
-      // If no reset button, just verify search is active
-      await expect(page.locator('input[placeholder="Search…"]')).toHaveValue('keyboard');
-      return;
-    }
+    await expect(resetBtn).toBeVisible({ timeout: 3_000 });
 
     // Click reset
     await resetBtn.click();

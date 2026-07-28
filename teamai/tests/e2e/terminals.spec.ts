@@ -18,31 +18,21 @@ test.describe('Terminals Page', () => {
 
   test('terminals page shows New Terminal button when project selected', async ({ page }) => {
     await page.goto('/terminals');
-    // The button may not be visible until React hydrates (server-rendered).
-    // Some test environments have the terminals page without the button.
-    const btn = page.getByTestId('new-terminal-btn');
-    try {
-      await expect(btn).toBeVisible({ timeout: 20_000 });
-    } catch {
-      test.skip(true, 'New Terminal button not rendered — terminals page may use different layout');
-    }
+    // The page heading may be deeply nested; verify the page rendered first
+    await expect(page.locator('body')).toBeVisible({ timeout: 10_000 });
+    // The New Terminal button has data-testid and is in the SSR HTML
+    await expect(page.getByTestId('new-terminal-btn')).toBeVisible({ timeout: 20_000 });
   });
 
   test('opening New Terminal dialog shows role selector', async ({ page }) => {
     await page.goto('/terminals');
     await expect(page.locator('body')).toBeVisible({ timeout: 10_000 });
 
-    // First verify the button exists; skip if not
-    const btn = page.getByTestId('new-terminal-btn');
-    try {
-      await expect(btn).toBeVisible({ timeout: 15_000 });
-    } catch {
-      test.skip(true, 'New Terminal button not rendered');
-      return;
-    }
-
     // Click repeatedly until React hydration completes and the dialog appears
-    await clickUntilVisible(btn, page.getByTestId('dialog-backdrop'));
+    await clickUntilVisible(
+      page.getByTestId('new-terminal-btn'),
+      page.getByTestId('dialog-backdrop'),
+    );
     await expect(page.locator('h2:has-text("New Terminal")')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('select').first()).toBeVisible({ timeout: 5_000 });
 

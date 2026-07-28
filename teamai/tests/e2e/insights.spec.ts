@@ -181,18 +181,15 @@ test.describe('Insights — Chat Interaction', () => {
       return;
     }
 
-    // Try to dismiss the error banner. If the dismiss button isn't present
-    // (different error rendering), just verify the page is still functional.
-    const dismissBtn = alert.locator('button');
-    const dismissCount = await dismissBtn.count();
-    if (dismissCount > 0) {
-      await dismissBtn.first().dispatchEvent('click');
-      await page.waitForTimeout(500);
-      // Error text should be gone if dismiss worked
-      const errorText = page.locator('[role="alert"] p');
-      await expect(errorText).not.toBeVisible({ timeout: 5_000 });
-    }
-    // If no dismiss button, the error banner may be a different component
-    // — test passes as long as the page didn't crash
+    // Click the dismiss button inside the alert.
+    // Both RoleEditor and InsightsChat error banners use <button aria-label="Dismiss error">.
+    const dismissBtn = alert.locator('button[aria-label="Dismiss error"]');
+    await expect(dismissBtn).toBeVisible({ timeout: 5_000 });
+    await dismissBtn.click();
+    await page.waitForTimeout(500);
+
+    // After dismiss, the error text paragraph should be gone
+    const errorText = alert.locator('p');
+    await expect(errorText).not.toBeVisible({ timeout: 5_000 });
   });
 });
