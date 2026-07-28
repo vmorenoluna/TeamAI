@@ -141,10 +141,7 @@ test.describe('Settings — Role Editor', () => {
 
     const roleBtn = page.locator('button:has-text(".md")').first();
     const roleCount = await roleBtn.count();
-    if (roleCount === 0) {
-      test.skip(true, 'No role rows found');
-      return;
-    }
+    expect(roleCount, 'Role rows must be present in settings').toBeGreaterThan(0);
 
     // Expand
     await roleBtn.click();
