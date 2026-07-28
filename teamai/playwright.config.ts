@@ -31,13 +31,11 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    // Clean up orphaned port 3001 process before starting the server.
-    // Previous timed-out test runs (basher agents, CI) can leave a
-    // dangling server.  Running the cleanup as part of the startup
-    // command ensures it fires for every invocation method (npm run
-    // test:e2e, npx playwright test, CI, etc.) — unlike an npm
-    // pretest:e2e hook which only fires with `npm run`.
-    command: 'node scripts/clear-port-3001.mjs && npx tsx server.ts',
+    // Single process (no shell && chaining) so Playwright can kill it
+    // cleanly.  On Windows, shell && chains create orphaned grandchild
+    // processes because SIGTERM doesn't propagate through the tree.
+    // Port cleanup is handled inside server.ts itself (test mode only).
+    command: 'npx tsx server.ts',
     url: 'http://localhost:3001',
     // Force a fresh dev server per test run. If we allow reuseExistingServer,
     // the running server's projectStore.ts singleton has its CONFIG_DIR frozen

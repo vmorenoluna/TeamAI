@@ -1,4 +1,7 @@
 import { createServer } from 'http';
+import { writeFileSync, unlinkSync, existsSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { parse } from 'url';
 import next from 'next';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -12,7 +15,7 @@ import { checkAllTools } from './src/lib/tool-checker';
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
 const handle = app.getRequestHandler();
 
-app.prepare().then(() => {
+app.prepare().then(async () => {
   const server = createServer((req, res) => {
     // ── Test-only endpoint: inject a synthetic agent event for E2E testing ──
     if (process.env.NODE_ENV === 'test' && req.method === 'POST' && req.url === '/api/test/emit-agent-event') {
@@ -145,6 +148,49 @@ app.prepare().then(() => {
 
   const port = parseInt(process.env.PORT || '3000', 10);
   const host = process.env.HOST || '0.0.0.0';
+
+  // ── Port cleanup (test mode only) ─────────────────────────────────────
+  // Previous E2E runs can leave orphaned server processes on port 3001
+  // because Playwright's SIGTERM to the webServer shell doesn't propagate
+  // to grandchild Node.js processes on Windows.  By cleaning up here
+  // (before listen()), the server can safely restart without a separate
+  // clear-port script in the webServer command — keeping the command a
+  // single process that Playwright can kill cleanly.
+  if (process.env.NODE_ENV === 'test') {
+    const { clearPort } = await import('./scripts/clear-port-3001.mjs');
+    if (typeof clearPort === 'function') {
+      await clearPort();
+    } else {
+      console.warn('[clear-port] clearPort() not exported — skipping port cleanup (zombie server risk)');
+    }
+  }
+
+  // ── PID file for zombie detection (test mode only) ────────────────────
+  // On Windows, Playwright spawns the webServer through cmd.exe.  When
+  // Playwright kills the webServer, the signal reaches cmd.exe but NOT the
+  // Node.js grandchild — our server becomes a zombie occupying port 3001.
+  //
+  // We write our PID to a known file AFTER port cleanup and successful
+  // bind, so the next test run's clear-port can target-kill us by PID
+  // instead of scanning netstat.  Clean shutdown (SIGINT/SIGTERM/SIGBREAK)
+  // deletes the file; force-killed zombies leave it behind for detection.
+  //
+  // NOTE: written AFTER clearPort() to avoid a self-kill — clearPort
+  // checks the PID file and would kill us if we wrote it first.
+  const PID_FILE = process.env.NODE_ENV === 'test'
+    ? join(tmpdir(), 'teamai-e2e-server.pid')
+    : null;
+
+  function removePidFile() {
+    if (!PID_FILE) return;
+    try {
+      if (existsSync(PID_FILE)) {
+        unlinkSync(PID_FILE);
+        console.log(`[server] Removed PID file ${PID_FILE}`);
+      }
+    } catch { /* best-effort */ }
+  }
+
   // ── Global error handlers so unhandled rejections don't crash the server ──
   process.on('unhandledRejection', (reason: unknown) => {
     logError('server', 'Unhandled rejection', reason instanceof Error ? reason : String(reason));
@@ -166,6 +212,8 @@ app.prepare().then(() => {
     shuttingDown = true;
     console.log(`[server] Received ${signal} — shutting down gracefully…`);
 
+    removePidFile();
+
     // Stop accepting new connections, then close existing ones
     wss.close();
     server.close(() => {
@@ -184,8 +232,20 @@ app.prepare().then(() => {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
+  // Windows: taskkill sends a console CTRL event that Node.js surfaces as
+  // SIGBREAK on some Windows shells.  Not all Windows terminals support it,
+  // but it's the best shot at catching Playwright's process termination.
+  process.on('SIGBREAK', () => shutdown('SIGBREAK'));
+
   server.listen(port, host, () => {
     console.log(`> Ready on http://${host}:${port}`);
+
+    // Write the PID file AFTER the port is bound, so clearPort() doesn't
+    // self-kill (it checks the PID file before we start listening).
+    if (PID_FILE) {
+      writeFileSync(PID_FILE, String(process.pid));
+      console.log(`[server] PID ${process.pid} written to ${PID_FILE}`);
+    }
 
     // ── Prerequisite tool check ────────────────────────────────────────
     const tools = checkAllTools();
