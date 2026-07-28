@@ -155,6 +155,35 @@ app.prepare().then(() => {
     // Don't exit — log and continue
   });
 
+  // ── Graceful shutdown ──────────────────────────────────────────────────
+  // When Playwright kills the webServer (SIGTERM) or the user hits Ctrl+C,
+  // close connections cleanly so the port is immediately reusable.  Without
+  // this, a force-killed server can leave the socket in a zombie state that
+  // blocks the next test run from binding to port 3001.
+  let shuttingDown = false;
+  function shutdown(signal: string) {
+    if (shuttingDown) return;  // ignore duplicate signals (e.g. double Ctrl+C)
+    shuttingDown = true;
+    console.log(`[server] Received ${signal} — shutting down gracefully…`);
+
+    // Stop accepting new connections, then close existing ones
+    wss.close();
+    server.close(() => {
+      console.log('[server] HTTP server closed');
+      process.exit(0);
+    });
+
+    // If we haven't exited within 5 seconds, force-quit.
+    // Handles stuck keep-alive connections and zombie WebSocket clients.
+    setTimeout(() => {
+      console.warn('[server] Graceful shutdown timed out — forcing exit');
+      process.exit(1);
+    }, 5_000).unref();
+  }
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+
   server.listen(port, host, () => {
     console.log(`> Ready on http://${host}:${port}`);
 
