@@ -124,27 +124,15 @@ test.describe('Settings — Role Editor', () => {
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
-    // Find a role button and click it to expand
+    // The RoleEditor component renders a <button> with the filename as text.
+    // Click it to expand and reveal the textarea.
     const roleBtn = page.locator('button:has-text(".md")').first();
-    const roleCount = await roleBtn.count();
-    if (roleCount === 0) {
-      test.skip(true, 'No role rows found');
-      return;
-    }
-
-    // Click repeatedly to handle React hydration timing
+    await expect(roleBtn).toBeVisible({ timeout: 5_000 });
     await roleBtn.click();
-    await page.waitForTimeout(300);
-    await roleBtn.click();
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(500);
 
-    // Textarea should appear (use longer timeout for React hydration + animation)
+    // After clicking, the textarea inside the expanded editor should appear
     const textarea = page.locator('textarea').first();
-    const taCount = await textarea.count();
-    if (taCount === 0) {
-      test.skip(true, 'Role editor textarea not rendered after click — may need different interaction');
-      return;
-    }
     await expect(textarea).toBeVisible({ timeout: 5_000 });
 
     // Reset to default button

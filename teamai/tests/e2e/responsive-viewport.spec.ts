@@ -73,19 +73,19 @@ test.describe('Responsive — Sidebar', () => {
   });
 
   test('collapsing sidebar works at tablet width', async ({ page }) => {
-    test.fixme(true, 'Component has conflicting w-48 and w-12 classes — w-48 takes priority');
-
     await page.setViewportSize(TABLET);
     await page.goto('/');
 
     const sidebar = page.locator('aside');
     await expect(sidebar).toBeVisible({ timeout: 10_000 });
 
-    // Collapse sidebar — use a longer wait for React hydration + transition
-    await sidebar.evaluate((el) => {
-      const btn = el.querySelector('button');
-      if (btn instanceof HTMLElement) btn.click();
-    });
+    // Click the collapse toggle button (first button inside the aside)
+    const collapseBtn = sidebar.locator('button').first();
+    await expect(collapseBtn).toBeVisible({ timeout: 5_000 });
+    await collapseBtn.click();
+    await page.waitForTimeout(500);
+    // Click again in case the first click didn't register (hydration timing)
+    await collapseBtn.click();
     await page.waitForTimeout(1000);
 
     // After collapse, sidebar should have w-12 class

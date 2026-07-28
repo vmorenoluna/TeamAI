@@ -26,14 +26,7 @@ const TEST_SESSION_ID = 'test-coder-session-42';
 test.setTimeout(90_000);
 
 test('terminal renders SSR log labels, then live assistant labels, then live result labels', async ({ page }) => {
-  // Verify the seed task exists before proceeding.
-  let taskId: string;
-  try {
-    taskId = requireSeedTaskId(TASK_SLUG);
-  } catch {
-    test.skip(true, `Seed task "${TASK_SLUG}" not found on disk — did the seed run?`);
-    return;
-  }
+  const taskId = requireSeedTaskId(TASK_SLUG);
 
   // Write files then set the active-project cookie directly.
   writeTestSessionMap(TASK_SLUG, { '1': TEST_SESSION_ID });

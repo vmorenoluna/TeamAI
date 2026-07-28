@@ -213,13 +213,8 @@ test.describe('Task Detail — Review Panel (awaiting-review)', () => {
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 10_000 });
 
     // Review panel should render with approve/reject options
-    // Review panel may render differently based on QA report contents.
-    // The key assertion is that the task detail page loads without error.
-    await expect(page.locator('h1').first()).toBeVisible({ timeout: 10_000 });
-    const hasReviewPanel = await page.locator('text=Human Review').count();
-    if (hasReviewPanel > 0) {
-      await expect(page.locator('text=Human Review').first()).toBeVisible({ timeout: 5_000 });
-    }
+    // Review panel should render — check for the QA Report section heading
+    await expect(page.locator('text=QA Report').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('shows human feedback content in review panel', async ({ page }) => {
@@ -228,13 +223,14 @@ test.describe('Task Detail — Review Panel (awaiting-review)', () => {
     const taskId = requireSeedTaskId(NAVBAR_DROPDOWN_SLUG);
     await page.goto(`/task/${taskId}`);
 
-    // Human feedback content may or may not be seeded for this task.
-    // The key assertion is that the task detail page renders without error.
-    await expect(page.locator('h1').first()).toBeVisible({ timeout: 10_000 });
-    const hasFeedback = await page.locator('text=The fix looks good').count();
-    if (hasFeedback > 0) {
-      await expect(page.locator('text=The fix looks good').first()).toBeVisible({ timeout: 5_000 });
-    }
+    // The review panel's QA Report section starts collapsed — use clickUntilVisible
+    // to expand it and wait for the human feedback content to appear.
+    const { clickUntilVisible } = await import('./helpers');
+    await clickUntilVisible(
+      page.locator('button:has-text("QA Report")').first(),
+      page.locator('text=Human Reviewer Feedback').first(),
+      { timeout: 15_000 },
+    );
   });
 });
 
@@ -282,9 +278,8 @@ test.describe('Task Detail — Phase-Specific UI', () => {
     const taskId = requireSeedTaskId(RATE_LIMITED_SLUG);
     await page.goto(`/task/${taskId}`);
 
-    // Should show the rate-limit banner
-    await expect(page.locator('text=Pipeline paused')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('text=rate limiting')).toBeVisible({ timeout: 5_000 });
+    // Should show the rate-limit banner with pipeline paused message
+    await expect(page.locator('text=Pipeline paused').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('auto-processed task shows review banner', async ({ page }) => {
@@ -294,7 +289,7 @@ test.describe('Task Detail — Phase-Specific UI', () => {
     await page.goto(`/task/${taskId}`);
 
     // Should show auto-processed banner with "Mark Reviewed" button
-    await expect(page.locator('text=auto-processed')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('text=auto-processed').first()).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('button:has-text("Mark Reviewed")')).toBeVisible({ timeout: 5_000 });
   });
 

@@ -183,8 +183,7 @@ test.describe('Roadmap — Item Cards', () => {
 
     const convertBtns = page.locator('text=+ Convert to ticket');
     const count = await convertBtns.count();
-    // Convert to ticket buttons may not appear if all items are already linked
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
   });
 
   test('clicking Convert to ticket shows Converting state', async ({ page }) => {
@@ -257,14 +256,8 @@ test.describe('Roadmap — Bulk Selection', () => {
     await columnCheckbox.click();
     await page.waitForTimeout(500);
 
-    // Bulk action bar should appear if items were selected
-    const bulkBar = page.locator('text=item selected');
-    const bulkCount = await bulkBar.count();
-    if (bulkCount === 0) {
-      test.skip(true, 'Bulk selection bar not rendered — roadmap component might differ');
-      return;
-    }
-    await expect(bulkBar.first()).toBeVisible({ timeout: 5_000 });
+    // Bulk action bar should appear showing count (e.g., "2 items selected")
+    await expect(page.locator('text=/\\d+ items? selected/')).toBeVisible({ timeout: 5_000 });
   });
 });
 
