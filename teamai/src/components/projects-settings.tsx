@@ -123,7 +123,7 @@ export function ProjectsSettings() {
   }
 
   return (
-    <section>
+    <section data-testid="project-defaults">
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-sm font-semibold text-slate-200">Project Defaults</h2>
         <div className="flex items-center gap-2">

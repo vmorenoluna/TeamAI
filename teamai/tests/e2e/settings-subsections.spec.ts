@@ -64,7 +64,7 @@ test.describe('Settings — Pipeline Configuration', () => {
     await expect(page.locator('text=Max QA attempts')).toBeVisible({ timeout: 5_000 });
 
     // The number input for max QA attempts
-    const qaInput = page.locator('input[type="number"]').first();
+    const qaInput = page.locator('[data-testid="pipeline-config"] input[type="number"]').first();
     await expect(qaInput).toBeVisible();
   });
 
@@ -75,7 +75,7 @@ test.describe('Settings — Pipeline Configuration', () => {
 
     await expect(page.locator('text=Parallel subtasks')).toBeVisible({ timeout: 5_000 });
 
-    const checkbox = page.locator('input[type="checkbox"]').first();
+    const checkbox = page.locator('[data-testid="pipeline-config"] input[type="checkbox"]').first();
     await expect(checkbox).toBeVisible();
   });
 
@@ -84,7 +84,7 @@ test.describe('Settings — Pipeline Configuration', () => {
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
-    const saveBtn = page.locator('button:has-text("Save Pipeline Config")');
+    const saveBtn = page.locator('[data-testid="pipeline-config"] button:has-text("Save Pipeline Config")');
     await expect(saveBtn).toBeVisible({ timeout: 5_000 });
   });
 });
@@ -159,11 +159,12 @@ test.describe('Settings — Tool Settings', () => {
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
-    await expect(page.locator('text=Tool Paths').first()).toBeVisible({ timeout: 5_000 });
+    const section = page.locator('[data-testid="tool-settings"]');
+    await expect(section.locator('text=Tool Paths')).toBeVisible({ timeout: 5_000 });
 
     // At minimum, should show claude and git tool rows
-    await expect(page.locator('text=Claude').first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('text=Git').first()).toBeVisible({ timeout: 5_000 });
+    await expect(section.locator('text=Claude').first()).toBeVisible({ timeout: 5_000 });
+    await expect(section.locator('text=Git').first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('Recheck button refreshes tool status', async ({ page }) => {
@@ -171,13 +172,14 @@ test.describe('Settings — Tool Settings', () => {
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
-    const recheckBtn = page.locator('button:has-text("Recheck")');
+    const section = page.locator('[data-testid="tool-settings"]');
+    const recheckBtn = section.locator('button:has-text("Recheck")');
     await expect(recheckBtn).toBeVisible({ timeout: 5_000 });
     await recheckBtn.click();
 
     // Should still show tool rows after refresh
     await page.waitForTimeout(1000);
-    await expect(page.locator('text=Claude').first()).toBeVisible({ timeout: 5_000 });
+    await expect(section.locator('text=Claude').first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('Edit button appears on tool rows', async ({ page }) => {
@@ -186,7 +188,7 @@ test.describe('Settings — Tool Settings', () => {
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
     // Each tool row should have an Edit button
-    const editBtns = page.locator('button[title="Set custom path"]');
+    const editBtns = page.locator('[data-testid="tool-settings"] button[title="Set custom path"]');
     const count = await editBtns.count();
     expect(count).toBeGreaterThanOrEqual(1);
   });
@@ -214,7 +216,7 @@ test.describe('Settings — Projects Defaults', () => {
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
     // Should show at least the seeded project's sync status
-    await expect(page.locator('text=E2E Test Project').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-testid="project-defaults"]').locator('text=E2E Test Project').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('Refresh button is present in projects section', async ({ page }) => {
@@ -222,7 +224,7 @@ test.describe('Settings — Projects Defaults', () => {
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
-    const refreshBtn = page.locator('button:has-text("Refresh")');
+    const refreshBtn = page.locator('[data-testid="project-defaults"] button:has-text("Refresh")');
     // May be hidden if still loading — just verify the section works
     const count = await refreshBtn.count();
     expect(count).toBeGreaterThanOrEqual(0);
