@@ -121,10 +121,10 @@ test.describe('Insights — Chat Interaction', () => {
 
   });
 
-  // NOTE: These tests verify the UI error-path behavior when no
-  // orchestrator is running (getOrCreateInsightsSession fails).
-  // In CI with a live orchestrator the session may succeed and
-  // the error banner / disabled-Send assertions will not hold.
+  // NOTE: These tests verify the UI error-path behavior by mocking
+  // getOrCreateInsightsSession to fail via route interception.
+  // Only server action POSTs are intercepted — RSC page data loads
+  // via GET and are unaffected.
 
   test('chat input renders with a textarea', async ({ page }) => {
 
@@ -146,28 +146,41 @@ test.describe('Insights — Chat Interaction', () => {
 
   test('shows error banner when chat session creation fails', async ({ page }) => {
 
+    // Mock: abort server actions on /insights to simulate session creation failure.
+    // The InsightsChat component calls getOrCreateInsightsSession on mount;
+    // aborting the POST triggers the error banner.
+    await page.route('**/insights', async (route) => {
+      const req = route.request();
+      if (req.method() === 'POST' && req.headers()['next-action']) {
+        await route.abort('failed');
+        return;
+      }
+      await route.continue();
+    });
+
     await page.goto('/insights');
 
-    // Without orchestrator, session creation fails → error alert appears
+    // Session creation fails → error alert appears
     const alert = page.locator('[role="alert"]');
-    try {
-      await expect(alert).toBeVisible({ timeout: 10_000 });
-    } catch {
-      test.skip(true, 'Orchestrator available — session created successfully, no error banner');
-    }
+    await expect(alert).toBeVisible({ timeout: 10_000 });
   });
 
   test('error banner dismiss button clears the error', async ({ page }) => {
 
+    // Mock: abort server actions to force session creation failure
+    await page.route('**/insights', async (route) => {
+      const req = route.request();
+      if (req.method() === 'POST' && req.headers()['next-action']) {
+        await route.abort('failed');
+        return;
+      }
+      await route.continue();
+    });
+
     await page.goto('/insights');
 
     const alert = page.locator('[role="alert"]');
-    try {
-      await expect(alert).toBeVisible({ timeout: 10_000 });
-    } catch {
-      test.skip(true, 'Orchestrator available — no error banner to test');
-      return;
-    }
+    await expect(alert).toBeVisible({ timeout: 10_000 });
 
     // Click the dismiss button inside the alert.
     // Both RoleEditor and InsightsChat error banners use <button aria-label="Dismiss error">.

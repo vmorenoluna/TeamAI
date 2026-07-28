@@ -110,32 +110,46 @@ test.describe('Ideation — Scan Interaction', () => {
   test('clicking Run Scan shows error when scan fails', async ({ page }) => {
 
     await page.goto('/ideation');
+    await expect(page.locator('h1:has-text("Ideation")')).toBeVisible({ timeout: 10_000 });
+
+    // Mock: abort server actions on /ideation to simulate scan failure.
+    // Only intercept POSTs with the next-action header (server actions),
+    // leaving RSC GET requests for page data untouched.
+    await page.route('**/ideation', async (route) => {
+      const req = route.request();
+      if (req.method() === 'POST' && req.headers()['next-action']) {
+        await route.abort('failed');
+        return;
+      }
+      await route.continue();
+    });
 
     const scanBtn = page.locator('button:has-text("Run Scan")');
     await expect(scanBtn).toBeVisible({ timeout: 10_000 });
-
     await scanBtn.click();
 
-    try {
-      await expect(page.locator('text=Scan failed')).toBeVisible({ timeout: 10_000 });
-    } catch {
-      test.skip(true, 'Orchestrator available — scan succeeded, no error');
-    }
+    await expect(page.locator('text=Scan failed')).toBeVisible({ timeout: 10_000 });
   });
 
   test('Run Scan button is re-enabled after scan failure', async ({ page }) => {
 
     await page.goto('/ideation');
+    await expect(page.locator('h1:has-text("Ideation")')).toBeVisible({ timeout: 10_000 });
+
+    // Mock: abort server actions on /ideation to simulate scan failure
+    await page.route('**/ideation', async (route) => {
+      const req = route.request();
+      if (req.method() === 'POST' && req.headers()['next-action']) {
+        await route.abort('failed');
+        return;
+      }
+      await route.continue();
+    });
 
     const scanBtn = page.locator('button:has-text("Run Scan")');
     await scanBtn.click();
 
-    try {
-      await expect(page.locator('text=Scan failed')).toBeVisible({ timeout: 10_000 });
-    } catch {
-      test.skip(true, 'Orchestrator available — scan succeeded');
-      return;
-    }
+    await expect(page.locator('text=Scan failed')).toBeVisible({ timeout: 10_000 });
 
     // After failure the button should be re-enabled for retry
     await expect(scanBtn).toBeEnabled({ timeout: 5_000 });
@@ -144,24 +158,29 @@ test.describe('Ideation — Scan Interaction', () => {
   test('new scan attempt clears previous error before showing new one', async ({ page }) => {
 
     await page.goto('/ideation');
+    await expect(page.locator('h1:has-text("Ideation")')).toBeVisible({ timeout: 10_000 });
+
+    // Mock: abort server actions on /ideation to simulate scan failure
+    await page.route('**/ideation', async (route) => {
+      const req = route.request();
+      if (req.method() === 'POST' && req.headers()['next-action']) {
+        await route.abort('failed');
+        return;
+      }
+      await route.continue();
+    });
 
     const scanBtn = page.locator('button:has-text("Run Scan")');
     await scanBtn.click();
 
     // Wait for the first error
     const errorLocator = page.locator('text=Scan failed');
-    try {
-      await expect(errorLocator).toBeVisible({ timeout: 10_000 });
-    } catch {
-      test.skip(true, 'Orchestrator available — scan succeeded');
-      return;
-    }
+    await expect(errorLocator).toBeVisible({ timeout: 10_000 });
 
     // Click again — handleScan() calls setError(null) before starting
     await scanBtn.click();
 
     // Verify the previous error is cleared (setError(null) is synchronous).
-    // The error should disappear before the new async startIdeationScan() resolves.
     // Use a short timeout — if React hasn't re-rendered yet, we skip this check
     // rather than failing (async timing is environment-dependent).
     try {
