@@ -18,6 +18,7 @@
     "test:integration": "vitest run --include 'tests/integration/**'",
     "pretest:e2e": "node scripts/clear-port-3001.mjs",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "node scripts/clear-port-3001.mjs && playwright test tests/e2e/sidebar.spec.ts tests/e2e/task-detail.spec.ts tests/e2e/kanban.spec.ts tests/e2e/settings.spec.ts tests/e2e/workflow.spec.ts",
     "test:changelog": "bash tests/unit/changelog-parsing.test.sh",
     "test:all": "npm run typecheck && npm run lint && vitest run && npm run test:e2e && npm run test:changelog",
     "test:coverage": "vitest run --coverage && npm run test:e2e && node -e \"console.log('\\n=== Combined Coverage ==='); console.log('  Vitest HTML: coverage/index.html'); console.log('  Vitest summary + Playwright results: see above.')\"",
