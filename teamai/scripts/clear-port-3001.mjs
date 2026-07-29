@@ -31,7 +31,7 @@ import { setTimeout } from 'timers/promises';
 const PORT = '3001';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2_000;
-const PID_FILE = join(tmpdir(), 'teamai-e2e-server.pid');
+const PID_FILE = join(tmpdir(), 'teamai-server.pid');
 
 function isPidAlive(pid) {
   try {

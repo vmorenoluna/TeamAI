@@ -14,14 +14,14 @@ test.describe('Kanban Board', () => {
   });
 
   test('kanban board shows task cards', async ({ page }) => {
-    const cards = page.locator('[data-testid="task-card"]');
+    const cards = page.locator('[data-component="task-card"]');
     const count = await cards.count();
     expect(count).toBeGreaterThan(0);
   });
 
   test('kanban board renders task cards from seed data', async ({ page }) => {
     // With the seed project active, task cards should be present
-    const cards = page.locator('[data-testid="task-card"]');
+    const cards = page.locator('[data-component="task-card"]');
     await expect(cards.first()).toBeVisible({ timeout: 10_000 });
     const count = await cards.count();
     expect(count).toBeGreaterThan(0);

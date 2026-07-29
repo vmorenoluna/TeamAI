@@ -295,7 +295,7 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#11131b]">
+    <div className="flex flex-col h-full bg-[#11131b]" data-component="kanban-board">
       {/* Unified header row */}
       <div className="flex items-center flex-wrap gap-3 px-6 py-3 border-b bg-[#11131b] border-[#1e293b] shrink-0">
         <div className="flex items-center gap-2 shrink-0">
@@ -394,6 +394,7 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
                       <div
                         key={task.id}
                         draggable
+                        data-card-id={task.id}
                         onDragStart={() => handleDragStart(task.id)}
                         onDragEnd={handleDragEnd}
                         onClick={e => handleCardClick(task.id, globalIdx, e)}

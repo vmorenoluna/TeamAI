@@ -172,8 +172,7 @@ test.describe('Roadmap — Item Cards', () => {
     await page.goto('/roadmap');
 
     const convertBtns = page.locator('text=+ Convert to ticket');
-    const count = await convertBtns.count();
-    expect(count).toBeGreaterThan(0);
+    await expect.poll(() => convertBtns.count(), { timeout: 10_000 }).toBeGreaterThan(0);
   });
 
   test('clicking Convert to ticket shows Converting state', async ({ page }) => {
@@ -204,13 +203,11 @@ test.describe('Roadmap — Bulk Selection', () => {
 
     await page.goto('/roadmap');
 
-    // Click the first item checkbox (skip column-level checkboxes, first 4)
-    const checkboxes = page.locator('input[type="checkbox"]');
-    const count = await checkboxes.count();
-    expect(count).toBeGreaterThanOrEqual(5);
-
-    // Click the 5th checkbox (first item checkbox after 4 column headers)
-    await checkboxes.nth(4).click();
+    // Click the first unlinked roadmap item checkbox. Item checkboxes have
+    // aria-label="Select roadmap item"; column header checkboxes have title.
+    const itemCheckbox = page.locator('input[aria-label="Select roadmap item"]').first();
+    await expect(itemCheckbox).toBeVisible({ timeout: 10_000 });
+    await itemCheckbox.click();
 
     // Bulk action bar should appear
     await expect(page.locator('text=1 item selected')).toBeVisible({ timeout: 5_000 });
@@ -222,11 +219,9 @@ test.describe('Roadmap — Bulk Selection', () => {
 
     await page.goto('/roadmap');
 
-    const checkboxes = page.locator('input[type="checkbox"]');
-    const count = await checkboxes.count();
-    expect(count).toBeGreaterThanOrEqual(5);
-
-    await checkboxes.nth(4).click();
+    const itemCheckbox = page.locator('input[aria-label="Select roadmap item"]').first();
+    await expect(itemCheckbox).toBeVisible({ timeout: 10_000 });
+    await itemCheckbox.click();
     await expect(page.locator('text=1 item selected')).toBeVisible({ timeout: 5_000 });
 
     await page.locator('button:has-text("Clear")').click();
@@ -237,12 +232,12 @@ test.describe('Roadmap — Bulk Selection', () => {
 
     await page.goto('/roadmap');
 
-    // Click the column header checkbox for "Phase 1 — Now" (first checkbox)
-    const columnCheckbox = page.locator('input[type="checkbox"]').first();
+    // Click the column header checkbox for "Phase 1 — Now".
+    const columnCheckbox = page.locator('input[title="Select all"]').first();
+    await expect(columnCheckbox).toBeVisible({ timeout: 10_000 });
     await columnCheckbox.click();
-    await page.waitForTimeout(500);
 
-    // Bulk action bar should appear showing count (e.g., "2 items selected")
+    // Bulk action bar should appear showing the now-phase items selected.
     await expect(page.locator('text=/\\d+ items? selected/')).toBeVisible({ timeout: 5_000 });
   });
 });

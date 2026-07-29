@@ -10,7 +10,7 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
 });
 
   async function logAllTaskCards(page: Page) {
-    const cards = page.locator('[data-testid="task-card"]');
+    const cards = page.locator('[data-component="task-card"]');
     const count = await cards.count();
     const titles: string[] = [];
     for (let i = 0; i < count; i++) {
@@ -25,10 +25,10 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
     await logAllTaskCards(page);
     await scrollKanbanRight(page);
 
-    const failedCard = page.locator('[data-testid="task-card"]', { hasText: 'search bar crashes' });
+    const failedCard = page.locator('[data-component="task-card"]', { hasText: 'search bar crashes' });
     await expect(failedCard.first()).toHaveCount(1, { timeout: 5_000 });
 
-    const retryButton = failedCard.first().locator('[data-testid="retry-button"]');
+    const retryButton = failedCard.first().locator('[data-component="retry-button"]');
     await expect(retryButton).toBeVisible({ timeout: 5_000 });
     await expect(retryButton).toHaveText(/Retry/);
     await expect(retryButton).toHaveAttribute('title', 'Retry task — restart pipeline from the phase it failed at');
@@ -39,11 +39,11 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
     await logAllTaskCards(page);
     await scrollKanbanRight(page);
 
-    const failedCard = page.locator('[data-testid="task-card"]', { hasText: 'search bar crashes' });
+    const failedCard = page.locator('[data-component="task-card"]', { hasText: 'search bar crashes' });
     await expect(failedCard.first()).toHaveCount(1, { timeout: 5_000 });
 
-    const failureIndicator = failedCard.first().locator('[data-testid="failure-indicator"]');
-    const retryButton = failedCard.first().locator('[data-testid="retry-button"]');
+    const failureIndicator = failedCard.first().locator('[data-component="failure-indicator"]');
+    const retryButton = failedCard.first().locator('[data-component="retry-button"]');
     await expect(failureIndicator).toBeVisible({ timeout: 5_000 });
     await expect(retryButton).toBeVisible({ timeout: 5_000 });
   });
@@ -59,9 +59,9 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
     ];
 
     for (const title of nonFailedCards) {
-      const card = page.locator('[data-testid="task-card"]', { hasText: title });
+      const card = page.locator('[data-component="task-card"]', { hasText: title });
       if (await card.count() > 0) {
-        const retryButton = card.first().locator('[data-testid="retry-button"]');
+        const retryButton = card.first().locator('[data-component="retry-button"]');
         await expect(retryButton).toHaveCount(0);
       }
     }
@@ -73,7 +73,7 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
     await expect(page.locator('body')).toBeVisible();
 
     // Wait for the detail retry button to appear (panel loads async data)
-    const detailRetryButton = page.locator('[data-testid="detail-retry-button"]');
+    const detailRetryButton = page.locator('[data-component="detail-retry-button"]');
     await expect(detailRetryButton).toBeAttached({ timeout: 15_000 });
 
     await expect(detailRetryButton).toBeVisible({ timeout: 5_000 });

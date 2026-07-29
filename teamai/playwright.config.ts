@@ -29,12 +29,13 @@ export default defineConfig({
     baseURL: 'http://localhost:3001',
     trace: 'on-first-retry',
     headless: true,
+    testIdAttribute: 'data-component',
   },
   webServer: {
     // Single process (no shell && chaining) so Playwright can kill it
     // cleanly.  On Windows, shell && chains create orphaned grandchild
     // processes because SIGTERM doesn't propagate through the tree.
-    // Port cleanup is handled inside server.ts itself (test mode only).
+    // Port cleanup is handled inside server.ts itself.
     command: 'npx tsx server.ts',
     url: 'http://localhost:3001',
     // Force a fresh dev server per test run. If we allow reuseExistingServer,

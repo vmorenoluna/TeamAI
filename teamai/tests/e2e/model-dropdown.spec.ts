@@ -107,7 +107,7 @@ test.describe('Model Dropdown', () => {
       // Use page.evaluate to click the backdrop — React event delegation
       // can miss Playwright clicks on overlays due to pointer-events layers.
       await page.evaluate(() => {
-        const el = document.querySelector('[data-testid="dialog-backdrop"]') as HTMLElement | null;
+        const el = document.querySelector('[data-component="dialog-backdrop"]') as HTMLElement | null;
         if (el) el.click();
       });
       await expect(page.locator('h2:has-text("New Terminal")')).not.toBeVisible({ timeout: 3_000 });

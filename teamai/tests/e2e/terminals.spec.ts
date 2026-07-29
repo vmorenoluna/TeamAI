@@ -20,7 +20,7 @@ test.describe('Terminals Page', () => {
     await page.goto('/terminals');
     // The page heading may be deeply nested; verify the page rendered first
     await expect(page.locator('body')).toBeVisible({ timeout: 10_000 });
-    // The New Terminal button has data-testid and is in the SSR HTML
+    // The New Terminal button has data-component and is in the SSR HTML
     await expect(page.getByTestId('new-terminal-btn')).toBeVisible({ timeout: 20_000 });
   });
 

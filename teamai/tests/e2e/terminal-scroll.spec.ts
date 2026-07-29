@@ -23,7 +23,7 @@ test.describe('Terminal Scroll Behavior', () => {
 
     // Wait for React hydration, then verify the terminal container is mounted.
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('[data-component="terminal-container"]')).toBeVisible({ timeout: 20_000 });
 
     // Wait for any xterm instances to initialise (terminal emulator + WebGL
     // renderer). Not all tasks have terminal output — if none rendered, skip.
@@ -35,7 +35,7 @@ test.describe('Terminal Scroll Behavior', () => {
     }
 
     // No floating scroll buttons
-    await expect(page.locator('[data-testid="scroll-to-bottom"]')).toHaveCount(0);
-    await expect(page.locator('[data-testid="scroll-to-top"]')).toHaveCount(0);
+    await expect(page.locator('[data-component="scroll-to-bottom"]')).toHaveCount(0);
+    await expect(page.locator('[data-component="scroll-to-top"]')).toHaveCount(0);
   });
 });

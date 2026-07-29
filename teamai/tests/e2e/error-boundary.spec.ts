@@ -34,7 +34,7 @@ test.describe('Error Boundary — Normal Operation', () => {
     await expect(prodFallback).toHaveCount(0, { timeout: 5_000 });
 
     // Kanban should be working
-    await expect(page.locator('[data-testid="task-card"]').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-component="task-card"]').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('task detail page renders without error boundary fallback', async ({ page }) => {
@@ -43,7 +43,7 @@ test.describe('Error Boundary — Normal Operation', () => {
     await page.goto('/');
     await page.waitForTimeout(1500);
 
-    const firstCard = page.locator('[data-testid="task-card"]').first();
+    const firstCard = page.locator('[data-component="task-card"]').first();
     await firstCard.click();
     await page.waitForTimeout(1500);
 
@@ -91,6 +91,6 @@ test.describe('Error Boundary — Normal Operation', () => {
     const errorFallback = page.locator('text=Render Error');
     await expect(errorFallback).toHaveCount(0, { timeout: 5_000 });
 
-    await expect(page.locator('[data-testid="task-card"]').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-component="task-card"]').first()).toBeVisible({ timeout: 10_000 });
   });
 });

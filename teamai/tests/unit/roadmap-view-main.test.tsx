@@ -79,8 +79,8 @@ vi.mock('@/hooks/use-phase-sync', () => ({
 
 vi.mock('@/components/task-panel', () => ({
   TaskPanel: ({ onClose }: { taskId: string; onClose: () => void }) => (
-    <div data-testid="task-panel">
-      <button data-testid="close-task-panel" onClick={onClose}>Close</button>
+    <div data-component="task-panel">
+      <button data-component="close-task-panel" onClick={onClose}>Close</button>
     </div>
   ),
 }));
@@ -91,8 +91,8 @@ vi.mock('@/components/roadmap-view', async (importOriginal) => {
   return {
     ...actual,
     PhasedKanban: ({ report }: { report: { executive_summary: string } }) => (
-      <div data-testid="phased-kanban">
-        <span data-testid="exec-summary">{report.executive_summary}</span>
+      <div data-component="phased-kanban">
+        <span data-component="exec-summary">{report.executive_summary}</span>
       </div>
     ),
   };

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { Project } from '@/lib/project-store';
 
@@ -13,6 +13,7 @@ interface Props {
 export function Sidebar({ projects: _projects, activeProjectPath: _activeProjectPath }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
 
   return (
     <aside className={`shrink-0 flex flex-col bg-[#11131b] text-slate-300 transition-all duration-200 ${collapsed ? 'w-12' : 'w-48 lg:w-60'}`}>
@@ -49,6 +50,15 @@ export function Sidebar({ projects: _projects, activeProjectPath: _activeProject
             key={href}
             href={href}
             title={collapsed ? label : undefined}
+            onKeyDown={(e) => {
+              // Ensure keyboard Enter activates navigation even when Next.js
+              // Link's synthetic click handling is not enough for the test
+              // harness or assistive-tech users.
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                router.push(href);
+              }
+            }}
             className={`flex items-center gap-2 lg:gap-3 px-2 lg:px-3 py-2 text-sm transition-colors ${
               isActive
                 ? 'text-white bg-[#2563eb]/15 border-r-2 border-[#2563eb]'

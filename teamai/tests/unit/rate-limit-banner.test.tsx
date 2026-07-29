@@ -50,7 +50,7 @@ function renderComponent(overrides: {
   return { onCancelAutoResume, onRetry };
 }
 
-/** Get the outermost container div via data-testid. */
+/** Get the outermost container div via data-component. */
 function getOuterContainer(): HTMLElement {
   return screen.getByTestId('rate-limit-banner');
 }

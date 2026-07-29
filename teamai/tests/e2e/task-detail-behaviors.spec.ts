@@ -61,7 +61,7 @@ test.describe('Task Detail — Page Rendering', () => {
     const taskId = requireSeedTaskId(DARK_MODE_SLUG);
     await page.goto(`/task/${taskId}`);
 
-    const idEl = page.locator('[data-testid="task-id"]');
+    const idEl = page.locator('[data-component="task-id"]');
     await expect(idEl).toBeVisible({ timeout: 10_000 });
     await expect(idEl).toContainText(taskId);
 
@@ -126,7 +126,7 @@ test.describe('Task Detail — Tab Content', () => {
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}#plan`);
 
-    await expect(page.locator('[data-testid="plan-subtask"]').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-component="plan-subtask"]').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('text=1 / 2 subtasks completed')).toBeVisible({ timeout: 5_000 });
   });
 
@@ -144,7 +144,7 @@ test.describe('Task Detail — Tab Content', () => {
     await page.goto(`/task/${taskId}#terminal`);
 
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('[data-component="terminal-container"]')).toBeVisible({ timeout: 20_000 });
   });
 });
 
@@ -163,7 +163,7 @@ test.describe('Task Detail — Failed Task', () => {
 
     await expect(page.locator('h3:has-text("Task Failed")')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('text=Max QA attempts reached')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('[data-testid="detail-retry-button"]')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-component="detail-retry-button"]')).toBeVisible({ timeout: 10_000 });
   });
 
   test('shows QA report on QA tab with FAIL status', async ({ page }) => {
@@ -245,7 +245,7 @@ test.describe('Task Detail — Phase-Specific UI', () => {
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}`);
 
-    const restartBtn = page.locator('[data-testid="restart-phase-button"]');
+    const restartBtn = page.locator('[data-component="restart-phase-button"]');
     await expect(restartBtn).toBeVisible({ timeout: 10_000 });
     await expect(restartBtn).toHaveText(/Restart/);
   });

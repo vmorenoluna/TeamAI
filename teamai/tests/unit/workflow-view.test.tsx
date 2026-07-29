@@ -12,8 +12,8 @@ vi.mock('@/hooks/use-phase-sync', () => ({
 
 vi.mock('@/components/task-panel', () => ({
   TaskPanel: ({ taskId, onClose }: { taskId: string; onClose: () => void }) => (
-    <div data-testid="task-panel" data-taskid={taskId}>
-      <button data-testid="task-panel-close" onClick={onClose}>Close</button>
+    <div data-component="task-panel" data-taskid={taskId}>
+      <button data-component="task-panel-close" onClick={onClose}>Close</button>
     </div>
   ),
 }));

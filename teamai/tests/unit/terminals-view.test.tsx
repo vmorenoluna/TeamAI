@@ -34,8 +34,8 @@ vi.mock('@/app/actions/terminals', () => ({
 
 vi.mock('@/components/terminal-panel', () => ({
   TerminalPanel: ({ sessionId, role, model, onClose }: { sessionId: string; role: string; model: string; onClose: () => void }) => (
-    <div data-testid="terminal-panel" data-session-id={sessionId} data-role={role} data-model={model}>
-      <button data-testid="close-terminal" onClick={onClose}>Close</button>
+    <div data-component="terminal-panel" data-session-id={sessionId} data-role={role} data-model={model}>
+      <button data-component="close-terminal" onClick={onClose}>Close</button>
     </div>
   ),
 }));

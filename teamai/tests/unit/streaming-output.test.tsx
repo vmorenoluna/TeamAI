@@ -19,7 +19,7 @@ function renderComponent(text: string, eventCount: number, className?: string) {
   render(<StreamingOutput text={text} eventCount={eventCount} className={className} />);
 }
 
-/** Get the outermost container div via data-testid. */
+/** Get the outermost container div via data-component. */
 function getOuterContainer(): HTMLElement {
   return screen.getByTestId('streaming-output');
 }

@@ -35,18 +35,18 @@ test.describe('QA Failure Banner & Completion Summary', () => {
     await page.goto(`/task/${taskId}#plan`);
 
     // Plan subtasks should render
-    await expect(page.locator('[data-testid="plan-subtask"]').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-component="plan-subtask"]').first()).toBeVisible({ timeout: 15_000 });
 
     // Progress text
     await expect(page.locator('text=1 / 2 subtasks completed')).toBeVisible({ timeout: 5_000 });
 
     // First subtask should be completed with checkmark
-    const completedSubtask = page.locator('[data-testid="plan-subtask"]').first();
+    const completedSubtask = page.locator('[data-component="plan-subtask"]').first();
     await expect(completedSubtask.locator('text=✓')).toBeVisible({ timeout: 5_000 });
     await expect(completedSubtask.locator('text=Fix CSS z-index')).toBeVisible({ timeout: 5_000 });
 
     // Progress bar should be visible (partial completion)
-    await expect(page.locator('[data-testid="subtask-progress-bar"]')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('[data-component="subtask-progress-bar"]')).toBeVisible({ timeout: 5_000 });
   });
 
   test('failed task shows QA report with FAIL overall', async ({ page }) => {
@@ -71,11 +71,11 @@ test.describe('QA Failure Banner & Completion Summary', () => {
     const taskId = requireSeedTaskId(SHARED_TYPES_SLUG);
     await page.goto(`/task/${taskId}#plan`);
     await expect(page.locator('body')).toBeVisible();
-    await expect(page.locator('[data-testid="plan-subtask"]').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-component="plan-subtask"]').first()).toBeVisible({ timeout: 15_000 });
 
     await expect(page.locator('text=3 / 3 subtasks completed')).toBeVisible({ timeout: 5_000 });
 
-    const subtasks = page.locator('[data-testid="plan-subtask"]');
+    const subtasks = page.locator('[data-component="plan-subtask"]');
     const count = await subtasks.count();
     expect(count).toBe(3);
 
@@ -95,9 +95,9 @@ test.describe('QA Failure Banner & Completion Summary', () => {
     await page.goto('/');
     await scrollKanbanRight(page);
 
-    const failedCard = page.locator('[data-testid="task-card"]', { hasText: 'search bar crashes' });
+    const failedCard = page.locator('[data-component="task-card"]', { hasText: 'search bar crashes' });
     await expect(failedCard).toBeVisible({ timeout: 10_000 });
-    const failureIndicator = failedCard.locator('[data-testid="failure-indicator"]');
+    const failureIndicator = failedCard.locator('[data-component="failure-indicator"]');
     await expect(failureIndicator).toBeVisible({ timeout: 5_000 });
     await expect(failureIndicator).toHaveAttribute('title', 'Task failed');
   });
@@ -105,9 +105,9 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   test('kanban card shows subtask progress badge for tasks with plans', async ({ page }) => {
     await page.goto('/');
 
-    const taskCard = page.locator('[data-testid="task-card"]', { hasText: 'login button' });
+    const taskCard = page.locator('[data-component="task-card"]', { hasText: 'login button' });
     await expect(taskCard).toBeVisible({ timeout: 10_000 });
-    const progressBadge = taskCard.locator('[data-testid="subtask-progress-badge"]');
+    const progressBadge = taskCard.locator('[data-component="subtask-progress-badge"]');
     await expect(progressBadge).toBeVisible({ timeout: 5_000 });
     await expect(progressBadge).toHaveText('1/2 ✓');
     await expect(progressBadge).toHaveAttribute('title', '1 / 2 subtasks completed');
@@ -116,9 +116,9 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   test('kanban card shows green subtask badge when all subtasks completed', async ({ page }) => {
     await page.goto('/');
 
-    const taskCard = page.locator('[data-testid="task-card"]', { hasText: 'Extract shared types' });
+    const taskCard = page.locator('[data-component="task-card"]', { hasText: 'Extract shared types' });
     await expect(taskCard).toBeVisible({ timeout: 10_000 });
-    const progressBadge = taskCard.locator('[data-testid="subtask-progress-badge"]');
+    const progressBadge = taskCard.locator('[data-component="subtask-progress-badge"]');
     await expect(progressBadge).toBeVisible({ timeout: 5_000 });
     await expect(progressBadge).toHaveText('3/3 ✓');
     await expect(progressBadge).toHaveAttribute('title', '3 / 3 subtasks completed');
@@ -127,9 +127,9 @@ test.describe('QA Failure Banner & Completion Summary', () => {
   test('backlog kanban cards without plans have no subtask progress badge', async ({ page }) => {
     await page.goto('/');
 
-    const taskCard = page.locator('[data-testid="task-card"]', { hasText: 'dark mode toggle' });
+    const taskCard = page.locator('[data-component="task-card"]', { hasText: 'dark mode toggle' });
     await expect(taskCard).toBeVisible({ timeout: 10_000 });
-    const progressBadge = taskCard.locator('[data-testid="subtask-progress-badge"]');
+    const progressBadge = taskCard.locator('[data-component="subtask-progress-badge"]');
     await expect(progressBadge).toHaveCount(0);
   });
 });

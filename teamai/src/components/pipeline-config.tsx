@@ -28,7 +28,7 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
   }
 
   return (
-    <div data-testid="pipeline-config" className="space-y-4">
+    <div data-component="pipeline-config" className="space-y-4">
       {/* Error banner — surfaces Server Action throws from handleSave. */}
       {error && (
         <div

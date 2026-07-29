@@ -93,7 +93,6 @@ vi.mock('@/lib/recovery', () => ({
   autoClearExpiredRateLimits: () => 0,
   reconcileTaskArtifacts: () => [],
   autoResumeInterruptedTasks: vi.fn().mockResolvedValue(0),
-  _resetAutoResumeDebounce: () => {},
 }));
 
 vi.mock('@/lib/project-store', () => ({

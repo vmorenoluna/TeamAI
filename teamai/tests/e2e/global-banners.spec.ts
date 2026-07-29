@@ -172,7 +172,7 @@ test.describe('Global Banners — Rate Limit Banner', () => {
 
   });
 
-  test('rate limit banner has data-testid when shown', async ({ page }) => {
+  test('rate limit banner has data-component when shown', async ({ page }) => {
 
     // Check multiple pages where the rate limit banner can appear
     const pages = ['/', '/insights', '/ideation'];
@@ -182,7 +182,7 @@ test.describe('Global Banners — Rate Limit Banner', () => {
       await page.waitForTimeout(1000);
 
       // If rate-limit banner is visible, it should have the testid
-      const rateLimitBanner = page.locator('[data-testid="rate-limit-banner"]');
+      const rateLimitBanner = page.locator('[data-component="rate-limit-banner"]');
       const count = await rateLimitBanner.count();
       // Rate limit is state-dependent — just verifying the component works
       expect(count).toBeGreaterThanOrEqual(0);
@@ -195,7 +195,7 @@ test.describe('Global Banners — Rate Limit Banner', () => {
     await page.waitForTimeout(1500);
 
     // Under normal conditions (no rate limiting), the banner should not appear
-    const rateLimitBanner = page.locator('[data-testid="rate-limit-banner"]');
+    const rateLimitBanner = page.locator('[data-component="rate-limit-banner"]');
     await expect(rateLimitBanner).toHaveCount(0, { timeout: 5_000 });
   });
 
@@ -205,7 +205,7 @@ test.describe('Global Banners — Rate Limit Banner', () => {
     await page.waitForTimeout(1500);
 
     // Rate limit banner should not interfere with normal kanban operation
-    await expect(page.locator('[data-testid="task-card"]').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-component="task-card"]').first()).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('text=Backlog').first()).toBeVisible({ timeout: 5_000 });
   });
 });
