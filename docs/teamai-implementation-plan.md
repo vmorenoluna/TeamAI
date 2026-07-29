@@ -143,8 +143,9 @@ app.prepare().then(() => {
   // Bind to 0.0.0.0 so the app is accessible from other devices
   // (e.g., phone via Tailscale). Use HOST env var to restrict if needed.
   const host = process.env.HOST || '0.0.0.0';
-  server.listen(3000, host, () => {
-    console.log(`> Ready on http://${host}:3000`);
+  const port = process.env.PORT || '3000';
+  server.listen(port, host, () => {
+    console.log(`> Ready on http://${host}:${port}`);
   });
 });
 ```
@@ -244,7 +245,7 @@ git clone https://github.com/your-org/teamai.git
 cd teamai
 npm install
 npm run dev
-# Open http://localhost:3000
+# Open http://localhost:3002 (dev, configurable via PORT env var)
 ```
 
 **First-time use:**
@@ -2039,7 +2040,7 @@ function useAgentStream(taskId: string) {
 Each step is designed to be self-contained and testable before moving to the next.
 
 ### ✅ Step 1: Project Scaffold
-Next.js project scaffolded with all dependencies, custom `server.ts`, and `npm run dev` working on port 3000.
+Next.js project scaffolded with all dependencies, custom `server.ts`, and `npm run dev` working on port 3002 (configurable via PORT env var).
 
 ### ✅ Step 2: Role Definitions + Slash Commands
 All 6 role files and 9 command files exist in `defaults/`. `teamai-workflow.md` scaffolded via `@`-import in project `CLAUDE.md`.
