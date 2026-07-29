@@ -1075,24 +1075,6 @@ describe('Crash Recovery Integration', () => {
       expect(prUrl).toBe('https://github.com/teamai-org/TeamAI/pull/42');
     });
 
-    it('PR URL extraction handles GitLab merge request URLs after crash', async () => {
-      const logFile = join(specPath, 'output.log');
-      writeFileSync(
-        logFile,
-        'Created merge request.\n' +
-        'https://gitlab.com/teamai-org/TeamAI/-/merge_requests/17\n',
-      );
-
-      vi.resetModules();
-      onHandlers.clear();
-
-      const { getOrchestrator } = await import('@/lib/orchestrator');
-      const recoveredOrch = getOrchestrator(testDir);
-
-      const prUrl = (recoveredOrch as AnyOrch)._ctx.extractPrUrl(logFile);
-      expect(prUrl).toBe('https://gitlab.com/teamai-org/TeamAI/-/merge_requests/17');
-    });
-
     it('PR URL extraction returns null when output.log does not exist after crash', async () => {
       // Simulate: crash happened before any agent output was written
       const logFile = join(specPath, 'output.log');

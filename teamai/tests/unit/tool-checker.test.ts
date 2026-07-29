@@ -196,24 +196,23 @@ describe('checkTool — custom paths', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('checkAllTools', () => {
-  it('returns status for all six tools', () => {
+  it('returns status for all five tools', () => {
     mockToolFound('claude');
     mockToolFound('git');
     mockToolFound('gh');
-    mockToolFound('glab');
     mockToolFound('docker');
     mockToolFound('devcontainer');
 
     const results = checkAllTools();
 
-    expect(results).toHaveLength(6);
+    expect(results).toHaveLength(5);
     const names = results.map(r => r.name);
     expect(names).toContain('claude');
     expect(names).toContain('git');
     expect(names).toContain('gh');
-    expect(names).toContain('glab');
     expect(names).toContain('docker');
     expect(names).toContain('devcontainer');
+    expect(names).not.toContain('glab');
   });
 
   it('mixes found and missing tools', () => {

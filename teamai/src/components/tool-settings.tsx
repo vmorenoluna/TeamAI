@@ -7,7 +7,7 @@ import type { ToolName, ToolStatus } from '@/lib/tool-checker';
 import { formatActionError } from '@/lib/error-format';
 
 const STATUS_ORDER: Record<string, number> = {
-  claude: 0, git: 1, gh: 2, glab: 3, docker: 4, devcontainer: 5,
+  claude: 0, git: 1, gh: 2, docker: 3, devcontainer: 4,
 };
 
 export function ToolSettings({ initialTools }: { initialTools: ToolStatus[] }) {

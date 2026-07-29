@@ -54,7 +54,7 @@ export function parseSessionLimitReset(line: string): number | null {
 
 /**
  * Scan a log file for a PR/MR URL created by an agent.
- * Supports GitHub, GitLab, and Bitbucket URLs.
+ * Supports GitHub and Bitbucket URLs.
  */
 export function extractPrUrl(logFile: string): string | null {
   try {
@@ -62,7 +62,6 @@ export function extractPrUrl(logFile: string): string | null {
     const content = readFileSync(logFile, 'utf-8');
     const patterns = [
       /https?:\/\/github\.com\/[^\s<>"')\]]+\/pull\/\d+/gi,
-      /https?:\/\/gitlab\.com\/[^\s<>"')\]]+\/-\/merge_requests\/\d+/gi,
       /https?:\/\/bitbucket\.org\/[^\s<>"')\]]+\/pull-requests\/\d+/gi,
     ];
     for (const pattern of patterns) {

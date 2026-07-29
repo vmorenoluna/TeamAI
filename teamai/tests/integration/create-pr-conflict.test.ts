@@ -75,9 +75,9 @@ vi.mock('@/lib/recovery', () => ({
 
 vi.mock('@/lib/tool-checker', () => ({
   getToolPath: (tool: string) => {
-    // gh/glab are not available in CI — return a non-existent path so
+    // gh is not available in CI — return a non-existent path so
     // execFileSync throws ENOENT immediately instead of hanging on real API calls
-    if (tool === 'gh' || tool === 'glab') return tool + '-NOTFOUND';
+    if (tool === 'gh') return tool + '-NOTFOUND';
     return tool;
   },
 }));

@@ -376,7 +376,7 @@ export class Orchestrator {
     // task's own in-progress artifacts would be destroyed for nothing, and
     // it would fall into the lossy fallback branch further down.
     if (task.mergeStrategy === 'pull-request' && task.prUrl) {
-      const platform = (task.platform as 'github' | 'gitlab' | 'bitbucket' | 'unknown' | undefined)
+      const platform = (task.platform as 'github' | 'bitbucket' | 'unknown' | undefined)
         ?? detectGitPlatform(this.projectRoot);
       const merged = isPrMerged(platform, task.prUrl, this.projectRoot);
       if (merged === false) {
