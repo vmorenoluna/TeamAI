@@ -135,7 +135,7 @@ export function isPrMerged(
 }
 
 /**
- * Create a PR/MR directly via CLI (`gh pr create` / `glab mr create`).
+ * Create a PR directly via CLI (`gh pr create`).
  * Returns the PR/MR URL on success.
  *
  * For non-GitHub platforms where no standard CLI exists, returns null
