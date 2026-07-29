@@ -5,7 +5,7 @@ Goal: a single installable file that opens TeamAI as a native-like app window (n
 ## Architecture Context
 
 TeamAI is a Next.js app with a **custom server** (`server.ts`) that:
-- Handles HTTP + WebSocket on port 3000
+- Handles HTTP + WebSocket on port 3000 (production default; dev mode uses 3002 via PORT env var)
 - Spawns Claude CLI subprocesses for agent pipelines
 - Manages git worktrees, file I/O, and container orchestration
 - Depends on `node-pty` for terminal emulation
@@ -44,7 +44,7 @@ Make the app an **installable PWA** (manifest + service worker) and bundle the s
 | **Cross-platform** | ✅ Anywhere Node.js runs |
 | **Maturity** | ⚠️ Node.js SEA is experimental (v21+); PWA is mature |
 
-**How it works:** User downloads `teamai.exe`, double-clicks → server starts → browser opens to `localhost:3000`. They click "Install" in the browser → PWA installs → next time it opens as a standalone window. A helper script could auto-install the PWA via Chrome's `--app` flag for a one-click experience.
+**How it works:** User downloads `teamai.exe`, double-clicks → production server starts on port 3000 → browser opens to `localhost:3000`. They click "Install" in the browser → PWA installs → next time it opens as a standalone window. A helper script could auto-install the PWA via Chrome's `--app` flag for a one-click experience.
 
 **Trade-off:** Two-step first-run experience (start server → install PWA). Can be smoothed with a launcher that opens Chrome in `--app` mode. Node.js SEA is still experimental.
 

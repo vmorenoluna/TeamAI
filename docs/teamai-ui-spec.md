@@ -1360,7 +1360,7 @@ Four sections, rendered top-to-bottom:
 
 ### Journey 1 — First-time Setup
 
-1. Open `http://localhost:3000`
+1. Open `http://localhost:3002` (dev server) or `http://localhost:3000` (production)
 2. See: empty main area, "Select or add a project from the sidebar to get started."
 3. Click **"+ Add"** in sidebar Projects section
 4. In the input that appears, type the path to your project (e.g. `/Users/me/myproject`)
