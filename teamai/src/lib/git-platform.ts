@@ -8,13 +8,12 @@ import path from 'path';
  * Detect the Git hosting platform from the remote origin URL.
  * @returns 'github', 'gitlab', 'bitbucket', or 'unknown'
  */
-export function detectGitPlatform(projectRoot: string): 'github' | 'gitlab' | 'bitbucket' | 'unknown' {
+export function detectGitPlatform(projectRoot: string): 'github' | 'bitbucket' | 'unknown' {
   try {
     const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
       cwd: projectRoot, encoding: 'utf-8', timeout: 5000,
     }).trim().toLowerCase();
     if (url.includes('github.com') || url.includes('github.')) return 'github';
-    if (url.includes('gitlab.com') || url.includes('gitlab.')) return 'gitlab';
     if (url.includes('bitbucket.org') || url.includes('bitbucket.')) return 'bitbucket';
   } catch (err) { logWarn('orchestrator', 'Failed to detect git remote platform', err); }
   return 'unknown';
@@ -80,7 +79,7 @@ export function buildPRBody(description: string, specContent: string): string {
  * Returns the PR URL if one exists, or null otherwise.
  */
 export function checkExistingPRViaCLI(
-  platform: 'github' | 'gitlab' | 'bitbucket' | 'unknown',
+  platform: 'github' | 'bitbucket' | 'unknown',
   branch: string,
   projectRoot: string,
 ): string | null {
@@ -101,23 +100,6 @@ export function checkExistingPRViaCLI(
     }
   }
 
-  if (platform === 'gitlab') {
-    try {
-      const result = execFileSync(getToolPath('glab'), [
-        'mr', 'list',
-        '--source-branch', branch,
-        '--state', 'opened',
-        '--json', 'web_url',
-        '--jq', '.[0].web_url',
-      ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 });
-      const url = result.trim();
-      return url || null;
-    } catch (err) {
-      logWarn('git-platform', 'Failed to check existing MR via glab CLI', err);
-      return null;
-    }
-  }
-
   return null;
 }
 
@@ -133,7 +115,7 @@ export function checkExistingPRViaCLI(
  * a pure regression for projects that never had this check.
  */
 export function isPrMerged(
-  platform: 'github' | 'gitlab' | 'bitbucket' | 'unknown',
+  platform: 'github' | 'bitbucket' | 'unknown',
   prUrl: string,
   projectRoot: string,
 ): boolean | null {
@@ -150,19 +132,6 @@ export function isPrMerged(
     }
   }
 
-  if (platform === 'gitlab') {
-    try {
-      const result = execFileSync(getToolPath('glab'), [
-        'mr', 'view', prUrl,
-        '--output', 'json',
-      ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 });
-      return JSON.parse(result).state === 'merged';
-    } catch (err) {
-      logWarn('git-platform', `Failed to check MR merge state via glab CLI for ${prUrl}`, err);
-      return null;
-    }
-  }
-
   return null;
 }
 
@@ -174,7 +143,7 @@ export function isPrMerged(
  * — the caller should fall back to constructing the create URL manually.
  */
 export function createPRViaCLI(
-  platform: 'github' | 'gitlab' | 'bitbucket' | 'unknown',
+  platform: 'github' | 'bitbucket' | 'unknown',
   branch: string,
   title: string,
   body: string,
@@ -198,21 +167,6 @@ export function createPRViaCLI(
     return url;
   }
 
-  if (platform === 'gitlab') {
-    logToOutput(specPath, `[PR] Creating GitLab MR via glab CLI: ${branch} → ${defaultBranch}\n`);
-    const result = execFileSync(getToolPath('glab'), [
-      'mr', 'create',
-      '--title', title,
-      '--description', body,
-      '--target-branch', defaultBranch,
-      '--source-branch', branch,
-      '--yes',
-    ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 30_000 });
-    const url = result.trim();
-    logToOutput(specPath, `[PR] Created: ${url}\n`);
-    return url;
-  }
-
   // Bitbucket / unknown: no standard CLI — return null for caller to handle
   logToOutput(specPath, `[PR] Platform "${platform}" has no standard CLI — cannot auto-create PR\n`);
   return null;
@@ -224,7 +178,7 @@ export function createPRViaCLI(
  * backward compatibility (re-exported from orchestrator.ts).
  */
 export function buildPlatformPrompt(
-  platform: 'github' | 'gitlab' | 'bitbucket' | 'unknown',
+  platform: 'github' | 'bitbucket' | 'unknown',
   branch: string,
   description: string,
   specContent: string,
@@ -244,12 +198,6 @@ export function buildPlatformPrompt(
   switch (platform) {
     case 'github':
       return base + `Use the GitHub MCP server's create_pull_request tool.\n\n` + meta;
-    case 'gitlab':
-      return base +
-        `Platform: GitLab. Create a Merge Request (not a PR).\n` +
-        `If the "glab" CLI is available, run: glab mr create --title "..." --description "..."` +
-        ` --target-branch ${defaultBranch} --source-branch ${branch}\n` +
-        `Otherwise, use the GitLab API (project is from remote origin URL).\n\n` + meta;
     case 'bitbucket':
       return base +
         `Platform: Bitbucket Cloud. Create a Pull Request.\n` +

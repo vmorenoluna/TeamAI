@@ -415,17 +415,6 @@ describe('Orchestrator', () => {
       expect(result).toBe('https://github.com/owner/repo/pull/42');
     });
 
-    it('extracts a GitLab MR URL from the log file', () => {
-      testData = setupTestProject();
-      const orch = makeOrch(testData.root, getOrchestrator);
-      const logFile = join(testData.taskDir, 'output.log');
-
-      writeFileSync(logFile, 'MR created: https://gitlab.com/group/project/-/merge_requests/99');
-
-      const result = (orch as AnyOrch)._ctx.extractPrUrl(logFile);
-      expect(result).toBe('https://gitlab.com/group/project/-/merge_requests/99');
-    });
-
     it('extracts a Bitbucket PR URL from the log file', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);

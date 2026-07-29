@@ -58,11 +58,6 @@ describe('detectGitPlatform', () => {
     expect(detectGitPlatform('/test')).toBe('github');
   });
 
-  it('detects gitlab from remote URL', () => {
-    mockExecFileSync.mockReturnValue('https://gitlab.com/user/repo.git\n');
-    expect(detectGitPlatform('/test')).toBe('gitlab');
-  });
-
   it('detects bitbucket from remote URL', () => {
     mockExecFileSync.mockReturnValue('https://bitbucket.org/user/repo.git\n');
     expect(detectGitPlatform('/test')).toBe('bitbucket');
@@ -82,11 +77,6 @@ describe('detectGitPlatform', () => {
   it('detects github with custom domain (github.mycompany.com)', () => {
     mockExecFileSync.mockReturnValue('https://github.mycompany.com/user/repo.git\n');
     expect(detectGitPlatform('/test')).toBe('github');
-  });
-
-  it('detects gitlab with self-hosted domain', () => {
-    mockExecFileSync.mockReturnValue('https://gitlab.internal.company.com/project/repo.git\n');
-    expect(detectGitPlatform('/test')).toBe('gitlab');
   });
 
   it('handles git@ SSH URLs for github', () => {
@@ -242,16 +232,6 @@ describe('buildPlatformPrompt', () => {
     expect(prompt).toContain(defaultBranch);
   });
 
-  it('builds gitlab MR prompt', () => {
-    mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
-    const prompt = buildPlatformPrompt('gitlab', branch, description, specContent, '/test');
-    expect(prompt).toContain('GitLab');
-    expect(prompt).toContain('Merge Request');
-    expect(prompt).toContain('glab mr create');
-    expect(prompt).toContain(branch);
-    expect(prompt).toContain(description);
-  });
-
   it('builds bitbucket PR prompt', () => {
     mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
     const prompt = buildPlatformPrompt('bitbucket', branch, description, specContent, '/test');
@@ -359,24 +339,6 @@ describe('checkExistingPRViaCLI', () => {
     expect(mockWarn).toHaveBeenCalledWith('git-platform', 'Failed to check existing PR via gh CLI', expect.any(Error));
   });
 
-  it('returns MR URL when glab mr list finds an open MR', () => {
-    mockExecFileSync.mockReturnValue('https://gitlab.com/group/project/-/merge_requests/99\n');
-    const result = checkExistingPRViaCLI('gitlab', 'feat/test', '/test');
-    expect(result).toBe('https://gitlab.com/group/project/-/merge_requests/99');
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'glab',
-      expect.arrayContaining(['mr', 'list', '--source-branch', 'feat/test', '--state', 'opened']),
-      expect.any(Object),
-    );
-  });
-
-  it('returns null when glab CLI fails, logs warning', () => {
-    mockExecFileSync.mockImplementation(() => { throw new Error('glab not found'); });
-    const result = checkExistingPRViaCLI('gitlab', 'feat/test', '/test');
-    expect(result).toBeNull();
-    expect(mockWarn).toHaveBeenCalledWith('git-platform', 'Failed to check existing MR via glab CLI', expect.any(Error));
-  });
-
   it('returns null for unknown platform', () => {
     const result = checkExistingPRViaCLI('unknown', 'feat/test', '/test');
     expect(result).toBeNull();
@@ -399,19 +361,6 @@ describe('createPRViaCLI', () => {
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'gh',
       expect.arrayContaining(['pr', 'create', '--title', 'Test PR', '--body', 'PR body']),
-      expect.any(Object),
-    );
-  });
-
-  it('creates GitLab MR via glab CLI with correct args', () => {
-    mockExecFileSync
-      .mockReturnValueOnce('refs/remotes/origin/main\n')
-      .mockReturnValueOnce('https://gitlab.com/group/project/-/merge_requests/99\n');
-    const result = createPRViaCLI('gitlab', 'feat/test', 'Test MR', 'MR body', '/test', logFile);
-    expect(result).toBe('https://gitlab.com/group/project/-/merge_requests/99');
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'glab',
-      expect.arrayContaining(['mr', 'create', '--title', 'Test MR', '--description', 'MR body', '--yes']),
       expect.any(Object),
     );
   });

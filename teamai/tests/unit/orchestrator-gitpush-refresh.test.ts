@@ -109,12 +109,6 @@ Command failed: git -c ${INJECTED_HEADER} push origin feat/test
 fatal: Authentication failed for 'https://github.com/user/repo.git/'
 `.trim());
 
-const GITLAB_AUTH_ERROR = new Error(`
-Command failed: git -c ${INJECTED_HEADER} push origin feat/test
-remote: HTTP Basic: Access denied. The provided password or token is incorrect or your account has 2FA enabled and you must use a personal access token in place of a password.
-fatal: Authentication failed for 'https://gitlab.com/user/repo.git/'
-`.trim());
-
 const HTTP_401_ERROR = new Error(`
 Command failed: git -c ${INJECTED_HEADER} push origin feat/test
 error: RPC failed; HTTP 401 curl 22 The requested URL returned error: 401
@@ -238,25 +232,6 @@ describe('_gitPush auto-refresh', () => {
       ).not.toThrow();
 
       // gh auth refresh was called
-      const refreshCalls = mockExecFileSync.mock.calls.filter(
-        (call: any[]) => call[0] === 'gh' && (call[1] as string[]).includes('refresh'),
-      );
-      expect(refreshCalls.length).toBe(1);
-    });
-
-    it('refreshes token and retries once on GitLab "HTTP Basic: Access denied"', () => {
-      mockExecFileSync
-        .mockImplementationOnce(() => FAKE_TOKEN)                     // gh auth token
-        .mockImplementationOnce(() => MOCK_REMOTE_URL)                // git remote get-url
-        .mockImplementationOnce(() => { throw GITLAB_AUTH_ERROR; })    // git push (fails)
-        .mockImplementationOnce(() => '')                              // gh auth refresh
-        .mockImplementationOnce(() => FRESH_TOKEN)                     // gh auth token (retry)
-        .mockImplementationOnce(() => '');                             // git push (retry)
-
-      expect(() =>
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
-      ).not.toThrow();
-
       const refreshCalls = mockExecFileSync.mock.calls.filter(
         (call: any[]) => call[0] === 'gh' && (call[1] as string[]).includes('refresh'),
       );

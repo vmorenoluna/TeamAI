@@ -366,7 +366,7 @@ export async function runCreatePRPhase(
   if (prUrl) {
     logToOutput(pipeline.specPath, `[PR] Open PR already exists for branch ${pipeline.branch}: ${prUrl}\n`);
   } else {
-    // Create PR directly via CLI (gh / glab) instead of spawning a merger agent
+    // Create PR directly via CLI (gh) instead of spawning a merger agent
     const body = buildPRBody(pipeline.description, specContent);
     prUrl = createPRViaCLI(platform, pipeline.branch, pipeline.description, body, deps.projectRoot, logFile);
     // Fallback: scan log for PR URL (handles Bitbucket/unknown where CLI returns null)

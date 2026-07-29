@@ -81,15 +81,6 @@ describe('TaskCard PR link indicator (render)', () => {
     expect(screen.getByText('Test Task')).toBeInTheDocument();
   });
 
-  it('handles GitLab MR URLs correctly', () => {
-    const task = makeTask({ prUrl: 'https://gitlab.com/group/project/-/merge_requests/99' });
-    render(<TaskCard task={task} onSelect={vi.fn()} />);
-
-    const link = screen.getByTestId('pr-link-indicator');
-    expect(link).toHaveAttribute('href', 'https://gitlab.com/group/project/-/merge_requests/99');
-    expect(link).toHaveAttribute('target', '_blank');
-  });
-
   it('handles Bitbucket PR URLs correctly', () => {
     const task = makeTask({ prUrl: 'https://bitbucket.org/team/repo/pull-requests/7' });
     render(<TaskCard task={task} onSelect={vi.fn()} />);

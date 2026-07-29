@@ -13,7 +13,7 @@ import { join } from 'path';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-export type ToolName = 'claude' | 'git' | 'gh' | 'glab' | 'docker' | 'devcontainer';
+export type ToolName = 'claude' | 'git' | 'gh' | 'docker' | 'devcontainer';
 
 export interface ToolStatus {
   name: ToolName;
@@ -35,12 +35,12 @@ const TOOL_DEFAULTS: Record<ToolName, { label: string; versionFlag: string }> = 
   claude:        { label: 'Claude CLI',       versionFlag: '--version' },
   git:           { label: 'Git',              versionFlag: '--version' },
   gh:            { label: 'GitHub CLI (gh)',  versionFlag: '--version' },
-  glab:          { label: 'GitLab CLI (glab)',versionFlag: '--version' },
+
   docker:        { label: 'Docker',           versionFlag: '--version' },
   devcontainer:  { label: 'Devcontainer CLI', versionFlag: '--version' },
 };
 
-const ALL_TOOLS: ToolName[] = ['claude', 'git', 'gh', 'glab', 'docker', 'devcontainer'];
+const ALL_TOOLS: ToolName[] = ['claude', 'git', 'gh', 'docker', 'devcontainer'];
 
 // ── findExecutable (inlined copy — avoids circular import from process-manager) ──
 
