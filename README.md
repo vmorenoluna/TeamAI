@@ -21,11 +21,11 @@ git config core.hooksPath .husky
 # Install and run
 cd teamai
 npm install
-npm run dev          # start dev server (React HMR on :3000)
+npm run dev          # start dev server (React HMR on :3002)
 npm run electron:dev  # launch Electron app (separate terminal)
 ```
 
-Open `http://localhost:3000` in a browser, or use the Electron app.
+Open `http://localhost:3002` in a browser, or run `npm run electron:dev` to open the Electron app (both connect to the dev server on :3002).
 
 ## Commands
 
@@ -85,7 +85,7 @@ The E2E tests cover ~270 UI interactions across 33 spec files. They **do not** i
 
 **What E2E tests don't cover** — anything requiring the real CLI: pipeline execution, live terminal output, WebSocket streaming from agents, Docker container management, GitHub PR creation, auto-mode processing.
 
-**Port isolation** — the E2E server runs on port **3001**, separate from the dev server (**3002**) and Electron (**3000**), so `npm run dev` and `npm run test:e2e` can run side by side.
+**Port isolation** — the E2E server runs on port **3001**, separate from the dev server (**3002**) and production server (**3000**), so `npm run dev` and `npm run test:e2e` can run side by side.
 
 **UI selectors** — components use `data-component="..."` attributes for stable test selectors instead of `data-testid`. Playwright and Testing Library are both configured to use `data-component` via `testIdAttribute`.
 
