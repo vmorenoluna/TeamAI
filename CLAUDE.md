@@ -13,10 +13,14 @@ All source code lives in the `teamai/` subdirectory. Run all commands from there
 
 ```bash
 cd teamai
-npm run dev      # Development mode (Electron + React HMR)
-npm run build    # Production build
-npm run start    # Launch the Electron app
-npm run lint     # ESLint check
+npm run dev                # Dev server (React HMR on :3002)
+npm run build              # Production build (Next.js)
+npm run build:server       # Bundle server.ts with esbuild
+npm run build:electron     # Run both build + build:server
+npm run start              # Start production server (:3000)
+npm run electron:dev       # Launch Electron in dev mode (connects to :3002)
+npm run electron:start     # Launch Electron in production (:3000, auto-builds first via prehook)
+npm run lint               # ESLint check
 ```
 
 Run the process manager test script:
@@ -27,7 +31,7 @@ npx tsx scripts/test-process-manager.ts
 
 > **Talking to the test server from a script or test?** Don't hardcode `localhost:3001` — import `getTestServerUrl()` from `teamai/scripts/servers.ts` (which reads the `PORT` literal from `playwright.config.ts`).
 >
-> **Talking to the dev server from a script or test?** Don't hardcode `localhost:3002` — import `getDevServerUrl()` from the same `teamai/scripts/servers.ts` (which reads the `PORT` literal from `package.json`'s `dev` script).
+> **Talking to the dev server (npm run dev or electron:dev) from a script or test?** Don't hardcode `localhost:3002` — import `getDevServerUrl()` from the same `teamai/scripts/servers.ts` (which reads the `PORT` literal from `package.json`'s `dev` script).
 
 ### Pre-Commit Testing
 
@@ -57,10 +61,30 @@ npm run precommit        # alias for test:all with a banner
 ```
 
 > **Always use `npm run test:e2e` (or `test:e2e:smoke`), never `npx playwright test` directly.**
-> The `pretest:e2e` hook runs port 3001 cleanup which prevents orphaned server
-> processes from blocking subsequent test runs.  The smoke suite covers the 5
-> most critical areas (sidebar, task detail, kanban, settings, workflow) and
-> completes in ~2 minutes — ideal for pre-commit verification.
+> The `pretest:e2e` and `pretest:e2e:smoke` hooks run port 3001 cleanup which
+> prevents orphaned server processes from blocking subsequent test runs.
+> The smoke suite covers the 5 most critical areas (sidebar, task detail,
+> kanban, settings, workflow) and completes in ~2 minutes — ideal for
+> pre-commit verification.
+
+### Build & Start Pre-Hooks
+
+Several npm scripts use `pre<name>` hooks to auto-run prerequisite steps:
+
+| Command | Pre-hook (`pre<name>`) |
+|---|---|
+| `npm run electron:start` | `preelectron:start` → `npm run build:electron` (builds Next.js + server first) |
+| `npm run test:e2e` | `pretest:e2e` → `node scripts/clear-port-3001.mjs` |
+| `npm run test:e2e:smoke` | `pretest:e2e:smoke` → `node scripts/clear-port-3001.mjs` |
+
+Shared build step (`build:electron`):
+```bash
+npm run build:electron     # equivalent to: npm run build && npm run build:server
+```
+
+This script is reused by `preelectron:start`, `electron:build`, `electron:build:mac`,
+`electron:build:linux`, and `electron:build:all` — keeping the build pipeline
+definition in one place.
 
 ## Architecture
 
