@@ -385,7 +385,7 @@ export class Orchestrator {
         );
       }
       // merged === null: platform/CLI couldn't confirm either way (e.g.
-      // a user who has no way to satisfy the check — this matches how the
+      // gh temporarily unreachable). Proceed rather than block
       // rest of the codebase treats unverifiable platforms.
     }
 
