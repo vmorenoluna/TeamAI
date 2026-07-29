@@ -58,11 +58,6 @@ describe('detectGitPlatform', () => {
     expect(detectGitPlatform('/test')).toBe('github');
   });
 
-  it('detects bitbucket from remote URL', () => {
-    mockExecFileSync.mockReturnValue('https://bitbucket.org/user/repo.git\n');
-    expect(detectGitPlatform('/test')).toBe('bitbucket');
-  });
-
   it('returns unknown for unmatched remote URL', () => {
     mockExecFileSync.mockReturnValue('https://dev.azure.com/user/repo\n');
     expect(detectGitPlatform('/test')).toBe('unknown');
@@ -232,15 +227,6 @@ describe('buildPlatformPrompt', () => {
     expect(prompt).toContain(defaultBranch);
   });
 
-  it('builds bitbucket PR prompt', () => {
-    mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
-    const prompt = buildPlatformPrompt('bitbucket', branch, description, specContent, '/test');
-    expect(prompt).toContain('Bitbucket');
-    expect(prompt).toContain('api.bitbucket.org');
-    expect(prompt).toContain(branch);
-    expect(prompt).toContain(description);
-  });
-
   it('builds unknown platform prompt', () => {
     mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
     const prompt = buildPlatformPrompt('unknown', branch, description, specContent, '/test');
@@ -363,13 +349,6 @@ describe('createPRViaCLI', () => {
       expect.arrayContaining(['pr', 'create', '--title', 'Test PR', '--body', 'PR body']),
       expect.any(Object),
     );
-  });
-
-  it('returns null for Bitbucket platform', () => {
-    // detectDefaultBranch still runs
-    mockExecFileSync.mockReturnValueOnce('refs/remotes/origin/main\n');
-    const result = createPRViaCLI('bitbucket', 'feat/test', 'Test', 'Body', '/test', logFile);
-    expect(result).toBeNull();
   });
 
   it('returns null for unknown platform', () => {

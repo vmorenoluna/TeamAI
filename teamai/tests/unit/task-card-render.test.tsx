@@ -81,14 +81,6 @@ describe('TaskCard PR link indicator (render)', () => {
     expect(screen.getByText('Test Task')).toBeInTheDocument();
   });
 
-  it('handles Bitbucket PR URLs correctly', () => {
-    const task = makeTask({ prUrl: 'https://bitbucket.org/team/repo/pull-requests/7' });
-    render(<TaskCard task={task} onSelect={vi.fn()} />);
-
-    const link = screen.getByTestId('pr-link-indicator');
-    expect(link).toHaveAttribute('href', 'https://bitbucket.org/team/repo/pull-requests/7');
-  });
-
   it('includes an external-link SVG icon in the PR link', () => {
     const task = makeTask({ prUrl: 'https://github.com/owner/repo/pull/42' });
     render(<TaskCard task={task} onSelect={vi.fn()} />);

@@ -376,7 +376,7 @@ export class Orchestrator {
     // task's own in-progress artifacts would be destroyed for nothing, and
     // it would fall into the lossy fallback branch further down.
     if (task.mergeStrategy === 'pull-request' && task.prUrl) {
-      const platform = (task.platform as 'github' | 'bitbucket' | 'unknown' | undefined)
+      const platform = (task.platform as 'github' | 'unknown' | undefined)
         ?? detectGitPlatform(this.projectRoot);
       const merged = isPrMerged(platform, task.prUrl, this.projectRoot);
       if (merged === false) {
@@ -385,7 +385,6 @@ export class Orchestrator {
         );
       }
       // merged === null: platform/CLI couldn't confirm either way (e.g.
-      // Bitbucket, or gh temporarily unreachable). Proceed rather than block
       // a user who has no way to satisfy the check — this matches how the
       // rest of the codebase treats unverifiable platforms.
     }

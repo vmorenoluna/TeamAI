@@ -415,17 +415,6 @@ describe('Orchestrator', () => {
       expect(result).toBe('https://github.com/owner/repo/pull/42');
     });
 
-    it('extracts a Bitbucket PR URL from the log file', () => {
-      testData = setupTestProject();
-      const orch = makeOrch(testData.root, getOrchestrator);
-      const logFile = join(testData.taskDir, 'output.log');
-
-      writeFileSync(logFile, 'https://bitbucket.org/team/repo/pull-requests/7 created');
-
-      const result = (orch as AnyOrch)._ctx.extractPrUrl(logFile);
-      expect(result).toBe('https://bitbucket.org/team/repo/pull-requests/7');
-    });
-
     it('returns null when no PR URL is found', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);

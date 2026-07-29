@@ -6,15 +6,14 @@ import path from 'path';
 
 /**
  * Detect the Git hosting platform from the remote origin URL.
- * @returns 'github', 'gitlab', 'bitbucket', or 'unknown'
+ * @returns 'github' or 'unknown'
  */
-export function detectGitPlatform(projectRoot: string): 'github' | 'bitbucket' | 'unknown' {
+export function detectGitPlatform(projectRoot: string): 'github' | 'unknown' {
   try {
     const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
       cwd: projectRoot, encoding: 'utf-8', timeout: 5000,
     }).trim().toLowerCase();
     if (url.includes('github.com') || url.includes('github.')) return 'github';
-    if (url.includes('bitbucket.org') || url.includes('bitbucket.')) return 'bitbucket';
   } catch (err) { logWarn('orchestrator', 'Failed to detect git remote platform', err); }
   return 'unknown';
 }
@@ -79,7 +78,7 @@ export function buildPRBody(description: string, specContent: string): string {
  * Returns the PR URL if one exists, or null otherwise.
  */
 export function checkExistingPRViaCLI(
-  platform: 'github' | 'bitbucket' | 'unknown',
+  platform: 'github' | 'unknown',
   branch: string,
   projectRoot: string,
 ): string | null {
@@ -111,11 +110,11 @@ export function checkExistingPRViaCLI(
  * platform, or the CLI call itself failed — e.g. offline, rate-limited).
  * Callers that use this as a safety guard should treat `null` as "unknown,
  * don't block" rather than "not merged" — there is no CLI-backed way to
- * verify Bitbucket/unknown platforms, and refusing to proceed there would be
+ * verify non-GitHub platforms, and refusing to proceed there would be
  * a pure regression for projects that never had this check.
  */
 export function isPrMerged(
-  platform: 'github' | 'bitbucket' | 'unknown',
+  platform: 'github' | 'unknown',
   prUrl: string,
   projectRoot: string,
 ): boolean | null {
@@ -139,11 +138,11 @@ export function isPrMerged(
  * Create a PR/MR directly via CLI (`gh pr create` / `glab mr create`).
  * Returns the PR/MR URL on success.
  *
- * For Bitbucket and unknown platforms where no standard CLI exists, returns null
+ * For non-GitHub platforms where no standard CLI exists, returns null
  * — the caller should fall back to constructing the create URL manually.
  */
 export function createPRViaCLI(
-  platform: 'github' | 'bitbucket' | 'unknown',
+  platform: 'github' | 'unknown',
   branch: string,
   title: string,
   body: string,
@@ -167,7 +166,7 @@ export function createPRViaCLI(
     return url;
   }
 
-  // Bitbucket / unknown: no standard CLI — return null for caller to handle
+  // non-GitHub: no standard CLI — return null for caller to handle
   logToOutput(specPath, `[PR] Platform "${platform}" has no standard CLI — cannot auto-create PR\n`);
   return null;
 }
@@ -178,7 +177,7 @@ export function createPRViaCLI(
  * backward compatibility (re-exported from orchestrator.ts).
  */
 export function buildPlatformPrompt(
-  platform: 'github' | 'bitbucket' | 'unknown',
+  platform: 'github' | 'unknown',
   branch: string,
   description: string,
   specContent: string,
@@ -198,11 +197,6 @@ export function buildPlatformPrompt(
   switch (platform) {
     case 'github':
       return base + `Use the GitHub MCP server's create_pull_request tool.\n\n` + meta;
-    case 'bitbucket':
-      return base +
-        `Platform: Bitbucket Cloud. Create a Pull Request.\n` +
-        `Use the Bitbucket REST API v2 (https://api.bitbucket.org/2.0) if credentials are available.\n` +
-        `The repository slug can be parsed from the remote origin URL.\n\n` + meta;
     default:
       return base +
         `Platform: Unknown. Create a PR/MR manually using whatever tools are available.\n` +
