@@ -42,15 +42,74 @@ All commands run from `teamai/`.
 
 ### Testing
 
+#### Quick reference
+
 | Command | Description |
 |---|---|
 | `npm test` | Run all unit + integration tests (Vitest) |
+| `npm run test:unit` | Run only unit tests |
+| `npm run test:integration` | Run only integration tests |
 | `npm run test:e2e` | Run Playwright E2E tests |
+| `npm run test:all` | Full suite: typecheck + lint + vitest + e2e + changelog |
 | `npm run test:changelog` | Run CHANGELOG parsing tests |
 | `npm run test:watch` | Run tests in watch mode |
-| `npx vitest run tests/unit` | Run only unit tests |
-| `npx vitest run tests/integration` | Run only integration tests |
 | `npx playwright test tests/e2e/update-banner.spec.ts` | Run a single E2E spec |
+
+#### Test layers
+
+| Layer | Framework | Location | Runs real CLI? | Runs Docker? |
+|---|---|---|---|---|
+| **Unit** | Vitest + jsdom/happy-dom | `tests/unit/` | No | No |
+| **Integration** | Vitest | `tests/integration/` | No (mocked) | No |
+| **E2E** | Playwright | `tests/e2e/` | No — uses seeded fixture data | No |
+
+#### E2E test strategy
+
+The E2E tests cover ~270 UI interactions across 33 spec files. They **do not** invoke the real Claude Code CLI or Docker — instead they run against a Next.js server with pre-seeded static fixture data.
+
+**Seed data** (`tests/e2e/seed.ts`) creates a fake project with 16 tasks spanning all pipeline phases (`backlog` → `done`). Each task includes pre-written artifacts that simulate real pipeline output:
+
+| Artifact | Simulates |
+|---|---|
+| `task.json` | Task metadata, phase, timestamps |
+| `spec.md` | Specification written by the analyst agent |
+| `plan.json` | Subtask plan written by the planner agent |
+| `qa_report.json` | QA review results (pass/fail) |
+| `completion_summary.md` | Final summary after pipeline completion |
+| `events.jsonl` | Phase-change event history |
+| `session_map.json` | Active pipeline session marker |
+
+**Route mocking** — `page.route()` intercepts server action POSTs in error-path tests (e.g., forcing `InsightsChat` to show error banners when session creation fails).
+
+**What E2E tests cover** — everything the user sees: kanban board, task detail panel, settings, workflow view, roadmap, insights dashboard, terminal UI, error banners, sidebar navigation, responsive viewport, drag-and-drop, search/filter, and more.
+
+**What E2E tests don't cover** — anything requiring the real CLI: pipeline execution, live terminal output, WebSocket streaming from agents, Docker container management, GitHub PR creation, auto-mode processing.
+
+**Port isolation** — the E2E server runs on port **3001**, separate from the dev server (**3002**) and Electron (**3000**), so `npm run dev` and `npm run test:e2e` can run side by side.
+
+**UI selectors** — components use `data-component="..."` attributes for stable test selectors instead of `data-testid`. Playwright and Testing Library are both configured to use `data-component` via `testIdAttribute`.
+
+**Parallel isolation** — the seed data is cloned per Playwright worker to prevent mutation races between parallel test files.
+
+#### Running E2E tests locally
+
+```bash
+# Run a single spec (always run E2E by file — never all at once, they take too long)
+npx playwright test tests/e2e/kanban-behaviors.spec.ts
+
+# Run with visible browser for debugging
+npx playwright test tests/e2e/sidebar.spec.ts --headed
+
+# Run a specific test within a file
+npx playwright test tests/e2e/settings.spec.ts -g "Updates"
+```
+
+#### Full suite (CI equivalent)
+
+```bash
+npm run test:all
+# Runs: typecheck → lint → vitest (unit + integration) → e2e → changelog
+```
 
 ### Linting & Type Checking
 
