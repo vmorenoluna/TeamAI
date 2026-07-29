@@ -44,6 +44,11 @@ next-env.d.ts
 .teamai-test-*
 .teamai-e2e-seed*
 tests/.vitest-state.json
+e2e-errors.txt
+e2e-full-errors.txt
+e2e-full-results.json
+e2e-results.json
+failing-specs.json
 # Temp scripts
 *.js
 !electron/main.js
