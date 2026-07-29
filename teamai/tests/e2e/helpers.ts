@@ -102,6 +102,7 @@ export async function ensureProjectSelected(page: Page): Promise<void> {
     await page.reload();
     await expect(page.locator('text=Backlog').first()).toBeVisible({ timeout: 25_000 });
   }
+
 }
 
 /**
@@ -119,9 +120,9 @@ export function requireSeedTaskId(slug: string): string {
  * Used by tests that verify card-level content without opening the panel.
  */
 export async function ensureTaskCardVisible(page: Page, text: string): Promise<boolean> {
-  const cardCount = await page.locator('[data-testid="task-card"]').count();
+  const cardCount = await page.locator('[data-component="task-card"]').count();
   if (cardCount === 0) return false;
-  const card = page.locator('[data-testid="task-card"]', { hasText: text });
+  const card = page.locator('[data-component="task-card"]', { hasText: text });
   return await card.count() > 0;
 }
 

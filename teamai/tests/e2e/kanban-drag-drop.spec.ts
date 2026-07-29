@@ -28,7 +28,7 @@ async function expectCardInColumn(
   // Find the column by label, then check the card exists inside it
   const column = page.locator(columnLoc(columnLabel)).first();
   await expect(column).toBeVisible({ timeout: 5_000 });
-  const card = column.locator('[data-testid="task-card"]', { hasText: cardText }).first();
+  const card = column.locator('[data-component="task-card"]', { hasText: cardText }).first();
   await expect(card).toBeVisible({ timeout: 5_000 });
 }
 

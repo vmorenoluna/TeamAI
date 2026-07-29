@@ -60,11 +60,11 @@ vi.mock('@/app/actions/auto-mode', () => ({
 // sub-component internals. PhaseSyncer uses WebSocket so MUST be mocked;
 // AgentPanel/ReviewPanel/SpecDiffView are optional safety mocks.
 vi.mock('@/components/agent-panel', () => ({
-  AgentPanel: () => <div data-testid="agent-panel" />,
+  AgentPanel: () => <div data-component="agent-panel" />,
 }));
 
 vi.mock('@/components/review-panel', () => ({
-  ReviewPanel: () => <div data-testid="review-panel" />,
+  ReviewPanel: () => <div data-component="review-panel" />,
 }));
 
 vi.mock('@/components/phase-syncer', () => ({

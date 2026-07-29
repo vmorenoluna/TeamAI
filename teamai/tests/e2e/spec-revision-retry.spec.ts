@@ -43,16 +43,16 @@ test.describe('Spec Revision — UI Elements', () => {
     await page.goto('/');
 
     // Backlog task should NOT have a retry button
-    const backlogCards = page.locator('[data-testid="task-card"]', { hasText: 'dark mode toggle' });
+    const backlogCards = page.locator('[data-component="task-card"]', { hasText: 'dark mode toggle' });
     if (await backlogCards.count() > 0) {
-      const retryBtn = backlogCards.first().locator('[data-testid="retry-button"]');
+      const retryBtn = backlogCards.first().locator('[data-component="retry-button"]');
       await expect(retryBtn, 'backlog tasks should not have retry button').toHaveCount(0);
     }
 
     // Done task should NOT have a retry button
-    const doneCards = page.locator('[data-testid="task-card"]', { hasText: 'Extract shared types' });
+    const doneCards = page.locator('[data-component="task-card"]', { hasText: 'Extract shared types' });
     if (await doneCards.count() > 0) {
-      const retryBtn = doneCards.first().locator('[data-testid="retry-button"]');
+      const retryBtn = doneCards.first().locator('[data-component="retry-button"]');
       await expect(retryBtn, 'done tasks should not have retry button').toHaveCount(0);
     }
   });

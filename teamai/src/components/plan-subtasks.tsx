@@ -16,17 +16,17 @@ export function PlanSubtasks({ plan }: { plan: PlanData | null }) {
         </p>
         <CopyButton text={planText} label="plan" />
         {completed > 0 && completed < total && (
-          <div className="flex-1 h-1.5 bg-[#1e293b] rounded-full overflow-hidden" data-testid="subtask-progress-track">
+          <div className="flex-1 h-1.5 bg-[#1e293b] rounded-full overflow-hidden" data-component="subtask-progress-track">
             <div
               className="h-full bg-[#2563eb] rounded-full transition-all duration-500"
               style={{ width: `${(completed / total) * 100}%` }}
-              data-testid="subtask-progress-bar"
+              data-component="subtask-progress-bar"
             />
           </div>
         )}
       </div>
       {plan.subtasks.map((s: PlanSubtask, i: number) => (
-        <div key={i} data-testid="plan-subtask" className={`p-3 rounded-lg border transition-colors ${
+        <div key={i} data-component="plan-subtask" className={`p-3 rounded-lg border transition-colors ${
           s.completed
             ? 'border-green-900/40 bg-green-950/20'
             : 'border-[#1e293b] bg-[#11131b]'

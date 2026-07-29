@@ -125,7 +125,7 @@ export function SpecDiffView({
         <select
           value={value ?? ''}
           onChange={e => onChange(e.target.value || null)}
-          data-testid={`compare-${side}-select`}
+          data-component={`compare-${side}-select`}
           className="text-[11px] font-medium px-2 py-1 rounded-md border border-[#334155] bg-[#1a1f2e] text-slate-300 focus:outline-none focus:ring-1 focus:ring-[#2563eb]"
         >
           {getVersionOptions(specVersions).filter(v => v === 'current' ? spec : specVersions[v]).map(v => (
@@ -167,7 +167,7 @@ export function SpecDiffView({
           return (
             <div key={hi} className="contents">
               {/* Left cell */}
-              <div className={`px-3 py-0.5 text-xs font-mono whitespace-pre-wrap leading-relaxed ${leftBg}`} data-testid={`diff-left-${hi}`}>
+              <div className={`px-3 py-0.5 text-xs font-mono whitespace-pre-wrap leading-relaxed ${leftBg}`} data-component={`diff-left-${hi}`}>
                 {hunk.left.map((dl, di) => (
                   <div key={di} className={
                     dl.type === 'removed'
@@ -179,7 +179,7 @@ export function SpecDiffView({
                 ))}
               </div>
               {/* Right cell */}
-              <div className={`px-3 py-0.5 text-xs font-mono whitespace-pre-wrap leading-relaxed border-l border-[#1e293b] ${rightBg}`} data-testid={`diff-right-${hi}`}>
+              <div className={`px-3 py-0.5 text-xs font-mono whitespace-pre-wrap leading-relaxed border-l border-[#1e293b] ${rightBg}`} data-component={`diff-right-${hi}`}>
                 {hunk.right.map((dl, di) => (
                   <div key={di} className={
                     dl.type === 'added'

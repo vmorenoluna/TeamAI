@@ -261,7 +261,7 @@ describe('SpecDiffView', () => {
         rightVersion: 'v1',
       });
 
-      // The left cell (data-testid="diff-left-0") contains the unchanged line
+      // The left cell (data-component="diff-left-0") contains the unchanged line
       const leftCell = screen.getByTestId('diff-left-0');
       // Its text content is "  Hello World" (two spaces prefix)
       expect(leftCell.textContent).toMatch(/Hello World/);

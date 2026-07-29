@@ -63,7 +63,7 @@ test.describe('Responsive — Sidebar', () => {
     await page.goto('/');
 
     // At mobile width, the board should still render task cards
-    await expect(page.locator('[data-testid="task-card"]').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-component="task-card"]').first()).toBeVisible({ timeout: 10_000 });
 
     // The kanban should be scrollable horizontally at narrow widths
     await expect(page.locator('.overflow-x-auto').first()).toBeAttached({ timeout: 5_000 });
@@ -168,19 +168,19 @@ test.describe('Responsive — Page Refresh Survivability', () => {
 
     await page.setViewportSize(MOBILE);
     await page.goto('/');
-    await expect(page.locator('[data-testid="task-card"]').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-component="task-card"]').first()).toBeVisible({ timeout: 10_000 });
 
     await page.reload();
-    await expect(page.locator('[data-testid="task-card"]').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-component="task-card"]').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('kanban survives refresh at tablet width', async ({ page }) => {
 
     await page.setViewportSize(TABLET);
     await page.goto('/');
-    await expect(page.locator('[data-testid="task-card"]').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-component="task-card"]').first()).toBeVisible({ timeout: 10_000 });
 
     await page.reload();
-    await expect(page.locator('[data-testid="task-card"]').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-component="task-card"]').first()).toBeVisible({ timeout: 10_000 });
   });
 });

@@ -233,10 +233,6 @@ export function UnifiedTerminal({
     () => new Set(ROLES.map(r => r.key))
   );
 
-  // Accumulated plain-text live event output for the E2E raw-output div.
-  // Reset whenever the SSR log content changes (interleavedOutput effect).
-  const [rawLiveText, setRawLiveText] = useState('');
-
   // ── Parse all logs ────────────────────────────────────────────────────
 
   const coderLines = useMemo(
@@ -321,10 +317,10 @@ export function UnifiedTerminal({
       const FitAddonCtor = addonFit.FitAddon;
 
       // Force DOM renderer so terminal content is accessible in DOM
-      // queries (e.g. getXtermText in E2E tests).  xterm.js v6 defaults
-      // to the WebGL renderer, which renders to a <canvas> element and
-      // does not populate .xterm-rows > div with text nodes — making
-      // innerText/textContent return only whitespace in headless Chrome.
+      // queries.  xterm.js v6 defaults to the WebGL renderer, which
+      // renders to a <canvas> element and does not populate .xterm-rows
+      // with text nodes — making innerText/textContent return only
+      // whitespace in headless Chrome.
       // The DOM renderer is fast enough for a log-viewing terminal.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const opts: any = {
@@ -352,16 +348,13 @@ export function UnifiedTerminal({
       // The terminal is NOT ready until the container has a non-zero
       // height and fit() has run at least once.
       //
-      // Under parallel E2E load the browser may report a tiny (1–2 px)
+      // Under heavy load the browser may report a tiny (1–2 px)
       // clientHeight on the first layout pass — enough to pass a > 0
       // check but not enough to give xterm usable rows.  We require at
       // least 5 px before fitting.  The bar is set low enough that the
-      // container's flex-1 layout settles above it even under extreme
-      // parallel load (where the dev server's CPU contention can cause
-      // the viewport to render at reduced dimensions).
-      // This check is skipped when clientHeight is 0 (jsdom/happy-dom
-      // test environments where dimensions are unavailable) — the
-      // terminal initialises immediately there.
+      // container's flex-1 layout settles above it even under load.
+      // clientHeight is 0 when dimensions are unavailable (e.g.
+      // simulated DOM) — the terminal initialises immediately there.
       const MIN_HEIGHT = 5;
       let ready = false;
       const tryBecomeReady = () => {
@@ -369,8 +362,7 @@ export function UnifiedTerminal({
         if (container.clientHeight > 0 && container.clientHeight < MIN_HEIGHT) {
           // Container has a tiny height (1–2 px) — the first layout pass
           // hasn't settled yet.  Schedule a retry so we don't get stuck
-          // forever if the ResizeObserver doesn't re-fire (observed under
-          // parallel E2E load).
+          // if the ResizeObserver doesn't re-fire promptly.
           setTimeout(() => tryBecomeReady(), 30);
           return;
         }
@@ -391,7 +383,7 @@ export function UnifiedTerminal({
       // Fallback: if the container already has usable height when we
       // reach here, initialise immediately via rAF so layout can settle.
       // Belt-and-suspenders: schedule a second attempt after a tick in
-      // case rAF fires too early under parallel load.
+      // case rAF fires too early for the layout to have settled.
       requestAnimationFrame(() => {
         if (!ready) tryBecomeReady();
         if (!ready) setTimeout(() => tryBecomeReady(), 50);
@@ -448,7 +440,6 @@ export function UnifiedTerminal({
     if (interleavedOutput) {
       terminal.write(interleavedOutput);
     }
-    setRawLiveText('');
     requestAnimationFrame(() => {
       if (termRef.current && !userScrolledRef.current) {
         termRef.current.terminal.scrollToBottom();
@@ -479,10 +470,6 @@ export function UnifiedTerminal({
         : formatLiveEvent(event);
       if (text) {
         pendingWrites++;
-        // Accumulate plain-text version for the raw-output E2E div.
-        // Strip ANSI escape codes so the test can assert on plain text.
-        const plain = text.replace(/\x1b\[[0-9;]*m/g, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd();
-        if (plain) setRawLiveText(prev => prev + plain + '\n');
         terminal.write(text, () => {
           pendingWrites--;
           if (pendingWrites === 0 && !userScrolledRef.current) terminal.scrollToBottom();
@@ -499,24 +486,11 @@ export function UnifiedTerminal({
 
   const hasAnyLog = Object.values(roleStats).some(n => n > 0);
 
-  // Plain-text version of interleavedOutput for the E2E raw-output div.
-  // xterm.js renders only rows that fit its viewport; under parallel load
-  // the terminal may show 0–1 empty rows.  This hidden div always contains
-  // the full parsed log for reliable DOM-based assertions.  Derived from
-  // interleavedOutput (rather than recomputing) to avoid a duplicate
-  // O(n log n) sort/filter pipeline.
-  const rawOutput = useMemo(() => {
-    // Strip ANSI escape codes and replace carriage returns.
-    let plain = interleavedOutput.replace(/\x1b\[[0-9;]*m/g, '');
-    plain = plain.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    return plain.trimEnd();
-  }, [interleavedOutput]);
-
   return (
     <div className="flex flex-col h-full gap-2">
       {/* Filter bar */}
       {hasAnyLog && (
-        <div className="shrink-0 flex items-center gap-2 px-1 flex-wrap" data-testid="unified-terminal">
+        <div className="shrink-0 flex items-center gap-2 px-1 flex-wrap" data-component="unified-terminal">
           <button
             onClick={selectAll}
             className="text-[10px] font-medium px-1.5 py-0.5 rounded text-slate-400 hover:text-white hover:bg-[#1e293b] transition-colors shrink-0"
@@ -566,7 +540,7 @@ export function UnifiedTerminal({
       {!connected && hasAnyLog && (
         <div
           className="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-950/50 border border-amber-800/50 text-amber-300 text-xs"
-          data-testid="terminal-reconnecting-banner"
+          data-component="terminal-reconnecting-banner"
         >
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
@@ -584,20 +558,13 @@ export function UnifiedTerminal({
           the init effect never reruns on the same component instance, so
           the terminal stayed permanently blank while the filter chips (fed
           by roleStats, independent of DOM mount state) rendered normally. */}
-      <div className="relative flex-1 min-h-0 rounded-lg overflow-hidden border border-[#1e293b]" data-testid="terminal-container">
+      <div className="relative flex-1 min-h-0 rounded-lg overflow-hidden border border-[#1e293b]" data-component="terminal-container">
         {!hasAnyLog && (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400 pointer-events-none" data-testid="terminal-empty-state">
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400 pointer-events-none" data-component="terminal-empty-state">
             No agent output yet. Run the pipeline to see terminal output.
           </div>
         )}
         <div ref={containerRef} className="w-full h-full" />
-        {/* Hidden element with raw parsed log text for E2E content verification.
-            xterm.js renders only rows that fit its viewport; under parallel load
-            the terminal may show 0-1 empty rows.  This div always contains the
-            full text, bypassing xterm's layout calculations. */}
-        <div data-testid="terminal-raw-output" className="hidden">
-          {rawOutput}{rawLiveText ? '\n' + rawLiveText : ''}
-        </div>
       </div>
     </div>
   );

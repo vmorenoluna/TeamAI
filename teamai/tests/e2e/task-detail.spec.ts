@@ -30,7 +30,7 @@ test.describe('Task Detail Page (/task/:id)', () => {
     await page.goto(`/task/${taskId}`);
     await expect(page.locator('body')).toBeVisible();
 
-    const fullPageTaskId = page.locator('[data-testid="task-id"]').first();
+    const fullPageTaskId = page.locator('[data-component="task-id"]').first();
     await expect(fullPageTaskId).toBeVisible({ timeout: 15_000 });
     await expect(fullPageTaskId).toContainText(taskId);
   });
@@ -83,10 +83,10 @@ test.describe('Task Detail Page (/task/:id)', () => {
     // container is mounted. Generous timeouts account for cumulative
     // resource pressure when many tests run in the full suite.
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-testid="terminal-container"]')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('[data-component="terminal-container"]')).toBeVisible({ timeout: 20_000 });
 
-    await expect(page.locator('[data-testid="scroll-to-bottom"]')).toHaveCount(0);
-    await expect(page.locator('[data-testid="scroll-to-top"]')).toHaveCount(0);
+    await expect(page.locator('[data-component="scroll-to-bottom"]')).toHaveCount(0);
+    await expect(page.locator('[data-component="scroll-to-top"]')).toHaveCount(0);
   });
 
   test('failed task shows completion summary banner on Overview tab', async ({ page }) => {

@@ -102,6 +102,7 @@ export function RoadmapCard({
         <div className="absolute top-2 right-2" onClick={e => e.stopPropagation()}>
           <input
             type="checkbox"
+            aria-label="Select roadmap item"
             checked={isSelected}
             onChange={onToggleSelect}
             className="w-4 h-4 rounded border-[#334155] bg-[#0f1320] text-[#2563eb] focus:ring-[#2563eb] focus:ring-1 cursor-pointer"

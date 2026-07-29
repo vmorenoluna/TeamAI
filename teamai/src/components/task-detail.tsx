@@ -58,12 +58,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Mark the component as hydrated so E2E tests can wait for React
-    // to attach event handlers before interacting with SSR-rendered
-    // elements (e.g., CopyButton on the Overview tab).
-    const root = document.getElementById('task-detail-root');
-    if (root) root.setAttribute('data-hydrated', 'true');
-
     const syncFromHash = () => {
       const hash = window.location.hash.replace(/^#/, '');
       if (hash && VALID_TABS.includes(hash as Tab)) {
@@ -215,7 +209,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                 onClick={handleRestart}
                 disabled={isPending}
                 title={`Restart ${task.phase} from scratch — clear current work and re-run`}
-                data-testid="restart-phase-button"
+                data-component="restart-phase-button"
                 className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-amber-900/30 text-amber-400 hover:bg-amber-800/40 hover:text-amber-300 transition-colors disabled:opacity-50 flex items-center gap-1"
               >
                 {isPending ? (
@@ -245,7 +239,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
         </h1>
 
         {/* Ticket ID */}
-        <p data-testid="task-id" className="mb-2 text-xs text-slate-500 font-mono select-all">
+        <p data-component="task-id" className="mb-2 text-xs text-slate-500 font-mono select-all">
           {task.id}
         </p>
 
@@ -353,7 +347,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                     <button
                       onClick={(e) => { e.stopPropagation(); handleInlineRetry(); }}
                       disabled={isPending}
-                      data-testid="detail-retry-button"
+                      data-component="detail-retry-button"
                       className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-red-900/30 text-red-400 hover:bg-red-800/40 hover:text-red-300 transition-colors disabled:opacity-50 flex items-center gap-1"
                     >
                       {isPending ? (
@@ -505,7 +499,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                     })() && (
                       <button
                         onClick={() => { setCompareMode(c => !c); setLeftVersion(null); setRightVersion(null); }}
-                        data-testid="compare-toggle"
+                        data-component="compare-toggle"
                         className={`text-[10px] font-medium px-2 py-0.5 rounded-md border transition-colors ${
                           compareMode
                             ? 'border-emerald-600 bg-emerald-950/30 text-emerald-300'

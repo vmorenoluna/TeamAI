@@ -43,24 +43,24 @@ vi.mock('next/navigation', () => ({
 // TaskCard — render minimal identifiable output so cards are visible in DOM
 vi.mock('@/components/task-card', () => ({
   TaskCard: ({ task, isMoving }: { task: Task; onSelect: (id: string) => void; isMoving?: boolean }) => (
-    <div data-testid="task-card" data-task-id={task.id} data-phase={task.phase}>
-      <span data-testid="task-title">{task.title}</span>
-      {isMoving && <span data-testid="is-moving" />}
+    <div data-component="task-card" data-task-id={task.id} data-phase={task.phase}>
+      <span data-component="task-title">{task.title}</span>
+      {isMoving && <span data-component="is-moving" />}
     </div>
   ),
 }));
 
 vi.mock('@/components/task-panel', () => ({
   TaskPanel: ({ taskId, onClose }: { taskId: string; onClose: () => void; readonly?: boolean; cachedData?: unknown; onDataLoaded?: () => void; onError?: () => void }) => (
-    <div data-testid="task-panel" data-task-id={taskId}>
-      <button data-testid="close-panel" onClick={onClose}>Close</button>
+    <div data-component="task-panel" data-task-id={taskId}>
+      <button data-component="close-panel" onClick={onClose}>Close</button>
     </div>
   ),
 }));
 
 vi.mock('@/components/connection-indicator', () => ({
   ConnectionIndicator: ({ connected, initial }: { connected: boolean; initial: boolean }) => (
-    <span data-testid="connection-indicator" data-connected={connected} data-initial={initial} />
+    <span data-component="connection-indicator" data-connected={connected} data-initial={initial} />
   ),
 }));
 
@@ -167,7 +167,7 @@ describe('KanbanBoard', () => {
       ]);
 
       const cards = screen.getAllByTestId('task-card');
-      const titles = cards.map(c => c.querySelector('[data-testid="task-title"]')?.textContent);
+      const titles = cards.map(c => c.querySelector('[data-component="task-title"]')?.textContent);
       expect(titles).toEqual(expect.arrayContaining(['Backlog Item', 'In Progress Item', 'Done Item']));
     });
 
@@ -222,7 +222,7 @@ describe('KanbanBoard', () => {
       // Only "Fix login bug" should remain
       const cards = screen.getAllByTestId('task-card');
       expect(cards).toHaveLength(1);
-      expect(cards[0].querySelector('[data-testid="task-title"]')?.textContent).toBe('Fix login bug');
+      expect(cards[0].querySelector('[data-component="task-title"]')?.textContent).toBe('Fix login bug');
     });
 
     it('searches in task description too', () => {
@@ -299,7 +299,7 @@ describe('KanbanBoard', () => {
 
       const cards = screen.getAllByTestId('task-card');
       expect(cards).toHaveLength(1);
-      expect(cards[0].querySelector('[data-testid="task-title"]')?.textContent).toBe('Ideation item');
+      expect(cards[0].querySelector('[data-component="task-title"]')?.textContent).toBe('Ideation item');
     });
   });
 

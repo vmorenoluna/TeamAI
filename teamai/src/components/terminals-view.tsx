@@ -50,7 +50,7 @@ export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
           <p className="text-xs text-slate-400 mt-0.5">Interactive Claude sessions pre-loaded with a role persona.</p>
         </div>
         <button
-          data-testid="new-terminal-btn"
+          data-component="new-terminal-btn"
           onClick={() => setShowDialog(true)}
           className="px-3 py-1.5 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] transition-colors"
         >
@@ -83,7 +83,7 @@ export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
       {/* New Terminal dialog */}
       {showDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div data-testid="dialog-backdrop" className="absolute inset-0 bg-black/60" onClick={() => setShowDialog(false)} />
+          <div data-component="dialog-backdrop" className="absolute inset-0 bg-black/60" onClick={() => setShowDialog(false)} />
           <div className="relative bg-[#1e2333] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] p-6 w-full max-w-sm mx-4 space-y-4">
             <h2 className="text-base font-semibold text-white">New Terminal</h2>
             <div>

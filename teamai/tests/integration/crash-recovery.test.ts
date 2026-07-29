@@ -92,7 +92,6 @@ vi.mock('@/lib/recovery', () => ({
   autoClearExpiredRateLimits: () => 0,
   reconcileTaskArtifacts: () => [],
   autoResumeInterruptedTasks: (...args: unknown[]) => mockAutoResumeInterruptedTasks(...args),
-  _resetAutoResumeDebounce: () => {},
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -30,7 +30,7 @@ export function RateLimitBanner({
           ? 'shrink-0 bg-amber-950/60 border-b border-amber-800 text-amber-200 px-4 py-2.5 text-xs flex items-center justify-between gap-3'
           : 'shrink-0 bg-amber-950/30 border border-amber-800 rounded-lg p-4'
       }
-      data-testid="rate-limit-banner"
+      data-component="rate-limit-banner"
     >
       <div className={`flex items-center justify-between gap-4${isInline ? ' w-full' : ''}`}>
         <div className="flex items-center gap-2 min-w-0">

@@ -14,7 +14,7 @@ vi.mock('fs', () => ({
   writeFileSync: vi.fn(),
 }));
 
-import { findInterruptedTasks, findOrphanedWorktrees, restoreContainerPatchedWorktrees, startupCleanup, autoClearExpiredRateLimits, reconcileTaskArtifacts, autoResumeInterruptedTasks, _resetAutoResumeDebounce, sweepStalledTasks } from '../../src/lib/recovery';
+import { findInterruptedTasks, findOrphanedWorktrees, restoreContainerPatchedWorktrees, startupCleanup, autoClearExpiredRateLimits, reconcileTaskArtifacts, autoResumeInterruptedTasks, sweepStalledTasks } from '../../src/lib/recovery';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
@@ -105,12 +105,14 @@ describe('findInterruptedTasks', () => {
     const projectPath = '/test/project';
     const teamaiDir = join(projectPath, '.teamai');
     const taskFile = join(teamaiDir, 'my-task', 'task.json');
+    const sessionMap = join(teamaiDir, 'my-task', 'session_map.json');
 
     vi.mocked(existsSync).mockImplementation((p) => {
       const path = String(p);
       if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
       if (path === teamaiDir) return true;
       if (path === taskFile) return true;
+      if (path === sessionMap) return true;
       return false;
     });
     vi.mocked(readFileSync).mockImplementation((p) => {
@@ -197,6 +199,7 @@ describe('findInterruptedTasks', () => {
     const projB = '/proj/b';
     const teamaiA = join(projA, '.teamai');
     const taskFileA = join(teamaiA, 't1', 'task.json');
+    const sessionMapA = join(teamaiA, 't1', 'session_map.json');
 
     vi.mocked(existsSync).mockImplementation((p) => {
       const path = String(p);
@@ -204,6 +207,7 @@ describe('findInterruptedTasks', () => {
       if (path === teamaiA) return true;
       if (path === join(projB, '.teamai')) return true;
       if (path === taskFileA) return true;
+      if (path === sessionMapA) return true;
       return false;
     });
     vi.mocked(readFileSync).mockImplementation((p) => {
@@ -1007,7 +1011,12 @@ describe('findOrphanedWorktrees — catch blocks', () => {
 describe('autoResumeInterruptedTasks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    _resetAutoResumeDebounce();
+    // Advance system time past the debounce window so each test starts
+    // with a fresh 15-second window.  Without this the first test to call
+    // autoResumeInterruptedTasks() would set _lastAutoResumeTime and every
+    // subsequent test would be debounced into a no-op.
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 20_000);
     mockGetOrchestrator.mockReturnValue({ resumeTask: mockOrchResumeTask });
     mockOrchResumeTask.mockResolvedValue(undefined);
   });
@@ -1017,6 +1026,8 @@ describe('autoResumeInterruptedTasks', () => {
     const teamaiDir = join(projectPath, '.teamai');
     const taskFileA = join(teamaiDir, 'task-a', 'task.json');
     const taskFileB = join(teamaiDir, 'task-b', 'task.json');
+    const sessionMapA = join(teamaiDir, 'task-a', 'session_map.json');
+    const sessionMapB = join(teamaiDir, 'task-b', 'session_map.json');
 
     vi.mocked(existsSync).mockImplementation((p) => {
       const path = String(p);
@@ -1024,6 +1035,8 @@ describe('autoResumeInterruptedTasks', () => {
       if (path === teamaiDir) return true;
       if (path === taskFileA) return true;
       if (path === taskFileB) return true;
+      if (path === sessionMapA) return true;
+      if (path === sessionMapB) return true;
       return false;
     });
     vi.mocked(readFileSync).mockImplementation((p) => {
@@ -1074,26 +1087,18 @@ describe('autoResumeInterruptedTasks', () => {
     expect(mockGetOrchestrator).not.toHaveBeenCalled();
   });
 
-  it('does not debounce after reset (for testing)', async () => {
-    vi.mocked(existsSync).mockReturnValue(false);
-    await autoResumeInterruptedTasks();
-
-    _resetAutoResumeDebounce();
-    const count = await autoResumeInterruptedTasks();
-
-    expect(count).toBe(0); // no tasks, but debounce didn't block
-  });
-
   it('handles orchestrator creation failure gracefully', async () => {
     const projectPath = '/test/project';
     const teamaiDir = join(projectPath, '.teamai');
     const taskFile = join(teamaiDir, 'task-a', 'task.json');
+    const sessionMap = join(teamaiDir, 'task-a', 'session_map.json');
 
     vi.mocked(existsSync).mockImplementation((p) => {
       const path = String(p);
       if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
       if (path === teamaiDir) return true;
       if (path === taskFile) return true;
+      if (path === sessionMap) return true;
       return false;
     });
     vi.mocked(readFileSync).mockImplementation((p) => {
@@ -1125,72 +1130,15 @@ describe('autoResumeInterruptedTasks', () => {
     const projectPath = '/test/project';
     const teamaiDir = join(projectPath, '.teamai');
     const taskFile = join(teamaiDir, 'task-a', 'task.json');
+    const sessionMap = join(teamaiDir, 'task-a', 'session_map.json');
 
     vi.mocked(existsSync).mockImplementation((p) => {
       const path = String(p);
       if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
       if (path === teamaiDir) return true;
       if (path === taskFile) return true;
+      if (path === sessionMap) return true;
       return false;
-it('skips tasks with future rateLimitedUntil', async () => {
-    const projectPath = '/test/project';
-    const teamaiDir = join(projectPath, '.teamai');
-    const taskFile = join(teamaiDir, 'task-rl', 'task.json');
-    const futureDate = new Date(Date.now() + 3600_000).toISOString();
-    vi.mocked(existsSync).mockImplementation((p) => {
-      const path = String(p);
-      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
-      if (path === teamaiDir) return true;
-      if (path === taskFile) return true;
-      return false;
-    });
-    vi.mocked(readFileSync).mockImplementation((p) => {
-      const path = String(p);
-      if (path === join('/mock/home', '.teamai', 'projects.json'))
-        return JSON.stringify([{ name: 'test', path: projectPath }]);
-      if (path === taskFile)
-        return JSON.stringify({ id: 'task-rl', title: 'Rate Limited', phase: 'implement', rateLimitedUntil: futureDate });
-      return '';
-    });
-    (vi.mocked(readdirSync) as any).mockImplementation((p: string) => {
-      if (String(p) === teamaiDir) return ['task-rl'];
-      return [];
-    });
-    const count = await autoResumeInterruptedTasks();
-    expect(count).toBe(0);
-    expect(mockOrchResumeTask).not.toHaveBeenCalled();
-  });
-
-  it('resumes tasks with expired rateLimitedUntil', async () => {
-    const projectPath = '/test/project';
-    const teamaiDir = join(projectPath, '.teamai');
-    const taskFile = join(teamaiDir, 'task-expired', 'task.json');
-    const pastDate = new Date(Date.now() - 3600_000).toISOString();
-    vi.mocked(existsSync).mockImplementation((p) => {
-      const path = String(p);
-      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
-      if (path === teamaiDir) return true;
-      if (path === taskFile) return true;
-      return false;
-    });
-    vi.mocked(readFileSync).mockImplementation((p) => {
-      const path = String(p);
-      if (path === join('/mock/home', '.teamai', 'projects.json'))
-        return JSON.stringify([{ name: 'test', path: projectPath }]);
-      if (path === taskFile)
-        return JSON.stringify({ id: 'task-expired', title: 'Expired RL', phase: 'implement', rateLimitedUntil: pastDate });
-      return '';
-    });
-    (vi.mocked(readdirSync) as any).mockImplementation((p: string) => {
-      if (String(p) === teamaiDir) return ['task-expired'];
-      return [];
-    });
-    const count = await autoResumeInterruptedTasks();
-    expect(count).toBe(1);
-    expect(mockOrchResumeTask).toHaveBeenCalledWith('task-expired');
-  });
-// ── sweepStalledTasks ───────────────────────────────────────────────
-
     });
     vi.mocked(readFileSync).mockImplementation((p) => {
       const path = String(p);
@@ -1214,7 +1162,72 @@ it('skips tasks with future rateLimitedUntil', async () => {
     expect(count).toBe(1);
     expect(mockOrchResumeTask).toHaveBeenCalledWith('task-a');
   });
+
+  it('skips tasks with future rateLimitedUntil', async () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'task-rl', 'task.json');
+    const sessionMap = join(teamaiDir, 'task-rl', 'session_map.json');
+    const futureDate = new Date(Date.now() + 3600_000).toISOString();
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      if (path === sessionMap) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === taskFile)
+        return JSON.stringify({ id: 'task-rl', title: 'Rate Limited', phase: 'implement', rateLimitedUntil: futureDate });
+      return '';
+    });
+    (vi.mocked(readdirSync) as any).mockImplementation((p: string) => {
+      if (String(p) === teamaiDir) return ['task-rl'];
+      return [];
+    });
+    const count = await autoResumeInterruptedTasks();
+    expect(count).toBe(0);
+    expect(mockOrchResumeTask).not.toHaveBeenCalled();
+  });
+
+  it('resumes tasks with expired rateLimitedUntil', async () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'task-expired', 'task.json');
+    const sessionMap = join(teamaiDir, 'task-expired', 'session_map.json');
+    const pastDate = new Date(Date.now() - 3600_000).toISOString();
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      if (path === sessionMap) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === taskFile)
+        return JSON.stringify({ id: 'task-expired', title: 'Expired RL', phase: 'implement', rateLimitedUntil: pastDate });
+      return '';
+    });
+    (vi.mocked(readdirSync) as any).mockImplementation((p: string) => {
+      if (String(p) === teamaiDir) return ['task-expired'];
+      return [];
+    });
+    const count = await autoResumeInterruptedTasks();
+    expect(count).toBe(1);
+    expect(mockOrchResumeTask).toHaveBeenCalledWith('task-expired');
+  });
 });
+
+// ── sweepStalledTasks ───────────────────────────────────────────────
+
 describe('sweepStalledTasks', () => {
   beforeEach(() => {
     vi.clearAllMocks();

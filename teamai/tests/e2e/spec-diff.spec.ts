@@ -12,7 +12,7 @@
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected, requireSeedTaskId } from './helpers';
 
-const TASK_SLUG = 'add-dark-mode-toggle-to-settings'; // may have spec revisions
+const TASK_SLUG = 'implement-dark-mode-toggle'; // may have spec revisions
 
 test.describe('Spec Diff View', () => {
   test.setTimeout(60_000);
@@ -30,7 +30,7 @@ test.describe('Spec Diff View', () => {
     await page.waitForTimeout(1500);
 
     // Check if the Compare toggle exists — if no spec versions, test passes vacuously
-    const compareToggle = page.locator('[data-testid="compare-toggle"]');
+    const compareToggle = page.locator('[data-component="compare-toggle"]');
     if (await compareToggle.count() === 0) return;
 
     await expect(compareToggle).toBeVisible({ timeout: 5_000 });
@@ -43,15 +43,15 @@ test.describe('Spec Diff View', () => {
     await page.goto(`/task/${taskId}`);
     await page.waitForTimeout(1500);
 
-    const compareToggle = page.locator('[data-testid="compare-toggle"]');
+    const compareToggle = page.locator('[data-component="compare-toggle"]');
     if (await compareToggle.count() === 0) return;
 
     await compareToggle.click();
     await page.waitForTimeout(500);
 
-    // Version selectors should appear (data-testid="compare-left-select", "compare-right-select")
-    const leftSelect = page.locator('[data-testid="compare-left-select"]');
-    const rightSelect = page.locator('[data-testid="compare-right-select"]');
+    // Version selectors should appear (data-component="compare-left-select", "compare-right-select")
+    const leftSelect = page.locator('[data-component="compare-left-select"]');
+    const rightSelect = page.locator('[data-component="compare-right-select"]');
 
     if (await leftSelect.count() > 0) {
       await expect(leftSelect).toBeVisible({ timeout: 5_000 });
@@ -66,15 +66,15 @@ test.describe('Spec Diff View', () => {
     await page.goto(`/task/${taskId}`);
     await page.waitForTimeout(1500);
 
-    const compareToggle = page.locator('[data-testid="compare-toggle"]');
+    const compareToggle = page.locator('[data-component="compare-toggle"]');
     if (await compareToggle.count() === 0) return;
 
     await compareToggle.click();
     await page.waitForTimeout(500);
 
     // Look for diff cells
-    const diffLeft = page.locator('[data-testid^="diff-left-"]');
-    const diffRight = page.locator('[data-testid^="diff-right-"]');
+    const diffLeft = page.locator('[data-component^="diff-left-"]');
+    const diffRight = page.locator('[data-component^="diff-right-"]');
 
     const leftCount = await diffLeft.count();
     const rightCount = await diffRight.count();
@@ -92,7 +92,7 @@ test.describe('Spec Diff View', () => {
     await page.goto(`/task/${taskId}`);
     await page.waitForTimeout(1500);
 
-    const compareToggle = page.locator('[data-testid="compare-toggle"]');
+    const compareToggle = page.locator('[data-component="compare-toggle"]');
     if (await compareToggle.count() === 0) return;
 
     await compareToggle.click();

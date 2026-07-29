@@ -15,7 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:unit": "vitest run --exclude 'tests/integration/**'",
-    "test:integration": "vitest run --include 'tests/integration/**'",
+    "test:integration": "vitest run tests/integration",
     "pretest:e2e": "node scripts/clear-port-3001.mjs",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "node scripts/clear-port-3001.mjs && playwright test tests/e2e/sidebar.spec.ts tests/e2e/task-detail.spec.ts tests/e2e/kanban.spec.ts tests/e2e/settings.spec.ts tests/e2e/workflow.spec.ts",

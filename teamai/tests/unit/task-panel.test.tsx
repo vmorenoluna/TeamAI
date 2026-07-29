@@ -66,13 +66,13 @@ vi.mock('@/components/unified-terminal', () => ({
     taskId: string; subtaskTerminals: { id: number; title: string; log: string | null }[];
     qaLog: string | null; specLog: string | null; planLog: string | null; mergeLog: string | null; orchestratorLog: string | null;
   }) => (
-    <div data-testid="unified-terminal" data-task-id={taskId}>
-      <span data-testid="subtask-count">{subtaskTerminals.length}</span>
-      {qaLog && <span data-testid="qa-log-present">qa</span>}
-      {specLog && <span data-testid="spec-log-present">spec</span>}
-      {planLog && <span data-testid="plan-log-present">plan</span>}
-      {mergeLog && <span data-testid="merge-log-present">merge</span>}
-      {orchestratorLog && <span data-testid="orchestrator-log-present">orch</span>}
+    <div data-component="unified-terminal" data-task-id={taskId}>
+      <span data-component="subtask-count">{subtaskTerminals.length}</span>
+      {qaLog && <span data-component="qa-log-present">qa</span>}
+      {specLog && <span data-component="spec-log-present">spec</span>}
+      {planLog && <span data-component="plan-log-present">plan</span>}
+      {mergeLog && <span data-component="merge-log-present">merge</span>}
+      {orchestratorLog && <span data-component="orchestrator-log-present">orch</span>}
     </div>
   ),
 }));
@@ -80,7 +80,7 @@ vi.mock('@/components/unified-terminal', () => ({
 // ReviewPanel mock
 vi.mock('@/components/review-panel', () => ({
   ReviewPanel: ({ taskId }: { taskId: string }) => (
-    <div data-testid="review-panel" data-task-id={taskId}>ReviewPanel</div>
+    <div data-component="review-panel" data-task-id={taskId}>ReviewPanel</div>
   ),
 }));
 
@@ -1179,7 +1179,7 @@ describe('TaskDetail', () => {
       fireEvent.change(rightSelect, { target: { value: 'v2' } });
 
       // Find removed text (should be on left side with red styling)
-      const allDiffLines = document.querySelectorAll('[data-testid^="diff-left-"] div');
+      const allDiffLines = document.querySelectorAll('[data-component^="diff-left-"] div');
       const removedTexts = Array.from(allDiffLines).map(d => d.textContent?.trim());
       expect(removedTexts).toContain('- line to be removed');
     });
@@ -1202,7 +1202,7 @@ describe('TaskDetail', () => {
       fireEvent.change(rightSelect, { target: { value: 'v2' } });
 
       // Find added text (should be on right side with green styling)
-      const allDiffLines = document.querySelectorAll('[data-testid^="diff-right-"] div');
+      const allDiffLines = document.querySelectorAll('[data-component^="diff-right-"] div');
       const addedTexts = Array.from(allDiffLines).map(d => d.textContent?.trim());
       expect(addedTexts).toContain('+ line added');
     });
@@ -1218,8 +1218,8 @@ describe('TaskDetail', () => {
       clickSpec();
       fireEvent.click(screen.getByTestId('compare-toggle'));
 
-      const leftLines = document.querySelectorAll('[data-testid^="diff-left-"] div');
-      const rightLines = document.querySelectorAll('[data-testid^="diff-right-"] div');
+      const leftLines = document.querySelectorAll('[data-component^="diff-left-"] div');
+      const rightLines = document.querySelectorAll('[data-component^="diff-right-"] div');
       const leftTexts = Array.from(leftLines).map(d => d.textContent?.trim());
       const rightTexts = Array.from(rightLines).map(d => d.textContent?.trim());
 
@@ -1246,7 +1246,7 @@ describe('TaskDetail', () => {
       fireEvent.change(rightSelect, { target: { value: 'v2' } });
 
       // Verify diff shows v1-specific content on left
-      const leftLines = document.querySelectorAll('[data-testid^="diff-left-"] div');
+      const leftLines = document.querySelectorAll('[data-component^="diff-left-"] div');
       const leftTexts = Array.from(leftLines).map(d => d.textContent);
       expect(leftTexts.some(t => t?.includes('line in v1 only'))).toBe(true);
 
@@ -1254,7 +1254,7 @@ describe('TaskDetail', () => {
       fireEvent.change(leftSelect, { target: { value: 'current' } });
 
       // Diff should now compare current vs v2 (different content)
-      const updatedLeftLines = document.querySelectorAll('[data-testid^="diff-left-"] div');
+      const updatedLeftLines = document.querySelectorAll('[data-component^="diff-left-"] div');
       const updatedLeftTexts = Array.from(updatedLeftLines).map(d => d.textContent);
       expect(updatedLeftTexts.some(t => t?.includes('Current Spec'))).toBe(true);
       // v1-specific content should no longer appear

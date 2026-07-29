@@ -120,7 +120,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
 
   return (
     <div
-      data-testid="task-card"
+      data-component="task-card"
       onClick={() => isMoving ? null : onSelect(task.id)}
       className={`relative bg-[#1e2333] rounded-lg p-3 border transition-all cursor-pointer group ${
         isMoving
@@ -147,13 +147,13 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
       )}
       {/* Spinning circle indicator — shows for active phases */}
       {showSpinner && !isMoving && !isRateLimited && (
-        <div className="absolute top-2 right-2" title="Task in progress" data-testid="spinner-icon">
+        <div className="absolute top-2 right-2" title="Task in progress" data-component="spinner-icon">
           <div className="w-3 h-3 rounded-full border-2 border-slate-500 border-t-transparent animate-spin" />
         </div>
       )}
       {/* Hourglass indicator — replaces spinner when API rate-limited */}
       {showSpinner && !isMoving && isRateLimited && (
-        <div className="absolute top-2 right-2" title="Rate limited — waiting for API quota" data-testid="hourglass-icon">
+        <div className="absolute top-2 right-2" title="Rate limited — waiting for API quota" data-component="hourglass-icon">
           <span className="text-sm text-amber-400">⏳</span>
         </div>
       )}
@@ -185,7 +185,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
           {task.subtaskProgress && task.subtaskProgress.total > 0 && (
             <span
               className="text-[10px] font-medium"
-              data-testid="subtask-progress-badge"
+              data-component="subtask-progress-badge"
               title={`${task.subtaskProgress.completed} / ${task.subtaskProgress.total} subtasks completed`}
               style={{
                 color: task.subtaskProgress.completed === task.subtaskProgress.total
@@ -206,7 +206,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
               rel="noopener noreferrer"
               onClick={e => e.stopPropagation()}
               title={`Open PR: ${task.prUrl}`}
-              data-testid="pr-link-indicator"
+              data-component="pr-link-indicator"
               className="text-[10px] font-medium text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 no-underline"
             >
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -278,7 +278,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
           {/* Failure indicator — shown only for failed tasks */}
           {task.phase === 'failed' && (
             <span
-              data-testid="failure-indicator"
+              data-component="failure-indicator"
               title="Task failed"
               className="text-[10px] font-medium text-red-400/70"
             >
@@ -292,7 +292,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
               onClick={handleRetry}
               disabled={isRetrying}
               title="Retry task — restart pipeline from the phase it failed at"
-              data-testid="retry-button"
+              data-component="retry-button"
               className="text-[11px] font-medium px-2 py-1 rounded-md bg-red-900/30 text-red-400 hover:bg-red-800/40 hover:text-red-300 transition-colors disabled:opacity-50 flex items-center gap-1"
             >
               {isRetrying ? (

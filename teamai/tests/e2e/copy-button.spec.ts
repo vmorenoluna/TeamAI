@@ -96,19 +96,14 @@ test.describe('Copy Button — Completion Summary', () => {
 
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 10_000 });
 
-    // Wait for React hydration to complete — the Overview tab renders
-    // server-side, so the CopyButton HTML is in the initial SSR payload
-    // but onClick handlers aren't attached until React hydrates.
-    // The task-detail useEffect sets data-hydrated="true" on the root
-    // element as a signal that event handlers are attached.
-    await page.waitForSelector('[data-hydrated="true"]', { timeout: 10_000 });
-
-    // Click the Copy button on the completion summary (Overview tab)
-    const copyBtn = page.locator('button', { hasText: /Copy/ }).first();
+    // Use the clipboard emoji to uniquely identify the Copy button
+    // (not just "Copy" which could match "Copied" state).
+    const copyBtn = page.locator('button', { hasText: '📋 Copy' }).first();
+    await expect(copyBtn).toBeVisible({ timeout: 10_000 });
     await copyBtn.click();
 
-    // Should toggle to "✓ Copied"
-    await expect(page.locator('button', { hasText: /Copied/ }).first()).toBeVisible({ timeout: 5_000 });
+    // Should toggle to "✓ Copied" — use longer timeout for slow hydration
+    await expect(page.locator('button', { hasText: '✓ Copied' }).first()).toBeVisible({ timeout: 10_000 });
   });
 });
 
@@ -126,7 +121,7 @@ test.describe('Copy Button — Plan Tab', () => {
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}#plan`);
 
-    await expect(page.locator('[data-testid="plan-subtask"]').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-component="plan-subtask"]').first()).toBeVisible({ timeout: 15_000 });
 
     // The PlanSubtasks component renders a CopyButton for the plan text
     const copyBtn = page.locator('button', { hasText: '📋 Copy' }).first();
@@ -138,7 +133,7 @@ test.describe('Copy Button — Plan Tab', () => {
     const taskId = requireSeedTaskId(LOGIN_BUTTON_SLUG);
     await page.goto(`/task/${taskId}#plan`);
 
-    await expect(page.locator('[data-testid="plan-subtask"]').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('[data-component="plan-subtask"]').first()).toBeVisible({ timeout: 15_000 });
 
     const copyBtn = page.locator('button', { hasText: '📋 Copy' }).first();
     await copyBtn.click();

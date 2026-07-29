@@ -17,26 +17,6 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(async () => {
   const server = createServer((req, res) => {
-    // ── Test-only endpoint: inject a synthetic agent event for E2E testing ──
-    if (process.env.NODE_ENV === 'test' && req.method === 'POST' && req.url === '/api/test/emit-agent-event') {
-      let body = '';
-      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-      req.on('end', () => {
-        try {
-          const payload = JSON.parse(body);
-          const msg = JSON.stringify(payload);
-          for (const client of wss.clients) {
-            if (client.readyState === WebSocket.OPEN) client.send(msg);
-          }
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: true, clients: wss.clients.size }));
-        } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: String(err) }));
-        }
-      });
-      return;
-    }
     handle(req, res, parse(req.url!, true));
   });
 
@@ -149,40 +129,35 @@ app.prepare().then(async () => {
   const port = parseInt(process.env.PORT || '3000', 10);
   const host = process.env.HOST || '0.0.0.0';
 
-  // ── Port cleanup (test mode only) ─────────────────────────────────────
-  // Previous E2E runs can leave orphaned server processes on port 3001
-  // because Playwright's SIGTERM to the webServer shell doesn't propagate
-  // to grandchild Node.js processes on Windows.  By cleaning up here
-  // (before listen()), the server can safely restart without a separate
-  // clear-port script in the webServer command — keeping the command a
-  // single process that Playwright can kill cleanly.
-  if (process.env.NODE_ENV === 'test') {
+  // ── Port cleanup ─────────────────────────────────────────────────────
+  // Previous runs (including E2E) can leave orphaned server processes on
+  // port 3001 because Playwright's SIGTERM to the webServer shell doesn't
+  // propagate to grandchild Node.js processes on Windows.  By cleaning up
+  // here (before listen()), the server can safely restart.
+  try {
     const { clearPort } = await import('./scripts/clear-port-3001.mjs');
     if (typeof clearPort === 'function') {
       await clearPort();
-    } else {
-      console.warn('[clear-port] clearPort() not exported — skipping port cleanup (zombie server risk)');
     }
+  } catch {
+    // clear-port script not available (e.g. production build) — skip
   }
 
-  // ── PID file for zombie detection (test mode only) ────────────────────
+  // ── PID file for zombie detection ────────────────────────────────────
   // On Windows, Playwright spawns the webServer through cmd.exe.  When
   // Playwright kills the webServer, the signal reaches cmd.exe but NOT the
   // Node.js grandchild — our server becomes a zombie occupying port 3001.
   //
   // We write our PID to a known file AFTER port cleanup and successful
-  // bind, so the next test run's clear-port can target-kill us by PID
-  // instead of scanning netstat.  Clean shutdown (SIGINT/SIGTERM/SIGBREAK)
-  // deletes the file; force-killed zombies leave it behind for detection.
+  // bind, so the next run's clear-port can target-kill us by PID instead
+  // of scanning netstat.  Clean shutdown (SIGINT/SIGTERM/SIGBREAK) deletes
+  // the file; force-killed zombies leave it behind for detection.
   //
   // NOTE: written AFTER clearPort() to avoid a self-kill — clearPort
   // checks the PID file and would kill us if we wrote it first.
-  const PID_FILE = process.env.NODE_ENV === 'test'
-    ? join(tmpdir(), 'teamai-e2e-server.pid')
-    : null;
+  const PID_FILE = join(tmpdir(), 'teamai-server.pid');
 
   function removePidFile() {
-    if (!PID_FILE) return;
     try {
       if (existsSync(PID_FILE)) {
         unlinkSync(PID_FILE);
@@ -242,10 +217,8 @@ app.prepare().then(async () => {
 
     // Write the PID file AFTER the port is bound, so clearPort() doesn't
     // self-kill (it checks the PID file before we start listening).
-    if (PID_FILE) {
-      writeFileSync(PID_FILE, String(process.pid));
-      console.log(`[server] PID ${process.pid} written to ${PID_FILE}`);
-    }
+    writeFileSync(PID_FILE, String(process.pid));
+    console.log(`[server] PID ${process.pid} written to ${PID_FILE}`);
 
     // ── Prerequisite tool check ────────────────────────────────────────
     const tools = checkAllTools();

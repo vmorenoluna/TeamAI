@@ -70,6 +70,14 @@ export function findInterruptedTasks(): InterruptedTask[] {
       try {
         const task = JSON.parse(readFileSync(taskFile, 'utf-8'));
         if (IN_PROGRESS_PHASES.has(task.phase)) {
+          // Only consider a task "interrupted" if there is evidence it was
+          // actually running — session_map.json (written when a session
+          // starts) or output.log (written during pipeline execution).
+          // Tasks in active phases without either were placed there by
+          // seed data or created manually and should not be auto-resumed.
+          const hasSessionMap = existsSync(join(teamaiDir, entry, 'session_map.json'));
+          const hasOutputLog = existsSync(join(teamaiDir, entry, 'output.log'));
+          if (!hasSessionMap && !hasOutputLog) continue;
           interrupted.push({
             taskId: task.id,
             title: task.title,
@@ -378,11 +386,6 @@ const WAKEUP_PROGRESS_STALE_THRESHOLD_MS = 15 * 60_000; // 15 minutes
  *  instructed to) is still eventually caught here. */
 const SESSION_TOOL_STALL_THRESHOLD_MS = 30 * 60_000; // 30 minutes
 
-/** @internal Reset the auto-resume debounce timer (used in tests). */
-export function _resetAutoResumeDebounce(): void {
-  _lastAutoResumeTime = 0;
-}
-
 /**
  * Auto-resume all interrupted tasks by re-queuing them through the orchestrator.
  * Called on server startup and when a container becomes available after being down.
@@ -613,11 +616,17 @@ export async function sweepStalledTasks(): Promise<number> {
                 }
               } catch { /* can't stat — skip */ }
             } else {
-              // No output.log at all but task is in active phase — likely
-              // the phase was written to task.json just before the server died
-              if (updatedAt < Date.now() - ABANDONED_PHASE_THRESHOLD_MS) {
-                shouldResume = true;
-                reason = `no output.log and phase "${task.phase}" set ${Math.round((Date.now() - updatedAt) / 60_000)}min ago — likely abandoned on startup`;
+              // No output.log at all but task is in active phase.  Only
+              // consider it "abandoned" if there is a session_map.json —
+              // evidence the task was actually running before the crash.
+              // Without it the task was seeded or manually created in this
+              // phase and should not be swept.
+              const sessionMapPath = join(teamaiDir, entry, 'session_map.json');
+              if (existsSync(sessionMapPath)) {
+                if (updatedAt < Date.now() - ABANDONED_PHASE_THRESHOLD_MS) {
+                  shouldResume = true;
+                  reason = `no output.log and phase "${task.phase}" set ${Math.round((Date.now() - updatedAt) / 60_000)}min ago — likely abandoned on startup`;
+                }
               }
             }
           }

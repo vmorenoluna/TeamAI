@@ -113,7 +113,9 @@ test.describe('Project Selector', () => {
     // Use force:true because the dialog's label elements intercept pointer events.
     const backdrop = page.locator('.bg-black\\/60').first();
     await expect(backdrop).toBeVisible({ timeout: 3_000 });
-    await backdrop.click({ force: true });
+    // Click near the top-left corner of the backdrop so the pointer lands on
+    // the overlay rather than the centered dialog content.
+    await backdrop.click({ position: { x: 10, y: 10 }, force: true });
     await page.waitForTimeout(500);
 
     await expect(page.locator('h2:has-text("Add Project")')).not.toBeVisible({ timeout: 5_000 });

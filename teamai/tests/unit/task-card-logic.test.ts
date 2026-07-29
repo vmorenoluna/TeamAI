@@ -86,12 +86,12 @@ describe('TaskCard PR link indicator logic', () => {
       href: prUrl,
       target: '_blank',
       rel: 'noopener noreferrer',
-      'data-testid': 'pr-link-indicator',
+      'data-component': 'pr-link-indicator',
     };
     expect(attrs.href).toBe('https://github.com/owner/repo/pull/42');
     expect(attrs.target).toBe('_blank');
     expect(attrs.rel).toBe('noopener noreferrer');
-    expect(attrs['data-testid']).toBe('pr-link-indicator');
+    expect(attrs['data-component']).toBe('pr-link-indicator');
   });
 });
 

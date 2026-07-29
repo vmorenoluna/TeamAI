@@ -79,7 +79,7 @@ export function ToolSettings({ initialTools }: { initialTools: ToolStatus[] }) {
   }
 
   return (
-    <section data-testid="tool-settings">
+    <section data-component="tool-settings">
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-sm font-semibold text-slate-200">Tool Paths</h2>
         <button

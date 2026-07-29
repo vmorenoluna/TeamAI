@@ -133,6 +133,15 @@ export class ProcessManager extends EventEmitter {
       });
     }
 
+    // Catch spawn errors (ENOENT when Claude CLI is not installed, etc.)
+    // to prevent uncaught exceptions from crashing the server.
+    proc.on('error', (err) => {
+      warn('process-manager', `Session ${id} spawn failed — ${err.message}`);
+      this.emit('error', { sessionId: id, error: err.message });
+      const session = this.sessions.get(id);
+      if (session) session.status = 'error';
+    });
+
     // Per-session EventEmitter so waitForCompletion doesn't pile listeners
     // on the global processManager emitter (BUG-20 / T29).
     const sessionEvents = new EventEmitter();
@@ -141,7 +150,8 @@ export class ProcessManager extends EventEmitter {
     const { logFile } = opts;
     let buffer = '';
     const now = Date.now();
-    proc.stdout!.on('data', (chunk: Buffer) => {
+    if (proc.stdout) {
+    proc.stdout.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -164,7 +174,9 @@ export class ProcessManager extends EventEmitter {
       if (session) session.lastOutputAt = Date.now();
     });
 
-    proc.stderr!.on('data', (chunk: Buffer) => {
+    }
+    if (proc.stderr) {
+    proc.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
       if (logFile) {
         // Full date-time (YYYY-MM-DDTHH:MM:SS), not just HH:MM:SS — a task
@@ -176,6 +188,7 @@ export class ProcessManager extends EventEmitter {
       this.emit('error', { sessionId: id, error: text });
     });
 
+    }
     proc.on('exit', (code, signal) => {
       if (buffer.trim()) {
         try {

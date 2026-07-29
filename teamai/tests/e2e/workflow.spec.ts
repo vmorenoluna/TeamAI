@@ -129,7 +129,7 @@ test.describe('Workflow — Diagram Interaction', () => {
 
     // Hover the inner cursor-pointer div — React's onMouseEnter uses
     // mouseover delegation on the root, so we must target the interactive child.
-    const backlogInner = page.locator('[data-testid="phase-node-backlog"] div.cursor-pointer').first();
+    const backlogInner = page.locator('[data-component="phase-node-backlog"] div.cursor-pointer').first();
     await expect(backlogInner).toBeAttached({ timeout: 5_000 });
     await backlogInner.hover({ force: true });
     // Allow the 180ms debounce timer in handlePhaseEnter to fire
@@ -145,7 +145,7 @@ test.describe('Workflow — Diagram Interaction', () => {
     await page.waitForTimeout(500);
 
     // Hover the inner cursor-pointer div of the Done phase node
-    const doneInner = page.locator('[data-testid="phase-node-done"] div.cursor-pointer').first();
+    const doneInner = page.locator('[data-component="phase-node-done"] div.cursor-pointer').first();
     await expect(doneInner).toBeAttached({ timeout: 5_000 });
     await doneInner.hover({ force: true });
     await page.waitForTimeout(300);
@@ -160,7 +160,7 @@ test.describe('Workflow — Diagram Interaction', () => {
     await page.waitForTimeout(500);
 
     // "Failed" phase has exactly 1 task in the seed
-    const failedInner = page.locator('[data-testid="phase-node-failed"] div.cursor-pointer').first();
+    const failedInner = page.locator('[data-component="phase-node-failed"] div.cursor-pointer').first();
     await expect(failedInner).toBeAttached({ timeout: 5_000 });
     await failedInner.hover({ force: true });
     await page.waitForTimeout(300);
@@ -178,7 +178,7 @@ test.describe('Workflow — Diagram Interaction', () => {
     await page.waitForTimeout(500);
 
     // Hover the inner cursor-pointer div of the Backlog phase node
-    const backlogInner = page.locator('[data-testid="phase-node-backlog"] div.cursor-pointer').first();
+    const backlogInner = page.locator('[data-component="phase-node-backlog"] div.cursor-pointer').first();
     await expect(backlogInner).toBeAttached({ timeout: 5_000 });
     await backlogInner.hover({ force: true });
     await page.waitForTimeout(300);

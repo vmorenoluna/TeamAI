@@ -108,6 +108,9 @@ function createTask(
     updatedAt: new Date().toISOString(),
   };
   writeFileSync(join(dir, 'task.json'), JSON.stringify(task, null, 2));
+  // Evidence the task was actually running — findInterruptedTasks requires
+  // session_map.json or output.log to exist before flagging a task as interrupted.
+  writeFileSync(join(dir, 'session_map.json'), JSON.stringify({}), 'utf-8');
   return dir;
 }
 
@@ -503,9 +506,6 @@ describe('Recovery Integration', () => {
       vi.clearAllMocks();
       mockGetOrchestrator.mockReturnValue({ resumeTask: mockOrchResumeTask });
       mockOrchResumeTask.mockResolvedValue(undefined);
-      // Reset the debounce timer so each test starts fresh
-      const { _resetAutoResumeDebounce } = await import('../../src/lib/recovery');
-      _resetAutoResumeDebounce();
     });
 
     it('calls resumeTask on orchestrator for each interrupted task on disk', async () => {
