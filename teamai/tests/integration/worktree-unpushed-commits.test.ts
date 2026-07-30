@@ -245,16 +245,26 @@ describe('Worktree unpushed-commit detection', () => {
       task.slug = slug;
       writeFileSync(join(taskDir, 'task.json'), JSON.stringify(task, null, 2));
 
-      // Clean up the worktree before deleting testDir (worktrees live
-      // outside testDir so cleanup() alone would leak them)
-      if (existsSync(worktreePath)) {
-        try { execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: testDir, stdio: 'ignore' }); } catch { /* ok */ }
-      }
+      // Import orchestrator
       const mod = await import('@/lib/orchestrator');
       orch = mod.getOrchestrator(testDir);
     });
 
     afterEach(() => {
+      // Remove the worktree before deleting testDir (worktrees live
+      // outside testDir so cleanup() alone would leak them)
+      try {
+        const taskPath = join(testDir, '.teamai', taskId, 'task.json');
+        if (existsSync(taskPath)) {
+          const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
+          if (task.branch && task.slug) {
+            const worktreePath = join(testDir, '..', 'worktrees', task.slug);
+            if (existsSync(worktreePath)) {
+              try { execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: testDir, stdio: 'ignore' }); } catch { /* ok */ }
+            }
+          }
+        }
+      } catch { /* best-effort — cleanup must not mask test failures */ }
       cleanup();
       vi.resetModules();
     });
