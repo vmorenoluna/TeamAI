@@ -225,9 +225,12 @@ export function UnifiedTerminal({
   const termRef = useRef<{ terminal: Terminal; fitAddon: FitAddon } | null>(null);
   // eslint-disable-next-line local/no-async-fetch-on-mount
   const [termReady, setTermReady] = useState(false);
+  // eslint-disable-next-line local/no-async-fetch-on-mount
+  const [termSized, setTermSized] = useState(false);
   const { events, connected } = useAgentStream(taskId, project);
   const userScrolledRef = useRef(false);
   const liveWrittenRef = useRef(0);
+  const hasWrittenRef = useRef(false);
 
   const [selectedRoles, setSelectedRoles] = useState<Set<string>>(
     () => new Set(ROLES.map(r => r.key))
@@ -302,7 +305,7 @@ export function UnifiedTerminal({
 
     let terminal: Terminal;
     let fitAddon: FitAddon;
-    let observer: ResizeObserver;
+    let jsdomFallback: ReturnType<typeof setTimeout>;
     let cancelled = false;
 
     liveWrittenRef.current = 0;
@@ -335,9 +338,15 @@ export function UnifiedTerminal({
         lineHeight: 1.5,
         cursorBlink: false,
         disableStdin: true,
-        convertEol: true,
+        convertEol: false,
         scrollback: 50000,
         rendererType: 'dom',
+        // Prevent a 1-row collapse that loses the first log line to
+        // scrollback.  When the container is 0-height at mount time
+        // (common under E2E suite load in headless Chrome), xterm
+        // defaults to 1 row.  An explicit rows value guarantees
+        // enough rows exist from the moment the terminal opens.
+        rows: 24,
       };
       terminal = new TerminalCtor(opts);
 
@@ -345,49 +354,31 @@ export function UnifiedTerminal({
       terminal.loadAddon(fitAddon);
       terminal.open(container);
 
-      // The terminal is NOT ready until the container has a non-zero
-      // height and fit() has run at least once.
+      // `rows: 24` guarantees enough rows from the moment the terminal
+      // opens — content can be written immediately without waiting for the
+      // container to reach any particular height.
       //
-      // Under heavy load the browser may report a tiny (1–2 px)
-      // clientHeight on the first layout pass — enough to pass a > 0
-      // check but not enough to give xterm usable rows.  We require at
-      // least 5 px before fitting.  The bar is set low enough that the
-      // container's flex-1 layout settles above it even under load.
-      // clientHeight is 0 when dimensions are unavailable (e.g.
-      // simulated DOM) — the terminal initialises immediately there.
-      const MIN_HEIGHT = 5;
-      let ready = false;
-      const tryBecomeReady = () => {
-        if (!container.isConnected || ready) return;
-        if (container.clientHeight > 0 && container.clientHeight < MIN_HEIGHT) {
-          // Container has a tiny height (1–2 px) — the first layout pass
-          // hasn't settled yet.  Schedule a retry so we don't get stuck
-          // if the ResizeObserver doesn't re-fire promptly.
-          setTimeout(() => tryBecomeReady(), 30);
-          return;
-        }
+      // The ResizeObserver is set up in the write effect (after content
+      // is safely in the buffer) to avoid a race where headless Chrome
+      // under load fires the observer before content is written, fitting
+      // the terminal to an intermediate height and collapsing the viewport.
+      const isNode = typeof process !== 'undefined' && process.versions?.node;
+      if (isNode) {
         fitAddon.fit();
-        termRef.current = { terminal, fitAddon };
-        setTermReady(true);
-        ready = true;
-        observer.disconnect();
-        observer = new ResizeObserver(() => fitAddon.fit());
-        observer.observe(container);
-      };
+      }
+      termRef.current = { terminal, fitAddon };
+      setTermReady(true);
+      setTermSized(true);
 
-      // Primary path: ResizeObserver fires when the container first gets
-      // laid out to a usable height.
-      observer = new ResizeObserver(() => tryBecomeReady());
-      observer.observe(container);
-
-      // Fallback: if the container already has usable height when we
-      // reach here, initialise immediately via rAF so layout can settle.
-      // Belt-and-suspenders: schedule a second attempt after a tick in
-      // case rAF fires too early for the layout to have settled.
-      requestAnimationFrame(() => {
-        if (!ready) tryBecomeReady();
-        if (!ready) setTimeout(() => tryBecomeReady(), 50);
-      });
+      // JSDOM escape hatch: in simulated DOM the container is always 0
+      // height, so fit once after 500 ms so unit tests have a sized terminal.
+      if (isNode) {
+        jsdomFallback = setTimeout(() => {
+          if (container.clientHeight === 0) {
+            fitAddon.fit();
+          }
+        }, 500);
+      }
 
       terminal.onScroll(() => {
         const atBottom = terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
@@ -399,11 +390,12 @@ export function UnifiedTerminal({
 
     return () => {
       cancelled = true;
-      observer?.disconnect();
+      clearTimeout(jsdomFallback);
       terminal?.dispose();
       termRef.current = null;
       liveWrittenRef.current = 0;
       setTermReady(false);
+      setTermSized(false);
     };
   }, []);
 
@@ -432,26 +424,65 @@ export function UnifiedTerminal({
 
   // ── Write interleaved output ──────────────────────────────────────────
 
+  const observerSetupRef = useRef(false);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+
   useEffect(() => {
-    if (!termReady || !termRef.current) return;
-    const { terminal } = termRef.current;
-    terminal.reset();
+    if (!termReady || !termSized || !termRef.current) return;
+    const { terminal, fitAddon } = termRef.current;
+    const container = containerRef.current;
+    // Use clear() instead of reset() — reset() tears down the full terminal
+    // buffer and DOM renderer state, and under headless-Chrome load the DOM
+    // renderer may not finish rebuilding before the synchronous write()
+    // below, causing the first line to be dropped from the viewport.
+    // clear() only wipes the screen and scrollback without a full teardown.
+    // On first mount the terminal is already empty, so skip clearing entirely.
+    if (hasWrittenRef.current) {
+      terminal.clear();
+    }
+    hasWrittenRef.current = true;
     userScrolledRef.current = false;
     if (interleavedOutput) {
       terminal.write(interleavedOutput);
     }
+
+    // Set up the ResizeObserver AFTER content is safely in the buffer.
+    // This avoids a race where headless Chrome under E2E load fires the
+    // observer before content is written, fitting to an intermediate
+    // height and collapsing the viewport to 1-2 rows.
+    // The 200 px threshold ensures the container has settled at a
+    // meaningful height (~10 rows) before calling fit().
+    if (!observerSetupRef.current && container) {
+      observerSetupRef.current = true;
+      resizeObserverRef.current = new ResizeObserver(() => {
+        if (container.clientHeight >= 200) {
+          fitAddon.fit();
+        }
+      });
+      resizeObserverRef.current.observe(container);
+    }
+
     requestAnimationFrame(() => {
       if (termRef.current && !userScrolledRef.current) {
         termRef.current.terminal.scrollToBottom();
       }
     });
     liveWrittenRef.current = 0;
-  }, [interleavedOutput, termReady, selectedSessionIds]);
+  }, [interleavedOutput, termReady, termSized, selectedSessionIds]);
+
+  // ── Cleanup ResizeObserver on unmount ─────────────────────────────────
+
+  useEffect(() => {
+    return () => {
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
+    };
+  }, []);
 
   // ── Append live events ────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!termReady || !termRef.current) return;
+    if (!termReady || !termSized || !termRef.current) return;
     const { terminal } = termRef.current;
 
     const filteredEvents = sessionMap
@@ -480,7 +511,7 @@ export function UnifiedTerminal({
     if (filteredEvents.length > 0 && pendingWrites === 0 && !userScrolledRef.current) {
       terminal.scrollToBottom();
     }
-  }, [events, termReady, selectedSessionIds, sessionMap, sessionRoleMap]);
+  }, [events, termReady, termSized, selectedSessionIds, sessionMap, sessionRoleMap]);
 
   // ── Render ────────────────────────────────────────────────────────────
 

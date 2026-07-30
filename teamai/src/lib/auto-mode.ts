@@ -354,6 +354,9 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
 
   log('auto-mode', `Starting CI polling for PR #${prNumber} (task ${taskId})`);
 
+  let mergeFailures = 0;
+  const MAX_MERGE_FAILURES = 5;
+
   const timer = setInterval(() => {
     if (!state.enabled) {
       clearInterval(timer);
@@ -394,14 +397,19 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
 
       // Check if all status checks passed
       const checks: Array<{ conclusion: string }> = prData.statusCheckRollup ?? [];
-      const allPassed = checks.length > 0 && checks.every(c =>
+      if (checks.length === 0) {
+        // No CI checks configured — stop polling, keep task in pr-open for manual review
+        clearInterval(timer);
+        state.ciPollTimers.delete(taskId);
+        log('auto-mode', `No CI checks configured for PR #${prNumber} — stopping poll, awaiting manual review`);
+        return;
+      }
+      const allPassed = checks.every(c =>
         c.conclusion === 'SUCCESS' || c.conclusion === 'NEUTRAL' || c.conclusion === 'SKIPPED'
       );
 
       if (allPassed) {
         log('auto-mode', `All CI checks passed for PR #${prNumber} — auto-merging`);
-        clearInterval(timer);
-        state.ciPollTimers.delete(taskId);
 
         try {
           const method = computePipelineConfig(projectRoot).autoMergeMethod ?? 'merge';
@@ -409,14 +417,19 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
             cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
           });
           log('auto-mode', `PR #${prNumber} merged successfully`);
+          clearInterval(timer);
+          state.ciPollTimers.delete(taskId);
+          _finishTask(taskId, projectRoot, state);
         } catch (mergeErr) {
+          mergeFailures++;
           const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
-          logError('auto-mode', `Failed to merge PR #${prNumber}: ${msg}`);
-          // Don't mark done if merge failed — leave for manual intervention
-          return;
+          logError('auto-mode', `Failed to merge PR #${prNumber} (attempt ${mergeFailures}/${MAX_MERGE_FAILURES}): ${msg}`);
+          if (mergeFailures >= MAX_MERGE_FAILURES) {
+            clearInterval(timer);
+            state.ciPollTimers.delete(taskId);
+            log('auto-mode', `PR #${prNumber} merge failed after ${MAX_MERGE_FAILURES} attempts — stopping poll, awaiting manual review`);
+          }
         }
-
-        _finishTask(taskId, projectRoot, state);
       }
     } catch (err) {
       // Silently retry — gh might be temporarily unavailable or rate-limited

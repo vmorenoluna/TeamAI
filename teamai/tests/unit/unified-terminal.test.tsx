@@ -16,8 +16,9 @@ import '@testing-library/jest-dom/vitest';
 
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
 
-const { mockTerminalWrite, mockTerminalReset, mockTerminalOpen, mockTerminalDispose, mockTerminalOnScroll, mockFitAddonFit } = vi.hoisted(() => ({
+const { mockTerminalWrite, mockTerminalClear, mockTerminalReset, mockTerminalOpen, mockTerminalDispose, mockTerminalOnScroll, mockFitAddonFit } = vi.hoisted(() => ({
   mockTerminalWrite: vi.fn(),
+  mockTerminalClear: vi.fn(),
   mockTerminalReset: vi.fn(),
   mockTerminalOpen: vi.fn(),
   mockTerminalDispose: vi.fn(),
@@ -27,6 +28,7 @@ const { mockTerminalWrite, mockTerminalReset, mockTerminalOpen, mockTerminalDisp
 
 const mockTerminalInstance = {
   write: mockTerminalWrite,
+  clear: mockTerminalClear,
   reset: mockTerminalReset,
   open: mockTerminalOpen,
   dispose: mockTerminalDispose,
@@ -981,7 +983,7 @@ describe('UnifiedTerminal — component', () => {
 
         // Wait for xterm init + initial writes.
         await waitFor(() => {
-          expect(mockTerminalReset).toHaveBeenCalled();
+          expect(mockTerminalWrite).toHaveBeenCalled();
         });
 
         // Both roles' parsed content and initial live events present.
@@ -1012,7 +1014,7 @@ describe('UnifiedTerminal — component', () => {
         fireEvent.click(orchBtn);
 
         await waitFor(() => {
-          expect(mockTerminalReset).toHaveBeenCalled();
+          expect(mockTerminalClear).toHaveBeenCalled();
         });
 
         const afterToggle = mockTerminalWrite.mock.calls.map(c => String(c[0] ?? '')).join('');
@@ -1042,7 +1044,7 @@ describe('UnifiedTerminal — component', () => {
       );
 
       await waitFor(() => {
-        expect(mockTerminalReset).toHaveBeenCalled();
+        expect(mockTerminalWrite).toHaveBeenCalled();
       });
 
       // Initial: both roles present.
@@ -1058,7 +1060,7 @@ describe('UnifiedTerminal — component', () => {
       fireEvent.click(qaBtn);
 
       await waitFor(() => {
-        expect(mockTerminalReset).toHaveBeenCalled();
+        expect(mockTerminalClear).toHaveBeenCalled();
       });
 
       output = mockTerminalWrite.mock.calls.map(c => String(c[0] ?? '')).join('');
@@ -1070,7 +1072,7 @@ describe('UnifiedTerminal — component', () => {
       fireEvent.click(qaBtn);
 
       await waitFor(() => {
-        expect(mockTerminalReset).toHaveBeenCalled();
+        expect(mockTerminalClear).toHaveBeenCalled();
       });
 
       output = mockTerminalWrite.mock.calls.map(c => String(c[0] ?? '')).join('');
@@ -1123,7 +1125,7 @@ describe('UnifiedTerminal — component', () => {
 
       // Wait for xterm init + first interleaved-write before returning so
       // callers can fireEvent.click immediately without racing termReady.
-      await waitForNextReset();
+      await waitForNextWrite();
 
       return { ...view, errorSpy };
     }
@@ -1132,9 +1134,17 @@ describe('UnifiedTerminal — component', () => {
     // happened for the current state. The effect is async (terminal init
     // Promise resolves on a microtask, then setTermReady triggers another
     // render, then rAF for scrollToBottom). `waitFor` polls until ready.
-    async function waitForNextReset() {
+    async function waitForNextWrite() {
       await waitFor(() => {
-        expect(mockTerminalReset).toHaveBeenCalled();
+        expect(mockTerminalWrite).toHaveBeenCalled();
+      });
+    }
+
+    // Helper: wait for a clear() call (occurs on subsequent writes after
+    // the first mount, when hasWrittenRef is true).
+    async function waitForNextClear() {
+      await waitFor(() => {
+        expect(mockTerminalClear).toHaveBeenCalled();
       });
     }
 
@@ -1157,7 +1167,7 @@ describe('UnifiedTerminal — component', () => {
     it('mounts and reaches a stable interleaved write without throwing', async () => {
       const { errorSpy } = await renderFull();
 
-      // renderFull already awaits waitForNextReset; no extra wait needed.
+      // renderFull already awaits waitForNextWrite; no extra wait needed.
 
       // Initial write must include every role's label (all selected by default).
       const initialWrite = lastWriteArg();
@@ -1186,12 +1196,10 @@ describe('UnifiedTerminal — component', () => {
 
       // selectedRoles changed → selectedSessionIds (a new Set) changed →
       // dep array is different → the interleaved-output useEffect must run.
-      // The reset call from this re-run is the only one after clearAllMocks(),
-      // so waiting for the count to exceed 0 cleanly isolates "effect ran
-      // because of the click" from earlier mount-time runs.
-      await waitFor(() => {
-        expect(mockTerminalReset).toHaveBeenCalled();
-      });
+      // Clear is called on subsequent writes (hasWrittenRef is true after
+      // the mount-time write), so waiting for clear cleanly isolates "effect
+      // ran because of the click" from earlier mount-time runs.
+      await waitForNextClear();
 
       const toggledWrite = lastWriteArg();
       expect(toggledWrite).not.toContain('[QA Review]');
@@ -1208,12 +1216,12 @@ describe('UnifiedTerminal — component', () => {
       const qaBtn = screen.getByText('QA Review').closest('button')!;
       // Deselect first.
       fireEvent.click(qaBtn);
-      await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+      await waitForNextClear();
       vi.clearAllMocks();
 
       // Reselect.
       fireEvent.click(qaBtn);
-      await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+      await waitForNextClear();
 
       const finalWrite = lastWriteArg();
       expect(finalWrite).toContain('[QA Review]');
@@ -1225,16 +1233,16 @@ describe('UnifiedTerminal — component', () => {
       vi.clearAllMocks();
 
       // Click None → all roles deselected → interleaved output becomes empty
-      // string. Effect still resets terminal but writes nothing.
+      // string. Effect clears terminal but writes nothing (empty string is falsy).
       fireEvent.click(screen.getByText('None'));
-      await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+      await waitForNextClear();
       expect(mockTerminalWrite).not.toHaveBeenCalled();
 
       vi.clearAllMocks();
 
       // Click All → all roles reselected → effect runs again with full content.
       fireEvent.click(screen.getByText('All'));
-      await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+      await waitForNextClear();
 
       const fullWrite = lastWriteArg();
       expect(fullWrite).toContain('[QA Review]');
@@ -1259,14 +1267,14 @@ describe('UnifiedTerminal — component', () => {
       // First loop: each label is currently SELECTED → click deselects it.
       for (const label of roundTripLabels) {
         fireEvent.click(screen.getByText(label).closest('button')!);
-        await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+        await waitForNextClear();
         vi.clearAllMocks();
       }
 
       // Second loop: each label is now DESELECTED → click reselects it.
       for (const label of roundTripLabels) {
         fireEvent.click(screen.getByText(label).closest('button')!);
-        await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+        await waitForNextClear();
         vi.clearAllMocks();
       }
 
@@ -1312,8 +1320,8 @@ describe('UnifiedTerminal — component', () => {
         const qaBtn = screen.getByText('QA Review').closest('button')!;
         fireEvent.click(qaBtn);
 
-        // Interleaved effect runs on dep change → resets terminal.
-        await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+        // Interleaved effect runs on dep change → clears terminal.
+        await waitForNextClear();
 
         const refErrors = errorSpy.mock.calls.filter(args =>
           args.some(a => typeof a === 'string' && a.includes('ReferenceError'))
@@ -1371,7 +1379,7 @@ describe('UnifiedTerminal — component', () => {
         // other tests use, inlined here since renderFull() always passes
         // sessionMap).
         await waitFor(() => {
-          expect(mockTerminalReset).toHaveBeenCalled();
+          expect(mockTerminalWrite).toHaveBeenCalled();
         });
 
         // ── Verify BOTH effects' writes happened on mount ──
@@ -1407,9 +1415,7 @@ describe('UnifiedTerminal — component', () => {
         const qaBtn = screen.getByText('QA Review').closest('button')!;
         fireEvent.click(qaBtn);
 
-        await waitFor(() => {
-          expect(mockTerminalReset).toHaveBeenCalled();
-        });
+        await waitForNextClear();
 
         // After deselecting QA, the new interleaved write must drop QA content.
         expect(allWrites()).not.toContain('[QA Review]');
@@ -1420,7 +1426,7 @@ describe('UnifiedTerminal — component', () => {
         // ── Reselect QA and confirm the round trip also works ──
         vi.clearAllMocks();
         fireEvent.click(qaBtn);
-        await waitFor(() => expect(mockTerminalReset).toHaveBeenCalled());
+        await waitForNextClear();
         expect(allWrites()).toContain('[QA Review]');
         expect(allWrites()).toContain('QA line');
 

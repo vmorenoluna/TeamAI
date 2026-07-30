@@ -5,7 +5,7 @@
  * copy button on spec tab, copy button on completion summary.
  */
 import { test, expect } from '@playwright/test';
-import { ensureProjectSelected, requireSeedTaskId } from './helpers';
+import { ensureProjectSelected, requireSeedTaskId, clickUntilVisible } from './helpers';
 
 const LOGIN_BUTTON_SLUG = 'fix-login-button-not-visible-on-mobile';
 const SEARCH_CRASH_SLUG = 'fix-search-bar-crashes-on-empty-input';
@@ -100,10 +100,13 @@ test.describe('Copy Button — Completion Summary', () => {
     // (not just "Copy" which could match "Copied" state).
     const copyBtn = page.locator('button', { hasText: '📋 Copy' }).first();
     await expect(copyBtn).toBeVisible({ timeout: 10_000 });
-    await copyBtn.click();
 
-    // Should toggle to "✓ Copied" — use longer timeout for slow hydration
-    await expect(page.locator('button', { hasText: '✓ Copied' }).first()).toBeVisible({ timeout: 10_000 });
+    // Use clickUntilVisible to handle React hydration races: the server-
+    // rendered button is in the DOM immediately but the onClick handler
+    // isn't attached until React hydrates.  A single click can fire into
+    // the void — this retries the click until the target appears.
+    const copiedBtn = page.locator('button', { hasText: '✓ Copied' }).first();
+    await clickUntilVisible(copyBtn, copiedBtn, { timeout: 15_000 });
   });
 });
 
