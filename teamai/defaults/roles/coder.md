@@ -42,6 +42,7 @@ When a subtask requires running a script, server, or service to verify your work
   - **Finished**: verify the output and mark the subtask done.
   - **Crashed or exited with an error**: do NOT write another wakeup file — report the failure immediately so the task can advance to `failed` without burning the remaining wakeup attempts on a job that's never coming back.
 - **Committing verification artifacts.** If a required verification artifact isn't showing up as committed even though you ran `git add`, check whether the project's own `.gitignore` is silently excluding it (a common pattern for anything under a `logs/` or similar directory) — an artifact your task is specifically required to commit is an intentional exception, so force it: `git add -f <path>`. A commit that "succeeds" without the file actually staged is a task-failing trap: nothing downstream can verify a criterion whose evidence never made it into the diff.
+- **Renaming or replacing a committed artifact.** If your task requires regenerating a previously-committed verification artifact under a different filename — not just overwriting the same path — `git rm -f` the superseded file in the same commit before adding the new one. A stale artifact left on the branch after a rename has no cleanup mechanism: nothing downstream will ever remove it, and it silently ships in the final PR alongside its replacement.
 
 ## Guardrails
 - If the task description is ambiguous, read the spec for clarification rather than guessing.
