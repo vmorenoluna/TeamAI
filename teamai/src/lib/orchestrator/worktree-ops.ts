@@ -5,7 +5,7 @@
  * spy on orchestrator methods via the delegate pattern.
  */
 import { execFileSync } from 'child_process';
-import { existsSync, readdirSync, rmSync } from 'fs';
+import { existsSync, readdirSync, rmSync, appendFileSync } from 'fs';
 import path from 'path';
 import { slugify } from '../utils';
 import { TaskStore } from '../task-store';
@@ -26,6 +26,27 @@ export interface RemoveWorktreeDeps extends WorktreeOpsDeps {
 }
 
 type SubtaskWorktreePipeline = Pick<TaskPipeline, 'worktreePath' | 'branch'>;
+
+// ── Unpushed-commit detection ─────────────────────────────────────────────
+
+/**
+ * Check whether a branch has local commits that haven't been pushed to its
+ * remote-tracking branch.  Returns the `git log --oneline` output (empty
+ * string = clean) or null if the remote branch doesn't exist yet.
+ */
+export function getUnpushedCommits(
+  projectRoot: string,
+  branch: string,
+): string | null {
+  try {
+    return execFileSync('git', ['log', `origin/${branch}..${branch}`, '--oneline'], {
+      cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe',
+    }).trim() || null;
+  } catch {
+    // Remote branch doesn't exist yet — nothing to compare against
+    return null;
+  }
+}
 
 // ── Worktree path resolver ────────────────────────────────────────────────
 
@@ -98,6 +119,33 @@ export function removeWorktree(
   const wtPath = getWorktreePath(taskId, deps.taskStore, worktreeBase);
   if (!wtPath || !existsSync(wtPath)) return;
 
+  // Check for unpushed commits before tearing down the worktree.
+  // Commits made directly in the worktree outside the normal pipeline
+  // push steps (e.g. a manual session after PR creation) would be
+  // silently lost once the worktree is removed — the commit objects
+  // survive in the local object store but become unreachable from any
+  // branch.  Log a warning so the discrepancy is not invisible.
+  const task = deps.taskStore.getById(taskId);
+  if (task?.branch) {
+    try {
+      const unpushed = getUnpushedCommits(deps.projectRoot, task.branch);
+      if (unpushed) {
+        const taskDir = deps.taskStore.getDirById(taskId);
+        const outputLog = path.join(taskDir, 'output.log');
+        const timestamp = new Date().toISOString();
+        try {
+          appendFileSync(outputLog,
+            `\n[${timestamp}] [WORKTREE] ⚠ WARNING: Removing worktree at ${wtPath}\n` +
+            `[${timestamp}] [WORKTREE] The branch ${task.branch} has unpushed commits:\n` +
+            unpushed.split('\n').map(l => `[${timestamp}] [WORKTREE]   ${l}`).join('\n') + '\n' +
+            `[${timestamp}] [WORKTREE] These commits will become unreachable once the worktree is removed.\n` +
+            `[${timestamp}] [WORKTREE] To recover: git branch recover-${taskId} ${task.branch} && git push origin recover-${taskId}\n`
+          );
+        } catch { /* best-effort — logging must not block worktree removal */ }
+      }
+    } catch { /* best-effort — unpushed check must not block worktree removal */ }
+  }
+
   try {
     deps.execGit(['worktree', 'remove', wtPath], deps.projectRoot);
   } catch {
@@ -111,7 +159,6 @@ export function removeWorktree(
     }
   }
 
-  const task = deps.taskStore.getById(taskId);
   if (task?.branch) {
     try { execFileSync('git', ['branch', '-D', task.branch], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
   }
