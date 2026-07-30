@@ -27,11 +27,21 @@ type ArtifactPipeline = Pick<TaskPipeline, 'taskId' | 'description' | 'specPath'
 
 // ── Exclude set ───────────────────────────────────────────────────────────
 
-/** Files excluded from artifact commit — internal/transient orchestrator state. */
+/** Files excluded from artifact commit — internal/transient orchestrator state.
+ *  Excludes output.log, all output-*.log variants (per-phase/per-subtask session
+ *  logs), and .pipeline_state.json (crash-recovery state). */
 export const ARTIFACT_EXCLUDE = new Set([
   'output.log',
   '.pipeline_state.json',
 ]);
+
+/** Regex matching all raw session log filenames: output.log and output-*.log.
+ *  Separate from ARTIFACT_EXCLUDE because the latter uses exact Set lookup. */
+const OUTPUT_LOG_PATTERN = /^output(-.*)?\.log$/;
+
+function isExcluded(filename: string): boolean {
+  return ARTIFACT_EXCLUDE.has(filename) || OUTPUT_LOG_PATTERN.test(filename);
+}
 
 // ── Commit function ───────────────────────────────────────────────────────
 
@@ -44,7 +54,7 @@ function copyArtifactsRecursive(sourceDir: string, destDir: string, specPath: st
   let count = 0;
   const entries = readdirSync(sourceDir, { withFileTypes: true });
   for (const entry of entries) {
-    if (ARTIFACT_EXCLUDE.has(entry.name)) continue;
+    if (isExcluded(entry.name)) continue;
     const srcPath = path.join(sourceDir, entry.name);
     const destPath = path.join(destDir, entry.name);
     if (entry.isDirectory()) {

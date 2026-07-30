@@ -567,6 +567,62 @@ describe('_commitArtifactsToWorktree', () => {
     expect(logContent).toContain('Committed 5 artifact file');
   });
 
+  // ── Per-phase / per-subtask log exclusion ────────────────────
+
+  it('excludes output-*.log variants (per-phase and per-subtask session logs)', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    // Set up artifact files including per-phase and per-subtask log files
+    writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+    writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
+    // These should ALL be excluded — raw session logs
+    writeFileSync(join(testData.taskDir, 'output.log'), 'raw terminal output');
+    writeFileSync(join(testData.taskDir, 'output-spec.log'), 'spec session log');
+    writeFileSync(join(testData.taskDir, 'output-plan.log'), 'plan session log');
+    writeFileSync(join(testData.taskDir, 'output-qa.log'), 'qa session log');
+    writeFileSync(join(testData.taskDir, 'output-merge.log'), 'merge session log');
+    writeFileSync(join(testData.taskDir, 'output-st1.log'), 'subtask 1 log');
+    writeFileSync(join(testData.taskDir, 'output-st7.log'), 'subtask 7 log');
+    writeFileSync(join(testData.taskDir, 'output-st9999.log'), 'subtask 9999 log');
+    writeFileSync(join(testData.taskDir, '.pipeline_state.json'), '{}');
+
+    const worktreePath = join(testData.root, 'worktree-log-variants');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: testData.slug,
+      specPath: testData.taskDir,
+      worktreePath,
+    });
+
+    mockExecFileSync.mockReturnValue('');
+
+    (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline);
+
+    const targetDir = join(worktreePath, '.teamai', basename(pipeline.specPath as string));
+
+    // ALL output log variants should be excluded
+    expect(existsSync(join(targetDir, 'output.log'))).toBe(false);
+    expect(existsSync(join(targetDir, 'output-spec.log'))).toBe(false);
+    expect(existsSync(join(targetDir, 'output-plan.log'))).toBe(false);
+    expect(existsSync(join(targetDir, 'output-qa.log'))).toBe(false);
+    expect(existsSync(join(targetDir, 'output-merge.log'))).toBe(false);
+    expect(existsSync(join(targetDir, 'output-st1.log'))).toBe(false);
+    expect(existsSync(join(targetDir, 'output-st7.log'))).toBe(false);
+    expect(existsSync(join(targetDir, 'output-st9999.log'))).toBe(false);
+    expect(existsSync(join(targetDir, '.pipeline_state.json'))).toBe(false);
+
+    // Included files should still be copied
+    expect(existsSync(join(targetDir, 'spec.md'))).toBe(true);
+    expect(existsSync(join(targetDir, 'plan.json'))).toBe(true);
+
+    // Log should report 3 files committed (spec, plan, task.json)
+    const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('Committed 3 artifact file');
+  });
+
   // ── Full artifact set (spec revisions, snapshots, etc.) ────────────
 
   it('excludes output.log and .pipeline_state.json but includes spec revisions and snapshots', () => {

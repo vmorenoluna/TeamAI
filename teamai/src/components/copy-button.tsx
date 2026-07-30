@@ -4,13 +4,13 @@ import { useState, useCallback } from 'react';
 
 export function CopyButton({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
+  const handleCopy = useCallback(() => {
+    // Fire-and-forget: don't await clipboard — in headless Chrome the
+    // Promise may hang indefinitely, preventing the "Copied" state from
+    // ever rendering.
+    navigator.clipboard.writeText(text).catch(() => {
       // Clipboard API may fail in headless environments or without focus.
-      // Still show the "Copied" state so the user gets visual feedback.
-    }
+    });
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [text]);

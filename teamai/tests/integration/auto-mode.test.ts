@@ -1004,7 +1004,7 @@ describe('Auto Mode Integration', () => {
       await vi.advanceTimersByTimeAsync(31_000);
 
       const mergeCalls = mockExecFileSync.mock.calls.filter(
-        (c: string[]) => c[0] === 'gh' && c[1] === 'pr' && c[2] === 'merge',
+        (c: unknown[]) => c[0] === 'gh' && Array.isArray(c[1]) && c[1][0] === 'pr' && c[1][1] === 'merge',
       );
       expect(mergeCalls.length).toBe(0);
     });
@@ -1040,7 +1040,7 @@ describe('Auto Mode Integration', () => {
       expect(viewCallCount).toBe(1);
 
       const mergeCalls = mockExecFileSync.mock.calls.filter(
-        (c: string[]) => c[0] === 'gh' && c[1] === 'pr' && c[2] === 'merge',
+        (c: unknown[]) => c[0] === 'gh' && Array.isArray(c[1]) && c[1][0] === 'pr' && c[1][1] === 'merge',
       );
       expect(mergeCalls.length).toBe(0);
     });
@@ -1172,6 +1172,92 @@ describe('Auto Mode Integration', () => {
         (c: string[]) => c[0] === 'gh',
       );
       expect(ghCalls.length).toBe(0);
+    });
+
+    it('stops polling when statusCheckRollup is empty (no CI checks configured)', async () => {
+      vi.useFakeTimers();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      let viewCallCount = 0;
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          viewCallCount++;
+          // statusCheckRollup is null (no CI checks) — gh returns the field as null
+          return JSON.stringify({ state: 'OPEN', statusCheckRollup: null });
+        }
+        return '';
+      });
+
+      const { TaskStore } = await import('@/lib/task-store');
+      const store = new TaskStore(testDir);
+      store.updatePhase(taskId, 'pr-open');
+      fireEvent('phase-change', { taskId, phase: 'pr-open', projectRoot: testDir });
+
+      // First poll — empty checks detected, should stop polling
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(viewCallCount).toBe(1);
+
+      // Second poll should NOT happen (timer was cleared on empty checks)
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(viewCallCount).toBe(1);
+
+      // No merge should have been attempted
+      const mergeCalls = mockExecFileSync.mock.calls.filter(
+        (c: unknown[]) => c[0] === 'gh' && Array.isArray(c[1]) && c[1][0] === 'pr' && c[1][1] === 'merge',
+      );
+      expect(mergeCalls.length).toBe(0);
+    });
+
+    it('retries merge on failure and stops polling after 5 consecutive failures', async () => {
+      vi.useFakeTimers();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      let viewCallCount = 0;
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          viewCallCount++;
+          return JSON.stringify({
+            state: 'OPEN',
+            statusCheckRollup: [{ conclusion: 'SUCCESS' }],
+          });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'merge') {
+          throw new Error('Branch protection requires review');
+        }
+        return '';
+      });
+
+      const { TaskStore } = await import('@/lib/task-store');
+      const store = new TaskStore(testDir);
+      store.updatePhase(taskId, 'pr-open');
+      fireEvent('phase-change', { taskId, phase: 'pr-open', projectRoot: testDir });
+
+      // Advance 5 polls — each one sees CI pass, attempts merge, and fails
+      for (let i = 0; i < 5; i++) {
+        await vi.advanceTimersByTimeAsync(31_000);
+      }
+
+      // All 5 polls ran and attempted merge 5 times
+      expect(viewCallCount).toBe(5);
+      const mergeCalls = mockExecFileSync.mock.calls.filter(
+        (c: unknown[]) => c[0] === 'gh' && Array.isArray(c[1]) && c[1][0] === 'pr' && c[1][1] === 'merge',
+      );
+      expect(mergeCalls.length).toBe(5);
+
+      // 6th poll should NOT happen (timer stopped after 5 merge failures)
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(viewCallCount).toBe(5);
+      expect(mergeCalls.length).toBe(5);
     });
   });
 
