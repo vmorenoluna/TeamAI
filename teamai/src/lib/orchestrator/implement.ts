@@ -19,6 +19,7 @@ import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { rebaseOntoLatestDefault } from './phase-runners';
 import { updateSessionMap, logToOutput } from './helpers';
 import { resolveBaseBranch } from '../git-platform';
+import { getUnpushedCommits } from './worktree-ops';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
 
@@ -97,6 +98,32 @@ export async function ensureWorktree(
       if (path.resolve(pipeline.worktreePath) === path.resolve(deps.projectRoot)) {
         throw new WorktreeError('Refusing to remove worktree at project root — this would destroy the repository', 'WORKTREE_AT_ROOT');
       }
+      // Check for unpushed commits before tearing down the worktree.
+      // A commit made directly in this worktree outside the normal pipeline
+      // push steps (e.g. a manual session after PR creation) would be
+      // silently lost — the worktree gets force-removed and recreated below.
+      try {
+        const unpushed = getUnpushedCommits(deps.projectRoot, pipeline.branch);
+        if (unpushed) {
+          logToOutput(pipeline.specPath,
+            `\n[WORKTREE] ⚠ WARNING: Removing unhealthy worktree at ${pipeline.worktreePath}\n` +
+            `[WORKTREE] The branch ${pipeline.branch} has unpushed commits:\n` +
+            unpushed.split('\n').map(l => `[WORKTREE]   ${l}`).join('\n') + '\n' +
+            `[WORKTREE] Attempting to push before teardown...\n`
+          );
+          try {
+            deps.gitPush(['push', 'origin', pipeline.branch], path.join(pipeline.specPath, 'output.log'));
+            logToOutput(pipeline.specPath, '[WORKTREE] Pushed unpushed commits successfully\n');
+          } catch (pushErr) {
+            const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+            logToOutput(pipeline.specPath, `[WORKTREE] Auto-push failed: ${pushMsg}\n`);
+            logToOutput(pipeline.specPath,
+              `[WORKTREE] These commits will become unreachable once the worktree is removed.\n` +
+              `[WORKTREE] To recover: git branch recover-${pipeline.taskId} ${pipeline.branch} && git push origin recover-${pipeline.taskId}\n`
+            );
+          }
+        }
+      } catch { /* best-effort — unpushed check must not block worktree repair */ }
       try {
         deps.execGit(['worktree', 'remove', '--force', pipeline.worktreePath], deps.projectRoot);
       } catch { /* best-effort */ }
