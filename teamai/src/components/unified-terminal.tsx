@@ -216,6 +216,16 @@ export function formatLiveEventWithLabel(
   return `${prefix}${body}`;
 }
 
+// ── Terminal sizing ─────────────────────────────────────────────────────────
+
+const FONT_SIZE = 13;
+const LINE_HEIGHT = 1.5;
+/** Minimum rows the container must hold before calling fitAddon.fit().
+ *  Fewer rows than this risk collapsing the viewport under E2E load
+ *  where headless Chrome delivers intermediate container heights. */
+const MIN_FIT_ROWS = 10;
+const MIN_FIT_HEIGHT = FONT_SIZE * LINE_HEIGHT * MIN_FIT_ROWS;
+
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function UnifiedTerminal({
@@ -225,8 +235,6 @@ export function UnifiedTerminal({
   const termRef = useRef<{ terminal: Terminal; fitAddon: FitAddon } | null>(null);
   // eslint-disable-next-line local/no-async-fetch-on-mount
   const [termReady, setTermReady] = useState(false);
-  // eslint-disable-next-line local/no-async-fetch-on-mount
-  const [termSized, setTermSized] = useState(false);
   const { events, connected } = useAgentStream(taskId, project);
   const userScrolledRef = useRef(false);
   const liveWrittenRef = useRef(0);
@@ -334,8 +342,8 @@ export function UnifiedTerminal({
           selectionBackground: '#1e293b',
         },
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-        fontSize: 13,
-        lineHeight: 1.5,
+        fontSize: FONT_SIZE,
+        lineHeight: LINE_HEIGHT,
         cursorBlink: false,
         disableStdin: true,
         convertEol: false,
@@ -368,7 +376,6 @@ export function UnifiedTerminal({
       }
       termRef.current = { terminal, fitAddon };
       setTermReady(true);
-      setTermSized(true);
 
       // JSDOM escape hatch: in simulated DOM the container is always 0
       // height, so fit once after 500 ms so unit tests have a sized terminal.
@@ -395,7 +402,6 @@ export function UnifiedTerminal({
       termRef.current = null;
       liveWrittenRef.current = 0;
       setTermReady(false);
-      setTermSized(false);
     };
   }, []);
 
@@ -424,11 +430,10 @@ export function UnifiedTerminal({
 
   // ── Write interleaved output ──────────────────────────────────────────
 
-  const observerSetupRef = useRef(false);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   useEffect(() => {
-    if (!termReady || !termSized || !termRef.current) return;
+    if (!termReady || !termRef.current) return;
     const { terminal, fitAddon } = termRef.current;
     const container = containerRef.current;
     // Use clear() instead of reset() — reset() tears down the full terminal
@@ -450,12 +455,11 @@ export function UnifiedTerminal({
     // This avoids a race where headless Chrome under E2E load fires the
     // observer before content is written, fitting to an intermediate
     // height and collapsing the viewport to 1-2 rows.
-    // The 200 px threshold ensures the container has settled at a
-    // meaningful height (~10 rows) before calling fit().
-    if (!observerSetupRef.current && container) {
-      observerSetupRef.current = true;
+    // MIN_FIT_HEIGHT (= FONT_SIZE * LINE_HEIGHT * MIN_FIT_ROWS) ensures
+    // the container has settled at a meaningful height before calling fit().
+    if (!resizeObserverRef.current && container) {
       resizeObserverRef.current = new ResizeObserver(() => {
-        if (container.clientHeight >= 200) {
+        if (container.clientHeight >= MIN_FIT_HEIGHT) {
           fitAddon.fit();
         }
       });
@@ -468,7 +472,7 @@ export function UnifiedTerminal({
       }
     });
     liveWrittenRef.current = 0;
-  }, [interleavedOutput, termReady, termSized, selectedSessionIds]);
+  }, [interleavedOutput, termReady, selectedSessionIds]);
 
   // ── Cleanup ResizeObserver on unmount ─────────────────────────────────
 
@@ -482,7 +486,7 @@ export function UnifiedTerminal({
   // ── Append live events ────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!termReady || !termSized || !termRef.current) return;
+    if (!termReady || !termRef.current) return;
     const { terminal } = termRef.current;
 
     const filteredEvents = sessionMap
@@ -511,7 +515,7 @@ export function UnifiedTerminal({
     if (filteredEvents.length > 0 && pendingWrites === 0 && !userScrolledRef.current) {
       terminal.scrollToBottom();
     }
-  }, [events, termReady, termSized, selectedSessionIds, sessionMap, sessionRoleMap]);
+  }, [events, termReady, selectedSessionIds, sessionMap, sessionRoleMap]);
 
   // ── Render ────────────────────────────────────────────────────────────
 
