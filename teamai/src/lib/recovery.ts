@@ -369,8 +369,22 @@ const SESSION_IDLE_STALL_THRESHOLD_MS = 2 * 60_000; // 2 minutes
  *  own mtime, not the scheduled `wakeup_at`, so a dead process is caught
  *  well before the full wait window elapses rather than only when the
  *  coder wakes up naturally. Generous relative to a sweep's own per-cell
- *  cadence (seconds), tight relative to a 1-2h wait. */
-const WAKEUP_PROGRESS_STALE_THRESHOLD_MS = 15 * 60_000; // 15 minutes
+ *  cadence (seconds), tight relative to a 1-2h wait.
+ *
+ *  Deliberately well above 15 minutes: a background job's stdout, when
+ *  redirected to a log file rather than a TTY, is commonly block-buffered
+ *  by the OS/runtime rather than line-buffered — a script emitting short,
+ *  frequent lines (tens of bytes each) can legitimately go 15-20+ minutes
+ *  between actual disk flushes while continuously making real progress.
+ *  A 15-minute threshold treated that normal buffering lag as death,
+ *  burning a wakeup attempt on every occurrence — three of those in a row
+ *  exhausted the attempt cap and failed a task whose background job was
+ *  never actually dead (confirmed independently: process alive, log
+ *  demonstrably still advancing minutes after the task had been failed).
+ *  30 minutes keeps comfortable margin above realistic buffering gaps
+ *  while still catching a genuinely dead job well before any real
+ *  `wakeup_at` window (typically 1-2h) elapses. */
+const WAKEUP_PROGRESS_STALE_THRESHOLD_MS = 30 * 60_000; // 30 minutes
 
 /** Threshold for killing a session that has a tool call in flight
  *  (`AgentSession.toolInFlight`). The CLI emits nothing between issuing a
