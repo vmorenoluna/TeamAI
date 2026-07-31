@@ -450,7 +450,6 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
       if (args && args[0] === 'fetch') return '';
       if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
       if (args && args[0] === 'rebase') return ''; // clean rebase — no conflict
-      if (args && args[0] === 'merge-base') return ''; // ancestor check settles immediately
       if (args && args[0] === 'push') {
         pushCalls++;
         if (pushCalls === 1) throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
@@ -484,20 +483,24 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     expect(logContent).toContain('Pushed after reconciling with origin');
   });
 
-  it('reconciles via a merger when the rebase conflicts, then proceeds to normal QA after retrying the push', async () => {
-    let pushCalls = 0;
+  it('reconciles via a merger when the rebase conflicts, verifies the merger pushed, then proceeds to normal QA', async () => {
+    // The merger's own /merge skill pushes the resolved branch as its final
+    // step (.claude/commands/merge.md step 6) — the orchestrator never
+    // retries the push itself for this path, it just re-checks. Simulate
+    // that by having `git log origin/branch..branch` return commits before
+    // the merger runs and empty afterward.
+    let logCalls = 0;
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (args && args[0] === 'fetch') return '';
-      if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
+      if (args && args[0] === 'log') {
+        logCalls++;
+        return logCalls === 1 ? 'abc123 Unpushed commit\n' : '';
+      }
       if (args && args[0] === 'rebase') {
         if (args[1] === '--abort') return '';
         throw new Error('CONFLICT (content): Merge conflict');
       }
-      if (args && args[0] === 'push') {
-        pushCalls++;
-        if (pushCalls === 1) throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
-        return '';
-      }
+      if (args && args[0] === 'push') throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
       return '';
     });
 
@@ -516,7 +519,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', expect.stringContaining('/merge origin/feat/robustness-test'));
     fireEvent('event', { sessionId: 'sess-merge', event: { type: 'result' } });
 
-    // Then the QA session, once the retried push succeeds
+    // Then the QA session, once the merger's own push is verified
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(2);
     });
@@ -528,10 +531,13 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     }));
     await promise;
 
-    expect(pushCalls).toBe(2);
+    // Only 2 log calls: the initial precheck, and one verification check
+    // after the merger — no polling needed since it settled immediately.
+    expect(logCalls).toBe(2);
     const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
     expect(logContent).toContain('spawning merger to resolve via git merge');
     expect(logContent).toContain('Merger resolved divergence from origin/feat/robustness-test');
+    expect(logContent).toContain('Merger pushed the reconciled branch — remote matches worktree');
   });
 
   it('falls through to the FAIL report when reconciliation cannot resolve the divergence', async () => {
@@ -567,43 +573,37 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     expect(logContent).toContain('Merger could not resolve divergence');
   });
 
-  // ── Post-reconciliation settle poll ──
+  // ── Post-merger push verification ──
   //
-  // Observed directly in production: waitForCompletion on the merger
-  // session resolved (and the orchestrator logged "Merger resolved
-  // divergence") a full 39 seconds before the resulting merge commit's own
-  // committer timestamp. An immediate retry push hit the identical
-  // non-fast-forward rejection because the shared local branch ref hadn't
-  // caught up yet. These tests cover the poll that guards against exactly
-  // that race.
+  // The merger's own /merge skill pushes the resolved branch as its final
+  // step, so the orchestrator doesn't retry the push itself — it just
+  // re-checks whether the branch is actually up to date. waitForCompletion
+  // resolving is a session/turn-ended signal, not a git-durability
+  // guarantee, so this re-check gets a couple of cheap retries (not an
+  // arbitrary blind wait) before concluding the push didn't land.
 
-  it('polls for the branch to settle after the merger completes, retrying before pushing', async () => {
-    let pushCalls = 0;
-    let mergeBaseCalls = 0;
+  it('retries the re-check a couple of times before confirming the merger settled', async () => {
+    let logCalls = 0;
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (args && args[0] === 'fetch') return '';
-      if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
+      if (args && args[0] === 'log') {
+        logCalls++;
+        // Initial precheck (call 1) and the first re-check (call 2) both
+        // still show the old, unpushed state; the second re-check (call 3)
+        // reflects the merger's push having landed.
+        return logCalls < 3 ? 'abc123 Unpushed commit\n' : '';
+      }
       if (args && args[0] === 'rebase') {
         if (args[1] === '--abort') return '';
         throw new Error('CONFLICT (content): Merge conflict');
       }
-      if (args && args[0] === 'merge-base') {
-        mergeBaseCalls++;
-        // Not yet an ancestor for the first two polls — settles on the third.
-        if (mergeBaseCalls < 3) throw new Error('fatal: Not an ancestor');
-        return '';
-      }
-      if (args && args[0] === 'push') {
-        pushCalls++;
-        if (pushCalls === 1) throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
-        return '';
-      }
+      if (args && args[0] === 'push') throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
       return '';
     });
 
     mockCreateSession
-      .mockResolvedValueOnce('sess-merge-settle')
-      .mockResolvedValueOnce('sess-qa-after-settle');
+      .mockResolvedValueOnce('sess-merge-retry')
+      .mockResolvedValueOnce('sess-qa-after-retry');
 
     const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 1 });
 
@@ -612,37 +612,34 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(1);
     });
-    fireEvent('event', { sessionId: 'sess-merge-settle', event: { type: 'result' } });
+    fireEvent('event', { sessionId: 'sess-merge-retry', event: { type: 'result' } });
 
-    // Two polls come back "not an ancestor yet" before the third succeeds —
-    // advance past both 1s delays.
-    await vi.advanceTimersByTimeAsync(1000);
-    await vi.advanceTimersByTimeAsync(1000);
+    // One re-check comes back still-unpushed before the second settles —
+    // advance past the single 500ms delay between them.
+    await vi.advanceTimersByTimeAsync(500);
 
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(2);
     });
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-qa-after-settle', expect.stringContaining('/qa-review'));
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-qa-after-retry', expect.stringContaining('/qa-review'));
 
-    fireEvent('event', { sessionId: 'sess-qa-after-settle', event: { type: 'result' } });
+    fireEvent('event', { sessionId: 'sess-qa-after-retry', event: { type: 'result' } });
     writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
       overall: 'PASS', criteria: [],
     }));
     await promise;
 
-    expect(mergeBaseCalls).toBe(3);
-    expect(pushCalls).toBe(2);
+    expect(logCalls).toBe(3);
   });
 
-  it('gives up and falls through to the FAIL report when the branch never settles within the poll cap', async () => {
+  it('gives up and falls through to the FAIL report when the merger push never settles within the recheck cap', async () => {
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (args && args[0] === 'fetch') return '';
-      if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
+      if (args && args[0] === 'log') return 'abc123 Unpushed commit\n'; // never settles
       if (args && args[0] === 'rebase') {
         if (args[1] === '--abort') return '';
         throw new Error('CONFLICT (content): Merge conflict');
       }
-      if (args && args[0] === 'merge-base') throw new Error('fatal: Not an ancestor'); // never settles
       if (args && args[0] === 'push') throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
       return '';
     });
@@ -660,13 +657,13 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     });
     fireEvent('event', { sessionId: 'sess-merge-never-settles', event: { type: 'result' } });
 
-    // Exhaust every poll attempt (RECONCILE_SETTLE_MAX_ATTEMPTS = 5, 1s apart).
-    await vi.advanceTimersByTimeAsync(6000);
+    // Exhaust the recheck cap (MERGED_RECHECK_MAX_ATTEMPTS = 2, 500ms apart).
+    await vi.advanceTimersByTimeAsync(1000);
 
     await promise;
 
-    // Only the merger session ran — the push was never retried since the
-    // branch never settled, so QA never gets a chance to run either.
+    // Only the merger session ran — QA never gets a chance to run since the
+    // push was never confirmed.
     expect(mockCreateSession).toHaveBeenCalledTimes(1);
 
     const reportPath = join(project.taskDir, 'qa_report.json');
@@ -676,7 +673,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     expect(pipeline.phase).toBe('failed');
 
     const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-    expect(logContent).toContain('still not ahead of origin/feat/robustness-test after reconciliation — giving up');
+    expect(logContent).toContain("Branch still diverged from origin/feat/robustness-test after the merger's push — giving up");
   });
 });
 
