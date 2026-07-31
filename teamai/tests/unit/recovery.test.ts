@@ -1601,12 +1601,12 @@ describe('sweepStalledTasks', () => {
       mockReaddir((p) => (String(p) === teamaiDir ? ['my-task'] : []));
     }
 
-    it('ends the wait early when the progress log has gone stale (>15min)', async () => {
+    it('ends the wait early when the progress log has gone stale (>30min)', async () => {
       setUpFiles({
         wakeupUntil: new Date(Date.now() + 3600_000).toISOString(), // 1h still to go
         state: { wakeupProgressPath: 'sweep_progress.log', worktreePath },
         progressLogExists: true,
-        progressLogMtimeMs: Date.now() - 20 * 60_000, // 20 min stale
+        progressLogMtimeMs: Date.now() - 40 * 60_000, // 40 min stale
       });
       mockTriggerEarlyWakeup.mockReturnValue(true);
 
@@ -1616,7 +1616,7 @@ describe('sweepStalledTasks', () => {
       const [taskId, reason] = mockTriggerEarlyWakeup.mock.calls[0];
       expect(taskId).toBe('t1');
       expect(reason).toContain('sweep_progress.log');
-      expect(reason).toContain('20min');
+      expect(reason).toContain('40min');
     });
 
     it('does not trigger when the progress log is fresh', async () => {
@@ -1625,6 +1625,28 @@ describe('sweepStalledTasks', () => {
         state: { wakeupProgressPath: 'sweep_progress.log', worktreePath },
         progressLogExists: true,
         progressLogMtimeMs: Date.now() - 30_000, // 30s ago — fresh
+      });
+
+      await sweepStalledTasks();
+
+      expect(mockTriggerEarlyWakeup).not.toHaveBeenCalled();
+    });
+
+    it('does not trigger on a 15-20min silent gap — within normal buffered-stdout range, not death', async () => {
+      // Regression guard: a real task's background sweep piped short, frequent
+      // progress lines to a file rather than a TTY. Block-buffered stdout meant
+      // the file's mtime could legitimately sit still for 15-20+ minutes while
+      // the job kept solving cells correctly. A 15-minute threshold treated
+      // that as death three times in a row, burning every wakeup attempt and
+      // failing the task even though the job was never dead (confirmed
+      // independently: process alive, log still advancing, well after the
+      // task had already been marked failed). The threshold must clear this
+      // gap with real margin.
+      setUpFiles({
+        wakeupUntil: new Date(Date.now() + 3600_000).toISOString(),
+        state: { wakeupProgressPath: 'sweep_progress.log', worktreePath },
+        progressLogExists: true,
+        progressLogMtimeMs: Date.now() - 20 * 60_000, // 20 min stale
       });
 
       await sweepStalledTasks();
