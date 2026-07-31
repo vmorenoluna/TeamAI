@@ -433,6 +433,138 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     }));
     await promise;
   });
+
+  // ── Diverged-branch reconciliation ──
+  //
+  // A non-fast-forward push rejection means the branch has diverged from
+  // its own remote counterpart (not the same as an unrelated push failure
+  // like a network/auth error) — a plain retry can never succeed, and
+  // without reconciliation the task bounces to implement, finds every
+  // subtask already complete, skips straight back to this exact same
+  // precheck, and fails identically every time until the QA attempt cap is
+  // burned on a problem the bounce loop never actually touches.
+
+  it('reconciles via a clean rebase onto origin/<branch> and proceeds to normal QA after retrying the push', async () => {
+    let pushCalls = 0;
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'fetch') return '';
+      if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
+      if (args && args[0] === 'rebase') return ''; // clean rebase — no conflict
+      if (args && args[0] === 'push') {
+        pushCalls++;
+        if (pushCalls === 1) throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
+        return ''; // retry after reconciliation succeeds
+      }
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-qa-after-clean-rebase');
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 1 });
+
+    const promise = (orch as AnyOrch).runQaReview(pipeline);
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
+
+    // Only the QA session should have been created — no merger needed for a clean rebase
+    expect(mockCreateSession).toHaveBeenCalledTimes(1);
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-qa-after-clean-rebase', expect.stringContaining('/qa-review'));
+
+    fireEvent('event', { sessionId: 'sess-qa-after-clean-rebase', event: { type: 'result' } });
+    writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+      overall: 'PASS', criteria: [],
+    }));
+    await promise;
+
+    expect(pushCalls).toBe(2);
+    const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('Push rejected (non-fast-forward) — reconciling with origin before retrying');
+    expect(logContent).toContain('Pushed after reconciling with origin');
+  });
+
+  it('reconciles via a merger when the rebase conflicts, then proceeds to normal QA after retrying the push', async () => {
+    let pushCalls = 0;
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'fetch') return '';
+      if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
+      if (args && args[0] === 'rebase') {
+        if (args[1] === '--abort') return '';
+        throw new Error('CONFLICT (content): Merge conflict');
+      }
+      if (args && args[0] === 'push') {
+        pushCalls++;
+        if (pushCalls === 1) throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
+        return '';
+      }
+      return '';
+    });
+
+    mockCreateSession
+      .mockResolvedValueOnce('sess-merge')
+      .mockResolvedValueOnce('sess-qa-after-merge');
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 1 });
+
+    const promise = (orch as AnyOrch).runQaReview(pipeline);
+
+    // Merger session runs first
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    });
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', expect.stringContaining('/merge origin/feat/robustness-test'));
+    fireEvent('event', { sessionId: 'sess-merge', event: { type: 'result' } });
+
+    // Then the QA session, once the retried push succeeds
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledTimes(2);
+    });
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-qa-after-merge', expect.stringContaining('/qa-review'));
+
+    fireEvent('event', { sessionId: 'sess-qa-after-merge', event: { type: 'result' } });
+    writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+      overall: 'PASS', criteria: [],
+    }));
+    await promise;
+
+    expect(pushCalls).toBe(2);
+    const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('spawning merger to resolve via git merge');
+    expect(logContent).toContain('Merger resolved divergence from origin/feat/robustness-test');
+  });
+
+  it('falls through to the FAIL report when reconciliation cannot resolve the divergence', async () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'fetch') return '';
+      if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
+      if (args && args[0] === 'rebase') {
+        if (args[1] === '--abort') return '';
+        throw new Error('CONFLICT (content): Merge conflict');
+      }
+      if (args && args[0] === 'push') throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
+      return '';
+    });
+
+    // Merger session itself fails to even start
+    mockCreateSession.mockRejectedValue(new Error('session creation failed'));
+
+    // qaAttempt starts at 2, runQaReview increments to 3 which equals maxQaAttempts (3),
+    // so it goes directly to 'failed' without bouncing back to implement — same pattern
+    // as the pre-existing "writes FAIL report..." test above.
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 2 });
+
+    await (orch as AnyOrch).runQaReview(pipeline);
+
+    const reportPath = join(project.taskDir, 'qa_report.json');
+    const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+    expect(report.overall).toBe('FAIL');
+    expect(report.criteria[0].name).toBe('Unpushed commits');
+
+    expect(pipeline.phase).toBe('failed');
+
+    const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('Merger could not resolve divergence');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════
