@@ -450,6 +450,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
       if (args && args[0] === 'fetch') return '';
       if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
       if (args && args[0] === 'rebase') return ''; // clean rebase — no conflict
+      if (args && args[0] === 'merge-base') return ''; // ancestor check settles immediately
       if (args && args[0] === 'push') {
         pushCalls++;
         if (pushCalls === 1) throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
@@ -564,6 +565,118 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
 
     const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
     expect(logContent).toContain('Merger could not resolve divergence');
+  });
+
+  // ── Post-reconciliation settle poll ──
+  //
+  // Observed directly in production: waitForCompletion on the merger
+  // session resolved (and the orchestrator logged "Merger resolved
+  // divergence") a full 39 seconds before the resulting merge commit's own
+  // committer timestamp. An immediate retry push hit the identical
+  // non-fast-forward rejection because the shared local branch ref hadn't
+  // caught up yet. These tests cover the poll that guards against exactly
+  // that race.
+
+  it('polls for the branch to settle after the merger completes, retrying before pushing', async () => {
+    let pushCalls = 0;
+    let mergeBaseCalls = 0;
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'fetch') return '';
+      if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
+      if (args && args[0] === 'rebase') {
+        if (args[1] === '--abort') return '';
+        throw new Error('CONFLICT (content): Merge conflict');
+      }
+      if (args && args[0] === 'merge-base') {
+        mergeBaseCalls++;
+        // Not yet an ancestor for the first two polls — settles on the third.
+        if (mergeBaseCalls < 3) throw new Error('fatal: Not an ancestor');
+        return '';
+      }
+      if (args && args[0] === 'push') {
+        pushCalls++;
+        if (pushCalls === 1) throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
+        return '';
+      }
+      return '';
+    });
+
+    mockCreateSession
+      .mockResolvedValueOnce('sess-merge-settle')
+      .mockResolvedValueOnce('sess-qa-after-settle');
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 1 });
+
+    const promise = (orch as AnyOrch).runQaReview(pipeline);
+
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    });
+    fireEvent('event', { sessionId: 'sess-merge-settle', event: { type: 'result' } });
+
+    // Two polls come back "not an ancestor yet" before the third succeeds —
+    // advance past both 1s delays.
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledTimes(2);
+    });
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-qa-after-settle', expect.stringContaining('/qa-review'));
+
+    fireEvent('event', { sessionId: 'sess-qa-after-settle', event: { type: 'result' } });
+    writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+      overall: 'PASS', criteria: [],
+    }));
+    await promise;
+
+    expect(mergeBaseCalls).toBe(3);
+    expect(pushCalls).toBe(2);
+  });
+
+  it('gives up and falls through to the FAIL report when the branch never settles within the poll cap', async () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'fetch') return '';
+      if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
+      if (args && args[0] === 'rebase') {
+        if (args[1] === '--abort') return '';
+        throw new Error('CONFLICT (content): Merge conflict');
+      }
+      if (args && args[0] === 'merge-base') throw new Error('fatal: Not an ancestor'); // never settles
+      if (args && args[0] === 'push') throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValueOnce('sess-merge-never-settles');
+
+    // qaAttempt starts at 2, runQaReview increments to 3 which equals maxQaAttempts (3),
+    // so it goes directly to 'failed' without bouncing back to implement.
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 2 });
+
+    const promise = (orch as AnyOrch).runQaReview(pipeline);
+
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    });
+    fireEvent('event', { sessionId: 'sess-merge-never-settles', event: { type: 'result' } });
+
+    // Exhaust every poll attempt (RECONCILE_SETTLE_MAX_ATTEMPTS = 5, 1s apart).
+    await vi.advanceTimersByTimeAsync(6000);
+
+    await promise;
+
+    // Only the merger session ran — the push was never retried since the
+    // branch never settled, so QA never gets a chance to run either.
+    expect(mockCreateSession).toHaveBeenCalledTimes(1);
+
+    const reportPath = join(project.taskDir, 'qa_report.json');
+    const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+    expect(report.overall).toBe('FAIL');
+    expect(report.criteria[0].name).toBe('Unpushed commits');
+    expect(pipeline.phase).toBe('failed');
+
+    const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('still not ahead of origin/feat/robustness-test after reconciliation — giving up');
   });
 });
 
