@@ -32,6 +32,14 @@ You are merging branch `{branch}` into the current branch using
    failure requires diagnosis.
    See `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 5. If tests pass, commit the merge with a message explaining how conflicts were resolved.
-6. If tests fail, fix the issues and re-run.
-7. Print a summary of conflicts resolved and test results.
+6. **If the current branch is a feature branch** (not `master`/`main`), push the commit
+   to its own remote counterpart: `git push origin HEAD:$(git rev-parse --abbrev-ref HEAD)`.
+   This is your own final action — the caller does not retry pushing separately
+   afterward, so a skipped or failed push here means the reconciliation is incomplete
+   even though the local merge succeeded. Report the outcome (pushed / push failed and
+   why) explicitly in the summary. Skip this step when landing work into `master`/`main`
+   — that push goes through the normal PR/merge flow, not this skill.
+7. If tests fail, fix the issues and re-run.
+8. Print a summary of conflicts resolved, test results, and (for feature branches) the
+   push outcome from step 6.
 ```
