@@ -7,9 +7,8 @@
 import { execFileSync } from 'child_process';
 import { existsSync, readdirSync, rmSync, appendFileSync } from 'fs';
 import path from 'path';
-import { slugify } from '../utils';
 import { TaskStore } from '../task-store';
-import { getWorktreeBase } from './helpers';
+import { getWorktreeBase, resolveWorktreeDirName } from './helpers';
 import type { TaskPipeline } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -58,8 +57,7 @@ export function getWorktreePath(
 ): string | null {
   const task = taskStore.getById(taskId);
   if (!task || !task.branch) return null;
-  const slug = task.slug ?? slugify(task.description);
-  return path.join(worktreeBase, slug);
+  return path.join(worktreeBase, resolveWorktreeDirName(task));
 }
 
 // ── Stale subtask worktree cleanup ────────────────────────────────────────

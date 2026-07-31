@@ -130,6 +130,12 @@ export function findOrphanedWorktrees(): OrphanedWorktree[] {
           // Worktree dirs are named by slug (derived from description)
           // The task directory name (under .teamai/) is the slug
           if (taskDir) knownSlugs.add(taskDir);
+          // A relocated worktree (ensureWorktree fell back to a suffixed
+          // directory because the canonical <slug> path had a file locked
+          // open by an external process) is registered under a different
+          // name than the task dir — without this it would be wrongly
+          // reported as orphaned and swept up by cleanup.
+          if (task.worktreeDirName) knownSlugs.add(task.worktreeDirName);
         } catch { /* skip malformed */ }
       }
     } catch { /* skip unreadable */ }
