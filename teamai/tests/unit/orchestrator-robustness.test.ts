@@ -75,7 +75,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator } from '../../src/lib/orchestrator';
-import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits } from '../../src/lib/orchestrator/implement';
+import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow } from '../../src/lib/orchestrator/implement';
 import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
 
 const fireEvent = createFireEvent(onHandlers);
@@ -4629,6 +4629,87 @@ describe('Defect 3 — isInfraError (infra vs git error detection)', () => {
     expect(isInfraError('fatal: refusing to merge unrelated histories')).toBe(false);
     expect(isInfraError('error: Your local changes would be overwritten')).toBe(false);
     expect(isInfraError('')).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  clearWorktreeDirectoryOrThrow — retry a locked worktree dir, then throw
+// ═══════════════════════════════════════════════════════════════════════
+//
+// git worktree remove --force can deregister a worktree from git's own
+// bookkeeping while the directory itself survives on disk — a file
+// locked open by an orphaned process (a background server/sweep from an
+// earlier, incompletely-torn-down run) blocks deletion on Windows even
+// with force:true. Left unhandled, the next `worktree add` at the same
+// path crashes on "already exists" with no indication why. This retries
+// a few times (a lock can clear on its own shortly after the owning
+// process finishes) before throwing a clear, actionable WorktreeError.
+
+describe('clearWorktreeDirectoryOrThrow', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('resolves without retrying when the directory clears on the first attempt', async () => {
+    let exists = true;
+    const rm = vi.fn(() => { exists = false; });
+    const pruneWorktrees = vi.fn();
+
+    await clearWorktreeDirectoryOrThrow('/test/wt', { exists: () => exists, rm, pruneWorktrees });
+
+    expect(rm).toHaveBeenCalledTimes(1);
+    expect(pruneWorktrees).toHaveBeenCalledTimes(1);
+  });
+
+  it('does nothing when the directory does not exist to begin with', async () => {
+    const rm = vi.fn();
+    const pruneWorktrees = vi.fn();
+
+    await clearWorktreeDirectoryOrThrow('/test/wt', { exists: () => false, rm, pruneWorktrees });
+
+    expect(rm).not.toHaveBeenCalled();
+    expect(pruneWorktrees).not.toHaveBeenCalled();
+  });
+
+  it('retries after a delay and succeeds once the lock clears on a later attempt', async () => {
+    let rmCalls = 0;
+    const rm = vi.fn(() => { rmCalls++; });
+    const pruneWorktrees = vi.fn();
+    // Still exists after the first two rm attempts (locked); the third clears it.
+    const exists = vi.fn(() => rmCalls < 3);
+
+    const promise = clearWorktreeDirectoryOrThrow('/test/wt', { exists, rm, pruneWorktrees });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    await promise;
+
+    expect(rm).toHaveBeenCalledTimes(3);
+    expect(pruneWorktrees).toHaveBeenCalledTimes(3);
+  });
+
+  it('throws a WorktreeError with an actionable message when the directory never clears', async () => {
+    const rm = vi.fn();
+    const pruneWorktrees = vi.fn();
+
+    const promise = clearWorktreeDirectoryOrThrow('/test/wt', { exists: () => true, rm, pruneWorktrees });
+    const assertion = expect(promise).rejects.toMatchObject({
+      name: 'WorktreeError',
+      code: 'WORKTREE_LOCKED',
+      message: expect.stringContaining('/test/wt'),
+    });
+
+    // Exhaust every retry (WORKTREE_CLEANUP_MAX_ATTEMPTS = 3, 1s apart — 2 delays).
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await assertion;
+    // 3 attempts total, no delay after the last one.
+    expect(rm).toHaveBeenCalledTimes(3);
   });
 });
 

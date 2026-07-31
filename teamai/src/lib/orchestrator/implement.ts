@@ -58,6 +58,56 @@ export interface ImplementDeps {
 //  Helper 1 — ensureWorktree
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Retry bounds for clearing a worktree directory that still exists after
+ *  git-level removal — see clearWorktreeDirectoryOrThrow for why this can
+ *  happen (a file locked open by a leftover process from an earlier run). */
+const WORKTREE_CLEANUP_MAX_ATTEMPTS = 3;
+const WORKTREE_CLEANUP_RETRY_MS = 1000;
+
+export interface ClearWorktreeDirDeps {
+  exists: (path: string) => boolean;
+  rm: (path: string) => void;
+  pruneWorktrees: () => void;
+}
+
+/**
+ * Retry clearing a worktree directory that still exists after git-level
+ * removal (`git worktree remove --force`). A leftover file handle held
+ * open by an orphaned process — a background server/sweep from an
+ * earlier, incompletely-torn-down run of this same task — can block
+ * deletion on Windows even with force:true, which only suppresses ENOENT,
+ * not a lock. git's own worktree metadata gets deregistered regardless of
+ * whether the directory itself survives (confirmed independently: `git
+ * worktree list` stops showing the entry even when files remain), so a
+ * subsequent `worktree add` at the same path crashes on "already exists"
+ * with no indication why. A lock can release on its own shortly after the
+ * owning process finishes writing, so retry a few times before giving up
+ * rather than on the first attempt — but throw a clear, actionable error
+ * instead of silently falling through to that confusing crash if it never
+ * clears.
+ */
+export async function clearWorktreeDirectoryOrThrow(
+  worktreePath: string,
+  deps: ClearWorktreeDirDeps,
+): Promise<void> {
+  for (let attempt = 0; attempt < WORKTREE_CLEANUP_MAX_ATTEMPTS && deps.exists(worktreePath); attempt++) {
+    try { deps.rm(worktreePath); } catch { /* best-effort */ }
+    try { deps.pruneWorktrees(); } catch { /* best-effort */ }
+    if (deps.exists(worktreePath) && attempt < WORKTREE_CLEANUP_MAX_ATTEMPTS - 1) {
+      await new Promise(resolve => setTimeout(resolve, WORKTREE_CLEANUP_RETRY_MS));
+    }
+  }
+  if (deps.exists(worktreePath)) {
+    throw new WorktreeError(
+      `Worktree directory at ${worktreePath} could not be fully removed — ` +
+      `it likely still has a file locked open by a leftover process from an earlier ` +
+      `run (e.g. an orphaned background server/sweep). Manually stop whatever holds ` +
+      `it open and delete the directory, then retry the task.`,
+      'WORKTREE_LOCKED',
+    );
+  }
+}
+
 /**
  * Ensure the task's git worktree exists, is healthy, and is ready for
  * the implement phase.  Covers:
@@ -128,8 +178,11 @@ export async function ensureWorktree(
         deps.execGit(['worktree', 'remove', '--force', pipeline.worktreePath], deps.projectRoot);
       } catch { /* best-effort */ }
       if (existsSync(pipeline.worktreePath)) {
-        try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-        try { execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+        await clearWorktreeDirectoryOrThrow(pipeline.worktreePath, {
+          exists: existsSync,
+          rm: (p) => rmSync(p, { recursive: true, force: true }),
+          pruneWorktrees: () => execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }),
+        });
       }
     }
     try {
