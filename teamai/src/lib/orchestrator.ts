@@ -5,11 +5,11 @@ import { processManager } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
 import { TaskStore } from './task-store';
 import { slugify } from './utils';
-import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit } from './orchestrator/worktree-utils';
+import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit, execGitCapture } from './orchestrator/worktree-utils';
 import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelineState, pipelineAdvancePhase } from './orchestrator/pipeline-state';
 import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedback';
 import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './orchestrator/phase-runners';
-import { parseSessionLimitReset, extractPrUrl, phaseHeader, logToOutput, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, computePipelineConfig, buildSessionOpts, type PipelineConfig } from './orchestrator/helpers';
+import { parseSessionLimitReset, extractPrUrl, phaseHeader, logToOutput, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, resolveWorktreeDirName, computePipelineConfig, buildSessionOpts, type PipelineConfig } from './orchestrator/helpers';
 import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn } from './orchestrator/worktree-ops';
 import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
 import { gitPush } from './orchestrator/git-push';
@@ -62,6 +62,7 @@ export class Orchestrator {
       waitForCompletion: (sessionId) => waitForCompletion(sessionId, { parseSessionLimitReset }),
 
       execGit: (args, hostCwd) => this._execGit(args, hostCwd),
+      execGitCapture: (args, hostCwd) => this._execGitCapture(args, hostCwd),
       gitPush: (pushArgs, logFile) => gitPush(projectRoot, pushArgs, logFile),
 
       rotateOutputLog: (logFile) => rotateOutputLog(logFile),
@@ -178,7 +179,7 @@ export class Orchestrator {
       // Merge/PR requires the worktree and branch to exist. If missing,
       // restart from the earliest phase needed to recreate them.
       const worktreeBase = this.getWorktreeBase();
-      const worktreePath = path.join(worktreeBase, task.slug ?? slugify(task.description));
+      const worktreePath = path.join(worktreeBase, resolveWorktreeDirName(task));
       const worktreeExists = existsSync(worktreePath);
       const branchExists = !!task.branch;
 
@@ -216,11 +217,15 @@ export class Orchestrator {
     this.activeTasks.add(taskId);
 
     const config = this.getPipelineConfig();
+    const taskRecord = this.taskStore.getById(taskId);
     // Canonical slug from the task record (BUG-13); legacy tasks fall back
     // to the historical slugify(description) so existing branches still match.
-    const slug = this.taskStore.getById(taskId)?.slug ?? slugify(description);
+    // The branch name always derives from slug, even if the worktree
+    // directory has since relocated (resolveWorktreeDirName) — only the
+    // local worktree path changes, never the branch identity.
+    const slug = taskRecord?.slug ?? slugify(description);
     const branch = `feat/${slug}`;
-    const worktreePath = path.join(this.getWorktreeBase(), slug);
+    const worktreePath = path.join(this.getWorktreeBase(), taskRecord ? resolveWorktreeDirName(taskRecord) : slug);
     const specPath = this.taskStore.getDirById(taskId);
 
     const pipeline: TaskPipeline = {
@@ -502,6 +507,7 @@ export class Orchestrator {
   private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void { pipelineAdvancePhase(pipeline, phase, this.taskStore, this.projectRoot, eventExtra); }
 
   private _execGit(args: string[], hostCwd: string): void { execGit(args, hostCwd, this.projectRoot); }
+  private _execGitCapture(args: string[], hostCwd: string): string { return execGitCapture(args, hostCwd, this.projectRoot); }
 
   private handleRateLimit(pipeline: TaskPipeline, resetsAt: number): void {
     handleRateLimitFn(pipeline, resetsAt, this._ctx);
@@ -513,13 +519,12 @@ export class Orchestrator {
       throw new PhaseTransitionError(taskId, task.phase, requiredPhase, 'restore pipeline');
     }
     const branch = task.branch ?? `feat/${task.slug ?? slugify(task.description)}`;
-    const slug = branch.replace(/^feat\//, '');
     const pipeline: TaskPipeline = {
       taskId,
       description: task.description,
       phase: requiredPhase,
       specPath: this.taskStore.getDirById(taskId),
-      worktreePath: path.join(this.getWorktreeBase(), slug),
+      worktreePath: path.join(this.getWorktreeBase(), resolveWorktreeDirName(task)),
       branch,
       qaAttempt: 0,
       maxQaAttempts: this.getPipelineConfig().maxQaAttempts,
@@ -783,8 +788,7 @@ export class Orchestrator {
     const worktreeBase = getWorktreeBase(this.projectRoot);
     const task = this.taskStore.getById(taskId);
     if (!task || !task.branch) return null;
-    const slug = task.slug ?? slugify(task.description);
-    return path.join(worktreeBase, slug);
+    return path.join(worktreeBase, resolveWorktreeDirName(task));
   }
 
   private _cleanWorktree(taskId: string): void {

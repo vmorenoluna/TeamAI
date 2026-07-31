@@ -9,7 +9,7 @@
  */
 import { execFileSync } from 'child_process';
 import { getToolPath } from '../tool-checker';
-import { readFileSync, writeFileSync, existsSync, unlinkSync, renameSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync, renameSync, rmSync } from 'fs';
 import { PipelineConfigError, WorktreeError, PushVerificationError, SessionKilledError } from './errors';
 import { readJsonFile } from '../json-io';
 import path from 'path';
@@ -20,6 +20,7 @@ import { rebaseOntoLatestDefault } from './phase-runners';
 import { updateSessionMap, logToOutput } from './helpers';
 import { resolveBaseBranch } from '../git-platform';
 import { getUnpushedCommits } from './worktree-ops';
+import type { TaskStore } from '../task-store';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
 
@@ -32,6 +33,7 @@ export interface ImplementPipeline extends TaskPipeline {
 
 export interface ImplementDeps {
   projectRoot: string;
+  taskStore: TaskStore;
   persistAndEmitPhase: (pipeline: ImplementPipeline) => void;
   advancePhase: (pipeline: ImplementPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
   savePipelineState: (pipeline: ImplementPipeline) => void;
@@ -39,6 +41,10 @@ export interface ImplementDeps {
   sessionOpts: (role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) => SessionOptsResult;
   waitForCompletion: (sessionId: string) => Promise<void>;
   execGit: (args: string[], hostCwd: string) => void;
+  /** Same routing as execGit, but returns captured stdout — needed to read
+   *  `git status --porcelain` etc. against a worktree that may be
+   *  container-patched and thus unresolvable via a plain host execFileSync. */
+  execGitCapture: (args: string[], hostCwd: string) => string;
   gitPush: (pushArgs: string[], logFile: string) => void;
   patchWorktreeGitFile: (hostWorktreePath: string, containerWorkspace: string) => void;
   isWorktreeHealthy: (worktreePath: string) => boolean;
@@ -109,6 +115,117 @@ export async function clearWorktreeDirectoryOrThrow(
 }
 
 /**
+ * Commit any uncommitted/untracked changes in a worktree before it's
+ * abandoned (removed, or relocated to a different path via
+ * relocateStuckWorktree) — otherwise in-flight WIP that was never
+ * committed is silently discarded. Verified safe even when a *different*
+ * file in the directory is locked open by an external process without
+ * delete permission: git only needs read/write access to commit, not
+ * delete access, so this succeeds independently of whether the directory
+ * can subsequently be removed. Since it's the same branch, the commit is
+ * automatically present in any worktree that later checks out that branch
+ * — including a relocated one — with no copying needed. Best-effort: a
+ * failure here must never block the teardown/relocation it's protecting.
+ */
+export function preserveUncommittedWork(pipeline: ImplementPipeline, deps: ImplementDeps): void {
+  try {
+    const status = deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath);
+    if (!status.trim()) return;
+    deps.execGit(['add', '-A'], pipeline.worktreePath);
+    deps.execGit(['commit', '-m', 'WIP: auto-preserved before worktree teardown/relocation'], pipeline.worktreePath);
+    logToOutput(pipeline.specPath, '[WORKTREE] Committed uncommitted changes before teardown (WIP auto-preserve)\n');
+  } catch { /* best-effort — never block teardown on this */ }
+}
+
+const WORKTREE_RELOCATE_MAX_SUFFIX = 5;
+
+/**
+ * Find the first available `<original-dirname>-rN` path (N=2..5) not
+ * currently occupied on disk, switch the pipeline to it, and persist the
+ * choice on the task (worktreeDirName) so future runs of this task —
+ * retries, resumes after a restart — resolve to the same place via
+ * resolveWorktreeDirName() instead of colliding with the stuck original.
+ *
+ * The abandoned original directory is left exactly where it is: it can't
+ * be safely deleted (that's why we're here) or even renamed out of the
+ * way — verified independently that a Windows handle without
+ * FILE_SHARE_DELETE blocks renaming ancestor directories, not just the
+ * locked file itself. It's swept opportunistically by
+ * sweepAbandonedWorktreeRelocations on a later run, once the lock clears.
+ *
+ * Throws WorktreeError only if every relocation slot is also occupied —
+ * at that point this is no longer a transient external lock, and silently
+ * trying yet another path would just paper over a real problem (e.g. a
+ * runaway prior process that's actually creating these directories).
+ */
+export function relocateStuckWorktree(pipeline: ImplementPipeline, deps: ImplementDeps): void {
+  const worktreeBase = path.dirname(pipeline.worktreePath);
+  const originalDirName = path.basename(pipeline.worktreePath);
+  const baseDirName = originalDirName.replace(/-r\d+$/, ''); // don't stack suffixes on repeated relocations
+
+  for (let n = 2; n <= WORKTREE_RELOCATE_MAX_SUFFIX; n++) {
+    const candidateDirName = `${baseDirName}-r${n}`;
+    const candidatePath = path.join(worktreeBase, candidateDirName);
+    if (existsSync(candidatePath)) continue;
+
+    logToOutput(pipeline.specPath,
+      `[WORKTREE] ${originalDirName} still locked after cleanup retries — relocating to ${candidateDirName} instead of failing the task\n`
+    );
+    pipeline.worktreePath = candidatePath;
+    deps.taskStore.update(pipeline.taskId, { worktreeDirName: candidateDirName });
+    return;
+  }
+
+  throw new WorktreeError(
+    `Worktree directory at ${pipeline.worktreePath} could not be removed, and every relocation ` +
+    `slot up to ${baseDirName}-r${WORKTREE_RELOCATE_MAX_SUFFIX} is also occupied. Manually clear out ` +
+    `stale "${baseDirName}-r*" directories under ${worktreeBase} and retry the task.`,
+    'WORKTREE_LOCKED',
+  );
+}
+
+/**
+ * Best-effort cleanup of directories left behind by relocateStuckWorktree
+ * on an earlier run of this task — the external lock that forced the
+ * relocation has often cleared by the time a later run starts, so this
+ * recovers the disk space instead of leaving garbage forever. Never
+ * touches the currently active worktreePath, and skips anything still
+ * registered as a live git worktree (could belong to a
+ * concurrently-running pipeline elsewhere). Silent on failure throughout —
+ * this is opportunistic tidying, never load-bearing for the current run.
+ */
+export function sweepAbandonedWorktreeRelocations(pipeline: ImplementPipeline, deps: ImplementDeps): void {
+  try {
+    const worktreeBase = path.dirname(pipeline.worktreePath);
+    const activeDirName = path.basename(pipeline.worktreePath);
+    const baseDirName = activeDirName.replace(/-r\d+$/, '');
+    if (!existsSync(worktreeBase)) return;
+
+    let registered: Set<string>;
+    try {
+      const list = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe' });
+      registered = new Set(
+        list.split('\n')
+          .filter(l => l.startsWith('worktree '))
+          .map(l => path.resolve(l.slice('worktree '.length).trim()))
+      );
+    } catch {
+      return; // can't verify what's live — don't risk deleting something in use
+    }
+
+    for (const entry of readdirSync(worktreeBase, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === activeDirName) continue;
+      if (!entry.name.startsWith(`${baseDirName}-r`)) continue;
+      if (!/^\d+$/.test(entry.name.slice(baseDirName.length + 2))) continue;
+      const candidatePath = path.join(worktreeBase, entry.name);
+      if (registered.has(path.resolve(candidatePath))) continue; // live worktree — leave it
+      try { rmSync(candidatePath, { recursive: true, force: true }); } catch { /* still locked — try again next run */ }
+    }
+  } catch { /* best-effort */ }
+}
+
+/**
  * Ensure the task's git worktree exists, is healthy, and is ready for
  * the implement phase.  Covers:
  * - Docker-gate check
@@ -142,6 +259,10 @@ export async function ensureWorktree(
     deps.gitPush(['pull', '--ff-only', 'origin', baseBranch], path.join(pipeline.specPath, 'output.log'));
   } catch { /* non-fast-forward or offline */ }
 
+  // Opportunistically reclaim disk space from earlier relocations of this
+  // task (see relocateStuckWorktree) — never load-bearing for this run.
+  sweepAbandonedWorktreeRelocations(pipeline, deps);
+
   // Ensure worktree exists and is healthy
   if (!existsSync(pipeline.worktreePath) || !deps.isWorktreeHealthy(pipeline.worktreePath)) {
     if (existsSync(pipeline.worktreePath)) {
@@ -174,15 +295,31 @@ export async function ensureWorktree(
           }
         }
       } catch { /* best-effort — unpushed check must not block worktree repair */ }
+      // Commits are protected by the push above; uncommitted/untracked
+      // changes are not — capture those too before anything is torn down.
+      preserveUncommittedWork(pipeline, deps);
       try {
         deps.execGit(['worktree', 'remove', '--force', pipeline.worktreePath], deps.projectRoot);
       } catch { /* best-effort */ }
       if (existsSync(pipeline.worktreePath)) {
-        await clearWorktreeDirectoryOrThrow(pipeline.worktreePath, {
-          exists: existsSync,
-          rm: (p) => rmSync(p, { recursive: true, force: true }),
-          pruneWorktrees: () => execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }),
-        });
+        try {
+          await clearWorktreeDirectoryOrThrow(pipeline.worktreePath, {
+            exists: existsSync,
+            rm: (p) => rmSync(p, { recursive: true, force: true }),
+            pruneWorktrees: () => execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }),
+          });
+        } catch (err) {
+          // A directory that survives every removal attempt is almost
+          // always a Windows-side lock this pipeline has no business
+          // fighting (an IDE indexer, an antivirus scanner) — see
+          // relocateStuckWorktree. Anything else (WORKTREE_AT_ROOT, etc.)
+          // is a real problem and must still fail the task.
+          if (err instanceof WorktreeError && err.code === 'WORKTREE_LOCKED') {
+            relocateStuckWorktree(pipeline, deps);
+          } else {
+            throw err;
+          }
+        }
       }
     }
     try {

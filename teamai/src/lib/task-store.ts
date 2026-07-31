@@ -44,9 +44,19 @@ export interface Task {
   title: string;
   description: string;
   /** Canonical slug (BUG-13): set at creation, unique among task dirs.
-   *  Used for the task directory, branch, and worktree names. Legacy tasks
-   *  (created before this field) fall back to slugify(description). */
+   *  Used for the task directory, branch, and (by default) worktree names.
+   *  Legacy tasks (created before this field) fall back to
+   *  slugify(description). */
   slug?: string;
+  /** Override for the worktree *directory* name only — distinct from
+   *  `slug`, which keeps deriving the task directory and branch name. Set
+   *  when the canonical `<slug>` worktree path can't be reclaimed (e.g. a
+   *  file locked open by an external process like an IDE indexer or an
+   *  antivirus scanner) and the pipeline relocates to `<slug>-r2`, `-r3`,
+   *  etc. instead of fighting for the original path. Always resolve a
+   *  task's worktree directory name via resolveWorktreeDirName() rather
+   *  than reading `slug` directly. */
+  worktreeDirName?: string;
   phase: string;
   branch?: string;
   dependencies?: string[];     // IDs of tasks this task depends on

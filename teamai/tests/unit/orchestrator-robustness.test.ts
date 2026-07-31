@@ -75,8 +75,9 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator } from '../../src/lib/orchestrator';
-import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow } from '../../src/lib/orchestrator/implement';
+import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations } from '../../src/lib/orchestrator/implement';
 import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
+import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
 
 const fireEvent = createFireEvent(onHandlers);
 
@@ -4714,6 +4715,235 @@ describe('clearWorktreeDirectoryOrThrow', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Worktree relocation — resolveWorktreeDirName, preserveUncommittedWork,
+//  relocateStuckWorktree, sweepAbandonedWorktreeRelocations
+// ═══════════════════════════════════════════════════════════════════════
+//
+// When a worktree directory survives every removal attempt
+// (clearWorktreeDirectoryOrThrow exhausts its retries — verified in
+// production to be a Windows-side file lock from an IDE indexer or
+// antivirus scanner, not anything a container process can cause), the
+// pipeline relocates to a suffixed directory instead of failing the task
+// outright. These tests cover: the path resolver every worktree-path
+// computation must go through, the safety step that preserves in-flight
+// uncommitted work before the old directory is abandoned, the relocation
+// logic itself, and the opportunistic sweeper that reclaims abandoned
+// relocations on a later run.
+
+function minimalImplPipeline(overrides: Partial<ImplementPipeline> = {}): ImplementPipeline {
+  return {
+    taskId: 'task-1',
+    description: 'test task',
+    phase: 'implement',
+    specPath: '/test/spec',
+    worktreePath: '/test/wt',
+    branch: 'feat/test-task',
+    qaAttempt: 0,
+    maxQaAttempts: 3,
+    specRevision: 0,
+    ...overrides,
+  };
+}
+
+describe('resolveWorktreeDirName', () => {
+  it('prefers worktreeDirName when set, even if slug is also present', () => {
+    expect(resolveWorktreeDirName({ slug: 'my-slug', description: 'desc', worktreeDirName: 'my-slug-r2' })).toBe('my-slug-r2');
+  });
+
+  it('falls back to slug when worktreeDirName is unset', () => {
+    expect(resolveWorktreeDirName({ slug: 'my-slug', description: 'desc' })).toBe('my-slug');
+  });
+
+  it('falls back to slugify(description) when neither slug nor worktreeDirName is set', () => {
+    expect(resolveWorktreeDirName({ description: 'My Cool Task' })).toBe('my-cool-task');
+  });
+});
+
+describe('preserveUncommittedWork', () => {
+  it('does nothing when the worktree is already clean', () => {
+    const execGit = vi.fn();
+    const deps = { execGitCapture: vi.fn(() => ''), execGit } as unknown as ImplementDeps;
+
+    preserveUncommittedWork(minimalImplPipeline(), deps);
+
+    expect(execGit).not.toHaveBeenCalled();
+  });
+
+  it('commits uncommitted and untracked changes when the worktree is dirty', () => {
+    const execGit = vi.fn();
+    const deps = { execGitCapture: vi.fn(() => ' M tracked.txt\n?? new.txt\n'), execGit } as unknown as ImplementDeps;
+    const pipeline = minimalImplPipeline({ worktreePath: '/test/wt' });
+
+    preserveUncommittedWork(pipeline, deps);
+
+    expect(execGit).toHaveBeenNthCalledWith(1, ['add', '-A'], '/test/wt');
+    expect(execGit).toHaveBeenNthCalledWith(2, ['commit', '-m', expect.stringContaining('WIP')], '/test/wt');
+  });
+
+  it('is best-effort — swallows errors instead of throwing', () => {
+    const execGit = vi.fn();
+    const deps = {
+      execGitCapture: vi.fn(() => { throw new Error('git not available'); }),
+      execGit,
+    } as unknown as ImplementDeps;
+
+    expect(() => preserveUncommittedWork(minimalImplPipeline(), deps)).not.toThrow();
+    expect(execGit).not.toHaveBeenCalled();
+  });
+});
+
+describe('relocateStuckWorktree', () => {
+  let project: ReturnType<typeof setupProject>;
+  let worktreeBase: string;
+
+  beforeEach(() => {
+    project = setupProject();
+    worktreeBase = join(project.root, 'worktrees');
+    mkdirSync(worktreeBase, { recursive: true });
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  it('relocates to the first available -rN suffix and persists it on the task', () => {
+    const stuckPath = join(worktreeBase, 'my-task');
+    const update = vi.fn();
+    const deps = { taskStore: { update } } as unknown as ImplementDeps;
+    const pipeline = minimalImplPipeline({ taskId: 'task-1', specPath: project.taskDir, worktreePath: stuckPath });
+
+    relocateStuckWorktree(pipeline, deps);
+
+    expect(pipeline.worktreePath).toBe(join(worktreeBase, 'my-task-r2'));
+    expect(update).toHaveBeenCalledWith('task-1', { worktreeDirName: 'my-task-r2' });
+  });
+
+  it('skips occupied slots and picks the first free one', () => {
+    mkdirSync(join(worktreeBase, 'my-task-r2'));
+    const stuckPath = join(worktreeBase, 'my-task');
+    const deps = { taskStore: { update: vi.fn() } } as unknown as ImplementDeps;
+    const pipeline = minimalImplPipeline({ specPath: project.taskDir, worktreePath: stuckPath });
+
+    relocateStuckWorktree(pipeline, deps);
+
+    expect(pipeline.worktreePath).toBe(join(worktreeBase, 'my-task-r3'));
+  });
+
+  it('throws WorktreeError when every relocation slot is occupied', () => {
+    for (let n = 2; n <= 5; n++) mkdirSync(join(worktreeBase, `my-task-r${n}`));
+    const stuckPath = join(worktreeBase, 'my-task');
+    const deps = { taskStore: { update: vi.fn() } } as unknown as ImplementDeps;
+    const pipeline = minimalImplPipeline({ specPath: project.taskDir, worktreePath: stuckPath });
+
+    expect(() => relocateStuckWorktree(pipeline, deps)).toThrow(/every relocation.*slot.*occupied/i);
+  });
+
+  it('does not stack suffixes when relocating an already-relocated worktree', () => {
+    const stuckPath = join(worktreeBase, 'my-task-r2'); // already relocated once on a prior run
+    mkdirSync(stuckPath); // stuck path is, by definition, still occupied on disk
+    const update = vi.fn();
+    const deps = { taskStore: { update } } as unknown as ImplementDeps;
+    const pipeline = minimalImplPipeline({ specPath: project.taskDir, worktreePath: stuckPath });
+
+    relocateStuckWorktree(pipeline, deps);
+
+    // Computed from the base name ("my-task"), not "my-task-r2-r2"
+    expect(pipeline.worktreePath).toBe(join(worktreeBase, 'my-task-r3'));
+  });
+});
+
+describe('sweepAbandonedWorktreeRelocations', () => {
+  let project: ReturnType<typeof setupProject>;
+  let worktreeBase: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    project = setupProject();
+    worktreeBase = join(project.root, 'worktrees');
+    mkdirSync(worktreeBase, { recursive: true });
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  it('deletes an abandoned relocation directory that is not registered as a live worktree', () => {
+    const activePath = join(worktreeBase, 'my-task');
+    const abandonedPath = join(worktreeBase, 'my-task-r2');
+    mkdirSync(abandonedPath);
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'worktree' && args[1] === 'list') return `worktree ${activePath}\nbranch refs/heads/feat/my-task\n\n`;
+      return '';
+    });
+    const pipeline = minimalImplPipeline({ worktreePath: activePath });
+    const deps = { projectRoot: project.root } as unknown as ImplementDeps;
+
+    sweepAbandonedWorktreeRelocations(pipeline, deps);
+
+    expect(existsSync(abandonedPath)).toBe(false);
+  });
+
+  it('never deletes the currently active worktreePath, even if it is itself a relocated path', () => {
+    const activePath = join(worktreeBase, 'my-task-r2');
+    mkdirSync(activePath);
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'worktree' && args[1] === 'list') return `worktree ${activePath}\n\n`;
+      return '';
+    });
+    const pipeline = minimalImplPipeline({ worktreePath: activePath });
+    const deps = { projectRoot: project.root } as unknown as ImplementDeps;
+
+    sweepAbandonedWorktreeRelocations(pipeline, deps);
+
+    expect(existsSync(activePath)).toBe(true);
+  });
+
+  it('does not delete a relocation directory that is still registered as a live git worktree', () => {
+    const activePath = join(worktreeBase, 'my-task');
+    const liveOtherPath = join(worktreeBase, 'my-task-r2'); // e.g. a concurrently-running pipeline
+    mkdirSync(liveOtherPath);
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'worktree' && args[1] === 'list') return `worktree ${activePath}\n\nworktree ${liveOtherPath}\n\n`;
+      return '';
+    });
+    const pipeline = minimalImplPipeline({ worktreePath: activePath });
+    const deps = { projectRoot: project.root } as unknown as ImplementDeps;
+
+    sweepAbandonedWorktreeRelocations(pipeline, deps);
+
+    expect(existsSync(liveOtherPath)).toBe(true);
+  });
+
+  it('ignores directories that do not match the -rN relocation naming pattern', () => {
+    const activePath = join(worktreeBase, 'my-task');
+    const unrelatedPath = join(worktreeBase, 'my-task-staging');
+    mkdirSync(unrelatedPath);
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'worktree' && args[1] === 'list') return `worktree ${activePath}\n\n`;
+      return '';
+    });
+    const pipeline = minimalImplPipeline({ worktreePath: activePath });
+    const deps = { projectRoot: project.root } as unknown as ImplementDeps;
+
+    sweepAbandonedWorktreeRelocations(pipeline, deps);
+
+    expect(existsSync(unrelatedPath)).toBe(true);
+  });
+
+  it('is a no-op when git worktree list fails — never risks deleting something possibly in use', () => {
+    const activePath = join(worktreeBase, 'my-task');
+    const abandonedPath = join(worktreeBase, 'my-task-r2');
+    mkdirSync(abandonedPath);
+    mockExecFileSync.mockImplementation(() => { throw new Error('git not available'); });
+    const pipeline = minimalImplPipeline({ worktreePath: activePath });
+    const deps = { projectRoot: project.root } as unknown as ImplementDeps;
+
+    expect(() => sweepAbandonedWorktreeRelocations(pipeline, deps)).not.toThrow();
+    expect(existsSync(abandonedPath)).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 //  Defect 3 — tryCherryPickWithRecovery: infra-vs-conflict routing
 // ═══════════════════════════════════════════════════════════════════════
 // Note: The full infra retry loop (ensureContainer + setTimeout backoff)
@@ -4737,7 +4967,9 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
   function makeDeps(overrides: Partial<ImplementDeps> = {}): ImplementDeps {
     return {
       projectRoot: project.root,
+      taskStore: { update: vi.fn() } as any,
       execGit: vi.fn(),
+      execGitCapture: vi.fn(() => ''),
       gitPush: vi.fn(),
       persistAndEmitPhase: vi.fn(),
       advancePhase: vi.fn(),
@@ -4851,7 +5083,9 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
   function makeDeps(overrides: Partial<ImplementDeps> = {}): ImplementDeps {
     return {
       projectRoot: project.root,
+      taskStore: { update: vi.fn() } as any,
       execGit: vi.fn(),
+      execGitCapture: vi.fn(() => ''),
       gitPush: vi.fn(),
       persistAndEmitPhase: vi.fn(),
       advancePhase: vi.fn(),

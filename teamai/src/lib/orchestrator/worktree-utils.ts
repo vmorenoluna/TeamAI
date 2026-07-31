@@ -192,3 +192,29 @@ export function execGit(args: string[], hostCwd: string, projectRoot: string): v
   const gitEnv = args[0] !== 'worktree' ? worktreeGitEnv(hostCwd, projectRoot) : {};
   execFileSync('git', args, { cwd: hostCwd, ...(Object.keys(gitEnv).length ? { env: { ...process.env, ...gitEnv } } : {}) });
 }
+
+/**
+ * Same routing as execGit, but captures and returns stdout instead of
+ * discarding it — for read commands (status, log, diff) run against a
+ * worktree that may be container-patched, where a plain host-side
+ * execFileSync would fail to resolve the worktree's .git linkage at all.
+ */
+export function execGitCapture(args: string[], hostCwd: string, projectRoot: string): string {
+  if (readContainerConfig(projectRoot).enabled && args[0] !== 'worktree') {
+    const info = containerManager.getRunningContainer(projectRoot);
+    if (info) {
+      const containerCwd = hostToContainerPath(hostCwd, projectRoot, info.remoteWorkspaceFolder);
+      const mappedArgs = args.map(a =>
+        path.isAbsolute(a) && a.startsWith(projectRoot)
+          ? hostToContainerPath(a, projectRoot, info.remoteWorkspaceFolder)
+          : a
+      );
+      const remoteUser = readContainerRemoteUser(projectRoot);
+      const gitEnv = worktreeGitEnv(hostCwd, projectRoot, info.remoteWorkspaceFolder);
+      const envFlags = Object.entries(gitEnv).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+      return execFileSync(getToolPath('docker'), ['exec', '-u', remoteUser, ...envFlags, '-w', containerCwd, info.containerId, 'git', ...mappedArgs], { encoding: 'utf-8' });
+    }
+  }
+  const gitEnv = args[0] !== 'worktree' ? worktreeGitEnv(hostCwd, projectRoot) : {};
+  return execFileSync('git', args, { cwd: hostCwd, encoding: 'utf-8', ...(Object.keys(gitEnv).length ? { env: { ...process.env, ...gitEnv } } : {}) });
+}

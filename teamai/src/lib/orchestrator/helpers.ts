@@ -7,6 +7,7 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from 'fs';
 import path from 'path';
 import { warn as logWarn } from '../logger';
+import { slugify } from '../utils';
 import { readContainerConfig } from '../container-manager';
 import { resolveProvider, providerToSessionOpts } from '../providers';
 import { containerSessionOpts, type AgentSession } from '../process-manager';
@@ -153,6 +154,23 @@ export function getWorktreeBase(projectRoot: string): string {
   return readContainerConfig(projectRoot).enabled
     ? path.join(projectRoot, '.worktrees')
     : path.join(projectRoot, '..', 'worktrees');
+}
+
+/**
+ * Resolve the directory *name* (not full path) for a task's git worktree.
+ * Prefers `worktreeDirName` — set when the canonical `<slug>` path
+ * couldn't be reclaimed (a file locked open by an external process, most
+ * commonly an IDE indexer or antivirus scanner holding a build artifact —
+ * see ensureWorktree's relocation logic in implement.ts) and the pipeline
+ * moved to a suffixed directory instead of fighting for the original one.
+ * Falls back to the stable slug (which still derives the branch name and
+ * task directory name) so a task without an override behaves exactly as
+ * before. Every worktree-path computation should go through this function
+ * rather than reading `task.slug` directly, so a relocation is honored
+ * consistently everywhere a task's worktree path is derived.
+ */
+export function resolveWorktreeDirName(task: { slug?: string; description: string; worktreeDirName?: string }): string {
+  return task.worktreeDirName ?? task.slug ?? slugify(task.description);
 }
 
 // ── Pipeline config ───────────────────────────────────────────────────────
