@@ -72,6 +72,7 @@ export interface Task {
   subtaskProgress?: { completed: number; total: number } | null;  // computed at load time from plan.json
   autoProcessed?: boolean;      // set to true when auto mode marks the task as done (PR auto-merged)
   autoReviewed?: boolean;       // set to true when user marks the auto-done task as manually reviewed
+  isPaused?: boolean;            // set to true when user pauses the task (session killed, stays in current phase)
   createdAt: string;
   updatedAt: string;
 }
