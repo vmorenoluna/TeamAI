@@ -115,7 +115,7 @@ describe('parseRoleLog', () => {
     expect(result[0].text).toBe('Test message');
     expect(result[0].prefixed).toContain('[QA Review]');
     expect(result[0].prefixed).toContain('Test message');
-    expect(result[0].prefixed).toMatch(/\x1b\[93m/); // orange ANSI for QA
+    expect(result[0].prefixed).toMatch(/\x1b\[32m/); // green ANSI for QA
   });
 
   it('assigns 00:00:00 to lines without timestamp', () => {
@@ -151,11 +151,11 @@ describe('parseRoleLog', () => {
 
   it('uses correct ANSI color per role', () => {
     expect(parseRoleLog('coder', '[00:00:01] x')[0].prefixed).toMatch(/\x1b\[33m/);
-    expect(parseRoleLog('qa', '[00:00:01] x')[0].prefixed).toMatch(/\x1b\[93m/);
+    expect(parseRoleLog('qa', '[00:00:01] x')[0].prefixed).toMatch(/\x1b\[32m/);
     expect(parseRoleLog('spec', '[00:00:01] x')[0].prefixed).toMatch(/\x1b\[35m/);
     expect(parseRoleLog('plan', '[00:00:01] x')[0].prefixed).toMatch(/\x1b\[36m/);
     expect(parseRoleLog('merge', '[00:00:01] x')[0].prefixed).toMatch(/\x1b\[96m/);
-    expect(parseRoleLog('orchestrator', '[00:00:01] x')[0].prefixed).toMatch(/\x1b\[37m/);
+    expect(parseRoleLog('orchestrator', '[00:00:01] x')[0].prefixed).toMatch(/\x1b\[91m/);
   });
 
   it('falls back to default ANSI for unknown role', () => {
@@ -184,7 +184,7 @@ describe('parseRoleLog', () => {
 describe('dated vs legacy timestamp format (sortKey)', () => {
   it('parses the dated format, splitting display time from the full sortable date-time', () => {
     const result = parseRoleLog('qa', '[2026-07-23T14:25:35] Fresh QA output');
-    expect(result[0].timestamp).toBe('14:25:35');
+    expect(result[0].timestamp).toBe('07-23 14:25:35');
     expect(result[0].sortKey).toBe('2026-07-23T14:25:35');
     expect(result[0].text).toBe('Fresh QA output');
   });
@@ -286,7 +286,7 @@ describe('parseCoderLogs', () => {
     const result = parseCoderLogs([
       { id: 1, title: 'T', log: '[2026-07-23T10:00:05] First' },
     ]);
-    expect(result[0].timestamp).toBe('10:00:05');
+    expect(result[0].timestamp).toBe('07-23 10:00:05');
     expect(result[0].sortKey).toBe('2026-07-23T10:00:05');
   });
 
@@ -433,8 +433,8 @@ describe('formatLiveEventWithLabel', () => {
 
   // ── Helpers ─────────────────────────────────────────────────────────────
 
-  /** Match the timestamp component: \x1b[90m[HH:MM:SS]\x1b[0m */
-  const TS_RE = /\x1b\[90m\[\d{2}:\d{2}:\d{2}\]\x1b\[0m/;
+  /** Match the timestamp component: \x1b[90m[MM-DD HH:MM:SS]\x1b[0m */
+  const TS_RE = /\x1b\[90m\[\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]\x1b\[0m/;
 
   // ── Null returns ───────────────────────────────────────────────────────
 
@@ -539,7 +539,7 @@ describe('formatLiveEventWithLabel', () => {
     expect(afterCrlf).toContain('[Coder]');
     expect(afterCrlf).toContain('✓ Done');
     // Content after the label prefix (strip timestamp + label) should be the result line.
-    const bodyAfterPrefix = afterCrlf.replace(/\x1b\[90m\[\d{2}:\d{2}:\d{2}\]\x1b\[0m \x1b\[33m\[Coder\]\x1b\[0m /, '');
+    const bodyAfterPrefix = afterCrlf.replace(/\x1b\[90m\[\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]\x1b\[0m \x1b\[33m\[Coder\]\x1b\[0m /, '');
     expect(bodyAfterPrefix).not.toMatch(/^\r\n/); // body no longer starts with \r\n
     expect(bodyAfterPrefix).toContain('✓ Done');
   });
@@ -559,23 +559,29 @@ describe('formatLiveEventWithLabel', () => {
 
   // ── Timestamp format ──────────────────────────────────────────────────
 
-  it('produces a zero-padded HH:MM:SS timestamp', () => {
+  it('produces a zero-padded MM-DD HH:MM:SS timestamp', () => {
     const result = formatLiveEventWithLabel(
       { type: 'assistant', message: { content: [{ type: 'text', text: 'x' }] } } as StreamEvent,
       ROLE_LABEL,
       ANSI_COLOR,
     );
     expect(result).not.toBeNull();
-    // Timestamp must be exactly 8 digits + colons inside dim ANSI brackets.
-    expect(result!).toMatch(/\x1b\[90m\[\d{2}:\d{2}:\d{2}\]\x1b\[0m/);
+    // Timestamp must be exactly the format MM-DD HH:MM:SS inside dim ANSI brackets.
+    expect(result!).toMatch(/\x1b\[90m\[\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]\x1b\[0m/);
     // Should not contain single-digit components (unpadded).
-    const tsMatch = result!.match(/\[(\d{2}:\d{2}:\d{2})\]/);
+    const tsMatch = result!.match(/\[(\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/);
     expect(tsMatch).not.toBeNull();
-    const [hh, mm, ss] = tsMatch![1].split(':').map(Number);
+    const [date, rest] = tsMatch![1].split(' ');
+    const [mm, dd] = date.split('-').map(Number);
+    const [hh, mmm, ss] = rest.split(':').map(Number);
+    expect(mm).toBeGreaterThanOrEqual(1);
+    expect(mm).toBeLessThanOrEqual(12);
+    expect(dd).toBeGreaterThanOrEqual(1);
+    expect(dd).toBeLessThanOrEqual(31);
     expect(hh).toBeGreaterThanOrEqual(0);
     expect(hh).toBeLessThan(24);
-    expect(mm).toBeGreaterThanOrEqual(0);
-    expect(mm).toBeLessThan(60);
+    expect(mmm).toBeGreaterThanOrEqual(0);
+    expect(mmm).toBeLessThan(60);
     expect(ss).toBeGreaterThanOrEqual(0);
     expect(ss).toBeLessThan(60);
   });
@@ -783,13 +789,13 @@ describe('UnifiedTerminal — component', () => {
       })} />);
 
       const qaBtn = screen.getByText('QA Review').closest('button')!;
-      expect(qaBtn.className).toContain('border-orange-500'); // selected
+      expect(qaBtn.className).toContain('border-green-500'); // selected
 
       fireEvent.click(qaBtn);
 
       // After click, it should be deselected (no border color)
       expect(qaBtn.className).toContain('text-slate-500');
-      expect(qaBtn.className).not.toContain('border-orange-500');
+      expect(qaBtn.className).not.toContain('border-green-500');
     });
 
     it('reselects a deselected role', () => {
@@ -801,11 +807,11 @@ describe('UnifiedTerminal — component', () => {
 
       // Deselect
       fireEvent.click(qaBtn);
-      expect(qaBtn.className).not.toContain('border-orange-500');
+      expect(qaBtn.className).not.toContain('border-green-500');
 
       // Reselect
       fireEvent.click(qaBtn);
-      expect(qaBtn.className).toContain('border-orange-500');
+      expect(qaBtn.className).toContain('border-green-500');
     });
   });
 
@@ -823,7 +829,7 @@ describe('UnifiedTerminal — component', () => {
 
       // All chips should be deselected
       const qaBtn = screen.getByText('QA Review').closest('button')!;
-      expect(qaBtn.className).not.toContain('border-orange-500');
+      expect(qaBtn.className).not.toContain('border-green-500');
 
       const specBtn = screen.getByText('Spec (Analyst)').closest('button')!;
       expect(specBtn.className).not.toContain('border-purple-500');
@@ -842,7 +848,7 @@ describe('UnifiedTerminal — component', () => {
       fireEvent.click(screen.getByText('All'));
 
       const qaBtn = screen.getByText('QA Review').closest('button')!;
-      expect(qaBtn.className).toContain('border-orange-500');
+      expect(qaBtn.className).toContain('border-green-500');
 
       const specBtn = screen.getByText('Spec (Analyst)').closest('button')!;
       expect(specBtn.className).toContain('border-purple-500');

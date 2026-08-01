@@ -23,11 +23,11 @@ interface RoleDef {
 
 const ROLES: RoleDef[] = [
   { key: 'coder',       label: 'Coder',        color: 'border-amber-500',   ansiColor: '\x1b[33m' },
-  { key: 'qa',          label: 'QA Review',     color: 'border-orange-500',  ansiColor: '\x1b[93m' },
+  { key: 'qa',          label: 'QA Review',     color: 'border-green-500',   ansiColor: '\x1b[32m' },
   { key: 'spec',        label: 'Spec (Analyst)',color: 'border-purple-500',  ansiColor: '\x1b[35m' },
   { key: 'plan',        label: 'Plan (Planner)',color: 'border-blue-500',    ansiColor: '\x1b[36m' },
   { key: 'merge',       label: 'Merge (Merger)',color: 'border-teal-500',    ansiColor: '\x1b[96m' },
-  { key: 'orchestrator',label: 'Orchestrator',  color: 'border-slate-500',   ansiColor: '\x1b[37m' },
+  { key: 'orchestrator',label: 'Orchestrator',  color: 'border-rose-500',   ansiColor: '\x1b[91m' },
 ];
 
 const ROLE_MAP = new Map(ROLES.map(r => [r.key, r]));
@@ -53,7 +53,7 @@ interface SubtaskTerminalInfo {
 
 interface ParsedLine {
   role: string;
-  /** Display-only HH:MM:SS, unchanged regardless of source format. */
+  /** Display timestamp: MM-DD HH:MM:SS for dated lines, HH:MM:SS for legacy lines. */
   timestamp: string;
   /**
    * Chronological sort key. Dated lines (`[YYYY-MM-DDTHH:MM:SS]`, written
@@ -93,7 +93,7 @@ const TS_RE_LEGACY = /^\[(\d{2}:\d{2}:\d{2})\]\s/;
 function parseTimestamp(line: string): { display: string; sortKey: string; rest: string } {
   const dated = line.match(TS_RE_DATED);
   if (dated) {
-    return { display: dated[2], sortKey: `${dated[1]}T${dated[2]}`, rest: line.slice(dated[0].length) };
+    return { display: `${dated[1].slice(5)} ${dated[2]}`, sortKey: `${dated[1]}T${dated[2]}`, rest: line.slice(dated[0].length) };
   }
   const legacy = line.match(TS_RE_LEGACY);
   if (legacy) {
@@ -208,8 +208,12 @@ export function formatLiveEventWithLabel(
 ): string | null {
   const body = formatLiveEvent(event);
   if (!body) return null;
+  // Use UTC to match process-manager.ts's toISOString() timestamps.
   const now = new Date();
-  const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(now.getUTCDate()).padStart(2, '0');
+  const time = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}:${String(now.getUTCSeconds()).padStart(2, '0')}`;
+  const ts = `${month}-${day} ${time}`;
   const prefix = `\x1b[90m[${ts}]\x1b[0m ${ansiColor}[${roleLabel}]\x1b[0m `;
   // Move any leading \r\n before the label so the content stays next to it.
   if (body.startsWith('\r\n')) return `\r\n${prefix}${body.slice(2)}`;
@@ -556,11 +560,11 @@ export function UnifiedTerminal({
                 <span
                   className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                     role.key === 'coder' ? 'bg-amber-500' :
-                    role.key === 'qa' ? 'bg-orange-500' :
+                    role.key === 'qa' ? 'bg-green-500' :
                     role.key === 'spec' ? 'bg-purple-500' :
                     role.key === 'plan' ? 'bg-blue-500' :
                     role.key === 'merge' ? 'bg-teal-500' :
-                    'bg-slate-500'
+                    'bg-rose-500'
                   }`}
                 />
                 {role.label}
