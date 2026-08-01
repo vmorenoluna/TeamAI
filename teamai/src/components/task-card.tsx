@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useServerMutation } from '@/hooks/use-server-mutation';
-import { checkTaskWorktree, deleteTaskWorktree, retryTask, stopTask, playTask } from '@/app/actions/tasks';
+import { checkTaskWorktree, deleteTaskWorktree, retryTask, stopTask, pauseTask, resumeTask, playTask } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 import { formatActionError } from '@/lib/error-format';
 import { PHASE_BADGE, PHASE_LABELS } from '@/constants/phases';
@@ -30,6 +30,8 @@ const EXCLUDED_SPINNER_PHASES = new Set(['backlog', 'failed', 'merge', 'create-p
 export function TaskCard({ task, onSelect, isMoving }: Props) {
   const { run: runRetry, isPending: isRetrying } = useServerMutation();
   const { run: runStop, isPending: isStopping } = useServerMutation();
+  const { run: runPause, isPending: isPausing } = useServerMutation();
+  const { run: runResume, isPending: isResuming } = useServerMutation();
   const { run: runPlay, isPending: isStarting } = useServerMutation();
   const { run: runWtDelete } = useServerMutation(); // isolated — uses wtDeleting for UI state
   const [expanded, setExpanded] = useState(false);
@@ -72,7 +74,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
     });
   }
 
-  const showSpinner = !EXCLUDED_SPINNER_PHASES.has(task.phase);
+  const showSpinner = !EXCLUDED_SPINNER_PHASES.has(task.phase) && !task.isPaused && !task.rateLimitedUntil;
   const isRateLimited = !!task.rateLimitedUntil;
   const longDesc = task.description && task.description.length > DESCRIPTION_LIMIT;
   const displayDesc = task.description
@@ -87,6 +89,32 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
         if (!result.success) throw new Error(result.error || 'Unknown error');
       } catch (err) {
         alert(formatActionError('retry task', err));
+        throw err;
+      }
+    });
+  }
+
+  async function handlePause(e: React.MouseEvent) {
+    e.stopPropagation();
+    runPause(async () => {
+      try {
+        const result = await pauseTask(task.id);
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+      } catch (err) {
+        alert(formatActionError('pause task', err));
+        throw err;
+      }
+    });
+  }
+
+  async function handleResume(e: React.MouseEvent) {
+    e.stopPropagation();
+    runResume(async () => {
+      try {
+        const result = await resumeTask(task.id);
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+      } catch (err) {
+        alert(formatActionError('resume task', err));
         throw err;
       }
     });
@@ -151,8 +179,16 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
           <div className="w-3 h-3 rounded-full border-2 border-slate-500 border-t-transparent animate-spin" />
         </div>
       )}
-      {/* Hourglass indicator — replaces spinner when API rate-limited */}
-      {showSpinner && !isMoving && isRateLimited && (
+      {/* Paused indicator */}
+      {task.isPaused && (
+        <div className="absolute top-2 right-2" title="Task paused — click Resume to continue">
+          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-900/40 text-slate-400 border border-slate-700/40">
+            ⏸ Paused
+          </span>
+        </div>
+      )}
+      {/* Hourglass indicator — only when rate-limited and NOT paused */}
+      {!task.isPaused && isRateLimited && !EXCLUDED_SPINNER_PHASES.has(task.phase) && !isMoving && (
         <div className="absolute top-2 right-2" title="Rate limited — waiting for API quota" data-component="hourglass-icon">
           <span className="text-sm text-amber-400">⏳</span>
         </div>
@@ -258,20 +294,53 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
             </button>
           )}
 
-          {/* Stop button — shown for active phases (not backlog, failed, done) */}
+          {/* Pause button — shown for active non-terminal phases when NOT paused */}
+          {!['backlog', 'failed', 'done'].includes(task.phase) && !task.isPaused && (
+            <button
+              onClick={handlePause}
+              disabled={isPausing}
+              title="Pause task — kill the session but stay in current phase"
+              className="text-[11px] font-medium px-2 py-1 rounded-md bg-slate-700/50 text-slate-400 hover:bg-amber-900/40 hover:text-amber-400 transition-colors disabled:opacity-50 flex items-center gap-1"
+            >
+              {isPausing ? (
+                <span className="w-3 h-3 rounded-full border border-amber-400 border-t-transparent animate-spin" />
+              ) : (
+                <span>⏸</span>
+              )}
+              Pause
+            </button>
+          )}
+
+          {/* Resume button — shown when task is paused */}
+          {task.isPaused && (
+            <button
+              onClick={handleResume}
+              disabled={isResuming}
+              title="Resume task — restart from current phase"
+              className="text-[11px] font-medium px-2 py-1 rounded-md bg-emerald-900/30 text-emerald-400 hover:bg-emerald-800/40 hover:text-emerald-300 transition-colors disabled:opacity-50 flex items-center gap-1"
+            >
+              {isResuming ? (
+                <span className="w-3 h-3 rounded-full border border-emerald-400 border-t-transparent animate-spin" />
+              ) : (
+                <span>▶</span>
+              )}
+              Resume
+            </button>
+          )}
+
+          {/* Stop button — shown for active phases (always available alongside Pause) */}
           {!['backlog', 'failed', 'done'].includes(task.phase) && (
             <button
               onClick={handleStop}
               disabled={isStopping}
-              title="Stop task — cancel and move back to Backlog"
-              className="text-[11px] font-medium px-2 py-1 rounded-md bg-slate-700/50 text-slate-400 hover:bg-red-900/40 hover:text-red-400 transition-colors disabled:opacity-50 flex items-center gap-1"
+              title="Stop task — cancel, clean up artifacts, and move back to Backlog"
+              className="text-[11px] font-medium px-1.5 py-1 rounded-md text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40"
             >
               {isStopping ? (
-                <span className="w-3 h-3 rounded-full border border-red-400 border-t-transparent animate-spin" />
+                <span className="w-2.5 h-2.5 rounded-full border border-red-400 border-t-transparent animate-spin" />
               ) : (
-                <span>■</span>
+                <span>✕</span>
               )}
-              Stop
             </button>
           )}
 

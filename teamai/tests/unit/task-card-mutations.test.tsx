@@ -19,6 +19,8 @@ vi.mock('next/navigation', () => ({
 
 const mockRetryTask = vi.fn();
 const mockStopTask = vi.fn();
+const mockPauseTask = vi.fn();
+const mockResumeTask = vi.fn();
 const mockPlayTask = vi.fn();
 const mockDeleteWorktree = vi.fn();
 const mockCheckWorktree = vi.fn().mockResolvedValue({ exists: false, path: null });
@@ -26,6 +28,8 @@ const mockCheckWorktree = vi.fn().mockResolvedValue({ exists: false, path: null 
 vi.mock('@/app/actions/tasks', () => ({
   retryTask: (...args: unknown[]) => mockRetryTask(...args),
   stopTask: (...args: unknown[]) => mockStopTask(...args),
+  pauseTask: (...args: unknown[]) => mockPauseTask(...args),
+  resumeTask: (...args: unknown[]) => mockResumeTask(...args),
   playTask: (...args: unknown[]) => mockPlayTask(...args),
   deleteTaskWorktree: (...args: unknown[]) => mockDeleteWorktree(...args),
   checkTaskWorktree: (...args: unknown[]) => mockCheckWorktree(...args),
@@ -59,6 +63,8 @@ describe('TaskCard mutation handlers', () => {
     window.alert = vi.fn();
     mockRetryTask.mockResolvedValue({ success: true, error: '' });
     mockStopTask.mockResolvedValue({ success: true, error: '' });
+    mockPauseTask.mockResolvedValue({ success: true, error: '' });
+    mockResumeTask.mockResolvedValue({ success: true, error: '' });
     mockPlayTask.mockResolvedValue({ success: true, error: '' });
     mockDeleteWorktree.mockResolvedValue({ success: true, error: '' });
     mockCheckWorktree.mockResolvedValue({ exists: false, path: null });
@@ -133,9 +139,115 @@ describe('TaskCard mutation handlers', () => {
     });
   });
 
-  // ── handleStop ───────────────────────────────────────────────────────
+  // ── handlePause ──────────────────────────────────────────────────────
 
-  describe('handleStop (stop button)', () => {
+  describe('handlePause (pause button)', () => {
+    function renderActiveTask() {
+      return render(
+        <TaskCard task={makeTask({ id: 'active-1', phase: 'implement', title: 'Active Task' })} onSelect={vi.fn()} />,
+      );
+    }
+
+    it('calls pauseTask and refreshes router on success', async () => {
+      mockPauseTask.mockResolvedValue({ success: true, error: '' });
+      renderActiveTask();
+
+      const pauseBtn = screen.getByText('Pause');
+      await act(async () => {
+        fireEvent.click(pauseBtn);
+      });
+
+      expect(mockPauseTask).toHaveBeenCalledWith('active-1');
+      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(window.alert).not.toHaveBeenCalled();
+    });
+
+    it('shows alert and skips router refresh on failure', async () => {
+      mockPauseTask.mockResolvedValue({ success: false, error: 'Task locked' });
+      renderActiveTask();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Pause'));
+      });
+
+      expect(window.alert).toHaveBeenCalledWith('Failed to pause task: Task locked');
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('disables pause button and shows spinner while pending', async () => {
+      mockPauseTask.mockImplementation(() => new Promise(() => {}));
+      renderActiveTask();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Pause'));
+      });
+
+      const pauseBtn = screen.getByText('Pause');
+      expect(pauseBtn).toBeDisabled();
+    });
+  });
+
+  // ── handleResume ─────────────────────────────────────────────────────
+
+  describe('handleResume (resume button)', () => {
+    function renderPausedTask() {
+      return render(
+        <TaskCard task={makeTask({ id: 'paused-1', phase: 'implement', title: 'Paused Task', isPaused: true })} onSelect={vi.fn()} />,
+      );
+    }
+
+    it('calls resumeTask and refreshes router on success', async () => {
+      mockResumeTask.mockResolvedValue({ success: true, error: '' });
+      renderPausedTask();
+
+      const resumeBtn = screen.getByText('Resume');
+      await act(async () => {
+        fireEvent.click(resumeBtn);
+      });
+
+      expect(mockResumeTask).toHaveBeenCalledWith('paused-1');
+      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(window.alert).not.toHaveBeenCalled();
+    });
+
+    it('shows alert and skips router refresh on failure', async () => {
+      mockResumeTask.mockResolvedValue({ success: false, error: 'Session dead' });
+      renderPausedTask();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Resume'));
+      });
+
+      expect(window.alert).toHaveBeenCalledWith('Failed to resume task: Session dead');
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('disables resume button and shows spinner while pending', async () => {
+      mockResumeTask.mockImplementation(() => new Promise(() => {}));
+      renderPausedTask();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Resume'));
+      });
+
+      const resumeBtn = screen.getByText('Resume');
+      expect(resumeBtn).toBeDisabled();
+    });
+
+    it('shows paused badge on paused task', () => {
+      renderPausedTask();
+      expect(screen.getByText('⏸ Paused')).toBeInTheDocument();
+    });
+
+    it('does not show pause button when task is paused', () => {
+      renderPausedTask();
+      expect(screen.queryByText('Pause')).not.toBeInTheDocument();
+    });
+  });
+
+  // ── handleStop (small ✕ button, still available) ─────────────────────
+
+  describe('handleStop (small ✕ stop button)', () => {
     function renderActiveTask() {
       return render(
         <TaskCard task={makeTask({ id: 'active-1', phase: 'implement', title: 'Active Task' })} onSelect={vi.fn()} />,
@@ -146,7 +258,7 @@ describe('TaskCard mutation handlers', () => {
       mockStopTask.mockResolvedValue({ success: true, error: '' });
       renderActiveTask();
 
-      const stopBtn = screen.getByText('Stop');
+      const stopBtn = screen.getByTitle('Stop task — cancel, clean up artifacts, and move back to Backlog');
       await act(async () => {
         fireEvent.click(stopBtn);
       });
@@ -161,23 +273,56 @@ describe('TaskCard mutation handlers', () => {
       renderActiveTask();
 
       await act(async () => {
-        fireEvent.click(screen.getByText('Stop'));
+        fireEvent.click(screen.getByTitle('Stop task — cancel, clean up artifacts, and move back to Backlog'));
       });
 
       expect(window.alert).toHaveBeenCalledWith('Failed to stop task: Task locked');
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
-    it('disables stop button and shows spinner while pending', async () => {
-      mockStopTask.mockImplementation(() => new Promise(() => {}));
-      renderActiveTask();
+    it('stop button still visible on paused tasks', () => {
+      render(
+        <TaskCard task={makeTask({ id: 'p1', phase: 'implement', isPaused: true })} onSelect={vi.fn()} />,
+      );
+      expect(screen.getByTitle('Stop task — cancel, clean up artifacts, and move back to Backlog')).toBeInTheDocument();
+    });
+  });
 
-      await act(async () => {
-        fireEvent.click(screen.getByText('Stop'));
-      });
+  // ── Paused state rendering ────────────────────────────────────────────
 
-      const stopBtn = screen.getByText('Stop');
-      expect(stopBtn).toBeDisabled();
+  describe('paused state rendering', () => {
+    it('shows paused badge with correct title on paused task', () => {
+      render(
+        <TaskCard task={makeTask({ id: 'p1', phase: 'implement', isPaused: true })} onSelect={vi.fn()} />,
+      );
+      const badge = screen.getByText('⏸ Paused');
+      expect(badge).toBeInTheDocument();
+      expect(badge.closest('[title]')?.getAttribute('title')).toBe('Task paused — click Resume to continue');
+    });
+
+    it('does not show paused badge on non-paused tasks', () => {
+      render(<TaskCard task={makeTask({ id: 'a1', phase: 'implement' })} onSelect={vi.fn()} />);
+      expect(screen.queryByText('⏸ Paused')).not.toBeInTheDocument();
+    });
+
+    it('does not show spinner on paused tasks', () => {
+      render(<TaskCard task={makeTask({ id: 'p1', phase: 'implement', isPaused: true })} onSelect={vi.fn()} />);
+      expect(screen.queryByTestId('spinner-icon')).not.toBeInTheDocument();
+    });
+
+    it('does not show hourglass on paused rate-limited tasks', () => {
+      render(
+        <TaskCard
+          task={makeTask({ id: 'p1', phase: 'implement', isPaused: true, rateLimitedUntil: '2026-12-31T00:00:00Z' })}
+          onSelect={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId('hourglass-icon')).not.toBeInTheDocument();
+    });
+
+    it('resume button not shown when task is not paused', () => {
+      render(<TaskCard task={makeTask({ id: 'a1', phase: 'implement' })} onSelect={vi.fn()} />);
+      expect(screen.queryByText('Resume')).not.toBeInTheDocument();
     });
   });
 
@@ -404,15 +549,16 @@ describe('TaskCard mutation handlers', () => {
       expect(screen.queryByText('Start')).not.toBeInTheDocument();
     });
 
-    it('shows stop button for active phases (not backlog, failed, done)', () => {
+    it('shows pause button for active phases (not backlog, failed, done)', () => {
       render(<TaskCard task={makeTask({ id: 'a1', phase: 'implement' })} onSelect={vi.fn()} />);
-      expect(screen.getByText('Stop')).toBeInTheDocument();
+      expect(screen.getByText('Pause')).toBeInTheDocument();
     });
 
-    it('hides stop button for backlog, failed, and done phases', () => {
+    it('hides pause/resume buttons for backlog, failed, and done phases', () => {
       for (const phase of ['backlog', 'failed', 'done']) {
         const { unmount } = render(<TaskCard task={makeTask({ id: 't', phase })} onSelect={vi.fn()} />);
-        expect(screen.queryByText('Stop')).not.toBeInTheDocument();
+        expect(screen.queryByText('Pause')).not.toBeInTheDocument();
+        expect(screen.queryByText('Resume')).not.toBeInTheDocument();
         unmount();
       }
     });
@@ -442,17 +588,17 @@ describe('TaskCard mutation handlers', () => {
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
-    it('handleStop: alerts when stopTask raw-throws', async () => {
-      mockStopTask.mockRejectedValue(new Error('session killed'));
+    it('handlePause: alerts when pauseTask raw-throws', async () => {
+      mockPauseTask.mockRejectedValue(new Error('session killed'));
 
       render(<TaskCard task={makeTask({ id: 'active-r', phase: 'implement' })} onSelect={vi.fn()} />);
 
       await act(async () => {
-        fireEvent.click(screen.getByText('Stop'));
+        fireEvent.click(screen.getByText('Pause'));
       });
 
-      expect(mockStopTask).toHaveBeenCalledWith('active-r');
-      expect(window.alert).toHaveBeenCalledWith('Failed to stop task: session killed');
+      expect(mockPauseTask).toHaveBeenCalledWith('active-r');
+      expect(window.alert).toHaveBeenCalledWith('Failed to pause task: session killed');
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 

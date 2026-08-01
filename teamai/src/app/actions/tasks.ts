@@ -124,6 +124,42 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
   return { success: true };
 }
 
+export async function pauseTask(taskId: string): Promise<{ success: boolean; error?: string }> {
+  const { taskStore, orchestrator, projectPath } = await getStores();
+  const task = taskStore.getById(taskId);
+  if (!task) return { success: false, error: 'Task not found' };
+
+  if (NO_STOP_PHASES.has(task.phase)) return { success: false, error: `Cannot pause task in "${task.phase}" phase` };
+  if (task.isPaused) return { success: false, error: 'Task is already paused' };
+
+  // Kill the running pipeline session, but leave the task in its current phase.
+  orchestrator.cancelPipeline(taskId);
+
+  // Mark as paused — stay in current phase, no artifact cleanup.
+  taskStore.update(taskId, { isPaused: true });
+  processManager.emit('phase-change', { taskId, phase: task.phase, projectRoot: projectPath });
+  revalidatePath('/');
+  revalidatePath(`/task/${taskId}`);
+  return { success: true };
+}
+
+export async function resumeTask(taskId: string): Promise<{ success: boolean; error?: string }> {
+  const { taskStore, orchestrator } = await getStores();
+  const task = taskStore.getById(taskId);
+  if (!task) return { success: false, error: 'Task not found' };
+
+  if (!task.isPaused) return { success: false, error: 'Task is not paused' };
+
+  // Clear paused flag
+  taskStore.update(taskId, { isPaused: false });
+
+  // Resume from current phase — re-run the pipeline at whatever phase the task was in
+  orchestrator.moveTaskToPhase(taskId, task.phase).catch(console.error);
+  revalidatePath('/');
+  revalidatePath(`/task/${taskId}`);
+  return { success: true };
+}
+
 export async function stopTask(taskId: string): Promise<{ success: boolean; error?: string }> {
   const { taskStore, orchestrator, projectPath } = await getStores();
   const task = taskStore.getById(taskId);
@@ -139,6 +175,9 @@ export async function stopTask(taskId: string): Promise<{ success: boolean; erro
   // hiccup (reprovisioning the container), so this must settle before the
   // task moves to 'backlog' below.
   await orchestrator.cleanupTaskArtifacts(taskId, task.phase);
+
+  // Clear paused state when moving to backlog (belt-and-suspenders)
+  taskStore.update(taskId, { isPaused: false });
 
   // Move to backlog
   taskStore.updatePhase(taskId, 'backlog');

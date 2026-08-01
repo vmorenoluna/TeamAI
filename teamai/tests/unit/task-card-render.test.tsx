@@ -23,6 +23,8 @@ vi.mock('@/app/actions/tasks', () => ({
   deleteTaskWorktree: vi.fn(),
   retryTask: vi.fn(),
   stopTask: vi.fn(),
+  pauseTask: vi.fn(),
+  resumeTask: vi.fn(),
   playTask: vi.fn(),
 }));
 
