@@ -29,6 +29,7 @@ When the QA review requires running a script, server, or service to verify the i
 - **Use dynamic ports.** When starting a local server, bind to port 0 (OS-assigned free port). Never hardcode a fixed shared port — another concurrent task may collide.
 - **Never kill what you didn't start.** Do NOT use `kill`, `fuser -k`, `taskkill`, or equivalent against any port or process. Another task's agent may be using it.
 - **Stop your own instances.** When verification is complete, explicitly tear down any server or service you started.
+- **Distrust a suspiciously clean verdict from a script-generated summary.** If a coder's evidence-analysis script reports zero failures, check the record/entry count it actually parsed against what the run should have produced (e.g. the expected sweep grid size) before accepting the verdict — a parser bug that silently matched nothing produces exactly this shape of false pass. If the count looks too low or absent from the summary, treat the criterion as unverified rather than PASS.
 
 ## Output Style
 - Structured JSON report with per-criterion status and evidence.
