@@ -136,7 +136,10 @@ export async function pauseTask(taskId: string): Promise<{ success: boolean; err
   orchestrator.cancelPipeline(taskId);
 
   // Mark as paused — stay in current phase, no artifact cleanup.
-  taskStore.update(taskId, { isPaused: true });
+  // Clear rate-limit and wakeup timestamps: cancelPipeline already killed
+  // the timers, so these are stale. Leaving them causes a stale hourglass
+  // icon to reappear when the user resumes (spinner suppressed, ⏳ shown).
+  taskStore.update(taskId, { isPaused: true, rateLimitedUntil: undefined, wakeupUntil: undefined });
   processManager.emit('phase-change', { taskId, phase: task.phase, projectRoot: projectPath });
   revalidatePath('/');
   revalidatePath(`/task/${taskId}`);
@@ -150,8 +153,11 @@ export async function resumeTask(taskId: string): Promise<{ success: boolean; er
 
   if (!task.isPaused) return { success: false, error: 'Task is not paused' };
 
-  // Clear paused flag
-  taskStore.update(taskId, { isPaused: false });
+  // Clear paused flag and any stale rate-limit/wakeup timestamps.
+  // pauseTask now clears these, but belt-and-suspenders: if the task
+  // reached isPaused through any other path, stale timestamps here
+  // would cause a false hourglass (⏳) after resume.
+  taskStore.update(taskId, { isPaused: false, rateLimitedUntil: undefined, wakeupUntil: undefined });
 
   // Resume from current phase — re-run the pipeline at whatever phase the task was in
   orchestrator.moveTaskToPhase(taskId, task.phase).catch(console.error);
