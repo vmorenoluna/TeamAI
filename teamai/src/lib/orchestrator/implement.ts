@@ -767,10 +767,16 @@ async function runSubtaskSession(
     }
   }
 
-  // Verify deliverable files exist before marking subtask complete
+  // Verify deliverable files exist before marking subtask complete.
+  // Gated on wakeupDetected (THIS session scheduled a fresh wakeup), not on
+  // pipeline.wakeupSubtaskId (which stays set across every re-entry cycle
+  // until a session completes cleanly). Gating on the stale pipeline field
+  // let a wakeup-reentry session that silently failed to reschedule — no new
+  // wakeup file, deliverable still missing — sail through as "completed"
+  // with the verification skipped, because the pipeline still remembered an
+  // EARLIER, legitimate wakeup on the same subtask.
   let skipCompletion = false;
-  const hasWakeup = pipeline.wakeupSubtaskId != null;
-  if (!hasWakeup && subtask.files_to_create?.length) {
+  if (!wakeupDetected && subtask.files_to_create?.length) {
     for (const file of subtask.files_to_create) {
       if (!existsSync(path.join(cwd, file))) {
         skipCompletion = true;
