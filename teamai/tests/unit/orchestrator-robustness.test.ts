@@ -3096,7 +3096,14 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
     }
   });
 
-  it('does NOT increment deliverable counter when wakeup is active (wakeupSubtaskId != null)', async () => {
+  it('does NOT increment deliverable counter when THIS session schedules a fresh wakeup', async () => {
+    // Deliverate verification must be gated on whether THIS session actually
+    // scheduled a wakeup (wakeupDetected), not on whether pipeline.wakeupSubtaskId
+    // was already set walking in — a stale carry-over from an earlier cycle must
+    // NOT suppress the check (see the wakeup re-entry regression test above,
+    // "still verifies files_to_create on a wakeup re-entry session that ends
+    // without scheduling a fresh wakeup"). This test covers the legitimate case:
+    // the job is still genuinely running and the session correctly reschedules.
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
         id: 5,
@@ -3116,7 +3123,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       qaAttempt: 0,
       worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
-    // Simulate wakeup active
+    // Simulate wakeup already active from an earlier cycle.
     (pipeline as any).wakeupSubtaskId = 5;
 
     try {
@@ -3125,10 +3132,18 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
         expect(mockSendMessage).toHaveBeenCalled();
       });
 
+      // THIS session reschedules — job is still running, writes a fresh wakeup file.
+      writeFileSync(join(project.taskDir, 'subtask_wakeup-st5.json'), JSON.stringify({
+        subtask_id: 5,
+        wakeup_at: '2026-07-04T12:00:00Z',
+        background_command: 'python long_job.py',
+        expected_artifact: 'output/data.json',
+      }));
+
       fireEvent('event', { sessionId: 'sess-deliverable-wakeup', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
 
-      // Counter should NOT be incremented (wakeup takes priority)
+      // Counter should NOT be incremented (a fresh wakeup was scheduled this session)
       expect(pipeline.deliverableFailCounts).toBeUndefined();
 
       await promise;
@@ -4129,6 +4144,63 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
 
       fireEvent('event', { sessionId: 'sess-wakeup-prompt', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(30);
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  // Regression coverage for a real production failure: a subtask goes through
+  // several legitimate wakeup cycles (pipeline.wakeupSubtaskId stays set
+  // across all of them), then its FINAL re-entry session ends normally
+  // without writing a fresh subtask_wakeup-st<id>.json — the job may have
+  // silently died, or the coder assumed some other notification would
+  // resume it. Before this fix, the deliverable-existence check was gated on
+  // `pipeline.wakeupSubtaskId != null`, which was still true from the
+  // EARLIER wakeup cycles even though THIS session detected no wakeup file
+  // — so the check was skipped and the subtask was marked complete with its
+  // required files_to_create never having been produced.
+  it('still verifies files_to_create on a wakeup re-entry session that ends without scheduling a fresh wakeup', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 4,
+        title: 'Run isolation sweep and commit evidence',
+        description: 'Run the sweep and commit the evidence artifact',
+        files: ['scripts/sweep.py'],
+        acceptance_criteria: ['Evidence committed'],
+        files_to_create: ['scripts/sweep_logs/evidence.log'],
+      }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-silent-drop');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    // Pipeline enters this session already mid-wakeup, as if resuming after
+    // an earlier, legitimate wakeup cycle on the same subtask.
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+      wakeupSubtaskId: 4, wakeupCommand: 'python sweep.py', wakeupArtifact: 'scripts/sweep_logs/evidence.log', wakeupAttemptCount: 2,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      // No fresh wakeup file written this session, and the expected
+      // deliverable was never produced.
+      expect(existsSync(join(project.root, 'scripts/sweep_logs/evidence.log'))).toBe(false);
+
+      fireEvent('event', { sessionId: 'sess-wakeup-silent-drop', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+
+      // The deliverable check must still have run and caught the missing file.
+      expect(pipeline.deliverableFailCounts).toBeDefined();
+      expect(pipeline.deliverableFailCounts![4]).toBe(1);
+
+      // Subtask must NOT be silently marked complete.
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks[0].completed).toBeUndefined();
+
       await promise;
     } finally {
       executeSpy.mockRestore();
