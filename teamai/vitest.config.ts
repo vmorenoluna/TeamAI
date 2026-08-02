@@ -8,6 +8,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
+    // Default is 5s — too low for crash-recovery (real git worktrees)
+    // and tasks-integration (module re-imports) under full-suite parallel load.
+    testTimeout: 30_000,
     globalSetup: ['./tests/global-setup.ts'],
     setupFiles: ['./tests/vitest-setup.ts'],
     include: ['tests/unit/**/*.test.{ts,tsx}', 'tests/integration/**/*.test.{ts,tsx}'],

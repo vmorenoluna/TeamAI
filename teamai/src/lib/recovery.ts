@@ -15,6 +15,8 @@ export interface InterruptedTask {
   projectName: string;
   /** ISO timestamp — set when pipeline was paused by API rate limit. */
   rateLimitedUntil?: string;
+  /** User-paused flag — task was deliberately paused and must not be auto-resumed. */
+  isPaused?: boolean;
 }
 
 export interface OrphanedWorktree {
@@ -85,6 +87,7 @@ export function findInterruptedTasks(): InterruptedTask[] {
             projectPath: project.path,
             projectName: project.name,
             rateLimitedUntil: task.rateLimitedUntil,
+            isPaused: task.isPaused === true,
           });
         }
       } catch {
@@ -439,6 +442,13 @@ export async function autoResumeInterruptedTasks(): Promise<number> {
         log('auto-resume', `Task ${task.taskId} "${task.title}" rate limit expired (was ${task.rateLimitedUntil}) — resuming`);
       }
 
+      // Respect user-paused tasks — the pause is deliberate and must only
+      // be lifted by clicking Resume in the UI, never by automated recovery.
+      if (task.isPaused) {
+        log('auto-resume', `Task ${task.taskId} "${task.title}" is paused — skipping (user must unpause)`);
+        continue;
+      }
+
       log('auto-resume', `Resuming task ${task.taskId} "${task.title}" at phase ${task.phase} in ${task.projectName}`);
       orchestrator.resumeTask(task.taskId).catch(err => {
         logWarn('auto-resume', `Task ${task.taskId} "${task.title}" failed to resume:`, err);
@@ -589,6 +599,12 @@ export async function sweepStalledTasks(): Promise<number> {
             if (orchestrator.isTaskActive(task.id)) continue;
           } catch { /* orchestrator not available — proceed */ }
 
+          // Respect user-paused tasks — never auto-resume a paused task.
+          if (task.isPaused) {
+            log('sweep', `Task ${task.id} "${task.title}" is paused — skipping (user must unpause)`);
+            continue;
+          }
+
           // Clear the stale rate-limit flag and re-queue
           log('sweep', `Task ${task.id} "${task.title}" has expired rate limit (was ${task.rateLimitedUntil}) — clearing and resuming`);
           delete task.rateLimitedUntil;
@@ -652,6 +668,12 @@ export async function sweepStalledTasks(): Promise<number> {
           }
 
           if (!shouldResume) continue;
+
+          // Respect user-paused tasks — the pause is deliberate.
+          if (task.isPaused) {
+            log('sweep', `Task ${task.id} "${task.title}" is paused — skipping stalled-task resume (user must unpause)`);
+            continue;
+          }
 
           log('sweep', `Task ${task.id} "${task.title}" ${reason} — resuming`);
         }

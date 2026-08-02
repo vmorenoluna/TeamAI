@@ -256,6 +256,7 @@ describe('Recovery Integration', () => {
         phase: 'implement',
         projectPath,
         projectName: 'test-proj',
+        isPaused: false,
       });
     });
 
