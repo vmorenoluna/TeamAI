@@ -1495,7 +1495,59 @@ describe('Orchestrator', () => {
       expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(false);
     });
 
-    // Coverage: handleRateLimit retry callback — RateLimitError branch (lines 501-504)
+    it('skips resume when task is user-paused (isPaused flag)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'spec', isPaused: true });
+
+      // Track that advancePhase('failed') is NOT called
+      let failedCalled = false;
+      const origAdvance = (orch as AnyOrch).advancePhase.bind(orch);
+      (orch as AnyOrch).advancePhase = (p: any, phase: string) => {
+        if (phase === 'failed') failedCalled = true;
+        origAdvance(p, phase);
+      };
+
+      // Create a session that will succeed (should not be called)
+      mockCreateSession.mockRejectedValue(new Error('should not be called'));
+
+      // resetsAt = 0 → fires immediately
+      (orch as AnyOrch).handleRateLimit(pipeline, 0);
+
+      await new Promise(r => setTimeout(r, 50));
+
+      // Verify the task was NOT resumed — pipeline cleaned up, rateLimitedUntil cleared
+      expect(failedCalled).toBe(false);
+      expect((orch as AnyOrch).pipelines.has(testData.taskId)).toBe(false);
+      expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(false);
+    });
+    it('_fireWakeup skips resume when task is user-paused ', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'spec', isPaused: true });
+
+      // Track that advancePhase or executePhase is NOT called
+      const executePhaseSpy = vi.spyOn(orch as AnyOrch, 'executePhase')
+        .mockRejectedValue(new Error('should not be called'));
+
+      await (orch as AnyOrch)._fireWakeup(pipeline);
+
+      expect(executePhaseSpy).not.toHaveBeenCalled();
+      expect((orch as AnyOrch).pipelines.has(testData.taskId)).toBe(true);
+
+      executePhaseSpy.mockRestore();
+    });
+
     it('re-enters handleRateLimit when retry is also rate limited', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
@@ -2940,6 +2992,24 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       await expect(orch.resumeTask('nonexistent')).rejects.toThrow('not found');
+    });
+
+    it('throws when task is user-paused (isPaused flag)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      // Set up artifacts then mark the task as paused
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [], completed: true }],
+      }));
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'implement', isPaused: true });
+
+      await expect(orch.resumeTask(testData.taskId)).rejects.toThrow(
+        'paused — cannot auto-resume'
+      );
     });
   });
 

@@ -136,6 +136,7 @@ describe('findInterruptedTasks', () => {
       phase: 'implement',
       projectPath,
       projectName: 'test',
+      isPaused: false,
     });
   });
 
@@ -1192,39 +1193,67 @@ describe('autoResumeInterruptedTasks', () => {
     const count = await autoResumeInterruptedTasks();
     expect(count).toBe(0);
     expect(mockOrchResumeTask).not.toHaveBeenCalled();
-  });
+  });    it('resumes tasks with expired rateLimitedUntil', async () => {
+      const projectPath = '/test/project';
+      const teamaiDir = join(projectPath, '.teamai');
+      const taskFile = join(teamaiDir, 'task-expired', 'task.json');
+      const sessionMap = join(teamaiDir, 'task-expired', 'session_map.json');
+      const pastDate = new Date(Date.now() - 3600_000).toISOString();
+      vi.mocked(existsSync).mockImplementation((p) => {
+        const path = String(p);
+        if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+        if (path === teamaiDir) return true;
+        if (path === taskFile) return true;
+        if (path === sessionMap) return true;
+        return false;
+      });
+      vi.mocked(readFileSync).mockImplementation((p) => {
+        const path = String(p);
+        if (path === join('/mock/home', '.teamai', 'projects.json'))
+          return JSON.stringify([{ name: 'test', path: projectPath }]);
+        if (path === taskFile)
+          return JSON.stringify({ id: 'task-expired', title: 'Expired RL', phase: 'implement', rateLimitedUntil: pastDate });
+        return '';
+      });
+      (vi.mocked(readdirSync) as any).mockImplementation((p: string) => {
+        if (String(p) === teamaiDir) return ['task-expired'];
+        return [];
+      });
+      const count = await autoResumeInterruptedTasks();
+      expect(count).toBe(1);
+      expect(mockOrchResumeTask).toHaveBeenCalledWith('task-expired');
+    });
 
-  it('resumes tasks with expired rateLimitedUntil', async () => {
-    const projectPath = '/test/project';
-    const teamaiDir = join(projectPath, '.teamai');
-    const taskFile = join(teamaiDir, 'task-expired', 'task.json');
-    const sessionMap = join(teamaiDir, 'task-expired', 'session_map.json');
-    const pastDate = new Date(Date.now() - 3600_000).toISOString();
-    vi.mocked(existsSync).mockImplementation((p) => {
-      const path = String(p);
-      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
-      if (path === teamaiDir) return true;
-      if (path === taskFile) return true;
-      if (path === sessionMap) return true;
-      return false;
+    it('skips user-paused tasks (isPaused flag)', async () => {
+      const projectPath = '/test/project';
+      const teamaiDir = join(projectPath, '.teamai');
+      const taskFile = join(teamaiDir, 'task-paused', 'task.json');
+      const sessionMap = join(teamaiDir, 'task-paused', 'session_map.json');
+      vi.mocked(existsSync).mockImplementation((p) => {
+        const path = String(p);
+        if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+        if (path === teamaiDir) return true;
+        if (path === taskFile) return true;
+        if (path === sessionMap) return true;
+        return false;
+      });
+      vi.mocked(readFileSync).mockImplementation((p) => {
+        const path = String(p);
+        if (path === join('/mock/home', '.teamai', 'projects.json'))
+          return JSON.stringify([{ name: 'test', path: projectPath }]);
+        if (path === taskFile)
+          return JSON.stringify({ id: 'task-paused', title: 'Paused Task', phase: 'implement', isPaused: true });
+        return '';
+      });
+      (vi.mocked(readdirSync) as any).mockImplementation((p: string) => {
+        if (String(p) === teamaiDir) return ['task-paused'];
+        return [];
+      });
+      const count = await autoResumeInterruptedTasks();
+      expect(count).toBe(0);
+      expect(mockOrchResumeTask).not.toHaveBeenCalled();
     });
-    vi.mocked(readFileSync).mockImplementation((p) => {
-      const path = String(p);
-      if (path === join('/mock/home', '.teamai', 'projects.json'))
-        return JSON.stringify([{ name: 'test', path: projectPath }]);
-      if (path === taskFile)
-        return JSON.stringify({ id: 'task-expired', title: 'Expired RL', phase: 'implement', rateLimitedUntil: pastDate });
-      return '';
-    });
-    (vi.mocked(readdirSync) as any).mockImplementation((p: string) => {
-      if (String(p) === teamaiDir) return ['task-expired'];
-      return [];
-    });
-    const count = await autoResumeInterruptedTasks();
-    expect(count).toBe(1);
-    expect(mockOrchResumeTask).toHaveBeenCalledWith('task-expired');
   });
-});
 
 // ── sweepStalledTasks ───────────────────────────────────────────────
 
@@ -1697,5 +1726,67 @@ describe('sweepStalledTasks', () => {
 
       expect(mockTriggerEarlyWakeup).not.toHaveBeenCalled();
     });
+  });
+
+  it('skips user-paused task with expired rate limit (check 1)', async () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'my-task', 'task.json');
+    const pastDate = new Date(Date.now() - 3600_000).toISOString();
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === taskFile)
+        return JSON.stringify({ id: 't1', title: 'Paused RL', phase: 'implement', rateLimitedUntil: pastDate, isPaused: true });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['my-task'];
+      return [];
+    });
+
+    const count = await sweepStalledTasks();
+    expect(count).toBe(0);
+    expect(mockSweepResumeTask).not.toHaveBeenCalled();
+  });
+
+  it('skips user-paused stalled task (check 2)', async () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'my-task', 'task.json');
+    const oldDate = new Date(Date.now() - 31 * 60_000).toISOString();
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === taskFile)
+        return JSON.stringify({ id: 't1', title: 'Paused Stalled', phase: 'implement', updatedAt: oldDate, isPaused: true });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['my-task'];
+      return [];
+    });
+
+    const count = await sweepStalledTasks();
+    expect(count).toBe(0);
+    expect(mockSweepResumeTask).not.toHaveBeenCalled();
   });
 });

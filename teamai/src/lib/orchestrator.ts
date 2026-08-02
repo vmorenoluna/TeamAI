@@ -729,6 +729,15 @@ export class Orchestrator {
     const task = this.taskStore.getById(taskId);
     if (!task) throw new TaskNotFoundError(taskId);
 
+    // Refuse to resume a user-paused task — the pause is deliberate and
+    // must only be lifted by the user clicking Resume in the UI.
+    if (task.isPaused) {
+      throw new Error(
+        `Task ${taskId} is paused — cannot auto-resume. ` +
+        `The user must click Resume to unpause it.`
+      );
+    }
+
     const dir = this.taskStore.getDirById(taskId);
 
     // Determine start phase:
@@ -835,6 +844,11 @@ export class Orchestrator {
     const task = this.taskStore.getById(pipeline.taskId);
     if (!task || NO_RESUME_PHASES.has(task.phase)) {
       log('wakeup', `Task ${pipeline.taskId} is in terminal phase "${task?.phase}" — skipping resume`);
+      this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
+      return;
+    }
+    if (task.isPaused) {
+      log('wakeup', `Task ${pipeline.taskId} is paused — skipping resume (user must unpause)`);
       this.taskStore.update(pipeline.taskId, { wakeupUntil: undefined });
       return;
     }

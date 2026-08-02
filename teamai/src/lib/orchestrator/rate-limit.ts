@@ -190,6 +190,13 @@ export function handleRateLimit(
       deps.activeTasks.delete(pipeline.taskId);
       return;
     }
+    if (task.isPaused) {
+      log('rate-limit', `Task ${pipeline.taskId} is paused — skipping resume (user must unpause)`);
+      deps.taskStore.update(pipeline.taskId, { rateLimitedUntil: undefined });
+      deps.pipelines.delete(pipeline.taskId);
+      deps.activeTasks.delete(pipeline.taskId);
+      return;
+    }
 
     // Verify the pipeline object hasn't been replaced (stale guard)
     const currentPipeline = deps.pipelines.get(pipeline.taskId);
