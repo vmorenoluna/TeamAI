@@ -63,6 +63,16 @@ export interface AgentSession {
    */
   killReason?: 'stalled';
   /**
+   * Set alongside `killReason` by killSession's optional `stallKind` param
+   * when `reason` is `'stalled'`. Records WHICH of the two stall thresholds
+   * actually fired (see getStalledSessions) so a consumer of the resulting
+   * SessionKilledError can report the real cause instead of assuming one —
+   * a session idle between tool calls for just over 2 minutes and a session
+   * whose tool call has been running for 30+ minutes are very different
+   * situations and must not be described identically.
+   */
+  stallKind?: 'idle' | 'tool';
+  /**
    * Per-session EventEmitter scoped to this session only.
    * Used by {@link waitForCompletion} to avoid piling listeners
    * on the global {@link processManager} emitter (BUG-20 / T29).
@@ -270,11 +280,16 @@ export class ProcessManager extends EventEmitter {
    * runSubtaskSession can offer the coder a recovery retry instead of
    * failing the task outright. Omit for a deliberate stop (stopTask /
    * cancelPipeline) — those must never trigger an automatic retry.
+   * @param stallKind Only meaningful alongside reason 'stalled' — which
+   * threshold fired (idle >2min vs tool-in-flight >30min). The caller
+   * already knows this (it's `session.toolInFlight` at kill time); pass it
+   * through rather than letting a downstream consumer guess or hardcode one.
    */
-  killSession(sessionId: string, reason?: 'stalled'): void {
+  killSession(sessionId: string, reason?: 'stalled', stallKind?: 'idle' | 'tool'): void {
     const session = this.sessions.get(sessionId);
     if (session) {
       if (reason) session.killReason = reason;
+      if (stallKind) session.stallKind = stallKind;
       session.process.kill('SIGTERM');
       // SIGKILL fallback after a grace period if the process ignores SIGTERM
       // Use exitCode instead of process.killed (killed is set synchronously by SIGTERM above)

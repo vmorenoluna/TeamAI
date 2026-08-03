@@ -104,9 +104,17 @@ export class SessionExitedError extends OrchestratorError {
  *  `reason` distinguishes a stall-detector kill ('stalled', recoverable —
  *  runSubtaskSession offers the coder a retry) from a deliberate stop
  *  (undefined — must never trigger an automatic retry). Populated from the
- *  killed session's own `killReason` in waitForCompletion's onExit handler. */
+ *  killed session's own `killReason` in waitForCompletion's onExit handler.
+ *
+ *  `stallKind` (only meaningful when reason is 'stalled') distinguishes
+ *  which of the two stall thresholds actually fired — 'idle' (session sat
+ *  silent for >2min with no tool running) vs 'tool' (a single tool call ran
+ *  for >30min with no output). A consumer must not assume the tool-in-flight
+ *  case just because reason is 'stalled': the two are very different
+ *  situations and any message shown to the coder must say which one it was.
+ *  Populated from the killed session's own `stallKind` alongside `reason`. */
 export class SessionKilledError extends OrchestratorError {
-  constructor(public readonly signal: string, public readonly reason?: 'stalled') {
+  constructor(public readonly signal: string, public readonly reason?: 'stalled', public readonly stallKind?: 'idle' | 'tool') {
     super(`Session killed by signal ${signal}`, 'SESSION_KILLED');
     this.name = 'SessionKilledError';
   }
