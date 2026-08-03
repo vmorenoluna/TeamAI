@@ -12,7 +12,7 @@ import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody }
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
 import { updateSessionMap, logToOutput } from './helpers';
-import { pruneWorktreesSafely } from './worktree-utils';
+import { removeStaleWorktreeRegistration } from './worktree-utils';
 import { WorktreeError, PipelineConfigError } from './errors';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
@@ -226,7 +226,7 @@ export async function runPlanPhase(
     } catch {
       if (existsSync(pipeline.worktreePath)) {
         try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-        pruneWorktreesSafely(deps.projectRoot, pipeline.worktreePath);
+        removeStaleWorktreeRegistration(deps.projectRoot, pipeline.worktreePath);
       }
       deps.execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], deps.projectRoot);
     }
