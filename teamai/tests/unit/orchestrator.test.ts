@@ -1210,7 +1210,7 @@ describe('Orchestrator', () => {
         expect(updated?.branch).toBeUndefined();
       });
 
-      it('falls back to rmSync + prune when docker exec remove and --force both fail', () => {
+      it('falls back to rmSync + a scoped worktree-remove retry when docker exec remove and --force both fail', () => {
         testData = setupTestProject();
         vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
         vi.mocked(containerManager.getRunningContainer).mockReturnValue({
@@ -1244,11 +1244,23 @@ describe('Orchestrator', () => {
 
         // rmSync was called — the worktree directory should be gone
         expect(existsSync(wtPath)).toBe(false);
-        // git worktree prune was called on host (raw execFileSync)
-        expect(mockExecFileSync).toHaveBeenCalledWith(
+        // removeStaleWorktreeRegistration retries a scoped `git worktree
+        // remove --force <path>` (not the unscoped `git worktree prune`,
+        // which has no path argument to limit its blast radius and would
+        // risk destroying an unrelated concurrently-running task's worktree
+        // registration). Both the earlier --force attempt (via _execGit)
+        // and this fallback attempt use identical args, so there are two
+        // matching calls, not one.
+        const scopedRemoveCalls = mockExecFileSync.mock.calls.filter(
+          (c: unknown[]) => c[0] === 'git' &&
+            Array.isArray(c[1]) &&
+            c[1][0] === 'worktree' && c[1][1] === 'remove' && c[1][2] === '--force' && c[1][3] === wtPath,
+        );
+        expect(scopedRemoveCalls.length).toBeGreaterThanOrEqual(2);
+        expect(mockExecFileSync).not.toHaveBeenCalledWith(
           'git',
-          expect.arrayContaining(['worktree', 'prune']),
-          expect.objectContaining({ cwd: testData.root }),
+          ['worktree', 'prune'],
+          expect.any(Object),
         );
         // Branch cleanup still runs
         expect(mockExecFileSync).toHaveBeenCalledWith(

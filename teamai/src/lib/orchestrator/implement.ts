@@ -20,7 +20,7 @@ import { rebaseOntoLatestDefault } from './phase-runners';
 import { updateSessionMap, logToOutput } from './helpers';
 import { resolveBaseBranch } from '../git-platform';
 import { getUnpushedCommits } from './worktree-ops';
-import { pruneWorktreesSafely } from './worktree-utils';
+import { removeStaleWorktreeRegistration } from './worktree-utils';
 import type { TaskStore } from '../task-store';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
@@ -307,7 +307,7 @@ export async function ensureWorktree(
           await clearWorktreeDirectoryOrThrow(pipeline.worktreePath, {
             exists: existsSync,
             rm: (p) => rmSync(p, { recursive: true, force: true }),
-            pruneWorktrees: () => pruneWorktreesSafely(deps.projectRoot, pipeline.worktreePath),
+            pruneWorktrees: () => removeStaleWorktreeRegistration(deps.projectRoot, pipeline.worktreePath),
           });
         } catch (err) {
           // A directory that survives every removal attempt is almost
@@ -990,7 +990,7 @@ async function integrateGroup(
       if (id === pipeline.wakeupSubtaskId) continue;
       try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch {
         try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-        pruneWorktreesSafely(deps.projectRoot, stWorktreePath);
+        removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
       }
       try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
       cleanedCount++;
@@ -1188,7 +1188,7 @@ export async function runImplement(
         try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch { /* best-effort */ }
         if (existsSync(stWorktreePath)) {
           try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-          pruneWorktreesSafely(deps.projectRoot, stWorktreePath);
+          removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
         }
 
         if (canRecreate) {
