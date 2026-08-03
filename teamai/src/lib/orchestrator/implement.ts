@@ -662,6 +662,19 @@ async function runSubtaskSession(
       pipeline.stallRecoveryCounts[subtask.id] = attemptCount;
       const maxRecoveries = deps.getPipelineConfig().maxStallRecoveries;
 
+      // The two stall thresholds are very different situations (a session
+      // idle for 2+ minutes between tool calls vs. a single tool call still
+      // running after 30+ minutes) — describe whichever one actually fired
+      // instead of assuming/hardcoding the tool-in-flight case. err.stallKind
+      // is undefined only if this SessionKilledError somehow reached here
+      // without going through the stall-detector's own kill call; treat that
+      // as unknown rather than asserting a specific duration that may be wrong.
+      const stallDescription = err.stallKind === 'idle'
+        ? 'idle for over 2 minutes with no tool running'
+        : err.stallKind === 'tool'
+          ? 'a tool call running for over 30 minutes with no output'
+          : 'an extended period with no output (exact cause unknown)';
+
       if (attemptCount >= maxRecoveries) {
         logToOutput(pipeline.specPath, '[STALL-RECOVERY] Subtask ' + subtask.id + ' exceeded stall-recovery cap (' + maxRecoveries + ') — advancing to failed\n');
         const reportPath = path.join(pipeline.specPath, 'qa_report.json');
@@ -671,29 +684,39 @@ async function runSubtaskSession(
             criterion: 'Session repeatedly stalled',
             name: 'Session repeatedly stalled',
             status: 'FAIL',
-            notes: 'Subtask ' + subtask.id + ' had its session killed for stalling (no output for 30+ minutes with a tool running) ' + maxRecoveries + ' time(s) in a row. This may indicate a genuine hang introduced by the change (an infinite loop, unbounded recursion, a non-terminating solver configuration) rather than an environment issue.',
+            notes: 'Subtask ' + subtask.id + ' had its session killed for stalling (' + stallDescription + ' on its most recent kill) ' + maxRecoveries + ' time(s) in a row. This may indicate a genuine hang introduced by the change (an infinite loop, unbounded recursion, a non-terminating solver configuration) rather than an environment issue — or, if the kills were idle-timeout kills rather than tool-in-flight kills, the session may simply be pausing longer between tool calls than the 2-minute idle threshold allows.',
           }],
         }, null, 2));
         deps.advancePhase(pipeline, 'failed');
         return;
       }
 
-      logToOutput(pipeline.specPath, '[STALL-RECOVERY] Subtask ' + subtask.id + ' session killed (stalled, no output 30+min) — retrying with a fresh session (attempt ' + attemptCount + '/' + maxRecoveries + ')\n');
-      stallRecoveryHeader = '⚠️ SESSION RECOVERED AFTER STALL-KILL (attempt ' + attemptCount + '/' + maxRecoveries + ')\n\n' +
-        'Your previous session for this subtask was terminated by the orchestrator — it\n' +
-        'produced no output for over 30 minutes while a tool was running. Two distinct\n' +
-        'possibilities, and you need to tell them apart before doing anything else:\n\n' +
-        '1. The command was simply slow and unrelated to your changes (a cold compile, a\n' +
-        '   large test suite, a slow network call) — check git status/git diff for what\n' +
-        '   you\'d already done, and whether re-running the command now completes in a\n' +
-        '   reasonable time. If so, continue or re-run as needed.\n\n' +
-        '2. Your own change caused a genuine hang or pathological slowdown — an infinite\n' +
-        '   loop, unbounded recursion, a solver configuration that no longer terminates,\n' +
-        '   a resource leak, a join that becomes combinatorial. Re-running the exact same\n' +
-        '   command blind wastes your remaining attempts if this is the real cause — look\n' +
-        '   for it specifically. If you find one, fix the root cause (this is a code bug\n' +
-        '   in your own change, not a spec or environment issue) and verify the fix with\n' +
-        '   a bounded/timeout-guarded run before resuming normal work.\n\n';
+      logToOutput(pipeline.specPath, '[STALL-RECOVERY] Subtask ' + subtask.id + ' session killed (stalled — ' + stallDescription + ') — retrying with a fresh session (attempt ' + attemptCount + '/' + maxRecoveries + ')\n');
+      stallRecoveryHeader = err.stallKind === 'idle'
+        ? '⚠️ SESSION RECOVERED AFTER STALL-KILL (attempt ' + attemptCount + '/' + maxRecoveries + ')\n\n' +
+          'Your previous session for this subtask was terminated by the orchestrator — it produced\n' +
+          'no output for over 2 minutes while IDLE (no tool call was in progress at the time). This\n' +
+          'is not the "a command ran long" case — the session went silent between turns. Check\n' +
+          'git status/git diff for whatever progress you\'d already made, then continue from where\n' +
+          'you left off. If this keeps recurring on the same subtask, note it in your summary —\n' +
+          'a session repeatedly going idle for 2+ minutes between tool calls (composing a long\n' +
+          'response, deep reasoning with no interim tool use) may just need a longer idle\n' +
+          'threshold, not a code fix on your end.\n\n'
+        : '⚠️ SESSION RECOVERED AFTER STALL-KILL (attempt ' + attemptCount + '/' + maxRecoveries + ')\n\n' +
+          'Your previous session for this subtask was terminated by the orchestrator — it\n' +
+          'produced no output for over 30 minutes while a tool was running. Two distinct\n' +
+          'possibilities, and you need to tell them apart before doing anything else:\n\n' +
+          '1. The command was simply slow and unrelated to your changes (a cold compile, a\n' +
+          '   large test suite, a slow network call) — check git status/git diff for what\n' +
+          '   you\'d already done, and whether re-running the command now completes in a\n' +
+          '   reasonable time. If so, continue or re-run as needed.\n\n' +
+          '2. Your own change caused a genuine hang or pathological slowdown — an infinite\n' +
+          '   loop, unbounded recursion, a solver configuration that no longer terminates,\n' +
+          '   a resource leak, a join that becomes combinatorial. Re-running the exact same\n' +
+          '   command blind wastes your remaining attempts if this is the real cause — look\n' +
+          '   for it specifically. If you find one, fix the root cause (this is a code bug\n' +
+          '   in your own change, not a spec or environment issue) and verify the fix with\n' +
+          '   a bounded/timeout-guarded run before resuming normal work.\n\n';
       // Loop and retry with a fresh session.
     }
   }

@@ -3383,6 +3383,72 @@ describe('runImplement — stall-detector-kill recovery', () => {
     }
   });
 
+  // Regression coverage for a real production failure: a session went idle
+  // between tool calls for a bit over 2 minutes (no tool running) and was
+  // killed by the idle-stall threshold, but the retry prompt and log line
+  // both claimed "no output for over 30 minutes while a tool was running" —
+  // hardcoded text that assumed the tool-in-flight threshold regardless of
+  // which one actually fired. The coder then reasoned about a nonexistent
+  // 30-minute hang instead of the real ~2-minute idle gap, and repeated
+  // idle-kills burned through the stall-recovery budget in minutes, not the
+  // hours the message implied. stallKind now must be threaded through from
+  // the kill call so the message reflects the real cause.
+  it('reports the idle threshold accurately, not the hardcoded tool-in-flight text (stallKind regression)', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 1,
+        title: 'Investigate pitch-height anchoring',
+        description: 'Read the relevant files and design the fix',
+        files: ['src/Foo.scala'],
+        acceptance_criteria: ['Fix designed'],
+      }],
+    }));
+
+    mockCreateSession
+      .mockResolvedValueOnce('sess-idle-stalled')
+      .mockResolvedValueOnce('sess-recovered');
+    mockGetSession.mockImplementation((id: string) =>
+      id === 'sess-idle-stalled' ? { killReason: 'stalled', stallKind: 'idle' } : undefined);
+
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalledTimes(1);
+      });
+
+      fireEvent('exit', { sessionId: 'sess-idle-stalled', code: null, signal: 'SIGTERM' });
+      await vi.advanceTimersByTimeAsync(30);
+
+      await vi.waitFor(() => {
+        expect(mockCreateSession).toHaveBeenCalledTimes(2);
+        expect(mockSendMessage).toHaveBeenCalledTimes(2);
+      });
+      const retryPrompt = mockSendMessage.mock.calls[1][1];
+      expect(retryPrompt).toContain('SESSION RECOVERED AFTER STALL-KILL (attempt 1/3)');
+      expect(retryPrompt).toContain('over 2 minutes while IDLE');
+      expect(retryPrompt).not.toContain('over 30 minutes while a tool was running');
+      expect(retryPrompt).not.toContain('Your own change caused a genuine hang');
+
+      const outputLog = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(outputLog).toContain('idle for over 2 minutes with no tool running');
+      expect(outputLog).not.toContain('no output 30+min');
+
+      fireEvent('event', { sessionId: 'sess-recovered', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(30);
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   it('advances to failed with a FAIL qa_report.json after exceeding maxStallRecoveries', async () => {
     writeFileSync(join(project.root, '.teamai', 'pipeline.json'), JSON.stringify({
       phases: ['spec', 'plan', 'implement', 'qa-review', 'merge'],

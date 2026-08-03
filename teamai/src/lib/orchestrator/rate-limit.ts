@@ -105,11 +105,12 @@ export function waitForCompletion(
       // handler resolved as success — causing the pipeline to deadlock
       // indefinitely with no Retry button and no failure path.
       if (signal) {
-        // Read killReason before the session record is cleaned up elsewhere —
-        // distinguishes a stall-detector kill (recoverable) from a
-        // deliberate stop (must never auto-retry).
-        const killReason = processManager.getSession(sessionId)?.killReason;
-        reject(new SessionKilledError(signal, killReason));
+        // Read killReason/stallKind before the session record is cleaned up
+        // elsewhere — distinguishes a stall-detector kill (recoverable) from
+        // a deliberate stop (must never auto-retry), and which stall
+        // threshold actually fired (idle vs tool-in-flight).
+        const killedSession = processManager.getSession(sessionId);
+        reject(new SessionKilledError(signal, killedSession?.killReason, killedSession?.stallKind));
       } else if (sessionLimitResetsAt) {
         reject(new RateLimitError(sessionLimitResetsAt));
       } else if (code === 0) {
