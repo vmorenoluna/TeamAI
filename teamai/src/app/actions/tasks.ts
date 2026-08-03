@@ -13,6 +13,7 @@ import { getResumePhaseForFailedTask } from '@/lib/task-utils';
 import { join, resolve } from 'path';
 import { execFileSync } from 'child_process';
 import { NO_STOP_PHASES, RESTARTABLE_PHASES } from '@/constants/phases';
+import { pruneWorktreesSafely } from '@/lib/orchestrator/worktree-utils';
 
 async function getStores() {
   const projectPath = await getActiveProjectPath();
@@ -497,7 +498,7 @@ export async function deleteTaskWorktree(taskId: string): Promise<{ success: boo
       // --force also failed (e.g. files locked) — delete manually and prune
       try {
         rmSync(wtPath, { recursive: true, force: true });
-        execFileSync('git', ['worktree', 'prune'], { cwd: projectPath, stdio: 'pipe' });
+        pruneWorktreesSafely(projectPath, wtPath);
         taskStore.update(taskId, { branch: undefined });
         revalidatePath('/');
         revalidatePath(`/task/${taskId}`);

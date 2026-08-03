@@ -87,6 +87,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 import { getOrchestrator } from '../../src/lib/orchestrator';
 import { getToolPath } from '../../src/lib/tool-checker';
 import { readContainerConfig, containerManager, hostToContainerPath, readContainerRemoteUser } from '../../src/lib/container-manager';
+import { pruneWorktreesSafely } from '../../src/lib/orchestrator/worktree-utils';
 
 type AnyOrch = any;
 
@@ -1074,5 +1075,99 @@ describe('_isWorktreeHealthy — container-mode path detection', () => {
     rmSync(env.worktreeMetaDir, { recursive: true, force: true });
 
     expect((orch as AnyOrch)._ctx.isWorktreeHealthy(env.worktreePath)).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  pruneWorktreesSafely — cross-task worktree-prune hazard
+// ═══════════════════════════════════════════════════════════════════════
+//
+// `git worktree prune` has no path-scoping option (confirmed via
+// `git worktree prune --help`: only -n/-v/--expire) — it always sweeps
+// every registered worktree. A worktree that's currently container-patched
+// (patchWorktreeGitFile rewrote both its own .git file and the admin
+// back-reference to container-only paths, for an active docker-exec
+// session) looks IDENTICAL to a genuinely-removed worktree from the host's
+// perspective: `git worktree list` reports it "prunable: gitdir file
+// points to non-existent location". An unscoped prune call from ANY task's
+// cleanup path can silently destroy ANY OTHER concurrently-running task's
+// worktree registration this way — reproduced directly against two real
+// preserved per-subtask worktrees from an unrelated failed task.
+
+describe('pruneWorktreesSafely', () => {
+  const projectRoot = 'C:\\proj';
+  const removedPath = 'C:\\proj\\.worktrees\\my-task-st2';
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('prunes when the only prunable entry is the one just removed', () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args?.[0] === 'worktree' && args[1] === 'list') {
+        return 'worktree /workspaces/proj/.worktrees/my-task-st2\n' +
+          'HEAD abc123\n' +
+          'branch refs/heads/feat/my-task-st2\n' +
+          'prunable gitdir file points to non-existent location\n';
+      }
+      return '';
+    });
+
+    pruneWorktreesSafely(projectRoot, removedPath);
+
+    expect(mockExecFileSync).toHaveBeenCalledWith('git', ['worktree', 'prune'], { cwd: projectRoot, stdio: 'pipe' });
+  });
+
+  it('prunes when nothing is prunable', () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args?.[0] === 'worktree' && args[1] === 'list') {
+        return 'worktree C:/proj\nHEAD abc123\nbranch refs/heads/master\n';
+      }
+      return '';
+    });
+
+    pruneWorktreesSafely(projectRoot, removedPath);
+
+    expect(mockExecFileSync).toHaveBeenCalledWith('git', ['worktree', 'prune'], { cwd: projectRoot, stdio: 'pipe' });
+  });
+
+  it('defers pruning when a DIFFERENT worktree is also prunable — must not destroy it', () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args?.[0] === 'worktree' && args[1] === 'list') {
+        return 'worktree /workspaces/proj/.worktrees/my-task-st2\n' +
+          'HEAD abc123\n' +
+          'branch refs/heads/feat/my-task-st2\n' +
+          'prunable gitdir file points to non-existent location\n' +
+          '\n' +
+          'worktree /workspaces/proj/.worktrees/unrelated-task\n' +
+          'HEAD def456\n' +
+          'branch refs/heads/feat/unrelated-task\n' +
+          'prunable gitdir file points to non-existent location\n';
+      }
+      return '';
+    });
+
+    pruneWorktreesSafely(projectRoot, removedPath);
+
+    const pruneCalls = mockExecFileSync.mock.calls.filter(
+      (c: any[]) => c[1]?.[0] === 'worktree' && c[1]?.[1] === 'prune',
+    );
+    expect(pruneCalls).toHaveLength(0);
+  });
+
+  it('does not throw when git worktree list fails', () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args?.[0] === 'worktree' && args[1] === 'list') {
+        throw new Error('git not found');
+      }
+      return '';
+    });
+
+    expect(() => pruneWorktreesSafely(projectRoot, removedPath)).not.toThrow();
+
+    const pruneCalls = mockExecFileSync.mock.calls.filter(
+      (c: any[]) => c[1]?.[0] === 'worktree' && c[1]?.[1] === 'prune',
+    );
+    expect(pruneCalls).toHaveLength(0);
   });
 });

@@ -9,6 +9,7 @@ import { existsSync, readdirSync, rmSync, appendFileSync } from 'fs';
 import path from 'path';
 import { TaskStore } from '../task-store';
 import { getWorktreeBase, resolveWorktreeDirName } from './helpers';
+import { pruneWorktreesSafely } from './worktree-utils';
 import type { TaskPipeline } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -93,7 +94,7 @@ export function cleanStaleSubtaskWorktrees(
       deps.execGit(['worktree', 'remove', '--force', stPath], deps.projectRoot);
     } catch {
       try { rmSync(stPath, { recursive: true, force: true }); } catch { /* best-effort */ }
-      try { execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+      pruneWorktreesSafely(deps.projectRoot, stPath);
     }
 
     try {
@@ -153,7 +154,7 @@ export function removeWorktree(
     } catch {
       // Worktree is stuck (files locked) — delete manually + prune
       try { rmSync(wtPath, { recursive: true, force: true }); } catch { /* best-effort */ }
-      try { execFileSync('git', ['worktree', 'prune'], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+      pruneWorktreesSafely(deps.projectRoot, wtPath);
     }
   }
 
