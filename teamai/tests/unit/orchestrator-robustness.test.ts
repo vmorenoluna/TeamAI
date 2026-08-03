@@ -3384,15 +3384,17 @@ describe('runImplement — stall-detector-kill recovery', () => {
   });
 
   // Regression coverage for a real production failure: a session went idle
-  // between tool calls for a bit over 2 minutes (no tool running) and was
-  // killed by the idle-stall threshold, but the retry prompt and log line
-  // both claimed "no output for over 30 minutes while a tool was running" —
-  // hardcoded text that assumed the tool-in-flight threshold regardless of
-  // which one actually fired. The coder then reasoned about a nonexistent
-  // 30-minute hang instead of the real ~2-minute idle gap, and repeated
-  // idle-kills burned through the stall-recovery budget in minutes, not the
-  // hours the message implied. stallKind now must be threaded through from
-  // the kill call so the message reflects the real cause.
+  // between tool calls for a bit over 2 minutes (no tool running, threshold
+  // was 2 minutes at the time — since raised to 15, see
+  // SESSION_IDLE_STALL_THRESHOLD_MS) and was killed by the idle-stall
+  // threshold, but the retry prompt and log line both claimed "no output for
+  // over 30 minutes while a tool was running" — hardcoded text that assumed
+  // the tool-in-flight threshold regardless of which one actually fired. The
+  // coder then reasoned about a nonexistent 30-minute hang instead of the
+  // real ~2-minute idle gap, and repeated idle-kills burned through the
+  // stall-recovery budget in minutes, not the hours the message implied.
+  // stallKind now must be threaded through from the kill call so the message
+  // reflects the real cause (and the real threshold, whatever it's set to).
   it('reports the idle threshold accurately, not the hardcoded tool-in-flight text (stallKind regression)', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
@@ -3433,12 +3435,12 @@ describe('runImplement — stall-detector-kill recovery', () => {
       });
       const retryPrompt = mockSendMessage.mock.calls[1][1];
       expect(retryPrompt).toContain('SESSION RECOVERED AFTER STALL-KILL (attempt 1/3)');
-      expect(retryPrompt).toContain('over 2 minutes while IDLE');
+      expect(retryPrompt).toContain('over 15 minutes while IDLE');
       expect(retryPrompt).not.toContain('over 30 minutes while a tool was running');
       expect(retryPrompt).not.toContain('Your own change caused a genuine hang');
 
       const outputLog = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-      expect(outputLog).toContain('idle for over 2 minutes with no tool running');
+      expect(outputLog).toContain('idle for over 15 minutes with no tool running');
       expect(outputLog).not.toContain('no output 30+min');
 
       fireEvent('event', { sessionId: 'sess-recovered', event: { type: 'result' } });

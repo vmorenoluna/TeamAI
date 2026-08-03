@@ -1544,7 +1544,7 @@ describe('sweepStalledTasks', () => {
     expect(mockSweepResumeTask).toHaveBeenCalledWith('t1');
   });
 
-  it('kills sessions stalled >2min idle with no output', async () => {
+  it('kills sessions stalled >15min idle with no output', async () => {
     vi.mocked(existsSync).mockReturnValue(false); // prevent project scanning
     mockGetStalledSessions.mockReturnValue([
       { id: 'sess-abc', taskId: 't1', role: 'coder', toolInFlight: false },
@@ -1567,18 +1567,19 @@ describe('sweepStalledTasks', () => {
     expect(mockKillSession).toHaveBeenCalledWith('sess-xyz');
   });
 
-  it('uses a 2-minute idle threshold and a 30-minute tool-in-flight threshold, not a single 2-minute threshold for everyone', async () => {
-    // Regression: a flat 2-minute no-output threshold killed sessions
-    // mid-investigation while a single slow-but-alive tool call (a cold sbt
-    // compile/test, a slow HTTP call) was legitimately still running. Locks
-    // in the two-tier thresholds so idle stalls stay tightly bounded while
-    // genuine tool-running silence gets real headroom.
+  it('uses a 15-minute idle threshold and a 30-minute tool-in-flight threshold, not a single threshold for everyone', async () => {
+    // Regression: a flat no-output threshold killed sessions mid-investigation
+    // while (a) a single slow-but-alive tool call (a cold sbt compile/test, a
+    // slow HTTP call) was legitimately still running, and (b) a session was
+    // genuinely reasoning between tool calls with no tool in flight. Locks in
+    // the two-tier thresholds so both get real headroom relative to their own
+    // failure mode.
     vi.mocked(existsSync).mockReturnValue(false);
     mockGetStalledSessions.mockReturnValue([]);
 
     await sweepStalledTasks();
 
-    expect(mockGetStalledSessions).toHaveBeenCalledWith(2 * 60_000, 30 * 60_000);
+    expect(mockGetStalledSessions).toHaveBeenCalledWith(15 * 60_000, 30 * 60_000);
   });
 
   // ── Wakeup progress-log freshness check ──────────────────────────────

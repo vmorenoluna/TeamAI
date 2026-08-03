@@ -663,14 +663,14 @@ async function runSubtaskSession(
       const maxRecoveries = deps.getPipelineConfig().maxStallRecoveries;
 
       // The two stall thresholds are very different situations (a session
-      // idle for 2+ minutes between tool calls vs. a single tool call still
+      // idle for 15+ minutes between tool calls vs. a single tool call still
       // running after 30+ minutes) — describe whichever one actually fired
       // instead of assuming/hardcoding the tool-in-flight case. err.stallKind
       // is undefined only if this SessionKilledError somehow reached here
       // without going through the stall-detector's own kill call; treat that
       // as unknown rather than asserting a specific duration that may be wrong.
       const stallDescription = err.stallKind === 'idle'
-        ? 'idle for over 2 minutes with no tool running'
+        ? 'idle for over 15 minutes with no tool running'
         : err.stallKind === 'tool'
           ? 'a tool call running for over 30 minutes with no output'
           : 'an extended period with no output (exact cause unknown)';
@@ -684,7 +684,7 @@ async function runSubtaskSession(
             criterion: 'Session repeatedly stalled',
             name: 'Session repeatedly stalled',
             status: 'FAIL',
-            notes: 'Subtask ' + subtask.id + ' had its session killed for stalling (' + stallDescription + ' on its most recent kill) ' + maxRecoveries + ' time(s) in a row. This may indicate a genuine hang introduced by the change (an infinite loop, unbounded recursion, a non-terminating solver configuration) rather than an environment issue — or, if the kills were idle-timeout kills rather than tool-in-flight kills, the session may simply be pausing longer between tool calls than the 2-minute idle threshold allows.',
+            notes: 'Subtask ' + subtask.id + ' had its session killed for stalling (' + stallDescription + ' on its most recent kill) ' + maxRecoveries + ' time(s) in a row. This may indicate a genuine hang introduced by the change (an infinite loop, unbounded recursion, a non-terminating solver configuration) rather than an environment issue.',
           }],
         }, null, 2));
         deps.advancePhase(pipeline, 'failed');
@@ -695,13 +695,12 @@ async function runSubtaskSession(
       stallRecoveryHeader = err.stallKind === 'idle'
         ? '⚠️ SESSION RECOVERED AFTER STALL-KILL (attempt ' + attemptCount + '/' + maxRecoveries + ')\n\n' +
           'Your previous session for this subtask was terminated by the orchestrator — it produced\n' +
-          'no output for over 2 minutes while IDLE (no tool call was in progress at the time). This\n' +
-          'is not the "a command ran long" case — the session went silent between turns. Check\n' +
-          'git status/git diff for whatever progress you\'d already made, then continue from where\n' +
-          'you left off. If this keeps recurring on the same subtask, note it in your summary —\n' +
-          'a session repeatedly going idle for 2+ minutes between tool calls (composing a long\n' +
-          'response, deep reasoning with no interim tool use) may just need a longer idle\n' +
-          'threshold, not a code fix on your end.\n\n'
+          'no output for over 15 minutes while IDLE (no tool call was in progress at the time). This\n' +
+          'is not the "a command ran long" case — the session went silent between turns for longer\n' +
+          'than a normal thinking/reasoning pause should take. Check git status/git diff for\n' +
+          'whatever progress you\'d already made, then continue from where you left off. If this\n' +
+          'keeps recurring on the same subtask, note it in your summary — it may point to a genuine\n' +
+          'hang in the CLI process itself rather than something in your code.\n\n'
         : '⚠️ SESSION RECOVERED AFTER STALL-KILL (attempt ' + attemptCount + '/' + maxRecoveries + ')\n\n' +
           'Your previous session for this subtask was terminated by the orchestrator — it\n' +
           'produced no output for over 30 minutes while a tool was running. Two distinct\n' +

@@ -367,11 +367,20 @@ const STALLED_TASK_THRESHOLD_MS = 30 * 60_000; // 30 minutes
 const ABANDONED_PHASE_THRESHOLD_MS = 5 * 60_000; // 5 minutes
 
 /** Threshold for killing an IDLE session with no stdout output — no tool
- *  call in flight, no new message. There's no legitimate reason for a
- *  session to go quiet while it isn't waiting on a tool: this really is a
- *  stall signal (a crashed process, a broken connection) and should be
- *  caught quickly. */
-const SESSION_IDLE_STALL_THRESHOLD_MS = 2 * 60_000; // 2 minutes
+ *  call in flight, no new message.
+ *
+ *  Originally 2 minutes, on the theory that there's no legitimate reason
+ *  for a session to go quiet while it isn't waiting on a tool. Observed
+ *  directly to be wrong: a real coder session was killed twice, 5 minutes
+ *  apart, while genuinely reasoning through a multi-file investigation
+ *  between tool calls (composing a long analysis, deciding what to read
+ *  next) — no tool in flight, but real progress happening. This is the
+ *  same class of false positive as WAKEUP_PROGRESS_STALE_THRESHOLD_MS below:
+ *  silence between visible actions is not evidence of death. 15 minutes
+ *  gives an idle "thinking" stretch comfortable headroom while still
+ *  catching a genuinely dead/hung session (a crashed process, a broken
+ *  connection) well before it could be mistaken for a slow subtask. */
+const SESSION_IDLE_STALL_THRESHOLD_MS = 15 * 60_000; // 15 minutes
 
 /** Threshold for treating a wakeup-pending background job's own progress
  *  log as stale — i.e. the job most likely died. Checked against the log's
@@ -501,14 +510,14 @@ export async function sweepStalledTasks(): Promise<number> {
   // Dynamic import processManager to avoid circular dependency
   const { processManager } = await import('./process-manager');
 
-  // ── Kill hung sessions (idle >2min, or tool-in-flight >30min, no output) ──
+  // ── Kill hung sessions (idle >15min, or tool-in-flight >30min, no output) ──
   const stalledSessions = processManager.getStalledSessions(
     SESSION_IDLE_STALL_THRESHOLD_MS,
     SESSION_TOOL_STALL_THRESHOLD_MS,
   );
   for (const session of stalledSessions) {
     try {
-      const kind = session.toolInFlight ? 'tool-in-flight >30min' : 'idle >2min';
+      const kind = session.toolInFlight ? 'tool-in-flight >30min' : 'idle >15min';
       logWarn('sweep',
         `Session ${session.id} (task ${session.taskId}, role ${session.role}) ` +
         `stalled (${kind}) with no output — killing`,
