@@ -138,6 +138,50 @@ export function patchWorktreeGitFile(hostWorktreePath: string, containerWorkspac
 }
 
 /**
+ * Safely clean up a stale worktree registration after its directory has
+ * already been force-removed with rmSync, without `git worktree prune`'s
+ * unscoped blast radius. `git worktree prune` takes no path argument to
+ * limit its scope (confirmed via `git worktree prune --help`: only
+ * `-n`/`-v`/`--expire`) — it always sweeps every registered worktree.
+ *
+ * A worktree that's currently container-patched (patchWorktreeGitFile has
+ * rewritten both its own .git file and the admin back-reference to
+ * container-only paths, for an active docker-exec session) looks IDENTICAL
+ * to a genuinely-removed worktree from the host's perspective — `git
+ * worktree list` reports "prunable: gitdir file points to non-existent
+ * location" — even though it's alive and in use by another task entirely.
+ * An unscoped prune call from ANY task's cleanup path can silently destroy
+ * ANY OTHER concurrently-running task's worktree registration this way.
+ * Confirmed directly: two preserved per-subtask worktrees from an unrelated
+ * failed task showed exactly this "prunable" state while genuinely active
+ * moments earlier.
+ *
+ * Only runs the real prune when the sole prunable entry is the one this
+ * caller just removed itself (matched by directory basename, which is
+ * stable across host-style and container-style path forms). If any other
+ * worktree is currently prunable for the same container-patched reason,
+ * defers cleanup entirely — its stale admin entry is harmless until a later
+ * prune call finds nothing else mid-patch.
+ */
+export function pruneWorktreesSafely(projectRoot: string, justRemovedPath: string): void {
+  try {
+    const removedName = path.basename(justRemovedPath);
+    const list = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+      cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe',
+    });
+    for (const block of list.split(/\n\n+/)) {
+      if (!/^prunable\b|\nprunable\b/.test(block)) continue;
+      const pathLine = block.split('\n').find(l => l.startsWith('worktree '));
+      if (!pathLine) continue;
+      const registeredPath = pathLine.slice('worktree '.length).trim();
+      if (path.basename(registeredPath) === removedName) continue; // the one we intend to prune
+      return; // some other worktree is prunable — pruning now would destroy it too
+    }
+    execFileSync('git', ['worktree', 'prune'], { cwd: projectRoot, stdio: 'pipe' });
+  } catch { /* best-effort */ }
+}
+
+/**
  * Returns GIT_DIR and GIT_WORK_TREE environment variables for git commands
  * running inside a linked worktree, bypassing the .git pointer file entirely.
  *
