@@ -27,6 +27,21 @@ npm run electron:dev  # launch Electron app (separate terminal)
 
 Open `http://localhost:3002` in a browser, or run `npm run electron:dev` to open the Electron app (both connect to the dev server on :3002).
 
+### Demo Project
+
+TeamAI ships with a demo project (`demo/`) that includes pre-seeded tasks across all pipeline phases. The demo is **not shown by default** in production — it only appears when the server is started with the `--with-demo` flag:
+
+```bash
+# Start the dev server with the demo project
+cd teamai
+npm run dev -- -- --with-demo
+
+# Start the production server with the demo project
+npm run start -- -- --with-demo
+```
+
+`npm run electron:dev` already passes `--with-demo` internally, so the demo is visible when developing in Electron. For production builds (`npm run electron:start`), the demo is hidden unless you explicitly add it via the "+" button in the project selector.
+
 ## Commands
 
 All commands run from `teamai/`.

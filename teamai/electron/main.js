@@ -71,9 +71,10 @@ function startServer() {
       NEXT_TELEMETRY_DISABLED: '1',
     };
 
-    // In dev mode, use tsx watch for HMR; in production, run compiled JS
+    // In dev mode, use tsx watch for HMR; in production, run compiled JS.
+    // Pass --with-demo in dev so the demo project is visible for development.
     const args = isDev
-      ? [path.join(projectRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'), 'watch', path.join(projectRoot, 'server.ts')]
+      ? [path.join(projectRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'), 'watch', path.join(projectRoot, 'server.ts'), '--with-demo']
       : [serverEntry];
 
     console.log(`[electron] Starting server: ${args.join(' ')} (cwd: ${unpackedRoot})`);

@@ -1,7 +1,7 @@
 import { createServer } from 'http';
 import { writeFileSync, unlinkSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { parse } from 'url';
 import next from 'next';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -11,6 +11,7 @@ import { startupCleanup, autoResumeInterruptedTasks, sweepStalledTasks } from '.
 import { restoreAutoModeStates } from './src/lib/auto-mode';
 import { error as logError } from './src/lib/logger';
 import { checkAllTools } from './src/lib/tool-checker';
+import { projectStore } from './src/lib/project-store';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
 const handle = app.getRequestHandler();
@@ -231,6 +232,26 @@ app.prepare().then(async () => {
       console.warn('[tools] Configure custom paths in Settings → Tool Paths.');
     } else {
       console.log('[tools] All prerequisite tools found');
+    }
+
+    // ── Demo project registration ──────────────────────────────────────
+    // The demo project only appears when --with-demo is passed on the
+    // command line (e.g. in dev mode from Electron). Without the flag,
+    // the demo is removed from the registry so it doesn't clutter the
+    // production app but can be re-added later via the UI.
+    const DEMO_PATH = resolve(process.cwd(), '..', 'demo');
+    const WITH_DEMO = process.argv.includes('--with-demo');
+    const existingDemo = projectStore.getByPath(DEMO_PATH);
+    if (WITH_DEMO && !existingDemo) {
+      try {
+        projectStore.add(DEMO_PATH, 'ShopForge Demo');
+        console.log('[demo] Demo project registered (--with-demo)');
+      } catch (err) {
+        logError('demo', 'Failed to register demo project', err);
+      }
+    } else if (!WITH_DEMO && existingDemo) {
+      projectStore.remove(DEMO_PATH);
+      console.log('[demo] Demo project removed (no --with-demo flag)');
     }
 
     // ── Startup crash recovery scan ─────────────────────────────────────
