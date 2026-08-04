@@ -53,7 +53,7 @@ export interface ImplementDeps {
   restoreQaReportFromSnapshot: (specPath: string) => void;
   restoreHumanFeedbackFromSnapshot: (specPath: string) => void;
   writeQaFeedback: (pipeline: ImplementPipeline, report: QaReport) => void;
-  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxDeliverableFails: number; maxWakeupAttempts: number; maxStallRecoveries: number };
+  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxDeliverableFails: number; maxWakeupAttempts: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number };
   phaseHeader: (logFile: string, phase: string) => void;
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
@@ -664,16 +664,17 @@ async function runSubtaskSession(
       const maxRecoveries = deps.getPipelineConfig().maxStallRecoveries;
 
       // The two stall thresholds are very different situations (a session
-      // idle for 15+ minutes between tool calls vs. a single tool call still
-      // running after 30+ minutes) — describe whichever one actually fired
+      // idle for N minutes between tool calls vs. a single tool call still
+      // running after M minutes) — describe whichever one actually fired
       // instead of assuming/hardcoding the tool-in-flight case. err.stallKind
       // is undefined only if this SessionKilledError somehow reached here
       // without going through the stall-detector's own kill call; treat that
       // as unknown rather than asserting a specific duration that may be wrong.
+      const cfg = deps.getPipelineConfig();
       const stallDescription = err.stallKind === 'idle'
-        ? 'idle for over 15 minutes with no tool running'
+        ? `idle for over ${cfg.idleStallMinutes} minutes with no tool running`
         : err.stallKind === 'tool'
-          ? 'a tool call running for over 30 minutes with no output'
+          ? `a tool call running for over ${cfg.toolStallMinutes} minutes with no output`
           : 'an extended period with no output (exact cause unknown)';
 
       if (attemptCount >= maxRecoveries) {
@@ -696,7 +697,7 @@ async function runSubtaskSession(
       stallRecoveryHeader = err.stallKind === 'idle'
         ? '⚠️ SESSION RECOVERED AFTER STALL-KILL (attempt ' + attemptCount + '/' + maxRecoveries + ')\n\n' +
           'Your previous session for this subtask was terminated by the orchestrator — it produced\n' +
-          'no output for over 15 minutes while IDLE (no tool call was in progress at the time). This\n' +
+          'no output for over ' + cfg.idleStallMinutes + ' minutes while IDLE (no tool call was in progress at the time). This\n' +
           'is not the "a command ran long" case — the session went silent between turns for longer\n' +
           'than a normal thinking/reasoning pause should take. Check git status/git diff for\n' +
           'whatever progress you\'d already made, then continue from where you left off. If this\n' +
@@ -704,7 +705,7 @@ async function runSubtaskSession(
           'hang in the CLI process itself rather than something in your code.\n\n'
         : '⚠️ SESSION RECOVERED AFTER STALL-KILL (attempt ' + attemptCount + '/' + maxRecoveries + ')\n\n' +
           'Your previous session for this subtask was terminated by the orchestrator — it\n' +
-          'produced no output for over 30 minutes while a tool was running. Two distinct\n' +
+          'produced no output for over ' + cfg.toolStallMinutes + ' minutes while a tool was running. Two distinct\n' +
           'possibilities, and you need to tell them apart before doing anything else:\n\n' +
           '1. The command was simply slow and unrelated to your changes (a cold compile, a\n' +
           '   large test suite, a slow network call) — check git status/git diff for what\n' +

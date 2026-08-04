@@ -313,7 +313,10 @@ app.prepare().then(async () => {
       });
 
       // Also detect and clean up hung agent sessions (no output for >10 min)
-      const stalled = processManager.getStalledSessions(STALLED_SESSION_TIMEOUT_MS);
+      const stalled = processManager.getStalledSessions(() => ({
+        idleMs: STALLED_SESSION_TIMEOUT_MS,
+        toolMs: STALLED_SESSION_TIMEOUT_MS,
+      }));
       for (const s of stalled) {
         console.log(`[sweep] Session ${s.id.substring(0, 8)}… task=${s.taskId} role=${s.role} stalled >10 min — killing`);
         processManager.killSession(s.id);

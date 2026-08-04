@@ -3,7 +3,7 @@ import { join } from 'path';
 import { warn as logWarn, log } from './logger';
 import { IN_PROGRESS_PHASES } from '@/constants/phases';
 import { projectStore } from './project-store';
-import { getWorktreeBase } from './orchestrator/helpers';
+import { getWorktreeBase, computePipelineConfig } from './orchestrator/helpers';
 import { restoreWorktreeGitFileToHostPaths } from './orchestrator/worktree-utils';
 import { REQUIRED_ARTIFACTS } from './orchestrator/artifacts';
 
@@ -510,14 +510,41 @@ export async function sweepStalledTasks(): Promise<number> {
   // Dynamic import processManager to avoid circular dependency
   const { processManager } = await import('./process-manager');
 
-  // ── Kill hung sessions (idle >15min, or tool-in-flight >30min, no output) ──
-  const stalledSessions = processManager.getStalledSessions(
-    SESSION_IDLE_STALL_THRESHOLD_MS,
-    SESSION_TOOL_STALL_THRESHOLD_MS,
-  );
+  // ── Kill hung sessions using per-project config ──
+  // Each session carries a projectRoot; resolve the project's pipeline.json
+  // thresholds (idleStallMinutes × 60_000, toolStallMinutes × 60_000) so
+  // project A's 5-minute idle threshold doesn't affect project B's 15-minute
+  // default.  Sessions without a resolvable project config fall back to the
+  // hardcoded defaults (15 / 30 min).  Pre-resolve per projectPath so the
+  // resolver callback (called once per running session) is a cheap map lookup.
+  const projectConfigCache = new Map<string, { idleMs: number; toolMs: number }>();
+  const defaultMs = { idleMs: SESSION_IDLE_STALL_THRESHOLD_MS, toolMs: SESSION_TOOL_STALL_THRESHOLD_MS };
+  const stalledSessions = processManager.getStalledSessions((session) => {
+    const root = session.projectRoot;
+    if (!root) return defaultMs;
+    if (projectConfigCache.has(root)) return projectConfigCache.get(root)!;
+    try {
+      const cfg = computePipelineConfig(root);
+      const entry = {
+        idleMs: cfg.idleStallMinutes * 60_000,
+        toolMs: cfg.toolStallMinutes * 60_000,
+      };
+      projectConfigCache.set(root, entry);
+      return entry;
+    } catch {
+      projectConfigCache.set(root, defaultMs);
+      return defaultMs;
+    }
+  });
   for (const session of stalledSessions) {
     try {
-      const kind = session.toolInFlight ? 'tool-in-flight >30min' : 'idle >15min';
+      const root = session.projectRoot;
+      const cfg = root ? projectConfigCache.get(root) : undefined;
+      const idleMin = cfg ? Math.round(cfg.idleMs / 60_000) : 15;
+      const toolMin = cfg ? Math.round(cfg.toolMs / 60_000) : 30;
+      const kind = session.toolInFlight
+        ? `tool-in-flight >${toolMin}min`
+        : `idle >${idleMin}min`;
       logWarn('sweep',
         `Session ${session.id} (task ${session.taskId}, role ${session.role}) ` +
         `stalled (${kind}) with no output — killing`,

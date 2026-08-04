@@ -344,16 +344,23 @@ export class ProcessManager extends EventEmitter {
    * command takes — a cold compile, a full test run, a slow network call.
    * A session that is idle (no tool running, and hasn't sent a new message)
    * has no such excuse; silence there is a genuine stall signal and should
-   * be caught quickly. `toolTimeoutMs` defaults to `idleTimeoutMs` so a
-   * single-argument call preserves the old one-threshold-for-everyone
-   * behavior.
+   * be caught quickly.
+   *
+   * @param resolveThresholds Called per-session to resolve the (idle, tool)
+   *   timeout in milliseconds for that specific session. Receives the session
+   *   so the caller can look up per-project config (e.g. pipeline.json
+   *   idleStallMinutes / toolStallMinutes). Called once per running session,
+   *   so it must be fast (no I/O — pre-resolve the config before calling).
    */
-  getStalledSessions(idleTimeoutMs: number = 120_000, toolTimeoutMs: number = idleTimeoutMs): AgentSession[] {
+  getStalledSessions(
+    resolveThresholds: (session: AgentSession) => { idleMs: number; toolMs: number },
+  ): AgentSession[] {
     const now = Date.now();
     const stalled: AgentSession[] = [];
     for (const session of this.sessions.values()) {
       if (session.status !== 'running') continue;
-      const threshold = session.toolInFlight ? toolTimeoutMs : idleTimeoutMs;
+      const { idleMs, toolMs } = resolveThresholds(session);
+      const threshold = session.toolInFlight ? toolMs : idleMs;
       if (now - session.lastOutputAt > threshold) {
         stalled.push(session);
       }
