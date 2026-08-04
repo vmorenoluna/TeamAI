@@ -24,6 +24,12 @@ export interface PipelineConfig {
   /** Consecutive stall-detector kills a subtask may recover from (fresh
    *  session + retry) before the subtask fails outright. */
   maxStallRecoveries: number;
+  /** Minutes a session can be idle (no tool running, no new message) before
+   *  the stall-detector kills it. Default 15. */
+  idleStallMinutes: number;
+  /** Minutes a single tool call can run with no output before the
+   *  stall-detector kills the session. Default 30. */
+  toolStallMinutes: number;
   /** Merge strategy auto mode uses when auto-merging a green PR/MR (default 'merge'). */
   autoMergeMethod?: 'merge' | 'squash' | 'rebase';
   /** When true, all pipeline processing is skipped — demo data stays pristine. */
@@ -191,13 +197,15 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
         maxDeliverableFails: typeof raw.maxDeliverableFails === 'number' ? raw.maxDeliverableFails : 3,
         maxWakeupAttempts: typeof raw.maxWakeupAttempts === 'number' ? raw.maxWakeupAttempts : 3,
         maxStallRecoveries: typeof raw.maxStallRecoveries === 'number' ? raw.maxStallRecoveries : 3,
+        idleStallMinutes: typeof raw.idleStallMinutes === 'number' ? raw.idleStallMinutes : 15,
+        toolStallMinutes: typeof raw.toolStallMinutes === 'number' ? raw.toolStallMinutes : 30,
         autoMergeMethod: raw.autoMergeMethod === 'squash' || raw.autoMergeMethod === 'rebase' ? raw.autoMergeMethod : 'merge',
         demo: typeof raw.demo === 'boolean' ? raw.demo : undefined,
         ...(sensors ? { sensors } : {}),
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
   }
-  return { maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 3, maxStallRecoveries: 3, autoMergeMethod: 'merge' };
+  return { maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge' };
 }
 
 // ── Session map ───────────────────────────────────────────────────────────

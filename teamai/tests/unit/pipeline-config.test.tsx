@@ -59,6 +59,8 @@ const defaultConfig: PipelineConfig = {
   maxQaAttempts: 3,
   parallelSubtasks: true,
   autoModeMaxParallel: 1,
+  idleStallMinutes: 15,
+  toolStallMinutes: 30,
 };
 
 function renderComponent(config: PipelineConfig = defaultConfig) {
@@ -104,7 +106,7 @@ describe('PipelineConfigEditor', () => {
     });
 
     it('renders with custom config values from props', () => {
-      renderComponent({ maxQaAttempts: 5, parallelSubtasks: false, autoModeMaxParallel: 1 });
+      renderComponent({ maxQaAttempts: 5, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 });
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(5);
       expect(screen.getByRole('checkbox')).not.toBeChecked();
     });
@@ -127,7 +129,7 @@ describe('PipelineConfigEditor', () => {
     });
 
     it('toggles parallelSubtasks when the checkbox is clicked', () => {
-      renderComponent({ maxQaAttempts: 3, parallelSubtasks: true, autoModeMaxParallel: 1 });
+      renderComponent({ maxQaAttempts: 3, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 });
       const checkbox = screen.getByRole('checkbox');
       fireEvent.click(checkbox);
       expect(checkbox).not.toBeChecked();
@@ -136,7 +138,7 @@ describe('PipelineConfigEditor', () => {
     });
 
     it('defaults parallelSubtasks to unchecked when config says false', () => {
-      renderComponent({ maxQaAttempts: 3, parallelSubtasks: false, autoModeMaxParallel: 1 });
+      renderComponent({ maxQaAttempts: 3, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 });
       expect(screen.getByRole('checkbox')).not.toBeChecked();
     });
   });
@@ -159,6 +161,8 @@ describe('PipelineConfigEditor', () => {
         maxQaAttempts: 4,
         parallelSubtasks: false,
         autoModeMaxParallel: 1,
+        idleStallMinutes: 15,
+        toolStallMinutes: 30,
       });
     });
 
@@ -298,7 +302,7 @@ describe('PipelineConfigEditor', () => {
     it('initializes state from props on first render', () => {
       // Render with non-default values
       const { rerender } = render(
-        <PipelineConfigEditor config={{ maxQaAttempts: 1, parallelSubtasks: false, autoModeMaxParallel: 1 }} />
+        <PipelineConfigEditor config={{ maxQaAttempts: 1, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 }} />
       );
 
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(1);
@@ -308,7 +312,7 @@ describe('PipelineConfigEditor', () => {
       // a useEffect to re-sync, so prop changes after initial render don't
       // update the input values — this is the expected behaviour.
       rerender(
-        <PipelineConfigEditor config={{ maxQaAttempts: 8, parallelSubtasks: true, autoModeMaxParallel: 1 }} />
+        <PipelineConfigEditor config={{ maxQaAttempts: 8, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 }} />
       );
 
       // Values remain at the initial render values, not the new props.
@@ -321,17 +325,17 @@ describe('PipelineConfigEditor', () => {
 
   describe('edge cases', () => {
     it('handles maxQaAttempts at the minimum boundary (1)', () => {
-      renderComponent({ maxQaAttempts: 1, parallelSubtasks: true, autoModeMaxParallel: 1 });
+      renderComponent({ maxQaAttempts: 1, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 });
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(1);
     });
 
     it('handles maxQaAttempts at the maximum boundary (10)', () => {
-      renderComponent({ maxQaAttempts: 10, parallelSubtasks: true, autoModeMaxParallel: 1 });
+      renderComponent({ maxQaAttempts: 10, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 });
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(10);
     });
 
     it('saves immediately after toggling parallelSubtasks', async () => {
-      renderComponent({ maxQaAttempts: 2, parallelSubtasks: true, autoModeMaxParallel: 1 });
+      renderComponent({ maxQaAttempts: 2, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 });
 
       fireEvent.click(screen.getByRole('checkbox'));
 
@@ -343,6 +347,8 @@ describe('PipelineConfigEditor', () => {
         maxQaAttempts: 2,
         parallelSubtasks: false,
         autoModeMaxParallel: 1,
+        idleStallMinutes: 15,
+        toolStallMinutes: 30,
       });
     });
 

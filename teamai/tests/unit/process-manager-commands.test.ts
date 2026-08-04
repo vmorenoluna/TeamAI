@@ -569,21 +569,21 @@ describe('ProcessManager — getStalledSessions', () => {
   it('returns empty when no sessions exist', () => {
     const pm = new ProcessManager();
     (pm as unknown as AnySession).sessions.clear();
-    expect(pm.getStalledSessions()).toEqual([]);
+    expect(pm.getStalledSessions(() => ({ idleMs: 120_000, toolMs: 120_000 }))).toEqual([]);
   });
 
   it('returns empty when all sessions have recent output', () => {
     const pm = new ProcessManager();
     (pm as unknown as AnySession).sessions.clear();
     addMockSession(pm, 'sess-1', { status: 'running', lastOutputAt: Date.now() });
-    expect(pm.getStalledSessions()).toEqual([]);
+    expect(pm.getStalledSessions(() => ({ idleMs: 120_000, toolMs: 120_000 }))).toEqual([]);
   });
 
   it('returns sessions with stale output (no output for > 120s)', () => {
     const pm = new ProcessManager();
     (pm as unknown as AnySession).sessions.clear();
     addMockSession(pm, 'sess-1', { status: 'running', lastOutputAt: Date.now() - 200_000 });
-    const stalled = pm.getStalledSessions();
+    const stalled = pm.getStalledSessions(() => ({ idleMs: 120_000, toolMs: 120_000 }));
     expect(stalled).toHaveLength(1);
     expect(stalled[0].id).toBe('sess-1');
   });
@@ -592,17 +592,17 @@ describe('ProcessManager — getStalledSessions', () => {
     const pm = new ProcessManager();
     (pm as unknown as AnySession).sessions.clear();
     addMockSession(pm, 'sess-1', { status: 'done', lastOutputAt: Date.now() - 200_000 });
-    expect(pm.getStalledSessions()).toEqual([]);
+    expect(pm.getStalledSessions(() => ({ idleMs: 120_000, toolMs: 120_000 }))).toEqual([]);
   });
 
-  it('respects custom timeout', () => {
+  it('respects custom timeout via resolver', () => {
     const pm = new ProcessManager();
     (pm as unknown as AnySession).sessions.clear();
     addMockSession(pm, 'sess-1', { status: 'running', lastOutputAt: Date.now() - 30_000 });
-    // Default 120s timeout: not stalled (30s < 120s)
-    expect(pm.getStalledSessions()).toEqual([]);
-    // Custom 20s timeout: stalled (30s > 20s)
-    expect(pm.getStalledSessions(20_000)).toHaveLength(1);
+    // 120s timeout: not stalled (30s < 120s)
+    expect(pm.getStalledSessions(() => ({ idleMs: 120_000, toolMs: 120_000 }))).toEqual([]);
+    // 20s timeout: stalled (30s > 20s)
+    expect(pm.getStalledSessions(() => ({ idleMs: 20_000, toolMs: 20_000 }))).toHaveLength(1);
   });
 
   // ── Two-tier threshold: idle vs. tool-in-flight ─────────────────────────
@@ -620,7 +620,7 @@ describe('ProcessManager — getStalledSessions', () => {
       status: 'running', toolInFlight: false, lastOutputAt: Date.now() - 150_000, // 2.5 min
     });
     // 2.5min exceeds a 2min idle threshold even though it's under a 30min tool threshold
-    const stalled = pm.getStalledSessions(2 * 60_000, 30 * 60_000);
+    const stalled = pm.getStalledSessions(() => ({ idleMs: 2 * 60_000, toolMs: 30 * 60_000 }));
     expect(stalled).toHaveLength(1);
     expect(stalled[0].id).toBe('sess-idle');
   });
@@ -634,7 +634,7 @@ describe('ProcessManager — getStalledSessions', () => {
     // 2.5min would exceed the 2min idle threshold, but this session has a
     // tool in flight — it must use the 30min tool threshold instead and NOT
     // be flagged as stalled.
-    const stalled = pm.getStalledSessions(2 * 60_000, 30 * 60_000);
+    const stalled = pm.getStalledSessions(() => ({ idleMs: 2 * 60_000, toolMs: 30 * 60_000 }));
     expect(stalled).toEqual([]);
   });
 
@@ -644,17 +644,17 @@ describe('ProcessManager — getStalledSessions', () => {
     addMockSession(pm, 'sess-truly-hung', {
       status: 'running', toolInFlight: true, lastOutputAt: Date.now() - 31 * 60_000,
     });
-    const stalled = pm.getStalledSessions(2 * 60_000, 30 * 60_000);
+    const stalled = pm.getStalledSessions(() => ({ idleMs: 2 * 60_000, toolMs: 30 * 60_000 }));
     expect(stalled).toHaveLength(1);
     expect(stalled[0].id).toBe('sess-truly-hung');
   });
 
-  it('defaults the tool threshold to the idle threshold when only one argument is given (backward compatible)', () => {
+  it('returns empty when resolver returns the same thresholds for both idle and tool', () => {
     const pm = new ProcessManager();
     (pm as unknown as AnySession).sessions.clear();
     addMockSession(pm, 'sess-running', { status: 'running', toolInFlight: true, lastOutputAt: Date.now() - 30_000 });
-    // Single-arg call: both idle and tool thresholds are 20s regardless of toolInFlight
-    expect(pm.getStalledSessions(20_000)).toHaveLength(1);
+    // Both thresholds are 20s — toolInFlight doesn't matter since they're equal
+    expect(pm.getStalledSessions(() => ({ idleMs: 20_000, toolMs: 20_000 }))).toHaveLength(1);
   });
 });
 

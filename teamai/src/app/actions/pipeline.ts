@@ -9,12 +9,16 @@ export interface PipelineConfig {
   maxQaAttempts: number;
   parallelSubtasks: boolean;
   autoModeMaxParallel: number;
+  idleStallMinutes: number;
+  toolStallMinutes: number;
 }
 
 const DEFAULT_CONFIG: PipelineConfig = {
   maxQaAttempts: 3,
   parallelSubtasks: true,
   autoModeMaxParallel: 1,
+  idleStallMinutes: 15,
+  toolStallMinutes: 30,
 };
 
 export async function getPipelineConfig(): Promise<PipelineConfig> {

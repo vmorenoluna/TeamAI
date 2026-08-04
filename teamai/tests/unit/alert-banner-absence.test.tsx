@@ -249,7 +249,7 @@ describe('alert-banner absence contract', () => {
   it('pipeline-config: no role="alert" on initial render', () => {
     render(
       <PipelineConfigEditor
-        config={{ maxQaAttempts: 3, parallelSubtasks: true, autoModeMaxParallel: 1 }}
+        config={{ maxQaAttempts: 3, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 }}
       />,
     );
     assertNoAlert();

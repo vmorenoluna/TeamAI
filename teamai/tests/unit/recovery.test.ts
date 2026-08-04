@@ -25,7 +25,7 @@ const mockIsTaskActive = vi.fn();
 const mockSweepResumeTask = vi.fn();
 const mockTriggerEarlyWakeup = vi.fn<[string, string], boolean>(() => false);
 const mockGetAllSessions = vi.fn();
-const mockGetStalledSessions = vi.fn<[number?, number?], { id: string; taskId: string; role: string; toolInFlight?: boolean }[]>(() => []);
+const mockGetStalledSessions = vi.fn<[(session: { projectRoot?: string }) => { idleMs: number; toolMs: number }], { id: string; taskId: string; role: string; toolInFlight?: boolean }[]>(() => []);
 const mockKillSession = vi.fn();
 
 vi.mock('../../src/lib/orchestrator', () => ({
@@ -35,7 +35,7 @@ vi.mock('../../src/lib/orchestrator', () => ({
 vi.mock('../../src/lib/process-manager', () => ({
   processManager: {
     getAllSessions: (...args: unknown[]) => mockGetAllSessions(...args as []),
-    getStalledSessions: (idleTimeoutMs: number, toolTimeoutMs: number) => mockGetStalledSessions(idleTimeoutMs, toolTimeoutMs),
+    getStalledSessions: (resolveThresholds: (session: { projectRoot?: string }) => { idleMs: number; toolMs: number }) => mockGetStalledSessions(resolveThresholds),
     killSession: (sessionId: string) => mockKillSession(sessionId),
   },
 }));
@@ -1567,19 +1567,112 @@ describe('sweepStalledTasks', () => {
     expect(mockKillSession).toHaveBeenCalledWith('sess-xyz');
   });
 
-  it('uses a 15-minute idle threshold and a 30-minute tool-in-flight threshold, not a single threshold for everyone', async () => {
+  it('uses per-session resolver (not flat numbers) so each project gets its own configured thresholds', async () => {
     // Regression: a flat no-output threshold killed sessions mid-investigation
     // while (a) a single slow-but-alive tool call (a cold sbt compile/test, a
     // slow HTTP call) was legitimately still running, and (b) a session was
     // genuinely reasoning between tool calls with no tool in flight. Locks in
-    // the two-tier thresholds so both get real headroom relative to their own
-    // failure mode.
+    // the resolver pattern so each session's project config (pipeline.json
+    // idleStallMinutes / toolStallMinutes) is looked up per-session.
     vi.mocked(existsSync).mockReturnValue(false);
     mockGetStalledSessions.mockReturnValue([]);
 
     await sweepStalledTasks();
 
-    expect(mockGetStalledSessions).toHaveBeenCalledWith(15 * 60_000, 30 * 60_000);
+    expect(mockGetStalledSessions).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  // ── Per-project config resolution ──────────────────────────────────
+  //
+  // Each session carries a projectRoot. The resolver must look up THAT
+  // project's pipeline.json idleStallMinutes / toolStallMinutes, NOT
+  // a different project's or a flat global constant. This is the test
+  // that proves the cross-project correctness this ticket exists for.
+
+  describe('per-project config resolution', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockGetOrchestrator.mockReturnValue({
+        isTaskActive: mockIsTaskActive,
+        resumeTask: mockSweepResumeTask,
+        triggerEarlyWakeup: mockTriggerEarlyWakeup,
+      });
+      mockIsTaskActive.mockClear();
+      mockSweepResumeTask.mockClear();
+      mockTriggerEarlyWakeup.mockClear();
+      mockKillSession.mockClear();
+      // By default: sweep finds no projects, does nothing.
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockGetStalledSessions.mockReturnValue([]);
+      mockGetAllSessions.mockReturnValue([]);
+    });
+
+    it('resolves per-project thresholds from pipeline.json (idleStallMinutes / toolStallMinutes)', async () => {
+      // Setup: two projects, each with their own pipeline.json thresholds.
+      const projA = '/project/a';
+      const projB = '/project/b';
+      const pipelineJsonA = join(projA, '.teamai', 'pipeline.json');
+      const pipelineJsonB = join(projB, '.teamai', 'pipeline.json');
+
+      vi.mocked(existsSync).mockImplementation((p) => {
+        const path = String(p);
+        if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+        if (path === pipelineJsonA) return true;
+        if (path === pipelineJsonB) return true;
+        return false;
+      });
+      vi.mocked(readFileSync).mockImplementation((p) => {
+        const path = String(p);
+        if (path === join('/mock/home', '.teamai', 'projects.json'))
+          return JSON.stringify([{ name: 'A', path: projA }, { name: 'B', path: projB }]);
+        if (path === pipelineJsonA)
+          return JSON.stringify({ idleStallMinutes: 5, toolStallMinutes: 10 });
+        if (path === pipelineJsonB)
+          return JSON.stringify({ idleStallMinutes: 20, toolStallMinutes: 45 });
+        return '';
+      });
+
+      // Capture the resolver function passed to getStalledSessions
+      let capturedResolver: ((s: { projectRoot?: string }) => { idleMs: number; toolMs: number }) | null = null;
+      mockGetStalledSessions.mockImplementation((resolve) => {
+        capturedResolver = resolve;
+        return [];
+      });
+
+      await sweepStalledTasks();
+
+      expect(capturedResolver).not.toBeNull();
+
+      // Session from project A: configured 5 min idle, 10 min tool
+      const resultA = capturedResolver!({ projectRoot: projA });
+      expect(resultA.idleMs).toBe(5 * 60_000);
+      expect(resultA.toolMs).toBe(10 * 60_000);
+
+      // Session from project B: configured 20 min idle, 45 min tool
+      const resultB = capturedResolver!({ projectRoot: projB });
+      expect(resultB.idleMs).toBe(20 * 60_000);
+      expect(resultB.toolMs).toBe(45 * 60_000);
+
+      // Second call for the same project hits the cache (no re-read).
+      // Verify the values are the same (cache hit).
+      const resultA2 = capturedResolver!({ projectRoot: projA });
+      expect(resultA2.idleMs).toBe(5 * 60_000);
+      expect(resultA2.toolMs).toBe(10 * 60_000);
+    });
+
+    it('falls back to defaults (15/30 min) when session has no projectRoot', async () => {
+      let capturedResolver: ((s: { projectRoot?: string }) => { idleMs: number; toolMs: number }) | null = null;
+      mockGetStalledSessions.mockImplementation((resolve) => {
+        capturedResolver = resolve;
+        return [];
+      });
+
+      await sweepStalledTasks();
+
+      const result = capturedResolver!({ projectRoot: undefined });
+      expect(result.idleMs).toBe(15 * 60_000);
+      expect(result.toolMs).toBe(30 * 60_000);
+    });
   });
 
   // ── Wakeup progress-log freshness check ──────────────────────────────

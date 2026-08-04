@@ -9,6 +9,8 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
   const [maxQa, setMaxQa] = useState(config.maxQaAttempts);
   const [parallel, setParallel] = useState(config.parallelSubtasks);
   const [autoParallel, setAutoParallel] = useState(config.autoModeMaxParallel);
+  const [idleStall, setIdleStall] = useState(config.idleStallMinutes);
+  const [toolStall, setToolStall] = useState(config.toolStallMinutes);
   const [saved, setSaved] = useState(false);
   // Regression-fix contract: surfaces Server Action failures (raw-throw path).
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +20,7 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
     setError(null);
     startTransition(async () => {
       try {
-        await savePipelineConfig({ maxQaAttempts: maxQa, parallelSubtasks: parallel, autoModeMaxParallel: autoParallel });
+        await savePipelineConfig({ maxQaAttempts: maxQa, parallelSubtasks: parallel, autoModeMaxParallel: autoParallel, idleStallMinutes: idleStall, toolStallMinutes: toolStall });
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       } catch (err) {
@@ -78,6 +80,35 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
             max={10}
             value={autoParallel}
             onChange={e => setAutoParallel(Number(e.target.value))}
+            className="w-20 px-2 py-1 text-sm border border-[#334155] rounded bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb]"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4 flex-wrap">
+        <div title="Minutes a session can sit idle (no tool running, no new message) before the stall-detector terminates it. A session genuinely thinking through a multi-file investigation between tool calls can go quiet — too tight a value kills real progress. Default: 15 min.">
+          <label className="text-xs font-medium text-slate-400 block mb-1">
+            Idle stall threshold (min)
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={120}
+            value={idleStall}
+            onChange={e => setIdleStall(Number(e.target.value))}
+            className="w-20 px-2 py-1 text-sm border border-[#334155] rounded bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb]"
+          />
+        </div>
+        <div title="Minutes a single tool call can run with no output before the stall-detector terminates the session. A cold compile, large test suite, or slow network call can legitimately take many minutes. Default: 30 min.">
+          <label className="text-xs font-medium text-slate-400 block mb-1">
+            Tool stall threshold (min)
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={180}
+            value={toolStall}
+            onChange={e => setToolStall(Number(e.target.value))}
             className="w-20 px-2 py-1 text-sm border border-[#334155] rounded bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb]"
           />
         </div>
