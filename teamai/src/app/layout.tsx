@@ -1,13 +1,14 @@
 import type { Metadata } from 'next';
 import { Inter, Geist_Mono } from 'next/font/google';
 import './globals.css';
-import { getProjects, getActiveProject, getOutdatedProjects } from '@/app/actions/projects';
+import { getProjects, getActiveProject, getOutdatedProjects, getGitattributesRenormalizeSuggestion } from '@/app/actions/projects';
 import { Sidebar } from '@/components/sidebar';
 import { ProjectSelector } from '@/components/project-selector';
 import { DefaultsUpdater } from '@/components/defaults-updater';
 import { RecoveryBanner } from '@/components/recovery-banner';
 import { UpdateBanner } from '@/components/update-banner';
 import { MissingToolsBanner } from '@/components/missing-tools-banner';
+import { GitattributesRenormalizeBanner } from '@/components/gitattributes-renormalize-banner';
 import { AutoModeButton } from '@/components/auto-mode-button';
 import { getInterruptedTasks } from '@/app/actions/recovery';
 import { getAutoModeState } from '@/lib/auto-mode';
@@ -28,6 +29,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const interruptedTasks = await getInterruptedTasks();
   const autoModeState = activeProject ? getAutoModeState(activeProject.path) : { enabled: false };
   const toolStatuses = await checkTools();
+  const gitattributesRenormalizePath = await getGitattributesRenormalizeSuggestion();
 
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full`}>
@@ -51,6 +53,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <RecoveryBanner tasks={interruptedTasks} />
           {/* Missing tools banner — shows when required CLI tools are not found */}
           <MissingToolsBanner tools={toolStatuses} />
+          {/* Gitattributes renormalize suggestion — one-time prompt after .gitattributes is first added */}
+          <GitattributesRenormalizeBanner projectPath={gitattributesRenormalizePath ?? ''} />
           <div className="flex-1 min-h-0 flex flex-col">{children}</div>
         </div>
       </body>

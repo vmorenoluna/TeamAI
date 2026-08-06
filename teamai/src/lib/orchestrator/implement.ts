@@ -1192,13 +1192,40 @@ export async function runImplement(
         // Clean up old worktree directory (common to both paths)
         try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch { /* best-effort */ }
         if (existsSync(stWorktreePath)) {
+          logToOutput(pipeline.specPath, '\n[WORKTREE] Per-subtask worktree at ' + stWorktreePath + ' still exists after git-level removal — falling back to rmSync\n');
           try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
           removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
         }
 
         if (canRecreate) {
           try { execFileSync('git', ['branch', '-D', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
-          deps.execGit(['worktree', 'add', stWorktreePath, '-b', stBranch, pipeline.branch], deps.projectRoot);
+
+          // Verify the branch is actually gone before attempting -b creation.
+          // A prior-worktree lingering with a file lock (the worktree removal
+          // above failed silently) prevents branch deletion — git branch -D
+          // can't delete a branch still checked out in an existing worktree.
+          // Without this check, the subsequent `worktree add -b <same-name>`
+          // fails with "a branch named '<stBranch>' already exists" and the
+          // best-effort catch on worktree removal swallowed the real reason.
+          let branchStillExists = true;
+          try {
+            execFileSync('git', ['rev-parse', '--verify', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
+          } catch {
+            branchStillExists = false; // branch doesn't exist — expected and correct
+          }
+
+          if (!branchStillExists) {
+            deps.execGit(['worktree', 'add', stWorktreePath, '-b', stBranch, pipeline.branch], deps.projectRoot);
+          } else {
+            // Branch deletion failed — fall back to checking out the existing
+            // branch. Log this distinctly from the canRecreate=false case
+            // (branch preserved by recovery decision) because the root cause
+            // is different: this one means the worktree cleanup above didn't
+            // actually free the branch, likely because a file lock prevented
+            // full directory removal.
+            logToOutput(pipeline.specPath, '\n[WORKTREE] Branch ' + stBranch + ' still exists after deletion attempt (worktree removal likely incomplete due to a file lock) — checking out existing branch instead of recreating\n');
+            deps.execGit(['worktree', 'add', stWorktreePath, stBranch], deps.projectRoot);
+          }
         } else {
           // Branch preserved — create worktree from existing branch (no -b).
           // The merger agent in integrateGroup will handle conflicts when

@@ -213,6 +213,62 @@ export class ProjectStore {
   }
 
   /**
+   * Ensure the project's .gitattributes has a TeamAI-managed line-ending
+   * normalization policy so host and container agree on line endings for
+   * every tracked file. Appends the block only if not already present —
+   * never overwrites the project's own .gitattributes content.
+   *
+   * @returns true if the TeamAI block was newly added (the project didn't
+   *          already have it), false if it was already present or unchanged.
+   */
+  private _updateGitattributes(projectPath: string): boolean {
+    const gitattributesPath = join(projectPath, '.gitattributes');
+    const GITATTRIBUTES_BLOCK = [
+      '# TeamAI — consistent line-ending normalization across host and container',
+      '* text=auto eol=lf',
+    ];
+    const blockStr = GITATTRIBUTES_BLOCK.join('\n') + '\n';
+
+    if (!existsSync(gitattributesPath)) {
+      try {
+        writeFileSync(gitattributesPath, blockStr);
+        // New file created — flag the renormalize suggestion for the user.
+        // Without `git add --renormalize .`, the next auto-commit will be a
+        // large normalization commit with no real content change.
+        this._writeRenormalizeSuggestion(projectPath);
+        return true;
+      } catch { /* best-effort — don't block project setup on .gitattributes write failure */ }
+      return false;
+    }
+
+    try {
+      const existing = readFileSync(gitattributesPath, 'utf-8');
+      const lines = existing.split('\n');
+
+      // Only append patterns that are not already present (exact line match).
+      const missing = GITATTRIBUTES_BLOCK.filter(
+        pattern => !lines.some(line => line.trim() === pattern),
+      );
+      if (missing.length === 0) return false;
+
+      const separator = existing.endsWith('\n') ? '' : '\n';
+      appendFileSync(gitattributesPath, separator + '\n' + missing.join('\n') + '\n');
+      this._writeRenormalizeSuggestion(projectPath);
+      return true;
+    } catch { /* best-effort */ }
+    return false;
+  }
+
+  /** Write a marker file so the UI can suggest `git add --renormalize .`. */
+  private _writeRenormalizeSuggestion(projectPath: string): void {
+    try {
+      const teamaiDir = join(projectPath, '.teamai');
+      mkdirSync(teamaiDir, { recursive: true });
+      writeFileSync(join(teamaiDir, 'gitattributes-renormalize-suggestion'), '');
+    } catch { /* best-effort */ }
+  }
+
+  /**
    * Sync default files in a project that have NOT been customized.
    * If a default file was updated in TeamAI and the project's copy still
    * matches the old default (i.e., was never customized), update it.
@@ -389,6 +445,9 @@ export class ProjectStore {
 
     // Ensure .gitignore excludes transient/potentially-sensitive TeamAI files
     this._updateGitignore(projectPath);
+
+    // Ensure .gitattributes has consistent line-ending normalization across host and container
+    this._updateGitattributes(projectPath);
 
     // Sync defaults that have been updated in TeamAI but not customized by the project
     this.syncDefaults(projectPath);
