@@ -59,7 +59,7 @@ function findExecutable(name: string): string | null {
 // ── Path resolution ─────────────────────────────────────────────────────────
 
 function toolsConfigPath(): string {
-  return join(process.cwd(), 'tools.json');
+  return join(/* turbopackIgnore: true */ process.cwd(), 'tools.json');
 }
 
 // ── Config persistence ──────────────────────────────────────────────────────

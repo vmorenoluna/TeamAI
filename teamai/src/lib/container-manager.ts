@@ -37,7 +37,7 @@ function devcontainerBin(): string {
   const custom = getToolPath('devcontainer');
   if (custom !== 'devcontainer') return custom;
   const ext = process.platform === 'win32' ? '.cmd' : '';
-  const local = path.join(process.cwd(), 'node_modules', '.bin', `devcontainer${ext}`);
+  const local = path.join(/* turbopackIgnore: true */ process.cwd(), 'node_modules', '.bin', `devcontainer${ext}`);
   return existsSync(local) ? local : `devcontainer${ext}`;
 }
 

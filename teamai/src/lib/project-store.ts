@@ -16,7 +16,7 @@ function resolveConfigDir(): string {
     return join(process.env.TEAMAI_CONFIG_DIR, '.teamai');
   }
   try {
-    const e2ePathFile = join(process.cwd(), '.teamai-e2e-config-path');
+    const e2ePathFile = join(/* turbopackIgnore: true */ process.cwd(), '.teamai-e2e-config-path');
     if (existsSync(e2ePathFile)) {
       const dir = readFileSync(e2ePathFile, 'utf-8').trim();
       if (dir) return join(dir, '.teamai');
@@ -30,7 +30,7 @@ const PROJECTS_FILE = join(CONFIG_DIR, 'projects.json');
 const BACKUP_FILE = PROJECTS_FILE + '.backup';
 const TMP_FILE = PROJECTS_FILE + '.tmp';
 // process.cwd() is the project root (teamai/) at runtime
-const DEFAULTS_DIR = join(process.cwd(), 'defaults');
+const DEFAULTS_DIR = join(/* turbopackIgnore: true */ process.cwd(), 'defaults');
 
 export interface Project {
   name: string;
