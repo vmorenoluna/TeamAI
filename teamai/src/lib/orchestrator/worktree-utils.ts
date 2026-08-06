@@ -163,10 +163,25 @@ export function patchWorktreeGitFile(hostWorktreePath: string, containerWorkspac
  * leftover locked/untracked files, and in both cases leaves every sibling
  * worktree's registration completely untouched, because it only ever acts
  * on the exact path given.
+ *
+ * That "exact path given" requirement is itself a hazard once a worktree
+ * has been container-patched: git resolves the `<path>` argument by
+ * matching it against what it has recorded for the worktree, and a
+ * container-patched entry has that recorded path rewritten to a
+ * container-only location (e.g. /workspaces/...). Passing the host-computed
+ * path in that state fails outright — verified empirically in a scratch
+ * repo: `git worktree remove --force <original host path>` errors with
+ * "is not a working tree" once the gitdir has been repointed, even though
+ * the worktree is still fully registered. `git worktree remove --force
+ * <bare worktree name>` (the basename under .git/worktrees/) succeeds
+ * regardless of what the recorded path currently is — also verified
+ * empirically, in both the container-patched and the ordinary case — so
+ * resolve to the basename here rather than trusting the caller's path to
+ * still match git's records.
  */
 export function removeStaleWorktreeRegistration(projectRoot: string, worktreePath: string): void {
   try {
-    execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: projectRoot, stdio: 'pipe' });
+    execFileSync('git', ['worktree', 'remove', '--force', path.basename(worktreePath)], { cwd: projectRoot, stdio: 'pipe' });
   } catch { /* best-effort */ }
 }
 

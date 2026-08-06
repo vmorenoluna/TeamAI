@@ -226,8 +226,12 @@ export async function runPlanPhase(
     } catch {
       if (existsSync(pipeline.worktreePath)) {
         try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-        removeStaleWorktreeRegistration(deps.projectRoot, pipeline.worktreePath);
       }
+      // Unconditional — a container-patched worktree's registration is
+      // invisible to existsSync on the host but still blocks the -b
+      // creation above (and would block it again on the no-`-b` retry
+      // below too, since the branch would still read as checked out).
+      removeStaleWorktreeRegistration(deps.projectRoot, pipeline.worktreePath);
       deps.execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], deps.projectRoot);
     }
   }

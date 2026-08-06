@@ -5539,6 +5539,52 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
       executeSpy.mockRestore();
     }
   });
+
+  it('always clears the git-level worktree registration by bare name, even when the host directory was never created (container-patched registration)', async () => {
+    // In this mocked harness no real `git worktree add` ever creates a host
+    // directory, so existsSync(stWorktreePath) is false throughout — the
+    // same state a container-patched worktree registration produces for
+    // real (its gitdir points to a container-only path, so nothing is ever
+    // visible on the host). The registration cleanup must not depend on
+    // the host directory existing, or a stale registration for a branch
+    // like this one is never cleared and every retry keeps colliding with
+    // it (the exact failure this test guards against).
+    mockCreateSession
+      .mockResolvedValueOnce('sess-reg-st1')
+      .mockResolvedValueOnce('sess-reg-st2');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+
+      fireEvent('event', { sessionId: 'sess-reg-st1', event: { type: 'result' } });
+      fireEvent('event', { sessionId: 'sess-reg-st2', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+
+      // removeStaleWorktreeRegistration resolves to the bare worktree name
+      // (not the full host path) — a container-patched registration's
+      // recorded path no longer matches what the host computed, only the
+      // basename resolves in that case (verified empirically against a
+      // real repo).
+      const basenameRemoveCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'git' && Array.isArray(call[1]) &&
+          call[1][0] === 'worktree' && call[1][1] === 'remove' && call[1][2] === '--force' &&
+          typeof call[1][3] === 'string' && !call[1][3].includes('\\') && !call[1][3].includes('/') &&
+          call[1][3].includes('-st'),
+      );
+      expect(basenameRemoveCalls.some((c: any[]) => c[1][3] === 'test-task-st1')).toBe(true);
+      expect(basenameRemoveCalls.some((c: any[]) => c[1][3] === 'test-task-st2')).toBe(true);
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════

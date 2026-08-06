@@ -302,6 +302,10 @@ export async function ensureWorktree(
       try {
         deps.execGit(['worktree', 'remove', '--force', pipeline.worktreePath], deps.projectRoot);
       } catch { /* best-effort */ }
+      // Unconditional, like the per-subtask cleanup above — a container-
+      // patched worktree's registration is invisible to existsSync on the
+      // host but still blocks a subsequent worktree add/branch -D.
+      removeStaleWorktreeRegistration(deps.projectRoot, pipeline.worktreePath);
       if (existsSync(pipeline.worktreePath)) {
         try {
           await clearWorktreeDirectoryOrThrow(pipeline.worktreePath, {
@@ -1189,13 +1193,19 @@ export async function runImplement(
         // was never cherry-picked onto the feature branch.
         const canRecreate = await _recoverSubtaskBranchBeforeDelete(pipeline, deps, logFile, stBranch, subtask);
 
-        // Clean up old worktree directory (common to both paths)
+        // Clean up old worktree directory and registration (common to both
+        // paths). removeStaleWorktreeRegistration must run unconditionally,
+        // not just when stWorktreePath exists on the host: a container-
+        // patched worktree's gitdir points to a container-only path, so
+        // nothing is ever visible here via existsSync, yet git still
+        // considers the branch checked out (and refuses `branch -D`) until
+        // that registration is cleared.
         try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch { /* best-effort */ }
         if (existsSync(stWorktreePath)) {
           logToOutput(pipeline.specPath, '\n[WORKTREE] Per-subtask worktree at ' + stWorktreePath + ' still exists after git-level removal — falling back to rmSync\n');
           try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-          removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
         }
+        removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
 
         if (canRecreate) {
           try { execFileSync('git', ['branch', '-D', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
