@@ -2399,7 +2399,7 @@ describe('Orchestrator', () => {
       );
     });
 
-    it('leaves the restored snapshot untouched when checkout succeeds (restored copy already has phase:done)', async () => {
+    it('settles directly off a successful fast-forward merge, without ever attempting the scoped checkout fallback', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -2414,11 +2414,86 @@ describe('Orchestrator', () => {
         updatedAt: new Date().toISOString(),
       });
 
-      // Make the scoped `git checkout origin/master -- <dir>` "succeed" by
-      // recreating the task directory as a side effect, simulating what a
-      // real checkout would do (restore the committed snapshot) regardless
-      // of how dirty the rest of the working tree is.
+      // Make `git merge --ff-only` "succeed" by recreating the task
+      // directory as a side effect, simulating what a real fast-forward
+      // would do (bring HEAD, the index, and the working tree in sync with
+      // origin in one shot) — this is the primary path now, tried before
+      // any scoped checkout.
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'merge' && args.includes('--ff-only')) {
+          mkdirSync(testData.taskDir, { recursive: true });
+          writeFileSync(join(testData.taskDir, 'task.json'), restoredSnapshot);
+          return '';
+        }
+        return '';
+      });
+
+      mockEmit.mockClear();
+      await orch.markTaskDone(testData.taskId);
+
+      // Fast-forward succeeded — directory was restored from the snapshot
+      expect(existsSync(testData.taskDir)).toBe(true);
+
+      // phase-change was emitted exactly once
+      expect(mockEmit).toHaveBeenCalledTimes(1);
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
+        taskId: testData.taskId,
+        phase: 'done',
+      }));
+
+      // git fetch + fast-forward merge were attempted
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['fetch', 'origin', 'main']),
+        expect.objectContaining({ cwd: testData.root }),
+      );
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        ['merge', '--ff-only', 'origin/main'],
+        expect.objectContaining({ cwd: testData.root }),
+      );
+
+      // The scoped checkout fallback must never run — the fast-forward
+      // already settled everything, so falling through to it would be
+      // redundant and would leave the restored files as untracked/modified
+      // content instead of clean, fully-committed content.
+      expect(mockExecFileSync).not.toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['checkout']),
+        expect.anything(),
+      );
+
+      // The restored (tracked) snapshot must not be rewritten — modifying it
+      // would leave the repo dirty after every completed task.
+      expect(readFileSync(join(testData.taskDir, 'task.json'), 'utf-8')).toBe(restoredSnapshot);
+      expect(existsSync(join(testData.taskDir, 'events.jsonl'))).toBe(false);
+    });
+
+    it('falls back to the scoped checkout and leaves the restored snapshot untouched when the fast-forward merge fails', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      expect(existsSync(testData.taskDir)).toBe(true);
+
+      const restoredSnapshot = JSON.stringify({
+        id: testData.taskId,
+        title: 'Test Task',
+        description: 'A test task for full coverage',
+        phase: 'done',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Fast-forward fails (e.g. an unrelated dirty file elsewhere blocks
+      // it) — the scoped `git checkout origin/master -- <dir>` fallback is
+      // what actually restores the snapshot here, "succeeding" by
+      // recreating the task directory as a side effect, simulating what a
+      // real checkout would do regardless of how dirty the rest of the
+      // working tree is.
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'merge' && args.includes('--ff-only')) {
+          throw new Error('fatal: Not possible to fast-forward, aborting.');
+        }
         if (cmd === 'git' && args.includes('checkout')) {
           mkdirSync(testData.taskDir, { recursive: true });
           writeFileSync(join(testData.taskDir, 'task.json'), restoredSnapshot);
@@ -2440,10 +2515,16 @@ describe('Orchestrator', () => {
         phase: 'done',
       }));
 
-      // git fetch + scoped checkout were attempted
+      // git fetch, the failed fast-forward attempt, and the scoped checkout
+      // fallback were all attempted, in that order.
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
         expect.arrayContaining(['fetch', 'origin', 'main']),
+        expect.objectContaining({ cwd: testData.root }),
+      );
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        ['merge', '--ff-only', 'origin/main'],
         expect.objectContaining({ cwd: testData.root }),
       );
       expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -2458,7 +2539,7 @@ describe('Orchestrator', () => {
       expect(existsSync(join(testData.taskDir, 'events.jsonl'))).toBe(false);
     });
 
-    it('unstages the checked-out snapshot even when the fast-forward merge fails afterward', async () => {
+    it('unstages the checked-out snapshot from the scoped fallback used after the fast-forward merge fails', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -2471,10 +2552,11 @@ describe('Orchestrator', () => {
         updatedAt: new Date().toISOString(),
       });
 
-      // Checkout succeeds (restores the snapshot, staging it as a side
-      // effect) but the subsequent ff-only merge fails — e.g. an unrelated
-      // dirty file elsewhere in the tree blocks the fast-forward. The
-      // checkout's staged entries must not be left stranded in the index.
+      // ff-only merge fails first — e.g. an unrelated dirty file elsewhere
+      // in the tree blocks the fast-forward — so the scoped checkout
+      // fallback runs and restores the snapshot, staging it as a side
+      // effect. The checkout's staged entries must not be left stranded in
+      // the index.
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === 'git' && args.includes('checkout')) {
           mkdirSync(testData.taskDir, { recursive: true });

@@ -1,21 +1,29 @@
 /**
  * Integration tests for markTaskDone end-to-end flow.
  *
- * Tests verify the delete→fetch→scoped-checkout→fallback→emit sequence with
- * a real git repository on disk. The processManager and execFileSync are
- * mocked so no real remote operations occur, but filesystem operations
- * (mkdir, rm, readFileSync) use real Node.js APIs against a temp directory.
+ * Tests verify the delete→fetch→ff-only-merge→(scoped-checkout fallback)→
+ * fallback→emit sequence with a real git repository on disk. The
+ * processManager and execFileSync are mocked so no real remote operations
+ * occur, but filesystem operations (mkdir, rm, readFileSync) use real
+ * Node.js APIs against a temp directory.
  *
- * The restore step is deliberately scoped to just the task's own directory
- * (`git checkout origin/master -- <dir>`) rather than a whole-repo `git
- * pull` — see orchestrator.ts markTaskDone for why: a repo-wide pull fails
- * the moment ANY unrelated file elsewhere in the tree is dirty, which was
- * the actual bug that left completed tasks stuck with bare-bones fallback
- * artifacts instead of their real committed snapshot.
+ * The primary restore path is a whole-repo `git merge --ff-only
+ * origin/<base>` — when it succeeds, HEAD lands fully in sync with origin
+ * and the task's directory comes along as ordinary, clean, committed
+ * content. Only when that fails does the restore fall back to a checkout
+ * scoped to just the task's own directory (`git checkout origin/master --
+ * <dir>`) rather than retrying a whole-repo pull — see orchestrator.ts
+ * markTaskDone for why: a repo-wide pull fails the moment ANY unrelated
+ * file elsewhere in the tree is dirty, which was the actual bug that left
+ * completed tasks stuck with bare-bones fallback artifacts instead of
+ * their real committed snapshot. The scoped fallback tolerates that
+ * dirtiness but leaves the restored files as untracked/modified content
+ * rather than a clean commit — an accepted tradeoff for the fallback case.
  *
  * Coverage:
  *  - Fetch failure: directory deleted, recreated with task.json + events.jsonl
- *  - Checkout success: directory deleted, restored by checkout simulation, snapshot left untouched
+ *  - Fast-forward success: directory restored directly by the merge, scoped checkout never attempted
+ *  - Checkout fallback success: fast-forward fails, directory restored by checkout simulation, snapshot left untouched
  *  - Checkout success without artifacts: fallback recreates task.json
  *  - Single emit: phase-change fires exactly once after the full sequence
  */
@@ -312,7 +320,73 @@ describe('markTaskDone Integration', () => {
 
   // ── Pull success: directory restored, events.jsonl updated ──────────────
 
-  describe('checkout success path', () => {
+  describe('fast-forward success path', () => {
+    it('deletes directory, restores directly via ff-only merge, never attempts the scoped checkout fallback', async () => {
+      const restoredSnapshot = JSON.stringify({
+        id: taskId,
+        title: 'Mark Task Done Test',
+        description: 'Integration test for markTaskDone flow',
+        phase: 'done',   // phase was set to 'done' by commitArtifactsToWorktree before the merge
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Make `git merge --ff-only` succeed and simulate restoring the
+      // directory — this is the primary path, tried before any checkout.
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'merge' && args.includes('--ff-only')) {
+          // Simulate a fast-forward bringing HEAD (and the working tree)
+          // in sync with origin, which includes the committed
+          // .teamai/{slug}/ directory.
+          mkdirSync(taskDir, { recursive: true });
+          writeFileSync(join(taskDir, 'task.json'), restoredSnapshot);
+          return '';
+        }
+        return '';
+      });
+
+      mockEmit.mockClear();
+      await orch.markTaskDone(taskId);
+
+      // ── Directory exists from the fast-forward restore ──
+      expect(existsSync(taskDir)).toBe(true);
+      expect(existsSync(join(taskDir, 'task.json'))).toBe(true);
+
+      // ── The restored (tracked) snapshot is byte-identical: rewriting it
+      //    would leave the repo dirty after every completed task ──
+      expect(readFileSync(join(taskDir, 'task.json'), 'utf-8')).toBe(restoredSnapshot);
+      expect(existsSync(join(taskDir, 'events.jsonl'))).toBe(false);
+
+      // ── git fetch + ff-only merge were attempted ──
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['fetch', 'origin', 'main']),
+        expect.objectContaining({ cwd: testDir }),
+      );
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        ['merge', '--ff-only', 'origin/main'],
+        expect.objectContaining({ cwd: testDir }),
+      );
+
+      // ── The scoped checkout fallback must never run — the fast-forward
+      //    already settled everything ──
+      expect(mockExecFileSync).not.toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['checkout']),
+        expect.anything(),
+      );
+
+      // ── phase-change emitted exactly once ──
+      expect(mockEmit).toHaveBeenCalledTimes(1);
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
+        taskId,
+        phase: 'done',
+      }));
+    });
+  });
+
+  describe('checkout fallback path (fast-forward merge fails)', () => {
     it('deletes directory, restores via scoped checkout, leaves restored snapshot untouched, emits once', async () => {
       const restoredSnapshot = JSON.stringify({
         id: taskId,
@@ -323,8 +397,13 @@ describe('markTaskDone Integration', () => {
         updatedAt: new Date().toISOString(),
       });
 
-      // Make the scoped checkout succeed and simulate restoring the directory
+      // Fast-forward fails first (e.g. an unrelated dirty file elsewhere
+      // blocks it) — the scoped checkout fallback is what actually
+      // restores the directory here.
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'merge' && args.includes('--ff-only')) {
+          throw new Error('fatal: Not possible to fast-forward, aborting.');
+        }
         if (cmd === 'git' && args.includes('checkout')) {
           // Simulate `git checkout origin/master -- <dir>` restoring the
           // committed .teamai/{slug}/ directory, regardless of how dirty
@@ -348,10 +427,16 @@ describe('markTaskDone Integration', () => {
       expect(readFileSync(join(taskDir, 'task.json'), 'utf-8')).toBe(restoredSnapshot);
       expect(existsSync(join(taskDir, 'events.jsonl'))).toBe(false);
 
-      // ── git fetch + scoped checkout were attempted ──
+      // ── git fetch, the failed ff-only merge, and the scoped checkout
+      //    fallback were all attempted, in that order ──
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
         expect.arrayContaining(['fetch', 'origin', 'main']),
+        expect.objectContaining({ cwd: testDir }),
+      );
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        ['merge', '--ff-only', 'origin/main'],
         expect.objectContaining({ cwd: testDir }),
       );
       expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -371,7 +456,12 @@ describe('markTaskDone Integration', () => {
     it('patches phase via updatePhase when the restored snapshot lacks phase:done', async () => {
       // Simulate a checkout restoring a snapshot whose task.json was frozen
       // at an earlier phase (artifact commit ran on an older orchestrator).
+      // Fast-forward fails first so the checkout fallback is the one doing
+      // the restoring.
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'merge' && args.includes('--ff-only')) {
+          throw new Error('fatal: Not possible to fast-forward, aborting.');
+        }
         if (cmd === 'git' && args.includes('checkout')) {
           mkdirSync(taskDir, { recursive: true });
           writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
@@ -412,6 +502,9 @@ describe('markTaskDone Integration', () => {
 
     it('does not double-emit when checkout succeeds', async () => {
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'merge' && args.includes('--ff-only')) {
+          throw new Error('fatal: Not possible to fast-forward, aborting.');
+        }
         if (cmd === 'git' && args.includes('checkout')) {
           mkdirSync(taskDir, { recursive: true });
           writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
