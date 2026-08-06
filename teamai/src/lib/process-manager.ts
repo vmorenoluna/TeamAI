@@ -106,6 +106,15 @@ export class ProcessManager extends EventEmitter {
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
+      // ScheduleWakeup is an interactive-session tool (Claude Code's own
+      // /loop dynamic mode) with no counterpart in this pipeline — every
+      // session spawned here runs headless (-p), and nothing in the
+      // orchestrator listens for it. The only real resume mechanism is the
+      // subtask_wakeup-st<id>.json file (see coder.md). A tool call that
+      // appears to succeed but is actually a no-op is a worse trap than one
+      // that errors outright, so remove it from the session entirely rather
+      // than relying on prose alone to keep it unused.
+      '--disallowedTools', 'ScheduleWakeup',
     ];
 
     if (opts.model) claudeArgs.push('--model', opts.model);
