@@ -12,7 +12,7 @@ interface ProvidersFile {
   roles?: Record<string, ProviderConfig>;
 }
 
-const DEFAULTS_DIR = join(process.cwd(), 'defaults');
+const DEFAULTS_DIR = join(/* turbopackIgnore: true */ process.cwd(), 'defaults');
 
 /** Read the TeamAI-shipped defaults file. Returns null on any failure. */
 function readDefaultProviders(): ProvidersFile | null {

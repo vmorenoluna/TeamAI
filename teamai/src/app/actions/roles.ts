@@ -51,7 +51,7 @@ export async function saveRole(filename: string, content: string): Promise<void>
 }
 
 export async function resetRole(filename: string): Promise<string> {
-  const defaultPath = join(process.cwd(), 'defaults', 'roles', filename);
+  const defaultPath = join(/* turbopackIgnore: true */ process.cwd(), 'defaults', 'roles', filename);
   if (!existsSync(defaultPath)) throw new Error(`No default for ${filename}`);
   const defaultContent = readFileSync(defaultPath, 'utf-8');
   await saveRole(filename, defaultContent);
