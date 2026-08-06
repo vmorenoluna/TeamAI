@@ -161,6 +161,52 @@ describe('ProcessManager createSession — Docker container mode', () => {
     );
   });
 
+  // ScheduleWakeup is an interactive-session tool with no counterpart in
+  // this pipeline (every session here runs headless -p) — nothing in the
+  // orchestrator listens for it, only the subtask_wakeup-st<id>.json file
+  // does. Every spawned session must have it disallowed so a coder can't
+  // call it, get an apparently-successful result, and end its session
+  // believing a resume was scheduled when nothing will actually resume it.
+  it('disallows the ScheduleWakeup tool on both the container and host spawn paths', async () => {
+    mockReadContainerConfig.mockReturnValue({ enabled: true });
+    mockEnsureContainer.mockResolvedValue({
+      containerId: 'docker-container-abc',
+      remoteWorkspaceFolder: '/workspace',
+    });
+    mockHostToContainerPath.mockReturnValue('/workspace/src');
+    mockSpawn.mockReturnValue(createMockProcess());
+
+    await pm.createSession({
+      taskId: 'task-4',
+      role: 'coder',
+      cwd: '/host/project/src',
+      projectRoot: '/host/project',
+    });
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      getToolPath('docker'),
+      expect.arrayContaining(['--disallowedTools', 'ScheduleWakeup']),
+      expect.any(Object),
+    );
+
+    vi.clearAllMocks();
+    mockReadContainerConfig.mockReturnValue({ enabled: false });
+    mockSpawn.mockReturnValue(createMockProcess());
+
+    await pm.createSession({
+      taskId: 'task-5',
+      role: 'coder',
+      cwd: '/host/project/src',
+      projectRoot: '/host/project',
+    });
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      getToolPath('claude'),
+      expect.arrayContaining(['--disallowedTools', 'ScheduleWakeup']),
+      expect.any(Object),
+    );
+  });
+
   it('includes --permission-mode when container mode is disabled and permissionMode is set', async () => {
     mockReadContainerConfig.mockReturnValue({ enabled: false });
     const mockProc = createMockProcess();
