@@ -2450,6 +2450,57 @@ describe('Orchestrator', () => {
       expect(existsSync(join(testData.taskDir, 'events.jsonl'))).toBe(false);
     });
 
+    it('unstages the checked-out snapshot even when the fast-forward merge fails afterward', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const restoredSnapshot = JSON.stringify({
+        id: testData.taskId,
+        title: 'Test Task',
+        description: 'A test task for full coverage',
+        phase: 'done',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Checkout succeeds (restores the snapshot, staging it as a side
+      // effect) but the subsequent ff-only merge fails — e.g. an unrelated
+      // dirty file elsewhere in the tree blocks the fast-forward. The
+      // checkout's staged entries must not be left stranded in the index.
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args.includes('checkout')) {
+          mkdirSync(testData.taskDir, { recursive: true });
+          writeFileSync(join(testData.taskDir, 'task.json'), restoredSnapshot);
+          return '';
+        }
+        if (cmd === 'git' && args[0] === 'merge') {
+          throw new Error('fatal: Not possible to fast-forward, aborting.');
+        }
+        return '';
+      });
+
+      mockEmit.mockClear();
+      await orch.markTaskDone(testData.taskId);
+
+      // The checkout's staged entries were reset immediately after the
+      // checkout call, regardless of the merge outcome.
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['reset', '--']),
+        expect.objectContaining({ cwd: testData.root }),
+      );
+
+      // Un-staging didn't disturb the restored working-tree content.
+      expect(readFileSync(join(testData.taskDir, 'task.json'), 'utf-8')).toBe(restoredSnapshot);
+
+      // Settled via the restored snapshot despite the merge failure.
+      expect(mockEmit).toHaveBeenCalledTimes(1);
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
+        taskId: testData.taskId,
+        phase: 'done',
+      }));
+    });
+
     it('falls back to recreating task.json when pull succeeds but restores no artifacts', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
