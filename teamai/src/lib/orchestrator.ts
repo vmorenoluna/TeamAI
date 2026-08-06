@@ -438,6 +438,25 @@ export class Orchestrator {
         restored = existsSync(path.join(dir, 'task.json'));
       } catch (err) {
         logWarn('orchestrator', `markTaskDone: git checkout of ${relDir} from origin/${baseBranch} failed`, err);
+      } finally {
+        // `git checkout <ref> -- <path>` stages <path> in the index as a
+        // side effect, despite the subcommand name. The ff-only merge below
+        // is meant to reconcile this by fast-forwarding local HEAD to match
+        // — but it's allowed to fail independently (see comment above), and
+        // if it does, these staged entries would otherwise be stranded in
+        // this shared main-project-root index indefinitely: not part of any
+        // commit, not flagged as needing attention, just silently waiting to
+        // be swept into the next unrelated `git commit` run in this
+        // directory. Un-stage immediately — the restored files stay on disk
+        // (visible as ordinary untracked/modified files) either way, so the
+        // restore's resilience to a dirty tree elsewhere is unaffected; only
+        // the accidental index write is undone. A future fast-forward merge
+        // still reaches the same clean state as today. If any future change
+        // adds another `checkout -- <path>` against projectRoot here, pair
+        // it with the same reset.
+        try {
+          execFileSync('git', ['reset', '--', relDir], { cwd: this.projectRoot, stdio: 'pipe' });
+        } catch { /* best-effort */ }
       }
     }
 
