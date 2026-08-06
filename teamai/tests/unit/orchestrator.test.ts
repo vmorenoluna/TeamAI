@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { join, basename } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 
@@ -1245,18 +1245,26 @@ describe('Orchestrator', () => {
         // rmSync was called — the worktree directory should be gone
         expect(existsSync(wtPath)).toBe(false);
         // removeStaleWorktreeRegistration retries a scoped `git worktree
-        // remove --force <path>` (not the unscoped `git worktree prune`,
+        // remove --force <name>` (not the unscoped `git worktree prune`,
         // which has no path argument to limit its blast radius and would
         // risk destroying an unrelated concurrently-running task's worktree
-        // registration). Both the earlier --force attempt (via _execGit)
-        // and this fallback attempt use identical args, so there are two
-        // matching calls, not one.
-        const scopedRemoveCalls = mockExecFileSync.mock.calls.filter(
+        // registration). The earlier --force attempt (via _execGit) uses
+        // the full path; the fallback retry uses the bare worktree name —
+        // a container-patched registration's recorded path no longer
+        // matches the host-computed full path, only the basename resolves
+        // in that case (verified empirically), so the two calls differ.
+        const fullPathRemoveCalls = mockExecFileSync.mock.calls.filter(
           (c: unknown[]) => c[0] === 'git' &&
             Array.isArray(c[1]) &&
             c[1][0] === 'worktree' && c[1][1] === 'remove' && c[1][2] === '--force' && c[1][3] === wtPath,
         );
-        expect(scopedRemoveCalls.length).toBeGreaterThanOrEqual(2);
+        const basenameRemoveCalls = mockExecFileSync.mock.calls.filter(
+          (c: unknown[]) => c[0] === 'git' &&
+            Array.isArray(c[1]) &&
+            c[1][0] === 'worktree' && c[1][1] === 'remove' && c[1][2] === '--force' && c[1][3] === basename(wtPath),
+        );
+        expect(fullPathRemoveCalls.length).toBeGreaterThanOrEqual(1);
+        expect(basenameRemoveCalls.length).toBeGreaterThanOrEqual(1);
         expect(mockExecFileSync).not.toHaveBeenCalledWith(
           'git',
           ['worktree', 'prune'],

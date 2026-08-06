@@ -1099,6 +1099,14 @@ describe('_isWorktreeHealthy — container-mode path detection', () => {
 // worktree's admin entry whether its directory is already fully gone or
 // still has leftover locked/untracked files, without touching any sibling
 // worktree's registration.
+//
+// But once a worktree is container-patched, git's own record of its path
+// is the container-only location, not the host path callers here compute
+// — so passing the host path fails to match ("is not a working tree"),
+// verified empirically in a scratch repo. Passing the bare worktree name
+// (basename under .git/worktrees/) matches regardless of what path is
+// currently recorded, also verified empirically, in both the
+// container-patched and the ordinary case.
 
 describe('removeStaleWorktreeRegistration', () => {
   const projectRoot = 'C:\\proj';
@@ -1108,13 +1116,19 @@ describe('removeStaleWorktreeRegistration', () => {
     vi.resetAllMocks();
   });
 
-  it('calls git worktree remove --force scoped to exactly the given path', () => {
+  it('calls git worktree remove --force by bare worktree name, not the full path', () => {
     mockExecFileSync.mockReturnValue('');
 
     removeStaleWorktreeRegistration(projectRoot, worktreePath);
 
+    // Not the full path: a container-patched registration's recorded path
+    // no longer matches what the host computed, and only the bare name
+    // resolves in that case.
     expect(mockExecFileSync).toHaveBeenCalledWith(
-      'git', ['worktree', 'remove', '--force', worktreePath], { cwd: projectRoot, stdio: 'pipe' },
+      'git', ['worktree', 'remove', '--force', 'my-task-st2'], { cwd: projectRoot, stdio: 'pipe' },
+    );
+    expect(mockExecFileSync).not.toHaveBeenCalledWith(
+      'git', ['worktree', 'remove', '--force', worktreePath], expect.anything(),
     );
     expect(mockExecFileSync).toHaveBeenCalledTimes(1);
   });
