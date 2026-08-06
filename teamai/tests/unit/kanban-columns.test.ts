@@ -1,42 +1,10 @@
 import { describe, it, expect } from 'vitest';
-
-// Replicate normalizePhase from kanban-board.tsx
-// Maps task phases to display column phases
-function normalizePhase(phase: string): string {
-  if (phase === 'spec') return 'analysis';
-  if (phase === 'plan') return 'analysis';
-  if (phase === 'qa-fix') return 'review';
-  if (phase === 'qa-review') return 'review';
-  if (phase === 'awaiting-review') return 'review';
-  if (phase === 'create-pr') return 'review';
-  if (phase === 'pr-open') return 'review';
-  if (phase === 'merge') return 'review';
-  return phase;
-}
-
-// Replicate resolveTargetPhase from kanban-board.tsx
-// For merged columns, default to the first sub-phase or preserve existing
-function resolveTargetPhase(colPhase: string, currentPhase?: string): string {
-  if (colPhase === 'analysis') {
-    if (currentPhase === 'spec' || currentPhase === 'plan') return currentPhase;
-    return 'spec';
-  }
-  if (colPhase === 'review') {
-    if (currentPhase === 'qa-review' || currentPhase === 'awaiting-review' || currentPhase === 'qa-fix' || currentPhase === 'create-pr' || currentPhase === 'pr-open' || currentPhase === 'merge') return currentPhase;
-    return 'qa-review';
-  }
-  return colPhase;
-}
-
-// Replicate COLUMNS from kanban-board.tsx
-const COLUMNS = [
-  { phase: 'backlog', label: 'Backlog' },
-  { phase: 'analysis', label: 'Analysis' },
-  { phase: 'implement', label: 'In Progress' },
-  { phase: 'review', label: 'Review' },
-  { phase: 'failed', label: 'Failed' },
-  { phase: 'done', label: 'Done' },
-] as const;
+// Import the real implementation rather than maintaining a hand-copied
+// duplicate — a duplicate can silently drift from src/components/kanban-utils.ts
+// (edit the real function, forget this file exists, and the suite keeps
+// passing against stale logic that no longer matches what ships) and gives
+// no signal when that happens.
+import { COLUMNS, normalizePhase, resolveTargetPhase } from '@/components/kanban-utils';
 
 // ── COLUMNS structure ────────────────────────────────────────────────────────
 
@@ -145,12 +113,15 @@ describe('resolveTargetPhase — analysis column', () => {
     expect(resolveTargetPhase('analysis', 'plan')).toBe('plan');
   });
 
-  it('defaults to spec when no current phase', () => {
-    expect(resolveTargetPhase('analysis')).toBe('spec');
+  it('defaults to plan when no current phase (moveTaskToPhase falls back to spec itself if no spec.md exists)', () => {
+    expect(resolveTargetPhase('analysis')).toBe('plan');
   });
 
-  it('defaults to spec for unrelated current phase', () => {
-    expect(resolveTargetPhase('analysis', 'implement')).toBe('spec');
+  it('defaults to plan for unrelated current phase, so a failed/backlog/done task moved into Analysis keeps its existing spec', () => {
+    expect(resolveTargetPhase('analysis', 'implement')).toBe('plan');
+    expect(resolveTargetPhase('analysis', 'failed')).toBe('plan');
+    expect(resolveTargetPhase('analysis', 'backlog')).toBe('plan');
+    expect(resolveTargetPhase('analysis', 'done')).toBe('plan');
   });
 });
 
