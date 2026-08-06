@@ -403,18 +403,19 @@ export class Orchestrator {
     rmSync(dir, { recursive: true, force: true });
 
     // Restore this task's committed artifact snapshot from origin/master.
-    // This is deliberately scoped to just `relDir` via `git checkout <ref>
-    // -- <path>` rather than a whole-repo `git pull` — a repo-wide pull
-    // requires the ENTIRE working tree to be clean/fast-forwardable, and
-    // fails the moment any unrelated file is dirty (another task's
-    // in-progress edits, a stray local config change, etc.). That silent
-    // failure was the actual bug: the pull would bail, and every completed
-    // task fell into the lossy fallback below — recreating a bare-bones
-    // task.json + events.jsonl instead of the real multi-file snapshot
-    // (spec.md, plan.json, qa_report.json, output-*.log, ...) that's sitting
-    // right there on origin/master. Because `dir` was just deleted above,
-    // there is nothing local left to collide with the incoming checkout, so
-    // this restore succeeds regardless of how dirty the rest of the repo is.
+    // Primary path: fast-forward local HEAD to match origin/<base> outright.
+    // When this succeeds, the snapshot (and everything else outstanding)
+    // lands as ordinary, fully-committed, clean content — nothing left in
+    // the index or working tree needing attention. Try this FIRST, not as
+    // a best-effort afterthought: it can only ever fail closed (never
+    // partially apply), so there is no dirty-tree hazard from attempting it
+    // before the scoped fallback below. Because `dir` was just deleted
+    // above, there is nothing local left to collide with the incoming
+    // fast-forward for this task's own path — a real failure here means
+    // something ELSE in the tree is blocking it (another task's in-progress
+    // edits, a stray local config change, network trouble, genuine local
+    // divergence), which the scoped fallback is specifically built to
+    // tolerate.
     const baseBranch = resolveBaseBranch(this.projectRoot);
     let fetched = false;
     try {
@@ -428,8 +429,32 @@ export class Orchestrator {
       logWarn('orchestrator', `markTaskDone: git fetch origin ${baseBranch} failed for ${taskId}`, err);
     }
 
-    let restored = false;
+    let fastForwarded = false;
     if (fetched) {
+      try {
+        execFileSync('git', ['merge', '--ff-only', `origin/${baseBranch}`], {
+          cwd: this.projectRoot,
+          stdio: 'pipe',
+        });
+        fastForwarded = true;
+      } catch (err) {
+        logWarn('orchestrator', `markTaskDone: fast-forwarding local ${baseBranch} failed`, err);
+      }
+    }
+
+    // Fallback: scoped, dirty-tolerant restore of just this task's
+    // directory, only attempted when the fast-forward above didn't happen.
+    // Deliberately scoped to just `relDir` via `git checkout <ref> --
+    // <path>` rather than retrying a whole-repo pull — a repo-wide pull
+    // requires the ENTIRE working tree to be clean/fast-forwardable and
+    // fails the moment any unrelated file is dirty, which is exactly the
+    // case the fast-forward above couldn't already handle. Unlike the
+    // fast-forward, this path can never advance local HEAD itself, so it
+    // always leaves the restored files as ordinary untracked/modified
+    // content rather than a clean commit — that's the accepted tradeoff for
+    // resilience to a dirty tree elsewhere, not the common case.
+    let restored = fastForwarded && existsSync(path.join(dir, 'task.json'));
+    if (fetched && !fastForwarded) {
       try {
         execFileSync('git', ['checkout', `origin/${baseBranch}`, '--', relDir], {
           cwd: this.projectRoot,
@@ -440,39 +465,22 @@ export class Orchestrator {
         logWarn('orchestrator', `markTaskDone: git checkout of ${relDir} from origin/${baseBranch} failed`, err);
       } finally {
         // `git checkout <ref> -- <path>` stages <path> in the index as a
-        // side effect, despite the subcommand name. The ff-only merge below
-        // is meant to reconcile this by fast-forwarding local HEAD to match
-        // — but it's allowed to fail independently (see comment above), and
-        // if it does, these staged entries would otherwise be stranded in
-        // this shared main-project-root index indefinitely: not part of any
-        // commit, not flagged as needing attention, just silently waiting to
-        // be swept into the next unrelated `git commit` run in this
-        // directory. Un-stage immediately — the restored files stay on disk
-        // (visible as ordinary untracked/modified files) either way, so the
-        // restore's resilience to a dirty tree elsewhere is unaffected; only
-        // the accidental index write is undone. A future fast-forward merge
-        // still reaches the same clean state as today. If any future change
-        // adds another `checkout -- <path>` against projectRoot here, pair
-        // it with the same reset.
+        // side effect, despite the subcommand name — and unlike the
+        // fast-forward above, this path can never itself advance local HEAD
+        // to reconcile that, so the staged entries must always be undone
+        // here rather than left for a later best-effort pass. Otherwise
+        // they'd be stranded in this shared main-project-root index
+        // indefinitely: not part of any commit, not flagged as needing
+        // attention, just silently waiting to be swept into the next
+        // unrelated `git commit` run in this directory. Un-stage
+        // immediately — the restored files stay on disk (visible as
+        // ordinary untracked/modified files) either way; only the
+        // accidental index write is undone. If any future change adds
+        // another `checkout -- <path>` against projectRoot here, pair it
+        // with the same reset.
         try {
           execFileSync('git', ['reset', '--', relDir], { cwd: this.projectRoot, stdio: 'pipe' });
         } catch { /* best-effort */ }
-      }
-    }
-
-    // Best-effort: also fast-forward the local default branch pointer itself
-    // so it doesn't drift further behind origin over time. This is allowed
-    // to fail independently of the restore above (e.g. unrelated dirty
-    // files elsewhere in the tree still block a full fast-forward) — that
-    // failure no longer costs this task its artifacts.
-    if (fetched) {
-      try {
-        execFileSync('git', ['merge', '--ff-only', `origin/${baseBranch}`], {
-          cwd: this.projectRoot,
-          stdio: 'pipe',
-        });
-      } catch (err) {
-        logWarn('orchestrator', `markTaskDone: fast-forwarding local ${baseBranch} failed`, err);
       }
     }
 
