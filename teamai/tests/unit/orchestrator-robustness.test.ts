@@ -75,7 +75,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator } from '../../src/lib/orchestrator';
-import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations } from '../../src/lib/orchestrator/implement';
+import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup } from '../../src/lib/orchestrator/implement';
 import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
 
@@ -4393,6 +4393,59 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
     }
   });
 
+  // Regression coverage for a real production failure: the pre-cherry-pick
+  // "auto-commit stray changes in the main worktree" check used a raw
+  // execFileSync('git', ['status', '--porcelain'], { cwd: pipeline.worktreePath })
+  // instead of deps.execGitCapture. The main worktree is routinely
+  // container-patched while a pipeline run is active, and a raw host-side
+  // git call against a container-patched worktree fails outright — a
+  // failure this check silently swallowed (logged, then "proceeding with
+  // cherry-pick" regardless). With the check never actually running, stray
+  // uncommitted changes were left in place, and the REAL cherry-pick that
+  // followed failed instead with "local changes would be overwritten by
+  // merge" — a symptom that reads as an unrelated problem.
+  //
+  // Proving this precisely requires distinguishing "went through
+  // deps.execGitCapture" from "shelled out directly" — which integrateGroup
+  // is exported to allow (matching tryCherryPickWithRecovery's existing
+  // @internal-for-tests pattern), sidestepping the need to simulate a full
+  // container-mode routing path through the real Orchestrator just to prove
+  // which of two indistinguishable-in-non-container-mode call styles fired.
+  it('auto-commits stray uncommitted changes in the main worktree via execGitCapture, not a raw shell-out', async () => {
+    const execGitCapture = vi.fn((args: string[]) => {
+      if (args[0] === 'status') return ' M stray-file.txt\n';
+      return '';
+    });
+    const execGit = vi.fn();
+    const deps = {
+      execGit,
+      execGitCapture,
+      projectRoot: project.root,
+      sessionOpts: vi.fn() as any,
+    } as unknown as ImplementDeps;
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    const subtaskWorktrees = new Map<number, string>([[1, join(project.root, 'worktrees', 'test-task-st1')]]);
+    await integrateGroup(
+      pipeline, deps,
+      [{ id: 1, title: 'x', description: 'x', files: [], acceptance_criteria: [], depends_on: [] }],
+      [{ status: 'fulfilled', value: undefined }],
+      new Set(), subtaskWorktrees, join(project.root, 'output.log'),
+    );
+
+    // The status check must go through execGitCapture (container-aware) —
+    // never a raw execFileSync/execGit call for this read.
+    expect(execGitCapture).toHaveBeenCalledWith(['status', '--porcelain'], pipeline.worktreePath);
+
+    // A dirty status must result in an auto-commit via execGit (also
+    // container-aware) before cherry-picking proceeds.
+    expect(execGit).toHaveBeenCalledWith(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
+    expect(execGit).toHaveBeenCalledWith(['commit', '-m', 'chore: auto-save worktree state before cherry-pick'], pipeline.worktreePath);
+  });
+
   it('resumes the wakeup subtask in its preserved isolated worktree once the group has collapsed to just that subtask', async () => {
     // Simulate: subtask 2 already completed/integrated in a prior round;
     // subtask 1 is the sole remaining subtask, resuming after its wakeup fired.
@@ -5151,7 +5204,9 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
     deps.execGit = vi.fn()
       .mockImplementationOnce(() => { throw new Error('fatal: not a git repository: (null)'); });
 
-    // checkCherryPickInProgress → not in progress (no CHERRY_PICK_HEAD)
+    // checkCherryPickInProgress → not in progress (no CHERRY_PICK_HEAD).
+    // Goes through deps.execGitCapture (container-aware), not raw execFileSync.
+    deps.execGitCapture = vi.fn(() => { throw new Error('not found'); });
     mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
 
     // readContainerConfig returns enabled: false (default mock) — not in container mode
@@ -5170,7 +5225,9 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
     deps.execGit = vi.fn()
       .mockImplementationOnce(() => { throw new Error('CONFLICT (content): Merge conflict in file.ts'); });
 
-    // CHERRY_PICK_HEAD exists → infra path guard "!checkCherryPickInProgress" is false
+    // CHERRY_PICK_HEAD exists → infra path guard "!checkCherryPickInProgress" is false.
+    // Goes through deps.execGitCapture (container-aware), not raw execFileSync.
+    deps.execGitCapture = vi.fn(() => 'abc123\n');
     mockExecFileSync.mockReturnValue('abc123\n');
 
     const { readContainerConfig, containerManager } = await import('../../src/lib/container-manager');
@@ -5196,6 +5253,7 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
     expect(containerManager.ensureContainer).not.toHaveBeenCalled();
 
     // Now simulate merger resolving the conflict
+    deps.execGitCapture = vi.fn(() => { throw new Error('not found'); });
     mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
     resolveCompletion!();
     const result = await resultPromise;

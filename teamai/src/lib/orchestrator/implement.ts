@@ -623,9 +623,7 @@ async function runSubtaskSession(
   // not just the last one.
   let preSessionHead = '';
   try {
-    preSessionHead = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd, encoding: 'utf-8', stdio: 'pipe',
-    }).trim();
+    preSessionHead = deps.execGitCapture(['rev-parse', 'HEAD'], cwd).trim();
   } catch { /* best-effort — scope check is skipped if snapshot fails */ }
 
   // Stall-detector-kill recovery loop. A session killed for stalling
@@ -727,9 +725,7 @@ async function runSubtaskSession(
   // Post-session scope check: verify agent only modified assigned files.
   if (preSessionHead) {
     try {
-      const changedFiles = execFileSync('git', ['diff', '--name-only', preSessionHead + '..HEAD'], {
-        cwd, encoding: 'utf-8', stdio: 'pipe',
-      }).trim().split('\n').filter(Boolean);
+      const changedFiles = deps.execGitCapture(['diff', '--name-only', preSessionHead + '..HEAD'], cwd).trim().split('\n').filter(Boolean);
 
       const assignedFiles = new Set(subtask.files || []);
       const violations = changedFiles.filter(f => !assignedFiles.has(f));
@@ -926,8 +922,10 @@ async function runSubtaskSession(
  *
  * @returns true if the pipeline should continue, false if a hard failure
  *          (retainWorktrees was set) requires aborting the groups loop.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
  */
-async function integrateGroup(
+export async function integrateGroup(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
   subtasks: PlanSubtask[],
@@ -942,16 +940,22 @@ async function integrateGroup(
   // for a lone subtask resuming after a wakeup in a now-collapsed group.
   if (subtaskWorktrees.size > 0) {
     // Pre-cherry-pick: auto-commit any uncommitted changes in the main worktree.
+    // Must go through deps.execGit/execGitCapture, not a raw execFileSync —
+    // the main worktree is routinely container-patched (its .git file and
+    // the admin back-reference point at container-only /workspaces/... paths)
+    // while a pipeline run is active, and a raw host-side `git status` against
+    // a container-patched worktree fails outright ("fatal: not a git
+    // repository"). That failure was being silently swallowed by the catch
+    // below, which let real uncommitted changes sit in the worktree
+    // unnoticed — with nothing to catch them, the cherry-pick that follows
+    // fails instead with "local changes would be overwritten by merge",
+    // which reads as a completely different problem.
     try {
-      const statusOut = execFileSync('git', ['status', '--porcelain'], {
-        cwd: pipeline.worktreePath, encoding: 'utf-8', stdio: 'pipe',
-      }).trim();
+      const statusOut = deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath).trim();
       if (statusOut) {
         logToOutput(pipeline.specPath, '\n[WORKTREE] Main worktree has uncommitted changes — auto-committing before cherry-pick:\n' + statusOut + '\n');
-        execFileSync('git', ['add', '-A', '--', '.', ':!.teamai'], { cwd: pipeline.worktreePath, stdio: 'pipe' });
-        execFileSync('git', ['commit', '-m', 'chore: auto-save worktree state before cherry-pick'], {
-          cwd: pipeline.worktreePath, stdio: 'pipe',
-        });
+        deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
+        deps.execGit(['commit', '-m', 'chore: auto-save worktree state before cherry-pick'], pipeline.worktreePath);
         logToOutput(pipeline.specPath, '[WORKTREE] Auto-committed uncommitted changes\n');
       }
     } catch (statusErr) {
@@ -1541,12 +1545,16 @@ export async function _recoverSubtaskBranchBeforeDelete(
   return result.recovered;
 }
 
-/** Check whether a cherry-pick is currently in progress (CHERRY_PICK_HEAD exists). */
-function checkCherryPickInProgress(worktreePath: string): boolean {
+/**
+ * Check whether a cherry-pick is currently in progress (CHERRY_PICK_HEAD exists).
+ * Takes execGitCapture rather than shelling out directly — worktreePath here
+ * is always the main worktree, which is routinely container-patched while a
+ * pipeline run is active, and a raw host-side git call against it fails
+ * outright instead of reporting "not in progress".
+ */
+function checkCherryPickInProgress(worktreePath: string, execGitCapture: ImplementDeps['execGitCapture']): boolean {
   try {
-    execFileSync('git', ['rev-parse', '--verify', 'CHERRY_PICK_HEAD'], {
-      cwd: worktreePath, encoding: 'utf-8', stdio: 'pipe',
-    });
+    execGitCapture(['rev-parse', '--verify', 'CHERRY_PICK_HEAD'], worktreePath);
     return true;
   } catch {
     return false;
@@ -1623,7 +1631,7 @@ export async function tryCherryPickWithRecovery(
     // Defect 3: detect infra-class errors (dead container, Docker unreachable)
     // and retry after reprovisioning before giving up. These are trivially
     // retryable once the container is back, unlike genuine git conflicts.
-    if (!checkCherryPickInProgress(pipeline.worktreePath) && isInfraError(firstMsg)) {
+    if (!checkCherryPickInProgress(pipeline.worktreePath, deps.execGitCapture) && isInfraError(firstMsg)) {
       try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
 
       // Check if container mode is active and attempt reprovision
@@ -1653,7 +1661,7 @@ export async function tryCherryPickWithRecovery(
   }
 
   // Check whether this is a recoverable conflict or a hard failure
-  if (!checkCherryPickInProgress(pipeline.worktreePath)) {
+  if (!checkCherryPickInProgress(pipeline.worktreePath, deps.execGitCapture)) {
     try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
     logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick hard-failed (not a conflict) — cannot auto-recover subtask ' + subtaskId + '\n');
     return false;
@@ -1661,9 +1669,7 @@ export async function tryCherryPickWithRecovery(
 
   // Tier 2: Spawn merger agent to resolve conflicts semantically
   try {
-    const conflictedFiles = execFileSync('git', ['diff', '--name-only', '--diff-filter=U'], {
-      cwd: pipeline.worktreePath, encoding: 'utf-8', stdio: 'pipe',
-    }).trim();
+    const conflictedFiles = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath).trim();
     logToOutput(pipeline.specPath, '[WORKTREE] Conflicted files: ' + (conflictedFiles || '(none listed)') + '\n');
   } catch { /* best-effort — proceed with merger */ }
   logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick has conflicts — spawning merger agent for subtask ' + subtaskId + '\n');
@@ -1688,7 +1694,7 @@ export async function tryCherryPickWithRecovery(
     await deps.waitForCompletion(mergeSessionId);
     processManager.killSession(mergeSessionId);
 
-    if (checkCherryPickInProgress(pipeline.worktreePath)) {
+    if (checkCherryPickInProgress(pipeline.worktreePath, deps.execGitCapture)) {
       logToOutput(pipeline.specPath, '[WORKTREE] Merger finished but cherry-pick still in progress for subtask ' + subtaskId + ' — aborting\n');
       try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
       return false;
