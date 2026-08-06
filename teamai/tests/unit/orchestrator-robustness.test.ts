@@ -5417,6 +5417,131 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Harden per-subtask branch recreation — verify branch deletion before -b
+// ═══════════════════════════════════════════════════════════════════════
+// When a prior run left a stale per-subtask branch that can't be deleted
+// (the worktree removal silently failed due to a file lock), the `-b` flag
+// in `git worktree add -b <stBranch>` crashes with "a branch named X
+// already exists". The fix verifies the branch is gone after `git branch -D`
+// and falls back to checking out the existing branch (no `-b`) when deletion
+// didn't take.
+
+describe('runImplement — per-subtask branch recreation fallback when deletion fails', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+
+    // Ensure container mode stays disabled for this test path.
+    const { readContainerConfig, containerManager } = await import('../../src/lib/container-manager');
+    vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
+    vi.mocked(containerManager.ensureContainer).mockResolvedValue({
+      containerId: 'test-container', remoteWorkspaceFolder: '/workspaces/test',
+    });
+
+    // rev-parse --verify stBranch:
+    //   odd calls → throw (branch doesn't exist — _recoverStBranchCommits returns recovered:true)
+    //   even calls → return hash (branch still exists — verification after branch -D catches it)
+    let revParseCount = 0;
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'rev-parse' && args[1] === '--verify' && args[2] === 'CHERRY_PICK_HEAD') {
+          throw new Error('fatal: needed a single revision');
+        }
+        if (args[0] === 'rev-parse' && args[1] === '--verify') {
+          revParseCount++;
+          if (revParseCount % 2 === 1) throw new Error('fatal: Needed a single revision');
+          return 'abc123\n';
+        }
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'branch') return '';
+        if (args[0] === 'worktree') return '';
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull'
+            || args[0] === 'rebase' || args[0] === 'cherry-pick') return '';
+        if (args[0] === 'log') return '';
+        if (args[0] === 'status') return '';
+        if (args[0] === 'add') return '';
+        if (args[0] === 'commit') return '';
+      }
+      return '';
+    });
+
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Fix A', description: 'Fix module A', files: ['src/a.ts'], acceptance_criteria: ['A works'], parallel_group: 1 },
+        { id: 2, title: 'Fix B', description: 'Fix module B', files: ['src/b.ts'], acceptance_criteria: ['B works'], parallel_group: 1 },
+      ],
+    }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    project.clean();
+  });
+
+  it('falls back to existing-branch checkout when branch deletion silently fails (revert-then-restore proof)', async () => {
+    // Simulate: prior run created per-subtask branches/wortrees, was
+    // interrupted, and the worktree removal on resume can't fully clean up
+    // (file lock). git branch -D is swallowed by best-effort catch, and
+    // without the verification step, `worktree add -b` crashes.
+    mockCreateSession
+      .mockResolvedValueOnce('sess-br-st1')
+      .mockResolvedValueOnce('sess-br-st2');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+
+      fireEvent('event', { sessionId: 'sess-br-st1', event: { type: 'result' } });
+      fireEvent('event', { sessionId: 'sess-br-st2', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+
+      // Must not crash — the fix falls back to checking out the existing
+      // branch rather than throwing on "a branch named X already exists".
+      expect(pipeline.phase).not.toBe('failed');
+
+      // The worktree-add calls must use the fallback path (no -b) for both subtasks.
+      const worktreeAddCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'git' && Array.isArray(call[1]) && call[1][0] === 'worktree' && call[1][1] === 'add',
+      );
+      // There should be two per-subtask worktree-add calls in the st-worktree paths,
+      // neither with -b.
+      const stWorktreeAdds = worktreeAddCalls.filter(
+        (c: any[]) => typeof c[1][2] === 'string' && c[1][2].includes('-st'),
+      );
+      expect(stWorktreeAdds.length).toBe(2);
+      for (const call of stWorktreeAdds) {
+        expect(call[1]).not.toContain('-b');
+        // Should be: ['worktree', 'add', stWorktreePath, stBranch]
+        expect(call[1][2]).toContain('-st');
+        expect(call[1][3]).toContain('-st');
+      }
+
+      // The fallback log message must appear — distinctly worded from the
+      // "branch preserved by recovery decision" case (canRecreate === false).
+      const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(logContent).toContain('still exists after deletion attempt');
+      expect(logContent).toContain('worktree removal likely incomplete');
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 //  _recoverStBranchCommits — direct tests
 // ═══════════════════════════════════════════════════════════════════════
 

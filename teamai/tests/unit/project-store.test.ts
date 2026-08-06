@@ -793,4 +793,156 @@ describe('ProjectStore', () => {
     expect(content).toContain('# TeamAI — exclude transient pipeline files');
   });
 
+  it('_updateGitignore does not throw when .gitignore is write-protected (best-effort)', async () => {
+    // Pre-create .gitignore without the TeamAI block and make it read-only.
+    const giPath = join(projectDir, '.gitignore');
+    writeFileSync(giPath, 'node_modules/\n');
+
+    const { chmodSync, constants } = await import('fs');
+    chmodSync(giPath, constants.S_IRUSR);
+
+    try {
+      // Must not throw — the catch block swallows write failures silently.
+      expect(() => (store as any)._updateGitignore(projectDir)).not.toThrow();
+    } finally {
+      chmodSync(giPath, constants.S_IRUSR | constants.S_IWUSR);
+    }
+  });
+
+  // ── _updateGitattributes ────────────────────────────────────────────────
+
+  it('_updateGitattributes creates .gitattributes with TeamAI normalization when none exists', () => {
+    const gitattributesPath = join(projectDir, '.gitattributes');
+    expect(existsSync(gitattributesPath)).toBe(false);
+
+    (store as any)._updateGitattributes(projectDir);
+
+    expect(existsSync(gitattributesPath)).toBe(true);
+    const content = readFileSync(gitattributesPath, 'utf-8');
+    expect(content).toContain('# TeamAI — consistent line-ending normalization across host and container');
+    expect(content).toContain('* text=auto eol=lf');
+  });
+
+  it('_updateGitattributes appends TeamAI block when .gitattributes exists without it', () => {
+    const gitattributesPath = join(projectDir, '.gitattributes');
+    writeFileSync(gitattributesPath, '*.js text eol=lf\n');
+
+    (store as any)._updateGitattributes(projectDir);
+
+    const content = readFileSync(gitattributesPath, 'utf-8');
+    // Original content preserved
+    expect(content).toContain('*.js text eol=lf');
+    // TeamAI block appended
+    expect(content).toContain('# TeamAI — consistent line-ending normalization across host and container');
+    expect(content).toContain('* text=auto eol=lf');
+  });
+
+  it('_updateGitattributes is a no-op when the TeamAI block is already present', () => {
+    const gitattributesPath = join(projectDir, '.gitattributes');
+    const original = [
+      '*.js text eol=lf',
+      '',
+      '# TeamAI — consistent line-ending normalization across host and container',
+      '* text=auto eol=lf',
+    ].join('\n') + '\n';
+    writeFileSync(gitattributesPath, original);
+
+    (store as any)._updateGitattributes(projectDir);
+
+    const content = readFileSync(gitattributesPath, 'utf-8');
+    expect(content).toBe(original);
+  });
+
+  it('_updateGitattributes appends missing TeamAI lines when only some are present', () => {
+    const gitattributesPath = join(projectDir, '.gitattributes');
+    // Only has the comment line but not the policy line
+    writeFileSync(gitattributesPath, [
+      '*.js text eol=lf',
+      '',
+      '# TeamAI — consistent line-ending normalization across host and container',
+    ].join('\n') + '\n');
+
+    (store as any)._updateGitattributes(projectDir);
+
+    const content = readFileSync(gitattributesPath, 'utf-8');
+    expect(content).toContain('*.js text eol=lf');
+    expect(content).toContain('* text=auto eol=lf');
+    // The comment should appear exactly once
+    const commentCount = (content.match(/# TeamAI — consistent line-ending/g) || []).length;
+    expect(commentCount).toBe(1);
+  });
+
+  it('_updateGitattributes writes renormalize-suggestion marker file when block is first added', () => {
+    const markerPath = join(projectDir, '.teamai', 'gitattributes-renormalize-suggestion');
+    expect(existsSync(markerPath)).toBe(false);
+
+    // Brand-new — no .gitattributes exists
+    const result = (store as any)._updateGitattributes(projectDir);
+    expect(result).toBe(true);
+    expect(existsSync(markerPath)).toBe(true);
+
+    // Clean up marker and call again — block already present, should be no-op
+    unlinkSync(markerPath);
+    const result2 = (store as any)._updateGitattributes(projectDir);
+    expect(result2).toBe(false);
+    expect(existsSync(markerPath)).toBe(false);
+  });
+
+  it('_updateGitattributes writes marker when block is appended to existing .gitattributes', () => {
+    const markerPath = join(projectDir, '.teamai', 'gitattributes-renormalize-suggestion');
+    // Pre-create .gitattributes without the TeamAI block
+    writeFileSync(join(projectDir, '.gitattributes'), '*.js text eol=lf\n');
+    mkdirSync(join(projectDir, '.teamai'), { recursive: true });
+
+    const result = (store as any)._updateGitattributes(projectDir);
+    expect(result).toBe(true);
+    expect(existsSync(markerPath)).toBe(true);
+  });
+
+  it('_updateGitattributes does not write marker when block is already present (no-op)', () => {
+    const markerPath = join(projectDir, '.teamai', 'gitattributes-renormalize-suggestion');
+    const gitattributesPath = join(projectDir, '.gitattributes');
+    writeFileSync(gitattributesPath, [
+      '# TeamAI — consistent line-ending normalization across host and container',
+      '* text=auto eol=lf',
+    ].join('\n') + '\n');
+
+    const result = (store as any)._updateGitattributes(projectDir);
+    expect(result).toBe(false);
+    expect(existsSync(markerPath)).toBe(false);
+  });
+
+  it('_updateGitattributes does not throw when .gitattributes is write-protected (best-effort)', async () => {
+    // Pre-create .gitattributes without the TeamAI block and make it
+    // read-only so appendFileSync throws EPERM.
+    const gaPath = join(projectDir, '.gitattributes');
+    writeFileSync(gaPath, '*.js text eol=lf\n');
+
+    const { chmodSync, constants } = await import('fs');
+    // Make the file read-only (owner-read only — no write permission).
+    chmodSync(gaPath, constants.S_IRUSR);
+
+    try {
+      // Must not throw — the catch block swallows write failures silently.
+      expect(() => (store as any)._updateGitattributes(projectDir)).not.toThrow();
+    } finally {
+      // Restore write permission so the test dir can be cleaned up.
+      chmodSync(gaPath, constants.S_IRUSR | constants.S_IWUSR);
+    }
+  });
+
+  it('_updateGitattributes does not throw when .gitattributes cannot be created (best-effort)', async () => {
+    // Place a directory at .gitattributes so writeFileSync fails with EISDIR.
+    const gaPath = join(projectDir, '.gitattributes');
+    const { mkdirSync: mkdir, rmdirSync: rmdir } = await import('fs');
+    mkdir(gaPath);
+
+    try {
+      // Must not throw — the try/catch around writeFileSync swallows failures.
+      expect(() => (store as any)._updateGitattributes(projectDir)).not.toThrow();
+    } finally {
+      rmdir(gaPath);
+    }
+  });
+
 });

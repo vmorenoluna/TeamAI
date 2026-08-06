@@ -3,7 +3,7 @@
 import { projectStore } from '@/lib/project-store';
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
-import { readdirSync } from 'fs';
+import { readdirSync, existsSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { error as logError } from '@/lib/logger';
@@ -145,4 +145,39 @@ export async function getAllProjectsSyncStatus(): Promise<ProjectSyncStatus[]> {
       outdatedFiles: outdated,
     };
   });
+}
+
+// ── .gitattributes renormalize suggestion ────────────────────────────
+
+const RENORMALIZE_MARKER = 'gitattributes-renormalize-suggestion';
+
+/**
+ * If the active project has a pending renormalize suggestion (a one-time
+ * prompt to run `git add --renormalize .` after .gitattributes was first
+ * added), return its path. Otherwise return null.
+ */
+export async function getGitattributesRenormalizeSuggestion(): Promise<string | null> {
+  try {
+    const activePath = await getActiveProjectPath();
+    const markerPath = join(activePath, '.teamai', RENORMALIZE_MARKER);
+    if (existsSync(markerPath)) return activePath;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Dismiss the renormalize suggestion — deletes the marker file so the
+ * banner won't reappear on future server restarts.
+ */
+export async function dismissGitattributesRenormalizeSuggestion(): Promise<void> {
+  try {
+    const activePath = await getActiveProjectPath();
+    const markerPath = join(activePath, '.teamai', RENORMALIZE_MARKER);
+    if (existsSync(markerPath)) {
+      unlinkSync(markerPath);
+      revalidateRoot();
+    }
+  } catch { /* best-effort */ }
 }
