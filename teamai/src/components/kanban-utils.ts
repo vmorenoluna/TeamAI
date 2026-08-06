@@ -27,7 +27,17 @@ export function normalizePhase(phase: string): string {
 export function resolveTargetPhase(colPhase: string, currentPhase?: string): string {
   if (colPhase === 'analysis') {
     if (currentPhase === 'spec' || currentPhase === 'plan') return currentPhase;
-    return 'spec';
+    // A task moved in from any OTHER phase (failed, backlog, done, ...)
+    // requests 'plan', not 'spec'. moveTaskToPhase's own artifact-aware
+    // resolution (orchestrator.ts) already downgrades to 'spec' when no
+    // spec.md exists for the task, so this is never wrong for a task with
+    // no prior spec — but for a task that already has one (most commonly a
+    // failed task being re-planned), requesting 'plan' here is what lets
+    // the existing spec survive the move instead of being cleared and
+    // regenerated from scratch. There's no UI path to request 'plan'
+    // specifically otherwise — drag-and-drop into the merged Analysis
+    // column is the only way to move a task into this phase group.
+    return 'plan';
   }
   if (colPhase === 'review') {
     if (currentPhase === 'qa-review' || currentPhase === 'awaiting-review' || currentPhase === 'qa-fix' || currentPhase === 'create-pr' || currentPhase === 'pr-open' || currentPhase === 'merge') return currentPhase;
