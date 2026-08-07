@@ -2,10 +2,22 @@
 
 import { useState, useEffect } from 'react';
 import { useServerMutation } from '@/hooks/use-server-mutation';
-import { checkTaskWorktree, deleteTaskWorktree, retryTask, stopTask, pauseTask, resumeTask, playTask } from '@/app/actions/tasks';
+import { checkTaskWorktree, deleteTaskWorktree, retryTaskWithOptions, stopTask, pauseTask, resumeTask, playTask } from '@/app/actions/tasks';
 import type { Task } from '@/lib/task-store';
 import { formatActionError } from '@/lib/error-format';
 import { PHASE_BADGE, PHASE_LABELS } from '@/constants/phases';
+import { RetryPhaseDialog, type DialogPhaseOption } from './retry-phase-dialog';
+
+// ── Phase options for the Retry button (full list) ──
+// Default phase is 'implement' — the most common failure point is qa-review,
+// which maps to implement-level artifact clearing (keep spec+plan, clear QA).
+// This is a reasonable default since getResumePhaseForFailedTask() requires
+// events.jsonl (server-side) and can't be computed client-side.
+const RETRY_PHASE_OPTIONS: DialogPhaseOption[] = [
+  { phase: 'spec', label: 'Spec' },
+  { phase: 'plan', label: 'Plan' },
+  { phase: 'implement', label: 'Implement' },
+];
 
 const DESCRIPTION_LIMIT = 80;
 
@@ -38,6 +50,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
   const [wtStatus, setWtStatus] = useState<{ exists: boolean; path: string | null }>({ exists: false, path: null });
   const [wtChecking, setWtChecking] = useState(!!task.branch);
   const [wtDeleting, setWtDeleting] = useState(false);
+  const [showRetryDialog, setShowRetryDialog] = useState(false);
 
   useEffect(() => {
     if (!task.branch) {
@@ -81,11 +94,16 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
     ? (longDesc && !expanded ? task.description.slice(0, DESCRIPTION_LIMIT) + '…' : task.description)
     : null;
 
-  async function handleRetry(e: React.MouseEvent) {
+  function handleRetry(e: React.MouseEvent) {
     e.stopPropagation();
+    setShowRetryDialog(true);
+  }
+
+  async function handleRetryConfirm(phase: string, resetBudget: boolean) {
+    setShowRetryDialog(false);
     runRetry(async () => {
       try {
-        const result = await retryTask(task.id);
+        const result = await retryTaskWithOptions(task.id, phase, resetBudget);
         if (!result.success) throw new Error(result.error || 'Unknown error');
       } catch (err) {
         alert(formatActionError('retry task', err));
@@ -147,6 +165,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
   }
 
   return (
+    <>
     <div
       data-component="task-card"
       onClick={() => isMoving ? null : onSelect(task.id)}
@@ -375,5 +394,18 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
         </div>
       </div>
     </div>
+
+    {/* Retry-phase dialog */}
+    {showRetryDialog && (
+      <RetryPhaseDialog
+        taskTitle={task.title}
+        phases={RETRY_PHASE_OPTIONS}
+        defaultPhase="implement"
+        budgetDefault={false}
+        onCancel={() => setShowRetryDialog(false)}
+        onConfirm={handleRetryConfirm}
+      />
+    )}
+    </>
   );
 }

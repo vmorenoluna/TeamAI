@@ -68,10 +68,25 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
     resumePhase = getResumePhaseForFailedTask(events);
   } catch { /* fall back to default */ }
 
-  // ── Gap 4b: Restore qa_report.json from snapshot if deleted ──
-  // Belt-and-suspenders guard: if the report was deleted before the retry,
-  // restore it from any available snapshot so context is preserved.
+  _preRestoreFailedTask(taskStore, taskId);
+
+  // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
+  orchestrator.moveTaskToPhase(taskId, resumePhase).catch(console.error);
+  revalidatePath('/');
+  return { success: true };
+}
+
+/**
+ * Shared pre-restore logic for failed tasks.
+ *
+ * Restores qa_report.json and human_feedback.md from snapshots if deleted,
+ * snapshots qa_report.json before re-running, clears completionSummary,
+ * and clears output.log for a fresh terminal view on retry.
+ */
+function _preRestoreFailedTask(taskStore: TaskStore, taskId: string): void {
   const dir = taskStore.getDirById(taskId);
+
+  // ── Gap 4b: Restore qa_report.json from snapshot if deleted ──
   const reportPath = join(dir, 'qa_report.json');
   if (!existsSync(reportPath)) {
     for (const snapName of ['qa_report_before_failed.json', 'qa_report_before_bounce.json']) {
@@ -112,15 +127,43 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
   // Clear completionSummary so the failure indicator disappears
   taskStore.update(taskId, { completionSummary: undefined });
 
-  // Clear output.log for a fresh terminal view on retry.
-  // resumeTask does this too — retryTask (the UI's Retry button path) was
-  // missing it, so old log content from the failed run was appended to,
-  // not replaced. Defect 6 part 2.
+  // Clear output.log for a fresh terminal view on retry
   const outputPath = join(dir, 'output.log');
   try { if (existsSync(outputPath)) unlinkSync(outputPath); } catch { /* best-effort */ }
+}
+
+/**
+ * Retry a task with explicit phase and optional budget reset.
+ *
+ * Unlike `retryTask` which picks the resume phase automatically from
+ * events.jsonl, this accepts an explicit phase chosen by the user through
+ * the retry-phase dialog.  It also accepts an optional `resetBudget` flag
+ * that clears `.pipeline_state.json` (resetting qaAttempt and the other
+ * failure counters) regardless of target phase — decoupling the "which
+ * artifacts to clear" decision from the "fresh QA-attempt budget" decision.
+ */
+export async function retryTaskWithOptions(
+  taskId: string,
+  phase: string,
+  resetBudget: boolean,
+): Promise<{ success: boolean; error?: string }> {
+  const { taskStore, orchestrator } = await getStores();
+  const task = taskStore.getById(taskId);
+  if (!task) return { success: false, error: 'Task not found' };
+
+  // ── Pre-restore work (only for failed tasks) ──
+  if (task.phase === 'failed') {
+    _preRestoreFailedTask(taskStore, taskId);
+  }
+
+  // ── Budget reset (independent of phase choice) ──
+  if (resetBudget) {
+    const dir = taskStore.getDirById(taskId);
+    orchestrator.clearPipelineStateFile(dir);
+  }
 
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
-  orchestrator.moveTaskToPhase(taskId, resumePhase).catch(console.error);
+  orchestrator.moveTaskToPhase(taskId, phase).catch(console.error);
   revalidatePath('/');
   return { success: true };
 }

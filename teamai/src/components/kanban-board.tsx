@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { createTask, moveTask, bulkDeleteTasks } from '@/app/actions/tasks';
+import { createTask, moveTask, bulkDeleteTasks, retryTaskWithOptions } from '@/app/actions/tasks';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskCard } from './task-card';
@@ -11,12 +11,40 @@ import { TaskModal } from './task-modal';
 import { NewTaskDialog } from './new-task-dialog';
 import { KanbanFilters } from './kanban-filters';
 import { COLUMNS, normalizePhase, resolveTargetPhase, TEMPLATES } from './kanban-utils';
+import { RetryPhaseDialog, type DialogPhaseOption } from './retry-phase-dialog';
 import { formatActionError } from '@/lib/error-format';
+import { NO_RESUME_PHASES } from '@/constants/phases';
 import type { Task } from '@/lib/task-store';
 
 interface Props {
   tasks: Task[];
   projectPath: string;
+}
+
+// ── Phase options per kanban column ────────────────────────────────────────
+
+const ANALYSIS_PHASE_OPTIONS: DialogPhaseOption[] = [
+  { phase: 'spec', label: 'Spec' },
+  { phase: 'plan', label: 'Plan' },
+];
+
+const IMPLEMENT_PHASE_OPTIONS: DialogPhaseOption[] = [
+  { phase: 'implement', label: 'Implement' },
+];
+
+const REVIEW_PHASE_OPTIONS: DialogPhaseOption[] = [
+  { phase: 'qa-review', label: 'QA Review' },
+];
+
+function getPhaseOptionsForColumn(colPhase: string): DialogPhaseOption[] | null {
+  if (colPhase === 'analysis') return ANALYSIS_PHASE_OPTIONS;
+  if (colPhase === 'implement') return IMPLEMENT_PHASE_OPTIONS;
+  if (colPhase === 'review') return REVIEW_PHASE_OPTIONS;
+  return null; // backlog / failed / done — no dialog
+}
+
+function isArtifactClearingTarget(targetPhase: string): boolean {
+  return !NO_RESUME_PHASES.has(targetPhase);
 }
 
 export function KanbanBoard({ tasks, projectPath }: Props) {
@@ -39,6 +67,14 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'az' | 'za'>('newest');
   const [showDialog, setShowDialog] = useState(false);
+
+  // Pending drag-and-drop that needs the retry-phase confirmation dialog
+  const [pendingDrop, setPendingDrop] = useState<{
+    taskId: string;
+    task: Task;
+    targetPhase: string;
+    colPhase: string;
+  } | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
@@ -241,46 +277,106 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
     setDragOverPhase(null);
   }
 
-  function handleDrop(targetPhase: string) {
+  // ── Drop handler: show dialog for artifact-clearing phases, move instantly otherwise ──
+
+  function handleDrop(colPhase: string) {
     if (!draggingTaskId) return;
     const task = tasks.find(t => t.id === draggingTaskId);
-    if (!task || normalizePhase(effectivePhase(task)) === targetPhase) {
+    if (!task || normalizePhase(effectivePhase(task)) === colPhase) {
       setDraggingTaskId(null);
       setDragOverPhase(null);
       return;
     }
 
+    const actualPhase = resolveTargetPhase(colPhase, task.phase);
+
+    // Drops to backlog / done / failed don't clear artifacts — proceed instantly.
+    if (!isArtifactClearingTarget(actualPhase)) {
+      executeDropMove(draggingTaskId, task, actualPhase, colPhase);
+      return;
+    }
+
+    // Artifact-clearing target — show the confirmation dialog instead of
+    // applying the optimistic update immediately.  Cancel keeps the card
+    // in its original column untouched.
+    setDraggingTaskId(null);
+    setDragOverPhase(null);
+    setPendingDrop({
+      taskId: draggingTaskId,
+      task,
+      targetPhase: actualPhase,
+      colPhase,
+    });
+  }
+
+  /** Execute the actual move (optimistic UI + server call). */
+  function executeDropMove(taskId: string, task: Task, actualPhase: string, colPhase: string) {
     const previousPhase = task.phase;
-    undoStackRef.current.push({ taskId: draggingTaskId, previousPhase, taskTitle: task.title });
+    undoStackRef.current.push({ taskId, previousPhase, taskTitle: task.title });
     if (undoStackRef.current.length > 20) undoStackRef.current.shift();
-    showToast(`Moved "${task.title}" to ${targetPhase}`, { taskId: draggingTaskId, previousPhase, taskTitle: task.title });
+    showToast(`Moved "${task.title}" to ${colPhase}`, { taskId, previousPhase, taskTitle: task.title });
 
     setOptimisticPhases(prev => {
       const next = new Map(prev);
-      next.set(draggingTaskId, targetPhase);
+      next.set(taskId, colPhase);
       return next;
     });
 
-    setDraggingTaskId(null);
-    setDragOverPhase(null);
-
-    const existing = optimisticTimeoutRef.current.get(draggingTaskId);
+    const existing = optimisticTimeoutRef.current.get(taskId);
     if (existing) clearTimeout(existing);
-    optimisticTimeoutRef.current.set(draggingTaskId, setTimeout(() => {
+    optimisticTimeoutRef.current.set(taskId, setTimeout(() => {
       setOptimisticPhases(prev => {
         const next = new Map(prev);
-        next.delete(draggingTaskId);
+        next.delete(taskId);
         return next;
       });
     }, 10000));
 
-    const actualPhase = resolveTargetPhase(targetPhase, task.phase);
     run(async () => {
       try {
-        await moveTask(draggingTaskId, actualPhase);
+        await moveTask(taskId, actualPhase);
       } catch (err) {
-        clearOptimistic(draggingTaskId);
-        undoStackRef.current = undoStackRef.current.filter(a => a.taskId !== draggingTaskId);
+        clearOptimistic(taskId);
+        undoStackRef.current = undoStackRef.current.filter(a => a.taskId !== taskId);
+        setError(formatActionError('move task', err));
+        throw err;
+      }
+    });
+  }
+
+  /** Called when the user confirms the retry-phase dialog for a drop. */
+  async function handleDropDialogConfirm(phase: string, resetBudget: boolean) {
+    if (!pendingDrop) return;
+    const { taskId, task, colPhase } = pendingDrop;
+    setPendingDrop(null);
+
+    const previousPhase = task.phase;
+    undoStackRef.current.push({ taskId, previousPhase, taskTitle: task.title });
+    if (undoStackRef.current.length > 20) undoStackRef.current.shift();
+    showToast(`Moved "${task.title}" to ${colPhase}`, { taskId, previousPhase, taskTitle: task.title });
+
+    setOptimisticPhases(prev => {
+      const next = new Map(prev);
+      next.set(taskId, colPhase);
+      return next;
+    });
+
+    const existing = optimisticTimeoutRef.current.get(taskId);
+    if (existing) clearTimeout(existing);
+    optimisticTimeoutRef.current.set(taskId, setTimeout(() => {
+      setOptimisticPhases(prev => {
+        const next = new Map(prev);
+        next.delete(taskId);
+        return next;
+      });
+    }, 10000));
+
+    run(async () => {
+      try {
+        await retryTaskWithOptions(taskId, phase, resetBudget);
+      } catch (err) {
+        clearOptimistic(taskId);
+        undoStackRef.current = undoStackRef.current.filter(a => a.taskId !== taskId);
         setError(formatActionError('move task', err));
         throw err;
       }
@@ -293,6 +389,17 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
     setSourceFilter(null);
     setSortBy('newest');
   }
+
+  // ── Compute dialog phase options for a pending drop ──
+  const dropDialogPhases = pendingDrop
+    ? getPhaseOptionsForColumn(pendingDrop.colPhase)
+    : null;
+
+  // Budget default: checked for spec/plan (already cleared in moveTaskToPhase),
+  // unchecked for implement/qa-review (preserve circuit-breaker semantics).
+  const dropBudgetDefault = pendingDrop
+    ? (pendingDrop.targetPhase === 'spec' || pendingDrop.targetPhase === 'plan')
+    : false;
 
   return (
     <div className="flex flex-col h-full bg-[#11131b]" data-component="kanban-board">
@@ -448,6 +555,18 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
           isPending={isPending}
           onClose={() => setShowDialog(false)}
           onSubmit={handleCreate}
+        />
+      )}
+
+      {/* Drop-target retry-phase dialog */}
+      {pendingDrop && dropDialogPhases && (
+        <RetryPhaseDialog
+          taskTitle={pendingDrop.task.title}
+          phases={dropDialogPhases}
+          defaultPhase={pendingDrop.targetPhase}
+          budgetDefault={dropBudgetDefault}
+          onCancel={() => setPendingDrop(null)}
+          onConfirm={handleDropDialogConfirm}
         />
       )}
     </div>
