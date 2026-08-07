@@ -213,12 +213,12 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
         </div>
       )}
 
-      <p className="text-sm font-medium text-white leading-snug pr-8">
+      <p className="text-sm font-medium text-white leading-snug pr-8 break-words">
         {task.title}
       </p>
 
       {displayDesc && (
-        <p className="mt-1 text-xs text-slate-400 leading-snug">
+        <p className="mt-1 text-xs text-slate-400 leading-snug break-words">
           {displayDesc}
           {longDesc && (
             <button
