@@ -161,9 +161,11 @@ export class Orchestrator {
     let startPhase: PipelinePhase = 'spec';
     if (targetPhase === 'spec') {
       this.taskStore.clearArtifacts(taskId, 'spec');
+      this._clearPipelineStateFile(dir);
       startPhase = 'spec';
     } else if (targetPhase === 'plan') {
       this.taskStore.clearArtifacts(taskId, 'plan');
+      this._clearPipelineStateFile(dir);
       startPhase = hasSpec ? 'plan' : 'spec';
     } else if (targetPhase === 'implement') {
       this.taskStore.clearArtifacts(taskId, 'qa');
@@ -198,6 +200,32 @@ export class Orchestrator {
     }
 
     await this.runTask(taskId, task.description, startPhase);
+  }
+
+  /**
+   * Delete the crash-recovery pipeline-state file for a task, if present.
+   *
+   * `.pipeline_state.json` persists qaAttempt, deliverableFailCounts,
+   * stallRecoveryCounts, and persistedCriterionFailCounts across a server
+   * restart mid-pipeline (savePipelineState/restorePipelineState in
+   * pipeline-state.ts) — it's write-every-run, read-once-then-delete. But
+   * "once" only happens on the NEXT run; nothing else ever cleans it up,
+   * and it isn't in PHASE_ARTIFACTS, so clearArtifacts('spec'/'plan') never
+   * touches it. Re-planning or re-speccing a failed task is meant to give
+   * a materially different plan a fresh QA budget — without this, runTask's
+   * restorePipelineState call silently carries the OLD, already-exhausted
+   * qaAttempt count into the new plan, so a task that failed QA 3/3 times
+   * under a bad plan gets effectively 0 fresh attempts to prove a
+   * genuinely improved plan actually works. Only called for 'spec'/'plan'
+   * targets — moving back to 'implement'/'qa-review' with the SAME plan is
+   * a manual retry, not a new plan, and should keep counting against the
+   * same budget so the circuit breaker (ADR 005) still means something.
+   */
+  private _clearPipelineStateFile(dir: string): void {
+    try {
+      const statePath = path.join(dir, '.pipeline_state.json');
+      if (existsSync(statePath)) unlinkSync(statePath);
+    } catch { /* best-effort */ }
   }
 
   async runTask(taskId: string, description: string, startPhase?: PipelinePhase): Promise<void> {

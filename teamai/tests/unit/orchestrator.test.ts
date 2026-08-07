@@ -1325,6 +1325,61 @@ describe('Orchestrator', () => {
 
       expect(mockCreateSession).toHaveBeenCalled();
     });
+
+    // A task that already failed QA maxQaAttempts times under a bad plan
+    // must get a genuinely fresh budget when moved to a materially
+    // different plan — otherwise the stale, already-exhausted count carries
+    // over and the new plan gets effectively zero chances to prove itself.
+    it('resets qaAttempt to 0 when moving to plan, discarding a stale exhausted count from .pipeline_state.json', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec content');
+      const statePath = join(testData.taskDir, '.pipeline_state.json');
+      writeFileSync(statePath, JSON.stringify({ taskId: testData.taskId, qaAttempt: 3 }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'plan');
+        expect(executeSpy).toHaveBeenCalled();
+        expect((executeSpy.mock.calls[0][0] as any).qaAttempt).toBe(0);
+      } finally {
+        executeSpy.mockRestore();
+      }
+    });
+
+    it('resets qaAttempt to 0 when moving to spec, discarding a stale exhausted count', async () => {
+      testData = setupTestProject();
+      const statePath = join(testData.taskDir, '.pipeline_state.json');
+      writeFileSync(statePath, JSON.stringify({ taskId: testData.taskId, qaAttempt: 3 }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'spec');
+        expect((executeSpy.mock.calls[0][0] as any).qaAttempt).toBe(0);
+      } finally {
+        executeSpy.mockRestore();
+      }
+    });
+
+    it('does NOT reset qaAttempt when moving to implement — a same-plan retry keeps counting against the existing budget', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'x', description: 'x', files: [], acceptance_criteria: [] }],
+      }));
+      const statePath = join(testData.taskDir, '.pipeline_state.json');
+      writeFileSync(statePath, JSON.stringify({ taskId: testData.taskId, qaAttempt: 3 }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'implement');
+        expect((executeSpy.mock.calls[0][0] as any).qaAttempt).toBe(3);
+      } finally {
+        executeSpy.mockRestore();
+      }
+    });
   });
 
   // ── _writeQaFeedback ──────────────────────────────────────────────
