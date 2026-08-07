@@ -14,6 +14,12 @@ const STATE_BADGE: Record<ContainerState, { label: string; cls: string }> = {
   restarting: { label: 'Restarting…',  cls: 'bg-amber-900/40 text-amber-300' },
 };
 
+function projectTypeLabel(type: string): string {
+  if (!type || type === 'unknown' || type === 'generic') return 'project';
+  if (type === 'jvm') return 'Java project';
+  return type;
+}
+
 interface Props {
   config: ContainerConfig & { generated?: boolean; projectType?: string };
   initialState: ContainerState;
@@ -110,7 +116,7 @@ export function ContainerConfigEditor({ config, initialState, projectPath }: Pro
           </p>
           <p className="text-xs text-slate-500">
             {generated
-              ? `Auto-generated .devcontainer/devcontainer.json for your ${projectType || 'project'}. Claude CLI, gh CLI, and git are pre-configured.`
+              ? `Auto-generated .devcontainer/devcontainer.json for your ${projectTypeLabel(projectType)}. Claude CLI, gh CLI, and git are pre-configured.`
               : 'Requires .devcontainer/devcontainer.json in the project. TeamAI will auto-generate one if missing.'
             }
           </p>
