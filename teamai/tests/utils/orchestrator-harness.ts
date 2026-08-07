@@ -58,7 +58,8 @@ export function makePipeline(overrides: Record<string, any> = {}): any {
     branch: 'feat/test',
     qaAttempt: 0,
     maxQaAttempts: 3,
-    specRevision: 0,
+    specRevision: 1,
+    qaRevision: 0,
     ...overrides,
   };
 }

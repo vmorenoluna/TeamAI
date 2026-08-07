@@ -15,6 +15,8 @@ interface QaReport {
   overall: 'PASS' | 'FAIL';
   criteria?: { criterion?: string; name?: string; status: 'PASS' | 'FAIL'; notes?: string }[];
   spec_concerns?: SpecConcern[];
+  /** The spec version this QA report was produced against (1 = initial spec). */
+  spec_revision?: number;
 }
 
 interface Props {
@@ -126,6 +128,11 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
       {qaReport && (
         <Section title={`QA Report — ${qaReport.overall === 'PASS' ? '✓ PASS' : '✗ FAIL'}`}>
           <div className="space-y-3">
+            {qaReport.spec_revision && (
+              <div className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#1e293b] text-slate-400">
+                Spec v{qaReport.spec_revision}
+              </div>
+            )}
             <div className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${
               qaReport.overall === 'PASS'
                 ? 'bg-green-900/40 text-green-300'

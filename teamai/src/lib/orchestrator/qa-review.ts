@@ -315,13 +315,25 @@ export async function runQaReview(
   }
   const report: QaReport = reportResult.data!;
 
-  // Stamp HEAD sha
+  // Stamp HEAD sha and spec version so every QA report explicitly
+  // identifies which spec revision it was produced against.
   try {
     const headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: pipeline.worktreePath, encoding: 'utf-8', stdio: 'pipe',
     }).trim();
     report.head_at_review = headSha;
+    report.spec_revision = pipeline.specRevision;
     writeFileSync(reportPath, JSON.stringify(report, null, 2));
+  } catch { /* best-effort */ }
+
+  // Versioned snapshot: preserve every QA report for historical comparison,
+  // like spec_v{N}.md for specs. Increment before writing so v1 is the first
+  // completed QA report, not the zero-index.
+  pipeline.qaRevision++;
+  deps.savePipelineState(pipeline);
+  try {
+    const versionedPath = path.join(pipeline.specPath, `qa_report_v${pipeline.qaRevision}.json`);
+    writeFileSync(versionedPath, readFileSync(reportPath, 'utf-8'));
   } catch { /* best-effort */ }
 
   const hasSpecConcerns = report.spec_concerns && Array.isArray(report.spec_concerns) && report.spec_concerns.length > 0;

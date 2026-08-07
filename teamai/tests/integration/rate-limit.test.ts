@@ -186,7 +186,7 @@ function makePipeline(overrides: Record<string, any> = {}): any {
     branch: 'feat/test-slug',
     qaAttempt: 0,
     maxQaAttempts: 3,
-    specRevision: 0,
+    specRevision: 1,
     ...overrides,
   };
 }

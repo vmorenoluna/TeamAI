@@ -130,6 +130,57 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
     inRequiredArtifacts: false,
     inRevisionCleanup: true,
   },
+  // ── QA report versioned snapshots ───────────────────────────────────────
+  {
+    file: 'qa_report_v1.json',
+    usedIn: [
+      'qa-review.ts (runQaReview versioned snapshot)',
+    ],
+    inPhaseArtifacts: true,
+    inCleanupArtifacts: false,
+    inRequiredArtifacts: false,
+    inRevisionCleanup: false,
+  },
+  {
+    file: 'qa_report_v2.json',
+    usedIn: [
+      'qa-review.ts (runQaReview versioned snapshot)',
+    ],
+    inPhaseArtifacts: true,
+    inCleanupArtifacts: false,
+    inRequiredArtifacts: false,
+    inRevisionCleanup: false,
+  },
+  {
+    file: 'qa_report_v3.json',
+    usedIn: [
+      'qa-review.ts (runQaReview versioned snapshot)',
+    ],
+    inPhaseArtifacts: true,
+    inCleanupArtifacts: false,
+    inRequiredArtifacts: false,
+    inRevisionCleanup: false,
+  },
+  {
+    file: 'qa_report_v4.json',
+    usedIn: [
+      'qa-review.ts (runQaReview versioned snapshot)',
+    ],
+    inPhaseArtifacts: true,
+    inCleanupArtifacts: false,
+    inRequiredArtifacts: false,
+    inRevisionCleanup: false,
+  },
+  {
+    file: 'qa_report_v5.json',
+    usedIn: [
+      'qa-review.ts (runQaReview versioned snapshot)',
+    ],
+    inPhaseArtifacts: true,
+    inCleanupArtifacts: false,
+    inRequiredArtifacts: false,
+    inRevisionCleanup: false,
+  },
   // ── Spec revision artifacts ────────────────────────────────────────────
   {
     file: 'spec_revision_feedback.md',
@@ -166,6 +217,16 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
     file: 'spec_v3.md',
     usedIn: [
       'review-actions.ts (autoReviseSpec snapshot)',
+    ],
+    inPhaseArtifacts: true,
+    inCleanupArtifacts: false,
+    inRequiredArtifacts: false,
+    inRevisionCleanup: false,
+  },
+  {
+    file: 'spec_v4.md',
+    usedIn: [
+      'review-actions.ts (autoReviseSpec snapshot — 3rd revision)',
     ],
     inPhaseArtifacts: true,
     inCleanupArtifacts: false,

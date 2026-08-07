@@ -117,7 +117,8 @@ function makePipeline(taskId: string, specPath: string, overrides: Record<string
     branch: 'feat/robustness-test',
     qaAttempt: 1,
     maxQaAttempts: 3,
-    specRevision: 0,
+    specRevision: 1,
+    qaRevision: 0,
     deliverableFailCounts: undefined as Record<number, number> | undefined,
     ...overrides,
   };
@@ -845,6 +846,119 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
 
     // No bounce means no bounce snapshot
     expect(existsSync(join(project.taskDir, 'qa_report_before_bounce.json'))).toBe(false);
+  });
+
+  it('increments qaRevision and writes qa_report_v{N}.json on QA PASS', async () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'fetch') return '';
+      if (args && args[0] === 'log') return '';
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-qa-revision');
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      qaAttempt: 1,
+      qaRevision: 0,
+    });
+
+    const promise = (orch as AnyOrch).runQaReview(pipeline);
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    });
+
+    expect(mockCreateSession).toHaveBeenCalled();
+
+    writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+      overall: 'PASS',
+      criteria: [{ name: 'Login flow', status: 'PASS', notes: 'LGTM' }],
+    }));
+
+    fireEvent('event', { sessionId: 'sess-qa-revision', event: { type: 'result' } });
+    await promise;
+
+    // qaRevision incremented
+    expect(pipeline.qaRevision).toBe(1);
+    expect(pipeline.phase).toBe('awaiting-review');
+
+    // Versioned snapshot written
+    const versionedPath = join(project.taskDir, 'qa_report_v1.json');
+    expect(existsSync(versionedPath)).toBe(true);
+    const snapshot = JSON.parse(readFileSync(versionedPath, 'utf-8'));
+    expect(snapshot.overall).toBe('PASS');
+    expect(snapshot.criteria[0].name).toBe('Login flow');
+  });
+
+  it('increments qaRevision and writes qa_report_v{N}.json on consecutive QA cycles', async () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'fetch') return '';
+      if (args && args[0] === 'log') return '';
+      return '';
+    });
+
+    // Spy on executePhase to prevent cascading into runImplement on FAIL bounce
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    try {
+      // ── Cycle 1: QA FAIL, bounce to implement ──
+      mockCreateSession.mockResolvedValue('sess-qa-cycle1');
+
+      const pipeline = makePipeline(project.taskId, project.taskDir, {
+        qaAttempt: 1,
+        qaRevision: 0,
+      });
+
+      let promise = (orch as AnyOrch).runQaReview(pipeline);
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
+
+      writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [{ name: 'Bug', status: 'FAIL', notes: 'First failure' }],
+      }));
+
+      fireEvent('event', { sessionId: 'sess-qa-cycle1', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(30);
+      await promise;
+
+      // After cycle 1: FAIL bounce -> qaRevision increments
+      expect(pipeline.qaRevision).toBe(1);
+      expect(existsSync(join(project.taskDir, 'qa_report_v1.json'))).toBe(true);
+      const v1 = JSON.parse(readFileSync(join(project.taskDir, 'qa_report_v1.json'), 'utf-8'));
+      expect(v1.overall).toBe('FAIL');
+
+      // ── Cycle 2: QA FAIL again, bounce to implement ──
+      mockCreateSession.mockResolvedValue('sess-qa-cycle2');
+      mockSendMessage.mockClear();
+      pipeline.phase = 'qa-review';
+      pipeline.qaAttempt = 2;
+
+      promise = (orch as AnyOrch).runQaReview(pipeline);
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
+
+      writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [{ name: 'Bug', status: 'FAIL', notes: 'Still broken' }],
+      }));
+
+      fireEvent('event', { sessionId: 'sess-qa-cycle2', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(30);
+      await promise;
+
+      // After cycle 2: FAIL bounce -> qaRevision increments to 2
+      expect(pipeline.qaRevision).toBe(2);
+      expect(existsSync(join(project.taskDir, 'qa_report_v2.json'))).toBe(true);
+      const v2 = JSON.parse(readFileSync(join(project.taskDir, 'qa_report_v2.json'), 'utf-8'));
+      expect(v2.overall).toBe('FAIL');
+
+      // v1 still exists (never overwritten)
+      expect(existsSync(join(project.taskDir, 'qa_report_v1.json'))).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
   });
 });
 
@@ -3596,8 +3710,8 @@ describe('review-actions — unified counter reset (ADR 005)', () => {
       expect(pipeline.qaAttempt).toBe(0);
       expect(pipeline.deliverableFailCounts).toEqual({});
 
-      // Spec revision should be incremented
-      expect(pipeline.specRevision).toBe(1);
+      // Spec revision should be incremented (1 → 2: v1 is the initial spec)
+      expect(pipeline.specRevision).toBe(2);
 
       // Should advance to spec phase
       expect(pipeline.phase).toBe('spec');
@@ -4933,7 +5047,8 @@ function minimalImplPipeline(overrides: Partial<ImplementPipeline> = {}): Implem
     branch: 'feat/test-task',
     qaAttempt: 0,
     maxQaAttempts: 3,
-    specRevision: 0,
+    specRevision: 1,
+    qaRevision: 0,
     ...overrides,
   };
 }
@@ -5194,7 +5309,8 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
       branch: 'feat/infra-test',
       qaAttempt: 0,
       maxQaAttempts: 3,
-      specRevision: 0,
+      specRevision: 1,
+    qaRevision: 0,
       ...overrides,
     };
   }
@@ -5315,7 +5431,8 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
       branch: 'feat/recover-test',
       qaAttempt: 0,
       maxQaAttempts: 3,
-      specRevision: 0,
+      specRevision: 1,
+    qaRevision: 0,
       ...overrides,
     };
   }

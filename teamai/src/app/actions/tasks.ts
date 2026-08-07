@@ -425,7 +425,7 @@ export async function getTaskFull(taskId: string) {
 
   // Load spec revision snapshots for comparison UI
   const specVersions: Record<string, string> = {};
-  for (const version of [1, 2, 3]) {
+  for (const version of [1, 2, 3, 4]) {
     const vPath = join(dir, `spec_v${version}.md`);
     if (existsSync(vPath)) {
       specVersions[`v${version}`] = readFileSync(vPath, 'utf-8');

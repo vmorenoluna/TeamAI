@@ -126,7 +126,7 @@ function makePipeline(taskId: string, specPath: string, overrides: Record<string
     branch: 'feat/persisted-failures-test',
     qaAttempt: 1,
     maxQaAttempts: 5,
-    specRevision: 0,
+    specRevision: 1,
     deliverableFailCounts: undefined as Record<number, number> | undefined,
     persistedCriterionFailCounts: undefined as Record<string, number> | undefined,
     ...overrides,
@@ -1004,7 +1004,7 @@ describe('resetAllCounters — persistedCriterionFailCounts clearing', () => {
   it('clears persistedCriterionFailCounts during autoReviseSpec (spec revision resets counters)', async () => {
     // Setup: task has a qa_report.json with spec_concerns
     const taskStore = (orch as AnyOrch).taskStore;
-    taskStore.update(project.taskId, { phase: 'qa-review', specRevision: 0 });
+    taskStore.update(project.taskId, { phase: 'qa-review', specRevision: 1 });
 
     writeFileSync(join(project.taskDir, 'spec.md'), '# Original Spec\n\nMust have at least 3 positive cases.');
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({

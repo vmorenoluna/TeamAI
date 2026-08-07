@@ -49,6 +49,12 @@ export const PHASE_ARTIFACTS: Record<string, string[]> = {
     'spec_v1.md',
     'spec_v2.md',
     'spec_v3.md',
+    'spec_v4.md',
+    'qa_report_v1.json',
+    'qa_report_v2.json',
+    'qa_report_v3.json',
+    'qa_report_v4.json',
+    'qa_report_v5.json',
   ],
   plan: [
     'plan.json',
