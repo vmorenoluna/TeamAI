@@ -44,6 +44,7 @@ interface Props {
   planLog?: string | null;
   mergeLog?: string | null;
   sessionMap?: Record<string, string>;
+  specPath?: string;
   project?: string;
   onClose?: () => void;
   readonly?: boolean;
@@ -51,7 +52,7 @@ interface Props {
 
 const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, project, onClose, readonly = false }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, project, onClose, readonly = false }: Props) {
   const router = useRouter();
   const { run, isPending } = useServerMutation();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -77,6 +78,12 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   const isAwaiting = task.phase === 'awaiting-review';
   const isPrOpen = task.phase === 'pr-open';
   const canRestart = RESTARTABLE_PHASES.has(task.phase);
+
+  // Compute the highest spec revision number from available versions.
+  // Used by the review panel to detect when the auto-revision limit was reached.
+  const specRevision = specVersions
+    ? Math.max(0, ...Object.keys(specVersions).map(k => parseInt(k.replace('v', ''), 10)))
+    : undefined;
 
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview' },
@@ -376,6 +383,8 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                 diff={diff}
                 prUrl={task.prUrl}
                 phase={task.phase}
+                specRevision={specRevision}
+                specPath={specPath}
               />
             )}
 

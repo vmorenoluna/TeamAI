@@ -763,6 +763,150 @@ describe('ReviewPanel', () => {
     });
   });
 
+  // ── spec_revision badge ──────────────────────────────────────────────
+
+  describe('spec_revision badge', () => {
+    it('shows Spec v{N} badge when QA report has spec_revision', async () => {
+      const reportWithRevision = {
+        ...QA_REPORT_WITH_SPEC_CONCERNS,
+        spec_revision: 3,
+      };
+      render(
+        <ReviewPanel
+          taskId="task-rev-badge"
+          spec={null}
+          qaReport={reportWithRevision}
+          diff={null}
+          prUrl={null}
+          phase="awaiting-review"
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText(/QA Report/));
+      });
+
+      expect(screen.getByText('Spec v3')).toBeInTheDocument();
+    });
+
+    it('does NOT show Spec v{N} badge when spec_revision is absent', async () => {
+      render(
+        <ReviewPanel
+          taskId="task-rev-badge2"
+          spec={null}
+          qaReport={QA_REPORT_WITH_SPEC_CONCERNS}
+          diff={null}
+          prUrl={null}
+          phase="awaiting-review"
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText(/QA Report/));
+      });
+
+      expect(screen.queryByText(/Spec v\d/)).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Spec revision limit warning + Open spec button ───────────────────
+
+  describe('spec revision limit warning', () => {
+    it('shows amber warning when specRevision >= 4 with spec_concerns', async () => {
+      render(
+        <ReviewPanel
+          taskId="task-limit"
+          spec={null}
+          qaReport={QA_REPORT_WITH_SPEC_CONCERNS}
+          diff={null}
+          prUrl={null}
+          phase="awaiting-review"
+          specRevision={4}
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText(/QA Report/));
+      });
+
+      expect(screen.getByText(/Max auto-revisions reached/)).toBeInTheDocument();
+      expect(screen.getByText(/The pipeline is paused so you can safely edit the spec/)).toBeInTheDocument();
+    });
+
+    it('does NOT show amber warning when specRevision < 4', async () => {
+      render(
+        <ReviewPanel
+          taskId="task-limit2"
+          spec={null}
+          qaReport={QA_REPORT_WITH_SPEC_CONCERNS}
+          diff={null}
+          prUrl={null}
+          phase="awaiting-review"
+          specRevision={3}
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText(/QA Report/));
+      });
+
+      expect(screen.queryByText(/Max auto-revisions reached/)).not.toBeInTheDocument();
+    });
+
+    it('shows "Open spec location" button when specPath is provided in the warning', async () => {
+      const mockShowItem = vi.fn();
+      (window as any).electronAPI = { showItemInFolder: mockShowItem };
+
+      render(
+        <ReviewPanel
+          taskId="task-open"
+          spec={null}
+          qaReport={QA_REPORT_WITH_SPEC_CONCERNS}
+          diff={null}
+          prUrl={null}
+          phase="awaiting-review"
+          specRevision={4}
+          specPath="/test/project/.teamai/some-task/spec.md"
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText(/QA Report/));
+      });
+
+      const openBtn = screen.getByText('📂 Open spec location');
+      expect(openBtn).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(openBtn);
+      });
+
+      expect(mockShowItem).toHaveBeenCalledWith('/test/project/.teamai/some-task/spec.md');
+
+      delete (window as any).electronAPI;
+    });
+
+    it('does NOT show "Open spec location" button when specPath is not provided', async () => {
+      render(
+        <ReviewPanel
+          taskId="task-no-open"
+          spec={null}
+          qaReport={QA_REPORT_WITH_SPEC_CONCERNS}
+          diff={null}
+          prUrl={null}
+          phase="awaiting-review"
+          specRevision={4}
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText(/QA Report/));
+      });
+
+      expect(screen.queryByText('📂 Open spec location')).not.toBeInTheDocument();
+    });
+  });
+
   // ── Raw-throw path (regression) ──────────────────────────────────
   // All four RunAction-routed handlers (Approve local-merge / Approve
   // pull-request / Reject / ReviseSpec) plus handleMarkDone (also via

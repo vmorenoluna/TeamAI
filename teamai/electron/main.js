@@ -207,6 +207,11 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  // Expose file-system helpers to the renderer
+  ipcMain.handle('show-item-in-folder', (_event, filePath) => {
+    shell.showItemInFolder(filePath);
+  });
+
   mainWindow.loadURL(URL);
 
   mainWindow.once('ready-to-show', () => {

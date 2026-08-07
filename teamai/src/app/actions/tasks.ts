@@ -439,7 +439,9 @@ export async function getTaskFull(taskId: string) {
     try { sessionMap = JSON.parse(readFileSync(sessionMapPath, 'utf-8')); } catch { /* skip */ }
   }
 
-  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap };
+  const specPath = join(dir, 'spec.md');
+
+  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath };
 }
 
 export async function addDependency(taskId: string, depId: string): Promise<void> {

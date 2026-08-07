@@ -34,6 +34,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
       planLog={full.planLog}
       mergeLog={full.mergeLog}
       sessionMap={full.sessionMap}
+      specPath={full.specPath}
     />
   );
 }

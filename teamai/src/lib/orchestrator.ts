@@ -356,12 +356,12 @@ export class Orchestrator {
       throw new PhaseTransitionError(taskId, phase, 'awaiting-review', 'revise spec');
     }
     const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, 'awaiting-review');
-    await this._autoReviseSpec(pipeline);
+    await this._autoReviseSpec(pipeline, { humanTriggered: true });
   }
 
   // Delegates to review-actions.autoReviseSpec
-  private async _autoReviseSpec(pipeline: TaskPipeline): Promise<void> {
-    await autoReviseSpec(pipeline, this._ctx);
+  private async _autoReviseSpec(pipeline: TaskPipeline, opts?: { humanTriggered?: boolean }): Promise<void> {
+    await autoReviseSpec(pipeline, this._ctx, opts);
   }
 
   private async executePhase(pipeline: TaskPipeline): Promise<void> {
