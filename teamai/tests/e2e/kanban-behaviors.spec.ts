@@ -187,14 +187,15 @@ test.describe('Kanban — Play & Stop Buttons', () => {
   test('active task cards (implement) show ■ Stop button', async ({ page }) => {
 
       const activeCard = page.locator('[data-component="task-card"]', { hasText: 'login button' });
-    await expect(activeCard.locator('button:has-text("Stop")')).toBeVisible({ timeout: 5_000 });
+    await activeCard.scrollIntoViewIfNeeded();
+    await expect(activeCard.locator('button[title*="Stop task"]')).toBeVisible({ timeout: 5_000 });
   });
 
   test('done task cards do NOT show Play or Stop buttons', async ({ page }) => {
 
       const doneCard = page.locator('[data-component="task-card"]', { hasText: 'Extract shared types' });
     await expect(doneCard.locator('button:has-text("Start")')).toHaveCount(0);
-    await expect(doneCard.locator('button:has-text("Stop")')).toHaveCount(0);
+    await expect(doneCard.locator('button[title*="Stop task"]')).toHaveCount(0);
   });
 
   test('failed task cards show retry button instead of Play/Stop', async ({ page }) => {
@@ -204,7 +205,7 @@ test.describe('Kanban — Play & Stop Buttons', () => {
     const failedCard = page.locator('[data-component="task-card"]', { hasText: 'search bar crashes' });
     await expect(failedCard.locator('[data-component="retry-button"]')).toBeVisible({ timeout: 5_000 });
     await expect(failedCard.locator('button:has-text("Start")')).toHaveCount(0);
-    await expect(failedCard.locator('button:has-text("Stop")')).toHaveCount(0);
+    await expect(failedCard.locator('button[title*="Stop task"]')).toHaveCount(0);
   });
 });
 
@@ -228,6 +229,7 @@ test.describe('Kanban — Task Card UI Elements', () => {
   test('active task shows spinner icon', async ({ page }) => {
 
       const activeCard = page.locator('[data-component="task-card"]', { hasText: 'login button' });
+    await activeCard.scrollIntoViewIfNeeded();
     const spinner = activeCard.locator('[data-component="spinner-icon"]');
     await expect(spinner).toBeVisible({ timeout: 5_000 });
   });

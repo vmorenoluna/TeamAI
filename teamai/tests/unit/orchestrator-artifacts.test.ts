@@ -625,7 +625,7 @@ describe('_commitArtifactsToWorktree', () => {
 
   // ── Full artifact set (spec revisions, snapshots, etc.) ────────────
 
-  it('excludes output.log and .pipeline_state.json but includes spec revisions and snapshots', () => {
+  it('excludes output.log and .pipeline_state.json but includes spec revisions, qa report versions, and snapshots', () => {
     testData = setupTestProject();
     const orch = makeOrch(testData.root);
 
@@ -635,6 +635,9 @@ describe('_commitArtifactsToWorktree', () => {
     writeFileSync(join(testData.taskDir, 'spec_v2.md'), '# Spec v2');
     writeFileSync(join(testData.taskDir, 'plan.json'), '{}');
     writeFileSync(join(testData.taskDir, 'qa_report.json'), '{}');
+    writeFileSync(join(testData.taskDir, 'qa_report_v1.json'), '{}');
+    writeFileSync(join(testData.taskDir, 'qa_report_v2.json'), '{}');
+    writeFileSync(join(testData.taskDir, 'qa_report_v3.json'), '{}');
     writeFileSync(join(testData.taskDir, 'qa_report_before_bounce.json'), '{}');
     writeFileSync(join(testData.taskDir, 'qa_report_before_failed.json'), '{}');
     writeFileSync(join(testData.taskDir, 'qa_feedback.md'), '# Feedback');
@@ -674,6 +677,9 @@ describe('_commitArtifactsToWorktree', () => {
     expect(existsSync(join(targetDir, 'spec_v2.md'))).toBe(true);
     expect(existsSync(join(targetDir, 'plan.json'))).toBe(true);
     expect(existsSync(join(targetDir, 'qa_report.json'))).toBe(true);
+    expect(existsSync(join(targetDir, 'qa_report_v1.json'))).toBe(true);
+    expect(existsSync(join(targetDir, 'qa_report_v2.json'))).toBe(true);
+    expect(existsSync(join(targetDir, 'qa_report_v3.json'))).toBe(true);
     expect(existsSync(join(targetDir, 'qa_report_before_bounce.json'))).toBe(true);
     expect(existsSync(join(targetDir, 'qa_report_before_failed.json'))).toBe(true);
     expect(existsSync(join(targetDir, 'qa_feedback.md'))).toBe(true);
@@ -689,8 +695,8 @@ describe('_commitArtifactsToWorktree', () => {
     expect(committedTask.phase).toBe('done');
     expect(committedTask.updatedAt).toBeTruthy();
 
-    // Log should report 14 files committed (16 total - 2 excluded)
+    // Log should report 17 files committed (19 total - 2 excluded)
     const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
-    expect(logContent).toContain('Committed 14 artifact file');
+    expect(logContent).toContain('Committed 17 artifact file');
   });
 });

@@ -269,7 +269,8 @@ export class Orchestrator {
       branch,
       qaAttempt: 0,
       maxQaAttempts: config.maxQaAttempts,
-      specRevision: 0,
+      specRevision: 1,
+      qaRevision: 0,
     };
 
     // Use provided startPhase, else first phase in config.
@@ -295,6 +296,7 @@ export class Orchestrator {
       if (savedState.wakeupAttemptCount !== undefined) pipeline.wakeupAttemptCount = savedState.wakeupAttemptCount;
       if (savedState.persistedCriterionFailCounts !== undefined) pipeline.persistedCriterionFailCounts = savedState.persistedCriterionFailCounts;
       if (savedState.specRevision !== undefined) pipeline.specRevision = savedState.specRevision;
+      if (savedState.qaRevision !== undefined) pipeline.qaRevision = savedState.qaRevision;
       if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;
     }
 
@@ -588,6 +590,7 @@ export class Orchestrator {
       qaAttempt: 0,
       maxQaAttempts: this.getPipelineConfig().maxQaAttempts,
       specRevision: this._restoreSpecRevision(taskId),
+      qaRevision: this._restoreQaRevision(taskId),
     };
     this.pipelines.set(taskId, pipeline);
     return pipeline;
@@ -600,7 +603,7 @@ export class Orchestrator {
    *
    * When the in-memory pipeline is destroyed (runTask completes, server restarts),
    * restorePipeline() and the retry/restart paths create a fresh pipeline with
-   * specRevision: 0. This method recovers the real revision count so the next
+   * specRevision: 1. This method recovers the real revision count so the next
    * autoReviseSpec() call creates spec_v{N+1}.md instead of overwriting
    * spec_v1.md repeatedly.
    *
@@ -624,6 +627,33 @@ export class Orchestrator {
     let maxN = 0;
     for (let v = 1; ; v++) {
       if (existsSync(path.join(dir, `spec_v${v}.md`))) {
+        maxN = v;
+      } else {
+        break;
+      }
+    }
+    return maxN;
+  }
+
+  /**
+   * Restore qaRevision from persistent state or by counting on-disk snapshots.
+   * Mirrors _restoreSpecRevision — recovers the real revision count so the next
+   * QA cycle creates qa_report_v{N+1}.json instead of overwriting v1 repeatedly.
+   */
+  private _restoreQaRevision(taskId: string): number {
+    const dir = this.taskStore.getDirById(taskId);
+    try {
+      const statePath = path.join(dir, '.pipeline_state.json');
+      if (existsSync(statePath)) {
+        const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+        if (typeof state.qaRevision === 'number' && state.qaRevision > 0) {
+          return state.qaRevision;
+        }
+      }
+    } catch { /* fall through to on-disk counting */ }
+    let maxN = 0;
+    for (let v = 1; ; v++) {
+      if (existsSync(path.join(dir, `qa_report_v${v}.json`))) {
         maxN = v;
       } else {
         break;

@@ -649,6 +649,7 @@ describe('Orchestrator', () => {
         branch: 'feat/test',
         qaAttempt: 2,
         maxQaAttempts: 3,
+        qaRevision: 3,
         mergeStrategy: 'pull-request' as const,
         sessionId: 'sess-123',
       };
@@ -664,6 +665,7 @@ describe('Orchestrator', () => {
       expect(saved.sessionId).toBe('sess-123');
       expect(saved.mergeStrategy).toBe('pull-request');
       expect(saved.qaAttempt).toBe(2);
+      expect(saved.qaRevision).toBe(3);
       expect(saved.branch).toBe('feat/test');
       expect(saved.worktreePath).toBe('/test/wt');
       expect(saved.updatedAt).toBeDefined();
@@ -741,6 +743,7 @@ describe('Orchestrator', () => {
         sessionId: 'sess-abc',
         mergeStrategy: 'local-merge',
         qaAttempt: 1,
+        qaRevision: 4,
         branch: 'feat/test',
         worktreePath: '/test/wt',
         updatedAt: new Date().toISOString(),
@@ -753,6 +756,7 @@ describe('Orchestrator', () => {
       expect(result!.sessionId).toBe('sess-abc');
       expect(result!.mergeStrategy).toBe('local-merge');
       expect(result!.qaAttempt).toBe(1);
+      expect(result!.qaRevision).toBe(4);
       expect(result!.phase).toBe('implement');
 
       expect(existsSync(statePath)).toBe(false);
@@ -851,6 +855,78 @@ describe('Orchestrator', () => {
 
       const orch = makeOrch(testData.root, getOrchestrator);
       const result = (orch as AnyOrch)._restoreSpecRevision(testData.taskId);
+      expect(result).toBe(1);
+    });
+  });
+
+  // ── _restoreQaRevision ───────────────────────────────────────────
+
+  describe('_restoreQaRevision', () => {
+    beforeEach(() => {
+      testData = setupTestProject();
+    });
+
+    it('returns 0 when no pipeline state file and no qa report snapshots exist', () => {
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreQaRevision(testData.taskId);
+      expect(result).toBe(0);
+    });
+
+    it('returns qaRevision from .pipeline_state.json (primary path)', () => {
+      const statePath = join(testData.taskDir, '.pipeline_state.json');
+      writeFileSync(statePath, JSON.stringify({
+        qaRevision: 3,
+        taskId: testData.taskId,
+        phase: 'qa-review',
+      }, null, 2));
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreQaRevision(testData.taskId);
+      expect(result).toBe(3);
+    });
+
+    it('ignores .pipeline_state.json with qaRevision <= 0 and falls back to disk', () => {
+      const statePath = join(testData.taskDir, '.pipeline_state.json');
+      writeFileSync(statePath, JSON.stringify({
+        qaRevision: 0,
+        taskId: testData.taskId,
+      }, null, 2));
+
+      writeFileSync(join(testData.taskDir, 'qa_report_v1.json'), '{}');
+      writeFileSync(join(testData.taskDir, 'qa_report_v2.json'), '{}');
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreQaRevision(testData.taskId);
+      expect(result).toBe(2);
+    });
+
+    it('falls back to counting qa_report_v{N}.json snapshots when no state file exists', () => {
+      writeFileSync(join(testData.taskDir, 'qa_report_v1.json'), '{}');
+      writeFileSync(join(testData.taskDir, 'qa_report_v2.json'), '{}');
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreQaRevision(testData.taskId);
+      expect(result).toBe(2);
+    });
+
+    it('returns the highest snapshot number for contiguous snapshots', () => {
+      for (const v of [1, 2, 3, 4, 5]) {
+        writeFileSync(join(testData.taskDir, `qa_report_v${v}.json`), '{}');
+      }
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreQaRevision(testData.taskId);
+      expect(result).toBe(5);
+    });
+
+    it('handles corrupt .pipeline_state.json gracefully via fallback', () => {
+      const statePath = join(testData.taskDir, '.pipeline_state.json');
+      writeFileSync(statePath, 'not valid json {{{');
+
+      writeFileSync(join(testData.taskDir, 'qa_report_v1.json'), '{}');
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreQaRevision(testData.taskId);
       expect(result).toBe(1);
     });
   });
@@ -1856,6 +1932,91 @@ describe('Orchestrator', () => {
 
       // Phase should have advanced to 'plan' before the cascade failed
       expect(pipeline.phase).toBe('plan');
+    });
+
+    it('runSpec snapshots the initial spec as spec_v1.md on first creation (non-revision)', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        specRevision: 1,
+      });
+
+      // First createSession call succeeds, subsequent ones reject
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve('spec-sess-v1');
+        return Promise.reject(new Error('simulated abort'));
+      });
+
+      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+      expect(mockCreateSession).toHaveBeenCalled();
+      expect(mockSendMessage).toHaveBeenCalledWith('spec-sess-v1', expect.stringContaining('/spec'));
+
+      // Simulate the analyst writing spec.md
+      const specContent = '# Original Spec\n\nThis is the first version.';
+      writeFileSync(join(testData.taskDir, 'spec.md'), specContent);
+
+      // Fire result event to resolve waitForCompletion
+      fireEvent('event', { sessionId: 'spec-sess-v1', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+      await promise;
+
+      // spec_v1.md should exist with the original spec content
+      const v1Path = join(testData.taskDir, 'spec_v1.md');
+      expect(existsSync(v1Path)).toBe(true);
+      expect(readFileSync(v1Path, 'utf-8')).toBe(specContent);
+
+      // specRevision should be set to 1
+      expect(pipeline.specRevision).toBe(1);
+    });
+
+    it('runSpec does NOT overwrite spec_v1.md during revision mode', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      // Pre-create spec_v1.md and spec_revision_feedback.md to trigger revision mode
+      const originalV1 = '# Spec v1 — Original';
+      writeFileSync(join(testData.taskDir, 'spec_v1.md'), originalV1);
+      writeFileSync(join(testData.taskDir, 'spec_revision_feedback.md'), 'Revise the spec');
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        specRevision: 1,
+      });
+
+      // First createSession call succeeds, subsequent ones reject
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve('spec-sess-rev');
+        return Promise.reject(new Error('simulated abort'));
+      });
+
+      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => {});
+      await new Promise(r => setTimeout(r, 20));
+
+      // Should be in revision mode — sends REVISION: prompt, not /spec
+      expect(mockSendMessage).toHaveBeenCalledWith('spec-sess-rev', expect.stringContaining('REVISION:'));
+
+      // Simulate the analyst writing the revised spec
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec v2 — Revised');
+
+      fireEvent('event', { sessionId: 'spec-sess-rev', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+      await promise;
+
+      // spec_v1.md should still contain the original content (not overwritten)
+      expect(existsSync(join(testData.taskDir, 'spec_v1.md'))).toBe(true);
+      expect(readFileSync(join(testData.taskDir, 'spec_v1.md'), 'utf-8')).toBe(originalV1);
+
+      // spec_revision_feedback.md should be cleaned up
+      expect(existsSync(join(testData.taskDir, 'spec_revision_feedback.md'))).toBe(false);
     });
   });
 
@@ -4190,9 +4351,9 @@ describe('Orchestrator', () => {
         maxQaAttempts: 3,
       });
       // Already at max revisions (3) � next auto-revision should fall back
-      pipeline.specRevision = 3;
+      pipeline.specRevision = 4;
 
-      mockCreateSession.mockResolvedValue('sess-qa-max-rev');
+      let csCount = 0; mockCreateSession.mockImplementation(() => { csCount++; if (csCount === 1) return Promise.resolve('sess-qa-max-rev'); return Promise.reject(new Error('simulated abort')); });
 
       // QA report with spec_concerns � but we're out of revision budget
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
@@ -4209,18 +4370,18 @@ describe('Orchestrator', () => {
         ],
       }));
 
-      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => {});
       await new Promise(r => setTimeout(r, 10));
       fireEvent('event', { sessionId: 'sess-qa-max-rev', event: { type: 'result' } });
       await promise;
 
-      // Max revisions exhausted � must fall back to human review, NOT auto-revise
-      expect(pipeline.phase).toBe('awaiting-review');
-      expect(pipeline.specRevision).toBeGreaterThanOrEqual(3);
-      expect(pipeline.qaAttempt).toBe(1); // guard path: qaAttempt NOT reset (unlike auto-revision path)
-      // Should NOT have auto-revised � no spec_revision_feedback.md
+      // Max revisions exhausted — restarts from spec for human-guided revision
+      expect(pipeline.phase).toBe('spec'); // was awaiting-review, now restarts from spec
+      expect(pipeline.specRevision).toBe(5); // was 4, incremented to 5
+      expect(pipeline.qaAttempt).toBe(0); // resetAllCounters gives fresh budget
+      // Should have written spec_revision_feedback.md so analyst runs in revision mode
       const feedbackPath = join(testData.taskDir, 'spec_revision_feedback.md');
-      expect(existsSync(feedbackPath)).toBe(false);
+      expect(existsSync(feedbackPath)).toBe(true);
     });
 
 

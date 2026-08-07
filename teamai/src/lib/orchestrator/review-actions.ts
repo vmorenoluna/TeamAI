@@ -48,6 +48,33 @@ function resetAllCounters(pipeline: TaskPipeline): void {
   pipeline.wakeupProgressPath = undefined;
 }
 
+/**
+ * Write spec_revision_feedback.md from qa_report.json's spec_concerns.
+ * Used by both the normal auto-revision path and the bail-out path
+ * (when the revision limit is reached and the human restarts from spec).
+ */
+function writeSpecRevisionFeedback(specPath: string): void {
+  const reportPath = path.join(specPath, 'qa_report.json');
+  let feedbackContent = '# Spec Revision Feedback\n\n';
+  feedbackContent += 'The QA reviewer identified issues with the specification itself ';
+  feedbackContent += '(not the implementation). The spec needs to be revised to address these concerns.\n\n';
+  if (existsSync(reportPath)) {
+    try {
+      const report: QaReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
+      if (report.spec_concerns && report.spec_concerns.length > 0) {
+        for (const sc of report.spec_concerns) {
+          feedbackContent += `## ${sc.issue}\n\n`;
+          feedbackContent += `**Reasoning:** ${sc.reasoning}\n\n`;
+          if (sc.suggested_fix) {
+            feedbackContent += `**Suggested fix:** ${sc.suggested_fix}\n\n`;
+          }
+        }
+      }
+    } catch { /* best-effort — produce feedback from whatever we can read */ }
+  }
+  writeFileSync(path.join(specPath, 'spec_revision_feedback.md'), feedbackContent);
+}
+
 // ── Public functions ──────────────────────────────────────────────────────
 
 /**
@@ -144,37 +171,41 @@ export async function autoReviseSpec(
 ): Promise<void> {
   const specPath = pipeline.specPath;
 
-  // Guard: max 3 spec revisions before falling back to human review.
-  // Prevents infinite loops when the analyst produces the same flawed spec.
+  // Guard: max 3 auto-revisions. Beyond that, restart from spec so the
+  // human can edit spec.md before clicking "Revise Spec" — the analyst
+  // will then run in revision mode against the human-edited spec.
+  // Historical QA reports (qa_report_v{N}.json) are preserved — they are
+  // tied to specific spec versions and serve as a permanent audit trail.
   pipeline.specRevision++;
-  if (pipeline.specRevision > 3) {
+  if (pipeline.specRevision > 4) {
     try {
-      logToOutput(specPath, `\n[REFINE] Max spec revisions (3) reached — pausing for human review\n`);
+      logToOutput(specPath, `\n[REFINE] Max auto-revisions (3) reached — restarting from spec for human-guided revision\n`);
     } catch { /* best-effort */ }
-    deps.advancePhase(pipeline, 'awaiting-review');
+
+    // Write revision feedback so the analyst runs in revision mode
+    writeSpecRevisionFeedback(specPath);
+
+    // Clear stale plan (the old plan was for a now-replaced spec version)
+    const planPath = path.join(specPath, 'plan.json');
+    try { if (existsSync(planPath)) unlinkSync(planPath); } catch { /* best-effort */ }
+
+    // Clean up stale working files (but NOT historical qa_report_v{N}.json
+    // or spec_v{N}.md — those are permanent audit records)
+    for (const f of REVISION_CLEANUP_EXTRA) {
+      try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
+    }
+
+    // Reset counters — fresh spec gets a clean budget
+    resetAllCounters(pipeline);
+    deps.savePipelineState(pipeline);
+
+    deps.advancePhase(pipeline, 'spec');
+    await deps.executePhase(pipeline);
     return;
   }
 
   // Write spec_revision_feedback.md from QA report's spec_concerns
-  const reportPath = path.join(specPath, 'qa_report.json');
-  let feedbackContent = '# Spec Revision Feedback\n\n';
-  feedbackContent += 'The QA reviewer identified issues with the specification itself ';
-  feedbackContent += '(not the implementation). The spec needs to be revised to address these concerns.\n\n';
-  if (existsSync(reportPath)) {
-    try {
-      const report: QaReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
-      if (report.spec_concerns && report.spec_concerns.length > 0) {
-        for (const sc of report.spec_concerns) {
-          feedbackContent += `## ${sc.issue}\n\n`;
-          feedbackContent += `**Reasoning:** ${sc.reasoning}\n\n`;
-          if (sc.suggested_fix) {
-            feedbackContent += `**Suggested fix:** ${sc.suggested_fix}\n\n`;
-          }
-        }
-      }
-    } catch { /* best-effort — produce feedback from whatever we can read */ }
-  }
-  writeFileSync(path.join(specPath, 'spec_revision_feedback.md'), feedbackContent);
+  writeSpecRevisionFeedback(specPath);
 
   // Snapshot the current spec before revision (preserves history)
   const specMdPath = path.join(specPath, 'spec.md');
@@ -199,7 +230,7 @@ export async function autoReviseSpec(
   deps.savePipelineState(pipeline);
 
   try {
-    logToOutput(specPath, `\n[REFINE] Spec concerns detected — auto-revising spec with analyst (revision ${pipeline.specRevision}/3)\n`);
+    logToOutput(specPath, `\n[REFINE] Spec concerns detected — auto-revising spec with analyst (revision ${pipeline.specRevision - 1}/3)\n`);
   } catch { /* best-effort */ }
   deps.advancePhase(pipeline, 'spec');
   await deps.executePhase(pipeline);

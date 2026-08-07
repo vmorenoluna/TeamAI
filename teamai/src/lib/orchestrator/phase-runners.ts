@@ -157,6 +157,20 @@ export async function runSpecPhase(
   if (isRevision && existsSync(revisionFeedbackPath)) {
     unlinkSync(revisionFeedbackPath);
   }
+
+  // Versioned snapshot: preserve the initial spec as v1 so every version
+  // has a numbered file on disk — v1 = original spec, v2+ = revisions.
+  if (!isRevision) {
+    try {
+      const specMdPath = path.join(pipeline.specPath, 'spec.md');
+      if (existsSync(specMdPath)) {
+        writeFileSync(path.join(pipeline.specPath, 'spec_v1.md'), readFileSync(specMdPath, 'utf-8'));
+        pipeline.specRevision = 1;
+        deps.savePipelineState(pipeline);
+      }
+    } catch { /* best-effort */ }
+  }
+
   deps.advancePhase(pipeline, 'plan');
   await deps.executePhase(pipeline);
 }

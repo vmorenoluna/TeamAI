@@ -23,6 +23,7 @@ export interface TaskPipeline {
   qaAttempt: number;
   maxQaAttempts: number;
   specRevision: number;
+  qaRevision: number;
   mergeStrategy?: MergeStrategy;
   sessionId?: string;
   /** Per-subtask counter of consecutive files_to_create failures. Key = subtask ID, value = count. */
@@ -91,7 +92,13 @@ export interface QaReport {
   issues?: QaIssue[];
   spec_concerns?: SpecConcern[];
   head_at_review?: string;
+  /** The spec version this QA report was produced against (1 = initial spec). */
+  spec_revision?: number;
   fail_type?: string;
+  /** When true, the QA phase skips re-running and advances to awaiting-review. */
+  locked?: boolean;
+  /** Human reviewer identifier — "manual override" triggers QA skip. */
+  reviewedBy?: string;
 }
 
 // -- Plan subtask shape (plan.json) ------------------------------------

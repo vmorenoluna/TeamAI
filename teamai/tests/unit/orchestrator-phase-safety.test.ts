@@ -113,7 +113,7 @@ function makePipeline(taskId: string, specPath: string, overrides: Record<string
     branch: 'feat/p1p2-test',
     qaAttempt: 1,
     maxQaAttempts: 3,
-    specRevision: 0,
+    specRevision: 1,
     deliverableFailCounts: undefined as Record<number, number> | undefined,
     ...overrides,
   };
