@@ -39,15 +39,20 @@ export function RetryPhaseDialog({
   const singlePhase = options.length === 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-auto">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60"
         onClick={onCancel}
       />
 
-      {/* Dialog */}
-      <div className="relative bg-[#1e2333] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] p-6 w-full max-w-md mx-4">
+      {/* Dialog — stopPropagation prevents clicks from bubbling to the
+           kanban card wrapper, which would select the task and apply
+           pointer-events-none to the board (freezing this dialog). */}
+      <div
+        className="relative bg-[#1e2333] rounded-xl shadow-2xl shadow-black/40 border border-[#1e293b] p-6 w-full max-w-md mx-4"
+        onClick={e => e.stopPropagation()}
+      >
         <h2 className="text-base font-semibold text-white mb-1">
           {singlePhase ? 'Move Task' : 'Choose Resume Phase'}
         </h2>
