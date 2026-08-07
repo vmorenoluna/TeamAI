@@ -12,6 +12,8 @@ import { GitattributesRenormalizeBanner } from '@/components/gitattributes-renor
 import { AutoModeButton } from '@/components/auto-mode-button';
 import { getInterruptedTasks } from '@/app/actions/recovery';
 import { getAutoModeState } from '@/lib/auto-mode';
+import { getOnboardingState } from '@/lib/onboarding';
+import { OnboardingGate } from '@/components/onboarding-gate';
 import { checkTools } from '@/app/actions/tools';
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
@@ -30,6 +32,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const autoModeState = activeProject ? getAutoModeState(activeProject.path) : { enabled: false };
   const toolStatuses = await checkTools();
   const gitattributesRenormalizePath = await getGitattributesRenormalizeSuggestion();
+  const onboardingState = getOnboardingState();
+  const needsOnboarding = !onboardingState.completed && projects.length === 0;
 
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full`}>
@@ -55,7 +59,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <MissingToolsBanner tools={toolStatuses} />
           {/* Gitattributes renormalize suggestion — one-time prompt after .gitattributes is first added */}
           <GitattributesRenormalizeBanner projectPath={gitattributesRenormalizePath ?? ''} />
-          <div className="flex-1 min-h-0 flex flex-col">{children}</div>
+          <div className="flex-1 min-h-0 flex flex-col">
+            <OnboardingGate show={needsOnboarding}>{children}</OnboardingGate>
+          </div>
         </div>
       </body>
     </html>
