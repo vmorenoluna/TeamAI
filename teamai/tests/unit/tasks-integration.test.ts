@@ -455,3 +455,42 @@ describe('getTaskArtifacts — includes humanFeedback from human_feedback.md', (
     expect(result.humanFeedback).toBe('Fix the button color');
   });
 });
+
+describe('getTaskFull — returns specPath', () => {
+  let taskId: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockProjectPath = TEST_DIR;
+    mkdirSync(join(TEST_DIR, '.teamai', 'specpath-task-slug'), { recursive: true });
+    taskId = 'task-specpath-test';
+
+    const task = {
+      id: taskId,
+      title: 'Test SpecPath Task',
+      description: 'test task for specPath in getTaskFull',
+      phase: 'spec',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    writeFileSync(
+      join(TEST_DIR, '.teamai', 'specpath-task-slug', 'task.json'),
+      JSON.stringify(task, null, 2),
+    );
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it('returns specPath pointing to spec.md in the task dir', async () => {
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull(taskId);
+
+    expect(result.specPath).toContain('.teamai');
+    expect(result.specPath).toContain('specpath-task-slug');
+    expect(result.specPath).toContain('spec.md');
+  });
+});

@@ -132,6 +132,7 @@ function makeFullData(overrides: Partial<{
   diff: string | null;
   agentOutput: string | null;
   specVersions: Record<string, string>;
+  specPath: string;
 }> = {}): FullData {
   const task = makeTask(overrides.task ?? {});
   return {
@@ -152,6 +153,7 @@ function makeFullData(overrides: Partial<{
     planLog: null,
     mergeLog: null,
     sessionMap: {},
+    specPath: overrides.specPath ?? '/test/spec.md',
   };
 }
 

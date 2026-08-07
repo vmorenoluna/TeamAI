@@ -9,6 +9,7 @@ declare global {
       onDownloadProgress: (callback: (percent: number) => void) => void;
       removeDownloadProgressListener: () => void;
       installUpdate: () => void;
+      showItemInFolder?: (filePath: string) => void;
     };
   }
 }

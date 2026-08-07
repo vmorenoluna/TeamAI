@@ -27,6 +27,11 @@ interface Props {
   diff: string | null;
   prUrl?: string | null;
   phase: string;
+  /** Highest spec revision number (from spec_v{N}.md files). Used to detect when
+   *  the auto-revision limit has been reached. */
+  specRevision?: number;
+  /** Absolute path to spec.md on disk. Used by the "Open spec" button. */
+  specPath?: string;
 }
 
 function DiffLine({ line }: { line: string }) {
@@ -60,7 +65,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 type PendingAction = 'approve-local' | 'approve-pr' | 'reject' | 'mark-done' | 'revise-spec' | null;
 
-export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase }: Props) {
+export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase, specRevision, specPath }: Props) {
   const { run } = useServerMutation();
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [error, setError] = useState<string | null>(null);
@@ -159,6 +164,25 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
                     </div>
                   ))}
                 </div>
+                {specRevision !== undefined && specRevision >= 4 && (
+                  <div className="mt-3 pt-2 border-t border-purple-800/30">
+                    <p className="text-xs text-amber-300/80">
+                      ⚠ Max auto-revisions reached. The pipeline is paused so you can safely edit the spec.
+                      Click <strong>Revise Spec</strong> when ready.
+                    </p>
+                    {specPath && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          window.electronAPI?.showItemInFolder?.(specPath);
+                        }}
+                        className="mt-2 text-[11px] font-medium px-2 py-1 rounded-md bg-amber-900/30 text-amber-400 hover:bg-amber-800/40 hover:text-amber-300 transition-colors"
+                      >
+                        📂 Open spec location
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

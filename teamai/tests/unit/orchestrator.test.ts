@@ -4375,13 +4375,54 @@ describe('Orchestrator', () => {
       fireEvent('event', { sessionId: 'sess-qa-max-rev', event: { type: 'result' } });
       await promise;
 
-      // Max revisions exhausted — restarts from spec for human-guided revision
-      expect(pipeline.phase).toBe('spec'); // was awaiting-review, now restarts from spec
-      expect(pipeline.specRevision).toBe(5); // was 4, incremented to 5
+      // Max revisions exhausted — QA path parks in awaiting-review (no auto-restart).
+      // The human can safely edit spec.md, then click "Revise Spec" (UI path) to restart.
+      expect(pipeline.phase).toBe('awaiting-review');
+      expect(pipeline.specRevision).toBe(5); // was 4, incremented to 5 before bail-out
       expect(pipeline.qaAttempt).toBe(0); // resetAllCounters gives fresh budget
-      // Should have written spec_revision_feedback.md so analyst runs in revision mode
+      // Should have written spec_revision_feedback.md so the human can see the concerns
       const feedbackPath = join(testData.taskDir, 'spec_revision_feedback.md');
       expect(existsSync(feedbackPath)).toBe(true);
+      // Pipeline should NOT auto-execute — parked awaiting human action
+      // (mockCreateSession for spec phase should NOT have been called)
+    });
+
+    it('UI-triggered path (humanTriggered=true) bypasses limit and restarts from spec', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      // Set task to awaiting-review so reviseSpec can be called
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
+
+      // Register a pipeline already at the revision limit
+      const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
+      pipeline.specRevision = 4;
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Existing Spec');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        spec_concerns: [
+          { issue: 'Wrong API shape', reasoning: 'API returns JSON, not XML.' },
+        ],
+      }));
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+
+      // Call through the UI path (orchestrator.reviseSpec passes humanTriggered: true)
+      await (orch as AnyOrch).reviseSpec(testData.taskId).catch(() => {});
+
+      // UI path should bypass limit — advance to spec (not park in awaiting-review)
+      expect(pipeline.phase).toBe('spec');
+      expect(pipeline.specRevision).toBe(5); // was 4, incremented to 5
+      expect(pipeline.qaAttempt).toBe(0);
+
+      // Should have written spec_revision_feedback.md
+      expect(existsSync(join(testData.taskDir, 'spec_revision_feedback.md'))).toBe(true);
+
+      // createSession should have been called (proves executePhase was reached)
+      expect(mockCreateSession).toHaveBeenCalled();
     });
 
 

@@ -24,4 +24,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installUpdate: () => {
     ipcRenderer.send('install-update');
   },
+  /** Open the file manager at the given file/folder path. */
+  showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
 });
