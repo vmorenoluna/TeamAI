@@ -2,11 +2,13 @@ import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 
 export interface ProjectInfo {
-  type: 'node' | 'python' | 'go' | 'rust' | 'generic';
+  type: 'node' | 'python' | 'go' | 'rust' | 'jvm' | 'generic';
   nodeVersion?: string;
   pythonVersion?: string;
   goVersion?: string;
   rustVersion?: string;
+  jvmVersion?: string;
+  jvmBuildTool?: 'maven' | 'gradle' | 'sbt';
   packageManager?: 'npm' | 'yarn' | 'pnpm' | 'bun';
   hasTypeScript?: boolean;
   /** Discovered from README/docs, or heuristic fallback */
@@ -46,6 +48,9 @@ export function analyzeProject(projectRoot: string): ProjectInfo {
   }
   if (files.includes('Cargo.toml')) {
     return analyzeRustProject(projectRoot, files);
+  }
+  if (files.includes('pom.xml') || files.includes('build.gradle') || files.includes('build.gradle.kts') || files.includes('build.sbt')) {
+    return analyzeJvmProject(projectRoot, files);
   }
 
   return analyzeGenericProject(projectRoot, files);
@@ -136,6 +141,49 @@ function analyzeGenericProject(projectRoot: string, files: string[]): ProjectInf
     installCommand: docCommands.install || (hasMakefile ? 'make install' : 'echo "No install step configured"'),
     buildCommand: docCommands.build || (hasMakefile ? 'make build' : 'echo "No build step configured"'),
     testCommand: docCommands.test || (hasMakefile ? 'make test' : 'echo "No test step configured"'),
+  };
+}
+
+function analyzeJvmProject(projectRoot: string, files: string[]): ProjectInfo {
+  const docCommands = parseDocs(projectRoot, files);
+  const jvmVersion = detectJvmVersion(projectRoot, files);
+  const buildTool = detectJvmBuildTool(files);
+
+  const isWrapper = files.some(f => f === 'mvnw' || f === 'mvnw.cmd') || buildTool === 'gradle';
+
+  let installCommand: string;
+  let buildCommand: string;
+  let testCommand: string;
+
+  switch (buildTool) {
+    case 'maven':
+      installCommand = docCommands.install || (isWrapper ? './mvnw dependency:resolve' : 'mvn dependency:resolve');
+      buildCommand = docCommands.build || (isWrapper ? './mvnw compile' : 'mvn compile');
+      testCommand = docCommands.test || (isWrapper ? './mvnw test' : 'mvn test');
+      break;
+    case 'gradle':
+      installCommand = docCommands.install || './gradlew dependencies';
+      buildCommand = docCommands.build || './gradlew build';
+      testCommand = docCommands.test || './gradlew test';
+      break;
+    case 'sbt':
+      installCommand = docCommands.install || 'sbt update';
+      buildCommand = docCommands.build || 'sbt compile';
+      testCommand = docCommands.test || 'sbt test';
+      break;
+    default:
+      installCommand = docCommands.install || 'mvn dependency:resolve';
+      buildCommand = docCommands.build || 'mvn compile';
+      testCommand = docCommands.test || 'mvn test';
+  }
+
+  return {
+    type: 'jvm',
+    jvmVersion,
+    jvmBuildTool: buildTool,
+    installCommand,
+    buildCommand,
+    testCommand,
   };
 }
 
@@ -250,15 +298,15 @@ function findRelevantSections(text: string): string[] {
 }
 
 function isInstallCommand(cmd: string): boolean {
-  return /\b(npm\s+(install|ci)|yarn\s+install|pnpm\s+install|bun\s+install|pip\s+install|poetry\s+install|go\s+mod\s+download|cargo\s+(fetch|build)|make\s+install|bundle\s+install)\b/.test(cmd);
+  return /\b(npm\s+(install|ci)|yarn\s+install|pnpm\s+install|bun\s+install|pip\s+install|poetry\s+install|go\s+mod\s+download|cargo\s+(fetch|build)|make\s+install|bundle\s+install|mvnw?\s+.*(?:dependency:resolve|install)|.\/gradlew\s+dependencies|gradle\s+dependencies|sbt\s+update)\b/.test(cmd);
 }
 
 function isBuildCommand(cmd: string): boolean {
-  return /\b(npm\s+run\s+build|yarn\s+build|pnpm\s+(run\s+)?build|bun\s+run\s+build|npm\s+run\s+compile|make\s+build|cargo\s+build|go\s+build|poetry\s+build|tsc\b|meson|cmake)\b/.test(cmd);
+  return /\b(npm\s+run\s+build|yarn\s+build|pnpm\s+(run\s+)?build|bun\s+run\s+build|npm\s+run\s+compile|make\s+build|cargo\s+build|go\s+build|poetry\s+build|tsc\b|meson|cmake|mvnw?\s+(compile|package)|.\/gradlew\s+build|gradle\s+build|sbt\s+compile)\b/.test(cmd);
 }
 
 function isTestCommand(cmd: string): boolean {
-  return /\b(npm\s+(run\s+)?test|yarn\s+test|pnpm\s+(run\s+)?test|bun\s+test|npm\s+run\s+(spec|e2e|ci)|make\s+test|cargo\s+test|go\s+test|pytest|python\s+-m\s+pytest|jest|vitest|mocha|rspec)\b/.test(cmd);
+  return /\b(npm\s+(run\s+)?test|yarn\s+test|pnpm\s+(run\s+)?test|bun\s+test|npm\s+run\s+(spec|e2e|ci)|make\s+test|cargo\s+test|go\s+test|pytest|python\s+-m\s+pytest|jest|vitest|mocha|rspec|mvnw?\s+test|.\/gradlew\s+test|gradle\s+test|sbt\s+test)\b/.test(cmd);
 }
 
 /** Remove trailing comments, backslashes, and other noise */
@@ -338,6 +386,53 @@ function detectRustVersion(projectRoot: string): string | undefined {
   return undefined;
 }
 
+// ── JVM helpers ─────────────────────────────────────────────────────────
+
+/** Detect JVM build tool by scanning for config files. */
+function detectJvmBuildTool(files: string[]): ProjectInfo['jvmBuildTool'] {
+  if (files.includes('build.sbt')) return 'sbt';
+  if (files.includes('build.gradle.kts') || files.includes('build.gradle')) return 'gradle';
+  if (files.includes('pom.xml')) return 'maven';
+  return undefined;
+}
+
+/** Detect Java version from .java-version, pom.xml, or build.gradle. */
+function detectJvmVersion(projectRoot: string, files: string[]): string | undefined {
+  // .java-version (jenv/sdkman format)
+  if (files.includes('.java-version')) {
+    const raw = safeReadText(join(projectRoot, '.java-version'));
+    if (raw) {
+      const m = raw.trim().match(/^(\d+)/);
+      if (m) return m[1];
+    }
+  }
+
+  // pom.xml: <java.version>17</java.version> or <maven.compiler.source>17</...>
+  if (files.includes('pom.xml')) {
+    const pom = safeReadText(join(projectRoot, 'pom.xml'));
+    if (pom) {
+      let m = pom.match(/<java\.version>\s*(\d+)\s*<\/java\.version>/);
+      if (!m) m = pom.match(/<maven\.compiler\.source>\s*(\d+)\s*<\/maven\.compiler\.source>/);
+      if (!m) m = pom.match(/<jdk\.version>\s*(\d+)\s*<\/jdk\.version>/);
+      if (m) return m[1];
+    }
+  }
+
+  // build.gradle[.kts]: sourceCompatibility = '17' or sourceCompatibility = JavaVersion.VERSION_17
+  if (files.includes('build.gradle') || files.includes('build.gradle.kts')) {
+    const gradleFile = files.includes('build.gradle.kts') ? 'build.gradle.kts' : 'build.gradle';
+    const gradle = safeReadText(join(projectRoot, gradleFile));
+    if (gradle) {
+      let m = gradle.match(/sourceCompatibility\s*=\s*['"]?(\d+)['"]?/);
+      if (!m) m = gradle.match(/JavaVersion\.VERSION_(\d+)/);
+      if (!m) m = gradle.match(/javaVersion\s*=\s*(\d+)/);
+      if (m) return m[1];
+    }
+  }
+
+  return undefined;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function detectPackageManager(files: string[]): ProjectInfo['packageManager'] {
@@ -381,6 +476,7 @@ interface TemplateVars {
   PYTHON_VERSION: string;
   GO_VERSION: string;
   RUST_VERSION: string;
+  JVM_VERSION: string;
   INSTALL_COMMAND: string;
   BUILD_COMMAND: string;
   TEST_COMMAND: string;
@@ -435,6 +531,10 @@ function buildTemplateVars(info: ProjectInfo): TemplateVars {
       remoteUser = 'vscode';
       remoteHome = '/home/vscode';
       break;
+    case 'jvm':
+      remoteUser = 'vscode';
+      remoteHome = '/home/vscode';
+      break;
     default:
       remoteUser = 'vscode';
       remoteHome = '/home/vscode';
@@ -447,6 +547,7 @@ function buildTemplateVars(info: ProjectInfo): TemplateVars {
     PYTHON_VERSION: info.pythonVersion || '3.12',
     GO_VERSION: info.goVersion || '1',
     RUST_VERSION: info.rustVersion || '1',
+    JVM_VERSION: info.jvmVersion || '21',
     INSTALL_COMMAND: info.installCommand,
     BUILD_COMMAND: info.buildCommand,
     TEST_COMMAND: info.testCommand,

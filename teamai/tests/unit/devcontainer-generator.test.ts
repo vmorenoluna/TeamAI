@@ -306,6 +306,106 @@ describe('analyzeProject', () => {
     });
   });
 
+  describe('JVM detection', () => {
+    it('detects Maven project from pom.xml', () => {
+      mockProject(['pom.xml']);
+      const info = analyzeProject('/test/project');
+      expect(info.type).toBe('jvm');
+      expect(info.jvmBuildTool).toBe('maven');
+      expect(info.installCommand).toBe('mvn dependency:resolve');
+      expect(info.buildCommand).toBe('mvn compile');
+      expect(info.testCommand).toBe('mvn test');
+    });
+
+    it('detects Gradle project from build.gradle', () => {
+      mockProject(['build.gradle']);
+      const info = analyzeProject('/test/project');
+      expect(info.type).toBe('jvm');
+      expect(info.jvmBuildTool).toBe('gradle');
+      expect(info.installCommand).toBe('./gradlew dependencies');
+      expect(info.buildCommand).toBe('./gradlew build');
+      expect(info.testCommand).toBe('./gradlew test');
+    });
+
+    it('detects Gradle Kotlin DSL from build.gradle.kts', () => {
+      mockProject(['build.gradle.kts']);
+      const info = analyzeProject('/test/project');
+      expect(info.type).toBe('jvm');
+      expect(info.jvmBuildTool).toBe('gradle');
+    });
+
+    it('detects SBT project from build.sbt', () => {
+      mockProject(['build.sbt']);
+      const info = analyzeProject('/test/project');
+      expect(info.type).toBe('jvm');
+      expect(info.jvmBuildTool).toBe('sbt');
+      expect(info.installCommand).toBe('sbt update');
+      expect(info.buildCommand).toBe('sbt compile');
+      expect(info.testCommand).toBe('sbt test');
+    });
+
+    it('uses Maven wrapper when mvnw is present', () => {
+      mockProject(['pom.xml', 'mvnw']);
+      const info = analyzeProject('/test/project');
+      expect(info.jvmBuildTool).toBe('maven');
+      expect(info.installCommand).toBe('./mvnw dependency:resolve');
+      expect(info.buildCommand).toBe('./mvnw compile');
+      expect(info.testCommand).toBe('./mvnw test');
+    });
+
+    it('detects Java version from .java-version', () => {
+      mockProject(['pom.xml', '.java-version'], { '.java-version': '17.0.2\n' });
+      const info = analyzeProject('/test/project');
+      expect(info.jvmVersion).toBe('17');
+    });
+
+    it('detects Java version from pom.xml java.version property', () => {
+      mockProject(['pom.xml'], { 'pom.xml': '<project><properties><java.version>21</java.version></properties></project>' });
+      const info = analyzeProject('/test/project');
+      expect(info.jvmVersion).toBe('21');
+    });
+
+    it('detects Java version from build.gradle sourceCompatibility', () => {
+      mockProject(['build.gradle'], { 'build.gradle': "sourceCompatibility = '17'" });
+      const info = analyzeProject('/test/project');
+      expect(info.jvmVersion).toBe('17');
+    });
+
+    it('detects Java version from build.gradle.kts javaVersion', () => {
+      mockProject(['build.gradle.kts'], { 'build.gradle.kts': 'javaVersion = 21' });
+      const info = analyzeProject('/test/project');
+      expect(info.jvmVersion).toBe('21');
+    });
+
+    it('detects Java version from Gradle JavaVersion enum', () => {
+      mockProject(['build.gradle'], { 'build.gradle': 'sourceCompatibility = JavaVersion.VERSION_11' });
+      const info = analyzeProject('/test/project');
+      expect(info.jvmVersion).toBe('11');
+    });
+
+    it('falls back to undefined jvmVersion when no version files', () => {
+      mockProject(['pom.xml']);
+      const info = analyzeProject('/test/project');
+      expect(info.jvmVersion).toBeUndefined();
+    });
+
+    it('extracts Maven commands from README', () => {
+      const readme = ['## Build', '', '```', 'mvn clean install', 'mvn test', '```'].join('\n');
+      mockProject(['pom.xml', 'README.md'], { 'pom.xml': '<project></project>', 'README.md': readme });
+      const info = analyzeProject('/test/project');
+      expect(info.installCommand).toBe('mvn clean install');
+      expect(info.testCommand).toBe('mvn test');
+    });
+
+    it('extracts Gradle commands from README', () => {
+      const readme = ['## Setup', '', '```', './gradlew build', './gradlew test', '```'].join('\n');
+      mockProject(['build.gradle', 'README.md'], { 'build.gradle': '', 'README.md': readme });
+      const info = analyzeProject('/test/project');
+      expect(info.buildCommand).toBe('./gradlew build');
+      expect(info.testCommand).toBe('./gradlew test');
+    });
+  });
+
   describe('Generic fallback', () => {
     it('returns generic type when no known project files exist', () => {
       mockProject(['main.py', 'utils.py']);
@@ -594,6 +694,7 @@ describe('generateDevcontainer with real templates', () => {
     const rustTemplate = readTemplate('rust.devcontainer.json');
     const nodeTemplate = readTemplate('node.devcontainer.json');
     const genericTemplate = readTemplate('generic.devcontainer.json');
+    const jvmTemplate = readTemplate('jvm.devcontainer.json');
 
     mockExistsSync.mockImplementation((path: string) => {
       if (path.includes('devcontainers')) return true;
@@ -607,6 +708,7 @@ describe('generateDevcontainer with real templates', () => {
       if (p.includes('rust.devcontainer.json')) return rustTemplate;
       if (p.includes('node.devcontainer.json')) return nodeTemplate;
       if (p.includes('generic.devcontainer.json')) return genericTemplate;
+      if (p.includes('jvm.devcontainer.json')) return jvmTemplate;
       return '{}';
     });
   });
@@ -734,6 +836,49 @@ describe('generateDevcontainer with real templates', () => {
     });
   });
 
+  describe('JVM template', () => {
+    it('generates valid devcontainer JSON with detected version', () => {
+      const info: ProjectInfo = {
+        type: 'jvm',
+        jvmVersion: '17',
+        jvmBuildTool: 'maven',
+        installCommand: 'mvn dependency:resolve',
+        buildCommand: 'mvn compile',
+        testCommand: 'mvn test',
+      };
+
+      const result = generateDevcontainer('/test/project', info);
+      const parsed = assertValidDevcontainer(
+        result,
+        'mcr.microsoft.com/devcontainers/java:',
+        'vscode'
+      );
+
+      expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/java:17');
+      expect(parsed.remoteEnv).toBeDefined();
+      expect(parsed.remoteEnv.JAVA_HOME).toBe('/usr/local/sdkman/candidates/java/current');
+    });
+
+    it('uses default version 21 when no version detected', () => {
+      const info: ProjectInfo = {
+        type: 'jvm',
+        jvmBuildTool: 'gradle',
+        installCommand: './gradlew dependencies',
+        buildCommand: './gradlew build',
+        testCommand: './gradlew test',
+      };
+
+      const result = generateDevcontainer('/test/project', info);
+      const parsed = assertValidDevcontainer(
+        result,
+        'mcr.microsoft.com/devcontainers/java:',
+        'vscode'
+      );
+
+      expect(parsed.image).toBe('mcr.microsoft.com/devcontainers/java:21');
+    });
+  });
+
   describe('Cross-template safety', () => {
     it('cleans all placeholder syntax from generated JSON', () => {
       const info: ProjectInfo = {
@@ -749,7 +894,7 @@ describe('generateDevcontainer with real templates', () => {
       expect(result).not.toContain('}}');
     });
 
-    it('generates parseable JSON for all three language templates', () => {
+    it('generates parseable JSON for all templates', () => {
       const templates: { type: ProjectInfo['type']; info: Partial<ProjectInfo> }[] = [
         {
           type: 'python',
@@ -762,6 +907,10 @@ describe('generateDevcontainer with real templates', () => {
         {
           type: 'rust',
           info: { installCommand: 'cargo fetch', buildCommand: 'cargo build', testCommand: 'cargo test' },
+        },
+        {
+          type: 'jvm',
+          info: { jvmBuildTool: 'maven', installCommand: 'mvn dependency:resolve', buildCommand: 'mvn compile', testCommand: 'mvn test' },
         },
       ];
 
