@@ -161,11 +161,11 @@ export class Orchestrator {
     let startPhase: PipelinePhase = 'spec';
     if (targetPhase === 'spec') {
       this.taskStore.clearArtifacts(taskId, 'spec');
-      this._clearPipelineStateFile(dir);
+      this.clearPipelineStateFile(dir);
       startPhase = 'spec';
     } else if (targetPhase === 'plan') {
       this.taskStore.clearArtifacts(taskId, 'plan');
-      this._clearPipelineStateFile(dir);
+      this.clearPipelineStateFile(dir);
       startPhase = hasSpec ? 'plan' : 'spec';
     } else if (targetPhase === 'implement') {
       this.taskStore.clearArtifacts(taskId, 'qa');
@@ -220,8 +220,12 @@ export class Orchestrator {
    * targets — moving back to 'implement'/'qa-review' with the SAME plan is
    * a manual retry, not a new plan, and should keep counting against the
    * same budget so the circuit breaker (ADR 005) still means something.
+   *
+   * Public so the retry-phase dialog can request an explicit budget reset
+   * regardless of target phase (e.g. resume at implement with a fresh QA
+   * budget after the plan was found to be sound).
    */
-  private _clearPipelineStateFile(dir: string): void {
+  clearPipelineStateFile(dir: string): void {
     try {
       const statePath = path.join(dir, '.pipeline_state.json');
       if (existsSync(statePath)) unlinkSync(statePath);

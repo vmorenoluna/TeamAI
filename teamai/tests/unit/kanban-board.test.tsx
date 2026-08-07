@@ -6,11 +6,8 @@
  * Tests column rendering (6 phases with normalization), task card placement,
  * filter toolbar (search / phase filter / source filter / sort / reset),
  * bulk selection (individual + shift-click range + ctrl-click), drag and drop,
- * optimistic phase updates, the New Task dialog with templates, and the
- * connection indicator.
- *
- * React's useTransition is mocked (isPending=false, synchronous callback)
- * following the project's established pattern.
+ * optimistic phase updates, the New Task dialog with templates, the
+ * retry-phase dialog on artifact-clearing drops, and the connection indicator.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -23,11 +20,13 @@ import type { Task } from '@/lib/task-store';
 const mockCreateTask = vi.hoisted(() => vi.fn());
 const mockMoveTask = vi.hoisted(() => vi.fn());
 const mockBulkDeleteTasks = vi.hoisted(() => vi.fn());
+const mockRetryTaskWithOptions = vi.hoisted(() => vi.fn());
 
 vi.mock('@/app/actions/tasks', () => ({
   createTask: (...args: unknown[]) => mockCreateTask(...args),
   moveTask: (...args: unknown[]) => mockMoveTask(...args),
   bulkDeleteTasks: (...args: unknown[]) => mockBulkDeleteTasks(...args),
+  retryTaskWithOptions: (...args: unknown[]) => mockRetryTaskWithOptions(...args),
 }));
 
 vi.mock('@/hooks/use-phase-sync', () => ({
@@ -103,6 +102,18 @@ function renderBoard(tasks: Task[] = []) {
   render(<KanbanBoard tasks={tasks} projectPath="/test" />);
 }
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Drop a card onto a column by its header text. */
+function dropCardOnColumn(columnHeaderText: string) {
+  const card = screen.getByTestId('task-card');
+  fireEvent.dragStart(card);
+  const header = screen.getByText(columnHeaderText);
+  const column = header.closest('.flex.flex-col')!;
+  fireEvent.dragOver(column);
+  fireEvent.drop(column);
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('KanbanBoard', () => {
@@ -111,6 +122,7 @@ describe('KanbanBoard', () => {
     mockMoveTask.mockResolvedValue(undefined);
     mockCreateTask.mockResolvedValue(undefined);
     mockBulkDeleteTasks.mockResolvedValue(undefined);
+    mockRetryTaskWithOptions.mockResolvedValue({ success: true });
   });
 
   // ── Column rendering ─────────────────────────────────────────────────
@@ -432,9 +444,9 @@ describe('KanbanBoard', () => {
   // Each of the three remaining silent-failure-fixed handlers
   // (handleCreate, handleBulkDelete, handleUndo) gets a focused test that
   // locks in its specific anti-regression invariant beyond "error visible":
-  //   handleCreate     \u2192 dialog stays open, template fields preserved (no reset on throw)
-  //   handleBulkDelete \u2192 selection retained (user can retry)
-  //   handleUndo       \u2192 popped entry is NOT re-pushed (Ctrl+Z is a no-op after undo throws)
+  //   handleCreate     → dialog stays open, template fields preserved (no reset on throw)
+  //   handleBulkDelete → selection retained (user can retry)
+  //   handleUndo       → popped entry is NOT re-pushed (Ctrl+Z is a no-op after undo throws)
 
   describe('single-handler error paths', () => {
     let originalConfirm: typeof window.confirm;
@@ -466,7 +478,7 @@ describe('KanbanBoard', () => {
       expect(filledTitle).toContain('Fix: ');
       expect(filledDesc).toContain('Current Behavior');
 
-      // Submit the form \u2192 handleCreate fires \u2192 createTask throws
+      // Submit the form → handleCreate fires → createTask throws
       fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));
 
       await waitFor(() => {
@@ -477,10 +489,10 @@ describe('KanbanBoard', () => {
         expect(banner).toHaveTextContent('createTask refused: invalid path');
       });
 
-      // (a) Dialog did NOT close \u2014 setShowDialog(false) lives on the success path only.
+      // (a) Dialog did NOT close — setShowDialog(false) lives on the success path only.
       expect(screen.getByText('New Task')).toBeInTheDocument();
 
-      // (b) Template fields preserved \u2014 clearTemplate() lives on the success path only,
+      // (b) Template fields preserved — clearTemplate() lives on the success path only,
       //     so the user can correct the FormData and retry without re-selecting a template.
       const titleAfter = (screen.getByPlaceholderText('Add dark mode toggle') as HTMLInputElement).value;
       const descAfter = (screen.getByPlaceholderText('Describe what needs to be done...') as HTMLTextAreaElement).value;
@@ -501,7 +513,7 @@ describe('KanbanBoard', () => {
       fireEvent.click(cards[1], { ctrlKey: true });
       expect(screen.getByText('2 selected')).toBeInTheDocument();
 
-      // Click Delete selected \u2192 handleBulkDelete fires \u2192 bulkDeleteTasks throws
+      // Click Delete selected → handleBulkDelete fires → bulkDeleteTasks throws
       fireEvent.click(screen.getByText('Delete selected'));
 
       await waitFor(() => {
@@ -512,7 +524,7 @@ describe('KanbanBoard', () => {
       // (a) bulkDeleteTasks was invoked with both selected IDs
       expect(mockBulkDeleteTasks).toHaveBeenCalledWith(['1', '2']);
 
-      // (b) Selection retained \u2014 clearSelection() lives on the success path only,
+      // (b) Selection retained — clearSelection() lives on the success path only,
       //     so the user can retry. Same invariant as bulk-move.
       expect(screen.getByText('2 selected')).toBeInTheDocument();
       expect(screen.getByText('Deselect')).toBeInTheDocument();
@@ -520,30 +532,39 @@ describe('KanbanBoard', () => {
     });
 
     it('handleUndo: on moveTask throw, does NOT re-push the popped entry (Ctrl+Z is a no-op)', async () => {
-      // First moveTask (the drag-drop) succeeds; second moveTask (the undo) throws.
-      // mockResolvedValueOnce + mockRejectedValueOnce is the cleanest chain.
+      // The dialog-based drop calls retryTaskWithOptions (for implement target).
+      // The first call succeeds.  The undo calls moveTask.
+      mockRetryTaskWithOptions
+        .mockResolvedValueOnce({ success: true });
       mockMoveTask
-        .mockResolvedValueOnce(undefined)
         .mockRejectedValueOnce(new Error('undo moveTask refused: stale event handler'));
 
       renderBoard([task({ id: '1', title: 'Undo me', phase: 'backlog' })]);
 
-      // 1. Drag the card to In Progress \u2192 handleDrop succeeds \u2192 toast appears with Undo button
-      const card = screen.getByTestId('task-card');
-      fireEvent.dragStart(card);
-      const implementHeader = screen.getByText('In Progress');
-      fireEvent.drop(implementHeader.closest('.flex.flex-col')!);
+      // 1. Drag the card to In Progress → dialog opens (implement is an artifact-clearing target)
+      dropCardOnColumn('In Progress');
 
+      // Dialog should be visible
       await waitFor(() => {
-        expect(mockMoveTask).toHaveBeenCalledWith('1', 'implement');
+        expect(screen.getByText('Move Task')).toBeInTheDocument();
       });
+
+      // Confirm the dialog
+      fireEvent.click(screen.getByText('Move & Resume'));
+
+      // retryTaskWithOptions should have been called
+      await waitFor(() => {
+        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement', false);
+      });
+
+      // Toast with Undo button appears
       await waitFor(() => {
         expect(screen.getByText('Undo')).toBeInTheDocument();
       });
 
-      // 2. Click the toast's Undo button \u2192 handleUndo pops from undoStackRef,
-      //    calls moveTask('1', 'backlog') \u2192 rejected \u2192 catch runs:
-      //      setError(msg); throw err;  \u2014\u2014 INTENTIONALLY does NOT re-push the entry.
+      // 2. Click the toast's Undo button → handleUndo pops from undoStackRef,
+      //    calls moveTask('1', 'backlog') → rejected → catch runs:
+      //      setError(msg); throw err;  —— INTENTIONALLY does NOT re-push the entry.
       fireEvent.click(screen.getByText('Undo'));
 
       await waitFor(() => {
@@ -553,18 +574,18 @@ describe('KanbanBoard', () => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('undo moveTask refused: stale event handler');
       });
-      // exactly two calls: drop + the one undo attempt
-      expect(mockMoveTask).toHaveBeenCalledTimes(2);
+      // exactly one undo attempt
+      expect(mockMoveTask).toHaveBeenCalledTimes(1);
 
       // 3. CRITICAL: pressed Ctrl+Z must be a no-op. The Ctrl+Z listener
       //    (registered in useEffect) gates on `undoStackRef.current.length > 0`
-      //    \u2014 because the popped entry was NOT re-pushed, the stack is empty and
+      //    — because the popped entry was NOT re-pushed, the stack is empty and
       //    the listener prevents default without calling handleUndo.
       mockMoveTask.mockClear();
       fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
 
       await waitFor(() => {
-        // mockClear reset the call list \u2014 if Ctrl+Z triggered handleUndo, the
+        // mockClear reset the call list — if Ctrl+Z triggered handleUndo, the
         // list would be non-empty. A genuine no-op assertion.
         expect(mockMoveTask).not.toHaveBeenCalled();
       });
@@ -574,22 +595,123 @@ describe('KanbanBoard', () => {
   // ── Drag and drop ────────────────────────────────────────────────────
 
   describe('drag and drop', () => {
-    it('calls moveTask when a card is dropped onto a different column', async () => {
+    it('shows retry-phase dialog when dropping onto In Progress (artifact-clearing)', async () => {
       renderBoard([task({ id: '1', title: 'Draggable', phase: 'backlog' })]);
 
-      const card = screen.getByTestId('task-card');
-      // Start drag
-      fireEvent.dragStart(card);
+      dropCardOnColumn('In Progress');
 
-      // Simulate dragging over the "In Progress" column
-      const implementHeader = screen.getByText('In Progress');
-      const implementColumn = implementHeader.closest('.flex.flex-col')!;
-      fireEvent.dragOver(implementColumn);
-      fireEvent.drop(implementColumn);
+      // Dialog should appear (implement is an artifact-clearing target)
+      await waitFor(() => {
+        expect(screen.getByText('Move Task')).toBeInTheDocument();
+      });
+      // Since there's only one phase (implement), no radio buttons — just explanation + budget toggle
+      expect(screen.getByText('Reset QA-attempt budget')).toBeInTheDocument();
+    });
+
+    it('calls retryTaskWithOptions when dialog is confirmed for implement drop', async () => {
+      renderBoard([task({ id: '1', title: 'Draggable', phase: 'backlog' })]);
+
+      dropCardOnColumn('In Progress');
 
       await waitFor(() => {
-        // resolveTargetPhase('implement', 'backlog') → 'implement'
-      expect(mockMoveTask).toHaveBeenCalledWith('1', 'implement');
+        expect(screen.getByText('Move Task')).toBeInTheDocument();
+      });
+
+      // Confirm
+      fireEvent.click(screen.getByText('Move & Resume'));
+
+      await waitFor(() => {
+        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement', false);
+      });
+    });
+
+    it('closes dialog and takes no action on Cancel for artifact-clearing drop', async () => {
+      renderBoard([task({ id: '1', title: 'Draggable', phase: 'backlog' })]);
+
+      dropCardOnColumn('In Progress');
+
+      await waitFor(() => {
+        expect(screen.getByText('Move Task')).toBeInTheDocument();
+      });
+
+      // Cancel — no action should be taken, card stays in original column
+      fireEvent.click(screen.getByText('Cancel'));
+
+      expect(screen.queryByText('Move Task')).not.toBeInTheDocument();
+      expect(mockRetryTaskWithOptions).not.toHaveBeenCalled();
+      expect(mockMoveTask).not.toHaveBeenCalled();
+    });
+
+    it('moves instantly (no dialog) when dropping onto Backlog', async () => {
+      renderBoard([task({ id: '1', title: 'Draggable', phase: 'implement' })]);
+
+      dropCardOnColumn('Backlog');
+
+      // No dialog — backlog is NO_RESUME_PHASES
+      expect(screen.queryByText('Move Task')).not.toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(mockMoveTask).toHaveBeenCalledWith('1', 'backlog');
+      });
+    });
+
+    it('moves instantly (no dialog) when dropping onto Failed', async () => {
+      renderBoard([task({ id: '1', title: 'Draggable', phase: 'implement' })]);
+
+      dropCardOnColumn('Failed');
+
+      expect(screen.queryByText('Move Task')).not.toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(mockMoveTask).toHaveBeenCalledWith('1', 'failed');
+      });
+    });
+
+    it('moves instantly (no dialog) when dropping onto Done', async () => {
+      renderBoard([task({ id: '1', title: 'Draggable', phase: 'review' })]);
+
+      // Need to find the Done column header
+      const card = screen.getByTestId('task-card');
+      fireEvent.dragStart(card);
+      const doneHeader = screen.getByText('Done');
+      const doneColumn = doneHeader.closest('.flex.flex-col')!;
+      fireEvent.dragOver(doneColumn);
+      fireEvent.drop(doneColumn);
+
+      expect(screen.queryByText('Move Task')).not.toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(mockMoveTask).toHaveBeenCalledWith('1', 'done');
+      });
+    });
+
+    it('shows dialog with phase selector when dropping onto Analysis', async () => {
+      renderBoard([task({ id: '1', title: 'Draggable', phase: 'failed' })]);
+
+      dropCardOnColumn('Analysis');
+
+      await waitFor(() => {
+        // Analysis has two phases, so we get "Choose Resume Phase" not "Move Task"
+        expect(screen.getByText('Choose Resume Phase')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Resume from Spec')).toBeInTheDocument();
+      expect(screen.getByText('Resume from Plan')).toBeInTheDocument();
+    });
+
+    it('defaults Analysis drop to plan and budget checked', async () => {
+      renderBoard([task({ id: '1', title: 'Draggable', phase: 'failed' })]);
+
+      dropCardOnColumn('Analysis');
+
+      await waitFor(() => {
+        expect(screen.getByText('Choose Resume Phase')).toBeInTheDocument();
+      });
+
+      // Confirm with defaults (plan, budget=true for spec/plan targets)
+      fireEvent.click(screen.getByText('Resume'));
+
+      await waitFor(() => {
+        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'plan', true);
       });
     });
 
@@ -619,6 +741,7 @@ describe('KanbanBoard', () => {
       fireEvent.drop(backlogColumn);
 
       expect(mockMoveTask).not.toHaveBeenCalled();
+      expect(mockRetryTaskWithOptions).not.toHaveBeenCalled();
     });
 
     it('adds opacity class to the dragged card', () => {
@@ -633,28 +756,28 @@ describe('KanbanBoard', () => {
     });
 
     // ── Regression: handleDrop's catch block ────────────────────────────
-    // The audit-flagged bug was that a bare `await moveTask(...)` threw into
+    // The audit-flagged bug was that a bare `await retryTaskWithOptions(...)` threw into
     // useServerMutation's empty catch — leaving the card stuck in the
     // optimistic column and the corresponding undo-stack entry available,
     // so clicking Undo would re-attempt the same known-failing action.
     // The fix specifically: clearOptimistic + filter undoStackRef + setError.
 
-    it('clears optimistic UI and removes the undo-stack entry when moveTask throws', async () => {
-      mockMoveTask.mockRejectedValueOnce(new Error('database timeout on moveTask'));
+    it('clears optimistic UI and removes the undo-stack entry when retryTaskWithOptions throws', async () => {
+      mockRetryTaskWithOptions.mockRejectedValueOnce(new Error('database timeout on moveTask'));
 
       renderBoard([task({ id: '1', title: 'Will fail', phase: 'backlog' })]);
 
-      const card = screen.getByTestId('task-card');
-      fireEvent.dragStart(card);
+      dropCardOnColumn('In Progress');
 
-      const implementHeader = screen.getByText('In Progress');
-      const implementColumn = implementHeader.closest('.flex.flex-col')!;
-      fireEvent.dragOver(implementColumn);
-      fireEvent.drop(implementColumn);
-
-      // moveTask was invoked with the resolved (normalized) target phase
       await waitFor(() => {
-        expect(mockMoveTask).toHaveBeenCalledWith('1', 'implement');
+        expect(screen.getByText('Move Task')).toBeInTheDocument();
+      });
+
+      // Confirm dialog
+      fireEvent.click(screen.getByText('Move & Resume'));
+
+      await waitFor(() => {
+        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement', false);
       });
 
       // (a) Error banner surfaces the thrown message
@@ -670,7 +793,7 @@ describe('KanbanBoard', () => {
 
       // (c) Undo-stack entry dropped — even though the toast still renders
       //     its 'Undo' button (toast.undoAction snapshot was set BEFORE the
-      //     throw), clicking it must NOT re-call moveTask. handleUndo pops
+      //     throw), clicking it must NOT re-call retryTaskWithOptions. handleUndo pops
       //     from undoStackRef which was filtered to remove the failing id,
       //     so the click is a no-op.
       const undoBtn = screen.getByText('Undo');
@@ -679,7 +802,7 @@ describe('KanbanBoard', () => {
 
       // Give the click handler a tick to settle
       await waitFor(() => {
-        expect(mockMoveTask).toHaveBeenCalledTimes(1);
+        expect(mockRetryTaskWithOptions).toHaveBeenCalledTimes(1);
       });
     });
   });
@@ -748,14 +871,16 @@ describe('KanbanBoard', () => {
   // ── Undo toast ───────────────────────────────────────────────────────
 
   describe('undo toast', () => {
-    it('shows undo toast after a successful drag-and-drop move', async () => {
+    it('shows undo toast after confirming a dialog-based move', async () => {
       renderBoard([task({ id: '1', title: 'Moved task', phase: 'backlog' })]);
 
-      const card = screen.getByTestId('task-card');
-      fireEvent.dragStart(card);
+      dropCardOnColumn('In Progress');
 
-      const implementHeader = screen.getByText('In Progress');
-      fireEvent.drop(implementHeader.closest('.flex.flex-col')!);
+      await waitFor(() => {
+        expect(screen.getByText('Move Task')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText('Move & Resume'));
 
       await waitFor(() => {
         expect(screen.getByText(/Moved "Moved task" to/)).toBeInTheDocument();
@@ -765,11 +890,13 @@ describe('KanbanBoard', () => {
     it('shows Undo button in the toast', async () => {
       renderBoard([task({ id: '1', title: 'Undoable', phase: 'backlog' })]);
 
-      const card = screen.getByTestId('task-card');
-      fireEvent.dragStart(card);
+      dropCardOnColumn('In Progress');
 
-      const implementHeader = screen.getByText('In Progress');
-      fireEvent.drop(implementHeader.closest('.flex.flex-col')!);
+      await waitFor(() => {
+        expect(screen.getByText('Move Task')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText('Move & Resume'));
 
       await waitFor(() => {
         expect(screen.getByText('Undo')).toBeInTheDocument();

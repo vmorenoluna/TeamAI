@@ -17,7 +17,7 @@ vi.mock('next/navigation', () => ({
   }),
 }));
 
-const mockRetryTask = vi.fn();
+const mockRetryTaskWithOptions = vi.fn();
 const mockStopTask = vi.fn();
 const mockPauseTask = vi.fn();
 const mockResumeTask = vi.fn();
@@ -26,7 +26,7 @@ const mockDeleteWorktree = vi.fn();
 const mockCheckWorktree = vi.fn().mockResolvedValue({ exists: false, path: null });
 
 vi.mock('@/app/actions/tasks', () => ({
-  retryTask: (...args: unknown[]) => mockRetryTask(...args),
+  retryTaskWithOptions: (...args: unknown[]) => mockRetryTaskWithOptions(...args),
   stopTask: (...args: unknown[]) => mockStopTask(...args),
   pauseTask: (...args: unknown[]) => mockPauseTask(...args),
   resumeTask: (...args: unknown[]) => mockResumeTask(...args),
@@ -61,7 +61,7 @@ describe('TaskCard mutation handlers', () => {
     vi.clearAllMocks();
     window.confirm = vi.fn().mockReturnValue(true);
     window.alert = vi.fn();
-    mockRetryTask.mockResolvedValue({ success: true, error: '' });
+    mockRetryTaskWithOptions.mockResolvedValue({ success: true, error: '' });
     mockStopTask.mockResolvedValue({ success: true, error: '' });
     mockPauseTask.mockResolvedValue({ success: true, error: '' });
     mockResumeTask.mockResolvedValue({ success: true, error: '' });
@@ -84,49 +84,96 @@ describe('TaskCard mutation handlers', () => {
       );
     }
 
-    it('calls retryTask and refreshes router on success', async () => {
-      mockRetryTask.mockResolvedValue({ success: true, error: '' });
+    it('opens the retry-phase dialog when retry button is clicked', async () => {
       renderFailedTask();
 
       await act(async () => {
         fireEvent.click(screen.getByTestId('retry-button'));
       });
 
-      expect(mockRetryTask).toHaveBeenCalledWith('failed-1');
+      // Dialog title is "Choose Resume Phase" since there are multiple options
+      expect(screen.getByText('Choose Resume Phase')).toBeInTheDocument();
+      // Dialog shows the task title in the subtitle
+      expect(screen.getByText(/"Failed Task" — pick which phase to resume from/)).toBeInTheDocument();
+      // Budget toggle should be present
+      expect(screen.getByText('Reset QA-attempt budget')).toBeInTheDocument();
+    });
+
+    it('calls retryTaskWithOptions and refreshes router on dialog confirm', async () => {
+      mockRetryTaskWithOptions.mockResolvedValue({ success: true, error: '' });
+      renderFailedTask();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('retry-button'));
+      });
+
+      // Click the confirm button
+      await act(async () => {
+        fireEvent.click(screen.getByText('Resume'));
+      });
+
+      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('failed-1', 'implement', false);
       expect(mockRouterRefresh).toHaveBeenCalled();
       expect(window.alert).not.toHaveBeenCalled();
     });
 
     it('shows alert and skips router refresh on failure', async () => {
-      mockRetryTask.mockResolvedValue({ success: false, error: 'API rate limited' });
+      mockRetryTaskWithOptions.mockResolvedValue({ success: false, error: 'API rate limited' });
       renderFailedTask();
 
       await act(async () => {
         fireEvent.click(screen.getByTestId('retry-button'));
       });
 
-      expect(mockRetryTask).toHaveBeenCalledWith('failed-1');
+      await act(async () => {
+        fireEvent.click(screen.getByText('Resume'));
+      });
+
       expect(window.alert).toHaveBeenCalledWith('Failed to retry task: API rate limited');
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
-    it('disables retry button and shows spinner while pending', async () => {
-      // Never-resolving promise keeps the action pending
-      mockRetryTask.mockImplementation(() => new Promise(() => {}));
+    it('closes dialog when Cancel is clicked', async () => {
       renderFailedTask();
 
       await act(async () => {
         fireEvent.click(screen.getByTestId('retry-button'));
       });
 
+      expect(screen.getByText('Choose Resume Phase')).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Cancel'));
+      });
+
+      // Dialog should be gone and no server action should have been called
+      expect(screen.queryByText('Choose Resume Phase')).not.toBeInTheDocument();
+      expect(mockRetryTaskWithOptions).not.toHaveBeenCalled();
+    });
+
+    it('disables retry button and shows spinner while pending', async () => {
+      // Never-resolving promise keeps the action pending
+      mockRetryTaskWithOptions.mockImplementation(() => new Promise(() => {}));
+      renderFailedTask();
+
+      // Open dialog
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('retry-button'));
+      });
+
+      // Confirm
+      await act(async () => {
+        fireEvent.click(screen.getByText('Resume'));
+      });
+
+      // The retry button should still be disabled after the dialog closes
       const btn = screen.getByTestId('retry-button');
       expect(btn).toBeDisabled();
-      // Should show a spinner icon (the animate-spin div)
       expect(btn.querySelector('.animate-spin')).toBeInTheDocument();
     });
 
     it('stops click event propagation', async () => {
-      mockRetryTask.mockResolvedValue({ success: true, error: '' });
+      mockRetryTaskWithOptions.mockResolvedValue({ success: true, error: '' });
       const onSelect = vi.fn();
       render(<TaskCard task={makeTask({ id: 'failed-2', phase: 'failed' })} onSelect={onSelect} />);
 
@@ -574,16 +621,22 @@ describe('TaskCard mutation handlers', () => {
   // silently swallowed by useServerMutation's empty catch.
 
   describe('raw-throw path (regression)', () => {
-    it('handleRetry: alerts when retryTask raw-throws', async () => {
-      mockRetryTask.mockRejectedValue(new Error('network dropped'));
+    it('handleRetry: alerts when retryTaskWithOptions raw-throws', async () => {
+      mockRetryTaskWithOptions.mockRejectedValue(new Error('network dropped'));
 
       render(<TaskCard task={makeTask({ id: 'failed-r', phase: 'failed' })} onSelect={vi.fn()} />);
 
+      // Open dialog
       await act(async () => {
         fireEvent.click(screen.getByTestId('retry-button'));
       });
 
-      expect(mockRetryTask).toHaveBeenCalledWith('failed-r');
+      // Confirm
+      await act(async () => {
+        fireEvent.click(screen.getByText('Resume'));
+      });
+
+      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('failed-r', 'implement', false);
       expect(window.alert).toHaveBeenCalledWith('Failed to retry task: network dropped');
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });

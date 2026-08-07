@@ -54,9 +54,12 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 // Mock orchestrator — uses the hoisted shared mocks
+const mockClearPipelineStateFile = vi.fn();
+
 vi.mock('@/lib/orchestrator', () => ({
   getOrchestrator: vi.fn(() => ({
     moveTaskToPhase: mockMoveTaskToPhase,
+    clearPipelineStateFile: mockClearPipelineStateFile,
     cancelPipeline: vi.fn(),
     runTask: vi.fn(),
     resumeTask: vi.fn(),
@@ -371,5 +374,229 @@ describe('retryTask — Gap 5: qa_report.json snapshot', () => {
     // Verify completionSummary was cleared
     const updatedTask = JSON.parse(readFileSync(join(taskDir, 'task.json'), 'utf-8'));
     expect(updatedTask.completionSummary).toBeUndefined();
+  });
+});
+
+// ── retryTaskWithOptions tests ────────────────────────────────────────────
+
+describe('retryTaskWithOptions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockProjectPath = TEST_DIR;
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  function seedTask(slug: string, phase: string, options: { qaReport?: Record<string, unknown> } = {}) {
+    const taskDir = join(TEST_DIR, '.teamai', slug);
+    mkdirSync(taskDir, { recursive: true });
+
+    const taskId = `task-${slug}`;
+    const task = {
+      id: taskId,
+      title: `Task ${slug}`,
+      description: 'a task for retryWithOptions testing',
+      phase,
+      branch: `feat/${slug}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    writeFileSync(join(taskDir, 'task.json'), JSON.stringify(task, null, 2));
+
+    // Write events.jsonl so getResumePhaseForFailedTask has data (only for failed tasks)
+    if (phase === 'failed') {
+      writeFileSync(join(taskDir, 'events.jsonl'),
+        JSON.stringify({ phase: 'backlog', timestamp: new Date().toISOString() }) + '\n' +
+        JSON.stringify({ phase: 'spec', timestamp: new Date().toISOString() }) + '\n' +
+        JSON.stringify({ phase: 'plan', timestamp: new Date().toISOString() }) + '\n' +
+        JSON.stringify({ phase: 'implement', timestamp: new Date().toISOString() }) + '\n' +
+        JSON.stringify({ phase: 'qa-review', timestamp: new Date().toISOString() }) + '\n' +
+        JSON.stringify({ phase: 'failed', timestamp: new Date().toISOString() }) + '\n',
+      );
+    }
+
+    if (options.qaReport) {
+      writeFileSync(
+        join(taskDir, 'qa_report.json'),
+        JSON.stringify(options.qaReport, null, 2),
+      );
+    }
+
+    return { taskId, taskDir };
+  }
+
+  it('calls moveTaskToPhase with user-chosen phase (implement)', async () => {
+    const slug = 'rto-implement';
+    const { taskId } = seedTask(slug, 'failed', {
+      qaReport: { overall: 'FAIL', criteria: [{ name: 'C1', status: 'FAIL' }] },
+    });
+
+    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
+    const result = await retryTaskWithOptions(taskId, 'implement', false);
+
+    expect(result.success).toBe(true);
+    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'implement');
+    expect(mockClearPipelineStateFile).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).toHaveBeenCalledWith('/');
+  });
+
+  it('calls moveTaskToPhase with plan phase', async () => {
+    const slug = 'rto-plan';
+    const { taskId } = seedTask(slug, 'failed');
+
+    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
+    const result = await retryTaskWithOptions(taskId, 'plan', true);
+
+    expect(result.success).toBe(true);
+    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'plan');
+  });
+
+  it('calls clearPipelineStateFile when resetBudget=true', async () => {
+    const slug = 'rto-reset-budget';
+    const { taskId } = seedTask(slug, 'failed');
+
+    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
+    const result = await retryTaskWithOptions(taskId, 'implement', true);
+
+    expect(result.success).toBe(true);
+    expect(mockClearPipelineStateFile).toHaveBeenCalledWith(
+      expect.stringContaining('.teamai'),
+    );
+  });
+
+  it('does NOT call clearPipelineStateFile when resetBudget=false', async () => {
+    const slug = 'rto-no-reset';
+    const { taskId } = seedTask(slug, 'failed');
+
+    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
+    const result = await retryTaskWithOptions(taskId, 'implement', false);
+
+    expect(result.success).toBe(true);
+    expect(mockClearPipelineStateFile).not.toHaveBeenCalled();
+  });
+
+  it('runs pre-restore logic for failed tasks (snapshots qa_report)', async () => {
+    const slug = 'rto-pre-restore';
+    const { taskId } = seedTask(slug, 'failed', {
+      qaReport: { overall: 'FAIL', criteria: [{ name: 'Security', status: 'FAIL', notes: 'XSS found' }] },
+    });
+
+    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
+    const result = await retryTaskWithOptions(taskId, 'implement', false);
+
+    expect(result.success).toBe(true);
+
+    // Verify snapshot exists
+    const snapshotPath = join(TEST_DIR, '.teamai', slug, 'qa_report_before_failed.json');
+    expect(existsSync(snapshotPath)).toBe(true);
+    const snapshot = JSON.parse(readFileSync(snapshotPath, 'utf-8'));
+    expect(snapshot.overall).toBe('FAIL');
+    expect(snapshot.criteria[0].name).toBe('Security');
+  });
+
+  it('clears completionSummary for failed tasks', async () => {
+    const slug = 'rto-clear-summary';
+    const taskDir = join(TEST_DIR, '.teamai', slug);
+    mkdirSync(taskDir, { recursive: true });
+    const taskId = `task-${slug}`;
+    writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
+      id: taskId,
+      title: 'Failed with summary',
+      description: 'a failed task',
+      phase: 'failed',
+      branch: `feat/${slug}`,
+      completionSummary: 'Task failed after 3 QA attempts.',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }, null, 2));
+
+    writeFileSync(join(taskDir, 'events.jsonl'),
+      JSON.stringify({ phase: 'qa-review', timestamp: new Date().toISOString() }) + '\n' +
+      JSON.stringify({ phase: 'failed', timestamp: new Date().toISOString() }) + '\n',
+    );
+
+    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
+    const result = await retryTaskWithOptions(taskId, 'implement', false);
+    expect(result.success).toBe(true);
+
+    const updatedTask = JSON.parse(readFileSync(join(taskDir, 'task.json'), 'utf-8'));
+    expect(updatedTask.completionSummary).toBeUndefined();
+  });
+
+  it('skips pre-restore for non-failed tasks (no snapshot)', async () => {
+    const slug = 'rto-backlog';
+    const { taskId } = seedTask(slug, 'backlog', {
+      qaReport: { overall: 'PASS' },
+    });
+
+    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
+    const result = await retryTaskWithOptions(taskId, 'implement', false);
+
+    expect(result.success).toBe(true);
+
+    // No snapshot should be created (pre-restore only runs for failed tasks)
+    const snapshotPath = join(TEST_DIR, '.teamai', slug, 'qa_report_before_failed.json');
+    expect(existsSync(snapshotPath)).toBe(false);
+
+    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'implement');
+  });
+
+  it('moves non-failed task with resetBudget=true', async () => {
+    const slug = 'rto-backlog-reset';
+    const { taskId } = seedTask(slug, 'backlog');
+
+    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
+    const result = await retryTaskWithOptions(taskId, 'plan', true);
+
+    expect(result.success).toBe(true);
+    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'plan');
+    expect(mockClearPipelineStateFile).toHaveBeenCalled();
+  });
+
+  it('returns error for nonexistent task', async () => {
+    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
+    const result = await retryTaskWithOptions('nonexistent', 'implement', false);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Task not found');
+    expect(mockMoveTaskToPhase).not.toHaveBeenCalled();
+  });
+
+  it('restores qa_report.json from snapshot when report is missing for failed task', async () => {
+    const slug = 'rto-restore-report';
+    const { taskId, taskDir } = seedTask(slug, 'failed');
+
+    // No qa_report.json — only a snapshot from a previous run
+    const snapshotContent = JSON.stringify({
+      overall: 'FAIL',
+      criteria: [{ name: 'Auth check', status: 'FAIL', notes: 'Missing validation' }],
+    }, null, 2);
+    writeFileSync(join(taskDir, 'qa_report_before_failed.json'), snapshotContent);
+
+    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
+    const result = await retryTaskWithOptions(taskId, 'implement', false);
+
+    expect(result.success).toBe(true);
+
+    // Verify qa_report.json was restored from snapshot
+    const reportPath = join(taskDir, 'qa_report.json');
+    expect(existsSync(reportPath)).toBe(true);
+    const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+    expect(report.criteria[0].name).toBe('Auth check');
+  });
+
+  it('resets budget on implement target with resetBudget=true', async () => {
+    const slug = 'rto-implement-budget';
+    const { taskId } = seedTask(slug, 'failed');
+
+    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
+    const result = await retryTaskWithOptions(taskId, 'implement', true);
+
+    expect(result.success).toBe(true);
+    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'implement');
+    expect(mockClearPipelineStateFile).toHaveBeenCalled();
   });
 });

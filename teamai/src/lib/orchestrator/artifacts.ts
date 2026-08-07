@@ -112,3 +112,54 @@ export const REVISION_CLEANUP_EXTRA: string[] = [
   'qa_report_before_bounce.json',
   'qa_report_before_failed.json',
 ];
+
+// ── Phase descriptions for the retry-phase dialog ─────────────────────────
+// The list of phases comes from this module (single source of truth).
+// The human-readable descriptions mirror PHASE_ARTIFACTS semantics:
+//   - spec: PHASE_ARTIFACTS['spec'] clears everything downstream
+//   - plan: PHASE_ARTIFACTS['plan'] clears plan + QA files (spec survives)
+//   - implement: PHASE_ARTIFACTS['qa'] clears only QA files
+
+export interface PhaseClearDescription {
+  phase: string;
+  label: string;
+}
+
+/** Return the list of phases the retry-phase dialog can offer. */
+export function getPhaseClearDescriptions(): PhaseClearDescription[] {
+  return [
+    { phase: 'spec', label: 'Spec' },
+    { phase: 'plan', label: 'Plan' },
+    { phase: 'implement', label: 'Implement' },
+  ] satisfies PhaseClearDescription[];
+}
+
+/**
+ * Get a human-readable description of what gets cleared when resuming
+ * at a particular phase level.
+ *
+ * The descriptions mirror PHASE_ARTIFACTS semantics so the copy won't
+ * drift from the actual behaviour: spec clears everything downstream,
+ * plan clears plan-level + QA files, implement clears only QA files.
+ */
+export function getPhaseClearDescription(phase: string): string {
+  switch (phase) {
+    case 'spec':
+      return (
+        'Regenerate the spec from scratch. The implementation plan, QA history, ' +
+        'and all downstream artifacts will be discarded.'
+      );
+    case 'plan':
+      return (
+        'Keep the existing spec, regenerate the implementation plan from scratch. ' +
+        'QA history will be discarded.'
+      );
+    case 'implement':
+      return (
+        'Keep the existing spec and plan — only QA history is cleared. ' +
+        'Re-runs implementation followed by QA review.'
+      );
+    default:
+      return 'Artifacts will be cleared according to the pipeline phase.';
+  }
+}
