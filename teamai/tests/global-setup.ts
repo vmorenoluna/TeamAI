@@ -1,16 +1,17 @@
 /**
  * Vitest global setup/teardown — ensures no test projects are left behind.
  *
- * The teardown scans ~/.teamai/projects.json for any test project entries
- * (directories with the ".teamai-test-" prefix) and removes both the
- * filesystem directory and the store registration.
- *
- * This is a safety net: per-test afterEach hooks should already clean up,
- * but if a test crashes before afterEach runs, the global teardown catches
- * the orphaned artifacts.
+ * The teardown performs two independent cleanup passes:
+ *   1. Catch-all: scans process.cwd() for .teamai-test-* directories and
+ *      removes them.  This handles createTestProject() leftovers from
+ *      crashed unit/integration tests (their afterEach → clean() never ran).
+ *   2. Registered-project cleanup: if TEAMAI_TEST_HOME is set, prunes test
+ *      project entries from ~/.teamai/projects.json and removes their
+ *      physical directories.  This is a safety net for tests that register
+ *      projects via ProjectStore.add().
  */
 
-import { readFileSync, writeFileSync, existsSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 // Safety: refuse to touch the real ~/.teamai/projects.json unless explicitly
@@ -27,14 +28,35 @@ export function setup() {
 }
 
 export function teardown() {
-  // Safety gate: refuse to touch the real ~/.teamai/projects.json.
-  // Set TEAMAI_TEST_HOME env var to a temp directory to enable cleanup.
+  let cleaned = 0;
+
+  // ── Catch-all: remove leftover .teamai-test-* dirs from cwd ──────────
+  // createTestProject() creates temp dirs in process.cwd(). If a test
+  // crashes before its afterEach → clean() runs, the directory lingers.
+  // Scan cwd and remove any that match the prefix.
+  const cwd = process.cwd();
+  try {
+    for (const entry of readdirSync(cwd)) {
+      if (!entry.startsWith(TEST_PREFIX)) continue;
+      const full = join(cwd, entry);
+      try {
+        rmSync(full, { recursive: true, force: true });
+        cleaned++;
+      } catch { /* best-effort per directory */ }
+    }
+  } catch { /* readdir can fail — nothing to clean */ }
+
+  if (cleaned > 0) {
+    console.log(`[test-teardown] Removed ${cleaned} leftover test director${cleaned === 1 ? 'y' : 'ies'} from cwd`);
+  }
+
+  // ── Registered-project cleanup (requires TEAMAI_TEST_HOME) ───────────
   if (!HOME_DIR) {
-    console.log('[test-teardown] Skipping — TEAMAI_TEST_HOME not set (refusing to touch real projects.json)');
+    console.log('[test-teardown] Skipping projects.json cleanup — TEAMAI_TEST_HOME not set');
     return;
   }
 
-  let cleaned = 0;
+  let prCleaned = 0;
 
   try {
     if (!existsSync(PROJECTS_FILE)) return;
@@ -50,13 +72,13 @@ export function teardown() {
       if (existsSync(p.path)) {
         rmSync(p.path, { recursive: true, force: true });
       }
-      cleaned++;
+      prCleaned++;
       return false; // Remove from the array
     });
 
-    if (cleaned > 0) {
+    if (prCleaned > 0) {
       writeFileSync(PROJECTS_FILE, JSON.stringify(remaining, null, 2));
-      console.log(`[test-teardown] Cleaned up ${cleaned} leftover test project(s)`);
+      console.log(`[test-teardown] Cleaned up ${prCleaned} leftover test project(s) from projects.json`);
     }
   } catch (err) {
     console.warn('[test-teardown] Cleanup error (non-fatal):', err);
