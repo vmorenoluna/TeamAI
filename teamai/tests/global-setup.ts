@@ -60,6 +60,12 @@ export function setup() {
 }
 
 export function teardown() {
+  // Clean stale git lock files — if tests themselves left any behind
+  // (e.g. a git command was killed mid-flight), don't let them poison
+  // the next run. The setup() also does this, but teardown catches locks
+  // from the current run before anything else touches the repo.
+  cleanStaleGitLocks();
+
   let cleaned = 0;
 
   // ── Catch-all: remove leftover .teamai-test-* dirs from cwd ──────────
