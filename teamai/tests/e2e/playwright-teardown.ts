@@ -7,23 +7,31 @@
  * via process.env.
  */
 
-import { rmSync, existsSync } from 'fs';
+import { rmSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 async function globalTeardown() {
   const cwd = process.cwd();
-  const seedDir = join(cwd, '.teamai-e2e-seed');
 
   console.log('[playwright-teardown] Cleaning up E2E artifacts…');
 
-  // ── Remove the seed directory ────────────────────────────────────────
-  if (existsSync(seedDir)) {
-    try {
-      rmSync(seedDir, { recursive: true, force: true });
-      console.log('[playwright-teardown] Removed seed directory');
-    } catch (err) {
-      console.warn('[playwright-teardown] Failed to remove seed directory (non-fatal):', err);
+  // ── Remove ALL .teamai-e2e-seed* directories ────────────────────────
+  // The base seed is .teamai-e2e-seed; parallel workers clone it as
+  // .teamai-e2e-seed-w{N}. Remove every variant so a crashed or
+  // force-killed run doesn't leave stale directories behind.
+  let removed = 0;
+  try {
+    for (const entry of readdirSync(cwd)) {
+      if (!entry.startsWith('.teamai-e2e-seed')) continue;
+      const full = join(cwd, entry);
+      try {
+        rmSync(full, { recursive: true, force: true });
+        removed++;
+      } catch { /* best-effort per directory */ }
     }
+  } catch { /* readdir itself can fail — nothing to clean */ }
+  if (removed > 0) {
+    console.log(`[playwright-teardown] Removed ${removed} seed director${removed === 1 ? 'y' : 'ies'}`);
   }
 
   // ── Remove the temp config directory ─────────────────────────────────
