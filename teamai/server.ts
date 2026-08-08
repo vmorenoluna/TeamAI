@@ -138,7 +138,7 @@ app.prepare().then(async () => {
   try {
     const { clearPort } = await import('./scripts/clear-port-3001.mjs');
     if (typeof clearPort === 'function') {
-      await clearPort();
+      await clearPort(String(port));
     }
   } catch {
     // clear-port script not available (e.g. production build) — skip
