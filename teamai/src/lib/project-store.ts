@@ -25,12 +25,19 @@ function resolveConfigDir(): string {
   return join(homedir(), '.teamai');
 }
 
-const CONFIG_DIR = resolveConfigDir();
-const PROJECTS_FILE = join(CONFIG_DIR, 'projects.json');
-const BACKUP_FILE = PROJECTS_FILE + '.backup';
-const TMP_FILE = PROJECTS_FILE + '.tmp';
-// process.cwd() is the project root (teamai/) at runtime
-const DEFAULTS_DIR = join(/* turbopackIgnore: true */ process.cwd(), 'defaults');
+// Lazy — avoids module-scope filesystem ops that trigger Turbopack NFT tracing.
+let _configDir: string | undefined;
+function getConfigDir() {
+  if (!_configDir) _configDir = resolveConfigDir();
+  return _configDir;
+}
+function getProjectsFile() { return join(getConfigDir(), 'projects.json'); }
+function getBackupFile() { return getProjectsFile() + '.backup'; }
+function getTmpFile() { return getProjectsFile() + '.tmp'; }
+/** Lazy getter — avoids module-scope process.cwd() that triggers Turbopack NFT tracing. */
+function getDefaultsDir() {
+  return join(/* turbopackIgnore: true */ process.cwd(), 'defaults');
+}
 
 export interface Project {
   name: string;
@@ -48,7 +55,7 @@ export interface StaleDefaults {
 
 export class ProjectStore {
   constructor() {
-    mkdirSync(CONFIG_DIR, { recursive: true });
+    mkdirSync(getConfigDir(), { recursive: true });
 
     // ═══ Crash recovery: if a previous add/remove crashed mid-write, ═══
     // the backup still exists. Restore it so the user's data is intact.
@@ -63,7 +70,7 @@ export class ProjectStore {
 
   getAll(): Project[] {
     try {
-      return JSON.parse(readFileSync(PROJECTS_FILE, 'utf-8'));
+      return JSON.parse(readFileSync(getProjectsFile(), 'utf-8'));
     } catch {
       return [];
     }
@@ -111,18 +118,18 @@ export class ProjectStore {
    */
   private _atomicWrite(compute: () => Project[]): void {
     // 1. Back up current file before modifying
-    if (existsSync(PROJECTS_FILE)) {
-      writeFileSync(BACKUP_FILE, readFileSync(PROJECTS_FILE, 'utf-8'));
+    if (existsSync(getProjectsFile())) {
+      writeFileSync(getBackupFile(), readFileSync(getProjectsFile(), 'utf-8'));
     }
 
     // 2. Write to temp file (if we crash here, real file is untouched)
-    writeFileSync(TMP_FILE, JSON.stringify(compute(), null, 2));
+    writeFileSync(getTmpFile(), JSON.stringify(compute(), null, 2));
 
     // 3. Atomically replace real file with temp
-    renameSync(TMP_FILE, PROJECTS_FILE);
+    renameSync(getTmpFile(), getProjectsFile());
 
     // 4. Clean up backup on success
-    try { rmSync(BACKUP_FILE); } catch { /* best-effort */ }
+    try { rmSync(getBackupFile()); } catch { /* best-effort */ }
   }
 
   /**
@@ -131,10 +138,10 @@ export class ProjectStore {
    * left in a corrupted or partially-modified state.
    */
   private _restoreFromBackup(): void {
-    if (!existsSync(BACKUP_FILE)) return;
+    if (!existsSync(getBackupFile())) return;
     try {
-      writeFileSync(PROJECTS_FILE, readFileSync(BACKUP_FILE, 'utf-8'));
-      rmSync(BACKUP_FILE);
+      writeFileSync(getProjectsFile(), readFileSync(getBackupFile(), 'utf-8'));
+      rmSync(getBackupFile());
     } catch {
       // If restore fails, leave backup in place for manual recovery
     }
@@ -161,7 +168,7 @@ export class ProjectStore {
     // roles/ are user-configurable from the UI (persona / tone / domain customisation)
     // and must never be auto-synced — only commands/ and top-level files are managed.
     const scanDirs = [
-      { src: join(DEFAULTS_DIR, 'commands'), prefix: 'commands' },
+      { src: join(getDefaultsDir(), 'commands'), prefix: 'commands' },
     ];
     for (const { src, prefix } of scanDirs) {
       if (!existsSync(src)) continue;
@@ -171,7 +178,7 @@ export class ProjectStore {
       }
     }
     // teamai-workflow.md is a top-level default, not in commands/ or roles/
-    const workflowSrc = join(DEFAULTS_DIR, 'teamai-workflow.md');
+    const workflowSrc = join(getDefaultsDir(), 'teamai-workflow.md');
     if (existsSync(workflowSrc)) {
       manifest['teamai-workflow.md'] = this._computeChecksum(readFileSync(workflowSrc, 'utf-8'));
     }
@@ -301,7 +308,7 @@ export class ProjectStore {
         if (!existsSync(destFile)) {
           // Brand-new default file, project never had it — copy it.
           if (!dryRun) {
-            const srcFile = join(DEFAULTS_DIR, relPath);
+            const srcFile = join(getDefaultsDir(), relPath);
             if (existsSync(srcFile)) cpSync(srcFile, destFile);
           }
           newManifest[relPath] = currentChecksum;
@@ -335,7 +342,7 @@ export class ProjectStore {
       if (!existsSync(projectFile)) {
         // File was deleted from project — copy fresh default
         if (!dryRun) {
-          const srcFile = join(DEFAULTS_DIR, relPath);
+          const srcFile = join(getDefaultsDir(), relPath);
           if (existsSync(srcFile)) cpSync(srcFile, projectFile);
         }
         updated.push(relPath);
@@ -347,7 +354,7 @@ export class ProjectStore {
       if (projectChecksum === storedChecksum) {
         // Project file matches old default — never customized, safe to update
         if (!dryRun) {
-          const srcFile = join(DEFAULTS_DIR, relPath);
+          const srcFile = join(getDefaultsDir(), relPath);
           if (existsSync(srcFile)) cpSync(srcFile, projectFile);
         }
         updated.push(relPath);
@@ -397,8 +404,8 @@ export class ProjectStore {
    */
   private scaffold(projectPath: string): void {
     const targets = [
-      { src: join(DEFAULTS_DIR, 'roles'), dest: join(projectPath, '.claude', 'roles') },
-      { src: join(DEFAULTS_DIR, 'commands'), dest: join(projectPath, '.claude', 'commands') },
+      { src: join(getDefaultsDir(), 'roles'), dest: join(projectPath, '.claude', 'roles') },
+      { src: join(getDefaultsDir(), 'commands'), dest: join(projectPath, '.claude', 'commands') },
     ];
 
     for (const { src, dest } of targets) {
@@ -416,19 +423,19 @@ export class ProjectStore {
     // Scaffold pipeline.json if not present
     const pipelineDest = join(projectPath, '.teamai', 'pipeline.json');
     if (!existsSync(pipelineDest)) {
-      cpSync(join(DEFAULTS_DIR, 'pipeline.json'), pipelineDest);
+      cpSync(join(getDefaultsDir(), 'pipeline.json'), pipelineDest);
     }
 
     // Scaffold providers.json if not present
     const providersDest = join(projectPath, '.teamai', 'providers.json');
     if (!existsSync(providersDest)) {
-      cpSync(join(DEFAULTS_DIR, 'providers.json'), providersDest);
+      cpSync(join(getDefaultsDir(), 'providers.json'), providersDest);
     }
 
     // Copy teamai-workflow.md into .claude/ if not already there
     const workflowDest = join(projectPath, '.claude', 'teamai-workflow.md');
     if (!existsSync(workflowDest)) {
-      cpSync(join(DEFAULTS_DIR, 'teamai-workflow.md'), workflowDest);
+      cpSync(join(getDefaultsDir(), 'teamai-workflow.md'), workflowDest);
     }
 
     // Ensure root CLAUDE.md references the workflow file
@@ -454,4 +461,21 @@ export class ProjectStore {
   }
 }
 
-export const projectStore = new ProjectStore();
+// Lazy singleton — defers ProjectStore construction (which does mkdirSync +
+// _restoreFromBackup) until first use, avoiding module-scope filesystem ops
+// that trigger Turbopack NFT tracing warnings during build.
+let _projectStore: ProjectStore | undefined;
+function getProjectStore(): ProjectStore {
+  if (!_projectStore) _projectStore = new ProjectStore();
+  return _projectStore;
+}
+export const projectStore: ProjectStore = new Proxy({} as ProjectStore, {
+  get(_target, prop, _receiver) {
+    const store = getProjectStore();
+    const value = (store as unknown as Record<string | symbol, unknown>)[prop];
+    if (typeof value === 'function') {
+      return (...args: unknown[]) => (value as (...a: unknown[]) => unknown).apply(store, args);
+    }
+    return value;
+  },
+});
