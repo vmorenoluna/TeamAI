@@ -22,8 +22,40 @@ const HOME_DIR = process.env.TEAMAI_TEST_HOME;
 const PROJECTS_FILE = HOME_DIR ? join(HOME_DIR, '.teamai', 'projects.json') : '';
 const TEST_PREFIX = '.teamai-test-';
 
+/** Remove stale git lock files from the main repo's .git directory. */
+function cleanStaleGitLocks() {
+  // Tests run from teamai/, so .git is ../.git
+  const repoRoot = join(process.cwd(), '..');
+  const gitDir = join(repoRoot, '.git');
+  if (!existsSync(gitDir)) return;
+
+  try {
+    const entries = readdirSync(gitDir);
+    let removed = 0;
+    for (const entry of entries) {
+      // Match index.lock, next-index-*.lock.lock, and any other git lock files
+      if (!entry.includes('.lock')) continue;
+      const full = join(gitDir, entry);
+      try {
+        rmSync(full, { force: true });
+        removed++;
+      } catch { /* best-effort per file */ }
+    }
+    if (removed > 0) {
+      console.log(`[test-setup] Removed ${removed} stale git lock file(s) from .git/`);
+    }
+  } catch { /* readdir can fail — nothing to clean */ }
+}
+
 export function setup() {
-  // No-op: per-test cleanup is handled by afterEach hooks.
+  // ── Clean stale git lock files from the main repo ──────────────────
+  // When a basher agent times out during git commit, it leaves stale
+  // .git/index.lock (and .git/next-index-*.lock.lock) files that block
+  // ALL subsequent git operations — including test repo init.
+  // The cwd during tests is teamai/, so .git is one level up.
+  cleanStaleGitLocks();
+
+  // Per-test cleanup is handled by afterEach hooks.
   // The global teardown handles any leftovers from crashed tests.
 }
 

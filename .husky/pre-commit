@@ -27,5 +27,11 @@ fi
 # For a comprehensive check before pushing, also run:
 #   cd teamai && npm run test:all
 # (includes E2E and changelog tests that take longer)
+
+# Clean stale git lock files left by timed-out or killed git processes.
+# Without this, a single basher timeout on git commit blocks ALL subsequent
+# git operations (commits, worktrees, test repo init) until manually removed.
+rm -f .git/index.lock .git/*.lock.lock 2>/dev/null || :
+
 cd teamai && npx tsc --noEmit && npx lint-staged && npx vitest run
 # test
