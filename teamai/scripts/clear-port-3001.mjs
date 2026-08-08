@@ -33,6 +33,9 @@ const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2_000;
 const PID_FILE = join(tmpdir(), 'teamai-server.pid');
 
+// Default port for standalone / pretest:e2e usage.
+const DEFAULT_PORT = '3001';
+
 function isPidAlive(pid) {
   try {
     if (platform() === 'win32') {
@@ -99,16 +102,16 @@ function killFromPidFile() {
   }
 }
 
-function isPortFree() {
+function isPortFree(port) {
   try {
     if (platform() === 'win32') {
       execSync(
-        `netstat -ano | findstr :${PORT} | findstr LISTENING`,
+        `netstat -ano | findstr :${port} | findstr LISTENING`,
         { encoding: 'utf-8', stdio: 'pipe' },
       );
       return false; // netstat found LISTENING → port occupied
     } else {
-      execSync(`lsof -ti:${PORT}`, { stdio: 'pipe' });
+      execSync(`lsof -ti:${port}`, { stdio: 'pipe' });
       return false; // lsof found a process → port occupied
     }
   } catch {
@@ -116,11 +119,11 @@ function isPortFree() {
   }
 }
 
-function killProcessOnPort() {
+function killProcessOnPort(port) {
   if (platform() === 'win32') {
     try {
       const result = execSync(
-        `netstat -ano | findstr :${PORT} | findstr LISTENING`,
+        `netstat -ano | findstr :${port} | findstr LISTENING`,
         { encoding: 'utf-8', stdio: 'pipe' },
       );
       const lines = result.trim().split('\n').filter(Boolean);
@@ -137,10 +140,10 @@ function killProcessOnPort() {
     }
   } else {
     try {
-      execSync(`lsof -ti:${PORT} | xargs -r kill -9 2>/dev/null`, {
+      execSync(`lsof -ti:${port} | xargs -r kill -9 2>/dev/null`, {
         stdio: 'pipe',
       });
-      console.log(`[clear-port] Port ${PORT} cleared`);
+      console.log(`[clear-port] Port ${port} cleared`);
       return true;
     } catch {
       return false;
@@ -148,21 +151,24 @@ function killProcessOnPort() {
   }
 }
 
-/** Programmatic API — call from server.ts or other modules. */
-export async function clearPort() {
+/**
+ * Programmatic API — call from server.ts or other modules.
+ * @param {string} [port='3001'] — the port to clear.
+ */
+export async function clearPort(port = DEFAULT_PORT) {
   // ── Step 1: PID file (precise zombie detection) ────────────────────
   killFromPidFile();
 
   // ── Step 2: Quick netstat check ────────────────────────────────────
-  if (isPortFree()) {
-    console.log(`[clear-port] Port ${PORT} is free`);
+  if (isPortFree(port)) {
+    console.log(`[clear-port] Port ${port} is free`);
     return;
   }
 
   // ── Step 3: Netstat scan + retry ───────────────────────────────────
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    console.log(`[clear-port] Port ${PORT} occupied — attempt ${attempt}/${MAX_RETRIES}`);
-    const killed = killProcessOnPort();
+    console.log(`[clear-port] Port ${port} occupied — attempt ${attempt}/${MAX_RETRIES}`);
+    const killed = killProcessOnPort(port);
 
     if (killed) {
       // Wait for the OS to release the port (handles Windows TIME_WAIT)
@@ -170,8 +176,8 @@ export async function clearPort() {
       await setTimeout(RETRY_DELAY_MS);
     }
 
-    if (isPortFree()) {
-      console.log(`[clear-port] Port ${PORT} is free`);
+    if (isPortFree(port)) {
+      console.log(`[clear-port] Port ${port} is free`);
       return;
     }
 
@@ -180,7 +186,7 @@ export async function clearPort() {
     }
   }
 
-  console.warn(`[clear-port] Port ${PORT} still occupied after ${MAX_RETRIES} attempts — continuing anyway`);
+  console.warn(`[clear-port] Port ${port} still occupied after ${MAX_RETRIES} attempts — continuing anyway`);
 }
 
 // Standalone CLI support — run with `node scripts/clear-port-3001.mjs`
@@ -190,5 +196,5 @@ const isMain = process.argv[1] && (
 );
 
 if (isMain) {
-  await clearPort();
+  await clearPort(DEFAULT_PORT);
 }
