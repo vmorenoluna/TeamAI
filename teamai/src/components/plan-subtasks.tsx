@@ -38,7 +38,7 @@ export function PlanSubtasks({ plan }: { plan: PlanData | null }) {
               <span className="shrink-0 mt-0.5 w-3.5 h-3.5 rounded-full border-2 border-slate-600" />
             )}
             <div className="flex-1 min-w-0">
-              <p className={`text-sm font-medium ${s.completed ? 'text-green-300 line-through decoration-green-700/50' : 'text-white'}`}>
+              <p className={`text-sm font-medium ${s.completed ? 'text-green-300' : 'text-white'}`}>
                 {s.title}
               </p>
               {!s.completed && s.description && (
