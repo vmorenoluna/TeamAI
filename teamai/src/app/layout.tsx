@@ -11,7 +11,7 @@ import { MissingToolsBanner } from '@/components/missing-tools-banner';
 import { GitattributesRenormalizeBanner } from '@/components/gitattributes-renormalize-banner';
 import { AutoModeButton } from '@/components/auto-mode-button';
 import { getInterruptedTasks } from '@/app/actions/recovery';
-import { getAutoModeState } from '@/lib/auto-mode';
+import { getAutoModeState } from '@/lib/auto-mode-state';
 import { getOnboardingState } from '@/lib/onboarding';
 import { OnboardingGate } from '@/components/onboarding-gate';
 import { checkTools } from '@/app/actions/tools';

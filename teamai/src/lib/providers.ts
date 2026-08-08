@@ -12,12 +12,11 @@ interface ProvidersFile {
   roles?: Record<string, ProviderConfig>;
 }
 
-const DEFAULTS_DIR = join(/* turbopackIgnore: true */ process.cwd(), 'defaults');
-
 /** Read the TeamAI-shipped defaults file. Returns null on any failure. */
 function readDefaultProviders(): ProvidersFile | null {
   try {
-    const defaultsPath = join(DEFAULTS_DIR, 'providers.json');
+    const defaultsDir = join(/* turbopackIgnore: true */ process.cwd(), 'defaults');
+    const defaultsPath = join(defaultsDir, 'providers.json');
     if (!existsSync(defaultsPath)) return null;
     return JSON.parse(readFileSync(defaultsPath, 'utf-8'));
   } catch {

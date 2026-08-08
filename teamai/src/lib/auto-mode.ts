@@ -9,6 +9,7 @@ import { getToolPath } from './tool-checker';
 import { log, error as logError } from './logger';
 import { TERMINAL_PHASES, PAUSED_PHASES } from '@/constants/phases';
 import { computePipelineConfig } from './orchestrator/helpers';
+import { isAutoModeEnabled, getAutoModeState } from './auto-mode-state';
 
 interface AutoProjectState {
   enabled: boolean;
@@ -88,31 +89,9 @@ function getState(projectRoot: string): AutoProjectState {
   return state;
 }
 
+export { isAutoModeEnabled, getAutoModeState };
+
 // ── Public API ──────────────────────────────────────────────────────────────
-
-export function isAutoModeEnabled(projectRoot: string): boolean {
-  return projectStates.get(projectRoot)?.enabled ?? false;
-}
-
-export function getAutoModeState(projectRoot: string): {
-  enabled: boolean;
-  maxParallel: number;
-  activeCount: number;
-} {
-  const state = getState(projectRoot);
-  let activeCount = 0;
-  try {
-    const taskStore = new TaskStore(projectRoot);
-    activeCount = taskStore.getAll().filter(t =>
-      !TERMINAL_PHASES.has(t.phase) && !PAUSED_PHASES.has(t.phase)
-    ).length;
-  } catch { /* taskStore may fail if projectRoot doesn't exist yet */ }
-  return {
-    enabled: state.enabled,
-    maxParallel: state.maxParallel,
-    activeCount,
-  };
-}
 
 export function setAutoModeState(projectRoot: string, enabled: boolean, maxParallel: number = 1): void {
   const state = getState(projectRoot);
