@@ -28,13 +28,9 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { setTimeout } from 'timers/promises';
 
-const PORT = '3001';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2_000;
 const PID_FILE = join(tmpdir(), 'teamai-server.pid');
-
-// Default port for standalone / pretest:e2e usage.
-const DEFAULT_PORT = '3001';
 
 function isPidAlive(pid) {
   try {
@@ -153,9 +149,9 @@ function killProcessOnPort(port) {
 
 /**
  * Programmatic API — call from server.ts or other modules.
- * @param {string} [port='3001'] — the port to clear.
+ * @param {string} port — the port to clear (required, caller must specify).
  */
-export async function clearPort(port = DEFAULT_PORT) {
+export async function clearPort(port) {
   // ── Step 1: PID file (precise zombie detection) ────────────────────
   killFromPidFile();
 
@@ -189,12 +185,17 @@ export async function clearPort(port = DEFAULT_PORT) {
   console.warn(`[clear-port] Port ${port} still occupied after ${MAX_RETRIES} attempts — continuing anyway`);
 }
 
-// Standalone CLI support — run with `node scripts/clear-port-3001.mjs`
+// Standalone CLI support — run with `node scripts/clear-port-3001.mjs <port>`
 const isMain = process.argv[1] && (
   process.argv[1].endsWith('clear-port-3001.mjs') ||
   process.argv[1].endsWith('clear-port-3001')
 );
 
 if (isMain) {
-  await clearPort(DEFAULT_PORT);
+  const port = process.argv[2];
+  if (!port) {
+    console.error('[clear-port] Usage: node scripts/clear-port-3001.mjs <port>');
+    process.exit(1);
+  }
+  await clearPort(port);
 }
