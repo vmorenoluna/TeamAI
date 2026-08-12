@@ -231,7 +231,26 @@ describe('Worktree unpushed-commit detection', () => {
       // creates the target directory but not its parents)
       const worktreesDir = join(testDir, '..', 'worktrees');
       mkdirSync(worktreesDir, { recursive: true });
-      execFileSync('git', ['worktree', 'add', worktreePath, branch], { cwd: testDir, stdio: 'ignore' });
+
+      // On Windows, git worktree add can hit a race where git tries to
+      // create index.lock inside .git/ before that directory exists.
+      // Retry with full cleanup of git's internal state between attempts.
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          execFileSync('git', ['worktree', 'add', worktreePath, branch], { cwd: testDir, stdio: 'ignore' });
+          lastErr = null;
+          break;
+        } catch (e) {
+          lastErr = e;
+          try { execFileSync('git', ['branch', '-D', branch], { cwd: testDir, stdio: 'pipe' }); } catch { /* ok */ }
+          try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* ok */ }
+          try { execFileSync('git', ['worktree', 'prune'], { cwd: testDir, stdio: 'pipe' }); } catch { /* ok */ }
+          const end = Date.now() + 500;
+          while (Date.now() < end) { /* busy-wait */ }
+        }
+      }
+      if (lastErr) throw lastErr;
 
       // Make an unpushed commit in the worktree
       writeFileSync(join(worktreePath, 'secret.ts'), '// this should not be lost');
