@@ -5109,6 +5109,7 @@ describe('clearWorktreeDirectoryOrThrow', () => {
 function minimalImplPipeline(overrides: Partial<ImplementPipeline> = {}): ImplementPipeline {
   return {
     taskId: 'task-1',
+    title: 'test task',
     description: 'test task',
     phase: 'implement',
     specPath: '/test/spec',
@@ -5371,6 +5372,7 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
   function makeImplPipeline(overrides: Record<string, any> = {}): ImplementPipeline {
     return {
       taskId: project.taskId,
+      title: 'infra test',
       description: 'infra test',
       phase: 'implement',
       specPath: project.taskDir,
@@ -5493,6 +5495,7 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
   function makeImplPipeline(overrides: Record<string, any> = {}): ImplementPipeline {
     return {
       taskId: project.taskId,
+      title: 'recover test',
       description: 'recover test',
       phase: 'implement',
       specPath: project.taskDir,

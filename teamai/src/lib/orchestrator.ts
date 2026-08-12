@@ -276,6 +276,7 @@ export class Orchestrator {
 
     const pipeline: TaskPipeline = {
       taskId,
+      title: taskRecord?.title ?? description,
       description,
       phase: 'spec',
       specPath,
@@ -611,6 +612,7 @@ export class Orchestrator {
     const branch = task.branch ?? `feat/${task.slug ?? slugify(task.description)}`;
     const pipeline: TaskPipeline = {
       taskId,
+      title: task.title,
       description: task.description,
       phase: requiredPhase,
       specPath: this.taskStore.getDirById(taskId),
