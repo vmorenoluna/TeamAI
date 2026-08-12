@@ -30,7 +30,12 @@ import { setTimeout } from 'timers/promises';
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2_000;
-const PID_FILE = join(tmpdir(), 'teamai-server.pid');
+
+/** Return the PID file path for a given port so prod (3000) and test (3001)
+ *  servers never collide on the same file. */
+function getPidFile(port) {
+  return join(tmpdir(), `teamai-server-${port}.pid`);
+}
 
 function isPidAlive(pid) {
   try {
@@ -68,32 +73,33 @@ function killPid(pid) {
   }
 }
 
-/** Kill a zombie by reading its PID file, then clean up the file. */
-function killFromPidFile() {
-  if (!existsSync(PID_FILE)) return false;
+/** Kill a zombie by reading its port-specific PID file, then clean up the file. */
+function killFromPidFile(port) {
+  const pidFile = getPidFile(port);
+  if (!existsSync(pidFile)) return false;
 
   try {
-    const raw = readFileSync(PID_FILE, 'utf-8').trim();
+    const raw = readFileSync(pidFile, 'utf-8').trim();
     const pid = parseInt(raw, 10);
     if (!pid || isNaN(pid)) {
-      console.warn(`[clear-port] PID file ${PID_FILE} has invalid content: "${raw}"`);
-      try { unlinkSync(PID_FILE); } catch { /* best-effort */ }
+      console.warn(`[clear-port] PID file ${pidFile} has invalid content: "${raw}"`);
+      try { unlinkSync(pidFile); } catch { /* best-effort */ }
       return false;
     }
 
     if (!isPidAlive(pid)) {
       console.log(`[clear-port] PID ${pid} from PID file is not alive — removing stale file`);
-      try { unlinkSync(PID_FILE); } catch { /* best-effort */ }
+      try { unlinkSync(pidFile); } catch { /* best-effort */ }
       return false;
     }
 
-    console.log(`[clear-port] Found zombie PID ${pid} from ${PID_FILE}`);
+    console.log(`[clear-port] Found zombie PID ${pid} from ${pidFile}`);
     const killed = killPid(pid);
-    try { unlinkSync(PID_FILE); } catch { /* best-effort */ }
+    try { unlinkSync(pidFile); } catch { /* best-effort */ }
     return killed;
   } catch (err) {
     console.warn(`[clear-port] Error reading PID file: ${err.message}`);
-    try { unlinkSync(PID_FILE); } catch { /* best-effort */ }
+    try { unlinkSync(pidFile); } catch { /* best-effort */ }
     return false;
   }
 }
@@ -152,8 +158,8 @@ function killProcessOnPort(port) {
  * @param {string} port — the port to clear (required, caller must specify).
  */
 export async function clearPort(port) {
-  // ── Step 1: PID file (precise zombie detection) ────────────────────
-  killFromPidFile();
+  // ── Step 1: PID file (precise zombie detection, port-specific) ─────
+  killFromPidFile(port);
 
   // ── Step 2: Quick netstat check ────────────────────────────────────
   if (isPortFree(port)) {
