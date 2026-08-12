@@ -49,8 +49,8 @@ Individual test commands:
 cd teamai
 npm run typecheck        # tsc --noEmit
 npm run lint             # eslint --max-warnings 0
-npm run test:unit        # vitest run --exclude 'tests/integration/**'
-npm run test:integration # vitest run --include 'tests/integration/**'
+npm run test:unit        # vitest run --exclude "tests/integration/**"
+npm run test:integration # vitest run tests/integration
 npm run test             # vitest run (unit + integration)
 npm run test:e2e         # playwright test (full suite, ~30 min)
 npm run test:e2e:smoke   # playwright test (5 critical specs, ~2 min)
@@ -59,6 +59,16 @@ npm run test:all         # typecheck + lint + vitest + playwright + changelog
 npm run test:coverage    # vitest --coverage + playwright E2E (combined report)
 npm run precommit        # alias for test:all with a banner
 ```
+
+> **Windows note:** npm scripts run under `cmd.exe` on Windows, which does not
+> strip single quotes the way a POSIX shell does. Glob arguments passed to a
+> script's CLI flags (e.g. `--exclude`) must use double quotes, not single
+> quotes, or the quote characters end up as part of the literal glob and
+> silently match nothing.
+
+Vitest runs via `vitest.workspace.ts`, not a single `vitest.config.ts`: the integration tests that create real git worktrees (`worktree-commondir-patching`, `worktree-unpushed-commits`, `create-pr-conflict`, `crash-recovery`) run in their own single-worker `worktree-serial` project so no two of them ever call `git worktree add` concurrently with each other; everything else runs in the `default` project at normal parallelism.
+
+> **Git-hook env leak, not a filesystem race:** running `git worktree add` inside these tests could fail with `'.../index.lock': No such file or directory` — this looked like a Windows filesystem race (and the retry-with-cleanup mitigation in `tests/utils/git-worktree.ts` helps with genuine transient races), but the real cause was that `git commit`'s pre-commit hook sets `GIT_INDEX_FILE` (and friends) pointing at the *outer* repo's `.git`, and every child process the hook's `npx vitest run` spawns inherits it — including `git init`/`git worktree add` in the completely unrelated temp repos these tests create, which then resolve the wrong repository. `tests/global-setup.ts` and `tests/vitest-setup.ts` strip `GIT_INDEX_FILE`/`GIT_DIR`/`GIT_WORK_TREE`/etc. from `process.env` at test-run startup so this can't reproduce there. Only ever reproduced when triggered via a real `git commit` (the env vars aren't set otherwise), which is why isolated manual `vitest run` attempts wouldn't show it.
 
 > **Always use `npm run test:e2e` (or `test:e2e:smoke`), never `npx playwright test` directly.**
 > The `pretest:e2e` and `pretest:e2e:smoke` hooks run port 3001 cleanup which

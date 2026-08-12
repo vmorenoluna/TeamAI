@@ -188,7 +188,7 @@ teamai/
 ├── package.json
 ├── tsconfig.json
 ├── eslint.config.mjs
-└── vitest.config.ts
+└── vitest.workspace.ts
 ```
 
 ## Architecture
