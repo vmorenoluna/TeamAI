@@ -162,7 +162,9 @@ app.prepare().then(async () => {
   //
   // NOTE: written AFTER clearPort() to avoid a self-kill — clearPort
   // checks the PID file and would kill us if we wrote it first.
-  const PID_FILE = join(tmpdir(), 'teamai-server.pid');
+  // Port-specific: prod (3000) and test (3001) use separate PID files
+  // so they never kill each other.
+  const PID_FILE = join(tmpdir(), `teamai-server-${port}.pid`);
 
   function removePidFile() {
     try {
