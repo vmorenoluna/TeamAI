@@ -111,7 +111,32 @@ function createRepo(): { repoPath: string; worktreePath: string } {
   mkdirSync(wtDir, { recursive: true });
   const worktreePath = path.join(wtDir, `wt-${randomUUID().slice(0, 6)}`);
   const branchName = `feat/int-${randomUUID().slice(0, 6)}`;
-  execFileSync('git', ['worktree', 'add', worktreePath, '-b', branchName], { cwd: repoPath, stdio: 'pipe' });
+
+  // On Windows, git worktree add can hit a race where git tries to create
+  // index.lock inside .git/ before that directory exists. Retry with full
+  // cleanup of git's internal state (branch + worktree registry) between
+  // attempts to avoid stale-state conflicts on retry.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      execFileSync('git', ['worktree', 'add', worktreePath, '-b', branchName], { cwd: repoPath, stdio: 'pipe' });
+      lastErr = null;
+      break;
+    } catch (e) {
+      lastErr = e;
+      // Clean up everything git created before retrying:
+      // 1. Delete the branch (git worktree add -b creates it even on failure)
+      try { execFileSync('git', ['branch', '-D', branchName], { cwd: repoPath, stdio: 'pipe' }); } catch { /* ok */ }
+      // 2. Remove the partial worktree directory
+      try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* ok */ }
+      // 3. Prune git's internal worktree registry of stale entries
+      try { execFileSync('git', ['worktree', 'prune'], { cwd: repoPath, stdio: 'pipe' }); } catch { /* ok */ }
+      // Small delay to let the filesystem settle
+      const end = Date.now() + 500;
+      while (Date.now() < end) { /* busy-wait */ }
+    }
+  }
+  if (lastErr) throw lastErr;
 
   return { repoPath, worktreePath };
 }
