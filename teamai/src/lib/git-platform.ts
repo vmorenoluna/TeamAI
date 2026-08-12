@@ -1,7 +1,10 @@
 import { execFileSync } from 'child_process';
+import { writeFileSync, unlinkSync } from 'fs';
+import { randomUUID } from 'crypto';
 import { warn as logWarn } from './logger';
 import { getToolPath } from './tool-checker';
 import { logToOutput } from './orchestrator/helpers';
+import { truncate } from './utils';
 import path from 'path';
 
 /**
@@ -153,17 +156,44 @@ export function createPRViaCLI(
   const specPath = path.dirname(logFile);
 
   if (platform === 'github') {
-    logToOutput(specPath, `[PR] Creating GitHub PR via gh CLI: ${branch} → ${defaultBranch}\n`);
-    const result = execFileSync(getToolPath('gh'), [
-      'pr', 'create',
-      '--title', title,
-      '--body', body,
-      '--base', defaultBranch,
-      '--head', branch,
-    ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 30_000 });
-    const url = result.trim();
-    logToOutput(specPath, `[PR] Created: ${url}\n`);
-    return url;
+    // gh's --body flag puts the entire body on the command line. On Windows,
+    // CreateProcess caps the total command line at ~32,767 characters, so a
+    // large spec.md embedded verbatim in the body (via buildPRBody) trips
+    // ENAMETOOLONG before gh even starts. --body-file sidesteps argv entirely
+    // by reading the body from a temp file on disk.
+    const bodyFile = path.join(specPath, `pr-body-${randomUUID().slice(0, 8)}.md`);
+    writeFileSync(bodyFile, body, 'utf-8');
+    try {
+      // The title is the task description, which for GitHub-imported tasks is the
+      // entire issue body — unbounded content that both risks Windows' ~32KB argv
+      // limit and exceeds GitHub's 256-char PR title cap. Truncate to be safe.
+      const MAX_PR_TITLE = 255;
+      const safeTitle = truncate(title, MAX_PR_TITLE);
+      logToOutput(specPath, `[PR] Creating GitHub PR via gh CLI: ${branch} → ${defaultBranch}\n`);
+      const result = execFileSync(getToolPath('gh'), [
+        'pr', 'create',
+        '--title', safeTitle,
+        '--body-file', bodyFile,
+        '--base', defaultBranch,
+        '--head', branch,
+      ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 30_000 });
+      const url = result.trim();
+      logToOutput(specPath, `[PR] Created: ${url}\n`);
+      return url;
+    } catch (err) {
+      // Surface the failure in the task's output.log. Previously the error only
+      // reached the server console (auto-mode's .catch → console.error), leaving
+      // the task stuck in an opaque awaiting-review → create-pr loop with no
+      // visible cause. gh writes its diagnostics to stderr, so include it.
+      const msg = err instanceof Error ? err.message : String(err);
+      const stderr = (err as { stderr?: unknown })?.stderr;
+      const stderrTrim = typeof stderr === 'string' ? stderr.trim() : '';
+      const stderrText = stderrTrim && !msg.includes(stderrTrim) ? `\n${stderrTrim}` : '';
+      logToOutput(specPath, `[PR] Failed to create GitHub PR via gh CLI: ${msg}${stderrText}\n`);
+      throw err;
+    } finally {
+      try { unlinkSync(bodyFile); } catch { /* best-effort */ }
+    }
   }
 
   // non-GitHub: no standard CLI — return null for caller to handle
