@@ -15,6 +15,8 @@ export type MergeStrategy = 'local-merge' | 'pull-request';
 
 export interface TaskPipeline {
   taskId: string;
+  /** Short human-readable task title (task.title) — used for PR titles. */
+  title: string;
   description: string;
   phase: PipelinePhase;
   specPath: string;

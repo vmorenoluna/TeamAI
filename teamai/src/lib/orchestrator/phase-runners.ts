@@ -387,7 +387,7 @@ export async function runCreatePRPhase(
   } else {
     // Create PR directly via CLI (gh) instead of spawning a merger agent
     const body = buildPRBody(pipeline.description, specContent);
-    prUrl = createPRViaCLI(platform, pipeline.branch, pipeline.description, body, deps.projectRoot, logFile);
+    prUrl = createPRViaCLI(platform, pipeline.branch, pipeline.title, body, deps.projectRoot, logFile);
     // Fallback: scan log for PR URL (handles unknown platforms where CLI returns null)
     if (!prUrl) {
       prUrl = deps.extractPrUrl(logFile);

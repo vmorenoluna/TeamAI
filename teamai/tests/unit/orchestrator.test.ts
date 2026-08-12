@@ -234,6 +234,25 @@ describe('Orchestrator', () => {
       // Proof we got past the gate: createSession was called by runSpec
       expect(mockCreateSession).toHaveBeenCalled();
     });
+
+    it('populates pipeline.title from task.title, not the description argument', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+      // Abort after the pipeline object is constructed (before executePhase awaits).
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+
+      // runTask registers the pipeline synchronously before its first await,
+      // so it's inspectable immediately after the call returns.
+      const promise = orch.runTask(testData.taskId, 'unrelated description', 'spec');
+      const pipeline = (orch as AnyOrch).pipelines.get(testData.taskId);
+
+      expect(pipeline).toBeDefined();
+      // Title comes from task.json's title, not the description argument.
+      expect(pipeline.title).toBe('Test Task');
+      expect(pipeline.description).toBe('unrelated description');
+
+      await promise.catch(() => {});
+    });
   });
 
   // ── executePhase — container Docker gate ───────────────────────────
@@ -2473,7 +2492,7 @@ describe('Orchestrator', () => {
       // Verify gh pr create was called
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'gh',
-        expect.arrayContaining(['pr', 'create', '--title', pipeline.description]),
+        expect.arrayContaining(['pr', 'create', '--title', pipeline.title]),
         expect.any(Object),
       );
       // No agent sessions should have been created for PR creation
@@ -3652,6 +3671,19 @@ describe('Orchestrator', () => {
       expect(pipeline.phase).toBe('awaiting-review');
       expect(pipeline.branch).toBe('feat/some-feature');
       expect(pipeline.qaAttempt).toBe(0);
+    });
+
+    it('populates pipeline.title from task.title', () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
+
+      const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
+
+      expect(pipeline.title).toBe('Test Task');
+      expect(pipeline.description).toBe('A test task for full coverage');
     });
 
     it('derives branch from description when task has no branch', () => {

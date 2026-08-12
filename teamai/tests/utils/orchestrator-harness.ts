@@ -51,6 +51,7 @@ export function createFireEvent(onHandlers: Map<string, Array<(...args: any[]) =
 export function makePipeline(overrides: Record<string, any> = {}): any {
   return {
     taskId: 'task-id',
+    title: 'Test Task',
     description: 'test',
     phase: 'spec',
     specPath: '/test/spec',
