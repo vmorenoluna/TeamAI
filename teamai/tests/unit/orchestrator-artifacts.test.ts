@@ -209,6 +209,43 @@ describe('_commitArtifactsToWorktree', () => {
     expect(logContent).toContain('Committed 6 artifact file');
   });
 
+  // ── Oversized description truncation (Windows argv limit) ─────────
+
+  it('truncates an oversized task description in the commit subject', () => {
+    testData = setupTestProject();
+    const orch = makeOrch(testData.root);
+
+    writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+
+    const worktreePath = join(testData.root, 'worktree-long-desc');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const longDescription = 'y'.repeat(50_000);
+    const pipeline = makePipeline({
+      taskId: testData.taskId,
+      description: longDescription,
+      specPath: testData.taskDir,
+      worktreePath,
+    });
+
+    mockExecFileSync.mockReturnValue('');
+
+    (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline);
+
+    const commitCall = mockExecFileSync.mock.calls.find(
+      (c: unknown[]) => c[0] === 'git' && Array.isArray(c[1]) && (c[1] as string[]).includes('commit'),
+    );
+    expect(commitCall).toBeTruthy();
+    const args = commitCall![1] as string[];
+    const mIdx = args.indexOf('-m');
+    const message = args[mIdx + 1] as string;
+    // Subject truncated to a bounded length, never the full description
+    expect(message.length).toBeLessThan(400);
+    expect(message).toContain('TeamAI pipeline artifacts');
+    expect(message).toContain('...');
+    expect(message).not.toContain(longDescription);
+  });
+
   // ── Empty source directory ────────────────────────────────────────
 
   it('returns early when source directory has no artifacts (only excluded files)', () => {

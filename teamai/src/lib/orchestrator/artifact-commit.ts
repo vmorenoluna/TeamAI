@@ -12,6 +12,7 @@ import { execFileSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync } from 'fs';
 import path from 'path';
 import { phaseHeader, logToOutput } from './helpers';
+import { truncate } from '../utils';
 import type { TaskPipeline } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -133,8 +134,15 @@ export function commitArtifactsToWorktree(
 
   execFileSync('git', ['add', '-f', `.teamai/${slug}`], gitOpts);
 
+  // The task description can be an entire GitHub issue body (importIssues) or a
+  // roadmap description — unbounded content that would blow Windows' ~32KB
+  // CreateProcess argv limit if interpolated verbatim into a single -m arg.
+  // Truncate it to a bounded commit subject.
+  const MAX_COMMIT_SUBJECT = 200;
+  const subject = truncate(pipeline.description, MAX_COMMIT_SUBJECT);
+
   try {
-    execFileSync('git', ['commit', '-m', `Add TeamAI pipeline artifacts for "${pipeline.description}"`], gitOpts);
+    execFileSync('git', ['commit', '-m', `Add TeamAI pipeline artifacts for "${subject}"`], gitOpts);
   } catch (gitErr) {
     const msg = gitErr instanceof Error ? gitErr.message : String(gitErr);
     if (/nothing\s+to\s+commit.*working\s+tree\s+clean/i.test(msg)) {

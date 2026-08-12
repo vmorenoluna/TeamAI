@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
 
 // ── Hoisted mocks ──
@@ -18,6 +18,15 @@ const { mockWarn } = vi.hoisted(() => ({
   mockWarn: vi.fn(),
 }));
 
+const { mockWriteFileSync, mockUnlinkSync } = vi.hoisted(() => ({
+  mockWriteFileSync: vi.fn(),
+  mockUnlinkSync: vi.fn(),
+}));
+
+const { mockLogToOutput } = vi.hoisted(() => ({
+  mockLogToOutput: vi.fn(),
+}));
+
 // Mock child_process globally so all modules see the mock execFileSync
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
@@ -25,6 +34,22 @@ vi.mock('child_process', () => ({
   spawn: vi.fn(),
   ChildProcess: class MockCP {},
 }));
+
+// Mock fs write/unlink so createPRViaCLI's --body-file temp file is a no-op
+// in tests, while preserving the real fs for every other consumer in this file.
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    writeFileSync: mockWriteFileSync,
+    unlinkSync: mockUnlinkSync,
+  };
+});
+
+vi.mock('../../src/lib/orchestrator/helpers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/lib/orchestrator/helpers')>();
+  return { ...actual, logToOutput: mockLogToOutput };
+});
 
 vi.mock('../../src/lib/logger', () => ({
   log: vi.fn(), warn: mockWarn,
@@ -344,10 +369,77 @@ describe('createPRViaCLI', () => {
       .mockReturnValueOnce('https://github.com/owner/repo/pull/42\n');
     const result = createPRViaCLI('github', 'feat/test', 'Test PR', 'PR body', '/test', logFile);
     expect(result).toBe('https://github.com/owner/repo/pull/42');
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'gh',
-      expect.arrayContaining(['pr', 'create', '--title', 'Test PR', '--body', 'PR body']),
-      expect.any(Object),
+
+    // Body is written to a temp file and passed via --body-file, never argv
+    expect(mockWriteFileSync).toHaveBeenCalledWith(expect.any(String), 'PR body', 'utf-8');
+    const bodyFile = mockWriteFileSync.mock.calls[0][0] as string;
+    const ghCall = mockExecFileSync.mock.calls.find((c) => c[0] === 'gh');
+    const args = ghCall![1] as string[];
+    expect(args).toContain('--body-file');
+    expect(args).toContain(bodyFile);
+    expect(args).not.toContain('--body');
+    expect(args).not.toContain('PR body');
+
+    // Temp file is cleaned up after the PR is created
+    expect(mockUnlinkSync).toHaveBeenCalledWith(bodyFile);
+  });
+
+  it('truncates an oversized PR title to stay within GitHub and argv limits', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('refs/remotes/origin/main\n')
+      .mockReturnValueOnce('https://github.com/owner/repo/pull/42\n');
+    const oversizedTitle = 'A'.repeat(40_000);
+    const result = createPRViaCLI('github', 'feat/test', oversizedTitle, 'PR body', '/test', logFile);
+    expect(result).toBe('https://github.com/owner/repo/pull/42');
+
+    const ghCall = mockExecFileSync.mock.calls.find((c) => c[0] === 'gh');
+    const args = ghCall![1] as string[];
+    const titleIdx = args.indexOf('--title');
+    const passedTitle = args[titleIdx + 1];
+    // Truncated to a GitHub-safe length (<= 255 chars) and never passed verbatim
+    expect(passedTitle.length).toBeLessThan(256);
+    expect(passedTitle).toContain('...');
+    expect(args).not.toContain(oversizedTitle);
+  });
+
+  it('passes an oversized body via --body-file without hitting argv limits', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('refs/remotes/origin/main\n')
+      .mockReturnValueOnce('https://github.com/owner/repo/pull/42\n');
+    // ~40KB body, above Windows' ~32KB CreateProcess command-line ceiling
+    const oversizedBody = '# Spec\n\n' + 'x'.repeat(40_000);
+    const result = createPRViaCLI('github', 'feat/test', 'Test PR', oversizedBody, '/test', logFile);
+    expect(result).toBe('https://github.com/owner/repo/pull/42');
+
+    // Body was written to disk, not passed as a CLI argument
+    expect(mockWriteFileSync).toHaveBeenCalledWith(expect.any(String), oversizedBody, 'utf-8');
+    const ghCall = mockExecFileSync.mock.calls.find((c) => c[0] === 'gh');
+    const args = ghCall![1] as string[];
+    expect(args).toContain('--body-file');
+    expect(args).not.toContain('--body');
+    expect(args).not.toContain(oversizedBody);
+  });
+
+  it('logs gh failures to output.log and re-throws', () => {
+    mockExecFileSync
+      .mockReturnValueOnce('refs/remotes/origin/main\n')  // detectDefaultBranch
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('Command failed: gh pr create'), {
+          stderr: 'ENAMETOOLONG: name too long',
+        });
+      });
+
+    expect(() =>
+      createPRViaCLI('github', 'feat/test', 'Test PR', 'PR body', '/test', logFile),
+    ).toThrow();
+
+    expect(mockLogToOutput).toHaveBeenCalledWith(
+      dirname(logFile),
+      expect.stringContaining('Failed to create GitHub PR'),
+    );
+    expect(mockLogToOutput).toHaveBeenCalledWith(
+      dirname(logFile),
+      expect.stringContaining('ENAMETOOLONG'),
     );
   });
 
