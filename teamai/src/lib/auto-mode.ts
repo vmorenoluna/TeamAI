@@ -10,6 +10,7 @@ import { log, error as logError } from './logger';
 import { TERMINAL_PHASES, PAUSED_PHASES } from '@/constants/phases';
 import { computePipelineConfig } from './orchestrator/helpers';
 import { isAutoModeEnabled, getAutoModeState } from './auto-mode-state';
+import { ContainerDockerMissingError } from './orchestrator/errors';
 
 interface AutoProjectState {
   enabled: boolean;
@@ -310,6 +311,14 @@ function _tick(projectRoot: string, state: AutoProjectState): void {
     state.startingIds.add(task.id); // prevent duplicate pick until phase changes
     const orchestrator = getOrchestrator(projectRoot);
     orchestrator.resumeTask(task.id).catch(err => {
+      if (err instanceof ContainerDockerMissingError) {
+        // Docker not running while container mode is enabled — not a crash,
+        // the container-docker-missing event will notify the UI to show a dialog.
+        // Don't log as error (it's an expected gate, not a failure).
+        log('auto-mode', `Task ${task.id} blocked — container mode enabled but Docker not running`);
+        state.startingIds.delete(task.id);
+        return;
+      }
       logError('auto-mode', `Failed to start task ${task.id}`, err);
       state.startingIds.delete(task.id);
     });

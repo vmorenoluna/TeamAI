@@ -96,6 +96,17 @@ export class SessionExitedError extends OrchestratorError {
   }
 }
 
+/** Thrown when container mode is enabled but Docker is not available. */
+export class ContainerDockerMissingError extends OrchestratorError {
+  constructor(projectRoot: string) {
+    super(
+      `Container mode is enabled for ${projectRoot} but Docker is not running. Start Docker Desktop and try again, or disable container mode in Settings.`,
+      'CONTAINER_DOCKER_MISSING',
+    );
+    this.name = 'ContainerDockerMissingError';
+  }
+}
+
 /** Thrown when a Claude CLI session was terminated by a signal (SIGTERM/SIGKILL).
  *  A killed session is never a successful completion — this error propagates
  *  through the pipeline so the task advances to 'failed' rather than hanging

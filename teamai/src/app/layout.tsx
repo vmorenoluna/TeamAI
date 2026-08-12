@@ -10,6 +10,7 @@ import { UpdateBanner } from '@/components/update-banner';
 import { MissingToolsBanner } from '@/components/missing-tools-banner';
 import { GitattributesRenormalizeBanner } from '@/components/gitattributes-renormalize-banner';
 import { AutoModeButton } from '@/components/auto-mode-button';
+import { ContainerDockerMissingDialog } from '@/components/container-docker-missing-dialog';
 import { getInterruptedTasks } from '@/app/actions/recovery';
 import { getAutoModeState } from '@/lib/auto-mode-state';
 import { getOnboardingState } from '@/lib/onboarding';
@@ -63,6 +64,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <OnboardingGate show={needsOnboarding}>{children}</OnboardingGate>
           </div>
         </div>
+        {/* Global dialog: shown when container mode is enabled but Docker is not running */}
+        <ContainerDockerMissingDialog projectPath={activeProject?.path ?? null} />
       </body>
     </html>
   );

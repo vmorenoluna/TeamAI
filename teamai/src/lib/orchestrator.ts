@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, rm
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { processManager } from './process-manager';
-import { readContainerConfig, containerManager, hostToContainerPath } from './container-manager';
+import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache } from './container-manager';
 import { TaskStore } from './task-store';
 import { slugify } from './utils';
 import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit, execGitCapture } from './orchestrator/worktree-utils';
@@ -14,7 +14,7 @@ import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWo
 import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
 import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
-import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError, SessionKilledError } from './orchestrator/errors';
+import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError, SessionKilledError, ContainerDockerMissingError } from './orchestrator/errors';
 import { NO_RESUME_PHASES } from '@/constants/phases';
 import { runImplement, _recoverStBranchCommits } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
@@ -241,6 +241,20 @@ export class Orchestrator {
     // Demo mode: when pipeline.json has demo:true, skip all pipeline processing
     if (this.getPipelineConfig().demo) return;
 
+    // Container-mode gate: refuse to start when container mode is enabled but
+    // Docker is not running. Resets the dockerAvailable cache so a just-started
+    // Docker is detected immediately on retry (mirrors ensureWorktree's pattern).
+    // Emits a container-docker-missing event so the UI can show a dialog prompting
+    // the user to start Docker or disable container mode.
+    const containerCfg = readContainerConfig(this.projectRoot);
+    if (containerCfg.enabled && !dockerAvailable()) {
+      _resetDockerAvailableCache();
+      if (!dockerAvailable()) {
+        processManager.emit('container-docker-missing', { projectRoot: this.projectRoot });
+        throw new ContainerDockerMissingError(this.projectRoot);
+      }
+    }
+
     // Prevent concurrent runs of the same task
     if (this.activeTasks.has(taskId)) {
       throw new TaskAlreadyRunningError(taskId);
@@ -365,6 +379,21 @@ export class Orchestrator {
   }
 
   private async executePhase(pipeline: TaskPipeline): Promise<void> {
+    // Container-mode gate: also checked here (not just in runTask) because
+    // phase transitions via advancePhase (e.g. autoReviseSpec → spec,
+    // approveTask → create-pr, rate-limit-resume) bypass runTask entirely.
+    // No-op phases (awaiting-review, pr-open) skip the check.
+    if (pipeline.phase !== 'awaiting-review' && pipeline.phase !== 'pr-open') {
+      const containerCfg = readContainerConfig(this.projectRoot);
+      if (containerCfg.enabled && !dockerAvailable()) {
+        _resetDockerAvailableCache();
+        if (!dockerAvailable()) {
+          processManager.emit('container-docker-missing', { projectRoot: this.projectRoot });
+          throw new ContainerDockerMissingError(this.projectRoot);
+        }
+      }
+    }
+
     switch (pipeline.phase) {
       case 'spec':         return this.runSpec(pipeline);
       case 'plan':         return this.runPlan(pipeline);
