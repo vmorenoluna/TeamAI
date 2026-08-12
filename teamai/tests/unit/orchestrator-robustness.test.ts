@@ -75,8 +75,9 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator } from '../../src/lib/orchestrator';
-import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup } from '../../src/lib/orchestrator/implement';
+import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks } from '../../src/lib/orchestrator/implement';
 import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
+import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
 
 const fireEvent = createFireEvent(onHandlers);
@@ -4388,6 +4389,74 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
       executeSpy.mockRestore();
     }
   });
+
+  // Regression coverage for a real production failure: a subtask whose FINAL
+  // wakeup re-entry session ended cleanly (no fresh wakeup file written, no
+  // deliverable missing) was added to completedIds, but the wakeup-reentry
+  // early return skipped the plan.json persistence write — so `completed:
+  // true` never landed in plan.json even though the subtask's acceptance
+  // criteria had all passed. The UI then showed the subtask as perpetually
+  // incomplete. Tested at the runSubtaskSession level so the group-loop's
+  // fire-and-forget fallback write (which also sets completed) can't mask the
+  // missing per-subtask checkpoint.
+  it('persists completed: true in plan.json when a subtask completes via wakeup re-entry', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 3,
+        title: 'Run files_to_create-gated sweep',
+        description: 'Run the sweep and commit the evidence artifact',
+        files: ['scripts/sweep.py'],
+        acceptance_criteria: ['Sweep evidence committed'],
+      }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-complete');
+
+    // Resuming after an earlier, legitimate wakeup cycle on the same subtask.
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+      wakeupSubtaskId: 3, wakeupCommand: 'python sweep.py', wakeupArtifact: 'scripts/sweep_logs/evidence.log', wakeupAttemptCount: 1,
+    });
+
+    const subtask: PlanSubtask = {
+      id: 3,
+      title: 'Run files_to_create-gated sweep',
+      description: 'Run the sweep and commit the evidence artifact',
+      files: ['scripts/sweep.py'],
+      acceptance_criteria: ['Sweep evidence committed'],
+      depends_on: [],
+    };
+
+    const ctx = (orch as AnyOrch)._ctx;
+    const completedIds: number[] = [];
+    const scopeViolations = new Set<number>();
+    const sessionMapLock = { current: Promise.resolve() };
+
+    const promise = runSubtaskSession(
+      pipeline, ctx, subtask, pipeline.worktreePath,
+      join(project.taskDir, 'output.log'),
+      false, false, join(project.taskDir, 'human_feedback.md'),
+      completedIds, scopeViolations, sessionMapLock,
+    );
+
+    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+    // No fresh wakeup file this session — the subtask completes now.
+    fireEvent('event', { sessionId: 'sess-wakeup-complete', event: { type: 'result' } });
+    await promise;
+
+    // The wakeup-reentry branch ran and cleared the wakeup state — confirming
+    // this exercised the exact completion path that used to skip the write.
+    expect(pipeline.wakeupSubtaskId).toBeUndefined();
+    expect(pipeline._wakeupJustCompleted).toBe(true);
+
+    // The per-subtask checkpoint write is queued on planWriteLock — await it
+    // so the assertion reads the settled plan.json.
+    await ctx.planWriteLock.current;
+
+    const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+    expect(plan.subtasks.find((s: any) => s.id === 3).completed).toBe(true);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -5929,5 +5998,75 @@ describe('_recoverStBranchCommits (shared helper)', () => {
 
     expect(result).toEqual({ recovered: false, commits: ['abc123 unintegrated commit'] });
     expect(containerManager.ensureContainer).not.toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  persistCompletedSubtasks — plan.json checkpoint + subtask-progress emit
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('persistCompletedSubtasks', () => {
+  let project: ReturnType<typeof setupProject>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    project = setupProject();
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  it('writes completed: true to plan.json and emits subtask-progress', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Already done', description: '', files: [], acceptance_criteria: [], completed: true },
+        { id: 2, title: 'Just finished', description: '', files: [], acceptance_criteria: [] },
+      ],
+    }));
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    const deps = {
+      planWriteLock: { current: Promise.resolve() },
+      projectRoot: project.root,
+    } as unknown as ImplementDeps;
+
+    persistCompletedSubtasks(pipeline, deps, [2]);
+
+    // The write is queued on the plan-write lock — await it before asserting.
+    await deps.planWriteLock.current;
+
+    const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+    expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(true);
+    expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(true);
+
+    // The helper always emits subtask-progress (the emitProgress flag was
+    // removed along with the now-redundant group-loop fallback), so the
+    // kanban counter updates live with the freshly-persisted counts.
+    expect(mockEmit).toHaveBeenCalledWith('subtask-progress', expect.objectContaining({
+      taskId: project.taskId,
+      completed: 2,
+      total: 2,
+      projectRoot: project.root,
+    }));
+  });
+
+  it('does not throw or emit when plan.json is missing (best-effort)', async () => {
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    const deps = {
+      planWriteLock: { current: Promise.resolve() },
+      projectRoot: project.root,
+    } as unknown as ImplementDeps;
+
+    // No plan.json written — the helper must silently no-op, not throw or emit.
+    expect(() => persistCompletedSubtasks(pipeline, deps, [1])).not.toThrow();
+    await deps.planWriteLock.current;
+    expect(mockEmit).not.toHaveBeenCalled();
   });
 });
