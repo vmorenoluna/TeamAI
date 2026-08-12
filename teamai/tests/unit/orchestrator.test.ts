@@ -82,6 +82,7 @@ import { Orchestrator, getOrchestrator } from '../../src/lib/orchestrator';
 import { getToolPath } from '../../src/lib/tool-checker';
 import { processManager } from '../../src/lib/process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache, readContainerRemoteUser } from '../../src/lib/container-manager';
+import { ContainerDockerMissingError } from '../../src/lib/orchestrator/errors';
 
 const fireEvent = createFireEvent(onHandlers);
 
@@ -192,6 +193,170 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).activeTasks.add(testData.taskId);
 
       await expect(orch.runTask(testData.taskId, 'test')).rejects.toThrow(/already running/i);
+    });
+
+    it('throws ContainerDockerMissingError when container mode is enabled but Docker is unavailable', async () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(dockerAvailable).mockReturnValue(false);
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      await expect(orch.runTask(testData.taskId, 'test', 'spec')).rejects.toThrow(ContainerDockerMissingError);
+    });
+
+    it('emits container-docker-missing event before throwing in runTask', async () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(dockerAvailable).mockReturnValue(false);
+      mockEmit.mockClear();
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      await orch.runTask(testData.taskId, 'test', 'spec').catch(() => {});
+
+      expect(mockEmit).toHaveBeenCalledWith('container-docker-missing', {
+        projectRoot: testData.root,
+      });
+    });
+
+    it('does not throw in runTask when Docker is available', async () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(dockerAvailable).mockReturnValue(true);
+      // Abort pipeline early after gate passes
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      // Should proceed past the gate — eventually fails on createSession, not the gate
+      await orch.runTask(testData.taskId, 'test', 'spec').catch(() => {});
+      // Proof we got past the gate: createSession was called by runSpec
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+  });
+
+  // ── executePhase — container Docker gate ───────────────────────────
+
+  describe('executePhase — container Docker gate', () => {
+    beforeEach(() => {
+      testData = setupTestProject();
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+    });
+
+    it('throws ContainerDockerMissingError when container mode is enabled but Docker is unavailable', async () => {
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(dockerAvailable).mockReturnValue(false);
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      const err = await (orch as AnyOrch).executePhase(pipeline).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ContainerDockerMissingError);
+      expect(err.code).toBe('CONTAINER_DOCKER_MISSING');
+    });
+
+    it('emits container-docker-missing event before throwing', async () => {
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(dockerAvailable).mockReturnValue(false);
+      mockEmit.mockClear();
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      await (orch as AnyOrch).executePhase(pipeline).catch(() => {});
+
+      expect(mockEmit).toHaveBeenCalledWith('container-docker-missing', {
+        projectRoot: testData.root,
+      });
+    });
+
+    it('resets the dockerAvailable cache before checking', async () => {
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      // First call returns false (stale cache), second returns true (Docker started)
+      vi.mocked(dockerAvailable)
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(true);
+      // Abort early — the gate passes, but we don't need the full pipeline to cascade
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      // Should NOT throw ContainerDockerMissingError — cache reset + second
+      // dockerAvailable() returns true, so gate lets us through to runSpec
+      await (orch as AnyOrch).executePhase(pipeline).catch(() => {});
+
+      expect(_resetDockerAvailableCache).toHaveBeenCalled();
+      expect(dockerAvailable).toHaveBeenCalledTimes(2);
+      // Proof we got past the gate: createSession was called by runSpec
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+
+    it('does not throw when Docker is available', async () => {
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(dockerAvailable).mockReturnValue(true);
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      // Should proceed to runSpec → createSession (which rejects with simulated abort)
+      await (orch as AnyOrch).executePhase(pipeline).catch(() => {});
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+
+    it('does not throw when container mode is disabled', async () => {
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
+      vi.mocked(dockerAvailable).mockReturnValue(false); // Docker unavailable but irrelevant
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      // Should proceed past the gate (container mode disabled)
+      await (orch as AnyOrch).executePhase(pipeline).catch(() => {});
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+
+    it('skips the Docker check for awaiting-review phase', async () => {
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(dockerAvailable).mockReturnValue(false);
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'awaiting-review', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      // awaiting-review is a no-op pause — should not throw
+      await expect((orch as AnyOrch).executePhase(pipeline)).resolves.toBeUndefined();
+    });
+
+    it('skips the Docker check for pr-open phase', async () => {
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(dockerAvailable).mockReturnValue(false);
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'pr-open', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      // pr-open is a no-op pause — should not throw
+      await expect((orch as AnyOrch).executePhase(pipeline)).resolves.toBeUndefined();
+    });
+
+    it('throws for plan phase (simulates autoReviseSpec → spec → advancePhase → plan path)', async () => {
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(dockerAvailable).mockReturnValue(false);
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'plan', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      const err = await (orch as AnyOrch).executePhase(pipeline).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ContainerDockerMissingError);
     });
   });
 

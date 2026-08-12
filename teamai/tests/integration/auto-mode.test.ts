@@ -18,6 +18,7 @@ import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
+import { ContainerDockerMissingError } from '@/lib/orchestrator/errors';
 
 // ── Hoisted mocks ────────────────────────────────────────────────────────────
 
@@ -1646,6 +1647,107 @@ describe('Auto Mode Integration', () => {
       await vi.waitFor(() => {
         expect(mockOrch.approveTask).toHaveBeenCalledWith(taskId, 'pull-request');
       });
+    });
+  });
+
+  // ── ContainerDockerMissingError handling ──────────────────────────────────
+
+  describe('ContainerDockerMissingError handling in tick loop', () => {
+    let autoMode: any;
+    let taskId: string;
+
+    beforeEach(async () => {
+      setupTestProject();
+      autoMode = await setupAutoMode();
+
+      const teamaiDir = join(testDir, '.teamai');
+      taskId = randomUUID();
+      const taskDir = join(teamaiDir, taskId);
+      mkdirSync(taskDir, { recursive: true });
+      createTaskFile(taskDir, {
+        id: taskId,
+        title: 'Docker-missing Test',
+        description: 'docker-missing-test',
+        phase: 'backlog',
+        createdAt: '2024-01-01T00:00:00.000Z',
+      });
+    });
+
+    afterEach(() => {
+      cleanup();
+    });
+
+    it('catches ContainerDockerMissingError gracefully without crashing tick loop', async () => {
+      mockOrch.resumeTask.mockRejectedValue(
+        new ContainerDockerMissingError(testDir),
+      );
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      // The tick loop calls resumeTask, which rejects with the error.
+      // The .catch handler should clean up and log, not crash.
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      // Auto-mode should still be enabled (not crashed)
+      expect(autoMode.isAutoModeEnabled(testDir)).toBe(true);
+    });
+
+    it('allows retry on next tick after ContainerDockerMissingError is resolved', async () => {
+      vi.useFakeTimers();
+
+      // First call: Docker missing → reject
+      mockOrch.resumeTask.mockRejectedValueOnce(
+        new ContainerDockerMissingError(testDir),
+      );
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      // First tick: resumeTask is called and rejects
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledTimes(1);
+      });
+
+      // Now Docker is available — resumeTask resolves
+      mockOrch.resumeTask.mockResolvedValue(undefined);
+
+      // Advance to next tick (5s interval)
+      await vi.advanceTimersByTimeAsync(5_001);
+
+      // Task should be retried on the next tick
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledTimes(2);
+      });
+      expect(mockOrch.resumeTask).toHaveBeenLastCalledWith(taskId);
+    });
+
+    it('does NOT crash auto-mode when multiple tasks all hit the gate', async () => {
+      // Create a second backlog task
+      const taskId2 = randomUUID();
+      const taskDir2 = join(testDir, '.teamai', taskId2);
+      mkdirSync(taskDir2, { recursive: true });
+      createTaskFile(taskDir2, {
+        id: taskId2,
+        title: 'Docker-missing Task 2',
+        description: 'docker-missing-test-2',
+        phase: 'backlog',
+        createdAt: '2024-01-02T00:00:00.000Z',
+      });
+
+      mockOrch.resumeTask.mockRejectedValue(
+        new ContainerDockerMissingError(testDir),
+      );
+
+      autoMode.setAutoModeState(testDir, true, 2);
+
+      // Both tasks should be attempted (and caught gracefully)
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledTimes(2);
+      });
+
+      // Auto-mode should still be enabled (not crashed)
+      expect(autoMode.isAutoModeEnabled(testDir)).toBe(true);
     });
   });
 });

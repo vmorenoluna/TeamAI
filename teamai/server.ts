@@ -112,6 +112,12 @@ app.prepare().then(async () => {
     broadcastToProject(data, msg);
   });
 
+  // Broadcast container-docker-missing events so the UI can show a warning dialog
+  processManager.on('container-docker-missing', (data: { projectRoot: string }) => {
+    const msg = JSON.stringify({ type: 'container-docker-missing', projectRoot: data.projectRoot });
+    broadcastToProject(data, msg);
+  });
+
   server.on('upgrade', (request, socket, head) => {
     const reqUrl = new URL(request.url!, `http://${request.headers.host || `127.0.0.1:${port}`}`);
     const pathname = reqUrl.pathname;

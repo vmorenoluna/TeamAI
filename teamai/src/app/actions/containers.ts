@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
-import { containerManager, dockerAvailable, type ContainerState, type ValidationStep } from '@/lib/container-manager';
+import { containerManager, dockerAvailable, _resetDockerAvailableCache, type ContainerState, type ValidationStep } from '@/lib/container-manager';
 
 export interface ContainerConfig {
   enabled: boolean;
@@ -67,4 +67,11 @@ export async function getValidationSteps(): Promise<ValidationStep[]> {
 
 export async function isDockerAvailable(): Promise<boolean> {
   return dockerAvailable();
+}
+
+/** Reset the dockerAvailable cache so the next check probes Docker fresh.
+ *  Called from the UI when the user starts Docker after seeing the
+ *  container-docker-missing dialog. */
+export async function resetDockerAvailability(): Promise<void> {
+  _resetDockerAvailableCache();
 }
