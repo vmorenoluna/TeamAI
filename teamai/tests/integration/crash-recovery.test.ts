@@ -17,6 +17,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
+import { addWorktreeWithRetry } from '../utils/git-worktree';
 
 // ── Hoisted listeners for container-state event capture ──────────────────────
 
@@ -873,8 +874,8 @@ describe('Crash Recovery Integration', () => {
         } catch { /* best-effort */ }
       }
 
-      // Create a real git worktree + branch
-      execFileSync('git', ['worktree', 'add', worktreePath, '-b', branch], { cwd: testDir, stdio: 'ignore' });
+      // Create a real git worktree + branch (retrying on Windows' index.lock race)
+      addWorktreeWithRetry([worktreePath, '-b', branch], testDir, { stdio: 'ignore' });
 
       const mod = await import('@/lib/orchestrator');
       orch = mod.getOrchestrator(testDir);

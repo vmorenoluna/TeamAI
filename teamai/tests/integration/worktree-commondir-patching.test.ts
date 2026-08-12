@@ -22,6 +22,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import path from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
+import { addWorktreeWithRetry } from '../utils/git-worktree';
 
 // ── Hoisted mocks: must be declared before module imports ──
 
@@ -116,27 +117,7 @@ function createRepo(): { repoPath: string; worktreePath: string } {
   // index.lock inside .git/ before that directory exists. Retry with full
   // cleanup of git's internal state (branch + worktree registry) between
   // attempts to avoid stale-state conflicts on retry.
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      execFileSync('git', ['worktree', 'add', worktreePath, '-b', branchName], { cwd: repoPath, stdio: 'pipe' });
-      lastErr = null;
-      break;
-    } catch (e) {
-      lastErr = e;
-      // Clean up everything git created before retrying:
-      // 1. Delete the branch (git worktree add -b creates it even on failure)
-      try { execFileSync('git', ['branch', '-D', branchName], { cwd: repoPath, stdio: 'pipe' }); } catch { /* ok */ }
-      // 2. Remove the partial worktree directory
-      try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* ok */ }
-      // 3. Prune git's internal worktree registry of stale entries
-      try { execFileSync('git', ['worktree', 'prune'], { cwd: repoPath, stdio: 'pipe' }); } catch { /* ok */ }
-      // Small delay to let the filesystem settle
-      const end = Date.now() + 500;
-      while (Date.now() < end) { /* busy-wait */ }
-    }
-  }
-  if (lastErr) throw lastErr;
+  addWorktreeWithRetry([worktreePath, '-b', branchName], repoPath, { stdio: 'pipe' });
 
   return { repoPath, worktreePath };
 }

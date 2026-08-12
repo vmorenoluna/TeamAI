@@ -47,6 +47,25 @@ function cleanStaleGitLocks() {
   } catch { /* readdir can fail — nothing to clean */ }
 }
 
+/**
+ * When vitest runs inside a git hook (e.g. the pre-commit hook running
+ * `npx vitest run`), git sets GIT_INDEX_FILE/GIT_DIR/etc. pointing at the
+ * OUTER repo's .git so hook scripts can inspect the commit-in-progress
+ * state. Those variables are inherited by every child process this test
+ * run spawns — including `git init`/`git worktree add` in unrelated temp
+ * repos created by integration tests — and cause git to resolve the wrong
+ * repository, producing errors like "Unable to create '.../index.lock':
+ * No such file or directory" that look like a Windows filesystem race but
+ * are actually a plain environment leak. Strip them before any worker
+ * spawns (also done in vitest-setup.ts, which runs per test file, as a
+ * second layer in case a pool type doesn't propagate this early mutation).
+ */
+function stripInheritedGitEnv() {
+  for (const key of ['GIT_INDEX_FILE', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_PREFIX']) {
+    delete process.env[key];
+  }
+}
+
 export function setup() {
   // ── Clean stale git lock files from the main repo ──────────────────
   // When a basher agent times out during git commit, it leaves stale
@@ -54,6 +73,7 @@ export function setup() {
   // ALL subsequent git operations — including test repo init.
   // The cwd during tests is teamai/, so .git is one level up.
   cleanStaleGitLocks();
+  stripInheritedGitEnv();
 
   // Per-test cleanup is handled by afterEach hooks.
   // The global teardown handles any leftovers from crashed tests.

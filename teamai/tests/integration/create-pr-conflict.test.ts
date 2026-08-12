@@ -15,6 +15,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
+import { addWorktreeWithRetry } from '../utils/git-worktree';
 
 // ── Hoisted mocks ────────────────────────────────────────────────────────────
 
@@ -162,22 +163,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     // On Windows, git worktree add can hit a race where git tries to
     // create index.lock inside .git/ before that directory exists.
     // Retry with full cleanup of git's internal state between attempts.
-    let lastErr: unknown;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        execFileSync('git', ['worktree', 'add', worktreePath, '-b', `feat/${slug}`], { cwd: projectDir, stdio: 'ignore' });
-        lastErr = null;
-        break;
-      } catch (e) {
-        lastErr = e;
-        try { execFileSync('git', ['branch', '-D', `feat/${slug}`], { cwd: projectDir, stdio: 'pipe' }); } catch { /* ok */ }
-        try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* ok */ }
-        try { execFileSync('git', ['worktree', 'prune'], { cwd: projectDir, stdio: 'pipe' }); } catch { /* ok */ }
-        const end = Date.now() + 500;
-        while (Date.now() < end) { /* busy-wait */ }
-      }
-    }
-    if (lastErr) throw lastErr;
+    addWorktreeWithRetry([worktreePath, '-b', `feat/${slug}`], projectDir, { stdio: 'ignore' });
     return worktreePath;
   }
 
