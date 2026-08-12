@@ -487,14 +487,57 @@ export interface SubtaskSessionResult {
 }
 
 /**
+ * Persist a set of completed subtask ids to plan.json and emit a live
+ * `subtask-progress` event. Serialized through the shared plan-write lock so
+ * parallel subtasks don't interleave their checkpoint writes. Best-effort:
+ * a failed checkpoint write must never fail the pipeline.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export function persistCompletedSubtasks(
+  pipeline: ImplementPipeline,
+  deps: ImplementDeps,
+  completedIds: number[],
+): void {
+  deps.planWriteLock.current = deps.planWriteLock.current.then(() => {
+    try {
+      const planPath = path.join(pipeline.specPath, 'plan.json');
+      if (!existsSync(planPath)) return;
+      const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+      if (plan.subtasks) {
+        for (const s of plan.subtasks) {
+          if (completedIds.includes(s.id)) s.completed = true;
+        }
+      }
+      const tmpPath = planPath + '.tmp';
+      writeFileSync(tmpPath, JSON.stringify(plan, null, 2));
+      renameSync(tmpPath, planPath);
+
+      // Emit subtask progress so the kanban counter updates live during implement.
+      // Without this, the UI only sees updated counts on phase-change or page refresh.
+      const subtasks = (plan as { subtasks?: PlanSubtask[] }).subtasks ?? [];
+      const completed = subtasks.filter((s: PlanSubtask) => s.completed).length;
+      processManager.emit('subtask-progress', {
+        taskId: pipeline.taskId,
+        completed,
+        total: subtasks.length,
+        projectRoot: deps.projectRoot,
+      });
+    } catch { /* best-effort */ }
+  });
+}
+
+/**
  * Run a single subtask's agent session: pre-sensors → create session → build
  * prompt (QA/wakeup/deliverable headers) → wait → post-session checks (scope,
  * wakeup detect, deliverable verification) → post-sensors → checkpoint.
  *
  * Mutates `pipeline`, `completedIds`, `scopeViolations`, and `sessionMapLock`
  * in-place (same as the original inline handler).
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
  */
-async function runSubtaskSession(
+export async function runSubtaskSession(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
   subtask: PlanSubtask,
@@ -848,6 +891,15 @@ async function runSubtaskSession(
         delete pipeline.stallRecoveryCounts[subtask.id];
       }
       completedIds.push(subtask.id);
+
+      // Persist completion to plan.json BEFORE the wakeup-reentry early return
+      // below (ADR 002). A subtask whose final wakeup re-entry session ends with
+      // no fresh wakeup file is added to completedIds above, but the early
+      // return here used to skip this write entirely — so `completed: true`
+      // never landed in plan.json for wakeup-completed subtasks. Guarded on a
+      // successful completion so scope-violation / deliverable-defer skip paths
+      // don't queue a redundant no-op write + duplicate emit.
+      persistCompletedSubtasks(pipeline, deps, completedIds);
     }
   }
 
@@ -886,33 +938,6 @@ async function runSubtaskSession(
     const msg = postSensorErr instanceof Error ? postSensorErr.message : String(postSensorErr);
     logToOutput(pipeline.specPath, '\n[SENSOR:post_subtask] post-subtask sensors error: ' + msg + '\n');
   }
-
-  deps.planWriteLock.current = deps.planWriteLock.current.then(() => {
-    try {
-      const cpPlanPath = path.join(pipeline.specPath, 'plan.json');
-      if (!existsSync(cpPlanPath)) return;
-      const cpPlan = JSON.parse(readFileSync(cpPlanPath, 'utf-8'));
-      if (cpPlan.subtasks) {
-        for (const s of cpPlan.subtasks) {
-          if (completedIds.includes(s.id)) s.completed = true;
-        }
-      }
-      const tmpPath = cpPlanPath + '.tmp';
-      writeFileSync(tmpPath, JSON.stringify(cpPlan, null, 2));
-      renameSync(tmpPath, cpPlanPath);
-
-      // Emit subtask progress so the kanban counter updates live during implement.
-      // Without this, the UI only sees updated counts on phase-change or page refresh.
-      const subtasks = (cpPlan as { subtasks?: PlanSubtask[] }).subtasks ?? [];
-      const completed = subtasks.filter((s: PlanSubtask) => s.completed).length;
-      processManager.emit('subtask-progress', {
-        taskId: pipeline.taskId,
-        completed,
-        total: subtasks.length,
-        projectRoot: deps.projectRoot,
-      });
-    } catch { /* best-effort */ }
-  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1318,23 +1343,6 @@ export async function runImplement(
         'Cherry-pick recovery exhausted — per-subtask branches have been preserved for manual recovery.',
         'CHERRY_PICK_RECOVERY_EXHAUSTED',
       );
-    }
-
-    // Batch-update plan.json (original group-level write, kept for compatibility
-    // with the per-subtask checkpoints in runSubtaskSession).
-    if (completedIds.length > 0) {
-      deps.planWriteLock.current = deps.planWriteLock.current.then(() => {
-        const planPath2 = path.join(pipeline.specPath, 'plan.json');
-        try {
-          const p = JSON.parse(readFileSync(planPath2, 'utf-8'));
-          if (p.subtasks) {
-            for (const s of p.subtasks) {
-              if (completedIds.includes(s.id)) s.completed = true;
-            }
-          }
-          writeFileSync(planPath2, JSON.stringify(p, null, 2));
-        } catch { /* best-effort */ }
-      });
     }
 
     // A subtask in this group scheduled a wakeup — stop starting further
