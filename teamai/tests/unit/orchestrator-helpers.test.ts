@@ -59,7 +59,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 
 // ── Imports after mocks ──
 
-import { logToOutput } from '../../src/lib/orchestrator/helpers';
+import { logToOutput, updateSessionMap } from '../../src/lib/orchestrator/helpers';
 
 // ── Helpers ──
 
@@ -99,6 +99,27 @@ describe('logToOutput', () => {
     expect(mockWarn).toHaveBeenCalledWith(
       'orchestrator',
       `Failed to write to output log at ${join(missing, 'output.log')}`,
+      expect.anything(),
+    );
+  });
+});
+
+describe('updateSessionMap', () => {
+  it('writes the session → role mapping and merges with existing entries', () => {
+    updateSessionMap(specPath, 'coder', 'session-a');
+    updateSessionMap(specPath, 'qa-reviewer', 'session-b');
+
+    const map = JSON.parse(readFileSync(join(specPath, 'session_map.json'), 'utf-8'));
+    expect(map).toEqual({ coder: 'session-a', 'qa-reviewer': 'session-b' });
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  it('warns (does not throw) when the write fails', () => {
+    const missing = join(specPath, 'nonexistent-subdir');
+    expect(() => updateSessionMap(missing, 'coder', 'session-a')).not.toThrow();
+    expect(mockWarn).toHaveBeenCalledWith(
+      'orchestrator',
+      'Failed to persist session_map.json',
       expect.anything(),
     );
   });
