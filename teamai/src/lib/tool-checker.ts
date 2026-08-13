@@ -10,6 +10,7 @@
 import { execFileSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { warn } from './logger';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -77,7 +78,11 @@ export function loadToolsConfig(): ToolsConfig {
 function saveToolsConfig(cfg: ToolsConfig): void {
   try {
     writeFileSync(toolsConfigPath(), JSON.stringify(cfg, null, 2));
-  } catch { /* best-effort */ }
+  } catch (err) {
+    // Never throw (a config write must not break tool detection), but surface
+    // it: a silent failure means a custom tool path reverts on the next launch.
+    warn('tool-checker', 'Failed to persist tools.json', err);
+  }
 }
 
 // ── Detection cache ─────────────────────────────────────────────────────────
