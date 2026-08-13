@@ -545,6 +545,30 @@ export function persistCompletedSubtasks(
 }
 
 /**
+ * Remove qa_flagged markers from plan.json after a bounce-back implement run
+ * completes, so the next run doesn't re-trigger already-fixed subtasks.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export function cleanQaFlaggedMarkers(pipeline: ImplementPipeline): void {
+  try {
+    const planPath = path.join(pipeline.specPath, 'plan.json');
+    const planAfter = JSON.parse(readFileSync(planPath, 'utf-8'));
+    let cleaned = false;
+    if (planAfter.subtasks) {
+      for (const s of planAfter.subtasks) {
+        if (s.qa_flagged) { delete s.qa_flagged; cleaned = true; }
+      }
+    }
+    if (cleaned) writeFileSync(planPath, JSON.stringify(planAfter, null, 2));
+  } catch (err) {
+    // A failed cleanup leaves stale qa_flagged markers on the next run,
+    // re-triggering QA-rework subtasks that were already fixed. Surface it.
+    warn('implement', `Failed to clean qa_flagged markers from plan.json for ${pipeline.taskId}`, err);
+  }
+}
+
+/**
  * Run a single subtask's agent session: pre-sensors → create session → build
  * prompt (QA/wakeup/deliverable headers) → wait → post-session checks (scope,
  * wakeup detect, deliverable verification) → post-sensors → checkpoint.
@@ -1431,17 +1455,7 @@ export async function runImplement(
 
   // Clean up qa_flagged markers
   if (hasQaFeedback) {
-    try {
-      const planPath = path.join(pipeline.specPath, 'plan.json');
-      const planAfter = JSON.parse(readFileSync(planPath, 'utf-8'));
-      let cleaned = false;
-      if (planAfter.subtasks) {
-        for (const s of planAfter.subtasks) {
-          if (s.qa_flagged) { delete s.qa_flagged; cleaned = true; }
-        }
-      }
-      if (cleaned) writeFileSync(planPath, JSON.stringify(planAfter, null, 2));
-    } catch { /* best-effort */ }
+    cleanQaFlaggedMarkers(pipeline);
   }
 
   // Mandatory git push before QA
