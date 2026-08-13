@@ -75,7 +75,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator } from '../../src/lib/orchestrator';
-import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks } from '../../src/lib/orchestrator/implement';
+import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks, findFileOwnershipConflict } from '../../src/lib/orchestrator/implement';
 import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
@@ -5767,6 +5767,24 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
     }
   });
 
+  it('throws PipelineConfigError when parallel subtasks share a file', async () => {
+    // Two parallel subtasks both declare src/a.ts — a guaranteed cherry-pick
+    // conflict at integration. The runtime guard must fail fast with an
+    // actionable error instead of silently racing.
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'A', description: 'A', files: ['src/a.ts'], acceptance_criteria: ['a'], parallel_group: 1 },
+        { id: 2, title: 'B', description: 'B', files: ['src/a.ts'], acceptance_criteria: ['b'], parallel_group: 1 },
+      ],
+    }));
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    await expect((orch as AnyOrch).runImplement(pipeline)).rejects.toThrow(/both modify/);
+  });
+
   it('always clears the git-level worktree registration by bare name, even when the host directory was never created (container-patched registration)', async () => {
     // In this mocked harness no real `git worktree add` ever creates a host
     // directory, so existsSync(stWorktreePath) is false throughout — the
@@ -6109,5 +6127,44 @@ describe('persistCompletedSubtasks', () => {
     expect(() => persistCompletedSubtasks(pipeline, deps, [1])).not.toThrow();
     await deps.planWriteLock.current;
     expect(mockEmit).not.toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// findFileOwnershipConflict — runtime guard against parallel file races
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('findFileOwnershipConflict', () => {
+  const st = (id: number, files: string[]): PlanSubtask => ({
+    id,
+    title: `t${id}`,
+    description: `d${id}`,
+    files,
+    depends_on: [],
+    acceptance_criteria: [],
+    parallel_group: 'g',
+  } as PlanSubtask);
+
+  it('returns null when no two subtasks share a file', () => {
+    expect(findFileOwnershipConflict([st(1, ['a.ts']), st(2, ['b.ts']), st(3, ['c.ts'])])).toBeNull();
+  });
+
+  it('detects the first overlapping file across any pair', () => {
+    const result = findFileOwnershipConflict([st(1, ['a.ts']), st(2, ['b.ts', 'a.ts'])]);
+    expect(result).not.toBeNull();
+    expect(result!.file).toBe('a.ts');
+    expect(result!.a.id).toBe(1);
+    expect(result!.b.id).toBe(2);
+  });
+
+  it('treats an empty files array as no overlap', () => {
+    expect(findFileOwnershipConflict([st(1, []), st(2, ['a.ts'])])).toBeNull();
+  });
+
+  it('treats undefined files as no overlap', () => {
+    const a = st(1, ['a.ts']);
+    const b = { ...st(2, []) } as PlanSubtask;
+    (b as { files?: string[] }).files = undefined;
+    expect(findFileOwnershipConflict([a, b])).toBeNull();
   });
 });
