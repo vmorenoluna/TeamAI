@@ -5,6 +5,15 @@ import { readFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
+const { mockWarn } = vi.hoisted(() => ({ mockWarn: vi.fn() }));
+
+vi.mock('@/lib/logger', () => ({
+  log: vi.fn(),
+  warn: mockWarn,
+  error: vi.fn(),
+  info: vi.fn(),
+}));
+
 // ── Path isolation ──────────────────────────────────────────────────────
 
 let testDir: string;
@@ -12,6 +21,7 @@ let testDir: string;
 beforeEach(() => {
   testDir = join(tmpdir(), `teamai-onboarding-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(testDir, { recursive: true });
+  mockWarn.mockClear();
   // Stub process.cwd() to return our temp directory so onboarding.json
   // is written there instead of the real project root.
   vi.spyOn(process, 'cwd').mockReturnValue(testDir);
@@ -106,5 +116,11 @@ describe('onboarding persistence', () => {
     const { completeOnboarding } = await importModule();
     // Should not throw
     expect(() => completeOnboarding()).not.toThrow();
+    // …but must surface the failure so the re-appearing wizard has a trace
+    expect(mockWarn).toHaveBeenCalledWith(
+      'onboarding',
+      'Failed to persist onboarding completion',
+      expect.anything(),
+    );
   });
 });

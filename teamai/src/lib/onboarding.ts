@@ -5,6 +5,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { warn } from './logger';
 
 export interface OnboardingState {
   completed: boolean;
@@ -31,5 +32,10 @@ export function completeOnboarding(): void {
       completed: true,
       completedAt: new Date().toISOString(),
     }, null, 2));
-  } catch { /* best-effort */ }
+  } catch (err) {
+    // Never throw (completing onboarding must not crash the wizard), but
+    // surface it: a silent failure here means the first-run wizard re-appears
+    // on the next launch with no trace.
+    warn('onboarding', 'Failed to persist onboarding completion', err);
+  }
 }
