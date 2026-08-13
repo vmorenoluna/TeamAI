@@ -847,6 +847,16 @@ export class Orchestrator {
     const logFile = path.join(dir, 'output.log');
     const execGitFn = (args: string[], hostCwd: string) => this._execGit(args, hostCwd);
 
+    // Guarded so a log write failure can't abort reconciliation mid-loop
+    // (which would skip later subtasks and the plan.json write below).
+    const logStop = (message: string) => {
+      try {
+        appendFileSync(logFile, message);
+      } catch (err) {
+        logWarn('orchestrator', `Failed to write reconcile log for ${taskId}`, err);
+      }
+    };
+
     let dirty = false;
 
     for (const subtask of plan.subtasks) {
@@ -870,7 +880,7 @@ export class Orchestrator {
       // Multi-group subtask: need a worktree to cherry-pick into.
       // Without one, we can't integrate — reset this subtask only.
       if (!worktreeExists) {
-        appendFileSync(logFile,
+        logStop(
           '[STOP] Subtask ' + subtask.id + ' has unintegrated commits on ' + stBranch +
           ' but worktree is missing — resetting completed: false\n'
         );
@@ -887,7 +897,7 @@ export class Orchestrator {
 
       if (result.recovered) {
         if (result.commits.length > 0) {
-          appendFileSync(logFile,
+          logStop(
             '[STOP] Subtask ' + subtask.id + ' commits recovered onto ' +
             pipelineBranch + ' — keeping completed: true\n'
           );
@@ -896,7 +906,7 @@ export class Orchestrator {
       }
 
       // Couldn't integrate — reset this subtask only
-      appendFileSync(logFile,
+      logStop(
         '[STOP] Subtask ' + subtask.id + ' recovery failed (' +
         result.commits.length + ' commits on ' + stBranch + ') — resetting completed: false\n'
       );
