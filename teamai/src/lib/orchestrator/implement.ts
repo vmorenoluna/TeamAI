@@ -1170,7 +1170,9 @@ export async function applySensorGate(
  * works in its own isolated worktree branched from the same base and their
  * branches are cherry-picked back sequentially — a guaranteed merge conflict.
  * The plan-phase rules require `depends_on` (or merging) between such
- * subtasks; this is the runtime enforcement of that rule.
+ * subtasks; this detects that condition so the caller can surface a
+ * prominent warning. It deliberately does NOT fail the pipeline — the
+ * merger agent can still auto-resolve the cherry-pick conflict.
  *
  * @internal — exported for unit tests only.
  */
@@ -1233,17 +1235,19 @@ export async function runImplement(
 
     // Per-subtask worktree isolation
     if (isMultiGroup) {
-      // Runtime file-ownership guard: two parallel subtasks that modify the
-      // same file from the same base branch are a guaranteed cherry-pick
+      // Runtime file-ownership warning: two parallel subtasks that modify the
+      // same file from the same base branch will likely produce a cherry-pick
       // conflict at integration. The plan-phase rules require depends_on (or
-      // merging) for such subtasks; fail fast with an actionable error
-      // instead of silently racing and wasting a merger session.
+      // merging) for such subtasks. We deliberately do NOT fail the pipeline
+      // here — the merger agent can still auto-resolve the conflict — but
+      // surface it prominently so the plan can be corrected at the source
+      // instead of relying on the merger agent every run.
       const conflict = findFileOwnershipConflict(subtasks);
       if (conflict) {
-        throw new PipelineConfigError(
-          `Parallel subtasks ${conflict.a.id} and ${conflict.b.id} both modify "${conflict.file}". ` +
-          `Parallel subtasks must not share files — add an explicit depends_on between them, or merge them into a single subtask.`,
-          'PARALLEL_FILE_CONFLICT',
+        logToOutput(
+          pipeline.specPath,
+          `\n[WORKTREE] Warning: parallel subtasks ${conflict.a.id} and ${conflict.b.id} both modify "${conflict.file}" — ` +
+          `they will likely conflict at cherry-pick. Add an explicit depends_on between them (or merge them) to avoid relying on the merger agent.\n`,
         );
       }
       for (const subtask of subtasks) {

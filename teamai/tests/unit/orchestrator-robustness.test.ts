@@ -5767,10 +5767,11 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
     }
   });
 
-  it('throws PipelineConfigError when parallel subtasks share a file', async () => {
+  it('warns but does not throw when parallel subtasks share a file', async () => {
     // Two parallel subtasks both declare src/a.ts — a guaranteed cherry-pick
-    // conflict at integration. The runtime guard must fail fast with an
-    // actionable error instead of silently racing.
+    // conflict at integration. The runtime guard must surface a prominent
+    // warning (so the plan can be corrected at the source) but NOT fail the
+    // pipeline: the merger agent can still auto-resolve the conflict.
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
         { id: 1, title: 'A', description: 'A', files: ['src/a.ts'], acceptance_criteria: ['a'], parallel_group: 1 },
@@ -5778,11 +5779,35 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
       ],
     }));
 
+    mockCreateSession
+      .mockResolvedValueOnce('sess-conf-st1')
+      .mockResolvedValueOnce('sess-conf-st2');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
 
-    await expect((orch as AnyOrch).runImplement(pipeline)).rejects.toThrow(/both modify/);
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+
+      // The warning must be written up front (in the group loop), before any
+      // session runs — the conflict is detected at plan-selection time, not at
+      // cherry-pick time.
+      const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(logContent).toContain('both modify');
+
+      fireEvent('event', { sessionId: 'sess-conf-st1', event: { type: 'result' } });
+      fireEvent('event', { sessionId: 'sess-conf-st2', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+
+      // Must NOT reject — the pipeline proceeds to the merger-agent recovery path.
+      await promise;
+      expect(pipeline.phase).not.toBe('failed');
+    } finally {
+      executeSpy.mockRestore();
+    }
   });
 
   it('always clears the git-level worktree registration by bare name, even when the host directory was never created (container-patched registration)', async () => {
