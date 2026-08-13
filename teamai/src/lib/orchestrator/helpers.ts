@@ -233,7 +233,11 @@ export function updateSessionMap(
       : {};
     map[roleOrSubtaskId] = sessionId;
     writeFileSync(sessionMapPath, JSON.stringify(map, null, 2));
-  } catch { /* best-effort */ }
+  } catch (err) {
+    // Never throw (live streaming must not block the pipeline), but surface
+    // the failure so a stale session map is diagnosable.
+    logWarn('orchestrator', 'Failed to persist session_map.json', err);
+  }
 }
 
 // ── Session options ───────────────────────────────────────────────────────
