@@ -281,7 +281,7 @@ describe('_commitArtifactsToWorktree', () => {
     expect(logContent).toContain('No artifacts to commit');
   });
 
-  it('does not crash when the specPath directory does not exist (logToOutput swallows ENOENT)', () => {
+  it('does not crash when the specPath directory does not exist (logToOutput warns on ENOENT)', () => {
     testData = setupTestProject();
     const orch = makeOrch(testData.root);
 
@@ -296,8 +296,8 @@ describe('_commitArtifactsToWorktree', () => {
     });
 
     // logToOutput wraps appendFileSync with try/catch so missing
-    // directories don't crash the pipeline — the function should
-    // complete without throwing.
+    // directories don't crash the pipeline (and warns) — the function
+    // should complete without throwing.
     expect(() => (orch as unknown as AnyOrch)._ctx.commitArtifactsToWorktree(pipeline)).not.toThrow();
   });
 

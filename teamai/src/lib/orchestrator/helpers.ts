@@ -100,7 +100,11 @@ export function logToOutput(specPath: string, message: string): void {
     const leadingNewlines = message.match(/^\n+/)?.[0] ?? '';
     const body = message.slice(leadingNewlines.length);
     appendFileSync(logFile, `${leadingNewlines}[${formatTimestamp()}] ${body}`);
-  } catch { /* best-effort */ }
+  } catch (err) {
+    // Never throw (a log write must not block the pipeline), but surface it
+    // so a broken output.log is diagnosable — matching phaseHeader()'s warn.
+    logWarn('orchestrator', `Failed to write to output log at ${path.join(specPath, 'output.log')}`, err);
+  }
 }
 
 // ── Pure: phase header ────────────────────────────────────────────────────
