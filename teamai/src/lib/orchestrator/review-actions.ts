@@ -12,6 +12,7 @@ import type { TaskPipeline, MergeStrategy, QaReport } from './types';
 import { REVISION_CLEANUP_EXTRA } from './artifacts';
 import { logToOutput } from './helpers';
 import { TaskNotFoundError, PhaseTransitionError } from './errors';
+import { warn } from '../logger';
 
 // ── Dependencies ──────────────────────────────────────────────────────────
 
@@ -134,7 +135,11 @@ export async function rejectTask(
   try {
     const snapshotPath = path.join(pipeline.specPath, 'human_feedback_before_bounce.md');
     writeFileSync(snapshotPath, readFileSync(feedbackPath, 'utf-8'));
-  } catch { /* best-effort */ }
+  } catch (err) {
+    // Defensive snapshot — a failure only means nothing to restore from
+    // later, but surface it so a silently-missing snapshot is diagnosable.
+    warn('review', `Failed to snapshot human feedback for ${taskId}`, err);
+  }
 
   // Update the QA report so the engineer can see what changes were requested
   const reportPath = path.join(pipeline.specPath, 'qa_report.json');
