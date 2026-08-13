@@ -29,10 +29,22 @@ const mockKillSession = vi.hoisted(() => vi.fn());
 const mockEmit = vi.hoisted(() => vi.fn());
 const mockExecFileSync = vi.hoisted(() => vi.fn());
 const mockProjectStoreGetAll = vi.hoisted(() => vi.fn().mockReturnValue([]));
+const { mockLog, mockWarn, mockError } = vi.hoisted(() => ({
+  mockLog: vi.fn(),
+  mockWarn: vi.fn(),
+  mockError: vi.fn(),
+}));
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
   execFileSync: mockExecFileSync,
+}));
+
+vi.mock('@/lib/logger', () => ({
+  log: mockLog,
+  warn: mockWarn,
+  error: mockError,
+  info: mockLog,
 }));
 
 vi.mock('@/lib/process-manager', () => ({
@@ -652,6 +664,34 @@ describe('Auto Mode Integration', () => {
       });
     });
 
+    it('still approves when the autoProcessed stamp fails (and logs the failure)', async () => {
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      // Make the autoProcessed stamp throw — approval must still proceed.
+      const { TaskStore } = await import('@/lib/task-store');
+      const updateSpy = vi.spyOn(TaskStore.prototype, 'update').mockImplementation(() => {
+        throw new Error('disk full');
+      });
+
+      mockOrch.approveTask.mockClear();
+      fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
+
+      await vi.waitFor(() => {
+        expect(mockOrch.approveTask).toHaveBeenCalledWith(taskId, 'pull-request');
+      });
+      expect(mockWarn).toHaveBeenCalledWith(
+        'auto-mode',
+        expect.stringContaining('Failed to stamp autoProcessed'),
+        expect.anything(),
+      );
+
+      updateSpy.mockRestore();
+    });
+
     it('auto-approves task even when NOT auto-tracked (e.g. resumed after a server restart)', async () => {
       // Move task to 'implement' so the tick does NOT pick it (not in backlog).
       // A task resumed by crash recovery after a restart was never started by
@@ -789,6 +829,47 @@ describe('Auto Mode Integration', () => {
         expect.arrayContaining(['pr', 'view', '42']),
         expect.any(Object),
       );
+    });
+
+    it('still marks the task done when the autoProcessed stamp fails (finishTask guard)', async () => {
+      vi.useFakeTimers();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({ state: 'MERGED', statusCheckRollup: [] });
+        }
+        return '';
+      });
+
+      const { TaskStore } = await import('@/lib/task-store');
+      const store = new TaskStore(testDir);
+      store.updatePhase(taskId, 'pr-open');
+      fireEvent('phase-change', { taskId, phase: 'pr-open', projectRoot: testDir });
+
+      // Make the autoProcessed stamp throw — _finishTask must still call
+      // markTaskDone (otherwise the already-cleared timer orphans the task).
+      const updateSpy = vi.spyOn(TaskStore.prototype, 'update').mockImplementation(() => {
+        throw new Error('disk full');
+      });
+
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.markTaskDone).toHaveBeenCalledWith(taskId);
+      });
+      expect(mockWarn).toHaveBeenCalledWith(
+        'auto-mode',
+        expect.stringContaining('Failed to stamp autoProcessed'),
+        expect.anything(),
+      );
+
+      updateSpy.mockRestore();
     });
 
     it('auto-merges PR when all CI checks pass', async () => {
@@ -1558,6 +1639,23 @@ describe('Auto Mode Integration', () => {
       const saved = JSON.parse(readFileSync(statePath, 'utf-8'));
       expect(saved.enabled).toBe(true);
       expect(saved.maxParallel).toBe(3);
+    });
+
+    it('warns (does not throw) when the persistence write fails', async () => {
+      setupTestProject();
+      const autoMode = await setupAutoMode();
+
+      // Replace .teamai/ with a FILE so mkdirSync throws inside
+      // saveAutoModeState — the toggle must still succeed but warn.
+      rmSync(join(testDir, '.teamai'), { recursive: true, force: true });
+      writeFileSync(join(testDir, '.teamai'), 'not a directory');
+
+      expect(() => autoMode.setAutoModeState(testDir, false, 1)).not.toThrow();
+      expect(mockWarn).toHaveBeenCalledWith(
+        'auto-mode',
+        expect.stringContaining('Failed to persist auto-mode state'),
+        expect.anything(),
+      );
     });
 
     it('persists disabled state to .teamai/auto-mode.json on disable', async () => {
