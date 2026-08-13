@@ -13,6 +13,7 @@ import { processManager, type AgentSession } from '../process-manager';
 import { resolveBaseBranch } from '../git-platform';
 import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
+import { warn } from '../logger';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, SessionOptsResult } from './types';
 
@@ -130,6 +131,38 @@ async function waitForMergerPushToSettle(pipeline: TaskPipeline, deps: QaReviewD
 
 // ── Main function ─────────────────────────────────────────────────────────
 
+/**
+ * Snapshot qa_report.json to qa_report_before_bounce.json so the next QA
+ * cycle can compare FAIL criteria against the previous cycle.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export function snapshotQaReportBeforeBounce(pipeline: TaskPipeline): void {
+  const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+  const bounceSnapshot = path.join(pipeline.specPath, 'qa_report_before_bounce.json');
+  try {
+    writeFileSync(bounceSnapshot, readFileSync(reportPath, 'utf-8'));
+  } catch (err) {
+    warn('qa-review', `Failed to snapshot QA report before bounce for ${pipeline.taskId}`, err);
+  }
+}
+
+/**
+ * Snapshot qa_report.json to qa_report_v{N}.json (N = pipeline.qaRevision)
+ * for historical comparison, like spec_v{N}.md for specs.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export function snapshotQaReportVersioned(pipeline: TaskPipeline): void {
+  const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+  const versionedPath = path.join(pipeline.specPath, `qa_report_v${pipeline.qaRevision}.json`);
+  try {
+    writeFileSync(versionedPath, readFileSync(reportPath, 'utf-8'));
+  } catch (err) {
+    warn('qa-review', `Failed to snapshot qa_report_v${pipeline.qaRevision} for ${pipeline.taskId}`, err);
+  }
+}
+
 export async function runQaReview(
   pipeline: TaskPipeline,
   deps: QaReviewDeps,
@@ -246,10 +279,7 @@ export async function runQaReview(
       deps.advancePhase(pipeline, 'failed');
     } else {
       if (existsSync(reportPath)) {
-        try {
-          const bounceSnapshot = path.join(pipeline.specPath, 'qa_report_before_bounce.json');
-          writeFileSync(bounceSnapshot, readFileSync(reportPath, 'utf-8'));
-        } catch { /* best-effort */ }
+        snapshotQaReportBeforeBounce(pipeline);
       }
       deps.writeQaFeedback(pipeline, failReport);
       deps.advancePhase(pipeline, 'implement');
@@ -331,10 +361,7 @@ export async function runQaReview(
   // completed QA report, not the zero-index.
   pipeline.qaRevision++;
   deps.savePipelineState(pipeline);
-  try {
-    const versionedPath = path.join(pipeline.specPath, `qa_report_v${pipeline.qaRevision}.json`);
-    writeFileSync(versionedPath, readFileSync(reportPath, 'utf-8'));
-  } catch { /* best-effort */ }
+  snapshotQaReportVersioned(pipeline);
 
   const hasSpecConcerns = report.spec_concerns && Array.isArray(report.spec_concerns) && report.spec_concerns.length > 0;
 
@@ -364,10 +391,7 @@ export async function runQaReview(
     }
 
     // Snapshot QA report before bouncing back (overwrites previous snapshot)
-    try {
-      const bounceSnapshot = path.join(pipeline.specPath, 'qa_report_before_bounce.json');
-      writeFileSync(bounceSnapshot, readFileSync(reportPath, 'utf-8'));
-    } catch { /* best-effort */ }
+    snapshotQaReportBeforeBounce(pipeline);
 
     // Update persisted criterion fail counts based on comparison
     if (currentFailNames.size > 0 && prevFailNames.size > 0) {
