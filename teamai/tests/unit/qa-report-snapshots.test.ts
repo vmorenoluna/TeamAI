@@ -5,7 +5,7 @@
  * qa_report_v{N}.json must warn (not swallow) when their write fails.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, existsSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -58,7 +58,7 @@ vi.mock('fs', async (importOriginal) => {
   return { ...actual, writeFileSync: mockWriteFileSync };
 });
 
-import { snapshotQaReportBeforeBounce, snapshotQaReportVersioned } from '../../src/lib/orchestrator/qa-review';
+import { snapshotQaReportBeforeBounce, snapshotQaReportVersioned, writeFailReport } from '../../src/lib/orchestrator/qa-review';
 
 function setup() {
   const root = join(tmpdir(), `teamai-qasnap-${randomUUID().slice(0, 8)}`);
@@ -118,6 +118,23 @@ describe('QA report snapshot helpers', () => {
     expect(mockWarn).toHaveBeenCalledWith(
       'qa-review',
       expect.stringContaining('Failed to snapshot qa_report_v2'),
+      expect.anything(),
+    );
+  });
+
+  it('writeFailReport writes the FAIL report without warning', () => {
+    writeFailReport(pipeline(ctx.specPath) as never, { overall: 'FAIL' } as never, 'unpushed-commits');
+    const onDisk = JSON.parse(readFileSync(join(ctx.specPath, 'qa_report.json'), 'utf-8'));
+    expect(onDisk.overall).toBe('FAIL');
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  it('writeFailReport warns (does not throw) on write failure', () => {
+    mockWriteFileSync.mockImplementationOnce(() => { throw new Error('disk full'); });
+    expect(() => writeFailReport(pipeline(ctx.specPath) as never, { overall: 'FAIL' } as never, 'unpushed-commits')).not.toThrow();
+    expect(mockWarn).toHaveBeenCalledWith(
+      'qa-review',
+      expect.stringContaining('Failed to write unpushed-commits FAIL report'),
       expect.anything(),
     );
   });

@@ -132,6 +132,22 @@ async function waitForMergerPushToSettle(pipeline: TaskPipeline, deps: QaReviewD
 // ── Main function ─────────────────────────────────────────────────────────
 
 /**
+ * Write a structured FAIL report to qa_report.json, guarding the write so a
+ * disk failure can't abort the bounce/failed flow — the in-memory report
+ * still reaches writeQaFeedback/writeCompletionSummary.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export function writeFailReport(pipeline: TaskPipeline, failReport: QaReport, label: string): void {
+  const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+  try {
+    writeFileSync(reportPath, JSON.stringify(failReport, null, 2));
+  } catch (err) {
+    warn('qa-review', `Failed to write ${label} FAIL report for ${pipeline.taskId}`, err);
+  }
+}
+
+/**
  * Snapshot qa_report.json to qa_report_before_bounce.json so the next QA
  * cycle can compare FAIL criteria against the previous cycle.
  *
@@ -271,7 +287,7 @@ export async function runQaReview(
           'so QA cannot verify the same code that reviewers will see.',
       }],
     };
-    writeFileSync(reportPath, JSON.stringify(failReport, null, 2));
+    writeFailReport(pipeline, failReport, 'unpushed-commits');
     logToOutput(pipeline.specPath, '[QA-PRECHECK] FAIL — unpushed commits detected, engineer must push first\n');
 
     if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
@@ -331,7 +347,7 @@ export async function runQaReview(
         notes: `The QA agent session completed but the report at ${reportPath} is missing or invalid: ${reportResult.error.message}. This is a pipeline error — re-running QA may produce a valid report.`,
       }],
     };
-    writeFileSync(reportPath, JSON.stringify(failReport, null, 2));
+    writeFailReport(pipeline, failReport, 'unreadable-report');
     if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
       deps.writeCompletionSummary(pipeline);
       deps.advancePhase(pipeline, 'failed');
