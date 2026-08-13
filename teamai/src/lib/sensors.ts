@@ -2,6 +2,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from 'fs';
 import path from 'path';
+import { warn } from './logger';
 
 const execFileAsync = promisify(execFile);
 
@@ -99,7 +100,8 @@ export async function runSensors(
     // Ensure the sensors output directory exists
     const sensorsDir = path.join(params.specPath, 'sensors');
     if (!existsSync(sensorsDir)) {
-      try { mkdirSync(sensorsDir, { recursive: true }); } catch { /* best-effort */ }
+      try { mkdirSync(sensorsDir, { recursive: true }); }
+      catch (err) { warn('sensors', `Failed to create sensors output dir ${sensorsDir}`, err); }
     }
 
     const subtaskSuffix = params.subtaskId !== undefined ? `-st${params.subtaskId}` : '';
@@ -167,7 +169,9 @@ export async function runSensors(
     // Write the report to disk (idempotent — overwrites on re-runs)
     try {
       writeFileSync(outputPath, JSON.stringify(report, null, 2));
-    } catch { /* best-effort */ }
+    } catch (err) {
+      warn('sensors', `Failed to write sensor report ${outputPath}`, err);
+    }
 
     // Append to the task's output log
     if (params.logFile) {
@@ -179,7 +183,9 @@ export async function runSensors(
           (report.error ? `  Error: ${report.error}\n` : '') +
           (report.stderr ? `  stderr: ${report.stderr.slice(0, 200)}\n` : ''),
         );
-      } catch { /* best-effort */ }
+      } catch (err) {
+        warn('sensors', 'Failed to append sensor result to output log', err);
+      }
     }
 
     reports.push(report);

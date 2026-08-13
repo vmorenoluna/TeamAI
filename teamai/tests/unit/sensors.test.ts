@@ -6,6 +6,15 @@ import path from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 
+const { mockWarn } = vi.hoisted(() => ({ mockWarn: vi.fn() }));
+
+vi.mock('@/lib/logger', () => ({
+  log: vi.fn(),
+  warn: mockWarn,
+  error: vi.fn(),
+  info: vi.fn(),
+}));
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 /** Create a temporary directory for test artifacts. */
@@ -286,6 +295,7 @@ describe('runSensors', () => {
     logFile = tempFile();
     writeFileSync(logFile, ''); // create the file
     mockExecFile.mockReset();
+    mockWarn.mockClear();
   });
 
   afterEach(() => {
@@ -579,6 +589,51 @@ describe('runSensors', () => {
     );
 
     // No logFile = nothing to read, just verify no crash
+  });
+
+  // ── Failure surfacing (warn instead of silent swallow) ─────────────────
+
+  it('warns (does not throw) when the report cannot be written to disk', async () => {
+    mockSuccess();
+
+    // A regular file blocks the path, so mkdirSync(recursive) for the
+    // sensors/ dir throws (can't create a directory inside a file).
+    const blocker = path.join(testDir, 'blocker');
+    writeFileSync(blocker, '');
+    const badSpecPath = path.join(blocker, 'spec');
+
+    const result = await runSensors(
+      [{ command: 'check', label: 'Check' }],
+      'post_subtask',
+      { cwd: testDir, specPath: badSpecPath, files: [], logFile },
+    );
+
+    // The in-memory verdict still propagates even though the write failed.
+    expect(result.reports[0].passed).toBe(true);
+    expect(mockWarn).toHaveBeenCalledWith(
+      'sensors',
+      expect.stringContaining('Failed to create sensors output dir'),
+      expect.anything(),
+    );
+  });
+
+  it('warns (does not throw) when the logFile append fails', async () => {
+    mockSuccess();
+
+    const missingLog = path.join(testDir, 'missing-parent', 'output.log');
+
+    const result = await runSensors(
+      [{ command: 'check', label: 'Check' }],
+      'pre_subtask',
+      { cwd: testDir, specPath: testDir, files: [], logFile: missingLog },
+    );
+
+    expect(result.reports[0].passed).toBe(true);
+    expect(mockWarn).toHaveBeenCalledWith(
+      'sensors',
+      'Failed to append sensor result to output log',
+      expect.anything(),
+    );
   });
 
   // ── Multiple sensors ──────────────────────────────────────────────────
