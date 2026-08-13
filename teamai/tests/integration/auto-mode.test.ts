@@ -1010,6 +1010,123 @@ describe('Auto Mode Integration', () => {
       expect(mergeCalls.length).toBe(0);
     });
 
+    it('re-runs failed CI jobs (transient infra failure) instead of stalling forever', async () => {
+      vi.useFakeTimers();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({
+            state: 'OPEN',
+            statusCheckRollup: [
+              { conclusion: 'FAILURE', detailsUrl: 'https://github.com/o/r/actions/runs/999888/job/1' },
+            ],
+          });
+        }
+        return '';
+      });
+
+      const { TaskStore: TSr } = await import('@/lib/task-store');
+      new TSr(testDir).updatePhase(taskId, 'pr-open');
+      fireEvent('phase-change', { taskId, phase: 'pr-open', projectRoot: testDir });
+
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'gh', ['run', 'rerun', '999888', '--failed'],
+        expect.objectContaining({ cwd: testDir }),
+      );
+
+      const mergeCalls = mockExecFileSync.mock.calls.filter(
+        (c: unknown[]) => c[0] === 'gh' && Array.isArray(c[1]) && c[1][0] === 'pr' && c[1][1] === 'merge',
+      );
+      expect(mergeCalls.length).toBe(0);
+    });
+
+    it('stops polling and stops re-running after CI keeps failing past the rerun cap', async () => {
+      vi.useFakeTimers();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      let viewCallCount = 0;
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          viewCallCount++;
+          return JSON.stringify({
+            state: 'OPEN',
+            statusCheckRollup: [
+              { conclusion: 'FAILURE', detailsUrl: 'https://github.com/o/r/actions/runs/999888/job/1' },
+            ],
+          });
+        }
+        return '';
+      });
+
+      const { TaskStore: TSr2 } = await import('@/lib/task-store');
+      new TSr2(testDir).updatePhase(taskId, 'pr-open');
+      fireEvent('phase-change', { taskId, phase: 'pr-open', projectRoot: testDir });
+
+      // MAX_CI_RERUN_ATTEMPTS is 3 — 3 polls each trigger a rerun, the 4th
+      // observes the still-failing check and gives up without another rerun.
+      for (let i = 0; i < 4; i++) {
+        await vi.advanceTimersByTimeAsync(31_000);
+      }
+
+      const rerunCalls = mockExecFileSync.mock.calls.filter(
+        (c: unknown[]) => c[0] === 'gh' && Array.isArray(c[1]) && c[1][0] === 'run' && c[1][1] === 'rerun',
+      );
+      expect(rerunCalls.length).toBe(3);
+      expect(viewCallCount).toBe(4);
+
+      // Polling stopped — a 5th tick must not produce any further `pr view` calls.
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(viewCallCount).toBe(4);
+    });
+
+    it('stops polling when a failed CI check has no run URL to re-run', async () => {
+      vi.useFakeTimers();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      let viewCallCount = 0;
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          viewCallCount++;
+          return JSON.stringify({ state: 'OPEN', statusCheckRollup: [{ conclusion: 'FAILURE' }] });
+        }
+        return '';
+      });
+
+      const { TaskStore: TSr3 } = await import('@/lib/task-store');
+      new TSr3(testDir).updatePhase(taskId, 'pr-open');
+      fireEvent('phase-change', { taskId, phase: 'pr-open', projectRoot: testDir });
+
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(viewCallCount).toBe(1);
+
+      const rerunCalls = mockExecFileSync.mock.calls.filter(
+        (c: unknown[]) => c[0] === 'gh' && Array.isArray(c[1]) && c[1][0] === 'run' && c[1][1] === 'rerun',
+      );
+      expect(rerunCalls.length).toBe(0);
+
+      // Polling stopped immediately — no second `pr view` call.
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(viewCallCount).toBe(1);
+    });
+
     it('stops polling when PR is closed (not OPEN)', async () => {
       vi.useFakeTimers();
 
