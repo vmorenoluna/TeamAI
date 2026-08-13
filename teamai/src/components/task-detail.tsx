@@ -250,9 +250,14 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
           {task.id}
         </p>
 
-        {/* Row 3: description */}
+        {/* Row 3: description — bounded so a long description scrolls within
+            a fixed height instead of growing the header and squeezing the
+            tab content below. */}
         {task.description && (
-          <p className="mb-2 text-sm text-slate-400">
+          <p
+            data-component="task-description"
+            className="mb-2 text-sm text-slate-400 max-h-40 overflow-y-auto break-words pr-1"
+          >
             {task.description}
           </p>
         )}
