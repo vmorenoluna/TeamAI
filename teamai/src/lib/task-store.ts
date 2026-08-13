@@ -6,6 +6,7 @@ export function isRetryableError(err: unknown): boolean {
 }
 import { join } from 'path';
 import { slugify } from './utils';
+import { warn as logWarn } from './logger';
 import { PHASE_ARTIFACTS } from './orchestrator/artifacts';
 
 type MergeStrategy = 'local-merge' | 'pull-request';
@@ -182,7 +183,15 @@ export class TaskStore {
     atomicWriteJson(join(dir, 'task.json'), task);
 
     const event = { phase, timestamp: new Date().toISOString() };
-    appendFileSync(join(dir, 'events.jsonl'), JSON.stringify(event) + '\n');
+    try {
+      appendFileSync(join(dir, 'events.jsonl'), JSON.stringify(event) + '\n');
+    } catch (err) {
+      // task.json is the source of truth for phase and is already written;
+      // a failed events.jsonl append must not throw (which would surface as a
+      // phase-transition failure) but must be visible, since the audit trail
+      // (used by analytics and retry resume) is now incomplete.
+      logWarn('task-store', `Failed to append phase event for ${id}`, err);
+    }
   }
 
   getAll(): Task[] {
