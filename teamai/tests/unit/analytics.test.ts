@@ -354,6 +354,34 @@ describe('getAnalytics', () => {
       expect(data.qaStats!.criteriaBreakdown[0].name).toBe('tests-passing');
     });
 
+    it('sorts criteria with equal passRate alphabetically by name (deterministic tie-break)', async () => {
+      writeTask('qa-zebra', 'qz', { phase: 'done' });
+      writeTask('qa-alpha', 'qa', { phase: 'done' });
+
+      writeQaReport('qa-zebra', {
+        overall: 'FAIL',
+        criteria: [
+          { name: 'zebra', status: 'PASS' },
+          { name: 'alpha', status: 'FAIL' },
+        ],
+      });
+      writeQaReport('qa-alpha', {
+        overall: 'FAIL',
+        criteria: [
+          { name: 'zebra', status: 'FAIL' },
+          { name: 'alpha', status: 'PASS' },
+        ],
+      });
+
+      const { getAnalytics } = await import('@/app/actions/analytics');
+      const data = await getAnalytics();
+
+      // Both criteria have passRate 50 (1 PASS / 2 total). The tie-break
+      // orders them alphabetically regardless of insertion order.
+      const names = data.qaStats!.criteriaBreakdown.map(c => c.name);
+      expect(names).toEqual(['alpha', 'zebra']);
+    });
+
     it('handles criteria with field name "criterion" (alternate field)', async () => {
       writeTask('alt-field', 'af', { phase: 'done' });
       writeQaReport('alt-field', {
