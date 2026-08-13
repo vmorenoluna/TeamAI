@@ -32,7 +32,7 @@ export async function getTaskReferences(taskId: string): Promise<string[]> {
   try {
     const dir = join(taskStore.getDirById(taskId), 'references');
     if (!existsSync(dir)) return [];
-    return readdirSync(dir).filter(f => /\.(png|jpg|jpeg|webp|gif)$/i.test(f));
+    return readdirSync(dir).filter(f => /\.(png|jpg|jpeg|webp|gif)$/i.test(f)).sort();
   } catch {
     return [];
   }

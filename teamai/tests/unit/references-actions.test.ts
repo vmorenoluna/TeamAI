@@ -223,5 +223,21 @@ describe('references server actions', () => {
       const { getTaskReferences } = await import('@/app/actions/references');
       await expect(getTaskReferences('task-1')).rejects.toThrow('no project');
     });
+
+    it('returns references in deterministic (sorted) order', async () => {
+      const refDir = join(root, '.teamai', 'task-4', 'references');
+      mkdirSync(refDir, { recursive: true });
+      const { writeFileSync } = await import('fs');
+      // Write in a deliberately non-alphabetical order — readdirSync order is
+      // filesystem-dependent, so the action must sort before returning.
+      writeFileSync(join(refDir, 'ref-zeta.png'), 'z');
+      writeFileSync(join(refDir, 'ref-alpha.png'), 'a');
+      writeFileSync(join(refDir, 'ref-mid.jpg'), 'm');
+
+      const { getTaskReferences } = await import('@/app/actions/references');
+      const refs = await getTaskReferences('task-4');
+
+      expect(refs).toEqual(['ref-alpha.png', 'ref-mid.jpg', 'ref-zeta.png']);
+    });
   });
 });
