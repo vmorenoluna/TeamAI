@@ -21,6 +21,7 @@ import { updateSessionMap, logToOutput } from './helpers';
 import { resolveBaseBranch } from '../git-platform';
 import { getUnpushedCommits } from './worktree-ops';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
+import { warn } from '../logger';
 import type { TaskStore } from '../task-store';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
@@ -408,7 +409,13 @@ export function selectSubtasks(
   if (hasHumanFeedback) {
     const snapshotPath = path.join(pipeline.specPath, 'human_feedback_before_bounce.md');
     if (!existsSync(snapshotPath)) {
-      try { writeFileSync(snapshotPath, readFileSync(humanFeedbackPath, 'utf-8')); } catch { /* best-effort */ }
+      try {
+        writeFileSync(snapshotPath, readFileSync(humanFeedbackPath, 'utf-8'));
+      } catch (err) {
+        // Defensive snapshot — a failure only means nothing to restore from
+        // later, but surface it so a silently-missing snapshot is diagnosable.
+        warn('implement', `Failed to snapshot human feedback to ${snapshotPath}`, err);
+      }
     }
   }
 
