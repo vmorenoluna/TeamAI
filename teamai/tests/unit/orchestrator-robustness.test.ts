@@ -5729,6 +5729,44 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
     }
   });
 
+  it('logs the failure instead of silently swallowing when worktree removal fails', async () => {
+    mockCreateSession
+      .mockResolvedValueOnce('sess-log-st1')
+      .mockResolvedValueOnce('sess-log-st2');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    // Wrap the beforeEach mock so `git worktree remove --force` throws (a file
+    // lock), but every other git call behaves as before.
+    const baseImpl = mockExecFileSync.getMockImplementation() as ((cmd: string, args?: string[]) => string) | undefined;
+    mockExecFileSync.mockImplementation((cmd: string, args?: string[]) => {
+      if (cmd === 'git' && Array.isArray(args) && args[0] === 'worktree' && args[1] === 'remove') {
+        throw new Error('fatal: cannot remove worktree (file locked)');
+      }
+      return baseImpl ? baseImpl(cmd, args) : '';
+    });
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+
+      fireEvent('event', { sessionId: 'sess-log-st1', event: { type: 'result' } });
+      fireEvent('event', { sessionId: 'sess-log-st2', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+
+      // The removal failure must be visible in the task log, not swallowed.
+      const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(logContent).toContain('Failed to remove per-subtask worktree');
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   it('always clears the git-level worktree registration by bare name, even when the host directory was never created (container-patched registration)', async () => {
     // In this mocked harness no real `git worktree add` ever creates a host
     // directory, so existsSync(stWorktreePath) is false throughout — the
