@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, readdirSync
 import { join } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
-import { error as logError } from './logger';
+import { error as logError, warn as logWarn } from './logger';
 
 /**
  * Resolve the TeamAI config directory. Precedence:
@@ -200,7 +200,11 @@ export class ProjectStore {
     if (!existsSync(gitignorePath)) {
       try {
         writeFileSync(gitignorePath, buildBlock(TEAMAI_PATTERNS));
-      } catch { /* best-effort — don't block project setup on .gitignore write failure */ }
+      } catch (err) {
+        // Don't block project setup, but surface it: a missing .gitignore
+        // changes what gets committed into the artifact snapshot.
+        logWarn('project-store', `Failed to write .gitignore at ${gitignorePath}`, err);
+      }
       return;
     }
 
@@ -216,7 +220,9 @@ export class ProjectStore {
 
       const separator = existing.endsWith('\n') ? '' : '\n';
       appendFileSync(gitignorePath, separator + '\n' + buildBlock(missing));
-    } catch { /* best-effort */ }
+    } catch (err) {
+      logWarn('project-store', `Failed to update .gitignore at ${gitignorePath}`, err);
+    }
   }
 
   /**
@@ -244,7 +250,9 @@ export class ProjectStore {
         // large normalization commit with no real content change.
         this._writeRenormalizeSuggestion(projectPath);
         return true;
-      } catch { /* best-effort — don't block project setup on .gitattributes write failure */ }
+      } catch (err) {
+        logWarn('project-store', `Failed to write .gitattributes at ${gitattributesPath}`, err);
+      }
       return false;
     }
 
@@ -262,7 +270,9 @@ export class ProjectStore {
       appendFileSync(gitattributesPath, separator + '\n' + missing.join('\n') + '\n');
       this._writeRenormalizeSuggestion(projectPath);
       return true;
-    } catch { /* best-effort */ }
+    } catch (err) {
+      logWarn('project-store', `Failed to update .gitattributes at ${gitattributesPath}`, err);
+    }
     return false;
   }
 
@@ -272,7 +282,9 @@ export class ProjectStore {
       const teamaiDir = join(projectPath, '.teamai');
       mkdirSync(teamaiDir, { recursive: true });
       writeFileSync(join(teamaiDir, 'gitattributes-renormalize-suggestion'), '');
-    } catch { /* best-effort */ }
+    } catch (err) {
+      logWarn('project-store', `Failed to write renormalize suggestion for ${projectPath}`, err);
+    }
   }
 
   /**
