@@ -461,7 +461,12 @@ export function selectSubtasks(
       const tmpPath = planPath + '.tmp';
       writeFileSync(tmpPath, JSON.stringify(plan, null, 2));
       renameSync(tmpPath, planPath);
-    } catch { /* best-effort — pipeline proceeds even if this write fails */ }
+    } catch (err) {
+      // The pipeline proceeds (the in-memory plan already carries the
+      // synthesized subtask), but a failed persist means the next run lacks
+      // the 9999 entry, so getTaskFull() can't surface output-st9999.log.
+      warn('implement', `Failed to persist synthesized QA-rework subtask to plan.json for ${pipeline.taskId}`, err);
+    }
   } else {
     effectiveSubtasks = subtasksToRun;
   }
