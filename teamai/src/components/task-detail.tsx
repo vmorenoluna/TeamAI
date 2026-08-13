@@ -304,7 +304,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                 {task.source === 'competitor-analysis' ? 'Competitor Analysis' : 'Ideation'}
               </span>
               {task.competitiveContext && (
-                <span className="text-amber-400 italic text-xs">{task.competitiveContext}</span>
+                <span className="text-amber-400 italic text-xs break-words">{task.competitiveContext}</span>
               )}
               <span className="text-slate-400 text-xs">·</span>
             </>

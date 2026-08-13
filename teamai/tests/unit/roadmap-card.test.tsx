@@ -280,6 +280,13 @@ describe('RoadmapCard', () => {
       expect(desc).not.toHaveClass('line-clamp-3');
     });
 
+    it('breaks long words in the description instead of overflowing', () => {
+      renderCard(roadItem({ description: 'A'.repeat(300) }), { isExpanded: true });
+
+      const desc = screen.getByText(/A{100,}/);
+      expect(desc).toHaveClass('break-words');
+    });
+
     it('shows affected files section when expanded and files exist', () => {
       renderCard(
         roadItem({ affected_files: ['src/foo.ts', 'src/bar.ts'] }),
@@ -403,6 +410,13 @@ describe('RoadmapCard', () => {
       renderCard(roadItem({ competitive_context: 'Ahead of competitor X' }));
 
       expect(screen.getByText('Ahead of competitor X')).toBeInTheDocument();
+    });
+
+    it('breaks long words in competitive context instead of overflowing', () => {
+      renderCard(roadItem({ competitive_context: 'x'.repeat(200) }));
+
+      const ctx = screen.getByText(/x{100,}/);
+      expect(ctx).toHaveClass('break-words');
     });
 
     it('does not render competitive context when absent', () => {

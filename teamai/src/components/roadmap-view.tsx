@@ -451,7 +451,7 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${selectedRoadmapItem.item.source === 'competitor-analysis' ? 'bg-amber-900/30 text-amber-400' : 'bg-blue-900/30 text-blue-400'}`}>
                   {selectedRoadmapItem.item.source === 'competitor-analysis' ? 'Competitor Analysis' : 'Ideation'}
                 </span>
-                {selectedRoadmapItem.item.competitive_context && (<span className="text-xs text-amber-400 italic">{selectedRoadmapItem.item.competitive_context}</span>)}
+                {selectedRoadmapItem.item.competitive_context && (<span className="text-xs text-amber-400 italic break-words">{selectedRoadmapItem.item.competitive_context}</span>)}
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-xs text-slate-500">Complexity:</span>
