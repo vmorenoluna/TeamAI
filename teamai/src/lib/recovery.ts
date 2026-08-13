@@ -61,7 +61,7 @@ export function findInterruptedTasks(): InterruptedTask[] {
 
     let entries: string[] = [];
     try {
-      entries = readdirSync(teamaiDir);
+      entries = readdirSync(teamaiDir).sort();
     } catch {
       continue;
     }
@@ -115,7 +115,7 @@ export function findOrphanedWorktrees(): OrphanedWorktree[] {
 
     let entries: string[] = [];
     try {
-      entries = readdirSync(worktreesDir);
+      entries = readdirSync(worktreesDir).sort();
     } catch {
       continue;
     }
@@ -207,7 +207,7 @@ export function restoreContainerPatchedWorktrees(): number {
 
     let entries: string[] = [];
     try {
-      entries = readdirSync(worktreesDir);
+      entries = readdirSync(worktreesDir).sort();
     } catch {
       continue;
     }
@@ -266,7 +266,7 @@ export function autoClearExpiredRateLimits(): number {
 
     let entries: string[] = [];
     try {
-      entries = readdirSync(teamaiDir);
+      entries = readdirSync(teamaiDir).sort();
     } catch {
       continue;
     }
@@ -315,7 +315,7 @@ export function reconcileTaskArtifacts(): ArtifactInconsistency[] {
 
     let entries: string[] = [];
     try {
-      entries = readdirSync(teamaiDir);
+      entries = readdirSync(teamaiDir).sort();
     } catch {
       continue;
     }
@@ -567,7 +567,7 @@ export async function sweepStalledTasks(): Promise<number> {
 
     let entries: string[] = [];
     try {
-      entries = readdirSync(teamaiDir);
+      entries = readdirSync(teamaiDir).sort();
     } catch {
       continue;
     }
