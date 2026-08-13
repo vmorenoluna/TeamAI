@@ -139,6 +139,24 @@ describe('TaskDetail mutation handlers', () => {
   // didn't appear, button click appeared to "do nothing". These tests
   // lock in the post-fix contract for the four most-affected handlers.
 
+  it('bounds the description with a scroll area so long text cannot squeeze the tab content', () => {
+    renderDetail(
+      makeTask({
+        id: 'desc-1',
+        title: 'Long description task',
+        description: 'x'.repeat(5000),
+      }),
+    );
+
+    const desc = screen.getByTestId('task-description');
+    expect(desc).toHaveTextContent(/^x+/);
+    // The description must be height-bounded and scrollable (not grow the
+    // shrink-0 header, which would reduce the terminal/spec tabs' height).
+    expect(desc.className).toContain('max-h-40');
+    expect(desc.className).toContain('overflow-y-auto');
+    expect(desc.className).toContain('break-words');
+  });
+
   describe('raw-throw path (regression)', () => {
     it('handleRestart: role=alert banner surfaces when restartCurrentPhase throws', async () => {
       mockRestartCurrentPhase.mockRejectedValue(new Error('restart raw throw: pipeline mismatch'));
