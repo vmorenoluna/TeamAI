@@ -234,7 +234,11 @@ export async function autoReviseSpec(
   if (existsSync(specMdPath)) {
     try {
       writeFileSync(path.join(specPath, `spec_v${pipeline.specRevision}.md`), readFileSync(specMdPath, 'utf-8'));
-    } catch { /* best-effort */ }
+    } catch (err) {
+      // A failed snapshot loses the pre-revision spec history (specRevision
+      // is already incremented). Surface it.
+      warn('review', `Failed to snapshot spec v${pipeline.specRevision} for ${pipeline.taskId}`, err);
+    }
   }
 
   // Clear downstream artifacts — plan, QA, and feedback all need regeneration
