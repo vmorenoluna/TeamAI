@@ -2756,7 +2756,7 @@ describe('Orchestrator', () => {
   // ── markTaskDone ──────────────────────────────────────────────────
 
   describe('markTaskDone', () => {
-    it('deletes live directory, attempts scoped restore, falls back to recreate task.json on fetch failure, emits once', async () => {
+    it('finalizes the live record in place on fetch failure, emits once', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -2774,7 +2774,7 @@ describe('Orchestrator', () => {
       mockEmit.mockClear();
       await orch.markTaskDone(testData.taskId);
 
-      // Fallback: directory was recreated with task.json + events.jsonl
+      // Finalize in place: task.json flipped to done, events.jsonl appended
       expect(existsSync(testData.taskDir)).toBe(true);
       expect(existsSync(join(testData.taskDir, 'task.json'))).toBe(true);
       expect(existsSync(join(testData.taskDir, 'events.jsonl'))).toBe(true);
@@ -2820,6 +2820,9 @@ describe('Orchestrator', () => {
       // origin in one shot) — this is the primary path now, tried before
       // any scoped checkout.
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'ls-tree') {
+          return `.teamai/${testData.taskId}/task.json\n`;
+        }
         if (cmd === 'git' && args[0] === 'merge' && args.includes('--ff-only')) {
           mkdirSync(testData.taskDir, { recursive: true });
           writeFileSync(join(testData.taskDir, 'task.json'), restoredSnapshot);
@@ -2891,6 +2894,9 @@ describe('Orchestrator', () => {
       // real checkout would do regardless of how dirty the rest of the
       // working tree is.
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'ls-tree') {
+          return `.teamai/${testData.taskId}/task.json\n`;
+        }
         if (cmd === 'git' && args[0] === 'merge' && args.includes('--ff-only')) {
           throw new Error('fatal: Not possible to fast-forward, aborting.');
         }
@@ -2958,6 +2964,9 @@ describe('Orchestrator', () => {
       // effect. The checkout's staged entries must not be left stranded in
       // the index.
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'ls-tree') {
+          return `.teamai/${testData.taskId}/task.json\n`;
+        }
         if (cmd === 'git' && args.includes('checkout')) {
           mkdirSync(testData.taskDir, { recursive: true });
           writeFileSync(join(testData.taskDir, 'task.json'), restoredSnapshot);
@@ -2991,22 +3000,35 @@ describe('Orchestrator', () => {
       }));
     });
 
-    it('falls back to recreating task.json when pull succeeds but restores no artifacts', async () => {
+    it('finalizes the live record in place when pull succeeds but restores no snapshot', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
-      // Pull succeeds but does NOT restore the directory — e.g. the project
-      // gitignores .teamai/ in-repo, so the artifact commit was skipped.
+      // Pull succeeds but restores no snapshot — e.g. the project gitignores
+      // .teamai/ in-repo, so the artifact commit was skipped.
       mockExecFileSync.mockReturnValue('');
 
       mockEmit.mockClear();
       await orch.markTaskDone(testData.taskId);
 
-      // Fallback recreated the minimal task so it stays on the kanban
+      // Finalized in place so the task stays on the kanban
       expect(existsSync(join(testData.taskDir, 'task.json'))).toBe(true);
       const taskJson = JSON.parse(readFileSync(join(testData.taskDir, 'task.json'), 'utf-8'));
       expect(taskJson.phase).toBe('done');
       expect(existsSync(join(testData.taskDir, 'events.jsonl'))).toBe(true);
+
+      // The explicit ls-tree gate saw no snapshot, so neither the
+      // fast-forward merge nor the scoped checkout was attempted.
+      expect(mockExecFileSync).not.toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['merge', '--ff-only']),
+        expect.anything(),
+      );
+      expect(mockExecFileSync).not.toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['checkout']),
+        expect.anything(),
+      );
 
       // Emitted exactly once, after everything settled
       expect(mockEmit).toHaveBeenCalledTimes(1);
