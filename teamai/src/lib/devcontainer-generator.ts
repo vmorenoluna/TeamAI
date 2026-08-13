@@ -208,7 +208,9 @@ function parseDocs(projectRoot: string, files: string[]): DocCommands {
   if (files.includes('docs')) {
     try {
       const docsDir = join(projectRoot, 'docs');
-      const docFiles = readdirSync(docsDir);
+      // Sort so the first matching doc (and thus the chosen commands) is
+      // deterministic rather than filesystem-order dependent.
+      const docFiles = readdirSync(docsDir).sort();
       for (const doc of docFiles) {
         if (/development|building|setup|contributing/i.test(doc)) {
           const content = safeReadText(join(docsDir, doc));
