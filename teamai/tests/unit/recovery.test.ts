@@ -14,8 +14,16 @@ vi.mock('fs', () => ({
   writeFileSync: vi.fn(),
 }));
 
+vi.mock('../../src/lib/logger', () => ({
+  log: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+}));
+
 import { findInterruptedTasks, findOrphanedWorktrees, restoreContainerPatchedWorktrees, startupCleanup, autoClearExpiredRateLimits, reconcileTaskArtifacts, autoResumeInterruptedTasks, sweepStalledTasks } from '../../src/lib/recovery';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
+import { warn } from '../../src/lib/logger';
 import { join } from 'path';
 
 // Mock orchestrator module for autoResumeInterruptedTasks and sweepStalledTasks tests
@@ -799,6 +807,42 @@ describe('autoClearExpiredRateLimits', () => {
     });
 
     expect(autoClearExpiredRateLimits()).toBe(0);
+  });
+
+  it('warns (and does not count) when the rate-limit clear write fails', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'my-task', 'task.json');
+    const pastDate = new Date(Date.now() - 3600_000).toISOString(); // 1 hour ago
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (String(p) === taskFile)
+        return JSON.stringify({ id: 't1', title: 'Task', phase: 'implement', rateLimitedUntil: pastDate });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['my-task'];
+      return [];
+    });
+    vi.mocked(writeFileSync).mockImplementationOnce(() => { throw new Error('disk full'); });
+
+    const result = autoClearExpiredRateLimits();
+    // The write failed → not counted as cleared, and surfaced via warn.
+    expect(result).toBe(0);
+    expect(warn).toHaveBeenCalledWith(
+      'recovery',
+      expect.stringContaining('Failed to clear expired rate limit'),
+      expect.anything(),
+    );
   });
 
   it('clears expired rateLimitedUntil and returns count', () => {

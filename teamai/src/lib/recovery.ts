@@ -280,8 +280,14 @@ export function autoClearExpiredRateLimits(): number {
         if (task.rateLimitedUntil && new Date(task.rateLimitedUntil).getTime() <= Date.now()) {
           // Rate limit has expired — clear it and write back
           delete task.rateLimitedUntil;
-          writeFileSync(taskFile, JSON.stringify(task, null, 2));
-          cleared++;
+          try {
+            writeFileSync(taskFile, JSON.stringify(task, null, 2));
+            cleared++;
+          } catch (err) {
+            // A failed write leaves the stale rateLimitedUntil on disk — surface
+            // it instead of silently treating it like a malformed task.
+            logWarn('recovery', `Failed to clear expired rate limit for ${taskFile}`, err);
+          }
         }
       } catch {
         // skip malformed task.json
