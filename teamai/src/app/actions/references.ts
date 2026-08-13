@@ -1,6 +1,7 @@
 'use server';
 
 import { mkdirSync, writeFileSync, readdirSync, existsSync } from 'fs';
+import { randomUUID } from 'crypto';
 import { join, extname } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
@@ -15,7 +16,9 @@ export async function uploadTaskReference(taskId: string, formData: FormData): P
   const file = formData.get('file') as File | null;
   if (!file) throw new Error('Missing file in form data');
   const ext = extname(file.name) || '.png';
-  const dest = join(dir, `ref-${Date.now()}${ext}`);
+  // randomUUID (not Date.now()) so two uploads in the same millisecond can't
+  // collide and silently overwrite each other.
+  const dest = join(dir, `ref-${randomUUID()}${ext}`);
   const buffer = Buffer.from(await file.arrayBuffer());
   writeFileSync(dest, buffer);
   revalidatePath('/');
