@@ -712,6 +712,98 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
     expect(pipeline.phase).toBe('implement');
     expect(deps.executePhase).toHaveBeenCalled();
   });
+
+  it('serializes subtasks that share a file in the same parallel_group', async () => {
+    // Two subtasks in the same group both declare src/a.ts — a guaranteed
+    // cherry-pick conflict. The plan-time validation must reassign the later
+    // one to a sequential group (and record depends_on) before implement runs.
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'A', description: 'A', files: ['src/a.ts'], acceptance_criteria: ['a'], parallel_group: 'A' },
+        { id: 2, title: 'B', description: 'B', files: ['src/a.ts'], acceptance_criteria: ['b'], parallel_group: 'A' },
+      ],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-plan-serialize');
+    mockExecFileSync.mockReturnValue('');
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'plan',
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    const advancePhase = vi.fn((p: any, phase: string) => { p.phase = phase; });
+    const deps = {
+      projectRoot: project.root,
+      persistAndEmitPhase: vi.fn(),
+      sessionOpts: vi.fn(() => ({ taskId: project.taskId, role: 'planner', cwd: project.root })),
+      waitForCompletion: vi.fn().mockResolvedValue(undefined),
+      advancePhase,
+      rotateOutputLog: vi.fn(),
+      phaseHeader: vi.fn(),
+      savePipelineState: vi.fn(),
+      toAgentPath: vi.fn((p: string) => p),
+      executePhase: vi.fn().mockResolvedValue(undefined),
+      gitPush: vi.fn(),
+      execGit: vi.fn(),
+    };
+
+    await runPlanPhase(pipeline, deps as any);
+
+    // plan.json must be rewritten with the conflict serialized.
+    const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+    expect(plan.subtasks[0].parallel_group).toBe('A');
+    expect(plan.subtasks[1].parallel_group).toBe('A.2');
+    expect(plan.subtasks[1].depends_on).toEqual([1]);
+
+    // The fix must be surfaced in the log.
+    const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain('[PLAN] Serialized subtask 2');
+
+    // Normal flow continues to implement.
+    expect(pipeline.phase).toBe('implement');
+    expect(deps.executePhase).toHaveBeenCalled();
+  });
+
+  it('leaves an already-safe plan.json untouched', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'A', description: 'A', files: ['src/a.ts'], acceptance_criteria: ['a'], parallel_group: 'A' },
+        { id: 2, title: 'B', description: 'B', files: ['src/b.ts'], acceptance_criteria: ['b'], parallel_group: 'A' },
+      ],
+    }));
+    const before = readFileSync(join(project.taskDir, 'plan.json'), 'utf-8');
+
+    mockCreateSession.mockResolvedValue('sess-plan-safe');
+    mockExecFileSync.mockReturnValue('');
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'plan',
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    const advancePhase = vi.fn((p: any, phase: string) => { p.phase = phase; });
+    const deps = {
+      projectRoot: project.root,
+      persistAndEmitPhase: vi.fn(),
+      sessionOpts: vi.fn(() => ({ taskId: project.taskId, role: 'planner', cwd: project.root })),
+      waitForCompletion: vi.fn().mockResolvedValue(undefined),
+      advancePhase,
+      rotateOutputLog: vi.fn(),
+      phaseHeader: vi.fn(),
+      savePipelineState: vi.fn(),
+      toAgentPath: vi.fn((p: string) => p),
+      executePhase: vi.fn().mockResolvedValue(undefined),
+      gitPush: vi.fn(),
+      execGit: vi.fn(),
+    };
+
+    await runPlanPhase(pipeline, deps as any);
+
+    // No fix applied — the file must be byte-identical.
+    expect(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8')).toBe(before);
+    expect(pipeline.phase).toBe('implement');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -13,6 +13,7 @@ import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
 import { updateSessionMap, logToOutput } from './helpers';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
+import { applyPlanFileSerialization } from './plan-validation';
 import { WorktreeError, PipelineConfigError } from './errors';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
@@ -225,6 +226,13 @@ export async function runPlanPhase(
     deps.advancePhase(pipeline, 'awaiting-review');
     return;
   }
+
+  // Plan-time validation: deterministically serialize subtasks that share a
+  // file within the same parallel_group (plan rule #13). The planner is
+  // instructed to avoid this, but a stray overlap would otherwise guarantee a
+  // cherry-pick conflict at implement time — fixing it here is cheap and
+  // deterministic, and cheaper than burning a merger-agent session later.
+  applyPlanFileSerialization(pipeline.specPath);
 
   const baseBranch = resolveBaseBranch(deps.projectRoot);
   try {
