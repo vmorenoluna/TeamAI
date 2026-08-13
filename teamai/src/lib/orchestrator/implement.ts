@@ -1164,33 +1164,6 @@ export async function applySensorGate(
 //  Main function
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Find the first pair of subtasks that declare the same file in their
- * `files` arrays. When two subtasks in a parallel group share a file, each
- * works in its own isolated worktree branched from the same base and their
- * branches are cherry-picked back sequentially — a guaranteed merge conflict.
- * The plan-phase rules require `depends_on` (or merging) between such
- * subtasks; this detects that condition so the caller can surface a
- * prominent warning. It deliberately does NOT fail the pipeline — the
- * merger agent can still auto-resolve the cherry-pick conflict.
- *
- * @internal — exported for unit tests only.
- */
-export function findFileOwnershipConflict(
-  subtasks: PlanSubtask[],
-): { a: PlanSubtask; b: PlanSubtask; file: string } | null {
-  for (let i = 0; i < subtasks.length; i++) {
-    const filesA = subtasks[i].files ?? [];
-    for (let j = i + 1; j < subtasks.length; j++) {
-      const filesB = subtasks[j].files ?? [];
-      for (const f of filesA) {
-        if (filesB.includes(f)) return { a: subtasks[i], b: subtasks[j], file: f };
-      }
-    }
-  }
-  return null;
-}
-
 export async function runImplement(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
@@ -1235,21 +1208,6 @@ export async function runImplement(
 
     // Per-subtask worktree isolation
     if (isMultiGroup) {
-      // Runtime file-ownership warning: two parallel subtasks that modify the
-      // same file from the same base branch will likely produce a cherry-pick
-      // conflict at integration. The plan-phase rules require depends_on (or
-      // merging) for such subtasks. We deliberately do NOT fail the pipeline
-      // here — the merger agent can still auto-resolve the conflict — but
-      // surface it prominently so the plan can be corrected at the source
-      // instead of relying on the merger agent every run.
-      const conflict = findFileOwnershipConflict(subtasks);
-      if (conflict) {
-        logToOutput(
-          pipeline.specPath,
-          `\n[WORKTREE] Warning: parallel subtasks ${conflict.a.id} and ${conflict.b.id} both modify "${conflict.file}" — ` +
-          `they will likely conflict at cherry-pick. Add an explicit depends_on between them (or merge them) to avoid relying on the merger agent.\n`,
-        );
-      }
       for (const subtask of subtasks) {
         const stWorktreePath = pipeline.worktreePath + '-st' + subtask.id;
         const stBranch = pipeline.branch + '-st' + subtask.id;
