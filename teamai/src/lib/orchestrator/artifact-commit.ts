@@ -144,15 +144,35 @@ export function commitArtifactsToWorktree(
   try {
     execFileSync('git', ['commit', '-m', `Add TeamAI pipeline artifacts for "${subject}"`], gitOpts);
   } catch (gitErr) {
-    const msg = gitErr instanceof Error ? gitErr.message : String(gitErr);
-    if (/nothing\s+to\s+commit.*working\s+tree\s+clean/i.test(msg)) {
-      logToOutput(pipeline.specPath, '[ARTIFACTS] Already committed — no new changes\n');
+    // Classify the no-op failure from git *state*, not by pattern-matching
+    // git's stderr (locale/version-dependent — a real failure like a hook or
+    // permission error could match the same wording and be silently skipped).
+    // If nothing is staged, either the path is gitignored or the files were
+    // already committed unchanged.
+    let staged = '';
+    try {
+      staged = execFileSync(
+        'git', ['diff', '--cached', '--name-only', '--', `.teamai/${slug}`],
+        gitOpts,
+      ).toString().trim();
+    } catch { /* can't inspect — fall through and rethrow the original error */ }
+
+    if (!staged) {
+      let ignored = false;
+      try {
+        execFileSync('git', ['check-ignore', path.join('.teamai', slug, 'task.json')], gitOpts);
+        ignored = true;
+      } catch { /* not ignored */ }
+
+      if (ignored) {
+        logToOutput(pipeline.specPath, '[ARTIFACTS] Warning: .teamai/ appears to be gitignored — skipping artifact commit\n');
+      } else {
+        logToOutput(pipeline.specPath, '[ARTIFACTS] Already committed — no new changes\n');
+      }
       return;
     }
-    if (/nothing\s+added\s+to\s+commit/i.test(msg)) {
-      logToOutput(pipeline.specPath, '[ARTIFACTS] Warning: .teamai/ appears to be gitignored — skipping artifact commit\n');
-      return;
-    }
+
+    // Staged changes exist but the commit failed — a real error, propagate.
     throw gitErr;
   }
 

@@ -320,10 +320,12 @@ describe('_commitArtifactsToWorktree', () => {
       worktreePath,
     });
 
-    // git add succeeds, git commit fails with "nothing added to commit"
+    // git add succeeds; git commit fails; nothing is staged and the path is
+    // gitignored (check-ignore exits 0). The commit failure message is
+    // irrelevant — classification comes from git state, not stderr text.
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (Array.isArray(args) && args.includes('commit')) {
-        throw new Error('nothing added to commit but untracked files present');
+        throw new Error('fatal: no commit for ignored path');
       }
       return '';
     });
@@ -359,10 +361,14 @@ describe('_commitArtifactsToWorktree', () => {
       worktreePath,
     });
 
-    // git add succeeds, git commit fails with "nothing to commit, working tree clean"
+    // git add succeeds; git commit fails; nothing is staged and the path is
+    // NOT ignored (check-ignore exits non-zero) → already committed.
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (Array.isArray(args) && args.includes('commit')) {
         throw new Error('nothing to commit, working tree clean');
+      }
+      if (Array.isArray(args) && args.includes('check-ignore')) {
+        throw new Error('not ignored');
       }
       return '';
     });
@@ -423,10 +429,15 @@ describe('_commitArtifactsToWorktree', () => {
       worktreePath,
     });
 
-    // git add succeeds, git commit fails with an unexpected error
+    // git add succeeds; git commit fails with an unexpected error; staged
+    // changes ARE present, so the failure must propagate (not be misclassified
+    // as a no-op).
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (Array.isArray(args) && args.includes('commit')) {
         throw new Error('fatal: unable to create commit');
+      }
+      if (Array.isArray(args) && args.includes('diff')) {
+        return '.teamai/task/spec.md\n';
       }
       return '';
     });
