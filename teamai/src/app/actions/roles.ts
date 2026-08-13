@@ -17,7 +17,7 @@ export interface RoleDefinition {
 
 export async function getRoles(): Promise<RoleDefinition[]> {
   const dir = await getRolesDir();
-  const files = readdirSync(dir).filter(f => f.endsWith('.md'));
+  const files = readdirSync(dir).filter(f => f.endsWith('.md')).sort();
   return files.map(filename => {
     const content = readFileSync(join(dir, filename), 'utf-8');
     const nameMatch = content.match(/^#\s+Role:\s+(.+)$/m);
