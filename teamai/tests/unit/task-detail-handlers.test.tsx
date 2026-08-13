@@ -157,6 +157,20 @@ describe('TaskDetail mutation handlers', () => {
     expect(desc.className).toContain('break-words');
   });
 
+  it('breaks long words in competitive context instead of overflowing', () => {
+    renderDetail(
+      makeTask({
+        id: 'cc-1',
+        title: 'Competitive task',
+        source: 'competitor-analysis',
+        competitiveContext: 'x'.repeat(200),
+      }),
+    );
+
+    const ctx = screen.getByText(/x{100,}/);
+    expect(ctx).toHaveClass('break-words');
+  });
+
   describe('raw-throw path (regression)', () => {
     it('handleRestart: role=alert banner surfaces when restartCurrentPhase throws', async () => {
       mockRestartCurrentPhase.mockRejectedValue(new Error('restart raw throw: pipeline mismatch'));
