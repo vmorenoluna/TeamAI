@@ -514,6 +514,49 @@ describe('analyzeProject', () => {
       expect(info.testCommand).toBe('pnpm test');
     });
 
+    it('picks the alphabetically-first matching doc regardless of readdirSync order', () => {
+      const buildingDoc = [
+        '### Setup',
+        '',
+        '```sh',
+        'make install',
+        'make build',
+        'make test',
+        '```',
+      ].join('\n');
+      const developmentDoc = [
+        '### Setup',
+        '',
+        '```sh',
+        'pnpm install',
+        'pnpm build',
+        'pnpm test',
+        '```',
+      ].join('\n');
+
+      // Return the docs in reverse-alphabetical order to prove .sort()
+      // is applied — without it, DEVELOPMENT.md would win.
+      mockReaddirSync.mockImplementation((dir: string) => {
+        if (dir.includes('docs')) return ['DEVELOPMENT.md', 'BUILDING.md'];
+        return ['package.json', 'docs'];
+      });
+
+      mockReadFileSync.mockImplementation((path: string) => {
+        if (path.includes('BUILDING.md')) return buildingDoc;
+        if (path.includes('DEVELOPMENT.md')) return developmentDoc;
+        if (path.includes('package.json')) return JSON.stringify({ name: 'test' });
+        return '{}';
+      });
+
+      mockExistsSync.mockReturnValue(true);
+
+      const info = analyzeProject('/test/project');
+      // BUILDING.md sorts before DEVELOPMENT.md, so its commands win.
+      expect(info.installCommand).toBe('make install');
+      expect(info.buildCommand).toBe('make build');
+      expect(info.testCommand).toBe('make test');
+    });
+
     it('falls back to heuristics when README has no commands', () => {
       const readme = [
         '# My Project',
