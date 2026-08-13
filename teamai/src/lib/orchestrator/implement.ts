@@ -1164,6 +1164,31 @@ export async function applySensorGate(
 //  Main function
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Find the first pair of subtasks that declare the same file in their
+ * `files` arrays. When two subtasks in a parallel group share a file, each
+ * works in its own isolated worktree branched from the same base and their
+ * branches are cherry-picked back sequentially — a guaranteed merge conflict.
+ * The plan-phase rules require `depends_on` (or merging) between such
+ * subtasks; this is the runtime enforcement of that rule.
+ *
+ * @internal — exported for unit tests only.
+ */
+export function findFileOwnershipConflict(
+  subtasks: PlanSubtask[],
+): { a: PlanSubtask; b: PlanSubtask; file: string } | null {
+  for (let i = 0; i < subtasks.length; i++) {
+    const filesA = subtasks[i].files ?? [];
+    for (let j = i + 1; j < subtasks.length; j++) {
+      const filesB = subtasks[j].files ?? [];
+      for (const f of filesA) {
+        if (filesB.includes(f)) return { a: subtasks[i], b: subtasks[j], file: f };
+      }
+    }
+  }
+  return null;
+}
+
 export async function runImplement(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
@@ -1208,6 +1233,19 @@ export async function runImplement(
 
     // Per-subtask worktree isolation
     if (isMultiGroup) {
+      // Runtime file-ownership guard: two parallel subtasks that modify the
+      // same file from the same base branch are a guaranteed cherry-pick
+      // conflict at integration. The plan-phase rules require depends_on (or
+      // merging) for such subtasks; fail fast with an actionable error
+      // instead of silently racing and wasting a merger session.
+      const conflict = findFileOwnershipConflict(subtasks);
+      if (conflict) {
+        throw new PipelineConfigError(
+          `Parallel subtasks ${conflict.a.id} and ${conflict.b.id} both modify "${conflict.file}". ` +
+          `Parallel subtasks must not share files — add an explicit depends_on between them, or merge them into a single subtask.`,
+          'PARALLEL_FILE_CONFLICT',
+        );
+      }
       for (const subtask of subtasks) {
         const stWorktreePath = pipeline.worktreePath + '-st' + subtask.id;
         const stBranch = pipeline.branch + '-st' + subtask.id;
