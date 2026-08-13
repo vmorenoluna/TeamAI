@@ -140,6 +140,43 @@ describe('findInterruptedTasks', () => {
     });
   });
 
+  it('returns interrupted tasks in deterministic (sorted) directory order', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const zetaFile = join(teamaiDir, 'zeta', 'task.json');
+    const alphaFile = join(teamaiDir, 'alpha', 'task.json');
+    const zetaSession = join(teamaiDir, 'zeta', 'session_map.json');
+    const alphaSession = join(teamaiDir, 'alpha', 'session_map.json');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === zetaFile || path === alphaFile) return true;
+      if (path === zetaSession || path === alphaSession) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === zetaFile)
+        return JSON.stringify({ id: 'zeta', title: 'Zeta', phase: 'implement' });
+      if (path === alphaFile)
+        return JSON.stringify({ id: 'alpha', title: 'Alpha', phase: 'implement' });
+      return '';
+    });
+    // readdirSync deliberately returns unsorted order — the function must
+    // sort it so the result is deterministic regardless of filesystem order.
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['zeta', 'alpha'];
+      return [];
+    });
+
+    const result = findInterruptedTasks();
+    expect(result.map(r => r.taskId)).toEqual(['alpha', 'zeta']);
+  });
+
   it('ignores tasks in non-in-progress phases', () => {
     const projectPath = '/test/project';
     const teamaiDir = join(projectPath, '.teamai');
