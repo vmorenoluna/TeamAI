@@ -650,7 +650,8 @@ export async function sweepStalledTasks(): Promise<number> {
           // Clear the stale rate-limit flag and re-queue
           log('sweep', `Task ${task.id} "${task.title}" has expired rate limit (was ${task.rateLimitedUntil}) — clearing and resuming`);
           delete task.rateLimitedUntil;
-          try { writeFileSync(taskFile, JSON.stringify(task, null, 2)); } catch { /* best-effort */ }
+          try { writeFileSync(taskFile, JSON.stringify(task, null, 2)); }
+          catch (err) { logWarn('sweep', `Failed to clear expired rate limit for task ${task.id}`, err); }
         } else {
           // Check 2: no rate limit, but task has been in this phase with no
           // active session for > 30 minutes — likely a silent crash or exit.
