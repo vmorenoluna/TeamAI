@@ -177,6 +177,25 @@ describe('TaskStore', () => {
       expect(all[1].id).toBe(task1.id);
     });
 
+    it('breaks createdAt ties deterministically by id (not readdirSync order)', () => {
+      // Two tasks with identical createdAt must not fall back to filesystem
+      // (readdirSync) ordering, which is unstable. Tie-break on id instead.
+      const ts = '2024-01-01T00:00:00.000Z';
+      const dirZ = join(root, '.teamai', 'dir-z');
+      const dirA = join(root, '.teamai', 'dir-a');
+      mkdirSync(dirZ, { recursive: true });
+      mkdirSync(dirA, { recursive: true });
+      writeFileSync(join(dirZ, 'task.json'), JSON.stringify({
+        id: 'id-z', title: 'Z', description: 'z', phase: 'backlog', createdAt: ts, updatedAt: ts,
+      }));
+      writeFileSync(join(dirA, 'task.json'), JSON.stringify({
+        id: 'id-a', title: 'A', description: 'a', phase: 'backlog', createdAt: ts, updatedAt: ts,
+      }));
+
+      const all = store.getAll();
+      expect(all.map(t => t.id)).toEqual(['id-a', 'id-z']);
+    });
+
     it('returns empty array from an empty .teamai directory', () => {
       // Fresh store on a new path — directory created by constructor but empty
       const emptyRoot = join(root, 'empty-project');
