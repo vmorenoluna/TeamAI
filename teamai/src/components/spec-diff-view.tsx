@@ -78,7 +78,15 @@ function mergeHunks(hunks: DiffHunk[]): DiffHunk[] {
 // ── SpecDiffView — side-by-side version comparison ─────────────────────────
 
 function getVersionOptions(specVersions: Record<string, string>): string[] {
-  return ['current', ...Object.keys(specVersions).sort()];
+  // Sort numerically by revision so v10 follows v9 (not v1). Falls back to
+  // lexicographic for keys that don't match the `vN` shape.
+  const versions = Object.keys(specVersions).sort((a, b) => {
+    const na = parseInt(a.replace(/^v/, ''), 10);
+    const nb = parseInt(b.replace(/^v/, ''), 10);
+    if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+    return a.localeCompare(b);
+  });
+  return ['current', ...versions];
 }
 
 export function SpecDiffView({

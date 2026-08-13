@@ -322,6 +322,23 @@ describe('SpecDiffView', () => {
       expect(options).toContain('v2');
     });
 
+    it('orders versions numerically (v10 after v9, not after v1)', () => {
+      renderComponent({
+        spec: 'current',
+        specVersions: {
+          v10: 'v10',
+          v11: 'v11',
+          v2: 'v2',
+          v1: 'v1',
+          v3: 'v3',
+        },
+      });
+
+      const leftSelect = screen.getByTestId('compare-left-select') as HTMLSelectElement;
+      const options = Array.from(leftSelect.options).map(o => o.value);
+      expect(options).toEqual(['current', 'v1', 'v2', 'v3', 'v10', 'v11']);
+    });
+
     it('calls onSetLeft when left selector changes', () => {
       const { onSetLeft } = renderComponent({
         spec: 'current',
