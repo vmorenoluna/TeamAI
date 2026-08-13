@@ -2,9 +2,10 @@
  * Structured logger for TeamAI.
  *
  * All messages follow the `[module] message` convention.
- * In production, `log`/`info`/`warn` are suppressed; only `error` is emitted.
+ * In production, `log`/`info` are suppressed; `warn` and `error` are emitted.
  *
- * Use `log` or `info` for informational messages, `warn` for warnings,
+ * Use `log` or `info` for informational messages, `warn` for warnings that
+ * must be visible in production (crash-recovery, state-persistence failures),
  * and `error` for errors that are always emitted.
  */
 
@@ -24,9 +25,9 @@ export function log(module: string, message: string, ...details: unknown[]): voi
   }
 }
 
-/** Warning log — suppressed in production */
+/** Warning log — always emitted (unlike informational logs), so
+ *  crash-recovery and state-persistence failures stay visible in production. */
 export function warn(module: string, message: string, ...details: unknown[]): void {
-  if (!isDev) return;
   if (details.length > 0) {
     console.warn(format(module, message), ...details);
   } else {
