@@ -11,13 +11,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Module-level mocks (must be before any imports from the file under test) ──
 
-const { mockSpawn, mockExecFileSync, mockPtySpawn, mockAppendFileSync, mockReadFileSync, mockExistsSync } = vi.hoisted(() => ({
+const { mockSpawn, mockExecFileSync, mockPtySpawn, mockAppendFileSync, mockReadFileSync, mockExistsSync, mockWarn, mockLog } = vi.hoisted(() => ({
   mockSpawn: vi.fn(),
   mockExecFileSync: vi.fn(),
   mockPtySpawn: vi.fn(),
   mockAppendFileSync: vi.fn(),
   mockReadFileSync: vi.fn(),
   mockExistsSync: vi.fn(),
+  mockWarn: vi.fn(),
+  mockLog: vi.fn(),
+}));
+
+vi.mock('../../src/lib/logger', () => ({
+  log: mockLog,
+  warn: mockWarn,
+  error: vi.fn(),
+  info: mockLog,
 }));
 
 vi.mock('child_process', () => ({
@@ -334,6 +343,33 @@ describe('ProcessManager — Full Coverage', () => {
         sessionId,
         error: 'some error output',
       });
+    });
+
+    it('guards the stderr appendFileSync so a write failure does not crash the process', async () => {
+      const proc = mockChildProcess();
+      const errorSpy = vi.fn();
+      pm.on('error', errorSpy);
+
+      mockAppendFileSync.mockImplementationOnce(() => { throw new Error('disk full'); });
+
+      const sessionId = await pm.createSession({
+        taskId: 'task-1', role: 'coder', cwd: '/test', logFile: '/tmp/test.log',
+      });
+
+      // The write failure must not propagate out of the stream 'data' handler.
+      expect(() => proc._emitStderr('some error output')).not.toThrow();
+
+      // The stderr error event still fires (logging failure must not swallow it).
+      expect(errorSpy).toHaveBeenCalledWith({
+        sessionId,
+        error: 'some error output',
+      });
+      // …and the failure is surfaced via warn.
+      expect(mockWarn).toHaveBeenCalledWith(
+        'process-manager',
+        `Failed to append stderr to log for session ${sessionId}`,
+        expect.anything(),
+      );
     });
   });
 
