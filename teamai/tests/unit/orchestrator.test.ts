@@ -879,7 +879,7 @@ describe('Orchestrator', () => {
       expect(saved.qaAttempt).toBe(0);
     });
 
-    it('does not throw on permission errors (best-effort)', () => {
+    it('does not throw on permission errors, but logs a warning (observable)', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = {
@@ -893,9 +893,13 @@ describe('Orchestrator', () => {
         maxQaAttempts: 3,
       };
 
+      mockWarn.mockClear();
       expect(() => {
         (orch as AnyOrch)._ctx.savePipelineState(pipeline);
       }).not.toThrow();
+
+      // The write failure must not be silent — crash recovery depends on it.
+      expect(mockWarn).toHaveBeenCalled();
     });
   });
 
@@ -946,12 +950,15 @@ describe('Orchestrator', () => {
       expect(existsSync(statePath)).toBe(false);
     });
 
-    it('returns null for corrupt JSON (file stays on disk for debugging)', () => {
+    it('returns null for corrupt JSON (file stays on disk, warning logged)', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(statePath, 'not valid json {{{');
+      mockWarn.mockClear();
       const result = (orch as AnyOrch)._restorePipelineState(testData.taskId, specPath);
       expect(result).toBeNull();
       expect(existsSync(statePath)).toBe(true);
+      // Corrupt state must be surfaced, not silently dropped.
+      expect(mockWarn).toHaveBeenCalled();
     });
 
     it('returns null for empty state file', () => {
