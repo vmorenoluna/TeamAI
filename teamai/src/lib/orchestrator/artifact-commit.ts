@@ -13,6 +13,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readd
 import path from 'path';
 import { phaseHeader, logToOutput } from './helpers';
 import { truncate } from '../utils';
+import { warn } from '../logger';
 import type { TaskPipeline } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -114,7 +115,13 @@ export function commitArtifactsToWorktree(
       const t = JSON.parse(readFileSync(committedTaskJson, 'utf-8'));
       t.phase = 'done';
       t.updatedAt = new Date().toISOString();
-      writeFileSync(committedTaskJson, JSON.stringify(t, null, 2));
+      try {
+        writeFileSync(committedTaskJson, JSON.stringify(t, null, 2));
+      } catch (err) {
+        // A failed write leaves the committed snapshot with a stale phase,
+        // which markTaskDone's restore detection relies on. Surface it.
+        warn('artifacts', `Failed to stamp committed task.json phase=done at ${committedTaskJson}`, err);
+      }
     } catch { /* best-effort */ }
   }
 
