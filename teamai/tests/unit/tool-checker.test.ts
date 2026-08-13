@@ -5,11 +5,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
 
-const { mockExecFileSync, mockExistsSync, mockReadFileSync, mockWriteFileSync } = vi.hoisted(() => ({
+const { mockExecFileSync, mockExistsSync, mockReadFileSync, mockWriteFileSync, mockWarn } = vi.hoisted(() => ({
   mockExecFileSync: vi.fn(),
   mockExistsSync: vi.fn(),
   mockReadFileSync: vi.fn(),
   mockWriteFileSync: vi.fn(),
+  mockWarn: vi.fn(),
+}));
+
+vi.mock('@/lib/logger', () => ({
+  log: vi.fn(),
+  warn: mockWarn,
+  error: vi.fn(),
+  info: vi.fn(),
 }));
 
 vi.mock('child_process', () => ({
@@ -291,6 +299,19 @@ describe('setToolPath / getToolPath / clearToolPath', () => {
     const writtenJson = mockWriteFileSync.mock.calls[0][1];
     const parsed = JSON.parse(writtenJson);
     expect(parsed.claude).toBeUndefined();
+  });
+
+  it('warns (does not throw) when persisting tools.json fails', () => {
+    mockToolsConfig(null);
+    mockExistsSync.mockReturnValue(false);
+    mockWriteFileSync.mockImplementation(() => { throw new Error('disk full'); });
+
+    expect(() => setToolPath('gh', '/opt/homebrew/bin/gh')).not.toThrow();
+    expect(mockWarn).toHaveBeenCalledWith(
+      'tool-checker',
+      'Failed to persist tools.json',
+      expect.anything(),
+    );
   });
 
   it('getToolPath caches on disk reads — second call returns same value', () => {
