@@ -124,7 +124,7 @@ export function findOrphanedWorktrees(): OrphanedWorktree[] {
     const knownSlugs = new Set<string>();
     const teamaiDir = join(project.path, '.teamai');
     try {
-      for (const taskDir of readdirSync(teamaiDir)) {
+      for (const taskDir of readdirSync(teamaiDir).sort()) {
         const taskFile = join(teamaiDir, taskDir, 'task.json');
         if (!existsSync(taskFile)) continue;
         try {
