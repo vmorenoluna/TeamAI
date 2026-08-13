@@ -302,8 +302,9 @@ function _tick(projectRoot: string, state: AutoProjectState): void {
 
   if (eligible.length === 0) return;
 
-  // Pick oldest (by createdAt) — fair FIFO ordering
-  eligible.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  // Pick oldest (by createdAt) — fair FIFO ordering. Tie-break by id so the
+  // pick is deterministic when two tasks share the same createdAt.
+  eligible.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
 
   // Start up to `slots` tasks
   const toStart = eligible.slice(0, slots);

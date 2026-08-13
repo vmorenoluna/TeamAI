@@ -195,7 +195,9 @@ export class TaskStore {
         return JSON.parse(readFileSync(taskPath, 'utf-8')) as Task;
       })
       .filter((t): t is Task => t !== null)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      // Tie-break by id so equal-createdAt tasks have a deterministic order
+      // (readdirSync order is filesystem-dependent and unstable).
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
   }
 
   getById(id: string): Task | null {

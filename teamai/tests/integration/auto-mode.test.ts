@@ -292,6 +292,29 @@ describe('Auto Mode Integration', () => {
       expect(mockOrch.resumeTask).not.toHaveBeenCalledWith(taskC);
     });
 
+    it('picks tasks with identical createdAt in deterministic id order', async () => {
+      // Self-contained: fresh project with two backlog tasks sharing the same
+      // createdAt. The pick must tie-break on id, not on readdirSync order.
+      setupTestProject();
+      const freshAutoMode = await setupAutoMode();
+
+      const teamaiDir = join(testDir, '.teamai');
+      const dirB = join(teamaiDir, 'tie-b');
+      mkdirSync(dirB, { recursive: true });
+      createTaskFile(dirB, { id: 'id-bbb', title: 'B', description: 'b', createdAt: '2024-01-01T00:00:00.000Z' });
+      const dirA = join(teamaiDir, 'tie-a');
+      mkdirSync(dirA, { recursive: true });
+      createTaskFile(dirA, { id: 'id-aaa', title: 'A', description: 'a', createdAt: '2024-01-01T00:00:00.000Z' });
+
+      freshAutoMode.setAutoModeState(testDir, true, 2);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledTimes(2);
+      });
+
+      expect(mockOrch.resumeTask.mock.calls.map((c: unknown[]) => c[0])).toEqual(['id-aaa', 'id-bbb']);
+    });
+
     it('respects maxParallel limit (only picks up to N tasks)', async () => {
       autoMode.setAutoModeState(testDir, true, 1);
 
