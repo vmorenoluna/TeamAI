@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { projectStore } from './project-store';
 import { getToolPath } from './tool-checker';
-import { log, error as logError } from './logger';
+import { log, error as logError, warn as logWarn } from './logger';
 import { TERMINAL_PHASES, PAUSED_PHASES } from '@/constants/phases';
 import { computePipelineConfig } from './orchestrator/helpers';
 import { isAutoModeEnabled, getAutoModeState } from './auto-mode-state';
@@ -61,7 +61,12 @@ function saveAutoModeState(projectRoot: string, state: AutoProjectState): void {
       enabled: state.enabled,
       maxParallel: state.maxParallel,
     }, null, 2));
-  } catch { /* best-effort — don't block toggle on disk errors */ }
+  } catch (err) {
+    // Don't block the toggle on a disk error — but surface it: this is the
+    // state that survives server restarts (Bug 1), so a silent failure here
+    // defeats crash recovery.
+    logWarn('auto-mode', `Failed to persist auto-mode state for ${projectRoot}`, err);
+  }
 }
 
 /** Read persisted auto-mode state from disk. Returns null if missing/invalid. */
@@ -193,7 +198,11 @@ function _autoApprove(taskId: string, projectRoot: string, state: AutoProjectSta
   state.autoApprovedIds.add(taskId);
   try {
     new TaskStore(projectRoot).update(taskId, { autoProcessed: true });
-  } catch { /* best-effort — approval proceeds regardless */ }
+  } catch (err) {
+    // Approval proceeds regardless, but a failed stamp must not be silent —
+    // it would leave the task without the "auto-processed" border and no trace.
+    logWarn('auto-mode', `Failed to stamp autoProcessed on task ${taskId} before approval`, err);
+  }
   getOrchestrator(projectRoot).approveTask(taskId, 'pull-request')
     .catch(err => {
       logError('auto-mode', `Failed to auto-approve task ${taskId}`, err);
@@ -476,8 +485,14 @@ function _finishTask(taskId: string, projectRoot: string, _state: AutoProjectSta
   // fallback, which recreates task.json from the live copy read at the start
   // of markTaskDone. (On pull success the snapshot wins by design — a task
   // approved manually and only merged by auto mode won't carry the flag.)
-  const taskStore = new TaskStore(projectRoot);
-  taskStore.update(taskId, { autoProcessed: true });
+  try {
+    new TaskStore(projectRoot).update(taskId, { autoProcessed: true });
+  } catch (err) {
+    // A failed stamp must NOT prevent markTaskDone — the CI-poll timer has
+    // already been cleared by the caller, so swallowing this would orphan the
+    // task in pr-open forever. Log and continue to markTaskDone.
+    logWarn('auto-mode', `Failed to stamp autoProcessed on task ${taskId} before marking done`, err);
+  }
 
   const orchestrator = getOrchestrator(projectRoot);
   orchestrator.markTaskDone(taskId).then(() => {
