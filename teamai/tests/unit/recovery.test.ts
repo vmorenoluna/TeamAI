@@ -1399,6 +1399,45 @@ describe('sweepStalledTasks', () => {
     expect(mockSweepResumeTask).toHaveBeenCalledWith('t1');
   });
 
+  it('warns (and still resumes) when the rate-limit clear write fails', async () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'my-task', 'task.json');
+    const pastDate = new Date(Date.now() - 3600_000).toISOString();
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === taskFile)
+        return JSON.stringify({ id: 't1', title: 'Test', phase: 'implement', rateLimitedUntil: pastDate });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['my-task'];
+      return [];
+    });
+    vi.mocked(writeFileSync).mockImplementationOnce(() => { throw new Error('disk full'); });
+
+    const count = await sweepStalledTasks();
+    expect(count).toBe(1);
+
+    // Resume still proceeds, and the failed write is surfaced via warn.
+    expect(mockSweepResumeTask).toHaveBeenCalledWith('t1');
+    expect(warn).toHaveBeenCalledWith(
+      'sweep',
+      expect.stringContaining('Failed to clear expired rate limit for task t1'),
+      expect.anything(),
+    );
+  });
+
   it('does not clear future rateLimitedUntil', async () => {
     const projectPath = '/test/project';
     const teamaiDir = join(projectPath, '.teamai');
