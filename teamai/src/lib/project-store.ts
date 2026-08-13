@@ -142,8 +142,10 @@ export class ProjectStore {
     try {
       writeFileSync(getProjectsFile(), readFileSync(getBackupFile(), 'utf-8'));
       rmSync(getBackupFile());
-    } catch {
-      // If restore fails, leave backup in place for manual recovery
+    } catch (err) {
+      // If restore fails, leave the backup in place for manual recovery — but
+      // surface it so a failed restore is diagnosable instead of silent.
+      logWarn('project-store', 'Failed to restore projects.json from backup — backup left in place', err);
     }
   }
 
