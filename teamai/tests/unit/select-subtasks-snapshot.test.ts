@@ -134,4 +134,22 @@ describe('selectSubtasks — human_feedback_before_bounce.md snapshot', () => {
       expect.anything(),
     );
   });
+
+  it('warns (does not throw) when the synthesized QA-rework subtask persist fails', () => {
+    // Trigger the synthesized 9999 path: qa_feedback.md present + no
+    // qa_flagged subtasks. Drop human_feedback.md so its snapshot write
+    // (the only other writeFileSync in selectSubtasks) doesn't run first.
+    rmSync(join(ctx.specPath, 'human_feedback.md'));
+    writeFileSync(join(ctx.specPath, 'qa_feedback.md'), '# QA feedback');
+
+    mockWriteFileSync.mockImplementationOnce(() => { throw new Error('disk full'); });
+
+    expect(() => selectSubtasks(pipeline(ctx.specPath) as never)).not.toThrow();
+
+    expect(mockWarn).toHaveBeenCalledWith(
+      'implement',
+      expect.stringContaining('Failed to persist synthesized QA-rework subtask'),
+      expect.anything(),
+    );
+  });
 });
