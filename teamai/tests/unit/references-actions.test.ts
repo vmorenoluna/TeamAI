@@ -77,7 +77,9 @@ describe('references server actions', () => {
 
       // Path should be inside taskDir/references/
       expect(dest).toContain(join('.teamai', 'task-1', 'references', 'ref-'));
-      expect(dest).toMatch(/ref-\d+\.png$/);
+      // Filename is a UUID (not a millisecond timestamp) so concurrent
+      // uploads can never collide.
+      expect(dest).toMatch(/ref-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.png$/);
     });
 
     it('defaults to .png extension when file has no extension', async () => {
