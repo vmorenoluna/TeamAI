@@ -256,7 +256,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
         {task.description && (
           <p
             data-component="task-description"
-            className="mb-2 text-sm text-slate-400 max-h-40 overflow-y-auto break-words pr-1"
+            className="mb-2 text-sm text-slate-400 max-h-48 overflow-y-auto break-words pr-1"
           >
             {task.description}
           </p>

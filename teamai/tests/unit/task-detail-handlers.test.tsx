@@ -152,7 +152,7 @@ describe('TaskDetail mutation handlers', () => {
     expect(desc).toHaveTextContent(/^x+/);
     // The description must be height-bounded and scrollable (not grow the
     // shrink-0 header, which would reduce the terminal/spec tabs' height).
-    expect(desc.className).toContain('max-h-40');
+    expect(desc.className).toContain('max-h-48');
     expect(desc.className).toContain('overflow-y-auto');
     expect(desc.className).toContain('break-words');
   });
