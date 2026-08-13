@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync, statSync, appendFileSync } from 'fs';
 import path from 'path';
+import { warn } from '../logger';
 import { processManager } from '../process-manager';
 import type { TaskStore } from '../task-store';
 import type { PipelinePhase } from '@/constants/phases';
@@ -63,7 +64,12 @@ export function savePipelineState(pipeline: TaskPipeline): void {
     const tmpPath = statePath + '.tmp';
     writeFileSync(tmpPath, JSON.stringify(state, null, 2));
     renameSync(tmpPath, statePath);
-  } catch { /* best-effort */ }
+  } catch (err) {
+    // Never throw (a crash-recovery write must not take down the pipeline),
+    // but surface it: a silent failure here means a later crash resumes from
+    // stale or missing state.
+    warn('pipeline-state', `Failed to save pipeline state for ${pipeline.taskId}`, err);
+  }
 }
 
 /**
@@ -71,13 +77,21 @@ export function savePipelineState(pipeline: TaskPipeline): void {
  * Returns null if no saved state exists.
  */
 export function restorePipelineState(_taskId: string, specPath: string): Partial<TaskPipeline> | null {
+  const statePath = path.join(specPath, '.pipeline_state.json');
   try {
-    const statePath = path.join(specPath, '.pipeline_state.json');
     if (!existsSync(statePath)) return null;
     const state = JSON.parse(readFileSync(statePath, 'utf-8'));
     unlinkSync(statePath); // clean up after reading
     return state;
-  } catch { return null; }
+  } catch (err) {
+    // Distinguish "no state saved" (routine) from "state exists but is
+    // unreadable" — only warn in the latter case, so a corrupt state file is
+    // surfaced instead of silently treated as a fresh pipeline.
+    if (existsSync(statePath)) {
+      warn('pipeline-state', `Failed to restore pipeline state at ${statePath}`, err);
+    }
+    return null;
+  }
 }
 
 export function pipelineAdvancePhase(
