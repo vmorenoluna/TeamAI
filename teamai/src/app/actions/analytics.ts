@@ -157,7 +157,7 @@ export async function getAnalytics(): Promise<AnalyticsData> {
             passRate: Math.round((pass / tot) * 100),
             total: tot,
           }))
-          .sort((a, b) => a.passRate - b.passRate),
+          .sort((a, b) => a.passRate - b.passRate || a.name.localeCompare(b.name)),
       }
     : null;
 
