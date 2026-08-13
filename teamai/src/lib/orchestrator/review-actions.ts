@@ -154,7 +154,11 @@ export async function rejectTask(
         notes: feedback,
       });
       writeFileSync(reportPath, JSON.stringify(report, null, 2));
-    } catch { /* best-effort: if qa_report.json is malformed, don't block the rejection */ }
+    } catch (err) {
+      // The rejection proceeds either way, but a failed patch (or a malformed
+      // report) means the change request never reaches the engineer's report.
+      warn('review', `Failed to record change request in qa_report.json for ${taskId}`, err);
+    }
   }
 
   // Reset all retry counters — rejection gets a clean budget
