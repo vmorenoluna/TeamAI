@@ -905,7 +905,13 @@ export class Orchestrator {
     }
 
     if (dirty) {
-      try { writeFileSync(planPath, JSON.stringify(plan, null, 2)); } catch { /* best-effort */ }
+      try {
+        writeFileSync(planPath, JSON.stringify(plan, null, 2));
+      } catch (err) {
+        // A failed write silently loses the completed→false reset, so on the
+        // next run the subtask is still (wrongly) marked completed. Surface it.
+        logWarn('orchestrator', `Failed to persist plan.json after reconciling subtask completions for ${taskId}`, err);
+      }
     }
   }
 
