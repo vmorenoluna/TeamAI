@@ -793,7 +793,7 @@ describe('ProjectStore', () => {
     expect(content).toContain('# TeamAI — exclude transient pipeline files');
   });
 
-  it('_updateGitignore does not throw when .gitignore is write-protected (best-effort)', async () => {
+  it('_updateGitignore does not throw when .gitignore is write-protected, but logs a warning', async () => {
     // Pre-create .gitignore without the TeamAI block and make it read-only.
     const giPath = join(projectDir, '.gitignore');
     writeFileSync(giPath, 'node_modules/\n');
@@ -801,10 +801,13 @@ describe('ProjectStore', () => {
     const { chmodSync, constants } = await import('fs');
     chmodSync(giPath, constants.S_IRUSR);
 
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      // Must not throw — the catch block swallows write failures silently.
+      // Must not throw, but the failure must be surfaced (not silent).
       expect(() => (store as any)._updateGitignore(projectDir)).not.toThrow();
+      expect(warnSpy).toHaveBeenCalled();
     } finally {
+      warnSpy.mockRestore();
       chmodSync(giPath, constants.S_IRUSR | constants.S_IWUSR);
     }
   });
@@ -922,25 +925,31 @@ describe('ProjectStore', () => {
     // Make the file read-only (owner-read only — no write permission).
     chmodSync(gaPath, constants.S_IRUSR);
 
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      // Must not throw — the catch block swallows write failures silently.
+      // Must not throw, but the failure must be surfaced (not silent).
       expect(() => (store as any)._updateGitattributes(projectDir)).not.toThrow();
+      expect(warnSpy).toHaveBeenCalled();
     } finally {
+      warnSpy.mockRestore();
       // Restore write permission so the test dir can be cleaned up.
       chmodSync(gaPath, constants.S_IRUSR | constants.S_IWUSR);
     }
   });
 
-  it('_updateGitattributes does not throw when .gitattributes cannot be created (best-effort)', async () => {
+  it('_updateGitattributes does not throw when .gitattributes cannot be created, but logs a warning', async () => {
     // Place a directory at .gitattributes so writeFileSync fails with EISDIR.
     const gaPath = join(projectDir, '.gitattributes');
     const { mkdirSync: mkdir, rmdirSync: rmdir } = await import('fs');
     mkdir(gaPath);
 
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      // Must not throw — the try/catch around writeFileSync swallows failures.
+      // Must not throw, but the failure must be surfaced (not silent).
       expect(() => (store as any)._updateGitattributes(projectDir)).not.toThrow();
+      expect(warnSpy).toHaveBeenCalled();
     } finally {
+      warnSpy.mockRestore();
       rmdir(gaPath);
     }
   });
