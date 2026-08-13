@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import type { TaskStore } from '../task-store';
 import type { QaReport } from './types';
+import { warn } from '../logger';
 
 /** Write QA feedback for bouncing back to implement */
 export function writeQaFeedback(
@@ -125,7 +126,14 @@ export function writeQaFeedback(
           }
         }
         if (modified) {
-          writeFileSync(planPath, JSON.stringify(plan, null, 2));
+          try {
+            writeFileSync(planPath, JSON.stringify(plan, null, 2));
+          } catch (err) {
+            // The qa_feedback.md written above is the primary channel, but a
+            // failed plan.json patch silently drops subtask-level targeting —
+            // surface it instead of swallowing.
+            warn('qa-feedback', `Failed to patch plan.json with QA feedback at ${planPath}`, err);
+          }
         }
       }
     } catch { /* best-effort */ }
