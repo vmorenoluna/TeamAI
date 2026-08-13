@@ -176,10 +176,10 @@ describe('logger', () => {
       expect(consoleLogSpy).not.toHaveBeenCalled();
     });
 
-    it('suppresses warn in production', async () => {
+    it('emits warn in production', async () => {
       const { warn } = await importLogger();
-      warn('MyModule', 'Should not appear');
-      expect(consoleWarnSpy).not.toHaveBeenCalled();
+      warn('MyModule', 'Crash-recovery warning');
+      expect(consoleWarnSpy).toHaveBeenCalledWith('[MyModule] Crash-recovery warning');
     });
 
     it('still emits error in production', async () => {
@@ -204,10 +204,10 @@ describe('logger', () => {
       expect(consoleLogSpy).not.toHaveBeenCalled();
     });
 
-    it('warn with details also suppressed', async () => {
+    it('emits warn with details in production', async () => {
       const { warn } = await importLogger();
-      warn('MyModule', 'Hidden', { b: 2 });
-      expect(consoleWarnSpy).not.toHaveBeenCalled();
+      warn('MyModule', 'Visible', { b: 2 });
+      expect(consoleWarnSpy).toHaveBeenCalledWith('[MyModule] Visible', { b: 2 });
     });
   });
 
