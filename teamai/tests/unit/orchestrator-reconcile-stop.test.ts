@@ -98,7 +98,7 @@ function setup() {
     description: 'd',
     phase: 'implement',
     branch: 'feat/test-reconcile',
-    slug: 'test-reconcile',
+    slug: `test-reconcile-${randomUUID().slice(0, 8)}`,
     createdAt: now,
     updatedAt: now,
   }));
@@ -168,6 +168,28 @@ describe('_reconcileSubtaskCompletionsOnStop — plan.json persistence', () => {
     expect(mockWarn).toHaveBeenCalledWith(
       'orchestrator',
       expect.stringContaining('Failed to persist plan.json'),
+      expect.anything(),
+    );
+  });
+
+  it('guards the reconcile log write so a failure does not abort the reset', async () => {
+    // No worktree dir → the "worktree missing" branch fires (no cherry-pick).
+    mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args?.[0] === 'rev-parse') return 'abc\n';
+      return '';
+    });
+
+    // The next appendFileSync (the reconcile log line) throws.
+    mockAppendFileSync.mockImplementationOnce(() => { throw new Error('disk full'); });
+
+    await orch.cleanupTaskArtifacts(ctx.taskId, 'implement');
+
+    // The reset still persisted despite the log write failure.
+    const plan = JSON.parse(readFileSync(join(ctx.taskDir, 'plan.json'), 'utf-8'));
+    expect(plan.subtasks[0].completed).toBe(false);
+    expect(mockWarn).toHaveBeenCalledWith(
+      'orchestrator',
+      expect.stringContaining('Failed to write reconcile log'),
       expect.anything(),
     );
   });
