@@ -202,7 +202,13 @@ export class ProcessManager extends EventEmitter {
         // whose logs span multiple days (retries, QA bounces) needs the
         // date to sort correctly. See _appendToLog for the matching write.
         const ts = new Date().toISOString().slice(0, 19);
-        appendFileSync(logFile, `[${ts}] [STDERR] ${text}`);
+        try {
+          appendFileSync(logFile, `[${ts}] [STDERR] ${text}`);
+        } catch (err) {
+          // Guarded like _appendToLog — an uncaught throw in a stream
+          // 'data' listener would crash the whole process.
+          warn('process-manager', `Failed to append stderr to log for session ${id}`, err);
+        }
       }
       this.emit('error', { sessionId: id, error: text });
     });
