@@ -109,4 +109,28 @@ describe('rejectTask — human_feedback_before_bounce.md snapshot', () => {
       expect.anything(),
     );
   });
+
+  it('warns (does not throw) when the qa_report.json change-request patch fails', async () => {
+    // qa_report.json must exist for the patch block to run.
+    realWriteFileSync.current!(
+      join(ctx.specPath, 'qa_report.json'),
+      JSON.stringify({ overall: 'PASS', criteria: [] }),
+    );
+
+    let calls = 0;
+    mockWriteFileSync.mockImplementation((...args: unknown[]) => {
+      calls += 1;
+      // 1st = human_feedback.md, 2nd = snapshot, 3rd = qa_report.json patch.
+      if (calls === 3) throw new Error('disk full');
+      return realWriteFileSync.current!(...args);
+    });
+
+    await expect(rejectTask('task-1', 'Fix the bugs', ctx.deps as never)).resolves.toBeUndefined();
+
+    expect(mockWarn).toHaveBeenCalledWith(
+      'review',
+      expect.stringContaining('Failed to record change request in qa_report.json'),
+      expect.anything(),
+    );
+  });
 });
