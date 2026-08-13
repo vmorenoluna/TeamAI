@@ -530,7 +530,12 @@ export function persistCompletedSubtasks(
         total: subtasks.length,
         projectRoot: deps.projectRoot,
       });
-    } catch { /* best-effort */ }
+    } catch (err) {
+      // A failed checkpoint write silently loses the completed→true marks, so
+      // on resume the subtask re-runs. Must never fail the pipeline, but must
+      // be visible.
+      warn('implement', `Failed to persist completed subtasks to plan.json for ${pipeline.taskId}`, err);
+    }
   });
 }
 

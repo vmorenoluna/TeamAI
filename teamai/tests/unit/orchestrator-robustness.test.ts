@@ -79,6 +79,7 @@ import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecover
 import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
+import { warn as mockWarn } from '../../src/lib/logger';
 
 const fireEvent = createFireEvent(onHandlers);
 
@@ -6109,6 +6110,30 @@ describe('persistCompletedSubtasks', () => {
     expect(() => persistCompletedSubtasks(pipeline, deps, [1])).not.toThrow();
     await deps.planWriteLock.current;
     expect(mockEmit).not.toHaveBeenCalled();
+  });
+
+  it('warns (does not throw) when the checkpoint write fails', async () => {
+    // Malformed plan.json → the JSON.parse inside the checkpoint throws, which
+    // previously was swallowed silently.
+    writeFileSync(join(project.taskDir, 'plan.json'), '{ not valid json');
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    const deps = {
+      planWriteLock: { current: Promise.resolve() },
+      projectRoot: project.root,
+    } as unknown as ImplementDeps;
+
+    expect(() => persistCompletedSubtasks(pipeline, deps, [1])).not.toThrow();
+    await deps.planWriteLock.current;
+
+    expect(mockWarn).toHaveBeenCalledWith(
+      'implement',
+      expect.stringContaining('Failed to persist completed subtasks'),
+      expect.anything(),
+    );
   });
 });
 
