@@ -132,7 +132,7 @@ export function RoadmapCard({
       </div>
 
       {/* Description — truncated when collapsed, full when expanded */}
-      <p className={`text-xs text-slate-400 leading-relaxed ${isExpanded ? '' : 'line-clamp-3'}`}>
+      <p className={`text-xs text-slate-400 leading-relaxed break-words ${isExpanded ? '' : 'line-clamp-3'}`}>
         {item.description}
       </p>
 
@@ -153,10 +153,10 @@ export function RoadmapCard({
       )}
 
       {/* Source */}
-      <div className="flex items-center gap-3 text-[11px] text-slate-400">
-        <span className="italic">Source: {item.source}</span>
+      <div className="flex items-start gap-3 text-[11px] text-slate-400 flex-wrap">
+        <span className="italic shrink-0">Source: {item.source}</span>
         {item.competitive_context && (
-          <span className="italic text-amber-400">
+          <span className="italic text-amber-400 break-words">
             {item.competitive_context}
           </span>
         )}
