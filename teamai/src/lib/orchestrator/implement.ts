@@ -1225,15 +1225,27 @@ export async function runImplement(
         // nothing is ever visible here via existsSync, yet git still
         // considers the branch checked out (and refuses `branch -D`) until
         // that registration is cleared.
-        try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch { /* best-effort */ }
+        try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); }
+        catch (err) {
+          // Log rather than swallow: a failed worktree removal is the root
+          // cause of the "branch still checked out" failures downstream, and
+          // previously it was invisible.
+          logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to remove per-subtask worktree ${stWorktreePath}: ${err instanceof Error ? err.message : String(err)}\n`);
+        }
         if (existsSync(stWorktreePath)) {
           logToOutput(pipeline.specPath, '\n[WORKTREE] Per-subtask worktree at ' + stWorktreePath + ' still exists after git-level removal — falling back to rmSync\n');
-          try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+          try { rmSync(stWorktreePath, { recursive: true, force: true }); }
+          catch (err) {
+            logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to rmSync per-subtask worktree ${stWorktreePath}: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
         }
         removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
 
         if (canRecreate) {
-          try { execFileSync('git', ['branch', '-D', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+          try { execFileSync('git', ['branch', '-D', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' }); }
+          catch (err) {
+            logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to delete branch ${stBranch}: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
 
           // Verify the branch is actually gone before attempting -b creation.
           // A prior-worktree lingering with a file lock (the worktree removal
