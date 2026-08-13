@@ -344,6 +344,8 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
 
   let mergeFailures = 0;
   const MAX_MERGE_FAILURES = 5;
+  let ciRerunAttempts = 0;
+  const MAX_CI_RERUN_ATTEMPTS = 3;
 
   const timer = setInterval(() => {
     if (!state.enabled) {
@@ -384,7 +386,7 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
       }
 
       // Check if all status checks passed
-      const checks: Array<{ conclusion: string }> = prData.statusCheckRollup ?? [];
+      const checks: Array<{ conclusion: string | null; detailsUrl?: string }> = prData.statusCheckRollup ?? [];
       if (checks.length === 0) {
         // No CI checks configured — stop polling, keep task in pr-open for manual review
         clearInterval(timer);
@@ -394,6 +396,19 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
       }
       const allPassed = checks.every(c =>
         c.conclusion === 'SUCCESS' || c.conclusion === 'NEUTRAL' || c.conclusion === 'SKIPPED'
+      );
+      // Terminal failure conclusions — distinct from "still running" (conclusion
+      // is null/undefined while a check is queued or in progress). Transient CI
+      // infra flakiness (a network blip in an unrelated setup step, a runner
+      // hiccup) commonly resolves on a plain re-run without any code change, so
+      // this re-runs the failed jobs — via the failing check's own workflow run
+      // — a bounded number of times before giving up, instead of treating a
+      // failure identically to "still pending" and polling forever with no
+      // escalation and no visible outcome.
+      const failedChecks = checks.filter(c =>
+        c.conclusion === 'FAILURE' || c.conclusion === 'TIMED_OUT' ||
+        c.conclusion === 'CANCELLED' || c.conclusion === 'ACTION_REQUIRED' ||
+        c.conclusion === 'STARTUP_FAILURE'
       );
 
       if (allPassed) {
@@ -417,6 +432,30 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
             state.ciPollTimers.delete(taskId);
             log('auto-mode', `PR #${prNumber} merge failed after ${MAX_MERGE_FAILURES} attempts — stopping poll, awaiting manual review`);
           }
+        }
+      } else if (failedChecks.length > 0) {
+        if (ciRerunAttempts >= MAX_CI_RERUN_ATTEMPTS) {
+          clearInterval(timer);
+          state.ciPollTimers.delete(taskId);
+          log('auto-mode', `PR #${prNumber} still has failing CI check(s) after ${MAX_CI_RERUN_ATTEMPTS} rerun attempts — stopping poll, awaiting manual review`);
+          return;
+        }
+        const runId = failedChecks[0].detailsUrl?.match(/\/actions\/runs\/(\d+)/)?.[1];
+        if (!runId) {
+          clearInterval(timer);
+          state.ciPollTimers.delete(taskId);
+          log('auto-mode', `PR #${prNumber} has failing CI check(s) but no workflow run URL to re-run — stopping poll, awaiting manual review`);
+          return;
+        }
+        ciRerunAttempts++;
+        log('auto-mode', `PR #${prNumber} has failing CI check(s) — re-running failed jobs (attempt ${ciRerunAttempts}/${MAX_CI_RERUN_ATTEMPTS})`);
+        try {
+          execFileSync(getToolPath('gh'), ['run', 'rerun', runId, '--failed'], {
+            cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
+          });
+        } catch (rerunErr) {
+          const msg = rerunErr instanceof Error ? rerunErr.message : String(rerunErr);
+          logError('auto-mode', `Failed to re-run CI for PR #${prNumber}: ${msg}`);
         }
       }
     } catch (err) {
