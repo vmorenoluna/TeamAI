@@ -14,6 +14,7 @@ import { resolveBaseBranch } from '../git-platform';
 import { updateSessionMap, logToOutput } from './helpers';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
 import { applyPlanFileSerialization } from './plan-validation';
+import { warn } from '../logger';
 import { WorktreeError, PipelineConfigError } from './errors';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
@@ -169,7 +170,11 @@ export async function runSpecPhase(
         pipeline.specRevision = 1;
         deps.savePipelineState(pipeline);
       }
-    } catch { /* best-effort */ }
+    } catch (err) {
+      // A failed v1 snapshot loses the original-spec history and leaves
+      // specRevision unset. Surface it.
+      warn('spec', `Failed to snapshot spec v1 for ${pipeline.taskId}`, err);
+    }
   }
 
   deps.advancePhase(pipeline, 'plan');
