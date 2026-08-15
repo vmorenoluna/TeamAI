@@ -14,6 +14,7 @@ import { join, resolve } from 'path';
 import { execFileSync } from 'child_process';
 import { NO_STOP_PHASES, RESTARTABLE_PHASES } from '@/constants/phases';
 import { removeStaleWorktreeRegistration } from '@/lib/orchestrator/worktree-utils';
+import { isFeedbackTarget, type FeedbackTarget } from '@/lib/orchestrator/feedback-target';
 
 async function getStores() {
   const projectPath = await getActiveProjectPath();
@@ -314,9 +315,12 @@ export async function markTaskDone(taskId: string) {
   revalidatePath('/');
 }
 
-export async function rejectTask(taskId: string, feedback: string) {
+export async function rejectTask(taskId: string, feedback: string, target: string) {
+  if (!isFeedbackTarget(target)) {
+    throw new Error(`Invalid feedback target: ${String(target)}`);
+  }
   const { orchestrator } = await getStores();
-  await orchestrator.rejectTask(taskId, feedback);
+  await orchestrator.rejectTask(taskId, feedback, target as FeedbackTarget);
   revalidatePath('/');
 }
 

@@ -987,7 +987,7 @@ describe('resetAllCounters — persistedCriterionFailCounts clearing', () => {
       mockExecFileSync.mockReturnValue('abc123\n');
 
       // Reject the task
-      await (orch as AnyOrch).rejectTask(project.taskId, 'Please fix the actual FAIL criterion');
+      await (orch as AnyOrch).rejectTask(project.taskId, 'Please fix the actual FAIL criterion', 'coder');
 
       // Verify the pipeline was created and persistedCriterionFailCounts was cleared
       const newPipeline = (orch as AnyOrch).pipelines.get(project.taskId);

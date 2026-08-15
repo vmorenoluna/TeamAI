@@ -162,7 +162,7 @@ describe('rejectTask — human_feedback_before_bounce.md snapshot', () => {
 
     try {
       const feedbackText = 'Fix the header alignment on mobile devices';
-      await orch.rejectTask(taskId, feedbackText);
+      await orch.rejectTask(taskId, feedbackText, 'coder');
 
       // Assert: human_feedback.md created
       const feedbackPath = join(taskDir, 'human_feedback.md');
@@ -185,7 +185,7 @@ describe('rejectTask — human_feedback_before_bounce.md snapshot', () => {
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
 
     try {
-      await expect(orch.rejectTask(taskId, 'Some feedback')).resolves.toBeUndefined();
+      await expect(orch.rejectTask(taskId, 'Some feedback', 'coder')).resolves.toBeUndefined();
 
       // Snapshot should still be created even without qa_report.json
       const snapshotPath = join(taskDir, 'human_feedback_before_bounce.md');

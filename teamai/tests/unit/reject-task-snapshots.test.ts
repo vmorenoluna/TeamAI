@@ -88,7 +88,7 @@ describe('rejectTask — human_feedback_before_bounce.md snapshot', () => {
   });
 
   it('snapshots human feedback without warning on success', async () => {
-    await rejectTask('task-1', 'Fix the bugs', ctx.deps as never);
+    await rejectTask('task-1', 'Fix the bugs', 'coder', ctx.deps as never);
     expect(mockWarn).not.toHaveBeenCalled();
   });
 
@@ -101,7 +101,7 @@ describe('rejectTask — human_feedback_before_bounce.md snapshot', () => {
       return realWriteFileSync.current!(...args);
     });
 
-    await expect(rejectTask('task-1', 'Fix the bugs', ctx.deps as never)).resolves.toBeUndefined();
+    await expect(rejectTask('task-1', 'Fix the bugs', 'coder', ctx.deps as never)).resolves.toBeUndefined();
 
     expect(mockWarn).toHaveBeenCalledWith(
       'review',
@@ -125,7 +125,7 @@ describe('rejectTask — human_feedback_before_bounce.md snapshot', () => {
       return realWriteFileSync.current!(...args);
     });
 
-    await expect(rejectTask('task-1', 'Fix the bugs', ctx.deps as never)).resolves.toBeUndefined();
+    await expect(rejectTask('task-1', 'Fix the bugs', 'coder', ctx.deps as never)).resolves.toBeUndefined();
 
     expect(mockWarn).toHaveBeenCalledWith(
       'review',

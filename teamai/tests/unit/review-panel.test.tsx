@@ -207,6 +207,45 @@ describe('ReviewPanel', () => {
       expect(screen.queryByPlaceholderText('Describe what needs to change...')).not.toBeInTheDocument();
     });
 
+    it('requires a target before sending feedback (no default)', async () => {
+      render(
+        <ReviewPanel
+          taskId="task-1"
+          spec={null}
+          qaReport={null}
+          diff={null}
+          prUrl="https://github.com/owner/repo/pull/42"
+          phase="pr-open"
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Request Changes'));
+      });
+
+      // The four target options render
+      for (const label of ['Analyst', 'Planner', 'Engineer', 'QA Reviewer']) {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      }
+
+      // Submit is disabled until a target is chosen
+      expect(screen.getByText('Send Back')).toBeDisabled();
+
+      // Typing feedback alone is still not enough
+      await act(async () => {
+        fireEvent.change(screen.getByPlaceholderText('Describe what needs to change...'), {
+          target: { value: 'Some feedback' },
+        });
+      });
+      expect(screen.getByText('Send Back')).toBeDisabled();
+
+      // Choosing a target enables submit
+      await act(async () => {
+        fireEvent.click(screen.getByText('Engineer'));
+      });
+      expect(screen.getByText('Send to Engineer')).toBeEnabled();
+    });
+
     it('calls rejectTask when feedback is submitted from pr-open phase', async () => {
       render(
         <ReviewPanel
@@ -224,18 +263,23 @@ describe('ReviewPanel', () => {
         fireEvent.click(screen.getByText('Request Changes'));
       });
 
+      // Select a target (no default)
+      await act(async () => {
+        fireEvent.click(screen.getByText('Engineer'));
+      });
+
       // Type feedback
       const textarea = screen.getByPlaceholderText('Describe what needs to change...');
       await act(async () => {
         fireEvent.change(textarea, { target: { value: 'The PR needs more tests' } });
       });
 
-      // Click "Send Back"
+      // Click "Send to Engineer"
       await act(async () => {
-        fireEvent.click(screen.getByText('Send Back'));
+        fireEvent.click(screen.getByText('Send to Engineer'));
       });
 
-      expect(mockRejectTask).toHaveBeenCalledWith('task-1', 'The PR needs more tests');
+      expect(mockRejectTask).toHaveBeenCalledWith('task-1', 'The PR needs more tests', 'coder');
       expect(mockRouterRefresh).toHaveBeenCalled();
     });
   });
@@ -371,18 +415,23 @@ describe('ReviewPanel', () => {
         fireEvent.click(screen.getByText('Request Changes'));
       });
 
+      // Select a target (no default)
+      await act(async () => {
+        fireEvent.click(screen.getByText('Engineer'));
+      });
+
       // Type feedback
       const textarea = screen.getByPlaceholderText('Describe what needs to change...');
       await act(async () => {
         fireEvent.change(textarea, { target: { value: 'Fix the button color' } });
       });
 
-      // Click "Send Back"
+      // Click "Send to Engineer"
       await act(async () => {
-        fireEvent.click(screen.getByText('Send Back'));
+        fireEvent.click(screen.getByText('Send to Engineer'));
       });
 
-      expect(mockRejectTask).toHaveBeenCalledWith('task-2', 'Fix the button color');
+      expect(mockRejectTask).toHaveBeenCalledWith('task-2', 'Fix the button color', 'coder');
       expect(mockRouterRefresh).toHaveBeenCalled();
     });
   });
@@ -1038,16 +1087,19 @@ describe('ReviewPanel', () => {
         fireEvent.click(screen.getByText('Request Changes'));
       });
       await act(async () => {
+        fireEvent.click(screen.getByText('Engineer'));
+      });
+      await act(async () => {
         fireEvent.change(screen.getByPlaceholderText('Describe what needs to change...'), {
           target: { value: 'Please add a test for X' },
         });
       });
 
       await act(async () => {
-        fireEvent.click(screen.getByText('Send Back'));
+        fireEvent.click(screen.getByText('Send to Engineer'));
       });
 
-      expect(mockRejectTask).toHaveBeenCalledWith('task-r1', 'Please add a test for X');
+      expect(mockRejectTask).toHaveBeenCalledWith('task-r1', 'Please add a test for X', 'coder');
       await assertErrorBannerWith('reject raw throw: comment api down');
       // runAction's re-throw preserves the feedback UI — textarea still
       // visible so the user can edit and retry.

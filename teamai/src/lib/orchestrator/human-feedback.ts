@@ -16,26 +16,24 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import path from 'path';
 import type { PipelinePhase } from '@/constants/phases';
+import type { FeedbackTarget } from './feedback-target';
+import {
+  FEEDBACK_TARGETS,
+  isFeedbackTarget,
+  targetToResumePhase,
+  TARGET_TO_PHASE,
+} from './feedback-target';
+
+// Re-export the client-safe constants for existing importers.
+export type { FeedbackTarget };
+export { FEEDBACK_TARGETS, isFeedbackTarget, targetToResumePhase, TARGET_TO_PHASE };
 
 // ── Types ──────────────────────────────────────────────────────────────────
-
-export type FeedbackTarget = 'analyst' | 'planner' | 'coder' | 'qa-reviewer';
-
-export const FEEDBACK_TARGETS: readonly FeedbackTarget[] = [
-  'analyst',
-  'planner',
-  'coder',
-  'qa-reviewer',
-] as const;
 
 export interface HumanFeedback {
   /** Undefined only for legacy human_feedback.md files written before targeting. */
   target?: FeedbackTarget;
   message: string;
-}
-
-export function isFeedbackTarget(value: unknown): value is FeedbackTarget {
-  return typeof value === 'string' && (FEEDBACK_TARGETS as readonly string[]).includes(value);
 }
 
 // ── File path + read/write ─────────────────────────────────────────────────
@@ -67,20 +65,6 @@ export function readHumanFeedback(specPath: string): HumanFeedback | null {
     targetMatch && isFeedbackTarget(targetMatch[1]) ? (targetMatch[1] as FeedbackTarget) : undefined;
   const message = (targetMatch ? body.slice(targetMatch[0].length) : body).trim();
   return { ...(target ? { target } : {}), message };
-}
-
-// ── Routing ────────────────────────────────────────────────────────────────
-
-const TARGET_TO_PHASE: Record<FeedbackTarget, PipelinePhase> = {
-  analyst: 'spec',
-  planner: 'plan',
-  coder: 'implement',
-  'qa-reviewer': 'qa-review',
-};
-
-/** Map a feedback target to the phase that agent resumes at. */
-export function targetToResumePhase(target: FeedbackTarget): PipelinePhase {
-  return TARGET_TO_PHASE[target];
 }
 
 // ── Prompt directive blocks ────────────────────────────────────────────────
