@@ -45,22 +45,6 @@ When a subtask requires running a script, server, or service to verify your work
 - **A script that turns raw verification output into a pass/fail verdict must assert it actually parsed something.** If you write or reuse a script that parses a log/output file and computes acceptance-criteria verdicts from it, have it assert a non-zero count of parsed records/entries and exit with an error if the count is zero — never let it silently fall through to computing "0 of 0 checks failed" and reporting that as a pass. A parser regression (a format change, a bad regex, a broken anchor) that produces zero matches is otherwise indistinguishable from a genuinely clean result, and can hide a real failure for as long as nobody happens to check the raw record count.
 - **Renaming or replacing a committed artifact.** If your task requires regenerating a previously-committed verification artifact under a different filename — not just overwriting the same path — `git rm -f` the superseded file in the same commit before adding the new one. A stale artifact left on the branch after a rename has no cleanup mechanism: nothing downstream will ever remove it, and it silently ships in the final PR alongside its replacement.
 
-## When Verification Contradicts the Spec
-
-If a spec criterion is labeled as an unverified hypothesis (e.g. "Expected to resolve
-X — unverified; must be confirmed by re-running the verification step"), implement it
-exactly as specified, then run the required verification. If the result contradicts the
-hypothesis, route by root cause — do not self-tune:
-
-- **Code bug** (your implementation deviates from the spec — wrong value, wrong logic,
-  wrong condition): fix it yourself and re-verify.
-- **Spec gap** (your code faithfully implements what the spec said, but the verification
-  run shows the spec's underlying assumption was wrong): do NOT invent, adjust, or
-  retune a value to compensate. That is a spec-level decision. State in your summary
-  that this is a spec-level gap with the verbatim verification evidence — this routes
-  to spec revision (`spec_revision_feedback.md`) rather than looping you on a fix that
-  was never yours to make.
-
 ## Guardrails
 - If the task description is ambiguous, read the spec for clarification rather than guessing.
 - **STRICT BOUNDARY: NEVER modify files outside your assigned scope.** If you discover that another file needs changes, create a kanban ticket and note it in your summary — do NOT modify it.

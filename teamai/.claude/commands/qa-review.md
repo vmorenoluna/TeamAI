@@ -131,6 +131,7 @@ Flag a spec concern when:
 - An acceptance criterion is impossible to satisfy as written
 - The spec contradicts itself or makes mutually exclusive requirements
 - The spec's assumptions about external dependencies (APIs, libraries, data formats) proved incorrect
+- The spec explicitly labeled a claim as an unverified hypothesis (e.g. "Expected to resolve X — unverified; must be confirmed by re-running the verification step"), and verification contradicts it. This is the first bullet above by construction: the coder implemented the hypothesis exactly as specified, so the outcome being wrong means the spec's assumption was wrong, not the implementation. Populate `spec_concerns` with the verbatim evidence — do not mark it a standard FAIL and do not let the coder substitute their own value to compensate.
 
 When spec concerns are present, the task goes to human review — the reviewer decides whether to revise the spec. Not all FAIL criteria are spec concerns; only flag when the *specification* is the root cause, not the implementation.
 
