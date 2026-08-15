@@ -15,9 +15,12 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, existsSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 
-const root = process.cwd();
+// Resolve the package root (teamai/) from this file's location instead of
+// relying on the test runner's cwd, so the test works from any directory.
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /** Command templates that must carry the override rule. The role files each
  *  command loads do not repeat it — the command is the single source. */
