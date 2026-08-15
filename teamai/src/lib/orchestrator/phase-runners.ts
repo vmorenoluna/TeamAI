@@ -160,6 +160,36 @@ export async function runSpecPhase(
     unlinkSync(revisionFeedbackPath);
   }
 
+  // No-op revision guard: autoReviseSpec (review-actions.ts) snapshots the
+  // pre-revision spec to spec_v{specRevision}.md before this session runs.
+  // If spec.md comes back byte-identical to that snapshot, the analyst
+  // session completed without actually addressing spec_revision_feedback.md
+  // — advancing to `plan` would silently replay the same QA failure through
+  // a full plan → implement → qa-review cycle. Park for human review instead
+  // of trusting the agent's self-reported summary.
+  if (isRevision) {
+    const preRevisionSnapshotPath = path.join(pipeline.specPath, `spec_v${pipeline.specRevision}.md`);
+    const specMdPath = path.join(pipeline.specPath, 'spec.md');
+    try {
+      const before = existsSync(preRevisionSnapshotPath) ? readFileSync(preRevisionSnapshotPath, 'utf-8') : null;
+      const after = existsSync(specMdPath) ? readFileSync(specMdPath, 'utf-8') : null;
+      if (before !== null && before === after) {
+        logToOutput(pipeline.specPath,
+          `\n[SPEC] No-op revision detected — spec.md is byte-identical to the pre-revision snapshot ` +
+          `(${path.basename(preRevisionSnapshotPath)}). The analyst session completed without addressing ` +
+          `spec_concerns from this round. Pausing in awaiting-review instead of advancing to plan.\n`);
+        warn('spec', `No-op spec revision detected for ${pipeline.taskId} — spec.md unchanged from ${path.basename(preRevisionSnapshotPath)}`);
+        deps.savePipelineState(pipeline);
+        deps.advancePhase(pipeline, 'awaiting-review');
+        return;
+      }
+    } catch (err) {
+      // A failed comparison must not silently mask a real no-op — surface it,
+      // but don't block the pipeline on a diagnostic-only check.
+      warn('spec', `Failed to compare revised spec against pre-revision snapshot for ${pipeline.taskId}`, err);
+    }
+  }
+
   // Versioned snapshot: preserve the initial spec as v1 so every version
   // has a numbered file on disk — v1 = original spec, v2+ = revisions.
   if (!isRevision) {
