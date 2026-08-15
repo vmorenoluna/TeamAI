@@ -247,6 +247,32 @@ describe('SpecDiffView', () => {
       expect(screen.getByText('left')).toBeInTheDocument();
       expect(screen.getByText('right')).toBeInTheDocument();
     });
+
+    it('labels the live spec option with its version number, not "current"', () => {
+      renderComponent({
+        spec: 'latest spec',
+        specVersions: { v1: 'v1 content', v2: 'v2 content' },
+      });
+
+      const leftSelect = screen.getByTestId('compare-left-select') as HTMLSelectElement;
+      const liveOption = Array.from(leftSelect.options).find(o => o.value === 'current');
+      expect(liveOption).toBeDefined();
+      expect(liveOption?.textContent).toBe('v3 (left)');
+    });
+
+    it('shows the live spec version number in column headers', () => {
+      renderComponent({
+        spec: 'latest spec',
+        specVersions: { v1: 'v1 content' },
+        leftVersion: 'current',
+        rightVersion: 'v1',
+      });
+
+      const headers = document.querySelectorAll('.sticky');
+      const headerTexts = Array.from(headers).map(h => h.textContent?.trim());
+      expect(headerTexts).toContain('v2');
+      expect(headerTexts).toContain('v1');
+    });
   });
 
   // ── Diff display ──────────────────────────────────────────────────────
