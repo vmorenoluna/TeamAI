@@ -166,8 +166,8 @@ re-read a file to verify an `Edit` that returned success.
 
 ## Long-Running Verification Scripts
 
-When a subtask requires running a verification script (sweep, benchmark, end-to-end
-integration run) that takes more than ~30 seconds:
+When a subtask requires running a verification script (benchmark, end-to-end
+integration run, data pipeline) that takes more than ~30 seconds:
 
 **NEVER foreground a known-long job.** If the subtask description, spec, or your
 own estimate says a verification step will run longer than a few minutes, detach it
@@ -210,30 +210,30 @@ If a long-running background script produces incremental output while running
    - An error line appears in the output
    Do NOT restart or escalate because the script "feels slow" — use the math.
 
-### When the sweep output is a committed artifact
+### When the run's output is a committed artifact
 
 > **Note:** The `$TEAMAI_SPEC_DIR` environment variable is available to locate the
 > `.teamai/{taskId}/` directory from within the worktree. Use it when you need to
 > reference the spec directory (your cwd is the worktree, not the project root).
 
-If the subtask requires running a sweep that **produces files you will commit** (e.g.,
+If the subtask requires running a script that **produces files you will commit** (e.g.,
 `summary.jsonl`, `aggregate.md`, log directories):
 
-1. Run the sweep ONCE with `run_in_background: true`. The output files will be written to disk.
+1. Run it ONCE with `run_in_background: true`. The output files will be written to disk.
 2. While it runs, complete any doc edits or other non-blocking subtask work.
 3. Wait for the background completion notification — do NOT read the output file while it is
-   running, do NOT re-run the sweep to "check progress", do NOT tail the log.
+   running, do NOT re-run the script to "check progress", do NOT tail the log.
 4. When the notification arrives, verify the output (record count, no truncated JSON lines,
    expected fields present) by reading only the first and last records.
 5. Run the aggregator script (if one exists) against the completed output.
-6. `git add` the sweep output directory + aggregated results. Commit.
-7. **Never commit a partial sweep.** If the sweep was interrupted, delete the partial output
+6. `git add` the output directory + aggregated results. Commit.
+7. **Never commit a partial run.** If it was interrupted, delete the partial output
    and re-run from the beginning. A committed summary.jsonl with 1,431 of 3,000 expected
    records is harder to diagnose than no file at all.
 
 ### When a background script won't finish before your session budget
 
-If a background script (benchmark, sweep, data pipeline) is still running and
+If a background script (benchmark, verification run, data pipeline) is still running and
 won't complete before your session ends, write a `subtask_wakeup-st<ID>.json`
 file (where `<ID>` is your current subtask ID, e.g. `subtask_wakeup-st3.json`)
 to the spec directory so the orchestrator can re-enter this subtask later.
@@ -252,8 +252,8 @@ Write to `$TEAMAI_SPEC_DIR/subtask_wakeup-st<ID>.json` (subtask 3 shown):
 {
   "subtask_id": 3,
   "wakeup_at": "2026-07-03T23:20:00Z",
-  "background_command": "python sweep.py --output sweep-results/",
-  "expected_artifact": "sweep-results/summary.jsonl"
+  "background_command": "python scripts/run_verification.py --output results/",
+  "expected_artifact": "results/summary.jsonl"
 }
 ```
 
