@@ -915,7 +915,7 @@ describe('TaskDetail', () => {
   // ── Spec tab — version selector ──────────────────────────────────────
 
   describe('spec tab — version selector', () => {
-    it('shows version buttons (current, v1, v2) when specVersions are provided', () => {
+    it('shows version buttons (v1, v2, v3) when specVersions are provided', () => {
       renderDetail({
         spec: '# Current Spec',
         specVersions: {
@@ -925,9 +925,9 @@ describe('TaskDetail', () => {
       });
       fireEvent.click(screen.getByText('Spec'));
 
-      expect(screen.getByText('current')).toBeInTheDocument();
       expect(screen.getByText('v1')).toBeInTheDocument();
       expect(screen.getByText('v2')).toBeInTheDocument();
+      expect(screen.getByText('v3')).toBeInTheDocument();
     });
 
     it('displays current spec content by default', () => {
@@ -945,14 +945,14 @@ describe('TaskDetail', () => {
       expect(pre?.textContent).not.toContain('# Spec v1 content');
     });
 
-    it('"current" button has blue highlight by default', () => {
+    it('latest version button (v2) has blue highlight by default', () => {
       renderDetail({
         spec: '# Current Spec',
         specVersions: { v1: '# Spec v1 content' },
       });
       fireEvent.click(screen.getByText('Spec'));
 
-      const currentBtn = screen.getByText('current');
+      const currentBtn = screen.getByText('v2');
       expect(currentBtn.className).toContain('border-[#2563eb]');
       expect(currentBtn.className).toContain('text-blue-300');
     });
@@ -978,8 +978,8 @@ describe('TaskDetail', () => {
       expect(v1Btn.className).toContain('border-[#2563eb]');
       expect(v1Btn.className).toContain('text-blue-300');
 
-      // current button should NOT be highlighted
-      const currentBtn = screen.getByText('current');
+      // latest version button should NOT be highlighted
+      const currentBtn = screen.getByText('v3');
       expect(currentBtn.className).toContain('text-slate-400');
       expect(currentBtn.className).not.toContain('border-[#2563eb]');
     });
@@ -1001,7 +1001,7 @@ describe('TaskDetail', () => {
       expect(pre?.textContent).not.toContain('# Current Spec');
     });
 
-    it('clicking "current" after viewing a snapshot restores current spec', () => {
+    it('clicking the latest version button after viewing a snapshot restores the live spec', () => {
       renderDetail({
         spec: '# Current Spec',
         specVersions: { v1: '# Spec v1 content' },
@@ -1012,8 +1012,8 @@ describe('TaskDetail', () => {
       fireEvent.click(screen.getByText('v1'));
       expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
 
-      // Switch back to current
-      fireEvent.click(screen.getByText('current'));
+      // Switch back to the live spec (v2)
+      fireEvent.click(screen.getByText('v2'));
       expect(document.querySelector('pre')?.textContent).toContain('# Current Spec');
       expect(document.querySelector('pre')?.textContent).not.toContain('# Spec v1 content');
     });
@@ -1059,16 +1059,16 @@ describe('TaskDetail', () => {
       });
       fireEvent.click(screen.getByText('Spec'));
 
-      // Should show empty state for "current" but the version button should still be there
-      expect(screen.getByText('current')).toBeInTheDocument();
+      // Should show empty state for the live spec (v2) but the version button should still be there
+      expect(screen.getByText('v2')).toBeInTheDocument();
       expect(screen.getByText('v1')).toBeInTheDocument();
 
       // Clicking v1 should show the snapshot
       fireEvent.click(screen.getByText('v1'));
       expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
 
-      // Clicking "current" when spec is null should show empty content
-      fireEvent.click(screen.getByText('current'));
+      // Clicking the live spec (v2) when spec is null should show empty content
+      fireEvent.click(screen.getByText('v2'));
       expect(document.querySelector('pre')?.textContent).toBe('');
     });
 
@@ -1137,7 +1137,7 @@ describe('TaskDetail', () => {
       expect(screen.getByTestId('compare-left-select')).toBeInTheDocument();
       expect(screen.getByTestId('compare-right-select')).toBeInTheDocument();
       // Version buttons hidden in compare mode
-      expect(screen.queryByText('current')).not.toBeInTheDocument();
+      expect(screen.queryByText('v3')).not.toBeInTheDocument();
     });
 
     it('compare toggle is highlighted when active', () => {
@@ -1159,7 +1159,7 @@ describe('TaskDetail', () => {
 
       expect(screen.getByText('⚖ Compare')).toBeInTheDocument();
       // Version buttons should be back
-      expect(screen.getByText('current')).toBeInTheDocument();
+      expect(screen.getByText('v3')).toBeInTheDocument();
       expect(screen.getByText('v1')).toBeInTheDocument();
     });
 

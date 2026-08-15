@@ -85,6 +85,10 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
     ? Math.max(0, ...Object.keys(specVersions).map(k => parseInt(k.replace('v', ''), 10)))
     : undefined;
 
+  // The live spec (spec.md) is always the newest version: v{N+1} where N is
+  // the highest numbered snapshot on disk.
+  const currentSpecVersion = specRevision !== undefined ? `v${specRevision + 1}` : 'v1';
+
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'terminal', label: 'Terminal' },
@@ -526,21 +530,11 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
 
                     {!compareMode && specVersions && Object.keys(specVersions).length > 0 && (
                       <div className="flex items-center gap-0.5 ml-2">
-                        <button
-                          onClick={() => setSpecVersion(null)}
-                          className={`text-[10px] font-medium px-2 py-0.5 rounded-l-md border transition-colors ${
-                            specVersion === null
-                              ? 'border-[#2563eb] bg-[#2563eb]/20 text-blue-300'
-                              : 'border-[#334155] bg-[#1a1f2e] text-slate-400 hover:text-slate-300'
-                          }`}
-                        >
-                          current
-                        </button>
                         {Object.entries(specVersions).map(([label]) => (
                           <button
                             key={label}
                             onClick={() => setSpecVersion(label)}
-                            className={`text-[10px] font-medium px-2 py-0.5 border transition-colors last:rounded-r-md ${
+                            className={`text-[10px] font-medium px-2 py-0.5 border transition-colors first:rounded-l-md ${
                               specVersion === label
                                 ? 'border-[#2563eb] bg-[#2563eb]/20 text-blue-300'
                                 : 'border-[#334155] bg-[#1a1f2e] text-slate-400 hover:text-slate-300'
@@ -549,6 +543,16 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                             {label}
                           </button>
                         ))}
+                        <button
+                          onClick={() => setSpecVersion(null)}
+                          className={`text-[10px] font-medium px-2 py-0.5 rounded-r-md border transition-colors ${
+                            specVersion === null
+                              ? 'border-[#2563eb] bg-[#2563eb]/20 text-blue-300'
+                              : 'border-[#334155] bg-[#1a1f2e] text-slate-400 hover:text-slate-300'
+                          }`}
+                        >
+                          {currentSpecVersion}
+                        </button>
                       </div>
                     )}
                   </div>
