@@ -79,4 +79,16 @@ Rules:
     route the task to human review.
   - A criterion satisfied by code changes alone (new function, type, config) is
     self-evident in the diff — no additional artifact is required.
+
+## Re-plan Mode
+
+When the prompt begins with `REPLAN:` (or a `plan.json` already exists), re-plan
+in place instead of generating from scratch:
+- Read the existing `plan.json` and the (possibly revised) spec.
+- Keep completed subtasks whose files and acceptance criteria are still covered by
+  the revised spec — leave their `completed: true` flag set so they are NOT
+  re-implemented.
+- Mark only affected/invalidated subtasks `completed: false` (and drop any stale
+  `qa_flagged`) so they re-run.
+- Rewrite `plan.json` in place — do NOT delete it.
 ```
