@@ -241,12 +241,10 @@ export async function autoReviseSpec(
     // Write revision feedback so the analyst runs in revision mode
     writeSpecRevisionFeedback(specPath);
 
-    // Clear stale plan (the old plan was for a now-replaced spec version)
-    const planPath = path.join(specPath, 'plan.json');
-    try { if (existsSync(planPath)) unlinkSync(planPath); } catch { /* best-effort */ }
-
-    // Clean up stale working files (but NOT historical qa_report_v{N}.json
-    // or spec_v{N}.md — those are permanent audit records)
+    // Preserve plan.json and code (no blind cleanup) — the planner re-plans in
+    // place. Clear only QA artifacts and stale human feedback (historical
+    // qa_report_v{N}.json and spec_v{N}.md are permanent audit records).
+    trimArtifactsForTarget(specPath, 'analyst');
     for (const f of REVISION_CLEANUP_EXTRA) {
       try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
     }
@@ -288,13 +286,11 @@ export async function autoReviseSpec(
     }
   }
 
-  // Clear downstream artifacts — plan, QA, and feedback all need regeneration
-  // from the revised spec. clearArtifacts('plan') clears plan.json + qa_report.json.
-  deps.taskStore.clearArtifacts(pipeline.taskId, 'plan');
-
-  // Also clear additional revision-related files that should not persist
-  const extraFiles = REVISION_CLEANUP_EXTRA;
-  for (const f of extraFiles) {
+  // Preserve plan.json and all code commits (no blind cleanup): the planner
+  // re-plans in place, keeping completed subtasks still valid under the
+  // revised spec. Only QA artifacts and stale human feedback are cleared.
+  trimArtifactsForTarget(specPath, 'analyst');
+  for (const f of REVISION_CLEANUP_EXTRA) {
     try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
   }
 

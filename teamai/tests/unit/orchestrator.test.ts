@@ -4798,7 +4798,7 @@ describe('Orchestrator', () => {
       expect(readFileSync(snapshotV1, 'utf-8')).toBe(originalSpecV1);
     });
 
-    it('clears downstream artifacts (plan.json, qa_report.json, feedback files)', async () => {
+    it('clears QA + feedback artifacts but preserves plan.json (no blind cleanup)', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -4819,8 +4819,8 @@ describe('Orchestrator', () => {
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
       await orch.reviseSpec(testData.taskId).catch(() => {});
 
-      // plan.json and qa_report.json cleared by clearArtifacts('plan')
-      expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(false);
+      // plan.json is preserved (the planner re-plans in place); QA artifacts are cleared
+      expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(true);
       expect(existsSync(join(testData.taskDir, 'qa_report.json'))).toBe(false);
 
       // Extra files manually cleared
