@@ -156,6 +156,7 @@ re-read a file to verify an `Edit` that returned success.
   the spec can be revised through the proper pipeline (spec → plan → implement),
   not patched ad-hoc during implementation. This applies to NORMAL implement mode,
   not just QA rework.
+- **A labeled hypothesis that verification disproves is the same case, not a different one.** If a spec criterion is explicitly marked as an unverified hypothesis (e.g. "Expected to resolve X — unverified; must be confirmed by re-running the verification step"), implement it exactly as specified and run the required verification. If the result contradicts the hypothesis, that is a spec-authority issue per the rule above — do NOT invent, adjust, or retune a value to compensate, even if you're confident your replacement is correct. State in your summary that this is a spec-level gap with the verbatim verification evidence, so it routes to spec revision instead of looping you on a fix that was never yours to make.
 - **No mathematical substitution:** If an acceptance criterion requires empirical evidence
   from a script run (benchmark, integration test, data pipeline, verification report),
   you MUST run the script and commit the output. Mathematical or theoretical justification
