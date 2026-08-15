@@ -85,9 +85,9 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
     ? Math.max(0, ...Object.keys(specVersions).map(k => parseInt(k.replace('v', ''), 10)))
     : undefined;
 
-  // The live spec (spec.md) is always the newest version: v{N+1} where N is
-  // the highest numbered snapshot on disk.
-  const currentSpecVersion = specRevision !== undefined ? `v${specRevision + 1}` : 'v1';
+  // The live spec (spec.md) is always the newest version, which is the same
+  // number as the highest snapshot on disk (spec_v{N}.md archives version N).
+  const currentSpecVersion = specRevision !== undefined && specRevision > 0 ? `v${specRevision}` : 'v1';
 
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview' },

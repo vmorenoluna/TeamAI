@@ -334,9 +334,12 @@ Server action `app/actions/tasks.ts`:
 
 ---
 
-## 8. Known issue to preserve (not in scope, do not regress)
+## 8. Spec-version snapshot off-by-one (fixed in follow-up)
 
-The spec-version snapshot naming has a pre-existing off-by-one (`autoReviseSpec`
+The spec-version snapshot naming had a pre-existing off-by-one (`autoReviseSpec`
 snapshots `spec.md` *before* the analyst rewrites it but names it with the
-post-increment number). The re-plan/preservation work must not make this worse; a
-separate follow-up can correct the numbering.
+post-increment number, so `spec_v2.md` held v1's content). This was fixed in a
+follow-up commit: `runSpecPhase` now overwrites `spec_v{specRevision}.md` with the
+post-revision content once the analyst finishes, so each `spec_v{N}.md` archives
+version N. `autoReviseSpec` is unchanged (its pre-revision snapshot still serves
+as the no-op guard's "before" marker).

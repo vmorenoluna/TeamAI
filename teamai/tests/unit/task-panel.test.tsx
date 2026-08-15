@@ -915,7 +915,7 @@ describe('TaskDetail', () => {
   // ── Spec tab — version selector ──────────────────────────────────────
 
   describe('spec tab — version selector', () => {
-    it('shows version buttons (v1, v2, v3) when specVersions are provided', () => {
+    it('shows version buttons (v1, v2) when specVersions are provided', () => {
       renderDetail({
         spec: '# Current Spec',
         specVersions: {
@@ -926,8 +926,10 @@ describe('TaskDetail', () => {
       fireEvent.click(screen.getByText('Spec'));
 
       expect(screen.getByText('v1')).toBeInTheDocument();
-      expect(screen.getByText('v2')).toBeInTheDocument();
-      expect(screen.getByText('v3')).toBeInTheDocument();
+      // v2 is both the latest snapshot and the live spec (identical content),
+      // so the label appears on the snapshot button and the live button.
+      expect(screen.getAllByText('v2')).toHaveLength(2);
+      expect(screen.queryByText('v3')).not.toBeInTheDocument();
     });
 
     it('displays current spec content by default', () => {
@@ -945,16 +947,18 @@ describe('TaskDetail', () => {
       expect(pre?.textContent).not.toContain('# Spec v1 content');
     });
 
-    it('latest version button (v2) has blue highlight by default', () => {
+    it('live version button (v2) has blue highlight by default', () => {
       renderDetail({
         spec: '# Current Spec',
-        specVersions: { v1: '# Spec v1 content' },
+        specVersions: { v1: '# Spec v1 content', v2: '# Spec v2 content' },
       });
       fireEvent.click(screen.getByText('Spec'));
 
-      const currentBtn = screen.getByText('v2');
-      expect(currentBtn.className).toContain('border-[#2563eb]');
-      expect(currentBtn.className).toContain('text-blue-300');
+      // v2 appears twice: the snapshot button and the live button (last).
+      const v2Buttons = screen.getAllByText('v2');
+      const liveBtn = v2Buttons[v2Buttons.length - 1];
+      expect(liveBtn.className).toContain('border-[#2563eb]');
+      expect(liveBtn.className).toContain('text-blue-300');
     });
 
     it('clicking v1 shows v1 content and highlights v1 button', () => {
@@ -978,8 +982,9 @@ describe('TaskDetail', () => {
       expect(v1Btn.className).toContain('border-[#2563eb]');
       expect(v1Btn.className).toContain('text-blue-300');
 
-      // latest version button should NOT be highlighted
-      const currentBtn = screen.getByText('v3');
+      // live (v2) button should NOT be highlighted
+      const v2Buttons = screen.getAllByText('v2');
+      const currentBtn = v2Buttons[v2Buttons.length - 1];
       expect(currentBtn.className).toContain('text-slate-400');
       expect(currentBtn.className).not.toContain('border-[#2563eb]');
     });
@@ -993,7 +998,7 @@ describe('TaskDetail', () => {
         },
       });
       fireEvent.click(screen.getByText('Spec'));
-      fireEvent.click(screen.getByText('v2'));
+      fireEvent.click(screen.getAllByText('v2')[0]);
 
       const pre = document.querySelector('pre');
       expect(pre?.textContent).toContain('# Spec v2 content');
@@ -1001,19 +1006,19 @@ describe('TaskDetail', () => {
       expect(pre?.textContent).not.toContain('# Current Spec');
     });
 
-    it('clicking the latest version button after viewing a snapshot restores the live spec', () => {
+    it('clicking the live version button after viewing a snapshot restores the live spec', () => {
       renderDetail({
         spec: '# Current Spec',
         specVersions: { v1: '# Spec v1 content' },
       });
       fireEvent.click(screen.getByText('Spec'));
 
-      // Switch to v1
-      fireEvent.click(screen.getByText('v1'));
+      // Switch to the v1 snapshot
+      fireEvent.click(screen.getAllByText('v1')[0]);
       expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
 
-      // Switch back to the live spec (v2)
-      fireEvent.click(screen.getByText('v2'));
+      // Switch back to the live spec (also labeled v1 — live == latest version)
+      fireEvent.click(screen.getAllByText('v1')[1]);
       expect(document.querySelector('pre')?.textContent).toContain('# Current Spec');
       expect(document.querySelector('pre')?.textContent).not.toContain('# Spec v1 content');
     });
@@ -1052,23 +1057,22 @@ describe('TaskDetail', () => {
       expect(screen.queryByText('v2')).not.toBeInTheDocument();
     });
 
-    it('shows snapshot content only (no current spec) when spec is null but versions exist', () => {
+    it('shows snapshot content only (no live spec) when spec is null but versions exist', () => {
       renderDetail({
         spec: null,
         specVersions: { v1: '# Spec v1 content' },
       });
       fireEvent.click(screen.getByText('Spec'));
 
-      // Should show empty state for the live spec (v2) but the version button should still be there
-      expect(screen.getByText('v2')).toBeInTheDocument();
-      expect(screen.getByText('v1')).toBeInTheDocument();
+      // v1 is both the snapshot and the live version (live == latest version)
+      expect(screen.getAllByText('v1')).toHaveLength(2);
 
-      // Clicking v1 should show the snapshot
-      fireEvent.click(screen.getByText('v1'));
+      // Clicking the v1 snapshot should show the snapshot content
+      fireEvent.click(screen.getAllByText('v1')[0]);
       expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
 
-      // Clicking the live spec (v2) when spec is null should show empty content
-      fireEvent.click(screen.getByText('v2'));
+      // Clicking the live spec (also v1) when spec is null shows empty content
+      fireEvent.click(screen.getAllByText('v1')[1]);
       expect(document.querySelector('pre')?.textContent).toBe('');
     });
 
@@ -1158,8 +1162,8 @@ describe('TaskDetail', () => {
       fireEvent.click(screen.getByTestId('compare-toggle'));
 
       expect(screen.getByText('⚖ Compare')).toBeInTheDocument();
-      // Version buttons should be back
-      expect(screen.getByText('v3')).toBeInTheDocument();
+      // Version buttons should be back (v2 snapshot + live, plus v1)
+      expect(screen.getAllByText('v2')).toHaveLength(2);
       expect(screen.getByText('v1')).toBeInTheDocument();
     });
 

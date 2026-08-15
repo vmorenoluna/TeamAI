@@ -2166,19 +2166,22 @@ describe('Orchestrator', () => {
       expect(pipeline.specRevision).toBe(1);
     });
 
-    it('runSpec does NOT overwrite spec_v1.md during revision mode', async () => {
+    it('runSpec revision mode archives the revision as spec_v2.md and preserves spec_v1.md', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
-      // Pre-create spec_v1.md and spec_revision_feedback.md to trigger revision mode
+      // Pre-create spec_v1.md (original) and the spec_v2.md pre-revision
+      // snapshot autoReviseSpec wrote before the analyst session, plus the
+      // feedback file to trigger revision mode.
       const originalV1 = '# Spec v1 — Original';
       writeFileSync(join(testData.taskDir, 'spec_v1.md'), originalV1);
+      writeFileSync(join(testData.taskDir, 'spec_v2.md'), originalV1);
       writeFileSync(join(testData.taskDir, 'spec_revision_feedback.md'), 'Revise the spec');
 
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
-        specRevision: 1,
+        specRevision: 2,
       });
 
       // First createSession call succeeds, subsequent ones reject
@@ -2205,6 +2208,9 @@ describe('Orchestrator', () => {
       // spec_v1.md should still contain the original content (not overwritten)
       expect(existsSync(join(testData.taskDir, 'spec_v1.md'))).toBe(true);
       expect(readFileSync(join(testData.taskDir, 'spec_v1.md'), 'utf-8')).toBe(originalV1);
+
+      // spec_v2.md should now archive the revised (v2) content — off-by-one fix
+      expect(readFileSync(join(testData.taskDir, 'spec_v2.md'), 'utf-8')).toBe('# Spec v2 — Revised');
 
       // spec_revision_feedback.md should be cleaned up
       expect(existsSync(join(testData.taskDir, 'spec_revision_feedback.md'))).toBe(false);
