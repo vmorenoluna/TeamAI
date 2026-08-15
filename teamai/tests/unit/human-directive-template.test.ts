@@ -4,8 +4,10 @@
  * Template coverage for the targeted human-feedback feature.
  *
  * 1. The "human directive overrides everything" rule must be baked into every
- *    command template AND role file — not just injected at runtime — so the
- *    agent honors the directive even if the runtime block is stripped.
+ *    command template — not just injected at runtime — so the agent honors the
+ *    directive even if the runtime block is stripped. The role files
+ *    intentionally do NOT repeat it: each command tells the agent to adopt its
+ *    role, so the rule is delivered once via the command.
  * 2. The repo's own `.claude/` role/command files must mirror `defaults/`
  *    (the canonical template source synced to target projects). Divergence
  *    means a stale or contradictory instruction can leak to agents running on
@@ -17,16 +19,13 @@ import { join } from 'path';
 
 const root = process.cwd();
 
-/** Command + role templates that must carry the override rule. */
+/** Command templates that must carry the override rule. The role files each
+ *  command loads do not repeat it — the command is the single source. */
 const OVERRIDE_FILES: string[] = [
   'defaults/commands/spec.md',
   'defaults/commands/plan.md',
   'defaults/commands/implement.md',
   'defaults/commands/qa-review.md',
-  'defaults/roles/analyst.md',
-  'defaults/roles/planner.md',
-  'defaults/roles/coder.md',
-  'defaults/roles/qa-reviewer.md',
 ];
 
 function normalize(s: string): string {
