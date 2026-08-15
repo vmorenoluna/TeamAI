@@ -18,6 +18,7 @@ import { readContainerConfig, containerManager, dockerAvailable, _resetDockerAva
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { rebaseOntoLatestDefault } from './phase-runners';
 import { updateSessionMap, logToOutput } from './helpers';
+import { humanDirectiveFor, readHumanFeedback } from './human-feedback';
 import { resolveBaseBranch } from '../git-platform';
 import { getUnpushedCommits } from './worktree-ops';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
@@ -692,6 +693,7 @@ export async function runSubtaskSession(
   resumeContext += 'Working directory: ' + cwd + ' (this is your git worktree)\n\n';
 
   const prompt =
+    humanDirectiveFor(pipeline.specPath, 'coder') +
     promptHeader +
     resumeContext +
     (subtaskFeedback ? subtaskFeedback + '\n---\n' : '') +
@@ -1451,7 +1453,13 @@ export async function runImplement(
 
   // Clean up feedback files
   if (hasQaFeedback && existsSync(qaFeedbackPath)) unlinkSync(qaFeedbackPath);
-  if (hasHumanFeedback && existsSync(humanFeedbackPath)) unlinkSync(humanFeedbackPath);
+  // Targeted human feedback is consumed later by consumeFeedbackIfDue at its
+  // consuming phase (so QA can see a coder-directed request); only legacy
+  // untargeted feedback keeps the old end-of-implement cleanup.
+  const pendingFeedback = hasHumanFeedback ? readHumanFeedback(pipeline.specPath) : null;
+  if (hasHumanFeedback && !pendingFeedback?.target && existsSync(humanFeedbackPath)) {
+    unlinkSync(humanFeedbackPath);
+  }
 
   // Clean up qa_flagged markers
   if (hasQaFeedback) {

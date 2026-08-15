@@ -8,6 +8,7 @@
 import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { updateSessionMap, logToOutput } from './helpers';
+import { humanDirectiveFor, consumeFeedbackIfDue } from './human-feedback';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
 import { resolveBaseBranch } from '../git-platform';
@@ -319,6 +320,7 @@ export async function runQaReview(
   updateSessionMap(pipeline.specPath, 'qa', sessionId);
   const agentSpecPath = deps.toAgentPath(pipeline.specPath);
   processManager.sendMessage(sessionId,
+    humanDirectiveFor(pipeline.specPath, 'qa-reviewer') +
     `/qa-review ${agentSpecPath}/spec.md\n\n` +
     `IMPORTANT: Write the QA report to \`${agentSpecPath}/qa_report.json\` (use this exact absolute path, not a relative path).\n` +
     `The working directory is a git worktree — do NOT write to a .teamai/ subdirectory relative to the current directory.`);
@@ -332,6 +334,7 @@ export async function runQaReview(
     throw err;
   }
   processManager.killSession(sessionId);
+  consumeFeedbackIfDue(pipeline.specPath, 'qa-review');
 
   const reportResult = readJsonFile<QaReport>(reportPath, { required: true });
   if (reportResult.error) {

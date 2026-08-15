@@ -4361,6 +4361,39 @@ describe('Orchestrator', () => {
       expect(pipeline.qaAttempt).toBe(1);
     });
 
+    it('injects the human override into the QA prompt for a qa-reviewer target and consumes it', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      writeFileSync(join(testData.taskDir, 'human_feedback.md'),
+        '# Human Review Feedback\nTarget: qa-reviewer\n\nRe-review only the auth module\n');
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+      });
+
+      mockCreateSession.mockResolvedValue('sess-qa');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [],
+      }));
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = mockSendMessage.mock.calls.filter((c: any[]) => c[0] === 'sess-qa');
+      expect(sendCalls.length).toBeGreaterThanOrEqual(1);
+      expect(sendCalls[0][1]).toContain('OVERRIDES EVERYTHING');
+      expect(sendCalls[0][1]).toContain('Re-review only the auth module');
+
+      fireEvent('event', { sessionId: 'sess-qa', event: { type: 'result' } });
+      await promise;
+
+      expect(pipeline.phase).toBe('awaiting-review');
+      expect(existsSync(join(testData.taskDir, 'human_feedback.md'))).toBe(false);
+    });
+
     it('writes completion summary and fails when max QA attempts reached', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
