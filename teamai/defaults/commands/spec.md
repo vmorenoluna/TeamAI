@@ -37,6 +37,8 @@ Review your own spec. Check for:
 - Missing files in the modification list
 - **Delegated analysis**: Are any requirements worded as research tasks ("analyse", "investigate", "determine") instead of concrete, computed specifications?
 - **Spec executability**: Are any requirements unquantified ("fast enough", "sufficient", "reasonable")? Are there reference implementations ("do it like module X") instead of concrete specs? Does every requirement stand alone — can an engineer with no prior context implement it without guessing?
+- **Unresolved conditionals**: Does the spec contain conditional/fallback language ("if X still happens, do Y", "consider Z if needed")? Every fork must be resolved to one concrete choice — rewrite the acceptance criteria and formulas to reflect that choice. A finished spec must never describe a branch that wasn't actually chosen.
+- **Unverified predictions**: Does the spec state the effect of a change on real behavior ("this resolves...", "this fixes...") without that effect having actually been measured? If so, either verify it now or rewrite it explicitly as a hypothesis, not a fact.
 
 ## Step 5: Output
 Print the path to the spec file and a one-paragraph summary.
@@ -57,10 +59,12 @@ If the prompt begins with `REVISION:` you are revising an existing spec, not wri
 4. Preserve valid parts of the spec that the feedback doesn't challenge — only change what needs changing.
 5. Validate the revised spec against the original feature description — does the revised spec still satisfy the feature request, corrected for the discovered issues?
 6. Re-run Step 2 (Codebase Research) to ensure the revised spec is grounded in the current codebase reality.
-7. Write the revised spec to the SAME path as the original spec.md (overwrite it).
+7. **Resolve every conditional you introduce.** If your fix involves a fork ("if the measured effect still shows the problem, do Y instead"), do not write the fork into the spec — pick one branch now and write only that branch's acceptance criteria and formulas. A spec with an unresolved fallback clause will fail review again.
+8. Write the revised spec to the SAME path as the original spec.md (overwrite it).
+9. **Verify you actually changed something.** Diff what you just wrote against the spec content you read in step 1. For each concern in `spec_revision_feedback.md`, find the specific line(s) that changed to address it. If any concern has no corresponding change, you have not addressed it — go back and fix the spec before proceeding to output.
 
 ### Revision Output
 After writing the revised spec, print:
 - The path to the revised spec file
-- A summary of what changed and why
-- Confirmation that all spec concerns from the feedback were addressed
+- For each concern in `spec_revision_feedback.md`: the specific before → after change that addresses it (quote the old and new text/value/formula, not just a paraphrase)
+- Confirmation that all spec concerns from the feedback were addressed, each backed by the diff above
