@@ -116,8 +116,8 @@ export function buildContextNote(feedback: HumanFeedback): string {
 export function humanDirectiveFor(specPath: string, phaseRole: string): string {
   const fb = readHumanFeedback(specPath);
   if (!fb || !fb.target) return '';
-  if (fb.target === phaseRole) return buildOverrideDirective(fb);
-  if (phaseRole === 'qa-reviewer') return buildContextNote(fb);
+  if (fb.target === phaseRole) return buildOverrideDirective(fb) + '\n\n';
+  if (phaseRole === 'qa-reviewer') return buildContextNote(fb) + '\n\n';
   return '';
 }
 

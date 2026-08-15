@@ -12,6 +12,7 @@ import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody }
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
 import { updateSessionMap, logToOutput } from './helpers';
+import { humanDirectiveFor, consumeFeedbackIfDue } from './human-feedback';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
 import { applyPlanFileSerialization } from './plan-validation';
 import { warn } from '../logger';
@@ -141,9 +142,11 @@ export async function runSpecPhase(
 
   const revisionFeedbackPath = path.join(pipeline.specPath, 'spec_revision_feedback.md');
   const isRevision = existsSync(revisionFeedbackPath);
+  const humanDirective = humanDirectiveFor(pipeline.specPath, 'analyst');
 
   if (isRevision) {
     processManager.sendMessage(sessionId,
+      humanDirective +
       `REVISION: ${pipeline.description}\n\n` +
       `Read the existing spec at: \`${agentSpecPath}/spec.md\`\n` +
       `Read the spec revision feedback at: \`${agentSpecPath}/spec_revision_feedback.md\`\n` +
@@ -152,6 +155,7 @@ export async function runSpecPhase(
       `IMPORTANT: Write the revised spec to \`${agentSpecPath}/spec.md\` (overwrite the existing file).`);
   } else {
     processManager.sendMessage(sessionId,
+      humanDirective +
       `/spec ${pipeline.description}\n\nIMPORTANT: Write the spec file to \`${agentSpecPath}/spec.md\` (use this exact path, not a new subdirectory).`);
   }
   await deps.waitForCompletion(sessionId);
@@ -159,6 +163,7 @@ export async function runSpecPhase(
   if (isRevision && existsSync(revisionFeedbackPath)) {
     unlinkSync(revisionFeedbackPath);
   }
+  consumeFeedbackIfDue(pipeline.specPath, 'spec');
 
   // No-op revision guard: autoReviseSpec (review-actions.ts) snapshots the
   // pre-revision spec to spec_v{specRevision}.md before this session runs.
@@ -235,9 +240,12 @@ export async function runPlanPhase(
   pipeline.sessionId = sessionId;
   deps.savePipelineState(pipeline);
   updateSessionMap(pipeline.specPath, 'plan', sessionId);
-  processManager.sendMessage(sessionId, `/plan ${deps.toAgentPath(pipeline.specPath)}/spec.md`);
+  processManager.sendMessage(sessionId,
+    humanDirectiveFor(pipeline.specPath, 'planner') +
+    `/plan ${deps.toAgentPath(pipeline.specPath)}/spec.md`);
   await deps.waitForCompletion(sessionId);
   processManager.killSession(sessionId);
+  consumeFeedbackIfDue(pipeline.specPath, 'plan');
 
   // Evidence producibility gate (#4): if the planner rejected the spec's
   // acceptance criteria as unverifiable (no producing artifact possible),
