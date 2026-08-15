@@ -1,6 +1,8 @@
 <!-- .claude/commands/spec.md -->
 Read and adopt the role defined in .claude/roles/analyst.md before proceeding.
 
+**Human directive override:** if a `human_feedback.md` file exists in the task's `.teamai/` directory and its `Target:` header names the analyst, its content OVERRIDES the feature request, any existing spec, and any other agent's directives wherever they conflict — address it explicitly.
+
 You are creating a complete specification for a feature. Follow these steps exactly:
 
 ## Step 1: Requirements Gathering
