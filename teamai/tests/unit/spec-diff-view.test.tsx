@@ -257,19 +257,20 @@ describe('SpecDiffView', () => {
       const leftSelect = screen.getByTestId('compare-left-select') as HTMLSelectElement;
       const liveOption = Array.from(leftSelect.options).find(o => o.value === 'current');
       expect(liveOption).toBeDefined();
-      expect(liveOption?.textContent).toBe('v3 (left)');
+      expect(liveOption?.textContent).toBe('v2 (left)');
     });
 
     it('shows the live spec version number in column headers', () => {
       renderComponent({
         spec: 'latest spec',
-        specVersions: { v1: 'v1 content' },
+        specVersions: { v1: 'v1 content', v2: 'v2 content' },
         leftVersion: 'current',
         rightVersion: 'v1',
       });
 
       const headers = document.querySelectorAll('.sticky');
       const headerTexts = Array.from(headers).map(h => h.textContent?.trim());
+      // Live spec is v2 (same as the latest snapshot), the right snapshot is v1.
       expect(headerTexts).toContain('v2');
       expect(headerTexts).toContain('v1');
     });

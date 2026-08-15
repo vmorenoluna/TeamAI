@@ -112,7 +112,7 @@ describe('runSpecPhase — no-op revision guard', () => {
     );
   });
 
-  it('advances to plan when spec.md actually changed from the pre-revision snapshot', async () => {
+  it('advances to plan and archives the revised spec as spec_v2.md when spec.md changed', async () => {
     ctx = makeCtx(2);
     writeFileSync(join(ctx.specPath, 'spec_v2.md'), '# original spec\n\nold formula');
     writeFileSync(join(ctx.specPath, 'spec.md'), '# original spec\n\nrevised formula');
@@ -122,6 +122,9 @@ describe('runSpecPhase — no-op revision guard', () => {
 
     expect(ctx.pipeline.phase).toBe('plan');
     expect(ctx.deps.executePhase).toHaveBeenCalledTimes(1);
+    // Off-by-one fix: the pre-revision snapshot written by autoReviseSpec is
+    // overwritten with the post-revision content, so spec_v2.md archives v2.
+    expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# original spec\n\nrevised formula');
     expect(mockWarn).not.toHaveBeenCalled();
   });
 

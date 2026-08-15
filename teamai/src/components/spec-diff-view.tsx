@@ -89,14 +89,16 @@ function getVersionOptions(specVersions: Record<string, string>): string[] {
   return ['current', ...versions];
 }
 
-/** The live spec (spec.md) version label — v{N+1} where N is the highest snapshot. */
+/** The live spec (spec.md) version label — v{N}, the same number as the
+ *  highest snapshot (spec_v{N}.md archives version N and the live spec is
+ *  that latest version). */
 function getCurrentVersionLabel(specVersions: Record<string, string>): string {
   let max = 0;
   for (const key of Object.keys(specVersions)) {
     const n = parseInt(key.replace(/^v/, ''), 10);
     if (!Number.isNaN(n) && n > max) max = n;
   }
-  return `v${max + 1}`;
+  return `v${Math.max(1, max)}`;
 }
 
 export function SpecDiffView({

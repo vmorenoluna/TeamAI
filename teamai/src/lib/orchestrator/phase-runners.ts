@@ -193,11 +193,27 @@ export async function runSpecPhase(
       // but don't block the pipeline on a diagnostic-only check.
       warn('spec', `Failed to compare revised spec against pre-revision snapshot for ${pipeline.taskId}`, err);
     }
-  }
 
-  // Versioned snapshot: preserve the initial spec as v1 so every version
-  // has a numbered file on disk — v1 = original spec, v2+ = revisions.
-  if (!isRevision) {
+    // Versioned snapshot (off-by-one fix): autoReviseSpec wrote the
+    // pre-revision spec to spec_v{specRevision}.md as the no-op guard's
+    // "before" marker. Overwrite that file now with the post-revision content
+    // so each spec_v{N}.md archives version N, not the N-1 pre-revision text.
+    try {
+      const specMdPath = path.join(pipeline.specPath, 'spec.md');
+      if (existsSync(specMdPath)) {
+        writeFileSync(
+          path.join(pipeline.specPath, `spec_v${pipeline.specRevision}.md`),
+          readFileSync(specMdPath, 'utf-8'),
+        );
+      }
+    } catch (err) {
+      // A failed snapshot loses the revision history — surface it, but don't
+      // block the pipeline on an archive-only write.
+      warn('spec', `Failed to snapshot spec v${pipeline.specRevision} for ${pipeline.taskId}`, err);
+    }
+  } else {
+    // Versioned snapshot: preserve the initial spec as v1 so every version
+    // has a numbered file on disk — v1 = original spec, v2+ = revisions.
     try {
       const specMdPath = path.join(pipeline.specPath, 'spec.md');
       if (existsSync(specMdPath)) {
