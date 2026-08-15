@@ -240,9 +240,23 @@ export async function runPlanPhase(
   pipeline.sessionId = sessionId;
   deps.savePipelineState(pipeline);
   updateSessionMap(pipeline.specPath, 'plan', sessionId);
+
+  // Re-plan mode: when plan.json already exists (preserved by a spec revision),
+  // the planner must re-work it in place, keeping completed subtasks that are
+  // still valid — not regenerate from scratch and discard the prior work.
+  const agentSpecPath = deps.toAgentPath(pipeline.specPath);
+  const isReplan = existsSync(path.join(pipeline.specPath, 'plan.json'));
+  const planInstruction = isReplan
+    ? `REPLAN: Read the existing plan at \`${agentSpecPath}/plan.json\` and the revised spec at \`${agentSpecPath}/spec.md\`.\n` +
+      `Re-plan to match the revised spec while PRESERVING work that is still valid:\n` +
+      `- Keep completed subtasks whose files and acceptance criteria are still covered by the revised spec, and leave their \`completed: true\` flag set so they are NOT re-implemented.\n` +
+      `- Mark only affected/invalidated subtasks \`completed: false\` (and drop any stale \`qa_flagged\`) so they re-run.\n` +
+      `- Rewrite plan.json in place — do NOT delete it.\n` +
+      `IMPORTANT: Write the updated plan to \`${agentSpecPath}/plan.json\` (overwrite the existing file).`
+    : `/plan ${agentSpecPath}/spec.md`;
+
   processManager.sendMessage(sessionId,
-    humanDirectiveFor(pipeline.specPath, 'planner') +
-    `/plan ${deps.toAgentPath(pipeline.specPath)}/spec.md`);
+    humanDirectiveFor(pipeline.specPath, 'planner') + planInstruction);
   await deps.waitForCompletion(sessionId);
   processManager.killSession(sessionId);
   consumeFeedbackIfDue(pipeline.specPath, 'plan');

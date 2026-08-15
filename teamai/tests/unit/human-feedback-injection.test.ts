@@ -167,4 +167,37 @@ describe('runPlanPhase — human directive injection', () => {
     // Consumed after the plan phase
     expect(existsSync(join(ctx.specPath, 'human_feedback.md'))).toBe(false);
   });
+
+  it('re-plans in place (REPLAN mode) when plan.json already exists', async () => {
+    writeFileSync(join(ctx.specPath, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'A', description: 'A', files: ['src/a.ts'], acceptance_criteria: ['a'], completed: true },
+      ],
+    }));
+
+    const pipeline = basePipeline(ctx.specPath, 'plan');
+    mkdirSync(pipeline.worktreePath, { recursive: true });
+
+    const deps = {
+      projectRoot: ctx.root,
+      persistAndEmitPhase: vi.fn(),
+      sessionOpts: () => ({ role: 'planner', cwd: ctx.root, taskId: 'task-1' }),
+      waitForCompletion: vi.fn(async () => undefined),
+      advancePhase: (p: typeof pipeline, phase: string) => { (p as { phase: string }).phase = phase; },
+      rotateOutputLog: vi.fn(),
+      phaseHeader: vi.fn(),
+      savePipelineState: vi.fn(),
+      toAgentPath: (p: string) => p,
+      executePhase: vi.fn(async () => undefined),
+      gitPush: vi.fn(),
+      execGit: vi.fn(),
+    };
+
+    await runPlanPhase(pipeline as never, deps as never);
+
+    const prompt = mockSendMessage.mock.calls[0][1] as string;
+    expect(prompt).toContain('REPLAN');
+    expect(prompt).toContain('PRESERVING');
+    expect(prompt).not.toContain('/plan ');
+  });
 });
