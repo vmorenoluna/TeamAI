@@ -25,6 +25,7 @@ import { warn as logWarn, log, error as logError } from './logger';
 import type { PhaseContext } from './orchestrator/phase-context';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy } from './orchestrator/types';
+import type { FeedbackTarget } from './orchestrator/feedback-target';
 
 export class Orchestrator {
   private pipelines: Map<string, TaskPipeline> = new Map();
@@ -359,8 +360,8 @@ export class Orchestrator {
     await approveTaskFn(taskId, strategy, this._ctx);
   }
 
-  async rejectTask(taskId: string, feedback: string): Promise<void> {
-    await rejectTaskFn(taskId, feedback, this._ctx);
+  async rejectTask(taskId: string, feedback: string, target: FeedbackTarget): Promise<void> {
+    await rejectTaskFn(taskId, feedback, target, this._ctx);
   }
 
   async reviseSpec(taskId: string): Promise<void> {

@@ -249,6 +249,9 @@ Server action `app/actions/tasks.ts`:
 
 **New**
 - `src/lib/orchestrator/human-feedback.ts` — shared module (4.1–4.6).
+- `src/lib/orchestrator/feedback-target.ts` — client-safe target constants/labels
+  (no `fs` import) so the review panel can import them without bundling Node's
+  `fs` into the browser.
 
 **Core**
 - `src/lib/orchestrator/review-actions.ts` — `rejectTask` signature + delegation to

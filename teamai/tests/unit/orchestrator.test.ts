@@ -524,7 +524,7 @@ describe('Orchestrator', () => {
     it('throws when not awaiting review', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
-      await expect(orch.rejectTask(testData.taskId, 'bad')).rejects.toThrow('cannot reject a task in backlog');
+      await expect(orch.rejectTask(testData.taskId, 'bad', 'coder')).rejects.toThrow('cannot reject a task in backlog');
     });
 
     it('writes feedback and resets qaAttempt when awaiting review', async () => {
@@ -544,7 +544,7 @@ describe('Orchestrator', () => {
       // rejectTask will try to execute 'implement' phase after writing feedback
       // That will call createSession, so we need to handle it
       mockCreateSession.mockResolvedValue('sess-reject');
-      const promise = orch.rejectTask(testData.taskId, 'Fix the tests').catch(() => {});
+      const promise = orch.rejectTask(testData.taskId, 'Fix the tests', 'coder').catch(() => {});
 
       // Verify feedback was written
       const feedbackPath = join(testData.taskDir, 'human_feedback.md');

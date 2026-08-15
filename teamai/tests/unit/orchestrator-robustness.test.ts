@@ -3744,7 +3744,7 @@ describe('review-actions — unified counter reset (ADR 005)', () => {
     (orch as AnyOrch).pipelines.set(project.taskId, pipeline);
 
     try {
-      await (orch as AnyOrch).rejectTask(project.taskId, 'Fix the bugs please');
+      await (orch as AnyOrch).rejectTask(project.taskId, 'Fix the bugs please', 'coder');
 
       // All counters should be reset
       expect(pipeline.qaAttempt).toBe(0);
@@ -3785,7 +3785,7 @@ describe('review-actions — unified counter reset (ADR 005)', () => {
     (orch as AnyOrch).pipelines.set(project.taskId, pipeline);
 
     try {
-      await (orch as AnyOrch).rejectTask(project.taskId, 'Fix the auth module too');
+      await (orch as AnyOrch).rejectTask(project.taskId, 'Fix the auth module too', 'coder');
 
       // Report should still exist with original criteria + new change request
       const report = JSON.parse(readFileSync(join(project.taskDir, 'qa_report.json'), 'utf-8'));

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { approveTask, rejectTask, markTaskDone, reviseSpec } from '@/app/actions/tasks';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 import { formatActionError } from '@/lib/error-format';
+import { FEEDBACK_TARGETS, FEEDBACK_TARGET_LABELS, type FeedbackTarget } from '@/lib/orchestrator/feedback-target';
 
 interface SpecConcern {
   issue: string;
@@ -71,6 +72,7 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
   const [error, setError] = useState<string | null>(null);
   const [showReject, setShowReject] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [target, setTarget] = useState<FeedbackTarget | null>(null);
   const isPrOpen = phase === 'pr-open' || !!prUrl;
 
   /**
@@ -111,11 +113,12 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
   }
 
   async function handleReject() {
-    if (!feedback.trim()) return;
+    if (!feedback.trim() || !target) return;
     await runAction('reject', 'send task back', async () => {
-      await rejectTask(taskId, feedback);
+      await rejectTask(taskId, feedback, target);
       setShowReject(false);
       setFeedback('');
+      setTarget(null);
     });
   }
 
@@ -327,6 +330,25 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
 
         {showReject && (
           <div className="space-y-2">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-slate-400">Send to</span>
+              <div className="flex flex-wrap gap-1.5">
+                {FEEDBACK_TARGETS.map(t => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTarget(t)}
+                    className={`px-2.5 py-1 text-xs font-medium rounded-md border transition-colors ${
+                      target === t
+                        ? 'bg-blue-900/40 text-blue-300 border-blue-600'
+                        : 'bg-[#1a1f2e] text-slate-300 border-[#334155] hover:bg-[#1e293b]'
+                    }`}
+                  >
+                    {FEEDBACK_TARGET_LABELS[t]}
+                  </button>
+                ))}
+              </div>
+            </div>
             <textarea
               value={feedback}
               onChange={e => setFeedback(e.target.value)}
@@ -336,17 +358,17 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
             />
             <div className="flex gap-2 justify-end">
               <button
-                onClick={() => setShowReject(false)}
+                onClick={() => { setShowReject(false); setTarget(null); }}
                 className="px-3 py-1.5 text-sm text-slate-400 hover:text-white transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleReject}
-                disabled={pendingAction !== null || !feedback.trim()}
+                disabled={pendingAction !== null || !target || !feedback.trim()}
                 className="px-4 py-1.5 text-sm font-medium bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white rounded-md transition-colors"
               >
-                {pendingAction === 'reject' ? 'Sending…' : 'Send Back'}
+                {pendingAction === 'reject' ? 'Sending…' : (target ? `Send to ${FEEDBACK_TARGET_LABELS[target]}` : 'Send Back')}
               </button>
             </div>
           </div>
