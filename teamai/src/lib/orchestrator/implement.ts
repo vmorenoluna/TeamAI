@@ -373,6 +373,36 @@ export interface SubtaskSelection {
 }
 
 /**
+ * Select the subtask IDs a coder-targeted human directive should re-run.
+ * Best-effort keyword match against title/description/files/acceptance
+ * criteria; falls back to all subtasks when nothing matches.
+ */
+export function selectReworkTargets(subtasks: PlanSubtask[], feedback: string): number[] {
+  const tokens = feedback
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(t => t.length > 2);
+  if (tokens.length === 0) return subtasks.map(s => s.id);
+
+  const scored = subtasks.map(s => {
+    const haystack = [
+      s.title,
+      s.description,
+      ...(s.files || []),
+      ...(s.acceptance_criteria || []),
+    ]
+      .join(' ')
+      .toLowerCase();
+    const hits = tokens.filter(t => haystack.includes(t)).length;
+    return { id: s.id, hits };
+  });
+
+  const best = Math.max(0, ...scored.map(s => s.hits));
+  if (best === 0) return subtasks.map(s => s.id);
+  return scored.filter(s => s.hits > 0).map(s => s.id);
+}
+
+/**
  * Read plan.json and determine which subtasks to execute:
  * - On QA bounce-back: only qa_flagged subtasks (or synthetic 9999)
  * - On first pass: all non-completed subtasks
@@ -425,6 +455,19 @@ export function selectSubtasks(
   // every bounce that reaches the fallback must synthesise a fresh one from
   // the *current* qa_feedback.md, never replay a stale persisted copy.
   const realSubtasks = plan.subtasks.filter((s: PlanSubtask) => s.id !== 9999);
+
+  // A coder-targeted human directive forces a rework even when every subtask is
+  // already complete (otherwise the [SKIP] branch below would drop the comment
+  // and bounce straight to QA without the coder ever seeing it). Match the
+  // affected subtasks by keyword and mark them incomplete so they re-run.
+  const humanFeedback = hasHumanFeedback ? readHumanFeedback(pipeline.specPath) : null;
+  if (humanFeedback?.target === 'coder') {
+    const reworkIds = new Set(selectReworkTargets(realSubtasks, humanFeedback.message));
+    for (const s of realSubtasks) {
+      if (reworkIds.has(s.id)) s.completed = false;
+    }
+  }
+
   const subtasksToRun = hasQaFeedback
     ? realSubtasks.filter((s: PlanSubtask) => s.qa_flagged)
     : realSubtasks.filter((s: PlanSubtask) => !s.completed);

@@ -70,7 +70,8 @@ vi.mock('fs', async (importOriginal) => {
   return { ...actual, writeFileSync: mockWriteFileSync };
 });
 
-import { selectSubtasks } from '../../src/lib/orchestrator/implement';
+import { selectSubtasks, selectReworkTargets } from '../../src/lib/orchestrator/implement';
+import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { writeFileSync } from 'fs';
 
 // ── Helpers ──
@@ -151,5 +152,38 @@ describe('selectSubtasks — human_feedback_before_bounce.md snapshot', () => {
       expect.stringContaining('Failed to persist synthesized QA-rework subtask'),
       expect.anything(),
     );
+  });
+
+  it('marks coder-targeted subtasks incomplete so a reject re-runs them (G2)', () => {
+    // All subtasks already complete — a plain reject would previously hit
+    // the [SKIP] branch and the comment would never reach the coder.
+    writeFileSync(join(ctx.specPath, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Auth', description: 'auth module', files: ['src/auth.ts'], acceptance_criteria: ['Auth works'], depends_on: [], completed: true },
+        { id: 2, title: 'UI', description: 'ui', files: ['src/ui.ts'], acceptance_criteria: ['UI works'], depends_on: [], completed: true },
+      ],
+    }));
+    writeFileSync(join(ctx.specPath, 'human_feedback.md'),
+      '# Human Review Feedback\nTarget: coder\n\nFix the auth module\n');
+
+    const selection = selectSubtasks(pipeline(ctx.specPath) as never);
+    const ids = selection.effectiveSubtasks.map(s => s.id);
+    expect(ids).toContain(1);
+    expect(ids).not.toContain(2);
+  });
+});
+
+describe('selectReworkTargets', () => {
+  const subtasks: PlanSubtask[] = [
+    { id: 1, title: 'Auth', description: 'auth module', files: ['src/auth.ts'], acceptance_criteria: ['Auth works'], depends_on: [] },
+    { id: 2, title: 'UI', description: 'ui', files: ['src/ui.ts'], acceptance_criteria: ['UI works'], depends_on: [] },
+  ];
+
+  it('returns matching subtask ids by keyword', () => {
+    expect(selectReworkTargets(subtasks, 'Fix the auth module')).toEqual([1]);
+  });
+
+  it('falls back to all subtasks when nothing matches', () => {
+    expect(selectReworkTargets(subtasks, 'Refactor everything')).toEqual([1, 2]);
   });
 });
