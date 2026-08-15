@@ -1,6 +1,8 @@
 <!-- .claude/commands/plan.md -->
 Read and adopt the role defined in .claude/roles/planner.md before proceeding.
 
+**Human directive override:** if a `human_feedback.md` file exists in the task's `.teamai/` directory and its `Target:` header names the planner, its content OVERRIDES the spec and any other agent's directives wherever they conflict — address it explicitly.
+
 You are creating an implementation plan from a specification.
 
 Read the spec at: $ARGUMENTS

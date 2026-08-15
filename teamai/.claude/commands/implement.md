@@ -1,6 +1,8 @@
 <!-- .claude/commands/implement.md -->
 Read and adopt the role defined in .claude/roles/coder.md before proceeding.
 
+**Human directive override:** if a `human_feedback.md` file exists in the task's `.teamai/` directory and its `Target:` header names the engineer (coder), its content OVERRIDES the spec, the plan, the QA report, and any other agent's directives wherever they conflict — follow it over any conflicting instruction and note the deviation in your summary.
+
 You are implementing a single subtask from an implementation plan.
 
 $ARGUMENTS
@@ -38,7 +40,7 @@ is `"cleanup"`. If so, you are in **cleanup-only rework mode**:
   - For git/file-system fixes: `git rm`, `git add`, `git mv`, committing missing files, etc.
   - For artifact fixes: run the specified script, verify the output meets the criterion's thresholds,
     `git add` the output, commit, and push.
-- Commit and push.
+- Commit your changes (do NOT push — the orchestrator handles pushing).
 - Print a summary of what was cleaned up or what artifact was produced.
 - Cleanup rework is complete — do not mark additional subtasks as complete.
 
@@ -119,7 +121,7 @@ re-read a file to verify an `Edit` that returned success.
    `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 5. If tests fail, fix the issues before proceeding.
 6. Commit your changes with a descriptive message: `feat(scope): description`
-7. Push the branch: `git push origin HEAD` (QA cannot verify unpushed commits).
+7. **Do NOT push.** The orchestrator pushes all commits at the end of the implement phase. Pushing from the agent sandbox will fail for lack of credentials and wastes calls. Commit your changes — the orchestrator handles the rest.
 8. Print a summary of what was changed and the test results.
 
 ## Rules
@@ -166,8 +168,14 @@ re-read a file to verify an `Edit` that returned success.
 
 ## Long-Running Verification Scripts
 
-When a subtask requires running a verification script (sweep, benchmark, end-to-end
-integration run) that takes more than ~30 seconds:
+When a subtask requires running a verification script (benchmark, end-to-end
+integration run, data pipeline) that takes more than ~30 seconds:
+
+**NEVER foreground a known-long job.** If the subtask description, spec, or your
+own estimate says a verification step will run longer than a few minutes, detach it
+from the very first attempt. Foregrounding it under the session timeout wastes a
+full session — it gets killed mid-run, the output is lost, and you have to re-launch
+it detached anyway. Detach from the start.
 
 1. Start it using `run_in_background: true` on the Bash tool call.
 2. Do any remaining non-blocking work (updating docs, minor edits) while it runs.
@@ -204,41 +212,50 @@ If a long-running background script produces incremental output while running
    - An error line appears in the output
    Do NOT restart or escalate because the script "feels slow" — use the math.
 
-### When the sweep output is a committed artifact
+### When the run's output is a committed artifact
 
 > **Note:** The `$TEAMAI_SPEC_DIR` environment variable is available to locate the
 > `.teamai/{taskId}/` directory from within the worktree. Use it when you need to
 > reference the spec directory (your cwd is the worktree, not the project root).
 
-If the subtask requires running a sweep that **produces files you will commit** (e.g.,
+If the subtask requires running a script that **produces files you will commit** (e.g.,
 `summary.jsonl`, `aggregate.md`, log directories):
 
-1. Run the sweep ONCE with `run_in_background: true`. The output files will be written to disk.
+1. Run it ONCE with `run_in_background: true`. The output files will be written to disk.
 2. While it runs, complete any doc edits or other non-blocking subtask work.
 3. Wait for the background completion notification — do NOT read the output file while it is
-   running, do NOT re-run the sweep to "check progress", do NOT tail the log.
+   running, do NOT re-run the script to "check progress", do NOT tail the log.
 4. When the notification arrives, verify the output (record count, no truncated JSON lines,
    expected fields present) by reading only the first and last records.
 5. Run the aggregator script (if one exists) against the completed output.
-6. `git add` the sweep output directory + aggregated results. Commit.
-7. **Never commit a partial sweep.** If the sweep was interrupted, delete the partial output
+6. `git add` the output directory + aggregated results. Commit.
+7. **Never commit a partial run.** If it was interrupted, delete the partial output
    and re-run from the beginning. A committed summary.jsonl with 1,431 of 3,000 expected
    records is harder to diagnose than no file at all.
 
 ### When a background script won't finish before your session budget
 
-If a background script (benchmark, sweep, data pipeline) is still running and
-won't complete before your session ends, write a `subtask_wakeup.json` file
-to the spec directory so the orchestrator can re-enter this subtask later:
+If a background script (benchmark, verification run, data pipeline) is still running and
+won't complete before your session ends, write a `subtask_wakeup-st<ID>.json`
+file (where `<ID>` is your current subtask ID, e.g. `subtask_wakeup-st3.json`)
+to the spec directory so the orchestrator can re-enter this subtask later.
+The per-subtask filename prevents parallel subtasks from clobbering each
+other's wakeup schedules:
 
-Write to `$TEAMAI_SPEC_DIR/subtask_wakeup.json`:
+**Size the wakeup timeout realistically.** Use the actual throughput rate to
+estimate completion time. If the script processed N records in T minutes and
+has M remaining, set `wakeup_at` to at least `(M/N)*T` minutes from now with a
+20% safety margin. An optimistic guess produces a wakeup that fires while the
+script is still running, wasting another session on a re-entry that finds nothing.
+
+Write to `$TEAMAI_SPEC_DIR/subtask_wakeup-st<ID>.json` (subtask 3 shown):
 
 ```json
 {
   "subtask_id": 3,
   "wakeup_at": "2026-07-03T23:20:00Z",
-  "background_command": "python sweep.py --output sweep-results/",
-  "expected_artifact": "sweep-results/summary.jsonl"
+  "background_command": "python scripts/run_verification.py --output results/",
+  "expected_artifact": "results/summary.jsonl"
 }
 ```
 
@@ -254,7 +271,7 @@ after the wakeup time with a `⚠️ WAKEUP RE-ENTRY` header. When you re-enter:
 - If the artifact is missing or incomplete, check whether the background
   process is still running:
   - **Still running**: estimate remaining time, write an updated
-    `subtask_wakeup.json` with a new `wakeup_at`, and end.
+    `subtask_wakeup-st<ID>.json` with a new `wakeup_at`, and end.
   - **Crashed or exited with error**: do NOT write another wakeup file.
     Report the failure immediately — the orchestrator will advance the task
     to failed after 3 consecutive wakeup attempts without progress.
