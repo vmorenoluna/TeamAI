@@ -60,7 +60,11 @@ If the prompt begins with `REVISION:` you are revising an existing spec, not wri
    - If the concern identifies contradictory criteria, resolve the contradiction
 4. Preserve valid parts of the spec that the feedback doesn't challenge — only change what needs changing.
 5. Validate the revised spec against the original feature description — does the revised spec still satisfy the feature request, corrected for the discovered issues?
-6. Re-run Step 2 (Codebase Research) to ensure the revised spec is grounded in the current codebase reality.
+6. Re-run Step 2 (Codebase Research) scoped to the feedback's scope. Research only the
+   files, modules, and configuration the concerns actually name (plus their adjacent tests
+   and immediate dependencies) to ensure the revised spec is grounded in current codebase
+   reality. Do NOT re-run a full-codebase Glob/Grep sweep — a revision triggered by a
+   single concern does not need to re-map the whole repository.
 7. **Resolve every conditional you introduce.** If your fix involves a fork ("if the measured effect still shows the problem, do Y instead"), do not write the fork into the spec — pick one branch now and write only that branch's acceptance criteria and formulas. A spec with an unresolved fallback clause will fail review again.
 8. Write the revised spec to the SAME path as the original spec.md (overwrite it).
 9. **Verify you actually changed something.** Diff what you just wrote against the spec content you read in step 1. For each concern in `spec_revision_feedback.md`, find the specific line(s) that changed to address it. If any concern has no corresponding change, you have not addressed it — go back and fix the spec before proceeding to output.
