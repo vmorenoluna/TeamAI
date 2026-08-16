@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { approveTask, rejectTask, markTaskDone, reviseSpec } from '@/app/actions/tasks';
+import { approveTask, rejectTask, markTaskDone } from '@/app/actions/tasks';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 import { formatActionError } from '@/lib/error-format';
 import { FEEDBACK_TARGETS, FEEDBACK_TARGET_LABELS, type FeedbackTarget } from '@/lib/orchestrator/feedback-target';
@@ -66,7 +66,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-type PendingAction = 'approve-local' | 'approve-pr' | 'reject' | 'mark-done' | 'revise-spec' | null;
+/** Format QA spec_concerns into a readable text block for the analyst textarea. */
+function specConcernsToText(concerns: SpecConcern[]): string {
+  return concerns
+    .map((sc) => {
+      const lines = [`- ${sc.issue}`];
+      if (sc.reasoning) lines.push(`  Reasoning: ${sc.reasoning}`);
+      if (sc.suggested_fix) lines.push(`  Suggested fix: ${sc.suggested_fix}`);
+      return lines.join('\n');
+    })
+    .join('\n\n');
+}
+
+type PendingAction = 'approve-local' | 'approve-pr' | 'reject' | 'mark-done' | null;
 
 export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase, specRevision, specPath, subtasks }: Props) {
   const { run } = useServerMutation();
@@ -132,8 +144,15 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
     );
   }
 
-  async function handleReviseSpec() {
-    await runAction('revise-spec', 'revise spec', () => reviseSpec(taskId));
+  function selectTarget(t: FeedbackTarget) {
+    setTarget(t);
+    setSelectedSubtasks([]);
+    // Fold the old "Revise Spec" shortcut into Request Changes: selecting the
+    // analyst pre-fills the QA's structured spec_concerns so the reviewer
+    // doesn't have to re-type them (and can still edit before sending).
+    if (t === 'analyst' && !feedback.trim() && qaReport?.spec_concerns?.length) {
+      setFeedback(specConcernsToText(qaReport.spec_concerns));
+    }
   }
 
   async function handleMarkDone() {
@@ -142,6 +161,47 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
 
   return (
     <div className="space-y-4">
+      {/* Spec concerns banner — top-level so it is visible in awaiting-review
+          without expanding the (collapsed-by-default) QA Report section. */}
+      {qaReport?.spec_concerns && qaReport.spec_concerns.length > 0 && (
+        <div className="rounded-md border border-purple-800/40 bg-purple-950/20 p-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <span className="text-purple-400 text-xs">📋</span>
+            <span className="text-xs font-semibold text-purple-300">Spec Concerns — The specification needs revision</span>
+          </div>
+          <div className="space-y-2">
+            {qaReport.spec_concerns.map((sc, i) => (
+              <div key={i} className="text-xs text-purple-200/90">
+                <p className="font-medium">{sc.issue}</p>
+                <p className="text-purple-300/70 mt-0.5">{sc.reasoning}</p>
+                {sc.suggested_fix && (
+                  <p className="text-purple-300/50 mt-0.5 italic">Suggested: {sc.suggested_fix}</p>
+                )}
+              </div>
+            ))}
+          </div>
+          {specRevision !== undefined && specRevision >= 4 && (
+            <div className="mt-3 pt-2 border-t border-purple-800/30">
+              <p className="text-xs text-amber-300/80">
+                ⚠ Max auto-revisions reached. The pipeline is paused so you can safely edit the spec.
+                Send a change request to the <strong>Analyst</strong> when ready.
+              </p>
+              {specPath && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.electronAPI?.showItemInFolder?.(specPath);
+                  }}
+                  className="mt-2 text-[11px] font-medium px-2 py-1 rounded-md bg-amber-900/30 text-amber-400 hover:bg-amber-800/40 hover:text-amber-300 transition-colors"
+                >
+                  📂 Open spec location
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* QA Report */}
       {qaReport && (
         <Section title={`QA Report — ${qaReport.overall === 'PASS' ? '✓ PASS' : '✗ FAIL'}`}>
@@ -158,46 +218,6 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
             }`}>
               {qaReport.overall}
             </div>
-
-            {/* Spec concerns banner — shown when QA detected spec-level issues */}
-            {qaReport.spec_concerns && qaReport.spec_concerns.length > 0 && (
-              <div className="rounded-md border border-purple-800/40 bg-purple-950/20 p-3">
-                <div className="flex items-center gap-1.5 mb-2">
-                  <span className="text-purple-400 text-xs">📋</span>
-                  <span className="text-xs font-semibold text-purple-300">Spec Concerns — The specification needs revision</span>
-                </div>
-                <div className="space-y-2">
-                  {qaReport.spec_concerns.map((sc, i) => (
-                    <div key={i} className="text-xs text-purple-200/90">
-                      <p className="font-medium">{sc.issue}</p>
-                      <p className="text-purple-300/70 mt-0.5">{sc.reasoning}</p>
-                      {sc.suggested_fix && (
-                        <p className="text-purple-300/50 mt-0.5 italic">Suggested: {sc.suggested_fix}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                {specRevision !== undefined && specRevision >= 4 && (
-                  <div className="mt-3 pt-2 border-t border-purple-800/30">
-                    <p className="text-xs text-amber-300/80">
-                      ⚠ Max auto-revisions reached. The pipeline is paused so you can safely edit the spec.
-                      Click <strong>Revise Spec</strong> when ready.
-                    </p>
-                    {specPath && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          window.electronAPI?.showItemInFolder?.(specPath);
-                        }}
-                        className="mt-2 text-[11px] font-medium px-2 py-1 rounded-md bg-amber-900/30 text-amber-400 hover:bg-amber-800/40 hover:text-amber-300 transition-colors"
-                      >
-                        📂 Open spec location
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Human feedback banner */}
             {humanFeedback && (
@@ -307,15 +327,6 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
               >
                 {pendingAction === 'approve-pr' ? 'Creating PR…' : 'Open Pull Request'}
               </button>
-              {qaReport?.spec_concerns && qaReport.spec_concerns.length > 0 && (
-              <button
-                onClick={handleReviseSpec}
-                disabled={pendingAction !== null}
-                className="flex-1 px-4 py-2 text-sm font-medium bg-purple-700/60 text-purple-200 hover:bg-purple-600/70 disabled:opacity-50 rounded-md transition-colors"
-              >
-                {pendingAction === 'revise-spec' ? 'Revising Spec…' : 'Revise Spec'}
-              </button>
-              )}
             </>
           )}
 
@@ -347,7 +358,7 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
                   <button
                     key={t}
                     type="button"
-                    onClick={() => { setTarget(t); setSelectedSubtasks([]); }}
+                    onClick={() => selectTarget(t)}
                     className={`px-2.5 py-1 text-xs font-medium rounded-md border transition-colors ${
                       target === t
                         ? 'bg-blue-900/40 text-blue-300 border-blue-600'

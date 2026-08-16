@@ -281,7 +281,7 @@ export async function runPlanPhase(
   // acceptance criteria as unverifiable (no producing artifact possible),
   // route to human review instead of silently proceeding to implement.
   // Write a minimal qa_report.json with spec_concerns so the review panel
-  // can render the familiar "Revise Spec" banner.
+  // can render the spec concerns banner.
   const planGapsPath = path.join(pipeline.specPath, 'plan_gaps.md');
   if (existsSync(planGapsPath)) {
     logToOutput(pipeline.specPath, '\n[GATE] Plan contains unverifiable acceptance criteria — routing to human review. See plan_gaps.md.\n');

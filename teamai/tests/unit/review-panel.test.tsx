@@ -19,13 +19,11 @@ vi.mock('next/navigation', () => ({
 const mockApproveTask = vi.fn().mockResolvedValue(undefined);
 const mockRejectTask = vi.fn().mockResolvedValue(undefined);
 const mockMarkTaskDone = vi.fn().mockResolvedValue(undefined);
-const mockReviseSpec = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@/app/actions/tasks', () => ({
   approveTask: (...args: unknown[]) => mockApproveTask(...args),
   rejectTask: (...args: unknown[]) => mockRejectTask(...args),
   markTaskDone: (...args: unknown[]) => mockMarkTaskDone(...args),
-  reviseSpec: (...args: unknown[]) => mockReviseSpec(...args),
 }));
 
 // ── Fixtures ───────────────────────────────────────────────────────────
@@ -626,6 +624,25 @@ describe('ReviewPanel', () => {
   // ── Spec concerns rendering ─────────────────────────────────────────
 
   describe('spec concerns banner', () => {
+    it('shows spec concerns without expanding the QA Report section', () => {
+      render(
+        <ReviewPanel
+          taskId="task-5"
+          spec={null}
+          qaReport={QA_REPORT_WITH_SPEC_CONCERNS}
+          diff={null}
+          prUrl={null}
+          phase="awaiting-review"
+        />,
+      );
+
+      // Banner + concern details are visible immediately (no section expansion).
+      expect(screen.getByText('Spec Concerns — The specification needs revision')).toBeInTheDocument();
+      expect(screen.getByText('Wrong API response shape assumed')).toBeInTheDocument();
+      expect(screen.getByText('Spec says API returns { data: [...] } but it actually returns { results: [...] }.')).toBeInTheDocument();
+      expect(screen.getByText('Suggested: Update spec to use { results: [...] }.')).toBeInTheDocument();
+    });
+
     it('renders spec concerns banner with issue, reasoning, and suggested_fix', async () => {
       render(
         <ReviewPanel
@@ -699,105 +716,13 @@ describe('ReviewPanel', () => {
     });
   });
 
-  // ── Revise Spec button visibility ───────────────────────────────────
+  // ── Request Changes → Analyst pre-fill ─────────────────────────────
 
-  describe('Revise Spec button', () => {
-    it('appears when spec_concerns exist and not in pr-open phase', () => {
+  describe('Request Changes analyst pre-fill', () => {
+    it('pre-fills the textarea with spec_concerns when selecting Analyst', async () => {
       render(
         <ReviewPanel
           taskId="task-6"
-          spec={null}
-          qaReport={QA_REPORT_WITH_SPEC_CONCERNS}
-          diff={null}
-          prUrl={null}
-          phase="awaiting-review"
-        />,
-      );
-
-      expect(screen.getByText('Revise Spec')).toBeInTheDocument();
-    });
-
-    it('does NOT appear when spec_concerns is undefined', () => {
-      render(
-        <ReviewPanel
-          taskId="task-6"
-          spec={null}
-          qaReport={QA_REPORT_PASS}
-          diff={null}
-          prUrl={null}
-          phase="awaiting-review"
-        />,
-      );
-
-      expect(screen.queryByText('Revise Spec')).not.toBeInTheDocument();
-    });
-
-    it('does NOT appear when spec_concerns is empty', () => {
-      render(
-        <ReviewPanel
-          taskId="task-6"
-          spec={null}
-          qaReport={{
-            overall: 'PASS',
-            criteria: [],
-            spec_concerns: [],
-          }}
-          diff={null}
-          prUrl={null}
-          phase="awaiting-review"
-        />,
-      );
-
-      expect(screen.queryByText('Revise Spec')).not.toBeInTheDocument();
-    });
-
-    it('does NOT appear when in pr-open phase (even with spec_concerns)', () => {
-      render(
-        <ReviewPanel
-          taskId="task-6"
-          spec={null}
-          qaReport={QA_REPORT_WITH_SPEC_CONCERNS}
-          diff={null}
-          prUrl="https://github.com/owner/repo/pull/42"
-          phase="pr-open"
-        />,
-      );
-
-      expect(screen.queryByText('Revise Spec')).not.toBeInTheDocument();
-      // pr-open shows Mark as Done instead
-      expect(screen.getByText('Mark as Done')).toBeInTheDocument();
-    });
-
-    it('renders alongside Merge Locally and Open Pull Request buttons', () => {
-      render(
-        <ReviewPanel
-          taskId="task-6"
-          spec={null}
-          qaReport={QA_REPORT_WITH_SPEC_CONCERNS}
-          diff={null}
-          prUrl={null}
-          phase="awaiting-review"
-        />,
-      );
-
-      // All three buttons should be present
-      expect(screen.getByText('Merge Locally')).toBeInTheDocument();
-      expect(screen.getByText('Open Pull Request')).toBeInTheDocument();
-      expect(screen.getByText('Request Changes')).toBeInTheDocument();
-      expect(screen.getByText('Revise Spec')).toBeInTheDocument();
-    });
-  });
-
-  // ── Revise Spec action ──────────────────────────────────────────────
-
-  describe('Revise Spec click action', () => {
-    it('calls reviseSpec with the taskId and shows loading state', async () => {
-      // Use a never-resolving promise to keep the action pending
-      mockReviseSpec.mockImplementation(() => new Promise(() => {}));
-
-      render(
-        <ReviewPanel
-          taskId="task-7"
           spec={null}
           qaReport={QA_REPORT_WITH_SPEC_CONCERNS}
           diff={null}
@@ -807,22 +732,26 @@ describe('ReviewPanel', () => {
       );
 
       await act(async () => {
-        fireEvent.click(screen.getByText('Revise Spec'));
+        fireEvent.click(screen.getByText('Request Changes'));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('Analyst'));
       });
 
-      expect(mockReviseSpec).toHaveBeenCalledWith('task-7');
-
-      // Button shows loading text and is disabled
-      const reviseBtn = screen.getByText('Revising Spec…');
-      expect(reviseBtn).toBeDisabled();
+      const textarea = screen.getByPlaceholderText('Describe what needs to change...');
+      expect(textarea).toHaveValue(
+        '- Wrong API response shape assumed\n' +
+        '  Reasoning: Spec says API returns { data: [...] } but it actually returns { results: [...] }.\n' +
+        '  Suggested fix: Update spec to use { results: [...] }.\n\n' +
+        '- Missing edge case\n' +
+        '  Reasoning: Spec does not cover the rate-limiting scenario.',
+      );
     });
 
-    it('refreshes router on successful completion', async () => {
-      mockReviseSpec.mockResolvedValue(undefined);
-
+    it('does not pre-fill when selecting a non-analyst target', async () => {
       render(
         <ReviewPanel
-          taskId="task-8"
+          taskId="task-6"
           spec={null}
           qaReport={QA_REPORT_WITH_SPEC_CONCERNS}
           diff={null}
@@ -832,35 +761,14 @@ describe('ReviewPanel', () => {
       );
 
       await act(async () => {
-        fireEvent.click(screen.getByText('Revise Spec'));
+        fireEvent.click(screen.getByText('Request Changes'));
       });
-
-      expect(mockRouterRefresh).toHaveBeenCalled();
-    });
-
-    it('disables other buttons while revise-spec is pending', async () => {
-      mockReviseSpec.mockImplementation(() => new Promise(() => {}));
-
-      render(
-        <ReviewPanel
-          taskId="task-9"
-          spec={null}
-          qaReport={QA_REPORT_WITH_SPEC_CONCERNS}
-          diff={null}
-          prUrl={null}
-          phase="awaiting-review"
-        />,
-      );
-
       await act(async () => {
-        fireEvent.click(screen.getByText('Revise Spec'));
+        fireEvent.click(screen.getByText('Engineer'));
       });
 
-      // All other action buttons should be disabled
-      expect(screen.getByText('Merge Locally')).toBeDisabled();
-      expect(screen.getByText('Open Pull Request')).toBeDisabled();
-      expect(screen.getByText('Request Changes')).toBeDisabled();
-      expect(screen.getByText('Revising Spec…')).toBeDisabled();
+      const textarea = screen.getByPlaceholderText('Describe what needs to change...');
+      expect(textarea).toHaveValue('');
     });
   });
 
@@ -1078,21 +986,6 @@ describe('ReviewPanel', () => {
       expect(mockApproveTask).toHaveBeenCalledWith('task-r1', 'pull-request');
       await assertErrorBannerWith('pr raw throw: gh auth expired');
       expect(screen.getByText('Open Pull Request')).toBeInTheDocument();
-      expect(mockRouterRefresh).not.toHaveBeenCalled();
-    });
-
-    it('handleReviseSpec: role=alert surfaces when reviseSpec throws', async () => {
-      mockReviseSpec.mockRejectedValueOnce(new Error('revise raw throw: spec snapshot conflict'));
-
-      setupAwaitingReview({ qaReport: QA_REPORT_WITH_SPEC_CONCERNS });
-
-      await act(async () => {
-        fireEvent.click(screen.getByText('Revise Spec'));
-      });
-
-      expect(mockReviseSpec).toHaveBeenCalledWith('task-r1');
-      await assertErrorBannerWith('revise raw throw: spec snapshot conflict');
-      expect(screen.getByText('Revise Spec')).toBeInTheDocument();
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
