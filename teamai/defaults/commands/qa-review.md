@@ -90,6 +90,16 @@ assertions don't.
    results alone are not sufficient; verify that each occurrence actually
    does what the grep keyword suggests.
 
+## Running Verification Scripts & Servers
+
+When verification requires running a script, server, or service (including the test
+suite in Step 6):
+
+- **Run from the worktree.** Start everything from the current working directory (the task's git worktree), NOT the base project root. The worktree contains the branch's code — running from the project root would exercise the wrong revision.
+- **Use dynamic ports.** When starting a local server, bind to port 0 (OS-assigned free port). Never hardcode a fixed shared port — another concurrent task may collide.
+- **Never kill what you didn't start.** Do NOT use `kill`, `fuser -k`, `taskkill`, or equivalent against any port or process. Another task's agent may be using it.
+- **Stop your own instances.** When verification is complete, explicitly tear down any server or service you started.
+
 ## Step 6: Run Test Suite
 
 > ⚠️ **ON REWORK PASSES: Run the FULL suite.** The coder was told to run tests,
