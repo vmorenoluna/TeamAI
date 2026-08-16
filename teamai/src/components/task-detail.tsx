@@ -531,7 +531,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                           <button
                             key={label}
                             onClick={() => setSpecVersion(label)}
-                            className={`text-[10px] font-medium px-2 py-0.5 border transition-colors first:rounded-l-md ${
+                            className={`text-[10px] font-medium px-2 py-0.5 border transition-colors first:rounded-l-md last:rounded-r-md ${
                               specVersion === label
                                 ? 'border-[#2563eb] bg-[#2563eb]/20 text-blue-300'
                                 : 'border-[#334155] bg-[#1a1f2e] text-slate-400 hover:text-slate-300'
@@ -540,16 +540,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                             {label}
                           </button>
                         ))}
-                        <button
-                          onClick={() => setSpecVersion(null)}
-                          className={`text-[10px] font-medium px-2 py-0.5 rounded-r-md border transition-colors ${
-                            specVersion === null
-                              ? 'border-[#2563eb] bg-[#2563eb]/20 text-blue-300'
-                              : 'border-[#334155] bg-[#1a1f2e] text-slate-400 hover:text-slate-300'
-                          }`}
-                        >
-                          current
-                        </button>
                       </div>
                     )}
                   </div>
@@ -561,7 +551,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
 
                 {compareMode && specVersions ? (
                   <SpecDiffView
-                    spec={spec ?? ''}
                     specVersions={specVersions}
                     leftVersion={leftVersion}
                     rightVersion={rightVersion}
