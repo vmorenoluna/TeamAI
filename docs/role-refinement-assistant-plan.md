@@ -157,17 +157,21 @@ Patching it into a project's *command* file is equally useless: commands are **f
 per-project edit), so the change would be clobbered on the next restart. The only durable home for
 a contract gap is the shipped default itself.
 
-**How the analyzer records a contract gap.** `isRolePromptGap:false`, empty `edits`, and a
-`diagnosis` that names the specific `defaults/commands/` file (and section) that needs the
-upstream fix. The UI renders it as a "not a role-prompt gap" card whose diagnosis reads *"upstream
-command change needed — <file>"*; no Apply/Retry button is offered.
+**How the analyzer records a contract gap.** `isRolePromptGap:false`, `contractGap:true`,
+`contractFile` set to the affected `defaults/commands/` file, empty `edits`, and a `diagnosis` that
+names the same file (and section), explains *why* it is a contract gap, and sketches the change. The
+diagnosis must be
+**self-contained and copyable** — written so the user can copy it verbatim and paste it as a
+prompt to an agent working on the TeamAI repo itself. The UI renders it as a "not a role-prompt
+gap" card with the diagnosis behind a **Copy** control (the existing `CopyButton` pattern) and no
+Apply/Retry button.
 
 **Non-goals.** The feature never edits a project's `.claude/commands/*.md`, and never edits the
-shared `teamai/defaults/commands/*.md` automatically. Upstreaming a good fix to the shared
-defaults stays a manual, human decision (a human writes the `teamai/defaults/commands/` change;
-the analyzer at most drafts the diff). A future **"propose to defaults"** affordance — the
-analyzer drafts a diff and a human opens the PR — could reuse this record shape, but it is
-explicitly out of scope here.
+shared `teamai/defaults/commands/*.md` automatically — it only hands the user a copyable
+diagnosis, and a human (or their TeamAI-repo agent) writes the `teamai/defaults/commands/` change.
+No draft diff is produced or stored; the copyable `diagnosis` *is* the deliverable for a contract
+gap. A future **"propose to defaults"** affordance — the analyzer drafts a diff and a human opens
+the PR — could reuse this record shape, but it is explicitly out of scope here.
 
 ---
 
@@ -270,9 +274,13 @@ A sibling of the per-task dirs (scanned like tasks; small volume). One file per 
   "sourceTaskIds": ["<taskId>", "..."],     // failures that motivated this
   "signature": "sha256:<hash>",              // dedupe key: sorted FAIL-criterion names + role set
   "isRolePromptGap": true,
+  "contractGap": false,                       // true when the finding is a command (not role) gap
+  "contractFile": null,                       // e.g. "implement.md" under defaults/commands/, set when contractGap
   "rootCause": "Coder never force-adds gitignored evidence logs; planner emits `git add` without -f.",
   "confidence": "high" | "medium" | "low",
   "diagnosis": "<free text, always present — the 'why', shown even when isRolePromptGap=false>",
+               // For contract gaps (isRolePromptGap=false): self-contained and copyable so the
+               // user can paste it as a prompt to an agent working on the TeamAI repo itself.
   "edits": [
     {
       "roleFile": "planner.md",             // must be an existing file in .claude/roles/
@@ -318,7 +326,9 @@ Add directly **below** the existing red "Task Failed" completion-summary banner 
   `useStreamProgress` progress-line trick from `insights-chat.tsx` for live status if streaming
   the analyst session; otherwise a static pending state polled via `refinementStatus`).
 - **No gap** (`no-gap`): neutral card — *"Not a role-prompt gap"* + the analyst `diagnosis`
-  text + a `Dismiss` link. No edits offered.
+  text behind a **Copy** button (reuse the existing `CopyButton` from `task-detail.tsx`), so the
+  user can paste it as a prompt to an agent working on the TeamAI repo, plus a `Dismiss` link.
+  No edits offered.
 - **Suggested** (`suggested`): the payoff card:
   - Header: *"Suggested role-prompt refinement"* + confidence pill (`high`/`medium`/`low`)
     styled like the existing phase badges.
@@ -345,6 +355,12 @@ New `<section>` above the existing "Agent Roles" section, plus new component
   each row shows source-task title(s), root cause, affected role files, confidence, and `Review`
   (jump to the task card) / `Apply` / `Dismiss`. Applied/dismissed items collapse into an
   HTML `<details>` summary section (the collapsible pattern already used across the settings UI).
+- **Contract gaps found** — an aggregate list of every record with `contractGap:true` (across all
+  tasks), so contract-shaped gaps are visible in one place instead of only on each failed task's
+  card. Each row shows the source-task title(s), the affected `defaults/commands/` file (from
+  `contractFile`), and a **Copy** button for the diagnosis; there is no Apply/Retry (these are not
+  role edits — see §2.7). This is the natural triage point for deciding which findings to upstream
+  into the shared defaults.
 - **Applied-refinements history** with per-item **Revert** (restores the backup via
   `revertRefinement`).
 
@@ -414,11 +430,14 @@ Sent as the session message. Key elements:
   project-specific persona/convention: missing house style, a repo-specific convention, or a
   misworded project convention that misleads the agent.
 - Output contract: write a single JSON object to `.teamai/role-refinements/<id>.analysis.json`
-  with `{ isRolePromptGap, rootCause, confidence, diagnosis, edits:[{roleFile, mode, rationale,
-  proposedContent, riskClass}] }`, `mode:"append"` preferred for additive fixes. *"If it is not
-  a role-prompt gap, set `isRolePromptGap:false`, leave `edits` empty, and explain the real cause
-  in `diagnosis`. If it is a **contract gap**, say so explicitly in `diagnosis` and name the
-  `defaults/commands/` file that needs the upstream fix — never emit a role edit for it."*
+  with `{ isRolePromptGap, contractGap, contractFile, rootCause, confidence, diagnosis,
+  edits:[{roleFile, mode, rationale, proposedContent, riskClass}] }`, `mode:"append"` preferred for
+  additive fixes. *"If it is not a role-prompt gap, set `isRolePromptGap:false`, leave `edits`
+  empty, and explain the real cause in `diagnosis`. If it is a **contract gap**, also set
+  `contractGap:true` and `contractFile` to the affected file under `defaults/commands/`, say so
+  explicitly in `diagnosis`, and name the file that needs the upstream fix — never emit a role edit
+  for it. Write the diagnosis as a self-contained, copyable prompt the user can paste into a
+  TeamAI-repo agent."*
 - Model: the project's configured **analyst** model (`providers.json`), defaulting to the analyst
   default (Sonnet-class) — analysis is a read-and-reason task, not a long agentic edit.
 
@@ -437,7 +456,10 @@ Sent as the session message. Key elements:
   `applyRefinement` (keep the action as a thin wrapper).
 - `server.ts` (custom server boot) — call `startRoleRefinementWatcher()` alongside
   `restoreAutoModeStates()`.
-- `app/settings/page.tsx` — render the new settings panel + `getRoleRefinementConfig`.
+- `app/settings/page.tsx` — render the new settings panel + `getRoleRefinementConfig`, and
+  **remove the "Project Defaults" sync section** (the `ProjectsSettings` component) — commands are
+  force-synced at startup now, so its manual Sync buttons and per-project sync status are obsolete
+  and the section should be deleted rather than left as a no-op.
 - `components/task-detail.tsx` — mount `<RoleRefinementCard>` under the failure banner.
 - `components/sidebar.tsx` — (Phase 2) pending-count badge.
 
