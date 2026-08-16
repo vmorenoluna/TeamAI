@@ -16,7 +16,9 @@ const sessions: Map<string, string> =
 export async function startIdeationScan(): Promise<string> {
   const projectPath = await getActiveProjectPath();
   const providersConfig = await getProvidersConfig();
-  const explorationModel = providersConfig.exploration?.model || undefined;
+  // Default to Sonnet (not the CLI default) so a mechanical scan never
+  // silently runs an expensive model.
+  const explorationModel = providersConfig.exploration?.model || providersConfig.default.model;
   const sessionId = await processManager.createSession({
     taskId: `ideation::${projectPath}`,
     role: 'general',
