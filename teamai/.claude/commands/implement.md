@@ -39,7 +39,7 @@ is `"cleanup"`. If so, you are in **cleanup-only rework mode**:
 - Execute only the `fix_needed` operations from the failing criteria:
   - For git/file-system fixes: `git rm`, `git add`, `git mv`, committing missing files, etc.
   - For artifact fixes: run the specified script, verify the output meets the criterion's thresholds,
-    `git add` the output, commit, and push.
+    `git add` the output, and commit.
 - Commit your changes (do NOT push — the orchestrator handles pushing).
 - Print a summary of what was cleaned up or what artifact was produced.
 - Cleanup rework is complete — do not mark additional subtasks as complete.
@@ -119,7 +119,7 @@ re-read a file to verify an `Edit` that returned success.
    `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 5. If tests fail, fix the issues before proceeding.
 6. Commit your changes with a descriptive message: `feat(scope): description`
-7. **Do NOT push.** Commit your changes — the orchestrator handles pushing (see your role guardrails).
+7. **Do NOT push.** The orchestrator pushes all commits at the end of the implement phase. Pushing from the agent sandbox will fail for lack of credentials and wastes calls. Commit your changes — the orchestrator handles the rest.
 8. Print a summary of what was changed and the test results.
 
 ## Rules
