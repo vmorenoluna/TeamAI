@@ -279,7 +279,7 @@ describe('ReviewPanel', () => {
         fireEvent.click(screen.getByText('Send to Engineer'));
       });
 
-      expect(mockRejectTask).toHaveBeenCalledWith('task-1', 'The PR needs more tests', 'coder');
+      expect(mockRejectTask).toHaveBeenCalledWith('task-1', 'The PR needs more tests', 'coder', undefined);
       expect(mockRouterRefresh).toHaveBeenCalled();
     });
   });
@@ -431,7 +431,59 @@ describe('ReviewPanel', () => {
         fireEvent.click(screen.getByText('Send to Engineer'));
       });
 
-      expect(mockRejectTask).toHaveBeenCalledWith('task-2', 'Fix the button color', 'coder');
+      expect(mockRejectTask).toHaveBeenCalledWith('task-2', 'Fix the button color', 'coder', undefined);
+      expect(mockRouterRefresh).toHaveBeenCalled();
+    });
+
+    it('shows a subtask checklist for the Engineer target and passes the selection', async () => {
+      render(
+        <ReviewPanel
+          taskId="task-2"
+          spec={null}
+          qaReport={QA_REPORT_PASS}
+          diff={null}
+          prUrl={null}
+          phase="awaiting-review"
+          subtasks={[
+            { id: 1, title: 'Auth module', files: ['src/auth.ts'] },
+            { id: 2, title: 'UI module', files: ['src/ui.ts'] },
+            { id: 3, title: 'API module', files: ['src/api.ts'] },
+          ]}
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Request Changes'));
+      });
+
+      // Checklist is hidden until the Engineer target is chosen.
+      expect(screen.queryByText(/Affected subtasks/)).not.toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Engineer'));
+      });
+
+      // Checklist renders one checkbox per subtask.
+      expect(screen.getByText(/Affected subtasks/)).toBeInTheDocument();
+      const checkboxes = screen.getAllByRole('checkbox');
+      expect(checkboxes).toHaveLength(3);
+
+      // Select subtasks #1 and #3.
+      await act(async () => {
+        fireEvent.click(checkboxes[0]);
+        fireEvent.click(checkboxes[2]);
+      });
+
+      await act(async () => {
+        fireEvent.change(screen.getByPlaceholderText('Describe what needs to change...'), {
+          target: { value: 'Rework these modules' },
+        });
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('Send to Engineer'));
+      });
+
+      expect(mockRejectTask).toHaveBeenCalledWith('task-2', 'Rework these modules', 'coder', [1, 3]);
       expect(mockRouterRefresh).toHaveBeenCalled();
     });
   });
@@ -1099,7 +1151,7 @@ describe('ReviewPanel', () => {
         fireEvent.click(screen.getByText('Send to Engineer'));
       });
 
-      expect(mockRejectTask).toHaveBeenCalledWith('task-r1', 'Please add a test for X', 'coder');
+      expect(mockRejectTask).toHaveBeenCalledWith('task-r1', 'Please add a test for X', 'coder', undefined);
       await assertErrorBannerWith('reject raw throw: comment api down');
       // runAction's re-throw preserves the feedback UI — textarea still
       // visible so the user can edit and retry.

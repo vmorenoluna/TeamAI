@@ -315,12 +315,12 @@ export async function markTaskDone(taskId: string) {
   revalidatePath('/');
 }
 
-export async function rejectTask(taskId: string, feedback: string, target: string) {
+export async function rejectTask(taskId: string, feedback: string, target: string, subtaskIds?: number[]) {
   if (!isFeedbackTarget(target)) {
     throw new Error(`Invalid feedback target: ${String(target)}`);
   }
   const { orchestrator } = await getStores();
-  await orchestrator.rejectTask(taskId, feedback, target as FeedbackTarget);
+  await orchestrator.rejectTask(taskId, feedback, target as FeedbackTarget, subtaskIds);
   revalidatePath('/');
 }
 

@@ -33,6 +33,8 @@ interface Props {
   specRevision?: number;
   /** Absolute path to spec.md on disk. Used by the "Open spec" button. */
   specPath?: string;
+  /** Plan subtasks — shown as a checklist to scope coder-targeted feedback. */
+  subtasks?: { id: number; title: string; files?: string[] }[];
 }
 
 function DiffLine({ line }: { line: string }) {
@@ -66,13 +68,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 type PendingAction = 'approve-local' | 'approve-pr' | 'reject' | 'mark-done' | 'revise-spec' | null;
 
-export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase, specRevision, specPath }: Props) {
+export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase, specRevision, specPath, subtasks }: Props) {
   const { run } = useServerMutation();
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [error, setError] = useState<string | null>(null);
   const [showReject, setShowReject] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [target, setTarget] = useState<FeedbackTarget | null>(null);
+  const [selectedSubtasks, setSelectedSubtasks] = useState<number[]>([]);
   const isPrOpen = phase === 'pr-open' || !!prUrl;
 
   /**
@@ -115,11 +118,18 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
   async function handleReject() {
     if (!feedback.trim() || !target) return;
     await runAction('reject', 'send task back', async () => {
-      await rejectTask(taskId, feedback, target);
+      await rejectTask(taskId, feedback, target, selectedSubtasks.length ? selectedSubtasks : undefined);
       setShowReject(false);
       setFeedback('');
       setTarget(null);
+      setSelectedSubtasks([]);
     });
+  }
+
+  function toggleSubtask(id: number) {
+    setSelectedSubtasks(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id],
+    );
   }
 
   async function handleReviseSpec() {
@@ -337,7 +347,7 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
                   <button
                     key={t}
                     type="button"
-                    onClick={() => setTarget(t)}
+                    onClick={() => { setTarget(t); setSelectedSubtasks([]); }}
                     className={`px-2.5 py-1 text-xs font-medium rounded-md border transition-colors ${
                       target === t
                         ? 'bg-blue-900/40 text-blue-300 border-blue-600'
@@ -349,6 +359,39 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
                 ))}
               </div>
             </div>
+            {target === 'coder' && subtasks && subtasks.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-slate-400">
+                  Affected subtasks <span className="text-slate-500">(optional — scopes the rework)</span>
+                </span>
+                <div className="max-h-44 overflow-y-auto rounded-md border border-[#334155] bg-[#11131b] p-1.5 space-y-1">
+                  {subtasks.map(s => {
+                    const checked = selectedSubtasks.includes(s.id);
+                    return (
+                      <label
+                        key={s.id}
+                        className={`flex items-start gap-2 px-2 py-1.5 rounded cursor-pointer text-xs ${
+                          checked ? 'bg-blue-900/30' : 'hover:bg-[#1a1f2e]'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleSubtask(s.id)}
+                          className="mt-0.5 accent-blue-500"
+                        />
+                        <span className="text-slate-300 min-w-0">
+                          <span className="font-medium">#{s.id}</span> {s.title}
+                          {s.files && s.files.length > 0 && (
+                            <span className="block text-slate-500 truncate">{s.files.join(', ')}</span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <textarea
               value={feedback}
               onChange={e => setFeedback(e.target.value)}
