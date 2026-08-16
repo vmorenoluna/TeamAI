@@ -108,9 +108,16 @@ Core engine. Extends `EventEmitter` and manages a `Map<string, AgentSession>`. E
 Key methods: `createSession(taskId, role, cwd)`, `writeToSession(id, data)`, `terminateSession(id)` (SIGTERM).
 
 ### Multi-Agent Pipeline
-Defined in `defaults/roles/` (analyst, planner, coder, qa-reviewer, qa-fixer, merger) and `defaults/commands/` (spec, plan, implement, qa-review, qa-fix, merge, roadmap, ideation, changelog).
+Defined in `defaults/roles/` (analyst, planner, coder, qa-reviewer, merger) and `defaults/commands/` (spec, plan, implement, qa-review, merge, roadmap, ideation, changelog, create-task). Each session gets its role persona injected as a system prompt (`--append-system-prompt` in `process-manager.ts`) before the first turn; the slash-command template (e.g. `/implement`) supplies the task instructions.
 
-Each command template injects the role at runtime: the Claude subprocess is told to adopt a role persona from `.claude/roles/{role}.md`. Per-project customization lives in the target project's `.claude/` directory.
+#### Commands vs. roles — responsibilities
+
+The two file sets are deliberately asymmetric:
+
+- **Commands** (`defaults/commands/`) are TeamAI's **orchestration contract**. They own everything the pipeline depends on to work mechanically: artifact paths and schemas (`spec.md`, `plan.json`, `qa_report.json`, `files_to_create`, the `subtask_wakeup-*.json` schema including `progress_log_path`), the output formats the orchestrator parses (`qa_report.json`'s `fail_type` / `criteria` / `additional_issues` / `spec_concerns`, the `[BUG] Fix: …` summary lines), execution-environment rules (run from the worktree, dynamic ports, never kill another agent's processes, don't push — the orchestrator does), and the cross-phase guardrails. They are synced from `defaults/` into each project on startup (customized copies are preserved).
+- **Roles** (`defaults/roles/`) are **persona + project conventions** — who the agent is and the project's own style. They are scaffolded once and then never auto-synced, because they are the part users customize (persona / tone / domain knowledge) to fit their project.
+
+**Invariant: rewriting a role — even radically — must never break TeamAI.** Anything the orchestrator or another phase relies on belongs in a command, never a role. `tests/unit/guardrail-coverage.test.ts` enforces this boundary (the verification-environment rules are pinned to the commands and asserted absent from every role).
 
 ### Renderer
 React application in `src/app/`. shadcn/ui components go in `src/components/ui/`. Path alias `@/*` maps to `src/*`. Tailwind CSS 4. Terminal output renders via xterm.js (dependency already installed).
