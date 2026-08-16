@@ -727,16 +727,21 @@ export async function runSubtaskSession(
     'Task: ' + pipeline.description + '\n' +
     'Branch: ' + pipeline.branch + '\n';
 
-  // Show completed subtasks so the agent knows what's already done
+  // Show only the completed dependencies this subtask builds on — not every
+  // completed subtask, which wastes tokens re-listing work the agent never
+  // needs to inspect.
   try {
     const planPath = path.join(pipeline.specPath, 'plan.json');
     if (existsSync(planPath)) {
       const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
       if (plan.subtasks) {
-        const completed = plan.subtasks.filter((s: PlanSubtask) => s.completed);
+        const dependsOn = new Set(subtask.depends_on || []);
+        const completedDeps = plan.subtasks.filter((s: PlanSubtask) =>
+          s.completed && dependsOn.has(s.id)
+        );
         resumeContext += 'Subtasks: ' + plan.subtasks.length + ' total';
-        if (completed.length > 0) resumeContext += ', ' + completed.length + ' already done (' +
-          completed.map((s: PlanSubtask) => '#' + s.id + ': ' + s.title).join(', ') + ')';
+        if (completedDeps.length > 0) resumeContext += ', ' + completedDeps.length + ' dependencies already done (' +
+          completedDeps.map((s: PlanSubtask) => '#' + s.id + ': ' + s.title).join(', ') + ')';
         resumeContext += '\n';
       }
     }

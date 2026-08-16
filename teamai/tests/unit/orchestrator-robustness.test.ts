@@ -2942,8 +2942,8 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       expect(sendCalls.length).toBe(1);
       expect(sendCalls[0][1]).toContain('Subtask 1');
       expect(sendCalls[0][1]).toContain('Fix auth bug');
-      // SESSION CONTEXT header lists all subtask titles, so these
-      // appearing is expected. The key assertion is only 1 session created.
+      // SESSION CONTEXT header is always present; the key assertion is
+      // only 1 session created (the non-flagged subtask must be skipped).
 
       expect(sendCalls[0][1]).toContain('SESSION CONTEXT');
       // Resolve the subtask
