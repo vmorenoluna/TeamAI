@@ -262,6 +262,25 @@ app.prepare().then(async () => {
       console.log('[demo] Demo project removed (no --with-demo flag)');
     }
 
+    // ── Force-sync default commands at startup ──────────────────────────
+    // Commands are the pipeline's orchestration contract and must match the
+    // shipped defaults before any session runs (auto-resume below can spawn
+    // sessions immediately). Customized commands are overwritten — TeamAI
+    // owns the commands; only roles are user-owned and never auto-synced.
+    try {
+      const syncReport = projectStore.syncAllProjectsDefaults();
+      if (syncReport.projects.length > 0) {
+        console.log(`[defaults] Auto-synced default commands for ${syncReport.projects.length} project(s):`);
+        for (const p of syncReport.projects) {
+          console.log(`  • ${p.projectName}: ${p.updatedFiles.length} file(s) — ${p.updatedFiles.slice(0, 3).join(', ')}${p.updatedFiles.length > 3 ? ', …' : ''}`);
+        }
+      } else {
+        console.log('[defaults] All projects already up to date');
+      }
+    } catch (err) {
+      logError('defaults', 'Failed to auto-sync default commands at startup', err);
+    }
+
     // ── Startup crash recovery scan ─────────────────────────────────────
     const staleSessions = processManager.getStaleSessions();
     const report = startupCleanup(staleSessions.length);

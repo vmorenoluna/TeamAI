@@ -278,7 +278,7 @@ describe('ProjectStore', () => {
     }
   });
 
-  it('syncDefaults does NOT overwrite a customized project file', () => {
+  it('syncDefaults OVERWRITES a customized project file (force-sync)', () => {
     store.add(projectDir, 'Test Project');
 
     // Customize the implement.md in the project
@@ -294,16 +294,15 @@ describe('ProjectStore', () => {
     writeFileSync(defaultImplSrc, modifiedDefault);
 
     try {
-      // Re-add — syncDefaults should detect the customization and skip the update
+      // Re-add — syncDefaults must force-sync the latest default over the customization
       store.remove(projectDir);
       store.add(projectDir, 'Test Project');
 
-      // The project file should STILL be the customized version
       const currentContent = readFileSync(implPath, 'utf-8');
-      expect(currentContent).toBe(customized);
-      expect(currentContent).toContain('My custom additions');
-      // Should NOT contain the default update
-      expect(currentContent).not.toContain('Updated in TeamAI v2.0');
+      expect(currentContent).toBe(modifiedDefault);
+      expect(currentContent).toContain('Updated in TeamAI v2.0');
+      // Customization is gone — commands are TeamAI-owned, not user-owned.
+      expect(currentContent).not.toContain('My custom additions');
     } finally {
       // Restore the default file
       retryOnLock(() => writeFileSync(defaultImplSrc, defaultBackup));
@@ -508,7 +507,7 @@ describe('ProjectStore', () => {
     }
   });
 
-  it('syncDefaults does not overwrite an existing project file when no baseline exists', () => {
+  it('syncDefaults OVERWRITES an existing project file even without a stored baseline', () => {
     store.add(projectDir, 'Test Project');
 
     // Create a temp default file
@@ -516,31 +515,29 @@ describe('ProjectStore', () => {
     writeFileSync(newDefaultPath, '# New default version\n');
 
     // Project already has the same file with different content and NO stored
-    // baseline — we cannot tell if it was customised, so we preserve it and
-    // record the current default checksum as the baseline for future tracking.
+    // baseline — force-sync overwrites it with the default regardless.
     const destPath = join(projectDir, '.claude', 'commands', '.test-new-command-2.md');
     writeFileSync(destPath, '# Pre-existing project version\n');
 
     try {
       const updated = store.syncDefaults(projectDir);
-      // Cannot auto-update without a baseline — but we DO flag it as outdated
       expect(updated).toContain('commands/.test-new-command-2.md');
 
-      // And record the project's checksum to the manifest (not the default's)
+      // The manifest records the DEFAULT's checksum (not the project's).
       const manifestPath = join(projectDir, '.claude', '.teamai-scaffold.json');
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-      const projectChecksum = 'sha256:' + createHash('sha256').update('# Pre-existing project version\n').digest('hex').slice(0, 16);
-      expect(manifest.files['commands/.test-new-command-2.md']).toBe(projectChecksum);
+      const defaultChecksum = 'sha256:' + createHash('sha256').update('# New default version\n').digest('hex').slice(0, 16);
+      expect(manifest.files['commands/.test-new-command-2.md']).toBe(defaultChecksum);
 
-      // Project file is preserved
-      expect(readFileSync(destPath, 'utf-8')).toBe('# Pre-existing project version\n');
+      // Project file is overwritten with the default.
+      expect(readFileSync(destPath, 'utf-8')).toBe('# New default version\n');
     } finally {
       if (existsSync(newDefaultPath)) unlinkSync(newDefaultPath);
       if (existsSync(destPath)) unlinkSync(destPath);
     }
   });
 
-  it('syncDefaults flags pre-existing mismatched file as outdated without manifest baseline', () => {
+  it('syncDefaults overwrites a pre-existing mismatched file without a manifest baseline', () => {
     store.add(projectDir, 'Test Project');
 
     // Create a new default file
@@ -552,21 +549,19 @@ describe('ProjectStore', () => {
     writeFileSync(destPath, '# Outdated project content\n');
 
     try {
-      // First syncDefaults call should flag it as outdated
+      // First syncDefaults call flags it and force-syncs the default over it
       const updated = store.syncDefaults(projectDir);
       expect(updated).toContain('commands/.test-outdated.md');
-
-      // But NOT overwrite the pre-existing project file
-      expect(readFileSync(destPath, 'utf-8')).toBe('# Outdated project content\n');
+      expect(readFileSync(destPath, 'utf-8')).toBe('# New default\n');
     } finally {
       if (existsSync(newDefaultPath)) unlinkSync(newDefaultPath);
       if (existsSync(destPath)) unlinkSync(destPath);
     }
   });
 
-  it('syncDefaults updates a bootstrapped outdated file on the next run after default changes', () => {
-    // Simulate the full lifecycle: bootstrap flags a divergent file →
-    // default changes → second run picks it up and updates.
+  it('syncDefaults force-syncs a divergent file immediately and tracks subsequent default updates', () => {
+    // Force-sync: a divergent file is overwritten on the very first run, then
+    // tracked so a later default update is picked up on the next run.
     store.add(projectDir, 'Test Project');
 
     const newDefaultPath = join(process.cwd(), 'defaults', 'commands', '.test-lifecycle.md');
@@ -577,32 +572,31 @@ describe('ProjectStore', () => {
     writeFileSync(destPath, '# Project v0 (outdated)\n');
 
     try {
-      // Step 2: Bootstrap — should flag as outdated and record project checksum.
+      // Step 2: First run overwrites the divergent file with default v1.
       const first = store.syncDefaults(projectDir);
       expect(first).toContain('commands/.test-lifecycle.md');
-      expect(readFileSync(destPath, 'utf-8')).toBe('# Project v0 (outdated)\n');
+      expect(readFileSync(destPath, 'utf-8')).toBe('# Default v1\n');
 
-      // Verify manifest recorded the PROJECT checksum, not the default's.
+      // Manifest records the DEFAULT v1 checksum.
       const manifestPath = join(projectDir, '.claude', '.teamai-scaffold.json');
       const manifestAfterFirst = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-      const projectV0Checksum = 'sha256:' + createHash('sha256').update('# Project v0 (outdated)\n').digest('hex').slice(0, 16);
-      expect(manifestAfterFirst.files['commands/.test-lifecycle.md']).toBe(projectV0Checksum);
+      const defaultV1Checksum = 'sha256:' + createHash('sha256').update('# Default v1\n').digest('hex').slice(0, 16);
+      expect(manifestAfterFirst.files['commands/.test-lifecycle.md']).toBe(defaultV1Checksum);
 
       // Step 3: Update the default to v2.
       writeFileSync(newDefaultPath, '# Default v2 (updated)\n');
 
-      // Step 4: Second run — projectChecksum === storedChecksum (v0 hash),
-      // so the file is treated as uncustomized and gets updated with default v2.
+      // Step 4: Second run overwrites with default v2.
       const second = store.syncDefaults(projectDir);
       expect(second).toContain('commands/.test-lifecycle.md');
       expect(readFileSync(destPath, 'utf-8')).toBe('# Default v2 (updated)\n');
 
-      // Manifest should now have the v2 default checksum.
+      // Manifest now has the v2 default checksum.
       const manifestAfterSecond = JSON.parse(readFileSync(manifestPath, 'utf-8'));
       const defaultV2Checksum = 'sha256:' + createHash('sha256').update('# Default v2 (updated)\n').digest('hex').slice(0, 16);
       expect(manifestAfterSecond.files['commands/.test-lifecycle.md']).toBe(defaultV2Checksum);
 
-      // Step 5: Third run — storedChecksum === currentChecksum, no changes.
+      // Step 5: Third run — file already matches default v2, no changes.
       const third = store.syncDefaults(projectDir);
       expect(third).not.toContain('commands/.test-lifecycle.md');
     } finally {
@@ -611,7 +605,7 @@ describe('ProjectStore', () => {
     }
   });
 
-  it('syncDefaults preserves a customised project file even when the default is updated', () => {
+  it('syncDefaults overwrites a customised project file when the default is updated', () => {
     // Register and establish a manifest baseline
     store.add(projectDir, 'Test Project');
 
@@ -630,9 +624,9 @@ describe('ProjectStore', () => {
       writeFileSync(newDefaultPath, '# Updated default\n');
 
       const updated = store.syncDefaults(projectDir);
-      // Customised file must NOT be updated
-      expect(updated).not.toContain('commands/.test-new-command-2.md');
-      expect(readFileSync(destPath, 'utf-8')).toBe('# My custom version\n');
+      // Customised file is force-synced to the latest default
+      expect(updated).toContain('commands/.test-new-command-2.md');
+      expect(readFileSync(destPath, 'utf-8')).toBe('# Updated default\n');
     } finally {
       if (existsSync(newDefaultPath)) unlinkSync(newDefaultPath);
       if (existsSync(destPath)) unlinkSync(destPath);
@@ -672,7 +666,7 @@ describe('ProjectStore', () => {
     }
   });
 
-  it('getStaleDefaults skips projects that are up to date and only returns stale ones', () => {
+  it('getStaleDefaults returns every project whose commands differ from the defaults (force-sync)', () => {
     // Clear all previously-registered projects for isolation
     for (const p of store.getAll()) store.remove(p.path);
     // Add two projects
@@ -682,7 +676,7 @@ describe('ProjectStore', () => {
     mkdirSync(projectB, { recursive: true });
     store.add(projectB, 'Project B');
 
-    // Only modify one project's file to simulate customization
+    // Customize one project's file — under force-sync it is still outdated.
     const implB = join(projectB, '.claude', 'commands', 'implement.md');
     const originalB = readFileSync(implB, 'utf-8');
     writeFileSync(implB, originalB + '\n\n# Customized by Project B\n');
@@ -695,11 +689,11 @@ describe('ProjectStore', () => {
     try {
       const stale = store.getStaleDefaults();
 
-      // Project A is uncustomized — should be stale
+      // Project A is uncustomized — stale
       expect(stale.some(s => s.projectPath === projectDir)).toBe(true);
 
-      // Project B is customized — should NOT be stale (preserved)
-      expect(stale.some(s => s.projectPath === projectB)).toBe(false);
+      // Project B is customized — still stale because commands are force-synced
+      expect(stale.some(s => s.projectPath === projectB)).toBe(true);
     } finally {
       retryOnLock(() => writeFileSync(defaultImplSrc, defaultBackup));
       store.remove(projectB);
@@ -730,6 +724,71 @@ describe('ProjectStore', () => {
     } finally {
       retryOnLock(() => writeFileSync(defaultImplSrc, defaultBackup));
     }
+  });
+
+  // ── Startup auto-sync report ──────────────────────────────────────
+
+  it('syncAllProjectsDefaults force-syncs all projects and persists a report of changes', () => {
+    // Clear all previously-registered projects for isolation
+    for (const p of store.getAll()) store.remove(p.path);
+    store.add(projectDir, 'Project A');
+
+    const projectB = join(process.cwd(), '.teamai-test-b-' + randomUUID().slice(0, 8));
+    mkdirSync(projectB, { recursive: true });
+    store.add(projectB, 'Project B');
+
+    // Customize Project B's command so only it changes on sync
+    const implB = join(projectB, '.claude', 'commands', 'implement.md');
+    writeFileSync(implB, readFileSync(implB, 'utf-8') + '\n\n# Customized\n');
+
+    const report = store.syncAllProjectsDefaults();
+
+    // Only Project B changed
+    expect(report.projects).toHaveLength(1);
+    expect(report.projects[0].projectName).toBe('Project B');
+    expect(report.projects[0].projectPath).toBe(projectB);
+    expect(report.projects[0].updatedFiles).toContain('commands/implement.md');
+    expect(report.syncedAt).toBeDefined();
+
+    // Project B's file was overwritten back to the default
+    expect(readFileSync(implB, 'utf-8')).not.toContain('# Customized');
+
+    // The report is persisted and readable
+    const readBack = store.getDefaultsSyncReport();
+    expect(readBack).not.toBeNull();
+    expect(readBack!.projects).toHaveLength(1);
+    expect(readBack!.projects[0].projectName).toBe('Project B');
+
+    store.remove(projectB);
+    if (existsSync(projectB)) rmSync(projectB, { recursive: true, force: true });
+  });
+
+  it('syncAllProjectsDefaults returns an empty report and getDefaultsSyncReport returns null when nothing changed', () => {
+    // Clear all previously-registered projects for isolation
+    for (const p of store.getAll()) store.remove(p.path);
+    store.add(projectDir, 'Project A');
+
+    // Everything is up to date → no changes
+    const report = store.syncAllProjectsDefaults();
+    expect(report.projects).toEqual([]);
+
+    // An empty report yields null so no banner renders
+    expect(store.getDefaultsSyncReport()).toBeNull();
+  });
+
+  it('dismissDefaultsSyncReport removes the persisted report', () => {
+    // Clear all previously-registered projects for isolation
+    for (const p of store.getAll()) store.remove(p.path);
+    store.add(projectDir, 'Project A');
+
+    // Force a change so the report has content
+    const implPath = join(projectDir, '.claude', 'commands', 'implement.md');
+    writeFileSync(implPath, readFileSync(implPath, 'utf-8') + '\n\n# Customized\n');
+    store.syncAllProjectsDefaults();
+    expect(store.getDefaultsSyncReport()).not.toBeNull();
+
+    store.dismissDefaultsSyncReport();
+    expect(store.getDefaultsSyncReport()).toBeNull();
   });
 
   // ── _updateGitignore ───────────────────────────────────────────────────

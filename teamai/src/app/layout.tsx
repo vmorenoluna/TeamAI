@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Inter, Geist_Mono } from 'next/font/google';
 import './globals.css';
-import { getProjects, getActiveProject, getOutdatedProjects, getGitattributesRenormalizeSuggestion } from '@/app/actions/projects';
+import { getProjects, getActiveProject, getDefaultsSyncReport, getGitattributesRenormalizeSuggestion } from '@/app/actions/projects';
 import { Sidebar } from '@/components/sidebar';
 import { ProjectSelector } from '@/components/project-selector';
 import { DefaultsUpdater } from '@/components/defaults-updater';
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const projects = await getProjects();
   const activeProject = await getActiveProject();
-  const staleDefaults = await getOutdatedProjects();
+  const defaultsSyncReport = await getDefaultsSyncReport();
   const interruptedTasks = await getInterruptedTasks();
   const autoModeState = activeProject ? getAutoModeState(activeProject.path) : { enabled: false };
   const toolStatuses = await checkTools();
@@ -50,8 +50,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <AutoModeButton activeProjectPath={activeProject?.path ?? null} initialEnabled={autoModeState.enabled} />
             </div>
           </div>
-          {/* Defaults update banner — shows when projects have outdated copies of TeamAI defaults */}
-          <DefaultsUpdater initialStale={staleDefaults} />
+          {/* Defaults auto-sync banner — informs which commands were force-synced at startup */}
+          <DefaultsUpdater initialReport={defaultsSyncReport} />
           {/* Update banner — shows when an auto-update is downloaded and ready to install */}
           <UpdateBanner />
           {/* Recovery banner — shows when interrupted tasks are detected from previous session */}

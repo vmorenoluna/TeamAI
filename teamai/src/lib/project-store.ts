@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, readdirSync, renameSync, rmSync, appendFileSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
 import { error as logError, warn as logWarn } from './logger';
@@ -49,8 +49,22 @@ export interface Project {
 export interface StaleDefaults {
   projectName: string;
   projectPath: string;
-  /** Relative paths of defaults that would be updated (uncustomized). */
+  /** Relative paths of defaults that would be force-synced (differ from shipped defaults). */
   outdatedFiles: string[];
+}
+
+/** Per-project entry in the startup auto-sync report. */
+export interface DefaultsSyncProjectReport {
+  projectName: string;
+  projectPath: string;
+  /** Relative paths of default command files that were overwritten. */
+  updatedFiles: string[];
+}
+
+/** Report of the startup auto-sync, surfaced as an informational banner in the UI. */
+export interface DefaultsSyncReport {
+  syncedAt: string;
+  projects: DefaultsSyncProjectReport[];
 }
 
 export class ProjectStore {
@@ -290,99 +304,49 @@ export class ProjectStore {
   }
 
   /**
-   * Sync default files in a project that have NOT been customized.
-   * If a default file was updated in TeamAI and the project's copy still
-   * matches the old default (i.e., was never customized), update it.
+   * Force-sync default command files (and teamai-workflow.md) into the
+   * project's .claude/ directory.
    *
-   * When `dryRun` is true, computes what WOULD be updated but does not
-   * write any files. Returns the list of file paths that were (or would
-   * be) updated.
+   * Commands are TeamAI's orchestration contract — the pipeline reads them
+   * from each project and depends on them matching the shipped defaults.
+   * Unlike roles (the user-owned persona surface, excluded from the manifest
+   * and never auto-synced), commands are overwritten unconditionally so a
+   * customized command can never drift the workflow away from what the
+   * orchestrator expects.
+   *
+   * When `dryRun` is true, computes what WOULD be overwritten without
+   * writing any files. Returns the relative paths of files that were (or
+   * would be) updated.
    */
   syncDefaults(projectPath: string, dryRun = false): string[] {
     const updated: string[] = [];
     const manifestPath = this._manifestPath(projectPath);
-
-    // Read the stored manifest (what was copied to this project)
-    let storedManifest: Record<string, string> = {};
-    if (existsSync(manifestPath)) {
-      try {
-        const parsed = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-        if (parsed.files) storedManifest = parsed.files;
-      } catch { /* malformed — treat as empty */ }
-    }
-
     const currentManifest = this._getDefaultsManifest();
-    const newManifest: Record<string, string> = { ...storedManifest };
+    const newManifest: Record<string, string> = {};
 
     for (const [relPath, currentChecksum] of Object.entries(currentManifest)) {
-      const storedChecksum = storedManifest[relPath];
+      const srcFile = join(getDefaultsDir(), relPath);
+      if (!existsSync(srcFile)) continue;
 
-      if (!storedChecksum) {
-        const destFile = join(projectPath, '.claude', relPath);
-        if (!existsSync(destFile)) {
-          // Brand-new default file, project never had it — copy it.
-          if (!dryRun) {
-            const srcFile = join(getDefaultsDir(), relPath);
-            if (existsSync(srcFile)) cpSync(srcFile, destFile);
-          }
-          newManifest[relPath] = currentChecksum;
-          updated.push(relPath);
-        } else {
-          // File exists but has no stored baseline (manifest was absent or the
-          // file predates the manifest). Compute the project file's checksum
-          // and compare to the current default. If they match, the file is
-          // genuinely in sync — record the default checksum as the baseline.
-          // If they differ, record the project's checksum so future default
-          // changes are still trackable, and flag the file as outdated.
-          const projectChecksum = this._computeChecksum(readFileSync(destFile, 'utf-8'));
+      const destFile = join(projectPath, '.claude', relPath);
+      const matches = existsSync(destFile) &&
+        this._computeChecksum(readFileSync(destFile, 'utf-8')) === currentChecksum;
 
-          if (projectChecksum === currentChecksum) {
-            newManifest[relPath] = currentChecksum;
-          } else {
-            newManifest[relPath] = projectChecksum;
-            updated.push(relPath);
-          }
-        }
-        continue;
-      }
-
-      if (storedChecksum === currentChecksum) {
-        // Unchanged — keep the existing entry
-        continue;
-      }
-
-      // Default changed — check if project's file matches the old default
-      const projectFile = join(projectPath, '.claude', relPath);
-      if (!existsSync(projectFile)) {
-        // File was deleted from project — copy fresh default
+      if (!matches) {
         if (!dryRun) {
-          const srcFile = join(getDefaultsDir(), relPath);
-          if (existsSync(srcFile)) cpSync(srcFile, projectFile);
+          mkdirSync(dirname(destFile), { recursive: true });
+          cpSync(srcFile, destFile);
         }
         updated.push(relPath);
-        newManifest[relPath] = currentChecksum;
-        continue;
       }
-
-      const projectChecksum = this._computeChecksum(readFileSync(projectFile, 'utf-8'));
-      if (projectChecksum === storedChecksum) {
-        // Project file matches old default — never customized, safe to update
-        if (!dryRun) {
-          const srcFile = join(getDefaultsDir(), relPath);
-          if (existsSync(srcFile)) cpSync(srcFile, projectFile);
-        }
-        updated.push(relPath);
-        newManifest[relPath] = currentChecksum;
-      } else {
-        // Project file was customized — preserve it but update the stored
-        // checksum so we don't keep comparing against the old default.
-        newManifest[relPath] = currentChecksum;
-      }
+      newManifest[relPath] = currentChecksum;
     }
 
-    // Write updated manifest (skip in dry-run mode)
-    if (!dryRun && (updated.length > 0 || Object.keys(storedManifest).length === 0)) {
+    // Always rewrite the manifest (idempotent) so it reflects the current
+    // defaults — including dropping entries for defaults that were removed.
+    if (!dryRun) {
       try {
+        mkdirSync(dirname(manifestPath), { recursive: true });
         writeFileSync(manifestPath, JSON.stringify({ version: 1, files: newManifest }, null, 2));
       } catch (err) {
         logError('ProjectStore', `Failed to write scaffold manifest at ${manifestPath}`, err);
@@ -390,6 +354,78 @@ export class ProjectStore {
     }
 
     return updated;
+  }
+
+  /** Path of the persisted auto-sync report read by the UI banner. */
+  private _syncReportPath(): string {
+    return join(getConfigDir(), 'defaults-sync-report.json');
+  }
+
+  /**
+   * Force-sync default commands into every registered project and persist a
+   * report of what changed so the UI can surface it as an informational
+   * banner (instead of a click-to-sync prompt). Called once at startup,
+   * before any session can run.
+   */
+  syncAllProjectsDefaults(): DefaultsSyncReport {
+    const report: DefaultsSyncReport = {
+      syncedAt: new Date().toISOString(),
+      projects: [],
+    };
+
+    for (const project of this.getAll()) {
+      let updated: string[] = [];
+      try {
+        updated = this.syncDefaults(project.path);
+      } catch (err) {
+        logError('ProjectStore', `Failed to sync defaults for ${project.path}`, err);
+        continue;
+      }
+      if (updated.length > 0) {
+        report.projects.push({
+          projectName: project.name,
+          projectPath: project.path,
+          updatedFiles: updated,
+        });
+      }
+    }
+
+    // Always (re)write the report so a stale report from a previous startup
+    // can't resurrect a banner that no longer applies.
+    try {
+      writeFileSync(this._syncReportPath(), JSON.stringify(report, null, 2));
+    } catch (err) {
+      logError('ProjectStore', 'Failed to write defaults sync report', err);
+    }
+
+    return report;
+  }
+
+  /**
+   * Read the persisted auto-sync report, or null when no project changed
+   * (or no report exists).
+   */
+  getDefaultsSyncReport(): DefaultsSyncReport | null {
+    try {
+      const parsed = JSON.parse(
+        readFileSync(this._syncReportPath(), 'utf-8'),
+      ) as DefaultsSyncReport;
+      if (!parsed || !Array.isArray(parsed.projects) || parsed.projects.length === 0) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Dismiss the auto-sync banner by removing the persisted report. */
+  dismissDefaultsSyncReport(): void {
+    try {
+      if (existsSync(this._syncReportPath())) rmSync(this._syncReportPath());
+    } catch (err) {
+      logError('ProjectStore', 'Failed to dismiss defaults sync report', err);
+    }
   }
 
   /**
@@ -470,7 +506,7 @@ export class ProjectStore {
     // Ensure .gitattributes has consistent line-ending normalization across host and container
     this._updateGitattributes(projectPath);
 
-    // Sync defaults that have been updated in TeamAI but not customized by the project
+    // Force-sync the latest default commands (overwrites any customization).
     this.syncDefaults(projectPath);
   }
 }

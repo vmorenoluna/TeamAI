@@ -146,8 +146,10 @@ export function ProjectsSettings() {
         </div>
       </div>
       <p className="text-xs text-slate-400 mb-4">
-        Track and update TeamAI default files across registered projects.
-        Projects with customized files are preserved — only uncustomized copies are updated.
+        Track and update TeamAI default command templates across registered projects.
+        Commands are TeamAI&apos;s orchestration contract — they are force-synced to the
+        shipped defaults at startup, overwriting any customization. (Roles are user-owned
+        and are never auto-synced.)
       </p>
 
       {projects.length === 0 ? (
