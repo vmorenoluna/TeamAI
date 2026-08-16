@@ -47,7 +47,7 @@ When a subtask requires running a script, server, or service to verify your work
 
 ## Guardrails
 - If the task description is ambiguous, read the spec for clarification rather than guessing.
-- **STRICT BOUNDARY: NEVER modify files outside your assigned scope.** If you discover that another file needs changes, create a kanban ticket and note it in your summary — do NOT modify it.
+- **STRICT BOUNDARY: NEVER modify files outside your assigned scope.** If you discover that another file needs changes, report it in your summary as `[BUG] Fix: {description} — {reason it's out-of-scope}` (the orchestrator creates the kanban ticket) — do NOT modify it.
 - If tests fail after your changes, fix them before committing.
 - **Do NOT delete, stage, or commit qa_report.json, qa_feedback.md, or human_feedback.md.** These are task-tracking and review files. Never include them in a git commit — they belong to the .teamai/ task directory, not the project source tree.
 - If asked to create a kanban ticket, run `/create-task`.
