@@ -4652,54 +4652,9 @@ describe('Orchestrator', () => {
       // (mockCreateSession for spec phase should NOT have been called)
     });
 
-    it('UI-triggered path (humanTriggered=true) bypasses limit and restarts from spec', async () => {
-      testData = setupTestProject();
-      const orch = makeOrch(testData.root, getOrchestrator);
+  // ── Spec revision — autoReviseSpec (QA path) ─────────────────────
 
-      // Set task to awaiting-review so reviseSpec can be called
-      const taskStore = (orch as AnyOrch).taskStore;
-      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
-
-      // Register a pipeline already at the revision limit
-      const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
-      pipeline.specRevision = 4;
-      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
-
-      writeFileSync(join(testData.taskDir, 'spec.md'), '# Existing Spec');
-      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
-        overall: 'FAIL',
-        spec_concerns: [
-          { issue: 'Wrong API shape', reasoning: 'API returns JSON, not XML.' },
-        ],
-      }));
-
-      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-
-      // Call through the UI path (orchestrator.reviseSpec passes humanTriggered: true)
-      await (orch as AnyOrch).reviseSpec(testData.taskId).catch(() => {});
-
-      // UI path should bypass limit — advance to spec (not park in awaiting-review)
-      expect(pipeline.phase).toBe('spec');
-      expect(pipeline.specRevision).toBe(5); // was 4, incremented to 5
-      expect(pipeline.qaAttempt).toBe(0);
-
-      // Should have written spec_revision_feedback.md
-      expect(existsSync(join(testData.taskDir, 'spec_revision_feedback.md'))).toBe(true);
-
-      // createSession should have been called (proves executePhase was reached)
-      expect(mockCreateSession).toHaveBeenCalled();
-    });
-
-
-  // ── Spec revision — reviseSpec method ─────────────────────────────
-
-  describe('reviseSpec', () => {
-    it('throws when task is not in awaiting-review', async () => {
-      testData = setupTestProject();
-      const orch = makeOrch(testData.root, getOrchestrator);
-
-      await expect(orch.reviseSpec(testData.taskId)).rejects.toThrow('cannot revise spec a task in backlog');
-    });
+  describe('autoReviseSpec (QA path)', () => {
 
     it('writes spec_revision_feedback.md from QA report spec_concerns', async () => {
       testData = setupTestProject();
@@ -4730,7 +4685,8 @@ describe('Orchestrator', () => {
       // Mock createSession to abort the cascading pipeline after spec starts
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
 
-      await orch.reviseSpec(testData.taskId).catch(() => {});
+      const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
+      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
 
       // Verify spec_revision_feedback.md was written with both concerns
       const feedbackPath = join(testData.taskDir, 'spec_revision_feedback.md');
@@ -4759,7 +4715,9 @@ describe('Orchestrator', () => {
       }));
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.reviseSpec(testData.taskId).catch(() => {});
+
+      const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
+      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
 
       // spec_v1.md should contain the original spec content
       const snapshotPath = join(testData.taskDir, 'spec_v1.md');
@@ -4791,7 +4749,7 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.reviseSpec(testData.taskId).catch(() => {});
+      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
 
       // spec_v2.md should be created with the current spec.md content
       const snapshotV2 = join(testData.taskDir, 'spec_v2.md');
@@ -4823,7 +4781,9 @@ describe('Orchestrator', () => {
       writeFileSync(join(testData.taskDir, 'human_feedback_before_bounce.md'), 'old snapshot');
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.reviseSpec(testData.taskId).catch(() => {});
+
+      const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
+      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
 
       // plan.json is preserved (the planner re-plans in place); QA artifacts are cleared
       expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(true);
@@ -4861,7 +4821,7 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.reviseSpec(testData.taskId).catch(() => {});
+      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
 
       // QA attempt should be reset to 0
       expect(pipeline.qaAttempt).toBe(0);
@@ -4882,7 +4842,8 @@ describe('Orchestrator', () => {
       // Mock createSession to verify the pipeline actually starts (createSession is called)
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
 
-      await orch.reviseSpec(testData.taskId).catch(() => {});
+      const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
+      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
 
       // createSession should have been called (proves executePhase → runSpec was reached)
       expect(mockCreateSession).toHaveBeenCalled();

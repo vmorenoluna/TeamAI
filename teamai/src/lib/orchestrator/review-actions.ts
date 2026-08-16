@@ -294,27 +294,23 @@ export async function routeHumanFeedback(
  * Writes revision feedback, snapshots the old spec, clears downstream artifacts,
  * and restarts the pipeline from the spec phase (analyst).
  *
- * Called by reviseSpec (UI path, human explicitly clicked "Revise Spec")
- * and runQaReview (QA path, auto-detected spec_concerns).
+ * Called by runQaReview (QA path, auto-detected spec_concerns). Human-driven
+ * spec revision goes through routeHumanFeedback's analyst target instead
+ * (see beginSpecRevision).
  *
- * When the revision limit is reached:
- * - QA path (humanTriggered=false): parks in awaiting-review so the human
- *   can safely edit spec.md without an agent writing concurrently.
- * - UI path (humanTriggered=true): the human has explicitly chosen to
- *   restart — bypass the limit and proceed with revision.
+ * When the revision limit is reached, the pipeline parks in awaiting-review so
+ * the human can safely edit spec.md without an agent writing concurrently.
  */
 export async function autoReviseSpec(
   pipeline: TaskPipeline,
   deps: ReviewActionsDeps,
-  opts?: { humanTriggered?: boolean },
 ): Promise<void> {
   const specPath = pipeline.specPath;
 
-  // Guard: max 3 auto-revisions. The QA path parks in awaiting-review
-  // so the human can safely edit spec.md; the UI path (Revise Spec button)
-  // bypasses the limit because the human has explicitly chosen to restart.
-  // Historical QA reports (qa_report_v{N}.json) are preserved — they are
-  // tied to specific spec versions and serve as a permanent audit trail.
+  // Guard: max 3 auto-revisions. At the limit, park in awaiting-review so the
+  // human can safely edit spec.md. Historical QA reports (qa_report_v{N}.json)
+  // are preserved — they are tied to specific spec versions and serve as a
+  // permanent audit trail.
   pipeline.specRevision++;
   if (pipeline.specRevision > 4) {
     // Write revision feedback so the analyst runs in revision mode
@@ -332,21 +328,12 @@ export async function autoReviseSpec(
     resetAllCounters(pipeline);
     deps.savePipelineState(pipeline);
 
-    if (opts?.humanTriggered) {
-      // UI path: human explicitly chose to restart — proceed with revision
-      try {
-        logToOutput(specPath, `\n[REFINE] Human-triggered spec revision (revision ${pipeline.specRevision - 1}) — restarting from spec with analyst\n`);
-      } catch { /* best-effort */ }
-      deps.advancePhase(pipeline, 'spec');
-      await deps.executePhase(pipeline);
-    } else {
-      // QA path: park in awaiting-review so the human can edit the spec
-      // without an agent writing concurrently
-      try {
-        logToOutput(specPath, `\n[REFINE] Max auto-revisions (3) reached — pausing for human-guided revision\n`);
-      } catch { /* best-effort */ }
-      deps.advancePhase(pipeline, 'awaiting-review');
-    }
+    // Park in awaiting-review so the human can edit the spec without an agent
+    // writing concurrently.
+    try {
+      logToOutput(specPath, `\n[REFINE] Max auto-revisions (3) reached — pausing for human-guided revision\n`);
+    } catch { /* best-effort */ }
+    deps.advancePhase(pipeline, 'awaiting-review');
     return;
   }
 
