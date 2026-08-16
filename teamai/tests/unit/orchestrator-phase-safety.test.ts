@@ -835,7 +835,7 @@ describe('SESSION CONTEXT header in implement prompt', () => {
     project.clean();
   });
 
-  it('includes SESSION CONTEXT header with task, branch, and completed subtasks', async () => {
+  it('includes SESSION CONTEXT header with task, branch, and completed dependencies', async () => {
     // Directly build and verify the resume-context header logic.
     // The resume-context is a string constructed in runSubtaskSession;
     // we verify its constituent parts here.
@@ -845,20 +845,23 @@ describe('SESSION CONTEXT header in implement prompt', () => {
     const testSubtaskTitle = 'Add feature';
     const testCwd = '/tmp/worktree/test';
 
-    // Simulate what runSubtaskSession does (simplified):
-    const completedSubtasks = [{ id: 1, title: 'Setup project', completed: true }];
+    // Simulate what runSubtaskSession does (simplified): only the completed
+    // DEPENDENCIES of the current subtask are listed, not every completed
+    // subtask (a completed subtask with no depends_on edge is omitted).
+    const currentSubtask = { id: 2, title: 'Add feature', depends_on: [1] };
     const allSubtasks = [
       { id: 1, title: 'Setup project', completed: true },
       { id: 2, title: 'Add feature', completed: false },
-      { id: 3, title: 'Add tests', completed: false },
+      { id: 3, title: 'Add tests', completed: true },
     ];
 
-    const done = completedSubtasks.filter(s => s.completed);
+    const dependsOn = new Set(currentSubtask.depends_on || []);
+    const done = allSubtasks.filter(s => s.completed && dependsOn.has(s.id));
     let resumeContext = '## SESSION CONTEXT\n\n' +
       'Task: ' + testDescription + '\n' +
       'Branch: ' + testBranch + '\n';
     resumeContext += 'Subtasks: ' + allSubtasks.length + ' total';
-    resumeContext += ', ' + done.length + ' already done (' +
+    resumeContext += ', ' + done.length + ' dependencies already done (' +
       done.map(s => '#' + s.id + ': ' + s.title).join(', ') + ')';
     resumeContext += '\n';
     resumeContext += 'Current: Subtask ' + testSubtaskId + ': ' + testSubtaskTitle + '\n';
@@ -868,8 +871,11 @@ describe('SESSION CONTEXT header in implement prompt', () => {
     expect(resumeContext).toContain('Task: Build user authentication');
     expect(resumeContext).toContain('Branch: feat/user-auth');
     expect(resumeContext).toContain('Current: Subtask 2: Add feature');
-    expect(resumeContext).toContain('already done');
+    expect(resumeContext).toContain('dependencies already done');
     expect(resumeContext).toContain('#1: Setup project');
+    // Subtask 3 is completed but is NOT a dependency of subtask 2, so it
+    // must be omitted to avoid re-listing irrelevant work.
+    expect(resumeContext).not.toContain('#3: Add tests');
     expect(resumeContext).toContain('Working directory:');
     expect(resumeContext).toContain('this is your git worktree');
   });
