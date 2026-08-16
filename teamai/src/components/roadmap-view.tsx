@@ -49,8 +49,7 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
   const [rmHistory, setRmHistory] = useState<{ filename: string; date: string }[]>([]);
   const [rmFilename, setRmFilename] = useState<string | null>(null);
 
-  // Changelog state
-  const [clSessionId, setClSessionId] = useState<string | null>(null);
+  // Changelog state (generated deterministically — no agent session to stream)
   const [clRunning, setClRunning] = useState(false);
   const [clMarkdown, setClMarkdown] = useState<string | null>(null);
   const [clHistory, setClHistory] = useState<{ filename: string; date: string }[]>([]);
@@ -64,13 +63,10 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
   } | null>(null);
 
   const [rmCancelling, setRmCancelling] = useState(false);
-  const [clCancelling, setClCancelling] = useState(false);
 
   const taskCacheRef = useRef<Map<string, { data: FullData }>>(new Map());
   const rmCancelRequestedRef = useRef(false);
-  const clCancelRequestedRef = useRef(false);
   const rmStream = useSessionStream(rmSessionId);
-  const clStream = useSessionStream(clSessionId);
 
   const {
     rateLimited: rmRateLimited,
@@ -81,20 +77,9 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
     handleCancelAutoResume: handleCancelRmAutoResume,
   } = useRateLimitAutoResume(rmStream, handleGenerateRoadmap, () => setRmRunning(false));
 
-  const {
-    rateLimited: clRateLimited,
-    rateLimitMessage: clRateLimitMessage,
-    autoResumeAt: clAutoResumeAt,
-    countdown: clCountdown,
-    resetRateLimit: clResetRateLimit,
-    handleCancelAutoResume: handleCancelClAutoResume,
-  } = useRateLimitAutoResume(clStream, handleGenerateChangelog, () => setClRunning(false));
-
   const rmFullText = useStreamProgress(rmStream);
-  const clFullText = useStreamProgress(clStream);
 
   const rmDone = rmStream.some(e => e.event.type === 'result');
-  const clDone = clStream.some(e => e.event.type === 'result');
 
   const persistTab = useCallback((tab: Tab) => {
     setActiveTab(tab);
@@ -113,16 +98,9 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
       setClHistory(creps);
 
       let activeRm: string | null = null;
-      let activeCl: string | null = null;
       try { activeRm = sessionStorage.getItem('roadmap-session'); } catch { /* noop */ }
-      try { activeCl = sessionStorage.getItem('changelog-session'); } catch { /* noop */ }
-      if (!activeRm || !activeCl) {
-        const [srvRm, srvCl] = await Promise.all([
-          getActiveRoadmapSession('roadmap').catch(() => null),
-          getActiveRoadmapSession('changelog').catch(() => null),
-        ]);
-        if (!activeRm) activeRm = srvRm;
-        if (!activeCl) activeCl = srvCl;
+      if (!activeRm) {
+        activeRm = await getActiveRoadmapSession('roadmap').catch(() => null);
       }
 
       let rmAlive = false;
@@ -143,17 +121,7 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
         } catch { /* ignore stale files */ }
       }
 
-      let clAlive = false;
-      if (activeCl) {
-        clAlive = await isRoadmapSessionAlive(activeCl).catch(() => false);
-        if (clAlive) {
-          setClSessionId(activeCl);
-          setClRunning(true);
-        } else {
-          try { sessionStorage.removeItem('changelog-session'); } catch { /* noop */ }
-        }
-      }
-      if (!clAlive && creps.length > 0) {
+      if (creps.length > 0) {
         try {
           const md = await getLatestChangelog(creps[0].filename);
           setClMarkdown(md);
@@ -179,22 +147,6 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
     })();
     try { sessionStorage.setItem('roadmap-session', rmSessionId); } catch { /* noop */ }
   }, [rmDone, rmSessionId]);
-
-  useEffect(() => {
-    if (!clDone || !clSessionId) return;
-    (async () => {
-      setClRunning(false);
-      const creps = await getChangelogReports().catch(() => [] as { filename: string; date: string }[]);
-      setClHistory(creps);
-      if (creps.length > 0) {
-        try {
-          const md = await getLatestChangelog(creps[0].filename);
-          setClMarkdown(md);
-        } catch { /* ignore */ }
-      }
-    })();
-    try { sessionStorage.setItem('changelog-session', clSessionId); } catch { /* noop */ }
-  }, [clDone, clSessionId]);
 
   const handleSelectTask = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
@@ -260,32 +212,23 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
   }
 
   function handleGenerateChangelog() {
-    clCancelRequestedRef.current = false;
     setClRunning(true);
-    setClSessionId(null);
     setClMarkdown(null);
-    clResetRateLimit();
     startTransition(async () => {
-      const id = await startChangelogGeneration();
-      if (clCancelRequestedRef.current) {
-        await cancelRoadmapGeneration('changelog').catch(() => {});
+      try {
+        await startChangelogGeneration();
+        const creps = await getChangelogReports().catch(() => [] as { filename: string; date: string }[]);
+        setClHistory(creps);
+        if (creps.length > 0) {
+          try {
+            const md = await getLatestChangelog(creps[0].filename);
+            setClMarkdown(md);
+          } catch { /* ignore */ }
+        }
+      } finally {
         setClRunning(false);
-        return;
       }
-      try { sessionStorage.setItem('changelog-session', id); } catch { /* noop */ }
-      setClSessionId(id);
     });
-  }
-
-  async function handleCancelChangelog() {
-    clCancelRequestedRef.current = true;
-    setClCancelling(true);
-    try { await cancelRoadmapGeneration('changelog'); } catch { /* best-effort */ }
-    setClRunning(false);
-    setClSessionId(null);
-    clResetRateLimit();
-    try { sessionStorage.removeItem('changelog-session'); } catch { /* noop */ }
-    setClCancelling(false);
   }
 
   async function handleSelectRoadmapHistory(filename: string) {
@@ -297,7 +240,6 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
   }
 
   async function handleSelectChangelogHistory(filename: string) {
-    setClSessionId(null);
     setClRunning(false);
     const md = await getLatestChangelog(filename);
     setClMarkdown(md);
@@ -368,13 +310,8 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-4 flex-wrap">
               <button onClick={handleGenerateChangelog} disabled={isPending || clRunning} className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] disabled:opacity-40 transition-colors">
-                {clRunning && !clDone ? 'Generating…' : 'Generate Changelog'}
+                {clRunning ? 'Generating…' : 'Generate Changelog'}
               </button>
-              {clRunning && (
-                <button onClick={handleCancelChangelog} disabled={clCancelling} className="px-3 py-2 text-sm font-medium text-red-400 border border-red-800 rounded-lg hover:bg-red-950/30 disabled:opacity-40 transition-colors">
-                  {clCancelling ? 'Stopping…' : '✕ Stop'}
-                </button>
-              )}
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <span>Previous changelogs:</span>
                 <select onChange={e => { if (e.target.value) handleSelectChangelogHistory(e.target.value); }} defaultValue="" disabled={clHistory.length === 0} className="text-sm border border-[#334155] rounded px-2 py-1 bg-[#1a1f2e] text-slate-200 disabled:opacity-40">
@@ -388,16 +325,12 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
               </div>
             </div>
 
-            {clRateLimited && (<RateLimitBanner message={clRateLimitMessage} autoResumeAt={clAutoResumeAt} countdown={clCountdown} onCancelAutoResume={handleCancelClAutoResume} onRetry={handleGenerateChangelog} disabled={isPending} />)}
-            {clRunning && !clRateLimited && clStream.length > 0 && (<StreamingOutput text={clFullText} eventCount={clStream.length} className="max-h-80" />)}
-            {clRunning && !clRateLimited && clStream.length === 0 && (<LoadingSpinner label="changelog generation" />)}
-
             {clMarkdown && (
               <div className="bg-[#1a1f2e] rounded-lg border border-[#1e293b] p-4 max-h-[60vh] overflow-y-auto">
                 <pre className="whitespace-pre-wrap font-mono text-xs text-slate-300 leading-relaxed">{clMarkdown}</pre>
               </div>
             )}
-            {!clRunning && !clMarkdown && !clFullText && (
+            {!clRunning && !clMarkdown && (
               <p className="text-sm text-slate-400">No changelog generated yet. Click &apos;Generate Changelog&apos; to start.</p>
             )}
           </div>
