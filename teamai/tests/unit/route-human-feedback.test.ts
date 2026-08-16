@@ -133,7 +133,7 @@ describe('routeHumanFeedback', () => {
     expect(raw).toContain('Do the thing');
   });
 
-  it('records a change request when qa_report.json exists', async () => {
+  it('records a change request when qa_report.json exists (coder target)', async () => {
     writeFileSync(join(ctx.specPath, 'qa_report.json'), JSON.stringify({ overall: 'PASS', criteria: [] }));
     await routeHumanFeedback(ctx.pipeline, ctx.deps as never, {
       target: 'coder',
@@ -144,6 +144,19 @@ describe('routeHumanFeedback', () => {
     expect(report.criteria).toEqual([
       { name: 'Change Request', status: 'FAIL', notes: 'Fix the auth module' },
     ]);
+  });
+
+  it('does not record a change request into qa_report.json for upstream targets', async () => {
+    for (const target of ['analyst', 'planner', 'qa-reviewer'] as const) {
+      seedArtifacts(ctx.specPath);
+      await routeHumanFeedback(ctx.pipeline, ctx.deps as never, {
+        target,
+        message: 'Tighten the acceptance criteria',
+      });
+      // The change request lives in human_feedback.md for these targets; the QA
+      // report is trimmed rather than carrying a throwaway "Change Request" entry.
+      expect(existsSync(join(ctx.specPath, 'qa_report.json'))).toBe(false);
+    }
   });
 
   it('preserves plan.json when routing to the analyst (no blind cleanup)', async () => {
