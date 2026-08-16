@@ -108,10 +108,13 @@ assertions don't.
    - The coder was told to run tests, but they may have introduced regressions
      in areas QA previously passed. Independent verification is mandatory.
    - **Exception — skip the test suite entirely** if `git diff <head_at_review>...HEAD --name-only`
-     shows zero changes under `src/main/scala/` or `src/test/scala/`. In that case,
-     carry forward the previous test evidence ("Tests: succeeded N, failed 0") as PASS.
-     Only non-Scala changes (scripts/, docs/, `.teamai/`, config files) cannot cause
-     Scala test regressions. Do NOT skip tests if any `.scala` file changed.
+     shows zero changes under the project's source or test directories. Identify those
+     directories from the project's own layout (e.g. `src/`, `lib/`, `test/`, `tests/`,
+     `src/main/<lang>/`, `src/test/<lang>/`) via its build config, `package.json`, Makefile,
+     or directory structure. In that case, carry forward the previous test evidence
+     ("Tests: succeeded N, failed 0") as PASS. Only changes outside the source and test
+     trees (scripts/, docs/, `.teamai/`, config files) cannot cause test regressions.
+     Do NOT skip tests if any source or test file changed.
 4. If tests fail:
    - Failures in code the coder was assigned to change → standard FAIL on
      the relevant acceptance criteria.
