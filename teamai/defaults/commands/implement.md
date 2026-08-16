@@ -79,21 +79,19 @@ If `fail_type` is `"code"` or absent, proceed with the standard QA rework steps 
 5. Do NOT re-read the full spec or re-validate criteria that QA already passed.
    Those were verified by the QA agent and require no changes.
 6. For each QA issue:
-   - Address it even if the current code already satisfies the original plan.
+   - Address it even if the current code already satisfies the original plan — do NOT
+     skip an issue because the code "already matches the plan."
    - If the issue requires a different approach than the plan, follow the QA feedback
      and note the deviation in your summary.
-7. Do NOT skip an issue because the code "already matches the plan."
-8. Do NOT mark the subtask as complete unless ALL QA issues are addressed.
+7. Do NOT mark the subtask as complete unless ALL QA issues are addressed.
    - EVERY issue listed in the QA feedback MUST be fixed. There are no optional or skippable items.
    - Failed criteria, additional issues — all of them are requirements. Fix them all.
-9. Focus on the specific issues listed — don't refactor unrelated code.
-10. **Run the full test suite** after all fixes are committed to catch regressions
-   on already-passed subtasks that shouldn't be affected by your changes. Run
-   the command ONCE and wait — do not re-run it repeatedly. Capture only the
-   pass/fail summary line — do not read the full test output into context unless a
-   failure requires diagnosis.
-   See `.claude/teamai-workflow.md` for full guidance on long-running scripts.
-11. **CRITICAL: Do NOT change formulas, algorithms, or domain logic.** QA fixes
+8. Focus on the specific issues listed — don't refactor unrelated code.
+9. **Run the full test suite** after all fixes are committed to catch regressions
+   on already-passed subtasks that shouldn't be affected by your changes. Follow the
+   test-running guidance in the Instructions section below (run once, wait, capture
+   only the pass/fail summary line).
+10. **CRITICAL: Do NOT change formulas, algorithms, or domain logic.** QA fixes
    are surgical corrections of implementation defects — they are NOT opportunities
    to redesign the solution. If an issue seems to require changing a formula or
    algorithm, STOP: this is a spec concern that must be escalated, not fixed in place.
