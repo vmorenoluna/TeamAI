@@ -51,11 +51,11 @@ function resetAllCounters(pipeline: TaskPipeline): void {
 }
 
 /**
- * Write spec_revision_feedback.md from qa_report.json's spec_concerns.
+ * Build spec_revision_feedback.md content from qa_report.json's spec_concerns.
  * Used by both the normal auto-revision path and the bail-out path
  * (when the revision limit is reached and the human restarts from spec).
  */
-function writeSpecRevisionFeedback(specPath: string): void {
+function buildSpecRevisionFeedback(specPath: string): string {
   const reportPath = path.join(specPath, 'qa_report.json');
   let feedbackContent = '# Spec Revision Feedback\n\n';
   feedbackContent += 'The QA reviewer identified issues with the specification itself ';
@@ -74,7 +74,7 @@ function writeSpecRevisionFeedback(specPath: string): void {
       }
     } catch { /* best-effort — produce feedback from whatever we can read */ }
   }
-  writeFileSync(path.join(specPath, 'spec_revision_feedback.md'), feedbackContent);
+  return feedbackContent;
 }
 
 // ── Shared routing helpers ─────────────────────────────────────────────────
@@ -134,6 +134,57 @@ export function trimArtifactsForTarget(specPath: string, target: FeedbackTarget)
       if (existsSync(p)) unlinkSync(p);
     } catch { /* best-effort */ }
   }
+}
+
+/**
+ * Begin a spec revision: write the feedback that flips runSpecPhase into
+ * REVISION mode, snapshot the pre-revision spec, trim only what the analyst
+ * must regenerate, reset counters, and restart from the spec phase.
+ *
+ * The caller is responsible for incrementing `pipeline.specRevision` first so
+ * the no-op guard and version archive use the new number.
+ *
+ * Shared by autoReviseSpec (QA-driven) and routeHumanFeedback's analyst target
+ * (human-driven), which differ only in the feedback content and whether stale
+ * human-feedback files are cleared (the human path keeps human_feedback.md so
+ * the analyst sees the directive).
+ */
+async function beginSpecRevision(
+  pipeline: TaskPipeline,
+  deps: ReviewActionsDeps,
+  feedbackContent: string,
+  opts: { clearStaleFeedback: boolean },
+): Promise<void> {
+  const specPath = pipeline.specPath;
+
+  // Feedback first (flips runSpecPhase into REVISION mode), then the spec
+  // snapshot — order matters for the snapshot-failure warn contract.
+  writeFileSync(path.join(specPath, 'spec_revision_feedback.md'), feedbackContent);
+
+  const specMdPath = path.join(specPath, 'spec.md');
+  if (existsSync(specMdPath)) {
+    try {
+      writeFileSync(path.join(specPath, `spec_v${pipeline.specRevision}.md`), readFileSync(specMdPath, 'utf-8'));
+    } catch (err) {
+      warn('review', `Failed to snapshot spec v${pipeline.specRevision} for ${pipeline.taskId}`, err);
+    }
+  }
+
+  // Preserve plan.json and all code commits (no blind cleanup): the planner
+  // re-plans in place, keeping completed subtasks still valid under the
+  // revised spec. Only QA artifacts (and, for the QA path, stale human
+  // feedback) are cleared.
+  trimArtifactsForTarget(specPath, 'analyst');
+  if (opts.clearStaleFeedback) {
+    for (const f of REVISION_CLEANUP_EXTRA) {
+      try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
+    }
+  }
+
+  resetAllCounters(pipeline);
+  deps.savePipelineState(pipeline);
+  deps.advancePhase(pipeline, 'spec');
+  await deps.executePhase(pipeline);
 }
 
 // ── Public functions ──────────────────────────────────────────────────────
@@ -210,29 +261,28 @@ export async function routeHumanFeedback(
   if (feedback.target === 'coder') {
     recordChangeRequest(pipeline.specPath, feedback.message, pipeline.taskId);
   }
-  resetAllCounters(pipeline);
-  trimArtifactsForTarget(pipeline.specPath, feedback.target);
 
   // Directing the analyst means "revise the existing spec", not "regenerate it
   // from scratch". Route it into runSpecPhase's REVISION mode (which preserves
   // valid parts of the spec) rather than the fresh /spec path that would
-  // overwrite the spec the team already wrote. Mirror autoReviseSpec's
-  // bookkeeping so the no-op guard and version archive have a correct baseline.
+  // overwrite the spec the team already wrote. Mirrors autoReviseSpec's
+  // bookkeeping via the shared beginSpecRevision helper.
   if (feedback.target === 'analyst') {
     const specMdPath = path.join(pipeline.specPath, 'spec.md');
     if (existsSync(specMdPath)) {
-      writeFileSync(
-        path.join(pipeline.specPath, 'spec_revision_feedback.md'),
-        `# Spec Revision Feedback\n\nThe human reviewer directed the analyst to revise the spec:\n\n${feedback.message.trim()}\n`,
-      );
       pipeline.specRevision += 1;
-      writeFileSync(
-        path.join(pipeline.specPath, `spec_v${pipeline.specRevision}.md`),
-        readFileSync(specMdPath, 'utf-8'),
+      await beginSpecRevision(
+        pipeline,
+        deps,
+        `# Spec Revision Feedback\n\nThe human reviewer directed the analyst to revise the spec:\n\n${feedback.message.trim()}\n`,
+        { clearStaleFeedback: false },
       );
-      deps.savePipelineState(pipeline);
+      return;
     }
   }
+
+  resetAllCounters(pipeline);
+  trimArtifactsForTarget(pipeline.specPath, feedback.target);
 
   const next = targetToResumePhase(feedback.target);
   deps.advancePhase(pipeline, next);
@@ -268,7 +318,7 @@ export async function autoReviseSpec(
   pipeline.specRevision++;
   if (pipeline.specRevision > 4) {
     // Write revision feedback so the analyst runs in revision mode
-    writeSpecRevisionFeedback(specPath);
+    writeFileSync(path.join(specPath, 'spec_revision_feedback.md'), buildSpecRevisionFeedback(specPath));
 
     // Preserve plan.json and code (no blind cleanup) — the planner re-plans in
     // place. Clear only QA artifacts and stale human feedback (historical
@@ -300,36 +350,12 @@ export async function autoReviseSpec(
     return;
   }
 
-  // Write spec_revision_feedback.md from QA report's spec_concerns
-  writeSpecRevisionFeedback(specPath);
-
-  // Snapshot the current spec before revision (preserves history)
-  const specMdPath = path.join(specPath, 'spec.md');
-  if (existsSync(specMdPath)) {
-    try {
-      writeFileSync(path.join(specPath, `spec_v${pipeline.specRevision}.md`), readFileSync(specMdPath, 'utf-8'));
-    } catch (err) {
-      // A failed snapshot loses the pre-revision spec history (specRevision
-      // is already incremented). Surface it.
-      warn('review', `Failed to snapshot spec v${pipeline.specRevision} for ${pipeline.taskId}`, err);
-    }
-  }
-
-  // Preserve plan.json and all code commits (no blind cleanup): the planner
-  // re-plans in place, keeping completed subtasks still valid under the
-  // revised spec. Only QA artifacts and stale human feedback are cleared.
-  trimArtifactsForTarget(specPath, 'analyst');
-  for (const f of REVISION_CLEANUP_EXTRA) {
-    try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
-  }
-
-  // Reset all retry counters — fresh spec gets a clean budget
-  resetAllCounters(pipeline);
-  deps.savePipelineState(pipeline);
+  // Write spec_revision_feedback.md from QA report's spec_concerns, snapshot the
+  // pre-revision spec, trim QA artifacts + stale human feedback, reset counters,
+  // and restart from the spec phase.
+  await beginSpecRevision(pipeline, deps, buildSpecRevisionFeedback(specPath), { clearStaleFeedback: true });
 
   try {
     logToOutput(specPath, `\n[REFINE] Spec concerns detected — auto-revising spec with analyst (revision ${pipeline.specRevision - 1}/3)\n`);
   } catch { /* best-effort */ }
-  deps.advancePhase(pipeline, 'spec');
-  await deps.executePhase(pipeline);
 }
