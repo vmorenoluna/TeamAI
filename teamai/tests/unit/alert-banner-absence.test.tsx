@@ -36,7 +36,6 @@ const mockBulkDeleteTasks = vi.hoisted(() => vi.fn());
 const mockApproveTask = vi.hoisted(() => vi.fn());
 const mockRejectTask = vi.hoisted(() => vi.fn());
 const mockMarkTaskDone = vi.hoisted(() => vi.fn());
-const mockReviseSpec = vi.hoisted(() => vi.fn());
 const mockAddDependency = vi.hoisted(() => vi.fn());
 const mockRemoveDependency = vi.hoisted(() => vi.fn());
 const mockAddBlock = vi.hoisted(() => vi.fn());
@@ -100,7 +99,6 @@ vi.mock('@/app/actions/tasks', () => ({
     mockApproveTask(id, strategy),
   rejectTask: (id: string, feedback: string) => mockRejectTask(id, feedback),
   markTaskDone: (id: string) => mockMarkTaskDone(id),
-  reviseSpec: (id: string) => mockReviseSpec(id),
   addDependency: (taskId: string, depId: string) => mockAddDependency(taskId, depId),
   removeDependency: (taskId: string, depId: string) => mockRemoveDependency(taskId, depId),
   addBlock: (taskId: string, blockedId: string) => mockAddBlock(taskId, blockedId),
@@ -229,7 +227,6 @@ describe('alert-banner absence contract', () => {
     mockApproveTask.mockResolvedValue(undefined);
     mockRejectTask.mockResolvedValue(undefined);
     mockMarkTaskDone.mockResolvedValue(undefined);
-    mockReviseSpec.mockResolvedValue(undefined);
     mockAddDependency.mockResolvedValue(undefined);
     mockRemoveDependency.mockResolvedValue(undefined);
     mockAddBlock.mockResolvedValue(undefined);
