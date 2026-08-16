@@ -9,40 +9,56 @@ Audience: any engineer picking this up to implement.
 ## 1. Problem statement
 
 TeamAI runs multi-agent pipelines (`spec → plan → implement → qa-review → merge/create-pr`,
-plus `failed`/`backlog`) against arbitrary user projects. Each project has editable role
-prompts at `.claude/roles/{coder,planner,analyst,merger,qa-reviewer,qa-fixer}.md`, scaffolded
-from `teamai/defaults/roles/*.md` on registration and thereafter owned per-project
-(`ProjectStore.syncDefaults` intentionally never auto-syncs `roles/` — see
-`project-store.ts` `_getDefaultsManifest`, which only tracks `commands/` and
-`teamai-workflow.md`).
+plus `failed`/`backlog`) against arbitrary user projects. Prompting splits into two kinds of
+file with different ownership and update behaviour:
+
+- **Commands** (`.claude/commands/*.md`) are TeamAI's **orchestration contract** — artifact
+  paths/schemas the pipeline parses, execution-environment rules (worktree isolation, dynamic
+  ports, process safety), and cross-phase guardrails. Scaffolded from
+  `teamai/defaults/commands/*.md` and **force-synced from the shipped defaults at every server
+  startup** (`syncAllProjectsDefaults` overwrites any per-project edit), because the pipeline
+  reads them and must run the current contract.
+- **Roles** (`.claude/roles/{analyst,planner,coder,qa-reviewer,merger}.md`) are each agent's
+  **persona + project conventions**. Scaffolded once from `teamai/defaults/roles/*.md` on
+  registration, then **owned per-project** — `project-store.ts` `_getDefaultsManifest`
+  deliberately excludes `roles/` from the sync manifest, so a user can rewrite a role radically
+  without breaking TeamAI. Roles are injected into every session as a system prompt
+  (`readRoleSystemPrompt` → `--append-system-prompt` in `process-manager.ts`).
 
 **The recurring-failure class we must catch.** In a real project (Formell), two tickets each
 failed repeatedly — one after 7 QA attempts, one after 3 — for the *same* root cause every
 time: a required verification artifact from a long (~1–2 h) sweep never got committed. The
-true causes were all **role-prompt gaps**:
+true causes were all **orchestration-contract gaps** — instructions that belong in the
+*commands*, not the roles:
 
 1. The project `.gitignore` silently blocked `git add` on the evidence path (needed
-   `git add -f`), and neither `coder.md` nor `planner.md` mentioned it — the planner even
-   emitted a literal `git add` example missing `-f`, so a compliant coder produced a broken
-   commit.
+   `git add -f`), and neither the implement nor the plan command mentioned it — the planner
+   even emitted a literal `git add` example missing `-f`, so a compliant coder produced a
+   broken commit. The fix now lives in `defaults/commands/implement.md`
+   §"Running Verification Scripts & Servers" ("Committing verification artifacts") and
+   `defaults/commands/plan.md` §"Output" (the gitignored-artifact `git add -f` rule).
 2. The sweep outlives one coder session. TeamAI *has* a mechanism for this (the coder writes
    `subtask_wakeup-st<id>.json`; the orchestrator re-enters with a `⚠️ WAKEUP RE-ENTRY`
    header — see `implement.ts` `runSubtaskSession` and `orchestrator.ts` `_scheduleWakeup`),
-   but the role prompts never documented the filename/schema or the detach (`nohup … & disown`)
+   but the commands never documented the filename/schema or the detach (`nohup … & disown`)
    requirement. One session called an interactive `ScheduleWakeup`-style tool (a no-op in a
    headless session); another left the process attached to its shell, so it died at session
    end and every wakeup restarted the multi-hour sweep from scratch, burning QA attempts.
+   The fix now lives in `defaults/commands/implement.md`
+   §"Long-Running Verification Scripts" → "When a background script won't finish before your
+   session budget" (the `subtask_wakeup-st<ID>.json` schema and detach rule).
 
 A human found this only by manually reading `output-st<id>.log`, `output-qa.log`,
-`qa_report.json`, and `plan.json` across several failed attempts, then hand-editing
-`coder.md`/`planner.md` (both the project copies and the shared defaults). The role prompts
-have since been fixed (see `teamai/defaults/roles/coder.md` §"Running Verification Scripts &
-Servers"), but the *system* still can't catch the next instance of this class on its own.
+`qa_report.json`, and `plan.json` across several failed attempts, then hand-editing the
+templates. Both fixes now live in the **force-synced commands** (the locations above), not the
+roles — but the *system* still can't catch the next instance of this class on its own.
 
 **Goal.** Give TeamAI users ongoing, low-friction support to **refine their own project's role
 prompts from real ticket signal**, so "the same failure keeps recurring because a role prompt
 has a gap" is surfaced and fixed by the system — not only by an attentive human reading five
-log files after the fact.
+log files after the fact. Because the contract now lives in the (force-synced) commands, the
+feature's scope narrows to **project-specific persona/conventions**; a gap in the shared
+contract is an *upstream* fix to `defaults/commands/`, not a per-project edit (see §2.7).
 
 ---
 
@@ -56,8 +72,9 @@ surfaced in two existing places: an inline card on the failed task's Overview ta
 aggregated "Role Refinements" panel in Settings next to the Agent Roles editor.** The engine
 reuses the proven **insights side-channel** pattern (a headless Claude session spawned via
 `processManager.createSession`, exactly like `getOrCreateInsightsSession` in
-`actions/insights.ts`) and the review-and-apply UX of the **defaults-updater** banner. Nothing
-new is invented at the infrastructure level; we compose two patterns that already ship.
+`actions/insights.ts`) and the review-and-apply UX of the **Agent Roles editor** (`RoleEditor`
+plus `saveRole`/`resetRole` in `actions/roles.ts`). Nothing new is invented at the
+infrastructure level; we compose two patterns that already ship.
 *Justification:* the failure artifacts the analyst needs (`qa_report.json`, `completion_summary.md`,
 `output-*.log`, `plan.json`, `events.jsonl`) are already written per task, and the write target
 (`.claude/roles/*.md`) already has a safe server-action path (`saveRole`/`resetRole` in
@@ -103,7 +120,8 @@ already scope behaviour.
 AND the pipeline auto-runner (`auto-mode`) also enabled — and even then behind a retry-loop
 guard.** In the default path, applying a suggestion presents an **"Apply & Retry"** button that
 re-runs the failed task via the existing `retryTask` action. *Justification:* a role edit only
-takes effect on the next run (`buildSessionOpts` reloads role context per session), so retry is
+takes effect on the next run (the role persona is injected per session as a system prompt via
+`--append-system-prompt`), so retry is
 the natural validation step — but a silent auto-retry loop is exactly how a bad refinement
 becomes runaway spend. Human-in-the-loop retry by default; automatic retry only under
 compounded explicit opt-ins, and never twice for the same failure signature (see §7).
@@ -117,6 +135,39 @@ size-capped, high-confidence* edits, and still logged + revertable. *Justificati
 prompts are load-bearing project config that affects every future ticket; unreviewed automated
 edits risk silent regressions and prompt churn. The human-review default makes the assistant a
 suggester, not an autonomous editor, until the user explicitly trusts it further.
+
+### 2.7 Contract-shaped gaps route upstream, never into role files
+**A finding is classified by which kind of prompt the gap lives in — and only one kind produces
+a role edit.**
+
+- **Role gap** → a *project-specific* persona/convention problem: missing house style, a
+  repo-specific convention, or a misworded project convention that misleads the agent. These are
+  what this feature exists to fix: emit an edit against `.claude/roles/*.md`, shown as a diff and
+  applied through the existing role-editor path.
+- **Contract gap** → an *orchestration-contract* problem: an undocumented TeamAI mechanism
+  (wakeup schema, worktree/port discipline, gitignore force-add, push rules), a cross-phase
+  guardrail, or an execution-environment rule that belongs in `.claude/commands/*.md`. These are
+  **not role edits**.
+
+**Why contract gaps must never become role edits.** (1) A contract rule missing from one
+project's role is missing from *every* project — patching it into a single project's role file
+hides it from everyone else, and it silently regresses the moment that role is rewritten. (2)
+Patching it into a project's *command* file is equally useless: commands are **force-synced from
+`teamai/defaults/commands/` at every server startup** (`syncAllProjectsDefaults` overwrites any
+per-project edit), so the change would be clobbered on the next restart. The only durable home for
+a contract gap is the shipped default itself.
+
+**How the analyzer records a contract gap.** `isRolePromptGap:false`, empty `edits`, and a
+`diagnosis` that names the specific `defaults/commands/` file (and section) that needs the
+upstream fix. The UI renders it as a "not a role-prompt gap" card whose diagnosis reads *"upstream
+command change needed — <file>"*; no Apply/Retry button is offered.
+
+**Non-goals.** The feature never edits a project's `.claude/commands/*.md`, and never edits the
+shared `teamai/defaults/commands/*.md` automatically. Upstreaming a good fix to the shared
+defaults stays a manual, human decision (a human writes the `teamai/defaults/commands/` change;
+the analyzer at most drafts the diff). A future **"propose to defaults"** affordance — the
+analyzer drafts a diff and a human opens the PR — could reuse this record shape, but it is
+explicitly out of scope here.
 
 ---
 
@@ -169,7 +220,7 @@ task when `mode !== 'off'`; (b) automatically, when a task hits `failed`, `mode 
 **What it analyzes.** For the target task (and, on the recurrence path, the sibling tasks in the
 signature cluster): `qa_report.json`, `qa_report_before_bounce.json`, `qa_report_before_failed.json`,
 `completion_summary.md`, `qa_feedback.md`, `plan.json`, `events.jsonl`, and the per-role logs
-`output-st<id>.log` / `output-qa.log` / `output-plan.log`. Plus the current contents of the six
+`output-st<id>.log` / `output-qa.log` / `output-plan.log`. Plus the current contents of the five
 role files. Paths are handed to the analyst (never pre-summarized — same discipline as the
 composer-log rule in project memory).
 
@@ -289,10 +340,11 @@ New `<section>` above the existing "Agent Roles" section, plus new component
   `setRoleRefinementConfig`); when `Auto`, reveal `autoApply` checkbox (with a warning:
   *"Only additive, low-risk edits are ever auto-applied, and every change is backed up and
   revertable."*) and the `maxAutoAnalysesPerDay` number input.
-- **Pending suggestions list** (across all tasks), rendered defaults-updater-style
-  (`defaults-updater.tsx` is the visual template): each row shows source-task title(s),
-  root cause, affected role files, confidence, and `Review` (jump to the task card) / `Apply` /
-  `Dismiss`. Applied/dismissed items collapse into a details summary like `CompletedResults`.
+- **Pending suggestions list** (across all tasks), rendered as a list sibling to the **Agent
+  Roles** editor (the Settings role list, not the now dismiss-only `defaults-updater` banner):
+  each row shows source-task title(s), root cause, affected role files, confidence, and `Review`
+  (jump to the task card) / `Apply` / `Dismiss`. Applied/dismissed items collapse into an
+  HTML `<details>` summary section (the collapsible pattern already used across the settings UI).
 - **Applied-refinements history** with per-item **Revert** (restores the backup via
   `revertRefinement`).
 
@@ -348,21 +400,25 @@ under the daily cap + no `superseded`/`applied` record already covers this signa
 
 ### 6.3 Analyst prompt (the actual analysis instruction)
 Sent as the session message. Key elements:
-- Role framing: *"You are diagnosing why a TeamAI pipeline ticket failed repeatedly. Decide
-  whether the root cause is a **gap in a role prompt** (`.claude/roles/*.md`) — a missing
-  instruction, a wrong example, or an undocumented mechanism — as opposed to genuine task
-  difficulty, a spec problem, or a code bug."*
-- Inputs as **paths** to read (never pre-summarized): the failure artifacts (§3) and the six
+- Role framing: *"You are diagnosing why a TeamAI pipeline ticket failed repeatedly. Classify the
+  root cause as one of: (a) a **role-prompt gap** — a missing or misworded *project-specific*
+  persona/convention in `.claude/roles/*.md`; (b) an **orchestration-contract gap** — an
+  undocumented TeamAI mechanism or environment rule that belongs in `.claude/commands/*.md`, not a
+  role; or (c) genuine task difficulty, a spec problem, or a code bug. Only (a) produces role edits."*
+- Inputs as **paths** to read (never pre-summarized): the failure artifacts (§3) and the five
   role files.
-- Guidance on the known gap-classes (from the case study): undocumented orchestrator mechanisms
-  (e.g. the `subtask_wakeup-st<id>.json` schema and detach requirement), `.gitignore`/`git add -f`
-  traps, planner-authored example commands that mislead the coder, interactive-only tools that
-  no-op in headless sessions.
+- Guidance on the known gap-classes: a **contract gap** — an undocumented orchestrator mechanism
+  (e.g. the `subtask_wakeup-st<id>.json` schema and detach requirement, worktree/port discipline),
+  a `.gitignore`/`git add -f` trap, or an interactive-only tool that no-ops in headless sessions —
+  is *not* a role edit; it is flagged as an **upstream command change** (see §2.7). A **role gap** is
+  project-specific persona/convention: missing house style, a repo-specific convention, or a
+  misworded project convention that misleads the agent.
 - Output contract: write a single JSON object to `.teamai/role-refinements/<id>.analysis.json`
   with `{ isRolePromptGap, rootCause, confidence, diagnosis, edits:[{roleFile, mode, rationale,
   proposedContent, riskClass}] }`, `mode:"append"` preferred for additive fixes. *"If it is not
   a role-prompt gap, set `isRolePromptGap:false`, leave `edits` empty, and explain the real cause
-  in `diagnosis`."*
+  in `diagnosis`. If it is a **contract gap**, say so explicitly in `diagnosis` and name the
+  `defaults/commands/` file that needs the upstream fix — never emit a role edit for it."*
 - Model: the project's configured **analyst** model (`providers.json`), defaulting to the analyst
   default (Sonnet-class) — analysis is a read-and-reason task, not a long agentic edit.
 
@@ -406,10 +462,13 @@ Sent as the session message. Key elements:
   to the user (*"A role refinement was applied but the task failed the same way — human review
   needed"*). This is the single most important guard: it converts a potential
   edit→retry→fail→edit loop into a one-shot with human fallback.
-- **Project-scoped edits only.** Refinements edit the *project's* `.claude/roles/*.md`, never the
-  shared `teamai/defaults/roles/*.md`. Upstreaming a good fix to the shared defaults stays a
-  manual, human decision (explicitly out of scope here; a future "propose to defaults" affordance
-  could reuse this record shape).
+- **Role edits are project-scoped; command changes go upstream (see §2.7).** Refinements edit the
+  *project's* `.claude/roles/*.md`, never the shared `teamai/defaults/roles/*.md` — and, because
+  commands are **force-synced from `teamai/defaults/commands/` at every startup**, refinements must
+  **never** edit a project's `.claude/commands/*.md` (the edit would be clobbered on restart). The
+  analyzer must classify every finding per §2.7: a **role gap** → emit an edit against a role file;
+  a **contract gap** → emit upstream-command-change guidance instead of a role edit. Upstreaming a
+  fix to the shared defaults stays a manual, human decision.
 - **Non-gap outcomes are first-class.** When the analyst says it's not a role-prompt gap, we
   record the diagnosis and offer nothing to apply — the assistant must be comfortable saying
   "this isn't a prompt problem," or it will manufacture edits and cause regressions.
@@ -452,11 +511,14 @@ Sent as the session message. Key elements:
 - The insights side-channel (`actions/insights.ts` + `components/insights-chat.tsx`) is the
   closest working prior art for spawning and (optionally) streaming the analyst session — copy
   its session lifecycle, including the `containerSessionOpts` + provider-resolution recipe.
-- The defaults-updater (`components/defaults-updater.tsx`) is the closest prior art for the
-  "here's a proposed change to your config — Apply/Dismiss" list UX; the Settings panel should
-  read as its sibling.
+- The **Agent Roles editor** (`RoleEditor` + `saveRole`/`resetRole` in `actions/roles.ts`) is
+  the closest prior art for the "proposed change to a role file — diff/Apply/Dismiss" UX; the
+  Settings panel should read as its sibling. (The `defaults-updater` banner is now a dismiss-only
+  informational notice about force-synced commands, so it is *not* a template for an apply flow.)
 - `SpecDiffView` (`components/spec-diff-view.tsx`) already renders line diffs for spec versions;
   factor out or reuse its diff body for the role-file diff.
-- Keep role-file documentation *in the role files themselves* — this feature edits
-  those files; it must not also write summaries of them into `Architecture.md`/README.
+- Respect the commands-vs-roles split: this feature edits **roles** (persona/conventions) only.
+  The orchestration contract lives in `defaults/commands/` and is force-synced (documented in
+  `CLAUDE.md`/`README`); a finding that touches the contract is an upstream command change, not a
+  role edit, and must be routed accordingly (see §2.7).
 ```
