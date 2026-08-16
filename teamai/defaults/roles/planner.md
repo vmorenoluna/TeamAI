@@ -67,41 +67,12 @@ so they re-run. Rewrite `plan.json` in place; do not delete it.
     `files_to_create` set, the deliverable-verification circuit breaker catches
     a missing file immediately after the coder session ends and forces a retry,
     instead of letting an empty subtask sail through to QA.
-  - **`files_to_create` must be a fixed, static filename — never a date/timestamp
-    placeholder the coder is expected to substitute.** Writing something like
-    `evidence-YYYY-MM-DD.log` and telling the coder "use the actual run date"
-    produces a real file (e.g. `evidence-2026-08-05.log`) that will never match
-    the literal placeholder string in `files_to_create` — the deliverable check
-    is an exact match against the real filesystem, not a pattern. Pick one
-    concrete, static name up front and instruct the coder to use exactly that
-    name for the committed artifact, regardless of what filename a tool's own
-    default output naming convention would otherwise produce — rename or copy
-    to the plan-specified name before committing if the tool's own output is
-    timestamped.
-  - **Check whether the artifact's path could be gitignored** (log directories
-    commonly are). If so, any "stage and commit" example in the subtask
-    description must use `git add -f <path>`, not a plain `git add` — the coder
-    will often follow your example literally, and a plain `git add` on a
-    gitignored path silently stages nothing, producing a commit that looks
-    successful but omits the evidence QA needs.
-  - **If a later revision of this plan renames or replaces a previously-declared
-    artifact**, the subtask instructions must tell the coder to `git rm -f` the
-    old filename in the same commit that adds the new one — not just point
-    `files_to_create` at the new name. Nothing else cleans up a superseded
-    artifact; leaving the old one in place means it silently ships in the final
-    PR alongside its replacement.
   - **If producing the artifact requires a verification job long enough that
     it won't finish inside one coder session**, say so explicitly in the
-    subtask description — note the expected order of magnitude and that the
-    coder must schedule an orchestrator wakeup (a `subtask_wakeup-st<id>.json`
-    file — see the coder role for the exact schema) if the job is still
-    running when the session needs to end. Don't write instructions that read
+    subtask description — note the expected order of magnitude and that the coder must schedule an orchestrator wakeup (a `subtask_wakeup-st<id>.json` file — see the implement command for the exact schema) if the job is still running when the session needs to end. Don't write instructions that read
     as if a long job completes inline in one sitting.
-  - **Never state your own path for the wakeup file — its location is fixed.**
-    It always goes to the same `.teamai/`-style task directory that already
-    holds this plan and its task metadata (see the coder role for the exact
-    path). If a subtask description needs to mention where it goes, use that
-    exact path or just say "see the coder role" — do not paraphrase or invent
+  - **Never state your own path for the wakeup file — its location is fixed.** It always goes to the same `.teamai/`-style task directory that already holds this plan and its task metadata (see the implement command for the exact path). If a subtask description needs to mention where it goes, use that
+    exact path or just say "see the implement command" — do not paraphrase or invent
     an alternative (e.g. the worktree root). A subtask's own explicit,
     task-specific instruction reads as higher-priority to the coder than the
     role prompt's general policy, so a wrong path stated here silently

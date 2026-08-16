@@ -227,7 +227,59 @@ If the subtask requires running a script that **produces files you will commit**
 
 ### When a background script won't finish before your session budget
 
-If a background script is still running and won't complete before your session
-ends, write a `subtask_wakeup-st<ID>.json` file to the spec directory and end
-normally. The file's exact shape, how to size `wakeup_at`, and the re-entry
-contract are in your role's "Running Verification Scripts & Servers" section.
+If a background script (benchmark, verification run, data pipeline) is still
+running and won't complete before your session ends, schedule an orchestrator
+wakeup so the task resumes once the job finishes:
+
+1. **Detach the job** so it keeps running after your session ends:
+   `nohup <command> > job.log 2>&1 & disown`. A bare `&` only backgrounds
+   within your current shell and dies the instant your session exits. Write the
+   log and PID file inside the worktree, not a container-local temp path, so
+   they survive even if the container is reprovisioned.
+2. Write a `subtask_wakeup-st<ID>.json` file (where `<ID>` is your current
+   subtask ID, e.g. `subtask_wakeup-st3.json`) to the spec directory
+   (`$TEAMAI_SPEC_DIR`). The per-subtask filename prevents parallel subtasks
+   from clobbering each other's wakeup schedules.
+
+**Do NOT call an interactive `ScheduleWakeup`-style tool** — it is an
+interactive-session feature and is a no-op in this pipeline. The orchestrator's
+resume mechanism only understands the file.
+
+**Size `wakeup_at` realistically.** Estimate completion from the job's actual
+throughput, not an optimistic guess, and add a 20% safety margin. An undersized
+wakeup fires before the job finishes, wasting a session on a re-entry that can
+do nothing but write another wakeup file.
+
+```json
+{
+  "subtask_id": 3,
+  "wakeup_at": "2026-07-03T23:20:00Z",
+  "background_command": "python scripts/run_verification.py --output results/",
+  "expected_artifact": "results/summary.jsonl",
+  "progress_log_path": "results/job.log"
+}
+```
+
+- `subtask_id`: your current subtask ID
+- `wakeup_at`: ISO 8601 timestamp when the process should be done
+- `background_command`: the command you ran (informational)
+- `expected_artifact`: the file you expect the process to produce
+- `progress_log_path`: the job's own log file, relative to the worktree root.
+  Include it whenever the job writes one — the orchestrator's periodic sweep
+  checks this file's freshness while you're asleep and re-enters you early if
+  it goes stale, instead of always waiting out the full `wakeup_at` window.
+
+Then end your session normally. The orchestrator re-enters you at `wakeup_at`
+with a `⚠️ WAKEUP RE-ENTRY` header. On re-entry:
+- Check if the artifact exists and is complete. If it is: verify it, git add,
+  commit, and mark the subtask done.
+- If the artifact is missing or incomplete, check whether the detached process
+  (via its PID file) is still alive:
+  - **Still running**: read its latest reported progress, write an updated
+    `subtask_wakeup-st<ID>.json` with a new `wakeup_at`, and end again.
+  - **Crashed or exited with error**: do NOT write another wakeup file.
+    Report the failure immediately — the orchestrator advances the task to
+    failed after 3 consecutive wakeup attempts without progress.
+
+Use `$TEAMAI_SPEC_DIR` to resolve the path — your cwd is the worktree, not
+the project root.

@@ -67,6 +67,23 @@ Rules:
   specify paths relative to the repository root (e.g. `docs/analysis.md`, not
   `/absolute/path/to/docs/analysis.md`). The orchestrator resolves these against
   the worktree root at verification time.
+- **`files_to_create` must be a fixed, static filename — never a date/timestamp
+  placeholder the coder is expected to substitute.** Writing `evidence-YYYY-MM-DD.log`
+  and telling the coder "use the actual run date" produces a file that will never
+  match the literal placeholder — the deliverable check is an exact match against
+  the real filesystem, not a pattern. Pick one concrete, static name and instruct
+  the coder to use exactly that name (rename/copy the tool's output to it before
+  committing if the tool's own output is timestamped).
+- **Check whether the artifact's path could be gitignored** (log directories
+  commonly are). If so, any "stage and commit" example in the subtask description
+  must use `git add -f <path>`, not a plain `git add` — a plain `git add` on a
+  gitignored path silently stages nothing, producing a commit that looks successful
+  but omits the evidence QA needs.
+- **If a later revision of this plan renames or replaces a previously-declared
+  artifact**, the subtask instructions must tell the coder to `git rm -f` the old
+  filename in the same commit that adds the new one — not just point `files_to_create`
+  at the new name. Nothing else cleans up a superseded artifact; it silently ships
+  in the final PR alongside its replacement.
 - **Evidence producibility gate**: Every acceptance criterion must have a producing
   artifact — a committed file that QA can inspect to verify the criterion. Before
   finalising the plan, check each criterion against the subtasks that satisfy it:
