@@ -205,14 +205,14 @@ The spec revision workflow allows a human reviewer to fix the spec itself (rathe
 
 1. **QA detects spec gaps** (Step 6 in `defaults/commands/qa-review.md`): The QA agent distinguishes between implementation bugs (code doesn't match spec) and spec gaps (spec itself is wrong). Spec gaps are reported in `spec_concerns` in `qa_report.json`.
 
-2. **Pipeline bifurcates**: When `spec_concerns` exist in the QA report, `runQaReview` in `src/lib/orchestrator.ts` advances the task to `awaiting-review` instead of bouncing back to `implement`. A human must decide.
+2. **Pipeline bifurcates**: When `spec_concerns` exist in the QA report, `runQaReview` in `src/lib/orchestrator/qa-review.ts` calls `autoReviseSpec` — which auto-revises the spec up to 3 times, then parks the task in `awaiting-review` for a human to decide.
 
-3. **Human clicks "Revise Spec"**: The review panel (`src/components/review-panel.tsx`) shows a purple banner listing each spec concern (issue, reasoning, suggested fix). Clicking **Revise Spec** calls `reviseSpec()`:
-   - Writes `spec_revision_feedback.md` with the QA's spec concerns
-   - Snapshots `spec.md` → `spec_v1.md` (preserves original)
-   - Clears downstream artifacts: `plan.json`, `qa_report.json`, `qa_feedback.md`, `completion_summary.md`, `human_feedback.md`
-   - Resets `qaAttempt` to 0
-   - Advances to `spec` phase → runs spec → plan → implement → QA from scratch
+3. **Human sends a change request to the Analyst**: The review panel (`src/components/review-panel.tsx`) shows a purple banner listing each spec concern (issue, reasoning, suggested fix). In **Request Changes**, selecting the **Analyst** target pre-fills the textarea with those concerns; sending it routes through `routeHumanFeedback` (analyst target) → `beginSpecRevision()`:
+   - Writes `spec_revision_feedback.md` with the reviewer's directive (or the QA's spec concerns)
+   - Snapshots `spec.md` → `spec_v{N}.md` (archives the pre-revision spec)
+   - Clears downstream QA artifacts (preserves `plan.json` — the planner re-plans in place)
+   - Resets retry counters
+   - Advances to `spec` phase → runs spec → plan → implement → QA
 
 4. **Revision-mode spec**: `runSpec` detects `spec_revision_feedback.md` and sends a `REVISION:` prompt instead of `/spec`. The spec command template (`spec.md` Revision Mode) instructs the analyst to read the existing spec + revision feedback, address all concerns, preserve valid parts, and re-validate.
 
@@ -222,7 +222,7 @@ The spec revision workflow allows a human reviewer to fix the spec itself (rathe
 
 **Revision counter persistence**: The `specRevision` counter tracks how many times the spec has been revised for a given task (max 3 before falling back to human review). Without persistence, server restarts or pipeline recreation would reset it to 0, causing the next revision to overwrite `spec_v1.md` instead of creating `spec_v{N+1}.md`.
 
-- **Increment**: `autoReviseSpec()` in `src/lib/orchestrator/review-actions.ts` increments `pipeline.specRevision` before snapshotting.
+- **Increment**: `autoReviseSpec()` (QA auto-revision) and `routeHumanFeedback()`'s analyst target (human "Request Changes → Analyst") both increment `pipeline.specRevision` in `src/lib/orchestrator/review-actions.ts` before snapshotting.
 - **Save**: `savePipelineState()` in `src/lib/orchestrator/pipeline-state.ts` writes `specRevision` to `.pipeline_state.json` alongside other crash-recovery state.
 - **Restore**: `_restoreSpecRevision()` in `src/lib/orchestrator.ts` recovers the counter from `.pipeline_state.json` (primary) or by counting existing `spec_v{N}.md` files on disk (fallback). Called from both `restorePipeline()` and `runTask()`'s crash-recovery path (`restorePipelineState`).
 - **Guard**: At `specRevision > 3`, `autoReviseSpec` stops revising and advances to `awaiting-review` for human intervention.

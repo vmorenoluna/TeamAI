@@ -364,20 +364,9 @@ export class Orchestrator {
     await rejectTaskFn(taskId, feedback, target, subtaskIds, this._ctx);
   }
 
-  async reviseSpec(taskId: string): Promise<void> {
-    const task = this.taskStore.getById(taskId);
-    if (!task) throw new TaskNotFoundError(taskId);
-    const phase = task.phase;
-    if (phase !== 'awaiting-review') {
-      throw new PhaseTransitionError(taskId, phase, 'awaiting-review', 'revise spec');
-    }
-    const pipeline = this.pipelines.get(taskId) ?? this.restorePipeline(taskId, 'awaiting-review');
-    await this._autoReviseSpec(pipeline, { humanTriggered: true });
-  }
-
   // Delegates to review-actions.autoReviseSpec
-  private async _autoReviseSpec(pipeline: TaskPipeline, opts?: { humanTriggered?: boolean }): Promise<void> {
-    await autoReviseSpec(pipeline, this._ctx, opts);
+  private async _autoReviseSpec(pipeline: TaskPipeline): Promise<void> {
+    await autoReviseSpec(pipeline, this._ctx);
   }
 
   private async executePhase(pipeline: TaskPipeline): Promise<void> {
