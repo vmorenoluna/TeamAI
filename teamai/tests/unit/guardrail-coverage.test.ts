@@ -133,6 +133,13 @@ const GUARDRAILS: GuardrailCheck[] = [
     file: 'defaults/commands/implement.md',
     signatures: ['Spec authority', 'do NOT silently change'],
   },
+  {
+    id: 15,
+    name: 'Shared-File Serialization',
+    description: 'plan.md Rules — same-group subtasks that touch a file conflict at cherry-pick; the orchestrator auto-serializes them as a safety net',
+    file: 'defaults/commands/plan.md',
+    signatures: ['Shared files across', 'auto-serializes', 'cherry-pick', 'documentation only'],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -153,6 +160,12 @@ const CODE_ENFORCEMENT: CodeEnforcement[] = [
     description: 'orchestrator routes cleanup failures to implement',
     file: 'src/lib/orchestrator/qa-review.ts',
     signatures: ["fail_type === 'cleanup'"],
+  },
+  {
+    guardrailIds: [15],
+    description: 'orchestrator auto-serializes same-group subtasks that declare a shared file',
+    file: 'src/lib/orchestrator/plan-validation.ts',
+    signatures: ['serializeSharedFileSubtasks', 'applyPlanFileSerialization'],
   },
   // Infrastructure: teamai-workflow.md is the canonical source for long-running
   // script guidance referenced by implement.md, qa-review.md, and merge.md.
