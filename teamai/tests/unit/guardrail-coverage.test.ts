@@ -202,6 +202,46 @@ const CODE_ENFORCEMENT: CodeEnforcement[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Contract placement — TeamAI's execution-environment rules (worktree
+// isolation, dynamic ports, process safety) are core orchestration contract:
+// they must live in the COMMANDS, never in the ROLES (persona + project
+// conventions, which users are free to rewrite).
+// ---------------------------------------------------------------------------
+
+interface ContractLocationCheck {
+  id: number;
+  name: string;
+  description: string;
+  /** Files where the contract must live (commands own TeamAI's core contract). */
+  presentIn: string[];
+  /** Role files where the contract must NOT live (must not drift back). */
+  absentFrom: string[];
+  signatures: string[];
+}
+
+const CONTRACT_LOCATIONS: ContractLocationCheck[] = [
+  {
+    id: 16,
+    name: 'Verification Environment Rules',
+    description: 'worktree isolation / dynamic ports / process-safety rules belong in commands, not roles',
+    presentIn: ['defaults/commands/implement.md', 'defaults/commands/qa-review.md'],
+    absentFrom: [
+      'defaults/roles/analyst.md',
+      'defaults/roles/planner.md',
+      'defaults/roles/coder.md',
+      'defaults/roles/qa-reviewer.md',
+      'defaults/roles/merger.md',
+    ],
+    signatures: [
+      'Run from the worktree',
+      'Use dynamic ports',
+      'Never kill what you didn\'t start',
+      'Stop your own instances',
+    ],
+  },
+];
+
+// ---------------------------------------------------------------------------
 
 describe('Guardrail Coverage', () => {
   const root = process.cwd();
@@ -255,5 +295,41 @@ describe('Guardrail Coverage', () => {
         ].filter(Boolean).join('\n'),
       ).toBe(true);
     });
+  }
+});
+
+// ---------------------------------------------------------------------------
+
+describe('Contract placement — commands, not roles', () => {
+  const root = process.cwd();
+
+  for (const c of CONTRACT_LOCATIONS) {
+    for (const file of c.presentIn) {
+      it(`contract #${c.id} "${c.name}" is present in ${file}`, () => {
+        const filePath = join(root, file);
+        expect(existsSync(filePath), `File not found: ${filePath}`).toBe(true);
+        const content = readFileSync(filePath, 'utf-8').toLowerCase();
+        const found = c.signatures.some(sig => content.includes(sig.toLowerCase()));
+        expect(
+          found,
+          `Contract #${c.id} "${c.name}" missing from ${file} (${c.description}).\n` +
+            `Expected at least one of: ${c.signatures.map(s => `"${s}"`).join(', ')}`,
+        ).toBe(true);
+      });
+    }
+
+    for (const file of c.absentFrom) {
+      it(`contract #${c.id} "${c.name}" is NOT in ${file}`, () => {
+        const filePath = join(root, file);
+        expect(existsSync(filePath), `File not found: ${filePath}`).toBe(true);
+        const content = readFileSync(filePath, 'utf-8').toLowerCase();
+        const drifted = c.signatures.filter(sig => content.includes(sig.toLowerCase()));
+        expect(
+          drifted,
+          `Contract #${c.id} "${c.name}" drifted back into ${file} (${c.description}).\n` +
+            `These belong in the commands, not roles — remove: ${drifted.map(s => `"${s}"`).join(', ')}`,
+        ).toEqual([]);
+      });
+    }
   }
 });
