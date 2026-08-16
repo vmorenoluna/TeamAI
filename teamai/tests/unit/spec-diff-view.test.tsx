@@ -16,7 +16,6 @@ import { SpecDiffView, computeLineDiff } from '@/components/spec-diff-view';
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function renderComponent(overrides: {
-  spec?: string;
   specVersions?: Record<string, string>;
   leftVersion?: string | null;
   rightVersion?: string | null;
@@ -24,7 +23,6 @@ function renderComponent(overrides: {
   onSetRight?: (v: string | null) => void;
 } = {}) {
   const {
-    spec = 'Current spec content.',
     specVersions = {},
     leftVersion = null,
     rightVersion = null,
@@ -34,7 +32,6 @@ function renderComponent(overrides: {
 
   render(
     <SpecDiffView
-      spec={spec}
       specVersions={specVersions}
       leftVersion={leftVersion}
       rightVersion={rightVersion}
@@ -218,7 +215,6 @@ describe('SpecDiffView', () => {
   describe('selector rendering', () => {
     it('renders left and right version selectors', () => {
       renderComponent({
-        spec: 'spec content',
         specVersions: {
           v1: 'spec v1 content',
           v2: 'spec v2 content',
@@ -231,7 +227,6 @@ describe('SpecDiffView', () => {
 
     it('renders "vs" label between selectors', () => {
       renderComponent({
-        spec: 'spec',
         specVersions: { v1: 'v1 content' },
       });
 
@@ -240,7 +235,6 @@ describe('SpecDiffView', () => {
 
     it('shows "left" and "right" labels', () => {
       renderComponent({
-        spec: 'spec',
         specVersions: { v1: 'v1' },
       });
 
@@ -248,29 +242,27 @@ describe('SpecDiffView', () => {
       expect(screen.getByText('right')).toBeInTheDocument();
     });
 
-    it('labels the live spec option "current", not a version number', () => {
+    it('does not offer a "current" option — versions only', () => {
       renderComponent({
-        spec: 'latest spec',
         specVersions: { v1: 'v1 content', v2: 'v2 content' },
       });
 
       const leftSelect = screen.getByTestId('compare-left-select') as HTMLSelectElement;
-      const liveOption = Array.from(leftSelect.options).find(o => o.value === 'current');
-      expect(liveOption).toBeDefined();
-      expect(liveOption?.textContent).toBe('current (left)');
+      const options = Array.from(leftSelect.options).map(o => o.value);
+      expect(options).toEqual(['v1', 'v2']);
+      expect(options).not.toContain('current');
     });
 
-    it('labels the live column header "current", not a version number', () => {
+    it('labels column headers with the selected version numbers', () => {
       renderComponent({
-        spec: 'latest spec',
         specVersions: { v1: 'v1 content', v2: 'v2 content' },
-        leftVersion: 'current',
+        leftVersion: 'v2',
         rightVersion: 'v1',
       });
 
       const headers = document.querySelectorAll('.sticky');
       const headerTexts = Array.from(headers).map(h => h.textContent?.trim());
-      expect(headerTexts).toContain('current');
+      expect(headerTexts).toContain('v2');
       expect(headerTexts).toContain('v1');
     });
   });
@@ -281,10 +273,9 @@ describe('SpecDiffView', () => {
     it('shows unchanged lines with "  " (two spaces) prefix', () => {
       // For identical content, each unchanged line renders with "  " prefix
       renderComponent({
-        spec: 'Hello World',
-        specVersions: { v1: 'Hello World' },
-        leftVersion: 'current',
-        rightVersion: 'v1',
+        specVersions: { v1: 'Hello World', v2: 'Hello World' },
+        leftVersion: 'v1',
+        rightVersion: 'v2',
       });
 
       // The left cell (data-component="diff-left-0") contains the unchanged line
@@ -299,10 +290,9 @@ describe('SpecDiffView', () => {
 
     it('shows added lines with + prefix', () => {
       renderComponent({
-        spec: 'Hello World\nAdded line',
-        specVersions: { v1: 'Hello World' },
+        specVersions: { v1: 'Hello World', v2: 'Hello World\nAdded line' },
         leftVersion: 'v1',
-        rightVersion: 'current',
+        rightVersion: 'v2',
       });
 
       expect(screen.getByText('+ Added line')).toBeInTheDocument();
@@ -310,10 +300,9 @@ describe('SpecDiffView', () => {
 
     it('shows removed lines with - prefix and line-through', () => {
       renderComponent({
-        spec: 'Hello World',
-        specVersions: { v1: 'Hello World\nRemoved line' },
+        specVersions: { v1: 'Hello World\nRemoved line', v2: 'Hello World' },
         leftVersion: 'v1',
-        rightVersion: 'current',
+        rightVersion: 'v2',
       });
 
       expect(screen.getByText('- Removed line')).toBeInTheDocument();
@@ -321,10 +310,9 @@ describe('SpecDiffView', () => {
 
     it('renders column headers with sticky positioning', () => {
       renderComponent({
-        spec: 'current spec',
-        specVersions: { v1: 'v1 spec' },
+        specVersions: { v1: 'v1 spec', v2: 'v2 spec' },
         leftVersion: 'v1',
-        rightVersion: 'current',
+        rightVersion: 'v2',
       });
 
       const headers = document.querySelectorAll('.sticky');
@@ -337,20 +325,16 @@ describe('SpecDiffView', () => {
   describe('version selectors', () => {
     it('renders options for each version', () => {
       renderComponent({
-        spec: 'current',
         specVersions: { v1: 'v1', v2: 'v2' },
       });
 
       const leftSelect = screen.getByTestId('compare-left-select') as HTMLSelectElement;
       const options = Array.from(leftSelect.options).map(o => o.value);
-      expect(options).toContain('current');
-      expect(options).toContain('v1');
-      expect(options).toContain('v2');
+      expect(options).toEqual(['v1', 'v2']);
     });
 
     it('orders versions numerically (v10 after v9, not after v1)', () => {
       renderComponent({
-        spec: 'current',
         specVersions: {
           v10: 'v10',
           v11: 'v11',
@@ -362,35 +346,33 @@ describe('SpecDiffView', () => {
 
       const leftSelect = screen.getByTestId('compare-left-select') as HTMLSelectElement;
       const options = Array.from(leftSelect.options).map(o => o.value);
-      expect(options).toEqual(['current', 'v1', 'v2', 'v3', 'v10', 'v11']);
+      expect(options).toEqual(['v1', 'v2', 'v3', 'v10', 'v11']);
     });
 
     it('calls onSetLeft when left selector changes', () => {
       const { onSetLeft } = renderComponent({
-        spec: 'current',
-        specVersions: { v1: 'v1' },
-        leftVersion: 'current',
-        rightVersion: 'v1',
+        specVersions: { v1: 'v1', v2: 'v2' },
+        leftVersion: 'v1',
+        rightVersion: 'v2',
       });
 
       const select = screen.getByTestId('compare-left-select');
-      fireEvent.change(select, { target: { value: 'v1' } });
+      fireEvent.change(select, { target: { value: 'v2' } });
 
-      expect(onSetLeft).toHaveBeenCalledWith('v1');
+      expect(onSetLeft).toHaveBeenCalledWith('v2');
     });
 
     it('calls onSetRight when right selector changes', () => {
       const { onSetRight } = renderComponent({
-        spec: 'current',
         specVersions: { v1: 'v1', v2: 'v2' },
-        leftVersion: 'current',
-        rightVersion: 'v1',
+        leftVersion: 'v1',
+        rightVersion: 'v2',
       });
 
       const select = screen.getByTestId('compare-right-select');
-      fireEvent.change(select, { target: { value: 'v2' } });
+      fireEvent.change(select, { target: { value: 'v1' } });
 
-      expect(onSetRight).toHaveBeenCalledWith('v2');
+      expect(onSetRight).toHaveBeenCalledWith('v1');
     });
   });
 
@@ -401,7 +383,6 @@ describe('SpecDiffView', () => {
       const onSetLeft = vi.fn();
       const onSetRight = vi.fn();
       renderComponent({
-        spec: 'current spec',
         specVersions: { v1: 'v1 spec', v2: 'v2 spec' },
         leftVersion: null,
         rightVersion: null,
@@ -418,9 +399,8 @@ describe('SpecDiffView', () => {
       const onSetLeft = vi.fn();
       const onSetRight = vi.fn();
       renderComponent({
-        spec: 'current spec',
         specVersions: { v1: 'v1 spec' },
-        leftVersion: 'current',
+        leftVersion: 'v1',
         rightVersion: 'v1',
         onSetLeft,
         onSetRight,
@@ -437,7 +417,6 @@ describe('SpecDiffView', () => {
   describe('empty diff', () => {
     it('renders without crashing when spec and versions are empty', () => {
       renderComponent({
-        spec: '',
         specVersions: {},
       });
 

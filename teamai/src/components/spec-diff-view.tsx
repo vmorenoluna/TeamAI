@@ -80,35 +80,32 @@ function mergeHunks(hunks: DiffHunk[]): DiffHunk[] {
 function getVersionOptions(specVersions: Record<string, string>): string[] {
   // Sort numerically by revision so v10 follows v9 (not v1). Falls back to
   // lexicographic for keys that don't match the `vN` shape.
-  const versions = Object.keys(specVersions).sort((a, b) => {
+  return Object.keys(specVersions).sort((a, b) => {
     const na = parseInt(a.replace(/^v/, ''), 10);
     const nb = parseInt(b.replace(/^v/, ''), 10);
     if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
     return a.localeCompare(b);
   });
-  return ['current', ...versions];
 }
 
 export function SpecDiffView({
-  spec,
   specVersions,
   leftVersion,
   rightVersion,
   onSetLeft,
   onSetRight,
 }: {
-  spec: string;
   specVersions: Record<string, string>;
   leftVersion: string | null;
   rightVersion: string | null;
   onSetLeft: (v: string | null) => void;
   onSetRight: (v: string | null) => void;
 }) {
-  // Auto-select defaults on first render: current vs v1 or v1 vs v2
+  // Auto-select defaults on first render: the two most recent versions.
   const [initialized, setInitialized] = useState(false);
   useEffect(() => {
     if (initialized) return;
-    const available = getVersionOptions(specVersions).filter(v => v === 'current' ? spec : specVersions[v]);
+    const available = getVersionOptions(specVersions);
     if (available.length >= 2 && leftVersion === null && rightVersion === null) {
       onSetLeft(available[available.length - 2]);
       onSetRight(available[available.length - 1]);
@@ -116,17 +113,17 @@ export function SpecDiffView({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setInitialized(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialized, leftVersion, rightVersion, spec, specVersions]);
+  }, [initialized, leftVersion, rightVersion, specVersions]);
 
-  const leftKey = leftVersion ?? getVersionOptions(specVersions).find(v => v === 'current' ? spec : specVersions[v]) ?? 'current';
-  const rightKey = rightVersion ?? getVersionOptions(specVersions).find(v => v === 'current' ? spec : specVersions[v]) ?? 'v1';
-  const leftText = leftKey === 'current' ? spec : (specVersions[leftKey] ?? '');
-  const rightText = rightKey === 'current' ? spec : (specVersions[rightKey] ?? '');
+  const options = getVersionOptions(specVersions);
+  const leftKey = leftVersion ?? options[options.length - 2] ?? options[0] ?? '';
+  const rightKey = rightVersion ?? options[options.length - 1] ?? options[0] ?? '';
+  const leftText = specVersions[leftKey] ?? '';
+  const rightText = specVersions[rightKey] ?? '';
 
   const hunks = computeLineDiff(leftText, rightText);
 
   function renderSelector(value: string | null, onChange: (v: string | null) => void, side: 'left' | 'right') {
-    const currentLabel = side === 'left' ? 'current (left)' : 'current (right)';
     return (
       <div className="flex items-center gap-1">
         <label className="text-[10px] text-slate-500 uppercase tracking-wider">{side}</label>
@@ -136,10 +133,8 @@ export function SpecDiffView({
           data-component={`compare-${side}-select`}
           className="text-[11px] font-medium px-2 py-1 rounded-md border border-[#334155] bg-[#1a1f2e] text-slate-300 focus:outline-none focus:ring-1 focus:ring-[#2563eb]"
         >
-          {getVersionOptions(specVersions).filter(v => v === 'current' ? spec : specVersions[v]).map(v => (
-            <option key={v} value={v}>
-              {v === 'current' ? currentLabel : v}
-            </option>
+          {getVersionOptions(specVersions).map(v => (
+            <option key={v} value={v}>{v}</option>
           ))}
         </select>
       </div>
@@ -159,11 +154,11 @@ export function SpecDiffView({
       <div className="grid grid-cols-2 gap-0 border border-[#1e293b] rounded-lg overflow-hidden overflow-y-auto max-h-[min(400px,50vh)]">
         {/* Sticky left header */}
         <div className="sticky top-0 z-10 px-3 py-1.5 bg-[#1a1f2e] border-b border-[#1e293b] text-[10px] font-medium text-slate-400 uppercase tracking-wider">
-          {leftKey === 'current' ? 'current' : leftKey}
+          {leftKey}
         </div>
         {/* Sticky right header */}
         <div className="sticky top-0 z-10 px-3 py-1.5 bg-[#1a1f2e] border-b border-l border-[#1e293b] text-[10px] font-medium text-slate-400 uppercase tracking-wider">
-          {rightKey === 'current' ? 'current' : rightKey}
+          {rightKey}
         </div>
         {hunks.map((hunk, hi) => {
           // Determine hunk type for background

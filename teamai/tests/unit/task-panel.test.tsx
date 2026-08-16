@@ -926,13 +926,11 @@ describe('TaskDetail', () => {
       fireEvent.click(screen.getByText('Spec'));
 
       expect(screen.getByText('v1')).toBeInTheDocument();
-      // v2 is the latest snapshot; the live spec is its own "current" button.
       expect(screen.getByText('v2')).toBeInTheDocument();
-      expect(screen.getByText('current')).toBeInTheDocument();
       expect(screen.queryByText('v3')).not.toBeInTheDocument();
     });
 
-    it('does not duplicate the latest version number (v1-v4 + current)', () => {
+    it('does not duplicate the latest version number (v1-v4)', () => {
       renderDetail({
         spec: '# Spec v4 (live)',
         specVersions: {
@@ -944,13 +942,11 @@ describe('TaskDetail', () => {
       });
       fireEvent.click(screen.getByText('Spec'));
 
-      // Each snapshot appears exactly once; the live spec is labeled "current"
-      // (never v4 again) so the latest version is not shown twice.
+      // Each version appears exactly once, in order — no duplicate latest.
       expect(screen.getByText('v1')).toBeInTheDocument();
       expect(screen.getByText('v2')).toBeInTheDocument();
       expect(screen.getByText('v3')).toBeInTheDocument();
       expect(screen.getByText('v4')).toBeInTheDocument();
-      expect(screen.getByText('current')).toBeInTheDocument();
       expect(screen.getAllByText('v4')).toHaveLength(1);
     });
 
@@ -967,18 +963,6 @@ describe('TaskDetail', () => {
       const pre = document.querySelector('pre');
       expect(pre?.textContent).toContain('# Current Spec');
       expect(pre?.textContent).not.toContain('# Spec v1 content');
-    });
-
-    it('live "current" button has blue highlight by default', () => {
-      renderDetail({
-        spec: '# Current Spec',
-        specVersions: { v1: '# Spec v1 content', v2: '# Spec v2 content' },
-      });
-      fireEvent.click(screen.getByText('Spec'));
-
-      const liveBtn = screen.getByText('current');
-      expect(liveBtn.className).toContain('border-[#2563eb]');
-      expect(liveBtn.className).toContain('text-blue-300');
     });
 
     it('clicking v1 shows v1 content and highlights v1 button', () => {
@@ -1001,11 +985,6 @@ describe('TaskDetail', () => {
       const v1Btn = screen.getByText('v1');
       expect(v1Btn.className).toContain('border-[#2563eb]');
       expect(v1Btn.className).toContain('text-blue-300');
-
-      // live "current" button should NOT be highlighted
-      const currentBtn = screen.getByText('current');
-      expect(currentBtn.className).toContain('text-slate-400');
-      expect(currentBtn.className).not.toContain('border-[#2563eb]');
     });
 
     it('clicking v2 shows v2 content', () => {
@@ -1025,23 +1004,6 @@ describe('TaskDetail', () => {
       expect(pre?.textContent).not.toContain('# Current Spec');
     });
 
-    it('clicking the live "current" button after viewing a snapshot restores the live spec', () => {
-      renderDetail({
-        spec: '# Current Spec',
-        specVersions: { v1: '# Spec v1 content' },
-      });
-      fireEvent.click(screen.getByText('Spec'));
-
-      // Switch to the v1 snapshot
-      fireEvent.click(screen.getByText('v1'));
-      expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
-
-      // Switch back to the live spec via the "current" button
-      fireEvent.click(screen.getByText('current'));
-      expect(document.querySelector('pre')?.textContent).toContain('# Current Spec');
-      expect(document.querySelector('pre')?.textContent).not.toContain('# Spec v1 content');
-    });
-
     it('shows correct badge count when spec and versions exist', () => {
       renderDetail({
         spec: '# Current Spec',
@@ -1049,7 +1011,7 @@ describe('TaskDetail', () => {
       });
       fireEvent.click(screen.getByText('Spec'));
 
-      // Badge should be 4: 1 (current) + 3 (v1, v2, v3)
+      // Badge should be 4: 1 (live spec) + 3 (v1, v2, v3)
       const specTab = screen.getByText('Spec').closest('button')!;
       const badgeSpans = specTab.querySelectorAll('span');
       const badgeTexts = Array.from(badgeSpans).map(b => b.textContent);
@@ -1083,17 +1045,12 @@ describe('TaskDetail', () => {
       });
       fireEvent.click(screen.getByText('Spec'));
 
-      // v1 is the snapshot; "current" is the live spec button.
+      // v1 is the only version; there is no separate "current" button.
       expect(screen.getByText('v1')).toBeInTheDocument();
-      expect(screen.getByText('current')).toBeInTheDocument();
 
       // Clicking the v1 snapshot should show the snapshot content
       fireEvent.click(screen.getByText('v1'));
       expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
-
-      // Clicking the live spec ("current") when spec is null shows empty content
-      fireEvent.click(screen.getByText('current'));
-      expect(document.querySelector('pre')?.textContent).toBe('');
     });
 
     it('preserves selected version when switching between Spec and other tabs', () => {
@@ -1137,10 +1094,10 @@ describe('TaskDetail', () => {
       expect(screen.getByText('⚖ Compare')).toBeInTheDocument();
     });
 
-    it('shows compare toggle with just 1 snapshot (current + v1 = 2 total)', () => {
+    it('shows compare toggle with just 1 snapshot (live spec + v1 = 2 total)', () => {
       renderDetail({ spec: '# Current', specVersions: { v1: '# v1' } });
       clickSpec();
-      // With 1 snapshot + current, total is 2 — toggle should appear
+      // With 1 snapshot + the live spec, total is 2 — toggle should appear
       expect(screen.getByTestId('compare-toggle')).toBeInTheDocument();
     });
 
@@ -1182,10 +1139,9 @@ describe('TaskDetail', () => {
       fireEvent.click(screen.getByTestId('compare-toggle'));
 
       expect(screen.getByText('⚖ Compare')).toBeInTheDocument();
-      // Version buttons should be back (v1 + v2 snapshot + live "current")
+      // Version buttons should be back (v1 + v2 snapshot)
       expect(screen.getByText('v1')).toBeInTheDocument();
       expect(screen.getByText('v2')).toBeInTheDocument();
-      expect(screen.getByText('current')).toBeInTheDocument();
     });
 
     it('shows removed lines in red with strikethrough on left side', () => {
@@ -1261,6 +1217,7 @@ describe('TaskDetail', () => {
         specVersions: {
           v1: '# Old Spec\nline in v1 only\nshared line',
           v2: '# New Spec\nshared line\nline in v2 only',
+          v3: '# Third Spec\nshared line\nline in v3 only',
         },
       });
       clickSpec();
@@ -1277,13 +1234,13 @@ describe('TaskDetail', () => {
       const leftTexts = Array.from(leftLines).map(d => d.textContent);
       expect(leftTexts.some(t => t?.includes('line in v1 only'))).toBe(true);
 
-      // Now switch left to 'current' spec
-      fireEvent.change(leftSelect, { target: { value: 'current' } });
+      // Now switch left to v3
+      fireEvent.change(leftSelect, { target: { value: 'v3' } });
 
-      // Diff should now compare current vs v2 (different content)
+      // Diff should now compare v3 vs v2 (different content)
       const updatedLeftLines = document.querySelectorAll('[data-component^="diff-left-"] div');
       const updatedLeftTexts = Array.from(updatedLeftLines).map(d => d.textContent);
-      expect(updatedLeftTexts.some(t => t?.includes('Current Spec'))).toBe(true);
+      expect(updatedLeftTexts.some(t => t?.includes('line in v3 only'))).toBe(true);
       // v1-specific content should no longer appear
       expect(updatedLeftTexts.some(t => t?.includes('line in v1 only'))).toBe(false);
       // Shared/unchanged content should persist after recomputing diff
