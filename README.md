@@ -195,6 +195,8 @@ teamai/
 
 **Pipeline:** Each task flows through configurable phases — spec → plan → implement → QA review → merge. Role-specialized Claude agents (analyst, planner, coder, qa-reviewer, merger) handle each phase.
 
+**Commands vs. roles:** Agent prompts ship in two forms under `defaults/` and are scaffolded into each project's `.claude/` directory. **Commands** (`commands/*.md`) are the orchestration contract — the artifact schemas, output formats, and environment rules the pipeline depends on; they're kept in sync across projects. **Roles** (`roles/*.md`) are agent personas and project conventions, scaffolded once and left for you to customize. Rewriting a role never breaks the pipeline — the load-bearing rules all live in the commands.
+
 **ProcessManager:** Spawns `claude -p --input-format stream-json --output-format stream-json` subprocesses. NDJSON output is parsed and streamed to the UI via WebSocket.
 
 **Git worktree isolation:** Parallel agents run in isolated git worktrees at `worktrees/<task-slug>/`, preventing file conflicts.
