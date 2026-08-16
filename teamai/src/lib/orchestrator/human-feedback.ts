@@ -97,9 +97,9 @@ const TARGET_LABELS: Record<FeedbackTarget, string> = {
 };
 
 /** Full override block for the targeted agent. */
-export function buildOverrideDirective(feedback: HumanFeedback): string {
+export function buildOverrideDirective(feedback: HumanFeedback, scopeNote?: string): string {
   const label = feedback.target ? TARGET_LABELS[feedback.target] : 'you';
-  return [
+  const parts = [
     '## 🧑 HUMAN DIRECTIVE — OVERRIDES EVERYTHING ELSE',
     '',
     `The human reviewer sent this instruction for ${label}. It takes precedence over the ` +
@@ -107,8 +107,12 @@ export function buildOverrideDirective(feedback: HumanFeedback): string {
       'If any of those documents tell you otherwise, follow this directive instead and note the ' +
       'deviation in your summary.',
     '',
-    feedback.message,
-  ].join('\n');
+  ];
+  if (scopeNote) {
+    parts.push(scopeNote, '');
+  }
+  parts.push(feedback.message);
+  return parts.join('\n');
 }
 
 /** Lower-priority context note so QA doesn't contradict a directive aimed at another agent. */
@@ -126,6 +130,34 @@ export function buildContextNote(feedback: HumanFeedback): string {
 }
 
 /**
+ * Format the list of subtasks a coder-targeted directive is scoped to, so the
+ * engineer sees the narrowed scope (ids + titles) rather than only the raw id
+ * list stored in human_feedback.md. Returns '' for an empty selection.
+ */
+export function buildSubtaskScopeNote(subtasks: { id: number; title: string }[]): string {
+  if (subtasks.length === 0) return '';
+  return [
+    'The human reviewer scoped this directive to the following subtasks — rework ONLY these, do not touch others:',
+    ...subtasks.map(s => `  - #${s.id}: ${s.title}`),
+  ].join('\n');
+}
+
+/** Resolve the subtask ids stored in human_feedback.md to their plan.json titles. */
+function readScopedSubtasks(specPath: string, ids: number[]): { id: number; title: string }[] {
+  const planPath = path.join(specPath, 'plan.json');
+  if (!existsSync(planPath)) return [];
+  try {
+    const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+    const idSet = new Set(ids);
+    return (plan.subtasks || [])
+      .filter((s: { id: number }) => idSet.has(s.id))
+      .map((s: { id: number; title: string }) => ({ id: s.id, title: s.title }));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Return the directive block to prepend to a phase's prompt, or '' if none.
  *
  * - The targeted agent gets the full override block.
@@ -136,7 +168,13 @@ export function buildContextNote(feedback: HumanFeedback): string {
 export function humanDirectiveFor(specPath: string, phaseRole: string): string {
   const fb = readHumanFeedback(specPath);
   if (!fb || !fb.target) return '';
-  if (fb.target === phaseRole) return buildOverrideDirective(fb) + '\n\n';
+  if (fb.target === phaseRole) {
+    let scopeNote: string | undefined;
+    if (fb.target === 'coder' && fb.subtaskIds?.length) {
+      scopeNote = buildSubtaskScopeNote(readScopedSubtasks(specPath, fb.subtaskIds));
+    }
+    return buildOverrideDirective(fb, scopeNote) + '\n\n';
+  }
   if (phaseRole === 'qa-reviewer') return buildContextNote(fb) + '\n\n';
   return '';
 }

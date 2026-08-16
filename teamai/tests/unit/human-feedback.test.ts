@@ -12,6 +12,7 @@ import {
   targetToResumePhase,
   buildOverrideDirective,
   buildContextNote,
+  buildSubtaskScopeNote,
   humanDirectiveFor,
   consumeFeedbackIfDue,
   feedbackFilePath,
@@ -110,11 +111,48 @@ describe('directive blocks', () => {
   });
 });
 
+describe('buildSubtaskScopeNote', () => {
+  it('formats the scoped subtasks as a bullet list', () => {
+    const note = buildSubtaskScopeNote([
+      { id: 2, title: 'Fix auth module' },
+      { id: 5, title: 'Add rate limiting' },
+    ]);
+    expect(note).toContain('rework ONLY these');
+    expect(note).toContain('#2: Fix auth module');
+    expect(note).toContain('#5: Add rate limiting');
+  });
+
+  it('returns an empty string for no subtasks', () => {
+    expect(buildSubtaskScopeNote([])).toBe('');
+  });
+});
+
 describe('humanDirectiveFor', () => {
   it('returns the full override for the targeted agent', () => {
     writeHumanFeedback(dir, 'coder', 'Use the new client');
     const block = humanDirectiveFor(dir, 'coder');
     expect(block).toContain('OVERRIDES EVERYTHING');
+  });
+
+  it('surfaces the scoped subtasks in the coder override when plan.json lists them', () => {
+    writeFileSync(join(dir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 2, title: 'Fix auth module' },
+        { id: 5, title: 'Add rate limiting' },
+      ],
+    }));
+    writeHumanFeedback(dir, 'coder', 'Tighten these up', [2, 5]);
+    const block = humanDirectiveFor(dir, 'coder');
+    expect(block).toContain('OVERRIDES EVERYTHING');
+    expect(block).toContain('#2: Fix auth module');
+    expect(block).toContain('#5: Add rate limiting');
+  });
+
+  it('omits the scope note when plan.json is missing or no ids are selected', () => {
+    writeHumanFeedback(dir, 'coder', 'Tighten these up', [2, 5]);
+    const block = humanDirectiveFor(dir, 'coder');
+    expect(block).toContain('OVERRIDES EVERYTHING');
+    expect(block).not.toContain('rework ONLY these');
   });
 
   it('returns a context note to QA for a directive aimed at another agent', () => {
