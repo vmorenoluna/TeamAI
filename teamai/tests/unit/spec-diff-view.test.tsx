@@ -248,7 +248,7 @@ describe('SpecDiffView', () => {
       expect(screen.getByText('right')).toBeInTheDocument();
     });
 
-    it('labels the live spec option with its version number, not "current"', () => {
+    it('labels the live spec option "current", not a version number', () => {
       renderComponent({
         spec: 'latest spec',
         specVersions: { v1: 'v1 content', v2: 'v2 content' },
@@ -257,10 +257,10 @@ describe('SpecDiffView', () => {
       const leftSelect = screen.getByTestId('compare-left-select') as HTMLSelectElement;
       const liveOption = Array.from(leftSelect.options).find(o => o.value === 'current');
       expect(liveOption).toBeDefined();
-      expect(liveOption?.textContent).toBe('v2 (left)');
+      expect(liveOption?.textContent).toBe('current (left)');
     });
 
-    it('shows the live spec version number in column headers', () => {
+    it('labels the live column header "current", not a version number', () => {
       renderComponent({
         spec: 'latest spec',
         specVersions: { v1: 'v1 content', v2: 'v2 content' },
@@ -270,8 +270,7 @@ describe('SpecDiffView', () => {
 
       const headers = document.querySelectorAll('.sticky');
       const headerTexts = Array.from(headers).map(h => h.textContent?.trim());
-      // Live spec is v2 (same as the latest snapshot), the right snapshot is v1.
-      expect(headerTexts).toContain('v2');
+      expect(headerTexts).toContain('current');
       expect(headerTexts).toContain('v1');
     });
   });
