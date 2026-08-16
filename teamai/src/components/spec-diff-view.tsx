@@ -89,18 +89,6 @@ function getVersionOptions(specVersions: Record<string, string>): string[] {
   return ['current', ...versions];
 }
 
-/** The live spec (spec.md) version label — v{N}, the same number as the
- *  highest snapshot (spec_v{N}.md archives version N and the live spec is
- *  that latest version). */
-function getCurrentVersionLabel(specVersions: Record<string, string>): string {
-  let max = 0;
-  for (const key of Object.keys(specVersions)) {
-    const n = parseInt(key.replace(/^v/, ''), 10);
-    if (!Number.isNaN(n) && n > max) max = n;
-  }
-  return `v${Math.max(1, max)}`;
-}
-
 export function SpecDiffView({
   spec,
   specVersions,
@@ -134,12 +122,11 @@ export function SpecDiffView({
   const rightKey = rightVersion ?? getVersionOptions(specVersions).find(v => v === 'current' ? spec : specVersions[v]) ?? 'v1';
   const leftText = leftKey === 'current' ? spec : (specVersions[leftKey] ?? '');
   const rightText = rightKey === 'current' ? spec : (specVersions[rightKey] ?? '');
-  const currentVersion = getCurrentVersionLabel(specVersions);
 
   const hunks = computeLineDiff(leftText, rightText);
 
   function renderSelector(value: string | null, onChange: (v: string | null) => void, side: 'left' | 'right') {
-    const currentLabel = side === 'left' ? `${currentVersion} (left)` : `${currentVersion} (right)`;
+    const currentLabel = side === 'left' ? 'current (left)' : 'current (right)';
     return (
       <div className="flex items-center gap-1">
         <label className="text-[10px] text-slate-500 uppercase tracking-wider">{side}</label>
@@ -172,11 +159,11 @@ export function SpecDiffView({
       <div className="grid grid-cols-2 gap-0 border border-[#1e293b] rounded-lg overflow-hidden overflow-y-auto max-h-[min(400px,50vh)]">
         {/* Sticky left header */}
         <div className="sticky top-0 z-10 px-3 py-1.5 bg-[#1a1f2e] border-b border-[#1e293b] text-[10px] font-medium text-slate-400 uppercase tracking-wider">
-          {leftKey === 'current' ? currentVersion : leftKey}
+          {leftKey === 'current' ? 'current' : leftKey}
         </div>
         {/* Sticky right header */}
         <div className="sticky top-0 z-10 px-3 py-1.5 bg-[#1a1f2e] border-b border-l border-[#1e293b] text-[10px] font-medium text-slate-400 uppercase tracking-wider">
-          {rightKey === 'current' ? currentVersion : rightKey}
+          {rightKey === 'current' ? 'current' : rightKey}
         </div>
         {hunks.map((hunk, hi) => {
           // Determine hunk type for background

@@ -926,10 +926,32 @@ describe('TaskDetail', () => {
       fireEvent.click(screen.getByText('Spec'));
 
       expect(screen.getByText('v1')).toBeInTheDocument();
-      // v2 is both the latest snapshot and the live spec (identical content),
-      // so the label appears on the snapshot button and the live button.
-      expect(screen.getAllByText('v2')).toHaveLength(2);
+      // v2 is the latest snapshot; the live spec is its own "current" button.
+      expect(screen.getByText('v2')).toBeInTheDocument();
+      expect(screen.getByText('current')).toBeInTheDocument();
       expect(screen.queryByText('v3')).not.toBeInTheDocument();
+    });
+
+    it('does not duplicate the latest version number (v1-v4 + current)', () => {
+      renderDetail({
+        spec: '# Spec v4 (live)',
+        specVersions: {
+          v1: '# v1',
+          v2: '# v2',
+          v3: '# v3',
+          v4: '# v4',
+        },
+      });
+      fireEvent.click(screen.getByText('Spec'));
+
+      // Each snapshot appears exactly once; the live spec is labeled "current"
+      // (never v4 again) so the latest version is not shown twice.
+      expect(screen.getByText('v1')).toBeInTheDocument();
+      expect(screen.getByText('v2')).toBeInTheDocument();
+      expect(screen.getByText('v3')).toBeInTheDocument();
+      expect(screen.getByText('v4')).toBeInTheDocument();
+      expect(screen.getByText('current')).toBeInTheDocument();
+      expect(screen.getAllByText('v4')).toHaveLength(1);
     });
 
     it('displays current spec content by default', () => {
@@ -947,16 +969,14 @@ describe('TaskDetail', () => {
       expect(pre?.textContent).not.toContain('# Spec v1 content');
     });
 
-    it('live version button (v2) has blue highlight by default', () => {
+    it('live "current" button has blue highlight by default', () => {
       renderDetail({
         spec: '# Current Spec',
         specVersions: { v1: '# Spec v1 content', v2: '# Spec v2 content' },
       });
       fireEvent.click(screen.getByText('Spec'));
 
-      // v2 appears twice: the snapshot button and the live button (last).
-      const v2Buttons = screen.getAllByText('v2');
-      const liveBtn = v2Buttons[v2Buttons.length - 1];
+      const liveBtn = screen.getByText('current');
       expect(liveBtn.className).toContain('border-[#2563eb]');
       expect(liveBtn.className).toContain('text-blue-300');
     });
@@ -982,9 +1002,8 @@ describe('TaskDetail', () => {
       expect(v1Btn.className).toContain('border-[#2563eb]');
       expect(v1Btn.className).toContain('text-blue-300');
 
-      // live (v2) button should NOT be highlighted
-      const v2Buttons = screen.getAllByText('v2');
-      const currentBtn = v2Buttons[v2Buttons.length - 1];
+      // live "current" button should NOT be highlighted
+      const currentBtn = screen.getByText('current');
       expect(currentBtn.className).toContain('text-slate-400');
       expect(currentBtn.className).not.toContain('border-[#2563eb]');
     });
@@ -998,7 +1017,7 @@ describe('TaskDetail', () => {
         },
       });
       fireEvent.click(screen.getByText('Spec'));
-      fireEvent.click(screen.getAllByText('v2')[0]);
+      fireEvent.click(screen.getByText('v2'));
 
       const pre = document.querySelector('pre');
       expect(pre?.textContent).toContain('# Spec v2 content');
@@ -1006,7 +1025,7 @@ describe('TaskDetail', () => {
       expect(pre?.textContent).not.toContain('# Current Spec');
     });
 
-    it('clicking the live version button after viewing a snapshot restores the live spec', () => {
+    it('clicking the live "current" button after viewing a snapshot restores the live spec', () => {
       renderDetail({
         spec: '# Current Spec',
         specVersions: { v1: '# Spec v1 content' },
@@ -1014,11 +1033,11 @@ describe('TaskDetail', () => {
       fireEvent.click(screen.getByText('Spec'));
 
       // Switch to the v1 snapshot
-      fireEvent.click(screen.getAllByText('v1')[0]);
+      fireEvent.click(screen.getByText('v1'));
       expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
 
-      // Switch back to the live spec (also labeled v1 — live == latest version)
-      fireEvent.click(screen.getAllByText('v1')[1]);
+      // Switch back to the live spec via the "current" button
+      fireEvent.click(screen.getByText('current'));
       expect(document.querySelector('pre')?.textContent).toContain('# Current Spec');
       expect(document.querySelector('pre')?.textContent).not.toContain('# Spec v1 content');
     });
@@ -1064,15 +1083,16 @@ describe('TaskDetail', () => {
       });
       fireEvent.click(screen.getByText('Spec'));
 
-      // v1 is both the snapshot and the live version (live == latest version)
-      expect(screen.getAllByText('v1')).toHaveLength(2);
+      // v1 is the snapshot; "current" is the live spec button.
+      expect(screen.getByText('v1')).toBeInTheDocument();
+      expect(screen.getByText('current')).toBeInTheDocument();
 
       // Clicking the v1 snapshot should show the snapshot content
-      fireEvent.click(screen.getAllByText('v1')[0]);
+      fireEvent.click(screen.getByText('v1'));
       expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
 
-      // Clicking the live spec (also v1) when spec is null shows empty content
-      fireEvent.click(screen.getAllByText('v1')[1]);
+      // Clicking the live spec ("current") when spec is null shows empty content
+      fireEvent.click(screen.getByText('current'));
       expect(document.querySelector('pre')?.textContent).toBe('');
     });
 
@@ -1162,9 +1182,10 @@ describe('TaskDetail', () => {
       fireEvent.click(screen.getByTestId('compare-toggle'));
 
       expect(screen.getByText('⚖ Compare')).toBeInTheDocument();
-      // Version buttons should be back (v2 snapshot + live, plus v1)
-      expect(screen.getAllByText('v2')).toHaveLength(2);
+      // Version buttons should be back (v1 + v2 snapshot + live "current")
       expect(screen.getByText('v1')).toBeInTheDocument();
+      expect(screen.getByText('v2')).toBeInTheDocument();
+      expect(screen.getByText('current')).toBeInTheDocument();
     });
 
     it('shows removed lines in red with strikethrough on left side', () => {
