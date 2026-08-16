@@ -134,15 +134,14 @@ re-read a file to verify an `Edit` that returned success.
   them. If a subtask instructs you to write to these files, skip that instruction entirely
   and include in your summary: `[SKIPPED] Pipeline artifact management is the orchestrator's
   responsibility.`
-- **Out-of-scope bugs: create a kanban ticket.** If you discover a bug, missing feature,
-  or refactor opportunity that is outside your assigned subtask scope, create a ticket for
-  it rather than fixing it inline. Write a `task.json` to `<PROJECT_ROOT>/.teamai/{slug}/`
-  following the format in `.claude/commands/create-task.md`. The PROJECT_ROOT value is
-  provided in the prompt above (e.g. `PROJECT_ROOT=/path/to/project`). Your working directory
-  is a git worktree — do NOT write to `./teamai/`; use the absolute PROJECT_ROOT path.
-  Use the `Fix:` prefix for bugs you encounter. This lets the team triage it properly
-  rather than silently shipping an unplanned change.
-  Summary format: `[BUG] Created ticket Fix: {description} — {reason it's out-of-scope}`
+- **Out-of-scope bugs: report, don't fix inline.** If you discover a bug, missing feature,
+  or refactor opportunity that is outside your assigned subtask scope, do NOT fix it and
+  do NOT write any ticket files — the orchestrator creates the kanban ticket from your
+  summary. Report each finding on its own line using the `Fix:` prefix:
+  Summary format: `[BUG] Fix: {description} — {reason it's out-of-scope}`
+  The orchestrator parses these lines and files the ticket in the project's `.teamai/`
+  directory. This lets the team triage the bug properly rather than silently shipping an
+  unplanned change.
 - If the spec or plan documents rejected alternatives, failed approaches, or explains
   why a specific value or formula was chosen, treat that as authoritative. Do not
   re-derive, re-test, or re-explore alternatives the spec explicitly marks as rejected

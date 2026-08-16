@@ -18,6 +18,7 @@ import { readContainerConfig, containerManager, dockerAvailable, _resetDockerAva
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { rebaseOntoLatestDefault } from './phase-runners';
 import { updateSessionMap, logToOutput } from './helpers';
+import { createOutOfScopeTicketsFromLog } from './out-of-scope-tickets';
 import { humanDirectiveFor, readHumanFeedback } from './human-feedback';
 import { resolveBaseBranch } from '../git-platform';
 import { getUnpushedCommits } from './worktree-ops';
@@ -863,6 +864,19 @@ export async function runSubtaskSession(
   }
 
   processManager.killSession(sessionId);
+
+  // Out-of-scope bug tickets (#3b): the coder reports `[BUG] Fix: ...` lines
+  // in its summary instead of hand-writing task.json files; the orchestrator
+  // parses the session log and creates deterministic tickets. Best-effort.
+  try {
+    const createdIds = createOutOfScopeTicketsFromLog(deps.projectRoot, subtaskLogFile, deps.taskStore);
+    if (createdIds.length > 0) {
+      logToOutput(pipeline.specPath, '[BUG-TICKET] Subtask ' + subtask.id + ' reported ' + createdIds.length + ' out-of-scope bug(s) — created ticket(s): ' + createdIds.join(', ') + '\n');
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToOutput(pipeline.specPath, '\n[BUG-TICKET] Failed to create out-of-scope tickets: ' + msg + '\n');
+  }
 
   // Post-session scope check: verify agent only modified assigned files.
   if (preSessionHead) {
