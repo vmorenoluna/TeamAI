@@ -1,5 +1,5 @@
 <!-- .claude/commands/merge.md -->
-Read and adopt the role defined in .claude/roles/merger.md before proceeding.
+Adopt the role persona already loaded in your system prompt.
 
 You are merging branch `{branch}` into the current branch using
 `git merge {branch} --no-commit`.

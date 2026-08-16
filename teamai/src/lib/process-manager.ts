@@ -80,6 +80,34 @@ export interface AgentSession {
   events: EventEmitter;
 }
 
+/**
+ * Resolve the role persona text to inject as a session's system prompt, or
+ * null when there is nothing to inject. Looks in
+ * `<projectRoot>/.claude/roles/<role>.md` first (the per-project,
+ * user-customizable copy), then falls back to the TeamAI-shipped
+ * `defaults/roles/<role>.md`. Only the five pipeline roles have role files —
+ * 'general' sessions have none, so they get nothing injected.
+ */
+export function readRoleSystemPrompt(
+  projectRoot: string | undefined,
+  role: AgentSession['role'],
+): string | null {
+  if (!projectRoot || role === 'general') return null;
+  const candidates = [
+    join(projectRoot, '.claude', 'roles', `${role}.md`),
+    join(process.cwd(), 'defaults', 'roles', `${role}.md`),
+  ];
+  for (const file of candidates) {
+    try {
+      if (existsSync(file)) {
+        const content = readFileSync(file, 'utf-8');
+        if (content.trim()) return content;
+      }
+    } catch { /* fall through to the next candidate */ }
+  }
+  return null;
+}
+
 export class ProcessManager extends EventEmitter {
   private sessions: Map<string, AgentSession> = new Map();
   private terminalSessions: Map<string, TerminalSession> = new Map();
@@ -118,6 +146,18 @@ export class ProcessManager extends EventEmitter {
     ];
 
     if (opts.model) claudeArgs.push('--model', opts.model);
+
+    // Inject the role persona as a system prompt instead of telling the agent
+    // to "read and adopt" .claude/roles/{role}.md as its first action. The old
+    // flow cost every session a Read tool round-trip plus a re-adoption turn;
+    // the system prompt is already in context before the first turn and is the
+    // always-in-effect instruction layer. Mirrors createTerminalSession, which
+    // has always passed the role this way. Only the five pipeline roles have
+    // role files — 'general' sessions (insights, ideation, roadmap, changelog,
+    // GitHub) get nothing injected and keep any role-adoption step their own
+    // command template defines.
+    const rolePrompt = readRoleSystemPrompt(opts.projectRoot, opts.role);
+    if (rolePrompt) claudeArgs.push('--append-system-prompt', rolePrompt);
 
     let proc: ChildProcess;
 

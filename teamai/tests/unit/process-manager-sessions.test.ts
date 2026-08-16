@@ -847,4 +847,60 @@ describe('ProcessManager — Full Coverage', () => {
       }));
     });
   });
+
+  // ── createSession: role persona injection ────────────────────────────────
+
+  describe('createSession — role persona injection', () => {
+    it('injects the role file as --append-system-prompt when present', async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockReturnValue('You are a coding expert.');
+      mockChildProcess();
+
+      await pm.createSession({
+        taskId: 'task-1', role: 'coder', cwd: '/test', projectRoot: '/proj',
+      });
+
+      const args = mockSpawn.mock.calls[0][1];
+      expect(args).toContain('--append-system-prompt');
+      expect(args).toContain('You are a coding expert.');
+    });
+
+    it('does not inject when the role file is missing', async () => {
+      mockExistsSync.mockReturnValue(false);
+      mockChildProcess();
+
+      await pm.createSession({
+        taskId: 'task-1', role: 'coder', cwd: '/test', projectRoot: '/proj',
+      });
+
+      const args = mockSpawn.mock.calls[0][1];
+      expect(args).not.toContain('--append-system-prompt');
+    });
+
+    it('does not inject for general sessions', async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockReturnValue('You are a coding expert.');
+      mockChildProcess();
+
+      await pm.createSession({
+        taskId: 'task-1', role: 'general', cwd: '/test', projectRoot: '/proj',
+      });
+
+      const args = mockSpawn.mock.calls[0][1];
+      expect(args).not.toContain('--append-system-prompt');
+    });
+
+    it('does not inject when projectRoot is absent', async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReadFileSync.mockReturnValue('You are a coding expert.');
+      mockChildProcess();
+
+      await pm.createSession({
+        taskId: 'task-1', role: 'coder', cwd: '/test',
+      });
+
+      const args = mockSpawn.mock.calls[0][1];
+      expect(args).not.toContain('--append-system-prompt');
+    });
+  });
 });

@@ -1,5 +1,5 @@
 <!-- .claude/commands/implement.md -->
-Read and adopt the role defined in .claude/roles/coder.md before proceeding.
+Adopt the role persona already loaded in your system prompt.
 
 **Human directive override:** if a `human_feedback.md` file exists in the task's `.teamai/` directory and its `Target:` header names the engineer (coder), its content OVERRIDES the spec, the plan, the QA report, and any other agent's directives wherever they conflict — follow it over any conflicting instruction and note the deviation in your summary.
 
