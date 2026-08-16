@@ -155,4 +155,34 @@ describe('routeHumanFeedback', () => {
     expect(existsSync(join(ctx.specPath, 'plan.json'))).toBe(true);
     expect(existsSync(join(ctx.specPath, 'spec.md'))).toBe(true);
   });
+
+  it('routes the analyst into revision mode: writes feedback + snapshots the pre-revision spec', async () => {
+    seedArtifacts(ctx.specPath);
+    await routeHumanFeedback(ctx.pipeline, ctx.deps as never, {
+      target: 'analyst',
+      message: 'Derive the formula from first principles',
+    });
+
+    // spec_revision_feedback.md triggers runSpecPhase's REVISION mode, so the
+    // analyst revises the existing spec instead of regenerating it.
+    expect(readFileSync(join(ctx.specPath, 'spec_revision_feedback.md'), 'utf-8')).toContain(
+      'Derive the formula from first principles',
+    );
+
+    // Pre-revision spec archived under the incremented revision number, so the
+    // no-op guard + version archive in runSpecPhase have a correct baseline.
+    expect(ctx.pipeline.specRevision).toBe(2);
+    expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# spec');
+    expect(ctx.deps.savePipelineState).toHaveBeenCalled();
+  });
+
+  it('does NOT write revision feedback when routing to the analyst with no existing spec', async () => {
+    // No spec.md seeded — the analyst should generate a fresh spec.
+    await routeHumanFeedback(ctx.pipeline, ctx.deps as never, {
+      target: 'analyst',
+      message: 'Draft a new spec',
+    });
+    expect(existsSync(join(ctx.specPath, 'spec_revision_feedback.md'))).toBe(false);
+    expect(ctx.pipeline.specRevision).toBe(1);
+  });
 });
