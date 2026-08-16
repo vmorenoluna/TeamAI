@@ -349,24 +349,6 @@ describe('RoadmapView', () => {
       });
     });
 
-    it('shows streaming text on the changelog tab too', async () => {
-      mockStartChangelogGeneration.mockResolvedValue('sess-cl');
-      mockUseSessionStream.mockReturnValue([ev('assistant', 'Building changelog…')]);
-      mockExtractProgressText.mockReturnValue('Building changelog…');
-
-      await renderView(false);
-      fireEvent.click(screen.getByText('Changelog'));
-
-      await act(async () => {
-        fireEvent.click(screen.getByText('Generate Changelog'));
-      });
-
-      // clFullText is set via useMemo — wait for it
-      await waitFor(() => {
-        expect(screen.getByText('Building changelog…')).toBeInTheDocument();
-      });
-    });
-
     it('shows Starting indicator when running but no events yet', async () => {
       mockStartRoadmapGeneration.mockResolvedValue('sess-stream');
       mockUseSessionStream.mockReturnValue([]);
@@ -424,9 +406,29 @@ describe('RoadmapView', () => {
       });
     });
 
-    it('shows Generating… on the changelog button while running', async () => {
-      mockStartChangelogGeneration.mockResolvedValue('sess-cl-2');
-      mockUseSessionStream.mockReturnValue([]);
+    it('generates and renders the changelog on click', async () => {
+      mockStartChangelogGeneration.mockResolvedValue('changelog-2026-08-16.md');
+      mockGetChangelogReports.mockResolvedValue([
+        { filename: 'changelog-2026-08-16.md', date: '2026-08-16' },
+      ]);
+      mockGetLatestChangelog.mockResolvedValue('# Changelog\n\n- Added dark mode');
+
+      await renderView(false);
+      fireEvent.click(screen.getByText('Changelog'));
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Generate Changelog'));
+      });
+
+      expect(mockStartChangelogGeneration).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(screen.getByText(/Added dark mode/)).toBeInTheDocument();
+      });
+    });
+
+    it('shows Generating… while a changelog generation is pending', async () => {
+      let resolveStart!: (value: string) => void;
+      mockStartChangelogGeneration.mockReturnValue(new Promise<string>(resolve => { resolveStart = resolve; }));
 
       await renderView(false);
       fireEvent.click(screen.getByText('Changelog'));
@@ -436,6 +438,11 @@ describe('RoadmapView', () => {
       });
 
       expect(screen.getByText('Generating…')).toBeInTheDocument();
+
+      await act(async () => {
+        resolveStart('changelog-2026-08-16.md');
+        await new Promise(r => setTimeout(r, 0));
+      });
     });
   });
 
@@ -516,40 +523,6 @@ describe('RoadmapView', () => {
       expect(screen.queryByText('✕ Stop')).not.toBeInTheDocument();
     });
 
-    it('cancels an in-flight changelog generation when Stop is clicked before start completes', async () => {
-      let resolveStart!: (value: string) => void;
-      const deferredStart = new Promise<string>(resolve => { resolveStart = resolve; });
-      mockStartChangelogGeneration.mockReturnValue(deferredStart);
-
-      await renderView(false);
-      fireEvent.click(screen.getByText('Changelog'));
-
-      await act(async () => {
-        fireEvent.click(screen.getByText('Generate Changelog'));
-      });
-
-      expect(screen.getByText('Generating…')).toBeInTheDocument();
-      expect(screen.getByText('✕ Stop')).toBeInTheDocument();
-
-      await act(async () => {
-        fireEvent.click(screen.getByText('✕ Stop'));
-      });
-
-      // Cancel handler ran immediately (mock resolves synchronously)
-      expect(mockCancelRoadmapGeneration).toHaveBeenCalledWith('changelog');
-
-      await act(async () => {
-        resolveStart('sess-cl-race');
-        await new Promise(r => setTimeout(r, 0));
-      });
-
-      expect(mockCancelRoadmapGeneration).toHaveBeenCalledTimes(2);
-
-      await waitFor(() => {
-        expect(screen.getByText('Generate Changelog')).toBeInTheDocument();
-      });
-      expect(screen.queryByText('✕ Stop')).not.toBeInTheDocument();
-    });
   });
 
   // ── Stale sessionStorage reconnect ───────────────────────────────────
@@ -589,33 +562,6 @@ describe('RoadmapView', () => {
       });
     });
 
-    it('does not reconnect when sessionStorage has a stale changelog session', async () => {
-      mockSessionStorage.setItem('changelog-session', 'stale-cl-id');
-      mockIsRoadmapSessionAlive.mockResolvedValue(false);
-      mockGetChangelogReports.mockResolvedValue([
-        { filename: 'changelog-2026-06-01.md', date: '2026-06-01' },
-      ]);
-      mockGetLatestChangelog.mockResolvedValue('# Changelog June 2026');
-
-      await renderView(false);
-
-      await waitFor(() => {
-        expect(mockSessionStorage.getItem('changelog-session')).toBeNull();
-      });
-
-      expect(mockIsRoadmapSessionAlive).toHaveBeenCalledWith('stale-cl-id');
-
-      // Switch to changelog tab
-      fireEvent.click(screen.getByText('Changelog'));
-
-      // Should NOT show "Generating…"
-      expect(screen.queryByText('Generating…')).not.toBeInTheDocument();
-
-      // Should auto-load most recent changelog
-      await waitFor(() => {
-        expect(screen.getByText(/Changelog June 2026/)).toBeInTheDocument();
-      });
-    });
 
     it('DOES reconnect when sessionStorage has a valid session that is still alive on server', async () => {
       mockSessionStorage.setItem('roadmap-session', 'alive-session-id');
@@ -858,137 +804,5 @@ describe('RoadmapView', () => {
       });
     });
 
-    // ── Changelog auto-resume ────────────────────────────────────────
-
-    describe('changelog auto-resume', () => {
-      afterEach(() => {
-        vi.useRealTimers();
-      });
-
-      it('timer triggers handleGenerateChangelog when countdown reaches 0', async () => {
-        vi.useFakeTimers();
-        const NOW_MS = 1719000000 * 1000;
-        const RESET_SECS = 1719000005;
-        vi.setSystemTime(NOW_MS);
-
-        mockStartChangelogGeneration.mockResolvedValue('sess-cl-auto-resume');
-        mockExtractText.mockReturnValue('session limit resets 3:45 pm UTC');
-        mockParseSessionLimitReset.mockReturnValue(RESET_SECS);
-        mockFormatCountdown.mockReturnValue('0:05');
-        mockUseSessionStream.mockReturnValue([ev('assistant')]);
-
-        await renderView(false);
-        fireEvent.click(screen.getByText('Changelog'));
-
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(0);
-        });
-
-        expect(screen.getByText('Cancel')).toBeInTheDocument();
-        expect(mockStartChangelogGeneration).not.toHaveBeenCalled();
-
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(6000);
-        });
-
-        expect(mockStartChangelogGeneration).toHaveBeenCalled();
-      });
-    });
-
-    // ── Changelog rate-limit ──────────────────────────────────────────
-
-    describe('changelog rate-limit', () => {
-      it('shows rate-limit banner on changelog tab when stream contains "session limit" text', async () => {
-        mockExtractText.mockReturnValue('session limit reached. Try again later.');
-        mockUseSessionStream.mockReturnValue([ev('assistant')]);
-
-        await renderView(false);
-        fireEvent.click(screen.getByText('Changelog'));
-
-        expect(screen.getByText(/session limit reached/)).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
-      });
-
-      it('detects "rate limit" as rate-limit on changelog tab', async () => {
-        mockExtractText.mockReturnValue('Rate limit exceeded. Please wait.');
-        mockUseSessionStream.mockReturnValue([ev('assistant')]);
-
-        await renderView(false);
-        fireEvent.click(screen.getByText('Changelog'));
-
-        expect(screen.getByText(/Rate limit exceeded/)).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
-      });
-
-      it('detects "too many requests" as rate-limit on changelog tab', async () => {
-        mockExtractText.mockReturnValue('Too many requests. Slow down.');
-        mockUseSessionStream.mockReturnValue([ev('assistant')]);
-
-        await renderView(false);
-        fireEvent.click(screen.getByText('Changelog'));
-
-        expect(screen.getByText(/Too many requests/)).toBeInTheDocument();
-      });
-
-      it('detects "usage limit" as rate-limit on changelog tab', async () => {
-        mockExtractText.mockReturnValue('Your usage limit has been exceeded.');
-        mockUseSessionStream.mockReturnValue([ev('assistant')]);
-
-        await renderView(false);
-        fireEvent.click(screen.getByText('Changelog'));
-
-        expect(screen.getByText(/usage limit/)).toBeInTheDocument();
-      });
-
-      it('sets running to false when changelog is rate-limited', async () => {
-        mockExtractText.mockReturnValue('session limit');
-        mockUseSessionStream.mockReturnValue([ev('assistant')]);
-
-        await renderView(false);
-        fireEvent.click(screen.getByText('Changelog'));
-
-        // clRunning=false → button shows "Generate Changelog" not "Generating…"
-        expect(screen.getByText('Generate Changelog')).toBeInTheDocument();
-        expect(screen.queryByText('Generating…')).not.toBeInTheDocument();
-      });
-
-      it('hides changelog streaming output when rate-limited', async () => {
-        mockExtractText.mockReturnValue('session limit reached');
-        mockUseSessionStream.mockReturnValue([ev('assistant')]);
-
-        await renderView(false);
-        fireEvent.click(screen.getByText('Changelog'));
-
-        expect(screen.queryByText('Agent Output')).not.toBeInTheDocument();
-      });
-
-      it('Retry Now button on changelog clears rate-limit and starts new generation', async () => {
-        mockStartChangelogGeneration.mockResolvedValue('sess-cl-retry');
-        mockExtractText.mockReturnValue('session limit reached');
-        mockUseSessionStream.mockReturnValue([ev('assistant')]);
-
-        await renderView(false);
-        fireEvent.click(screen.getByText('Changelog'));
-
-        expect(screen.getByRole('button', { name: 'Retry Now' })).toBeInTheDocument();
-
-        await act(async () => {
-          fireEvent.click(screen.getByRole('button', { name: 'Retry Now' }));
-        });
-
-        expect(screen.queryByRole('button', { name: 'Retry Now' })).not.toBeInTheDocument();
-        expect(mockStartChangelogGeneration).toHaveBeenCalledTimes(1);
-      });
-
-      it('shows ⏳ icon in the changelog rate-limit banner', async () => {
-        mockExtractText.mockReturnValue('session limit');
-        mockUseSessionStream.mockReturnValue([ev('assistant')]);
-
-        await renderView(false);
-        fireEvent.click(screen.getByText('Changelog'));
-
-        expect(screen.getByText('⏳')).toBeInTheDocument();
-      });
-    });
   });
 });

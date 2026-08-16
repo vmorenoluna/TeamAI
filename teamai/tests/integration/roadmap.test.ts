@@ -602,18 +602,19 @@ describe('Roadmap Integration', () => {
     });
   });
 
-  describe('startChangelogGeneration (with mocked processManager)', () => {
-    it('creates a session and sends the /changelog command', async () => {
-      mockCreateSession.mockResolvedValue('sess-changelog');
-
+  describe('startChangelogGeneration (deterministic)', () => {
+    it('writes a changelog file and returns its filename without spawning an agent', async () => {
       const { startChangelogGeneration } = await import('@/app/actions/roadmap');
-      const sessionId = await startChangelogGeneration();
+      const filename = await startChangelogGeneration();
 
-      expect(mockCreateSession).toHaveBeenCalledWith(
-        expect.objectContaining({ projectRoot: projectDir, permissionMode: 'bypassPermissions' }),
-      );
-      expect(sessionId).toBe('sess-changelog');
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-changelog', '/changelog');
+      expect(filename).toMatch(/^changelog-\d{4}-\d{2}-\d{2}\.md$/);
+      const filePath = join(projectDir, '.teamai', 'roadmap', filename);
+      expect(existsSync(filePath)).toBe(true);
+      expect(readFileSync(filePath, 'utf-8')).toContain('# Changelog');
+
+      // Deterministic generation must not spawn an agent session.
+      expect(mockCreateSession).not.toHaveBeenCalled();
+      expect(mockSendMessage).not.toHaveBeenCalled();
     });
   });
 });

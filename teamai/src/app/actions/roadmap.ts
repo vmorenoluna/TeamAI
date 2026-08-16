@@ -8,6 +8,7 @@ import { join } from 'path';
 import { TaskStore } from '@/lib/task-store';
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
+import { generateChangelogFile } from '@/lib/changelog';
 
 // ── Global session tracking (shared across Next.js module contexts) ──────────
 declare global {
@@ -93,16 +94,12 @@ export async function startRoadmapGeneration(skipCompetitors: boolean = false): 
 export async function startChangelogGeneration(): Promise<string> {
   const projectPath = await getActiveProjectPath();
   ensureRoadmapDir(projectPath);
-  const sessionId = await processManager.createSession({
-    taskId: `changelog::${projectPath}`,
-    role: 'general',
-    cwd: projectPath,
-    ...containerSessionOpts(projectPath),
-  });
-  const key = `changelog::${projectPath}`;
-  sessions.set(key, sessionId);
-  processManager.sendMessage(sessionId, '/changelog');
-  return sessionId;
+  // Deterministic: grouping conventional commits into Keep-a-Changelog
+  // markdown is mechanical work that doesn't need an agent session.
+  const { filename } = generateChangelogFile(projectPath);
+  revalidatePath('/');
+  revalidatePath('/roadmap');
+  return filename;
 }
 
 // ── Roadmap reports ──────────────────────────────────────────────────────────
