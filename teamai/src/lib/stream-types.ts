@@ -91,16 +91,26 @@ export interface QACriterion {
 export interface QAIssue {
   /** @deprecated Severity is no longer used by the pipeline — all issues are mandatory. */
   severity?: 'critical' | 'warning' | 'suggestion';
-  description: string;
+  description?: string;
   file?: string;
   fix_needed?: string;
   message?: string;
+}
+
+export interface SpecConcern {
+  issue: string;
+  reasoning: string;
+  suggested_fix?: string;
 }
 
 export interface QAReportData {
   overall: 'PASS' | 'FAIL';
   criteria?: QACriterion[];
   additional_issues?: QAIssue[];
+  /** Spec-level gaps flagged by QA — the spec itself needs revision, not the
+   *  code. Present even when overall is PASS (e.g. unverifiable-criterion
+   *  detection), so the UI must surface them independently of the PASS/FAIL badge. */
+  spec_concerns?: SpecConcern[];
 }
 
 export function extractText(event: StreamEvent): string {
