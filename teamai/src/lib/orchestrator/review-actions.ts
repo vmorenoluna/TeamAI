@@ -205,6 +205,28 @@ export async function routeHumanFeedback(
   recordChangeRequest(pipeline.specPath, feedback.message, pipeline.taskId);
   resetAllCounters(pipeline);
   trimArtifactsForTarget(pipeline.specPath, feedback.target);
+
+  // Directing the analyst means "revise the existing spec", not "regenerate it
+  // from scratch". Route it into runSpecPhase's REVISION mode (which preserves
+  // valid parts of the spec) rather than the fresh /spec path that would
+  // overwrite the spec the team already wrote. Mirror autoReviseSpec's
+  // bookkeeping so the no-op guard and version archive have a correct baseline.
+  if (feedback.target === 'analyst') {
+    const specMdPath = path.join(pipeline.specPath, 'spec.md');
+    if (existsSync(specMdPath)) {
+      writeFileSync(
+        path.join(pipeline.specPath, 'spec_revision_feedback.md'),
+        `# Spec Revision Feedback\n\nThe human reviewer directed the analyst to revise the spec:\n\n${feedback.message.trim()}\n`,
+      );
+      pipeline.specRevision += 1;
+      writeFileSync(
+        path.join(pipeline.specPath, `spec_v${pipeline.specRevision}.md`),
+        readFileSync(specMdPath, 'utf-8'),
+      );
+      deps.savePipelineState(pipeline);
+    }
+  }
+
   const next = targetToResumePhase(feedback.target);
   deps.advancePhase(pipeline, next);
   await deps.executePhase(pipeline);

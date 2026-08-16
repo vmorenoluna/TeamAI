@@ -53,7 +53,7 @@ If the prompt begins with `REVISION:` you are revising an existing spec, not wri
 
 ### Revision Workflow
 1. Read the existing spec at the path provided in the prompt.
-2. Read the `spec_revision_feedback.md` file at the same path — this contains the QA reviewer's spec concerns that triggered the revision.
+2. Read the `spec_revision_feedback.md` file at the same path — this contains the concerns that triggered the revision (from the QA reviewer's findings or the human reviewer's directive).
 3. Address EVERY concern listed in the feedback:
    - If the concern points to a wrong assumption, correct it in the spec
    - If the concern identifies missing requirements, add them
