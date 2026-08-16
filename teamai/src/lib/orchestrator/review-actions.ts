@@ -202,7 +202,13 @@ export async function routeHumanFeedback(
 ): Promise<void> {
   writeHumanFeedback(pipeline.specPath, feedback.target, feedback.message);
   snapshotHumanFeedback(pipeline.specPath, pipeline.taskId);
-  recordChangeRequest(pipeline.specPath, feedback.message, pipeline.taskId);
+  // The "Change Request" audit entry lives in qa_report.json. That file is
+  // preserved only for the coder target — trimArtifactsForTarget deletes it for
+  // analyst/planner/qa-reviewer, so recording it there would be a throwaway
+  // write. Scope the recording to the one target whose report actually survives.
+  if (feedback.target === 'coder') {
+    recordChangeRequest(pipeline.specPath, feedback.message, pipeline.taskId);
+  }
   resetAllCounters(pipeline);
   trimArtifactsForTarget(pipeline.specPath, feedback.target);
 
