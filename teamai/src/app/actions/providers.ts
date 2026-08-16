@@ -25,6 +25,7 @@ const DEFAULT: ProvidersConfig = {
     planner: { model: 'claude-haiku-4-5-20251001' },
     merger: { model: 'claude-haiku-4-5-20251001' },
   },
+  exploration: { model: 'claude-sonnet-4-6' },
 };
 
 // ── Cache helpers ──────────────────────────────────────────────────────

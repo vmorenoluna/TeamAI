@@ -147,6 +147,23 @@ describe('getAvailableModels Integration', () => {
       expect(typeof config.roles).toBe('object');
     });
 
+    it('defaults the exploration model to Sonnet when no providers.json exists', async () => {
+      const { getProvidersConfig } = await import('@/app/actions/providers');
+
+      const config = await getProvidersConfig();
+
+      expect(config.exploration?.model).toBe('claude-sonnet-4-6');
+    });
+
+    it('keeps the Sonnet exploration default when a config omits the exploration key', async () => {
+      writeProvidersConfig({ default: { model: 'claude-sonnet-4-6', provider: 'anthropic' }, roles: {} });
+      const { getProvidersConfig } = await import('@/app/actions/providers');
+
+      const config = await getProvidersConfig();
+
+      expect(config.exploration?.model).toBe('claude-sonnet-4-6');
+    });
+
     it('persists the config to the actual filesystem', async () => {
       const { saveProvidersConfig } = await import('@/app/actions/providers');
 

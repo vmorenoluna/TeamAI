@@ -73,7 +73,9 @@ export async function startRoadmapGeneration(skipCompetitors: boolean = false): 
   }
 
   const providersConfig = await getProvidersConfig();
-  const explorationModel = providersConfig.exploration?.model || undefined;
+  // Default to Sonnet (not the CLI default) so roadmap generation never
+  // silently runs an expensive model.
+  const explorationModel = providersConfig.exploration?.model || providersConfig.default.model;
   const sessionId = await processManager.createSession({
     taskId: `roadmap::${projectPath}`,
     role: 'general',
