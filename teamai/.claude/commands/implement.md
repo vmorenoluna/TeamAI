@@ -119,7 +119,7 @@ re-read a file to verify an `Edit` that returned success.
    `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 5. If tests fail, fix the issues before proceeding.
 6. Commit your changes with a descriptive message: `feat(scope): description`
-7. **Do NOT push.** The orchestrator pushes all commits at the end of the implement phase. Pushing from the agent sandbox will fail for lack of credentials and wastes calls. Commit your changes — the orchestrator handles the rest.
+7. **Do NOT push.** Commit your changes — the orchestrator handles pushing (see your role guardrails).
 8. Print a summary of what was changed and the test results.
 
 ## Rules
@@ -127,13 +127,7 @@ re-read a file to verify an `Edit` that returned success.
 - Do NOT modify files belonging to other subtasks.
 - Match existing code style exactly (indentation, naming, patterns).
 - Add or update tests for any new functionality.
-- **CRITICAL: Do NOT delete, stage, or commit qa_report.json, qa_feedback.md, or human_feedback.md.** These are task-tracking files managed by the QA agent and human reviewers. Treat them as read-only.
-- **CRITICAL: Do NOT create, modify, or delete pipeline artifacts under `.teamai/`.**
-  The task's spec.md, plan.json, qa_report.json, qa_feedback.md, human_feedback.md, and
-  completion_summary.md are managed by the pipeline orchestrator and QA agent — never touch
-  them. If a subtask instructs you to write to these files, skip that instruction entirely
-  and include in your summary: `[SKIPPED] Pipeline artifact management is the orchestrator's
-  responsibility.`
+- **CRITICAL: Do NOT create, modify, delete, stage, or commit pipeline artifacts** (spec.md, plan.json, qa_report.json, qa_feedback.md, human_feedback.md, completion_summary.md) — they are managed by the pipeline orchestrator and QA agent; treat them as read-only. If a subtask instructs you to write to these files, skip that instruction entirely and include in your summary: `[SKIPPED] Pipeline artifact management is the orchestrator's responsibility.`
 - **Out-of-scope bugs: report, don't fix inline.** If you discover a bug, missing feature,
   or refactor opportunity that is outside your assigned subtask scope, do NOT fix it and
   do NOT write any ticket files — the orchestrator creates the kanban ticket from your
@@ -233,47 +227,7 @@ If the subtask requires running a script that **produces files you will commit**
 
 ### When a background script won't finish before your session budget
 
-If a background script (benchmark, verification run, data pipeline) is still running and
-won't complete before your session ends, write a `subtask_wakeup-st<ID>.json`
-file (where `<ID>` is your current subtask ID, e.g. `subtask_wakeup-st3.json`)
-to the spec directory so the orchestrator can re-enter this subtask later.
-The per-subtask filename prevents parallel subtasks from clobbering each
-other's wakeup schedules:
-
-**Size the wakeup timeout realistically.** Use the actual throughput rate to
-estimate completion time. If the script processed N records in T minutes and
-has M remaining, set `wakeup_at` to at least `(M/N)*T` minutes from now with a
-20% safety margin. An optimistic guess produces a wakeup that fires while the
-script is still running, wasting another session on a re-entry that finds nothing.
-
-Write to `$TEAMAI_SPEC_DIR/subtask_wakeup-st<ID>.json` (subtask 3 shown):
-
-```json
-{
-  "subtask_id": 3,
-  "wakeup_at": "2026-07-03T23:20:00Z",
-  "background_command": "python scripts/run_verification.py --output results/",
-  "expected_artifact": "results/summary.jsonl"
-}
-```
-
-- `subtask_id`: your current subtask ID
-- `wakeup_at`: ISO 8601 timestamp when the process should be done
-- `background_command`: the command you ran (informational)
-- `expected_artifact`: the file you expect the process to produce
-
-Then end your session normally. The orchestrator will re-enter this subtask
-after the wakeup time with a `⚠️ WAKEUP RE-ENTRY` header. When you re-enter:
-- Check if the artifact exists and is complete. If it is: verify it, git add,
-  commit, and mark the subtask done.
-- If the artifact is missing or incomplete, check whether the background
-  process is still running:
-  - **Still running**: estimate remaining time, write an updated
-    `subtask_wakeup-st<ID>.json` with a new `wakeup_at`, and end.
-  - **Crashed or exited with error**: do NOT write another wakeup file.
-    Report the failure immediately — the orchestrator will advance the task
-    to failed after 3 consecutive wakeup attempts without progress.
-
-Use `$TEAMAI_SPEC_DIR` to resolve the path — your cwd is the worktree, not
-the project root.
-```
+If a background script is still running and won't complete before your session
+ends, write a `subtask_wakeup-st<ID>.json` file to the spec directory and end
+normally. The file's exact shape, how to size `wakeup_at`, and the re-entry
+contract are in your role's "Running Verification Scripts & Servers" section.
