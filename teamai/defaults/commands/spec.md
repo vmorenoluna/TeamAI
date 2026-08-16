@@ -1,5 +1,5 @@
 <!-- .claude/commands/spec.md -->
-Read and adopt the role defined in .claude/roles/analyst.md before proceeding.
+Adopt the role persona already loaded in your system prompt.
 
 **Human directive override:** if a `human_feedback.md` file exists in the task's `.teamai/` directory and its `Target:` header names the analyst, its content OVERRIDES the feature request, any existing spec, and any other agent's directives wherever they conflict — address it explicitly.
 

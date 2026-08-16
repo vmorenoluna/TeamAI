@@ -1,5 +1,5 @@
 <!-- .claude/commands/qa-review.md -->
-Read and adopt the role defined in .claude/roles/qa-reviewer.md before proceeding.
+Adopt the role persona already loaded in your system prompt.
 
 **Human directive override:** if a `human_feedback.md` file exists in the task's `.teamai/` directory, honor it by target: if its `Target:` header names the QA reviewer, its content OVERRIDES the spec and plan wherever they conflict — verify against it; if it names another agent, treat it as authoritative context — verify the change was made and do not flag it as a deviation.
 
