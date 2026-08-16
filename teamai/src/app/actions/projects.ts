@@ -105,9 +105,18 @@ export async function getProjects() {
   return projectStore.getAll();
 }
 
-/** Check all registered projects for outdated default files. */
-export async function getOutdatedProjects() {
-  return projectStore.getStaleDefaults();
+/**
+ * Read the persisted startup auto-sync report, or null when nothing changed.
+ * Surfaced as an informational banner instead of a click-to-sync prompt.
+ */
+export async function getDefaultsSyncReport() {
+  return projectStore.getDefaultsSyncReport();
+}
+
+/** Dismiss the auto-sync banner by removing the persisted report. */
+export async function dismissDefaultsSyncReport(): Promise<void> {
+  projectStore.dismissDefaultsSyncReport();
+  revalidateRoot();
 }
 
 /** Sync defaults for a specific project. Returns list of updated file paths. */
