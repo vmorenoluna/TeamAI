@@ -360,8 +360,8 @@ export class Orchestrator {
     await approveTaskFn(taskId, strategy, this._ctx);
   }
 
-  async rejectTask(taskId: string, feedback: string, target: FeedbackTarget): Promise<void> {
-    await rejectTaskFn(taskId, feedback, target, this._ctx);
+  async rejectTask(taskId: string, feedback: string, target: FeedbackTarget, subtaskIds?: number[]): Promise<void> {
+    await rejectTaskFn(taskId, feedback, target, subtaskIds, this._ctx);
   }
 
   async reviseSpec(taskId: string): Promise<void> {

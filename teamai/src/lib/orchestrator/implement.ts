@@ -458,22 +458,31 @@ export function selectSubtasks(
 
   // A coder-targeted human directive forces a rework even when every subtask is
   // already complete (otherwise the [SKIP] branch below would drop the comment
-  // and bounce straight to QA without the coder ever seeing it). Match the
-  // affected subtasks by keyword and mark them incomplete so they re-run.
+  // and bounce straight to QA without the coder ever seeing it). The affected
+  // subtasks come from the reviewer's explicit selection when present, else a
+  // keyword match against title/description/files/criteria — mark them
+  // incomplete so they re-run. A human directive for the coder is authoritative:
+  // it overrides both `completed` and any stale `qa_flagged` flags.
   const humanFeedback = hasHumanFeedback ? readHumanFeedback(pipeline.specPath) : null;
+  let humanReworkIds: Set<number> | null = null;
   if (humanFeedback?.target === 'coder') {
-    const reworkIds = new Set(selectReworkTargets(realSubtasks, humanFeedback.message));
+    const ids = humanFeedback.subtaskIds?.length
+      ? humanFeedback.subtaskIds
+      : selectReworkTargets(realSubtasks, humanFeedback.message);
+    humanReworkIds = new Set(ids);
     for (const s of realSubtasks) {
-      if (reworkIds.has(s.id)) s.completed = false;
+      if (humanReworkIds.has(s.id)) s.completed = false;
     }
   }
 
-  const subtasksToRun = hasQaFeedback
-    ? realSubtasks.filter((s: PlanSubtask) => s.qa_flagged)
-    : realSubtasks.filter((s: PlanSubtask) => !s.completed);
+  const subtasksToRun = humanReworkIds
+    ? realSubtasks.filter((s: PlanSubtask) => humanReworkIds!.has(s.id))
+    : hasQaFeedback
+      ? realSubtasks.filter((s: PlanSubtask) => s.qa_flagged)
+      : realSubtasks.filter((s: PlanSubtask) => !s.completed);
 
   let effectiveSubtasks: PlanSubtask[];
-  if (hasQaFeedback && subtasksToRun.length === 0) {
+  if (!humanReworkIds && hasQaFeedback && subtasksToRun.length === 0) {
     const allFiles: string[] = [...new Set<string>(
       realSubtasks.flatMap((s: PlanSubtask) => s.files ?? [])
     )];

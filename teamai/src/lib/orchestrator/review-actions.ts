@@ -177,6 +177,7 @@ export async function rejectTask(
   taskId: string,
   feedback: string,
   target: FeedbackTarget,
+  subtaskIds: number[] | undefined,
   deps: ReviewActionsDeps,
 ): Promise<void> {
   const task = deps.taskStore.getById(taskId);
@@ -187,7 +188,7 @@ export async function rejectTask(
   }
 
   const pipeline = deps.pipelines.get(taskId) ?? deps.restorePipeline(taskId, phase);
-  await routeHumanFeedback(pipeline, deps, { target, message: feedback });
+  await routeHumanFeedback(pipeline, deps, { target, message: feedback, subtaskIds });
 }
 
 /**
@@ -198,9 +199,9 @@ export async function rejectTask(
 export async function routeHumanFeedback(
   pipeline: TaskPipeline,
   deps: ReviewActionsDeps,
-  feedback: { target: FeedbackTarget; message: string },
+  feedback: { target: FeedbackTarget; message: string; subtaskIds?: number[] },
 ): Promise<void> {
-  writeHumanFeedback(pipeline.specPath, feedback.target, feedback.message);
+  writeHumanFeedback(pipeline.specPath, feedback.target, feedback.message, feedback.subtaskIds);
   snapshotHumanFeedback(pipeline.specPath, pipeline.taskId);
   // The "Change Request" audit entry lives in qa_report.json. That file is
   // preserved only for the coder target — trimArtifactsForTarget deletes it for

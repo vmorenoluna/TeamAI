@@ -42,6 +42,18 @@ describe('writeHumanFeedback / readHumanFeedback', () => {
     });
   });
 
+  it('round-trips reviewer-selected subtask ids', () => {
+    writeHumanFeedback(dir, 'coder', 'Rework these', [2, 5]);
+    expect(readFileSync(feedbackFilePath(dir), 'utf-8')).toBe(
+      '# Human Review Feedback\nTarget: coder\nSubtasks: 2,5\n\nRework these\n',
+    );
+    expect(readHumanFeedback(dir)).toEqual({
+      target: 'coder',
+      subtaskIds: [2, 5],
+      message: 'Rework these',
+    });
+  });
+
   it('returns null when no feedback file exists', () => {
     expect(readHumanFeedback(dir)).toBeNull();
   });

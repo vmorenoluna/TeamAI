@@ -159,6 +159,18 @@ describe('routeHumanFeedback', () => {
     }
   });
 
+  it('writes reviewer-selected subtask ids into the feedback for a coder target', async () => {
+    await routeHumanFeedback(ctx.pipeline, ctx.deps as never, {
+      target: 'coder',
+      message: 'Tighten error handling',
+      subtaskIds: [2, 5],
+    });
+    const raw = readFileSync(join(ctx.specPath, 'human_feedback.md'), 'utf-8');
+    expect(raw).toContain('Target: coder');
+    expect(raw).toContain('Subtasks: 2,5');
+    expect(raw).toContain('Tighten error handling');
+  });
+
   it('preserves plan.json when routing to the analyst (no blind cleanup)', async () => {
     seedArtifacts(ctx.specPath);
     await routeHumanFeedback(ctx.pipeline, ctx.deps as never, {

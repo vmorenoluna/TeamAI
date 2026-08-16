@@ -394,6 +394,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                 phase={task.phase}
                 specRevision={specRevision}
                 specPath={specPath}
+                subtasks={plan?.subtasks?.map(s => ({ id: Number(s.id), title: s.title, files: s.files }))}
               />
             )}
 

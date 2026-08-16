@@ -33,6 +33,8 @@ export { FEEDBACK_TARGETS, isFeedbackTarget, targetToResumePhase, TARGET_TO_PHAS
 export interface HumanFeedback {
   /** Undefined only for legacy human_feedback.md files written before targeting. */
   target?: FeedbackTarget;
+  /** Sub-task ids the reviewer flagged (coder target only). Undefined when absent. */
+  subtaskIds?: number[];
   message: string;
 }
 
@@ -49,8 +51,12 @@ export function writeHumanFeedback(
   specPath: string,
   target: FeedbackTarget,
   message: string,
+  subtaskIds?: number[],
 ): void {
-  const content = `${HEADER}\nTarget: ${target}\n\n${message.trim()}\n`;
+  const subtaskLine = subtaskIds && subtaskIds.length > 0
+    ? `Subtasks: ${subtaskIds.join(',')}\n`
+    : '';
+  const content = `${HEADER}\nTarget: ${target}\n${subtaskLine}\n${message.trim()}\n`;
   writeFileSync(feedbackFilePath(specPath), content);
 }
 
@@ -63,8 +69,22 @@ export function readHumanFeedback(specPath: string): HumanFeedback | null {
   const targetMatch = body.match(/^Target:\s*([a-z-]+)\s*\r?\n/);
   const target =
     targetMatch && isFeedbackTarget(targetMatch[1]) ? (targetMatch[1] as FeedbackTarget) : undefined;
-  const message = (targetMatch ? body.slice(targetMatch[0].length) : body).trim();
-  return { ...(target ? { target } : {}), message };
+  let rest = targetMatch ? body.slice(targetMatch[0].length) : body;
+  let subtaskIds: number[] | undefined;
+  const subtaskMatch = rest.match(/^Subtasks:\s*([0-9][0-9,\s]*)\s*\r?\n/);
+  if (subtaskMatch) {
+    subtaskIds = subtaskMatch[1]
+      .split(',')
+      .map((n) => parseInt(n.trim(), 10))
+      .filter((n) => !Number.isNaN(n));
+    rest = rest.slice(subtaskMatch[0].length);
+  }
+  const message = rest.trim();
+  return {
+    ...(target ? { target } : {}),
+    ...(subtaskIds && subtaskIds.length > 0 ? { subtaskIds } : {}),
+    message,
+  };
 }
 
 // ── Prompt directive blocks ────────────────────────────────────────────────

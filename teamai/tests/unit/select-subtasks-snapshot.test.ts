@@ -171,6 +171,37 @@ describe('selectSubtasks — human_feedback_before_bounce.md snapshot', () => {
     expect(ids).toContain(1);
     expect(ids).not.toContain(2);
   });
+
+  it('re-runs only the explicitly selected subtasks (overrides keyword match)', () => {
+    writeFileSync(join(ctx.specPath, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Auth', description: 'auth module', files: ['src/auth.ts'], acceptance_criteria: ['Auth works'], depends_on: [], completed: true },
+        { id: 2, title: 'UI', description: 'ui', files: ['src/ui.ts'], acceptance_criteria: ['UI works'], depends_on: [], completed: true },
+        { id: 3, title: 'API', description: 'api', files: ['src/api.ts'], acceptance_criteria: ['API works'], depends_on: [], completed: true },
+      ],
+    }));
+    // The message would keyword-match subtask 1, but the explicit selection wins.
+    writeFileSync(join(ctx.specPath, 'human_feedback.md'),
+      '# Human Review Feedback\nTarget: coder\nSubtasks: 3\n\nFix the auth module\n');
+
+    const selection = selectSubtasks(pipeline(ctx.specPath) as never);
+    expect(selection.effectiveSubtasks.map(s => s.id)).toEqual([3]);
+  });
+
+  it('re-runs the explicit selection over a stale qa_flagged set', () => {
+    writeFileSync(join(ctx.specPath, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Auth', description: 'auth module', files: ['src/auth.ts'], acceptance_criteria: ['Auth works'], depends_on: [], completed: true, qa_flagged: true },
+        { id: 2, title: 'UI', description: 'ui', files: ['src/ui.ts'], acceptance_criteria: ['UI works'], depends_on: [], completed: true },
+      ],
+    }));
+    writeFileSync(join(ctx.specPath, 'qa_feedback.md'), '# stale QA feedback');
+    writeFileSync(join(ctx.specPath, 'human_feedback.md'),
+      '# Human Review Feedback\nTarget: coder\nSubtasks: 2\n\nRework the UI\n');
+
+    const selection = selectSubtasks(pipeline(ctx.specPath) as never);
+    expect(selection.effectiveSubtasks.map(s => s.id)).toEqual([2]);
+  });
 });
 
 describe('selectReworkTargets', () => {
