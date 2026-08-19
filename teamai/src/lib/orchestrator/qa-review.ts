@@ -6,7 +6,7 @@
  * and bounce-back to implement.
  */
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, renameSync } from 'fs';
 import { updateSessionMap, logToOutput } from './helpers';
 import { humanDirectiveFor, consumeFeedbackIfDue } from './human-feedback';
 import path from 'path';
@@ -16,7 +16,7 @@ import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
 import { warn } from '../logger';
 import type { PipelinePhase } from '@/constants/phases';
-import type { TaskPipeline, QaReport, SessionOptsResult } from './types';
+import type { TaskPipeline, QaReport, SessionOptsResult, PlanSubtask } from './types';
 
 // ── Dependencies ──────────────────────────────────────────────────────────
 
@@ -34,6 +34,8 @@ export interface QaReviewDeps {
   phaseHeader: (logFile: string, phase: string) => void;
   toAgentPath: (hostPath: string) => string;
   autoReviseSpec: (pipeline: TaskPipeline) => Promise<void>;
+  /** Mutable reference to the plan-write serialization lock. */
+  planWriteLock: { current: Promise<void> };
 }
 
 // ── Diverged-branch reconciliation ──────────────────────────────────────
@@ -180,6 +182,69 @@ export function snapshotQaReportVersioned(pipeline: TaskPipeline): void {
   }
 }
 
+/**
+ * Reconcile plan.json's per-subtask `completed` flags with the QA PASS
+ * verdict before advancing to awaiting-review.
+ *
+ * A PASS overall QA verdict is ground truth that every subtask's work is
+ * complete and verified. But `completed` is only ever set to `true` inside
+ * runSubtaskSession() when a subtask is actually selected and re-run, so
+ * subtasks that finished in an earlier cycle (e.g. via a wakeup re-entry and
+ * never touched again) or the synthetic QA-rework subtask (id 9999) can stay
+ * `false`/missing forever. The kanban "N/M subtasks completed" counter is
+ * derived from these flags, so it undercounts even after everything has
+ * passed. Stamp `completed: true` on every subtask — including the synthetic
+ * 9999 entry, which is deliberately kept (not filtered) so getTaskFull() can
+ * still surface output-st9999.log to the terminal tab — and emit a fresh
+ * `subtask-progress` event, reusing the same write-lock / tmp-rename /
+ * event-shape pattern as persistCompletedSubtasks() in implement.ts.
+ *
+ * Unlike persistCompletedSubtasks(), this is NOT best-effort: the write is
+ * awaited by the caller and any failure propagates (throws), so the task can
+ * never advance to awaiting-review with a stale counter.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export async function reconcileCompletedSubtasksOnQaPass(
+  pipeline: TaskPipeline,
+  deps: QaReviewDeps,
+): Promise<void> {
+  const attempt = deps.planWriteLock.current.then(() => {
+    const planPath = path.join(pipeline.specPath, 'plan.json');
+    if (!existsSync(planPath)) return;
+
+    const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+    if (plan.subtasks) {
+      for (const s of plan.subtasks) {
+        s.completed = true;
+      }
+    }
+    const tmpPath = planPath + '.tmp';
+    writeFileSync(tmpPath, JSON.stringify(plan, null, 2));
+    renameSync(tmpPath, planPath);
+
+    // Emit subtask progress so the kanban counter updates immediately on
+    // QA PASS rather than waiting for a stale read. Same event shape as
+    // persistCompletedSubtasks().
+    const subtasks = (plan as { subtasks?: PlanSubtask[] }).subtasks ?? [];
+    const completed = subtasks.filter((s: PlanSubtask) => s.completed).length;
+    processManager.emit('subtask-progress', {
+      taskId: pipeline.taskId,
+      completed,
+      total: subtasks.length,
+      projectRoot: deps.projectRoot,
+    });
+  });
+
+  // Keep the shared lock chain resolvable even if this write fails, so a
+  // failed reconcile can't silently suppress other tasks' checkpoint writes.
+  deps.planWriteLock.current = attempt.catch(() => undefined);
+
+  // Propagate any failure to the caller — the QA-PASS transition must not
+  // proceed while the kanban counter would still be stale.
+  await attempt;
+}
+
 export async function runQaReview(
   pipeline: TaskPipeline,
   deps: QaReviewDeps,
@@ -198,12 +263,14 @@ export async function runQaReview(
       const existingReport = JSON.parse(readFileSync(reportPath, 'utf-8'));
       if (existingReport.locked === true) {
         logToOutput(pipeline.specPath, '\n[INFO] qa_report.json is locked — skipping QA review\n');
+        await reconcileCompletedSubtasksOnQaPass(pipeline, deps);
         deps.advancePhase(pipeline, 'awaiting-review');
         return;
       }
       if (existingReport.reviewedBy && typeof existingReport.reviewedBy === 'string' &&
           existingReport.reviewedBy.toLowerCase().includes('manual override')) {
         logToOutput(pipeline.specPath, '\n[INFO] qa_report.json has manual override — skipping QA review\n');
+        await reconcileCompletedSubtasksOnQaPass(pipeline, deps);
         deps.advancePhase(pipeline, 'awaiting-review');
         return;
       }
@@ -388,6 +455,7 @@ export async function runQaReview(
     await deps.autoReviseSpec(pipeline);
     return;
   } else if (report.overall === 'PASS') {
+    await reconcileCompletedSubtasksOnQaPass(pipeline, deps);
     deps.advancePhase(pipeline, 'awaiting-review');
   } else if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
     deps.writeCompletionSummary(pipeline);

@@ -180,6 +180,62 @@ describe('runQaReview — Gap 3: locked / manual override QA reports', () => {
     expect(pipeline.phase).toBe('awaiting-review');
   });
 
+  it('reconciles plan.json completed flags when skipping via locked report', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Done', description: '', files: [], acceptance_criteria: [], completed: true },
+        { id: 2, title: 'Stale', description: '', files: [], acceptance_criteria: [] },
+        { id: 9999, title: 'QA Rework', description: '', files: [], acceptance_criteria: [], completed: false },
+      ],
+    }));
+    writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+      overall: 'FAIL',
+      locked: true,
+      criteria: [{ name: 'Feature X', status: 'FAIL', notes: 'Manual override' }],
+    }));
+
+    const pipeline = makePipeline(project.taskId, project.taskDir);
+    await (orch as AnyOrch).runQaReview(pipeline);
+
+    expect(pipeline.phase).toBe('awaiting-review');
+    const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+    expect(plan.subtasks).toHaveLength(3);
+    for (const s of plan.subtasks) expect(s.completed).toBe(true);
+    expect(mockEmit).toHaveBeenCalledWith('subtask-progress', expect.objectContaining({
+      taskId: project.taskId,
+      completed: 3,
+      total: 3,
+    }));
+  });
+
+  it('reconciles plan.json completed flags when skipping via manual override', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Done', description: '', files: [], acceptance_criteria: [], completed: true },
+        { id: 2, title: 'Stale', description: '', files: [], acceptance_criteria: [] },
+        { id: 9999, title: 'QA Rework', description: '', files: [], acceptance_criteria: [], completed: false },
+      ],
+    }));
+    writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+      overall: 'FAIL',
+      reviewedBy: 'MANUAL OVERRIDE by Jane on 2024-06-01',
+      criteria: [{ name: 'Feature X', status: 'FAIL', notes: 'Human set FAIL' }],
+    }));
+
+    const pipeline = makePipeline(project.taskId, project.taskDir);
+    await (orch as AnyOrch).runQaReview(pipeline);
+
+    expect(pipeline.phase).toBe('awaiting-review');
+    const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+    expect(plan.subtasks).toHaveLength(3);
+    for (const s of plan.subtasks) expect(s.completed).toBe(true);
+    expect(mockEmit).toHaveBeenCalledWith('subtask-progress', expect.objectContaining({
+      taskId: project.taskId,
+      completed: 3,
+      total: 3,
+    }));
+  });
+
   it('proceeds with normal QA when qa_report.json has no lock or override', async () => {
     // No qa_report.json at all — should proceed normally
     const pipeline = makePipeline(project.taskId, project.taskDir);
