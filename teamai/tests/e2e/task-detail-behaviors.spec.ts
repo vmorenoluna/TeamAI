@@ -269,7 +269,7 @@ test.describe('Task Detail — Phase-Specific UI', () => {
     await expect(page.locator('button:has-text("Mark Reviewed")')).toBeVisible({ timeout: 5_000 });
   });
 
-  test('PR link is shown in header when prUrl is set', async ({ page }) => {
+  test('PR link is shown once in overview when prUrl is set', async ({ page }) => {
 
     // "Migrate API to v2" has prUrl
     const taskId = requireSeedTaskId('refactor-migrate-api-to-v2-endpoints');
@@ -277,8 +277,11 @@ test.describe('Task Detail — Phase-Specific UI', () => {
     await page.goto(`/task/${taskId}`);
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 10_000 });
 
-    // Should show the PR link icon
-    await expect(page.locator('a[title="View Pull Request"]')).toBeVisible({ timeout: 10_000 });
+    // Exactly one "View Pull Request" link (in the review panel) — the
+    // header 🔗 icon and standalone section were removed.
+    const prLink = page.locator('a:has-text("View Pull Request")');
+    await expect(prLink).toHaveCount(1);
+    await expect(prLink).toBeVisible({ timeout: 10_000 });
   });
 
   test('delete task button is visible', async ({ page }) => {

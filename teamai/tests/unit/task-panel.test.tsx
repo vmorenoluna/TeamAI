@@ -815,15 +815,15 @@ describe('TaskDetail', () => {
   // ── PR link ─────────────────────────────────────────────────────────
 
   describe('PR link', () => {
-    it('shows PR link in header when prUrl exists', () => {
-      renderDetail({ task: { prUrl: 'https://github.com/test/pr/1' } });
-      const link = screen.getByTitle('View Pull Request');
-      expect(link).toBeInTheDocument();
-    });
+    it('shows a single PR link sourced from the review panel (no header icon or standalone section)', () => {
+      renderDetail({ task: { phase: 'awaiting-review', prUrl: 'https://github.com/test/pr/1' } });
 
-    it('does not show PR link when prUrl is undefined', () => {
-      renderDetail();
+      // The header 🔗 icon was removed — no title="View Pull Request" anchor.
       expect(screen.queryByTitle('View Pull Request')).not.toBeInTheDocument();
+      // The standalone "View Pull Request" section was removed — only the
+      // review panel (mocked here) owns the single PR link.
+      expect(screen.queryByText('View Pull Request')).not.toBeInTheDocument();
+      expect(screen.getByTestId('review-panel')).toBeInTheDocument();
     });
   });
 

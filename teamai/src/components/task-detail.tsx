@@ -200,17 +200,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
             <span className={`text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded ${badge}`}>
               {PHASE_LABELS[task.phase] ?? task.phase}
             </span>
-            {task.prUrl && (
-              <a
-                href={task.prUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="View Pull Request"
-                className="shrink-0 text-sm px-1.5 py-0.5 rounded text-teal-400 hover:text-teal-300 hover:bg-teal-950/30 transition-colors"
-              >
-                🔗
-              </a>
-            )}
             {!readonly && canRestart && (
               <button
                 onClick={handleRestart}
@@ -392,24 +381,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                 specPath={specPath}
                 subtasks={plan?.subtasks?.map(s => ({ id: Number(s.id), title: s.title, files: s.files }))}
               />
-            )}
-
-            {/* PR link */}
-            {task.prUrl && (
-              <section>
-                <a
-                  href={task.prUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-teal-800/50 bg-teal-950/30 text-teal-400 hover:bg-teal-900/40 hover:text-teal-300 transition-colors text-sm"
-                >
-                  <span className="text-base">🔗</span>
-                  <span className="font-medium">View Pull Request</span>
-                  <svg className="w-3.5 h-3.5 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                  </svg>
-                </a>
-              </section>
             )}
 
             {/* Dependencies */}
