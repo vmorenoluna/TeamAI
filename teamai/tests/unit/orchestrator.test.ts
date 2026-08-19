@@ -4367,6 +4367,84 @@ describe('Orchestrator', () => {
       expect(pipeline.qaAttempt).toBe(1);
     });
 
+    it('reconciles plan.json completed flags and emits subtask-progress on QA PASS', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      // plan.json with two completed:true, two missing `completed`, and a
+      // synthetic 9999 entry left as completed:false — the stale state
+      // observed in production after QA had actually passed.
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [
+          { id: 1, title: 'Done 1', description: '', files: [], acceptance_criteria: [], completed: true },
+          { id: 2, title: 'Done 2', description: '', files: [], acceptance_criteria: [], completed: true },
+          { id: 3, title: 'Stale 3', description: '', files: [], acceptance_criteria: [] },
+          { id: 4, title: 'Stale 4', description: '', files: [], acceptance_criteria: [] },
+          { id: 9999, title: 'QA Rework', description: '', files: [], acceptance_criteria: [], completed: false },
+        ],
+      }));
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+      });
+
+      mockCreateSession.mockResolvedValue('sess-qa');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [],
+      }));
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-qa', event: { type: 'result' } });
+      await promise;
+
+      // Flush the plan-write lock so the reconcile write has completed.
+      await (orch as AnyOrch)._planWriteLockRef.current;
+
+      expect(pipeline.phase).toBe('awaiting-review');
+
+      const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks).toHaveLength(5);
+      for (const s of plan.subtasks) {
+        expect(s.completed).toBe(true);
+      }
+
+      expect(mockEmit).toHaveBeenCalledWith('subtask-progress', expect.objectContaining({
+        taskId: testData.taskId,
+        completed: 5,
+        total: 5,
+      }));
+    });
+
+    it('does not advance to awaiting-review when the reconcile write fails', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      // Malformed plan.json → the reconcile write's JSON.parse throws. The
+      // reconcile is guaranteed, not best-effort: the task must NOT advance.
+      writeFileSync(join(testData.taskDir, 'plan.json'), '{ not valid json');
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+      });
+
+      mockCreateSession.mockResolvedValue('sess-qa');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [],
+      }));
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-qa', event: { type: 'result' } });
+
+      await expect(promise).rejects.toThrow();
+      expect(pipeline.phase).not.toBe('awaiting-review');
+    });
+
     it('injects the human override into the QA prompt for a qa-reviewer target and consumes it', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
