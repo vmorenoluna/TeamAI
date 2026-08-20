@@ -209,7 +209,7 @@ The spec revision workflow allows a human reviewer to fix the spec itself (rathe
 
 3. **Human sends a change request to the Analyst**: The review panel (`src/components/review-panel.tsx`) shows a purple banner listing each spec concern (issue, reasoning, suggested fix). In **Request Changes**, selecting the **Analyst** target pre-fills the textarea with those concerns; sending it routes through `routeHumanFeedback` (analyst target) → `beginSpecRevision()`:
    - Writes `spec_revision_feedback.md` with the reviewer's directive (or the QA's spec concerns)
-   - Snapshots `spec.md` → `spec_v{N}.md` (archives the pre-revision spec)
+   - Snapshots `spec.md` → `spec_revision_before.md` (the pre-revision baseline used by the no-op guard; `spec_v{N}.md` is only written once the revision actually completes)
    - Clears downstream QA artifacts (preserves `plan.json` — the planner re-plans in place)
    - Resets retry counters
    - Advances to `spec` phase → runs spec → plan → implement → QA

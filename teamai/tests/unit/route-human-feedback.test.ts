@@ -194,10 +194,13 @@ describe('routeHumanFeedback', () => {
       'Derive the formula from first principles',
     );
 
-    // Pre-revision spec archived under the incremented revision number, so the
-    // no-op guard + version archive in runSpecPhase have a correct baseline.
+    // Pre-revision spec snapshotted to the dedicated marker so runSpecPhase's
+    // no-op guard has a correct baseline (spec_v{N}.md is written on completion).
     expect(ctx.pipeline.specRevision).toBe(2);
-    expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# spec');
+    expect(readFileSync(join(ctx.specPath, 'spec_revision_before.md'), 'utf-8')).toBe('# spec');
+    // The revision has not completed — spec_v2.md must not exist yet, or the
+    // UI would surface a phantom version before the analyst finishes.
+    expect(existsSync(join(ctx.specPath, 'spec_v2.md'))).toBe(false);
     expect(ctx.deps.savePipelineState).toHaveBeenCalled();
   });
 

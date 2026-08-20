@@ -479,10 +479,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-500">Specification</span>
 
-                    {(() => {
-                      const totalVersions = 1 + (specVersions ? Object.keys(specVersions).length : 0);
-                      return totalVersions >= 2;
-                    })() && (
+                    {specVersions && Object.keys(specVersions).length >= 2 && (
                       <button
                         onClick={() => { setCompareMode(c => !c); setLeftVersion(null); setRightVersion(null); }}
                         data-component="compare-toggle"

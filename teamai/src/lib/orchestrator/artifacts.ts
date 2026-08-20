@@ -46,6 +46,7 @@ export const PHASE_ARTIFACTS: Record<string, string[]> = {
     'qa_report_before_bounce.json',
     'qa_report_before_failed.json',
     'spec_revision_feedback.md',
+    'spec_revision_before.md',
     'spec_v1.md',
     'spec_v2.md',
     'spec_v3.md',
