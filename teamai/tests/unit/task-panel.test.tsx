@@ -1094,11 +1094,11 @@ describe('TaskDetail', () => {
       expect(screen.getByText('⚖ Compare')).toBeInTheDocument();
     });
 
-    it('shows compare toggle with just 1 snapshot (live spec + v1 = 2 total)', () => {
+    it('does not show compare toggle with just 1 snapshot (nothing to compare)', () => {
       renderDetail({ spec: '# Current', specVersions: { v1: '# v1' } });
       clickSpec();
-      // With 1 snapshot + the live spec, total is 2 — toggle should appear
-      expect(screen.getByTestId('compare-toggle')).toBeInTheDocument();
+      // A single snapshot has nothing to compare against — toggle should be hidden.
+      expect(screen.queryByTestId('compare-toggle')).not.toBeInTheDocument();
     });
 
     it('does not show compare toggle when specVersions is undefined', () => {

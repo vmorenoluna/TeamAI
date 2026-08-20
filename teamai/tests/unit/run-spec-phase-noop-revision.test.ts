@@ -3,12 +3,12 @@
 /**
  * Tests runSpecPhase's no-op revision guard: if the analyst's REVISION
  * session completes without actually changing spec.md (compared against
- * the pre-revision spec_v{N}.md snapshot written by autoReviseSpec before
- * the session started), the pipeline must park in awaiting-review instead
+ * the pre-revision spec_revision_before.md marker written by beginSpecRevision
+ * before the session started), the pipeline must park in awaiting-review instead
  * of silently advancing to plan and replaying the same QA failure.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -97,7 +97,7 @@ describe('runSpecPhase — no-op revision guard', () => {
     ctx = makeCtx(2);
     // Pre-revision snapshot (written by autoReviseSpec before this session ran)
     // and the "revised" spec.md the analyst session left behind — identical.
-    writeFileSync(join(ctx.specPath, 'spec_v2.md'), '# original spec\n\nold formula');
+    writeFileSync(join(ctx.specPath, 'spec_revision_before.md'), '# original spec\n\nold formula');
     writeFileSync(join(ctx.specPath, 'spec.md'), '# original spec\n\nold formula');
     writeFileSync(join(ctx.specPath, 'spec_revision_feedback.md'), 'revise the formula');
 
@@ -110,11 +110,13 @@ describe('runSpecPhase — no-op revision guard', () => {
       'spec',
       expect.stringContaining('No-op spec revision detected'),
     );
+    // The pre-revision marker is cleaned up after the no-op guard runs.
+    expect(existsSync(join(ctx.specPath, 'spec_revision_before.md'))).toBe(false);
   });
 
   it('advances to plan and archives the revised spec as spec_v2.md when spec.md changed', async () => {
     ctx = makeCtx(2);
-    writeFileSync(join(ctx.specPath, 'spec_v2.md'), '# original spec\n\nold formula');
+    writeFileSync(join(ctx.specPath, 'spec_revision_before.md'), '# original spec\n\nold formula');
     writeFileSync(join(ctx.specPath, 'spec.md'), '# original spec\n\nrevised formula');
     writeFileSync(join(ctx.specPath, 'spec_revision_feedback.md'), 'revise the formula');
 
@@ -122,9 +124,10 @@ describe('runSpecPhase — no-op revision guard', () => {
 
     expect(ctx.pipeline.phase).toBe('plan');
     expect(ctx.deps.executePhase).toHaveBeenCalledTimes(1);
-    // Off-by-one fix: the pre-revision snapshot written by autoReviseSpec is
-    // overwritten with the post-revision content, so spec_v2.md archives v2.
+    // spec_v2.md archives the completed revision's content — written only after
+    // the no-op guard passes, so an in-flight revision never shows as a version.
     expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# original spec\n\nrevised formula');
+    expect(existsSync(join(ctx.specPath, 'spec_revision_before.md'))).toBe(false);
     expect(mockWarn).not.toHaveBeenCalled();
   });
 

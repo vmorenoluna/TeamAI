@@ -164,9 +164,14 @@ async function beginSpecRevision(
   const specMdPath = path.join(specPath, 'spec.md');
   if (existsSync(specMdPath)) {
     try {
-      writeFileSync(path.join(specPath, `spec_v${pipeline.specRevision}.md`), readFileSync(specMdPath, 'utf-8'));
+      // Snapshot the pre-revision spec to a dedicated marker file (NOT
+      // spec_v{N}.md). runSpecPhase uses this as the no-op guard's "before"
+      // baseline, and spec_v{N}.md is only written once the revision actually
+      // completes — so an in-flight revision doesn't surface as a finished
+      // version in the spec comparison UI.
+      writeFileSync(path.join(specPath, 'spec_revision_before.md'), readFileSync(specMdPath, 'utf-8'));
     } catch (err) {
-      warn('review', `Failed to snapshot spec v${pipeline.specRevision} for ${pipeline.taskId}`, err);
+      warn('review', `Failed to snapshot pre-revision spec for ${pipeline.taskId}`, err);
     }
   }
 

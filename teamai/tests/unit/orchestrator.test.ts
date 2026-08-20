@@ -2170,12 +2170,12 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
-      // Pre-create spec_v1.md (original) and the spec_v2.md pre-revision
-      // snapshot autoReviseSpec wrote before the analyst session, plus the
-      // feedback file to trigger revision mode.
+      // Pre-create spec_v1.md (original) and the spec_revision_before.md
+      // pre-revision marker beginSpecRevision wrote before the analyst session,
+      // plus the feedback file to trigger revision mode.
       const originalV1 = '# Spec v1 — Original';
       writeFileSync(join(testData.taskDir, 'spec_v1.md'), originalV1);
-      writeFileSync(join(testData.taskDir, 'spec_v2.md'), originalV1);
+      writeFileSync(join(testData.taskDir, 'spec_revision_before.md'), originalV1);
       writeFileSync(join(testData.taskDir, 'spec_revision_feedback.md'), 'Revise the spec');
 
       const pipeline = makePipeline({
@@ -2209,11 +2209,12 @@ describe('Orchestrator', () => {
       expect(existsSync(join(testData.taskDir, 'spec_v1.md'))).toBe(true);
       expect(readFileSync(join(testData.taskDir, 'spec_v1.md'), 'utf-8')).toBe(originalV1);
 
-      // spec_v2.md should now archive the revised (v2) content — off-by-one fix
+      // spec_v2.md should now archive the revised (v2) content
       expect(readFileSync(join(testData.taskDir, 'spec_v2.md'), 'utf-8')).toBe('# Spec v2 — Revised');
 
-      // spec_revision_feedback.md should be cleaned up
+      // spec_revision_feedback.md and the pre-revision marker should be cleaned up
       expect(existsSync(join(testData.taskDir, 'spec_revision_feedback.md'))).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'spec_revision_before.md'))).toBe(false);
     });
   });
 
@@ -4777,7 +4778,7 @@ describe('Orchestrator', () => {
       expect(feedback).toContain('Spec does not cover the rate-limiting scenario');
     });
 
-    it('snapshots spec.md as spec_v1.md before revision', async () => {
+    it('snapshots spec.md to the pre-revision marker before revision', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -4797,13 +4798,13 @@ describe('Orchestrator', () => {
       const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
       await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
 
-      // spec_v1.md should contain the original spec content
-      const snapshotPath = join(testData.taskDir, 'spec_v1.md');
+      // spec_revision_before.md should contain the original spec content
+      const snapshotPath = join(testData.taskDir, 'spec_revision_before.md');
       expect(existsSync(snapshotPath)).toBe(true);
       expect(readFileSync(snapshotPath, 'utf-8')).toBe(originalSpec);
     });
 
-    it('creates spec_v2.md on second revision without overwriting spec_v1.md', async () => {
+    it('snapshots the pre-revision marker on second revision without overwriting spec_v1.md', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -4829,10 +4830,10 @@ describe('Orchestrator', () => {
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
       await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
 
-      // spec_v2.md should be created with the current spec.md content
-      const snapshotV2 = join(testData.taskDir, 'spec_v2.md');
-      expect(existsSync(snapshotV2)).toBe(true);
-      expect(readFileSync(snapshotV2, 'utf-8')).toBe(revisedSpec);
+      // spec_revision_before.md should be created with the current spec.md content
+      const markerPath = join(testData.taskDir, 'spec_revision_before.md');
+      expect(existsSync(markerPath)).toBe(true);
+      expect(readFileSync(markerPath, 'utf-8')).toBe(revisedSpec);
 
       // spec_v1.md should still exist and NOT be overwritten
       const snapshotV1 = join(testData.taskDir, 'spec_v1.md');
