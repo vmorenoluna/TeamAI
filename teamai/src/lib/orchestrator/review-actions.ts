@@ -218,7 +218,22 @@ export async function approveTask(
   try {
     await deps.executePhase(pipeline);
   } catch (err) {
-    deps.advancePhase(pipeline, 'awaiting-review');
+    // Capture error details for the audit trail and rollback event.
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const eventExtra: Record<string, unknown> = {
+      approvalError: errMsg,
+      fromPhase: next,
+    };
+    // Preserve structured error code if present (e.g. AUTH, PUSH, CONFLICT).
+    const errCode = (err instanceof Error && 'code' in err) ? (err as Error & { code?: string }).code : undefined;
+    if (errCode) eventExtra.errorCode = errCode;
+
+    // Log to output.log so the reason is visible alongside phase output
+    // (matches the top-level task runner's catch-block pattern).
+    logToOutput(pipeline.specPath, `\n[ERROR] Approval failed (${next}): ${errMsg}\n`);
+
+    // Roll back to awaiting-review with error details in the phase-change event.
+    deps.advancePhase(pipeline, 'awaiting-review', eventExtra);
     throw err;
   }
 }

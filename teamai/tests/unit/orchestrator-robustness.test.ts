@@ -3706,7 +3706,7 @@ describe('runImplement — stall-detector-kill recovery', () => {
     // (which fires as soon as the exit event below is processed) races an
     // as-yet-unattached handler and vitest reports it as an unhandled
     // rejection even though the test itself passes.
-    promise.catch(() => {});
+    promise.catch(() => { /* best-effort */ });
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(1);
     });

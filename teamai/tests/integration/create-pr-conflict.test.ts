@@ -232,7 +232,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
       maxQaAttempts: 3,
     };
     // PR creation via gh CLI may fail in test env (gh not installed) — catch the error
-    const promise = (orch as AnyOrch).runCreatePR(pipeline).catch(() => {});
+    const promise = (orch as AnyOrch).runCreatePR(pipeline).catch(() => { /* best-effort */ });
     // Allow async work to reach the merger session creation
     await new Promise(r => setTimeout(r, 100));
 
@@ -290,7 +290,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
       maxQaAttempts: 3,
     };
     // gh pr create will fail in test env — catch the error
-    const promise = (orch as AnyOrch).runCreatePR(pipeline).catch(() => {});
+    const promise = (orch as AnyOrch).runCreatePR(pipeline).catch(() => { /* best-effort */ });
     await new Promise(r => setTimeout(r, 100));
 
     // Verify merger was spawned
@@ -333,7 +333,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
       qaAttempt: 0,
       maxQaAttempts: 3,
     };
-    await (orch as AnyOrch).runCreatePR(pipeline).catch(() => {});
+    await (orch as AnyOrch).runCreatePR(pipeline).catch(() => { /* best-effort */ });
     await new Promise(r => setTimeout(r, 100));
 
     // Should NOT have sent /merge origin/master (no rebase conflict)

@@ -252,7 +252,7 @@ describe('_commitArtifactsToWorktree', () => {
     testData = setupTestProject();
     const orch = makeOrch(testData.root);
 
-    try { unlinkSync(join(testData.taskDir, 'task.json')); } catch {}
+    try { unlinkSync(join(testData.taskDir, 'task.json')); } catch { /* best-effort */ }
 
     // Only put excluded files in the source dir
     writeFileSync(join(testData.taskDir, 'output.log'), 'terminal output');

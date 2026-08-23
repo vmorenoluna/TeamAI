@@ -48,7 +48,7 @@ export function IdeationScanner() {
       try {
         const id = await startIdeationScan();
         if (cancelRequestedRef.current) {
-          await cancelIdeationScan().catch(() => {});
+          await cancelIdeationScan().catch(err => console.warn('[ideation-scanner] Failed to cancel scan:', err));
           setRunning(false);
           return;
         }

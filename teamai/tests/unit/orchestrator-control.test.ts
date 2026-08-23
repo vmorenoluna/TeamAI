@@ -307,14 +307,14 @@ describe('Orchestrator Pipeline Integration', () => {
       const active = (orch as AnyOrch).activeTasks as Set<string>;
       expect(active.has(taskId)).toBe(false);
 
-      await promise.catch(() => {});
+      await promise.catch(() => { /* best-effort */ });
     });
 
     it('should advance to failed phase on session error', async () => {
       mockCreateSession.mockResolvedValue('fail-sess');
       setTimeout(() => fireExitEvent('fail-sess', 1), 5);
 
-      await (orch as AnyOrch).runTask(taskId, 'failure').catch(() => {});
+      await (orch as AnyOrch).runTask(taskId, 'failure').catch(() => { /* best-effort */ });
 
       await new Promise((r) => setTimeout(r, 80));
 
@@ -323,6 +323,103 @@ describe('Orchestrator Pipeline Integration', () => {
         .filter((c: unknown[]) => c[0] === 'phase-change')
         .map((c: unknown[]) => (c[1] as { phase: string }).phase);
       expect(phaseChanges).toContain('failed');
+    });
+  });
+
+  // ── Pause Race Regression (#10) ───────────────────────────────────
+  // When a user pauses a task right as one pipeline phase finishes and
+  // the cascade is about to spawn the next phase's session, cancelPipeline
+  // deletes the pipeline from this.pipelines. The cascade code, holding
+  // a local pipeline reference, must check whether the pipeline is still
+  // tracked before dispatching to the next phase runner — otherwise a new
+  // agent session spawns for a task the user believes they stopped.
+
+  describe('Pause race regression', () => {
+    it('executePhase bails out when pipeline was cancelled (removed from map)', async () => {
+      mockCreateSession.mockResolvedValue('spec-sess');
+
+      const pipeline = makePipeline({ phase: 'spec' });
+      (orch as AnyOrch).pipelines.set(taskId, pipeline);
+
+      // Simulate cancelPipeline: delete from map (pause/stop does this)
+      (orch as AnyOrch).pipelines.delete(taskId);
+
+      // executePhase should bail at the guard without dispatching to any
+      // phase runner — if it proceeded, it would call runSpec → createSession
+      await (orch as AnyOrch).executePhase(pipeline);
+
+      // Sanity: runSpec creates a session; if the guard didn't bail,
+      // createSession would have been called.
+      expect(mockCreateSession).not.toHaveBeenCalled();
+
+      // Pipeline should still be absent from the map (guard didn't re-add it)
+      expect((orch as AnyOrch).pipelines.has(taskId)).toBe(false);
+    });
+
+    it('executePhase bails for any phase when pipeline was cancelled', async () => {
+      // Verify the guard is phase-agnostic: no-op phases (awaiting-review)
+      // normally return immediately, but the guard fires first and skips
+      // even the switch dispatch.
+      const pipeline = makePipeline({ phase: 'plan' });
+      (orch as AnyOrch).pipelines.set(taskId, pipeline);
+      (orch as AnyOrch).pipelines.delete(taskId); // simulate cancelPipeline
+
+      await (orch as AnyOrch).executePhase(pipeline);
+
+      // plan runner creates a session via runPlanPhase — must not fire
+      expect(mockCreateSession).not.toHaveBeenCalled();
+    });
+
+    it('cancelPipeline + cascade simulation: no next-phase session spawns', async () => {
+      // Simulate the full race: spec phase completes, advancePhase fires,
+      // then cancelPipeline fires, then executePhase for plan is called.
+      // This is the exact sequence that was racing.
+      mockCreateSession.mockResolvedValue('plan-sess');
+
+      const pipeline = makePipeline({ phase: 'plan' });
+      (orch as AnyOrch).pipelines.set(taskId, pipeline);
+
+      // Simulate: spec phase completed, advancePhase(pipeline, 'plan') fired
+      // Then: cancelPipeline fires (user paused)
+      (orch as AnyOrch).pipelines.delete(taskId);
+      (orch as AnyOrch).activeTasks.delete(taskId);
+
+      // Then: cascade calls executePhase(pipeline) with phase='plan'
+      await (orch as AnyOrch).executePhase(pipeline);
+
+      // Guard bailed — no plan session created
+      expect(mockCreateSession).not.toHaveBeenCalled();
+
+      // Maps stay clean
+      expect((orch as AnyOrch).pipelines.has(taskId)).toBe(false);
+      expect((orch as AnyOrch).activeTasks.has(taskId)).toBe(false);
+    });
+
+    it('executePhase bails when a NEWER pipeline replaced the old one (restart race)', async () => {
+      // The restart variant of the race: runTask creates a fresh pipeline
+      // for the same taskId after cancelPipeline. The old cascade's
+      // pipeline reference must not proceed — an identity check catches
+      // this (membership alone would pass, since a pipeline with the same
+      // taskId is in the map).
+      mockCreateSession.mockResolvedValue('old-sess');
+
+      const oldPipeline = makePipeline({ phase: 'qa-review' });
+      (orch as AnyOrch).pipelines.set(taskId, oldPipeline);
+
+      // Simulate: old pipeline's cascade is about to fire executePhase
+      // But a restart happened: cancelPipeline + runTask created a new pipeline
+      const newPipeline = makePipeline({ phase: 'spec' });
+      (orch as AnyOrch).pipelines.set(taskId, newPipeline);
+
+      // The old cascade tries to execute
+      await (orch as AnyOrch).executePhase(oldPipeline);
+
+      // Guard must bail — oldPipeline !== newPipeline, even though
+      // pipelines.has(taskId) is true. No session from the old pipeline.
+      expect(mockCreateSession).not.toHaveBeenCalled();
+
+      // The new pipeline is still in the map (guard didn't disturb it)
+      expect((orch as AnyOrch).pipelines.get(taskId)).toBe(newPipeline);
     });
   });
 

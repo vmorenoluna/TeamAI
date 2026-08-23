@@ -128,7 +128,7 @@ describe('Workflow Improvements', () => {
 
       mockCreateSession.mockResolvedValue('sess-qa-sha');
 
-      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       // Write a valid QA report before the session completes (so it parses)
@@ -145,7 +145,7 @@ describe('Workflow Improvements', () => {
       const report = JSON.parse(readFileSync(join(testData.taskDir, 'qa_report.json'), 'utf-8'));
       expect(report.head_at_review).toBe('abc123def456');
 
-      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch {}
+      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
     });
   });
 
@@ -178,7 +178,7 @@ describe('Workflow Improvements', () => {
       let sessionCounter = 0;
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-qa-${++sessionCounter}`));
 
-      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       // Write a QA report with fail_type: cleanup
@@ -208,7 +208,7 @@ describe('Workflow Improvements', () => {
       expect(logContent).toContain('[QA-ROUTER] fail_type=cleanup');
       expect(logContent).toContain('git rm unused.txt');
 
-      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch {}
+      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
     });
 
     it('routes artifact-cleanup failures and includes fail_type in qa_feedback.md', async () => {
@@ -237,7 +237,7 @@ describe('Workflow Improvements', () => {
       let sessionCounter = 0;
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-qa-${++sessionCounter}`));
 
-      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       // Write a QA report with fail_type: cleanup — artifact scenario (coder substituted math for benchmark output)
@@ -275,7 +275,7 @@ describe('Workflow Improvements', () => {
       expect(logContent).toContain('automated mechanical fix');
       expect(logContent).toContain('run ./scripts/benchmark.sh');
 
-      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch {}
+      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
     });
   });
 
@@ -308,7 +308,7 @@ describe('Workflow Improvements', () => {
       });
       mockCreateSession.mockResolvedValue('sess-qa-ratelimit');
 
-      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       // Fire rate limit events — should bubble up as RateLimitError, NOT trigger timeout
@@ -334,7 +334,7 @@ describe('Workflow Improvements', () => {
         expect(hasTimeoutMsg).toBeFalsy();
       }
 
-      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch {}
+      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
     });
   });
 
@@ -375,7 +375,7 @@ describe('Workflow Improvements', () => {
       let sessionCounter = 0;
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
 
-      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 50));
 
       // Verify the coder prompt includes the script-run instruction from the plan subtask
@@ -406,7 +406,7 @@ describe('Workflow Improvements', () => {
       await new Promise(r => setTimeout(r, 50));
       await promise;
 
-      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch {}
+      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
     });
   });
 
@@ -458,7 +458,7 @@ describe('Workflow Improvements', () => {
       let sessionCounter = 0;
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-sg-${++sessionCounter}`));
 
-      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 50));
 
       // Complete the coder session (subtask 1)
@@ -497,7 +497,7 @@ describe('Workflow Improvements', () => {
       expect(finalLog).toContain('[SENSOR-GATE]');
       expect(finalLog).toContain('post_subtask sensors failed');
 
-      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch {}
+      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
     });
 
     it('proceeds to qa-review when no sensor_report files exist', async () => {
@@ -532,7 +532,7 @@ describe('Workflow Improvements', () => {
       let sessionCounter = 0;
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-sg-${++sessionCounter}`));
 
-      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 50));
 
       // Complete the coder session
@@ -559,7 +559,7 @@ describe('Workflow Improvements', () => {
       await new Promise(r => setTimeout(r, 50));
       await promise;
 
-      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch {}
+      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
     });
   });
 });

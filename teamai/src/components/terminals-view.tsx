@@ -26,7 +26,7 @@ export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
   }
 
   function handleClose(sessionId: string) {
-    closeTerminalSession(sessionId).catch(() => {});
+    closeTerminalSession(sessionId).catch(err => console.warn('[terminals-view] Failed to close session:', err));
     setTerminals(prev => prev.filter(t => t.sessionId !== sessionId));
   }
 
@@ -35,7 +35,7 @@ export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
     terminalsRef.current = terminals;
     return () => {
       for (const t of terminalsRef.current) {
-        closeTerminalSession(t.sessionId).catch(() => {});
+        closeTerminalSession(t.sessionId).catch(err => console.warn('[terminals-view] Failed to close session (cleanup):', err));
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

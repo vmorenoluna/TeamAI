@@ -172,7 +172,7 @@ export class TaskStore {
     atomicWriteJson(join(dir, 'task.json'), updated);
   }
 
-  updatePhase(id: string, phase: string): void {
+  updatePhase(id: string, phase: string, eventExtra?: Record<string, unknown>): void {
     const task = this.getById(id);
     if (!task) throw new Error(`Task ${id} not found`);
 
@@ -182,7 +182,7 @@ export class TaskStore {
     const dir = this.getDirById(id);
     atomicWriteJson(join(dir, 'task.json'), task);
 
-    const event = { phase, timestamp: new Date().toISOString() };
+    const event = { phase, timestamp: new Date().toISOString(), ...eventExtra };
     try {
       appendFileSync(join(dir, 'events.jsonl'), JSON.stringify(event) + '\n');
     } catch (err) {
@@ -271,7 +271,7 @@ export class TaskStore {
     }
   }
 
-  getEvents(taskId: string): Array<{ phase: string; timestamp: string }> {
+  getEvents(taskId: string): Array<{ phase: string; timestamp: string; [key: string]: unknown }> {
     const dir = this.getDirById(taskId);
     const eventsPath = join(dir, 'events.jsonl');
     if (!existsSync(eventsPath)) return [];

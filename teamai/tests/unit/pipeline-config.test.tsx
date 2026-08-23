@@ -34,7 +34,7 @@ const mockStartTransition = vi.hoisted(() =>
     // these internally.
     try {
       const result = cb() as unknown;
-      if (result instanceof Promise) result.catch(() => {});
+      if (result instanceof Promise) result.catch(() => { /* best-effort */ });
     } catch {
       /* suppress sync errors too */
     }

@@ -23,6 +23,8 @@ const noAsyncFetchOnMountRule = localPlugin.rules['no-async-fetch-on-mount'] as 
 
 const noRealProjectsJsonRule = localPlugin.rules['no-real-projects-json'] as any;
 
+const noBareCatchRule = localPlugin.rules['no-bare-catch'] as any;
+
 ruleTester.run(
   'no-useTransition-useRouter',
   noTransitionUseRouterRule,
@@ -732,6 +734,62 @@ ruleTester.run(
               "Add vi.mock('os', ...) or vi.mock('@/lib/project-store', ...) to isolate the test.",
           },
         ],
+      },
+    ],
+  },
+);
+
+// ---------------------------------------------------------------------------
+// no-bare-catch
+// ---------------------------------------------------------------------------
+
+ruleTester.run(
+  'no-bare-catch',
+  noBareCatchRule,
+  {
+    valid: [
+      // Empty catch with comment — documented intent
+      { code: 'try { fn(); } catch { /* best-effort */ }' },
+      { code: 'try { fn(); } catch (err) { /* best-effort */ }' },
+      { code: 'try { fn(); } catch { /* ignore — cleanup failure is OK */ }' },
+      { code: 'try { fn(); } catch { /* offline — proceed with cached */ }' },
+      // Catch with at least one statement
+      { code: 'try { fn(); } catch (err) { logWarn("m", "x", err); }' },
+      { code: 'try { fn(); } catch { console.warn("cleanup failed"); }' },
+      { code: 'try { fn(); } catch (err) { throw err; }' },
+      { code: 'try { fn(); } catch { throw new Error("wrap"); }' },
+      // .catch() with documented intent
+      { code: 'p.catch(() => { /* best-effort */ });' },
+      { code: 'p.catch(err => { /* best-effort */ });' },
+      // .catch() with at least one statement
+      { code: 'p.catch(err => console.warn(err));' },
+      { code: 'p.catch(err => { logError("m", "x", err); });' },
+    ],
+    invalid: [
+      // Bare catch {} — no comment, no body
+      {
+        code: 'try { fn(); } catch {}',
+        errors: [{ message: /Empty catch block/ }],
+      },
+      // Bare catch (err) {} — no comment, no body
+      {
+        code: 'try { fn(); } catch (err) {}',
+        errors: [{ message: /Empty catch block/ }],
+      },
+      // Bare .catch(() => {}) — no comment, no body
+      {
+        code: 'p.catch(() => {});',
+        errors: [{ message: /Empty \.catch\(\) handler/ }],
+      },
+      // Bare .catch(err => {}) — no comment, no body
+      {
+        code: 'p.catch(err => {});',
+        errors: [{ message: /Empty \.catch\(\) handler/ }],
+      },
+      // Bare .catch(function() {}) — no comment, no body
+      {
+        code: 'p.catch(function() {});',
+        errors: [{ message: /Empty \.catch\(\) handler/ }],
       },
     ],
   },

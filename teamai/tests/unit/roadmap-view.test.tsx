@@ -44,7 +44,7 @@ const mockStartTransition = vi.hoisted(() =>
   vi.fn((cb: () => void) => {
     try {
       const result = cb() as unknown;
-      if (result instanceof Promise) result.catch(() => {});
+      if (result instanceof Promise) result.catch(() => { /* best-effort */ });
     } catch {
       /* suppress */
     }
