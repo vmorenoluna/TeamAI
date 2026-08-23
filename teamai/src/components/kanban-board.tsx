@@ -47,6 +47,77 @@ function isArtifactClearingTarget(targetPhase: string): boolean {
   return !NO_RESUME_PHASES.has(targetPhase);
 }
 
+/**
+ * Topological sort for the backlog column.
+ *
+ * If task B depends on task A (A is in B's dependencies array), and both
+ * are still in backlog, then A must appear above B — blocked tasks stack
+ * below their blockers. Ties (neither depends on the other) break by
+ * creation timestamp, oldest first.
+ *
+ * Uses Kahn's algorithm with a priority queue keyed by createdAt so the
+ * tie-breaker is built into the queue ordering, not applied as a post-pass.
+ */
+function topoSortBacklog(tasks: Task[]): Task[] {
+  if (tasks.length <= 1) return tasks;
+
+  const idSet = new Set(tasks.map(t => t.id));
+
+  // Build adjacency list: depId → [dependentIds ...]
+  // ("blocker" → tasks that depend on it)
+  const adj = new Map<string, string[]>();
+  const inDegree = new Map<string, number>();
+  for (const t of tasks) {
+    adj.set(t.id, []);
+    inDegree.set(t.id, 0);
+  }
+  for (const t of tasks) {
+    if (!t.dependencies) continue;
+    for (const depId of t.dependencies) {
+      // Only consider dependencies still in the backlog. If the dep is
+      // already done/in progress, it's not a blocking concern for ordering.
+      if (!idSet.has(depId)) continue;
+      const existing = adj.get(depId);
+      if (existing) existing.push(t.id);
+      inDegree.set(t.id, (inDegree.get(t.id) ?? 0) + 1);
+    }
+  }
+
+  // Priority queue: tasks with in-degree 0, ordered by createdAt (oldest first)
+  const queue: Task[] = [];
+  const taskById = new Map(tasks.map(t => [t.id, t]));
+  for (const t of tasks) {
+    if (inDegree.get(t.id) === 0) queue.push(t);
+  }
+  queue.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+  const result: Task[] = [];
+  while (queue.length > 0) {
+    const t = queue.shift()!;
+    result.push(t);
+    for (const depId of adj.get(t.id) ?? []) {
+      const deg = (inDegree.get(depId) ?? 1) - 1;
+      inDegree.set(depId, deg);
+      if (deg === 0) {
+        const next = taskById.get(depId);
+        if (next) {
+          // Insert sorted by createdAt to maintain priority order
+          let i = 0;
+          while (i < queue.length && queue[i].createdAt < next.createdAt) i++;
+          queue.splice(i, 0, next);
+        }
+      }
+    }
+  }
+
+  // Cycle guard: any tasks left unvisited (circular deps) append at end
+  for (const t of tasks) {
+    if (!result.includes(t)) result.push(t);
+  }
+
+  return result;
+}
+
 export function KanbanBoard({ tasks, projectPath }: Props) {
   const { run, isPending } = useServerMutation();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -462,7 +533,18 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
             {(() => {
               const filtered = processedTasks();
               return COLUMNS.map(col => {
-              const colTasks = filtered.filter(t => normalizePhase(effectivePhase(t)) === col.phase);
+              let colTasks = filtered.filter(t => normalizePhase(effectivePhase(t)) === col.phase);
+              // Done column: always sort by updatedAt descending — most recently
+              // completed tasks at the top. Other columns respect the global sort.
+              if (col.phase === 'done') {
+                colTasks = [...colTasks].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+              }
+              // Backlog column: topological sort by dependency order, breaking
+              // ties by creation time (oldest first). If task B depends on A,
+              // A stacks above B — only when both are still in backlog.
+              if (col.phase === 'backlog') {
+                colTasks = topoSortBacklog(colTasks);
+              }
               const isDropTarget = draggingTaskId !== null && dragOverPhase === col.phase;
               const isSameColumn = draggingTaskId !== null &&
                 tasks.find(t => t.id === draggingTaskId && normalizePhase(effectivePhase(t)) === col.phase);
