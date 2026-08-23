@@ -26,6 +26,8 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
       .catch((e) => {
         if (!silent && onError) {
           onError(e instanceof Error ? e.message : 'Failed to load task');
+        } else if (!onError) {
+          console.warn('[task-panel] Failed to load task:', e);
         }
       })
       .finally(() => { if (!silent) setLoading(false); });

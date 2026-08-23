@@ -219,7 +219,7 @@ describe('Rate Limit Integration', () => {
       mockCreateSession.mockResolvedValue('sess-rl-survive');
 
       // Start runTask — it will enter executePhase → runSpec → createSession → waitForCompletion
-      const runPromise = orch.runTask(taskId, 'rate limit survival', 'spec').catch(() => {});
+      const runPromise = orch.runTask(taskId, 'rate limit survival', 'spec').catch(() => { /* best-effort */ });
 
       // Wait for session creation and waitForCompletion to be listening
       await new Promise(r => setTimeout(r, 50));
@@ -502,7 +502,7 @@ describe('Rate Limit Integration', () => {
     it('rate-limited task has rateLimitedUntil persisted to task.json on disk', async () => {
       mockCreateSession.mockResolvedValue('sess-rl-persist');
 
-      const runPromise = orch.runTask(taskId, 'persist test', 'spec').catch(() => {});
+      const runPromise = orch.runTask(taskId, 'persist test', 'spec').catch(() => { /* best-effort */ });
 
       await new Promise(r => setTimeout(r, 50));
 
@@ -689,7 +689,7 @@ describe('Rate Limit Integration', () => {
       expect(task?.rateLimitedUntil).toBeDefined();
 
       // Clean up worktree
-      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch {}
+      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch { /* best-effort */ }
       orch.pipelines.delete(taskId);
       orch.activeTasks.delete(taskId);
     });
@@ -730,7 +730,7 @@ describe('Rate Limit Integration', () => {
       );
 
       // Clean up
-      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch {}
+      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch { /* best-effort */ }
       orch.pipelines.delete(taskId);
       orch.activeTasks.delete(taskId);
     });
@@ -776,7 +776,7 @@ describe('Rate Limit Integration', () => {
       expect(task?.rateLimitedUntil).toBeUndefined();
 
       // Clean up
-      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch {}
+      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch { /* best-effort */ }
       orch.pipelines.delete(taskId);
       orch.activeTasks.delete(taskId);
     });
@@ -843,7 +843,7 @@ describe('Rate Limit Integration', () => {
       expect(task?.rateLimitedUntil).toBeDefined();
 
       // Clean up
-      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch {}
+      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch { /* best-effort */ }
       orch.pipelines.delete(taskId);
       orch.activeTasks.delete(taskId);
     });
@@ -879,7 +879,7 @@ describe('Rate Limit Integration', () => {
       await new Promise(r => setTimeout(r, 30));
 
       // Clean up
-      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch {}
+      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch { /* best-effort */ }
       orch.pipelines.delete(taskId);
       orch.activeTasks.delete(taskId);
     });
@@ -925,7 +925,7 @@ describe('Rate Limit Integration', () => {
       expect(orch.pipelines.has(taskId)).toBe(true);
 
       // Clean up
-      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch {}
+      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch { /* best-effort */ }
       orch.pipelines.delete(taskId);
       orch.activeTasks.delete(taskId);
     });
@@ -991,7 +991,7 @@ describe('Rate Limit Integration', () => {
       expect(task?.rateLimitedUntil).toBeDefined();
 
       // Clean up
-      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch {}
+      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch { /* best-effort */ }
       orch.pipelines.delete(taskId);
       orch.activeTasks.delete(taskId);
     });
@@ -1071,7 +1071,7 @@ describe('Rate Limit Integration', () => {
       await new Promise(r => setTimeout(r, 50));
 
       // Clean up worktree (already cleaned from maps by finally block after merge→done)
-      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch {}
+      try { rmSync(join(testDir, '..', 'worktrees', 'test-slug'), { recursive: true, force: true }); } catch { /* best-effort */ }
     });
   });
 });

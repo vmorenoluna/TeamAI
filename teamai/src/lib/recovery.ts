@@ -90,8 +90,8 @@ export function findInterruptedTasks(): InterruptedTask[] {
             isPaused: task.isPaused === true,
           });
         }
-      } catch {
-        // skip malformed task.json
+      } catch (err) {
+        logWarn('recovery', `Malformed task.json — skipping`, err);
       }
     }
   }
@@ -289,8 +289,8 @@ export function autoClearExpiredRateLimits(): number {
             logWarn('recovery', `Failed to clear expired rate limit for ${taskFile}`, err);
           }
         }
-      } catch {
-        // skip malformed task.json
+      } catch (err) {
+        logWarn('recovery', `Malformed task.json — skipping`, err);
       }
     }
   }
@@ -347,8 +347,8 @@ export function reconcileTaskArtifacts(): ArtifactInconsistency[] {
             });
           }
         }
-      } catch {
-        // skip malformed task.json
+      } catch (err) {
+        logWarn('recovery', `Malformed task.json — skipping`, err);
       }
     }
   }
@@ -731,8 +731,8 @@ export async function sweepStalledTasks(): Promise<number> {
         } catch (err) {
           logWarn('sweep', `Failed to create orchestrator for ${project.path}:`, err);
         }
-      } catch {
-        // skip malformed task.json
+      } catch (err) {
+        logWarn('recovery', `Malformed task.json — skipping`, err);
       }
     }
   }

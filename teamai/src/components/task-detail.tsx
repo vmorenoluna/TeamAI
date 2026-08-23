@@ -45,6 +45,10 @@ interface Props {
   mergeLog?: string | null;
   sessionMap?: Record<string, string>;
   specPath?: string;
+  /** Populated when the last approval attempt failed and the task bounced
+   *  back to awaiting-review — surfaced in the review panel as a persistent
+   *  banner so the reason is visible even after a page refresh. */
+  approvalError?: string | null;
   project?: string;
   onClose?: () => void;
   readonly?: boolean;
@@ -52,7 +56,7 @@ interface Props {
 
 const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, project, onClose, readonly = false }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, approvalError, project, onClose, readonly = false }: Props) {
   const router = useRouter();
   const { run, isPending } = useServerMutation();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -379,6 +383,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                 phase={task.phase}
                 specRevision={specRevision}
                 specPath={specPath}
+                approvalError={approvalError}
                 subtasks={plan?.subtasks?.map(s => ({ id: Number(s.id), title: s.title, files: s.files }))}
               />
             )}

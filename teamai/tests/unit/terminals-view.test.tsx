@@ -23,7 +23,7 @@ const mockCreateTerminalSession = vi.hoisted(() => vi.fn());
 const mockCloseTerminalSession = vi.hoisted(() => vi.fn());
 const mockStartTransition = vi.hoisted(() =>
   vi.fn((cb: () => void) => {
-    try { const r = cb() as unknown; if (r instanceof Promise) r.catch(() => {}); } catch { /* suppress */ }
+    try { const r = cb() as unknown; if (r instanceof Promise) r.catch(() => { /* best-effort */ }); } catch { /* suppress */ }
   })
 );
 

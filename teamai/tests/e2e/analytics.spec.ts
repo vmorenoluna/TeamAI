@@ -53,7 +53,7 @@ test.describe('Analytics Dashboard', () => {
 
     // Wait for the loading spinner to disappear
     const loading = page.locator('text=Computing analytics');
-    await loading.waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => {});
+    await loading.waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => { /* best-effort */ });
 
     // Summary cards should be present
     const totalTasks = page.locator('text=Total Tasks');
@@ -84,7 +84,7 @@ test.describe('Analytics Dashboard', () => {
 
     // Wait for loading to finish
     const loading = page.locator('text=Computing analytics');
-    await loading.waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => {});
+    await loading.waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => { /* best-effort */ });
 
     // With seeded tasks, the dashboard should show non-zero task counts
     const totalTasks = page.locator('text=Total Tasks');

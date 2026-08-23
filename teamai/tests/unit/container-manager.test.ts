@@ -305,7 +305,7 @@ describe('ContainerManager', () => {
 
     it('throws when container start promise rejects', async () => {
       const failPromise = Promise.reject(new Error('Start failed'));
-      failPromise.catch(() => {}); // prevent unhandled rejection
+      failPromise.catch(() => { /* best-effort */ }); // prevent unhandled rejection
 
       (cm as any).records.set('/test', {
         projectRoot: '/test',

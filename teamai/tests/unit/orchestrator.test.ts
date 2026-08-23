@@ -213,7 +213,7 @@ describe('Orchestrator', () => {
 
       const orch = makeOrch(testData.root, getOrchestrator);
 
-      await orch.runTask(testData.taskId, 'test', 'spec').catch(() => {});
+      await orch.runTask(testData.taskId, 'test', 'spec').catch(() => { /* best-effort */ });
 
       expect(mockEmit).toHaveBeenCalledWith('container-docker-missing', {
         projectRoot: testData.root,
@@ -230,7 +230,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       // Should proceed past the gate — eventually fails on createSession, not the gate
-      await orch.runTask(testData.taskId, 'test', 'spec').catch(() => {});
+      await orch.runTask(testData.taskId, 'test', 'spec').catch(() => { /* best-effort */ });
       // Proof we got past the gate: createSession was called by runSpec
       expect(mockCreateSession).toHaveBeenCalled();
     });
@@ -251,7 +251,7 @@ describe('Orchestrator', () => {
       expect(pipeline.title).toBe('Test Task');
       expect(pipeline.description).toBe('unrelated description');
 
-      await promise.catch(() => {});
+      await promise.catch(() => { /* best-effort */ });
     });
   });
 
@@ -286,7 +286,7 @@ describe('Orchestrator', () => {
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
-      await (orch as AnyOrch).executePhase(pipeline).catch(() => {});
+      await (orch as AnyOrch).executePhase(pipeline).catch(() => { /* best-effort */ });
 
       expect(mockEmit).toHaveBeenCalledWith('container-docker-missing', {
         projectRoot: testData.root,
@@ -308,7 +308,7 @@ describe('Orchestrator', () => {
 
       // Should NOT throw ContainerDockerMissingError — cache reset + second
       // dockerAvailable() returns true, so gate lets us through to runSpec
-      await (orch as AnyOrch).executePhase(pipeline).catch(() => {});
+      await (orch as AnyOrch).executePhase(pipeline).catch(() => { /* best-effort */ });
 
       expect(_resetDockerAvailableCache).toHaveBeenCalled();
       expect(dockerAvailable).toHaveBeenCalledTimes(2);
@@ -325,7 +325,7 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
       // Should proceed to runSpec → createSession (which rejects with simulated abort)
-      await (orch as AnyOrch).executePhase(pipeline).catch(() => {});
+      await (orch as AnyOrch).executePhase(pipeline).catch(() => { /* best-effort */ });
       expect(mockCreateSession).toHaveBeenCalled();
     });
 
@@ -338,7 +338,7 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
       // Should proceed past the gate (container mode disabled)
-      await (orch as AnyOrch).executePhase(pipeline).catch(() => {});
+      await (orch as AnyOrch).executePhase(pipeline).catch(() => { /* best-effort */ });
       expect(mockCreateSession).toHaveBeenCalled();
     });
 
@@ -544,7 +544,7 @@ describe('Orchestrator', () => {
       // rejectTask will try to execute 'implement' phase after writing feedback
       // That will call createSession, so we need to handle it
       mockCreateSession.mockResolvedValue('sess-reject');
-      const promise = orch.rejectTask(testData.taskId, 'Fix the tests', 'coder').catch(() => {});
+      const promise = orch.rejectTask(testData.taskId, 'Fix the tests', 'coder').catch(() => { /* best-effort */ });
 
       // Verify feedback was written
       const feedbackPath = join(testData.taskDir, 'human_feedback.md');
@@ -913,7 +913,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       specPath = testData.taskDir;
       statePath = join(specPath, '.pipeline_state.json');
-      try { if (existsSync(statePath)) unlinkSync(statePath); } catch {}
+      try { if (existsSync(statePath)) unlinkSync(statePath); } catch { /* best-effort */ }
     });
 
     it('returns null when no state file exists', () => {
@@ -1563,7 +1563,7 @@ describe('Orchestrator', () => {
       // This lets us verify the branching logic ran without needing
       // to fire events for the cascading phase chain.
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.moveTaskToPhase(testData.taskId, 'plan').catch(() => {});
+      await orch.moveTaskToPhase(testData.taskId, 'plan').catch(() => { /* best-effort */ });
 
       // createSession was called — proving moveTaskToPhase reached executePhase
       expect(mockCreateSession).toHaveBeenCalled();
@@ -1578,7 +1578,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.moveTaskToPhase(testData.taskId, 'implement').catch(() => {});
+      await orch.moveTaskToPhase(testData.taskId, 'implement').catch(() => { /* best-effort */ });
 
       expect(mockCreateSession).toHaveBeenCalled();
     });
@@ -1588,7 +1588,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.moveTaskToPhase(testData.taskId, 'implement').catch(() => {});
+      await orch.moveTaskToPhase(testData.taskId, 'implement').catch(() => { /* best-effort */ });
 
       expect(mockCreateSession).toHaveBeenCalled();
     });
@@ -2037,7 +2037,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       mockCreateSession.mockResolvedValue('sess-rl-runTask');
-      const runPromise = orch.runTask(testData.taskId, 'test task', 'spec').catch(() => {});
+      const runPromise = orch.runTask(testData.taskId, 'test task', 'spec').catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
       const future = Math.floor(Date.now() / 1000) + 9999;
       fireEvent('event', { sessionId: 'sess-rl-runTask', event: { type: 'rate_limit_event', rate_limit_info: { status: 'limited', resetsAt: future } } });
@@ -2100,7 +2100,7 @@ describe('Orchestrator', () => {
       });
 
       // Start runSpec
-      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
 
       // Give microtasks time: runSpec awaits createSession → resolves → 
       // sends message → awaits waitForCompletion
@@ -2142,7 +2142,7 @@ describe('Orchestrator', () => {
         return Promise.reject(new Error('simulated abort'));
       });
 
-      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       expect(mockCreateSession).toHaveBeenCalled();
@@ -2192,7 +2192,7 @@ describe('Orchestrator', () => {
         return Promise.reject(new Error('simulated abort'));
       });
 
-      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       // Should be in revision mode — sends REVISION: prompt, not /spec
@@ -3290,7 +3290,7 @@ describe('Orchestrator', () => {
         if (cmd === 'gh') throw new Error('gh not available');
         return '';
       });
-      await orch.moveTaskToPhase(testData.taskId, 'create-pr').catch(() => {});
+      await orch.moveTaskToPhase(testData.taskId, 'create-pr').catch(() => { /* best-effort */ });
 
       // execFileSync was called (for gh pr list or gh pr create), proving
       // moveTaskToPhase reached executePhase for create-pr
@@ -3309,7 +3309,7 @@ describe('Orchestrator', () => {
       }));
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.moveTaskToPhase(testData.taskId, 'merge').catch(() => {});
+      await orch.moveTaskToPhase(testData.taskId, 'merge').catch(() => { /* best-effort */ });
 
       expect(mockCreateSession).toHaveBeenCalled();
     });
@@ -3320,7 +3320,7 @@ describe('Orchestrator', () => {
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.moveTaskToPhase(testData.taskId, 'merge').catch(() => {});
+      await orch.moveTaskToPhase(testData.taskId, 'merge').catch(() => { /* best-effort */ });
 
       expect(mockCreateSession).toHaveBeenCalled();
     });
@@ -3330,7 +3330,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.moveTaskToPhase(testData.taskId, 'merge').catch(() => {});
+      await orch.moveTaskToPhase(testData.taskId, 'merge').catch(() => { /* best-effort */ });
 
       expect(mockCreateSession).toHaveBeenCalled();
     });
@@ -3458,7 +3458,7 @@ describe('Orchestrator', () => {
       expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(false);
       expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(false);
 
-      try { rmSync(wtPath, { recursive: true, force: true }); } catch {}
+      try { rmSync(wtPath, { recursive: true, force: true }); } catch { /* best-effort */ }
     });
 
     it('preserves st-branch subtask when cherry-pick succeeds (Defect 8)', async () => {
@@ -3493,7 +3493,7 @@ describe('Orchestrator', () => {
       const plan = JSON.parse(readFileSync(join(testData.taskDir, 'plan.json'), 'utf-8'));
       expect(plan.subtasks[0].completed).toBe(true);
 
-      try { rmSync(wtPath, { recursive: true, force: true }); } catch {}
+      try { rmSync(wtPath, { recursive: true, force: true }); } catch { /* best-effort */ }
     });
 
     it('skips reconciliation when task has no branch (safe fallback)', async () => {
@@ -3546,7 +3546,7 @@ describe('Orchestrator', () => {
       }));
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.resumeTask(testData.taskId).catch(() => {});
+      await orch.resumeTask(testData.taskId).catch(() => { /* best-effort */ });
 
       expect(mockCreateSession).toHaveBeenCalled();
 
@@ -3561,7 +3561,7 @@ describe('Orchestrator', () => {
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.resumeTask(testData.taskId).catch(() => {});
+      await orch.resumeTask(testData.taskId).catch(() => { /* best-effort */ });
 
       expect(mockCreateSession).toHaveBeenCalled();
     });
@@ -3571,7 +3571,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await orch.resumeTask(testData.taskId).catch(() => {});
+      await orch.resumeTask(testData.taskId).catch(() => { /* best-effort */ });
 
       expect(mockCreateSession).toHaveBeenCalled();
     });
@@ -3621,7 +3621,7 @@ describe('Orchestrator', () => {
       const runTaskSpy = vi.spyOn(orch as AnyOrch, 'runTask')
         .mockRejectedValue(new Error('simulated abort'));
 
-      await orch.resumeTask(testData.taskId).catch(() => {});
+      await orch.resumeTask(testData.taskId).catch(() => { /* best-effort */ });
 
       // Should resume from qa-review, not from implement (the artifact-detection default)
       expect(runTaskSpy).toHaveBeenCalledWith(
@@ -3649,7 +3649,7 @@ describe('Orchestrator', () => {
       const runTaskSpy = vi.spyOn(orch as AnyOrch, 'runTask')
         .mockRejectedValue(new Error('simulated abort'));
 
-      await orch.resumeTask(testData.taskId).catch(() => {});
+      await orch.resumeTask(testData.taskId).catch(() => { /* best-effort */ });
 
       // Should resume from implement (the task's current phase), not detect from artifacts
       expect(runTaskSpy).toHaveBeenCalledWith(
@@ -3677,7 +3677,7 @@ describe('Orchestrator', () => {
       const runTaskSpy = vi.spyOn(orch as AnyOrch, 'runTask')
         .mockRejectedValue(new Error('simulated abort'));
 
-      await orch.resumeTask(testData.taskId).catch(() => {});
+      await orch.resumeTask(testData.taskId).catch(() => { /* best-effort */ });
 
       // Should use artifact detection: plan.json exists → start from implement
       expect(runTaskSpy).toHaveBeenCalledWith(
@@ -3897,7 +3897,7 @@ describe('Orchestrator', () => {
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
       vi.mocked(_resetDockerAvailableCache).mockImplementation(() => {});
 
-      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       expect(mockCreateSession).toHaveBeenCalled();
@@ -3942,7 +3942,7 @@ describe('Orchestrator', () => {
       let callCount = 0;
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++callCount}`));
 
-      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       const gitCalls = mockExecFileSync.mock.calls.filter(
@@ -3993,7 +3993,7 @@ describe('Orchestrator', () => {
       let callCount = 0;
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++callCount}`));
 
-      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       expect(gitWorktreeAttemptCount).toBe(2);
@@ -4041,7 +4041,7 @@ describe('Orchestrator', () => {
       let sessionCounter = 0;
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
 
-      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       // Verify the coder got both feedbacks
@@ -4096,7 +4096,7 @@ describe('Orchestrator', () => {
       let sessionCounter = 0;
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
 
-      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       const sendCalls = mockSendMessage.mock.calls.filter(
@@ -4143,7 +4143,7 @@ describe('Orchestrator', () => {
       let sessionCounter = 0;
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
 
-      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       const sendCalls = mockSendMessage.mock.calls.filter(
@@ -4190,7 +4190,7 @@ describe('Orchestrator', () => {
       mockCreateSession.mockResolvedValue('sess-subtask');
       mockExecFileSync.mockReturnValue('');
 
-      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
     // No merger spawned on fast path
@@ -4254,7 +4254,7 @@ describe('Orchestrator', () => {
       return '';
     });
 
-      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
     // Merger session spawns first
@@ -4316,7 +4316,7 @@ describe('Orchestrator', () => {
       return '';
     });
 
-      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
     // Merger was spawned
@@ -4545,7 +4545,7 @@ describe('Orchestrator', () => {
       }));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
-      const caught = promise.catch(() => {}); // attach handler before cascade microtasks fire
+      const caught = promise.catch(() => { /* best-effort */ }); // attach handler before cascade microtasks fire
       await new Promise(r => setTimeout(r, 10));
       fireEvent('event', { sessionId: 'sess-qa-spec', event: { type: 'result' } });
       // Wait for auto-revision cascade to complete (including the abort)
@@ -4596,7 +4596,7 @@ describe('Orchestrator', () => {
       }));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
-      const caught = promise.catch(() => {}); // attach handler before cascade microtasks fire
+      const caught = promise.catch(() => { /* best-effort */ }); // attach handler before cascade microtasks fire
       await new Promise(r => setTimeout(r, 10));
       fireEvent('event', { sessionId: 'sess-qa-pass-spec', event: { type: 'result' } });
       await caught;
@@ -4637,7 +4637,7 @@ describe('Orchestrator', () => {
         ],
       }));
 
-      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 10));
       fireEvent('event', { sessionId: 'sess-qa-fail', event: { type: 'result' } });
       await new Promise(r => setTimeout(r, 30));
@@ -4673,7 +4673,7 @@ describe('Orchestrator', () => {
         spec_concerns: [],
       }));
 
-      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 10));
       fireEvent('event', { sessionId: 'sess-qa-empty', event: { type: 'result' } });
       await new Promise(r => setTimeout(r, 30));
@@ -4714,7 +4714,7 @@ describe('Orchestrator', () => {
         ],
       }));
 
-      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 10));
       fireEvent('event', { sessionId: 'sess-qa-max-rev', event: { type: 'result' } });
       await promise;
@@ -4765,7 +4765,7 @@ describe('Orchestrator', () => {
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
 
       const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
-      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
+      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => { /* best-effort */ });
 
       // Verify spec_revision_feedback.md was written with both concerns
       const feedbackPath = join(testData.taskDir, 'spec_revision_feedback.md');
@@ -4796,7 +4796,7 @@ describe('Orchestrator', () => {
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
 
       const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
-      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
+      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => { /* best-effort */ });
 
       // spec_revision_before.md should contain the original spec content
       const snapshotPath = join(testData.taskDir, 'spec_revision_before.md');
@@ -4828,7 +4828,7 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
+      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => { /* best-effort */ });
 
       // spec_revision_before.md should be created with the current spec.md content
       const markerPath = join(testData.taskDir, 'spec_revision_before.md');
@@ -4862,7 +4862,7 @@ describe('Orchestrator', () => {
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
 
       const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
-      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
+      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => { /* best-effort */ });
 
       // plan.json is preserved (the planner re-plans in place); QA artifacts are cleared
       expect(existsSync(join(testData.taskDir, 'plan.json'))).toBe(true);
@@ -4900,7 +4900,7 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
-      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
+      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => { /* best-effort */ });
 
       // QA attempt should be reset to 0
       expect(pipeline.qaAttempt).toBe(0);
@@ -4922,7 +4922,7 @@ describe('Orchestrator', () => {
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
 
       const pipeline = (orch as AnyOrch).restorePipeline(testData.taskId, 'awaiting-review');
-      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => {});
+      await (orch as AnyOrch)._autoReviseSpec(pipeline).catch(() => { /* best-effort */ });
 
       // createSession should have been called (proves executePhase → runSpec was reached)
       expect(mockCreateSession).toHaveBeenCalled();
@@ -4953,7 +4953,7 @@ describe('Orchestrator', () => {
         return Promise.reject(new Error('simulated abort'));
       });
 
-      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       // Should have sent a REVISION prompt, not /spec
@@ -4993,7 +4993,7 @@ describe('Orchestrator', () => {
         return Promise.reject(new Error('simulated abort'));
       });
 
-      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       // File should still exist during spec execution
@@ -5025,7 +5025,7 @@ describe('Orchestrator', () => {
         return Promise.reject(new Error('simulated abort'));
       });
 
-      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => {});
+      const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       const sendCalls = mockSendMessage.mock.calls.filter(

@@ -482,7 +482,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       expect(mockCrossSpawn).toHaveBeenCalledTimes(2);
 
       // Now fail the restart by emitting error on the failing proc
-      // Wait for the startPromise to reject, which exercises the .catch(() => {}) line
+      // Wait for the startPromise to reject, which exercises the .catch(() => { /* best-effort */ }) line
       // _doStart will reject → catch handler runs → state set to 'stopped'
       // The eventWatcher should have been killed during the attempt
       failingProc.emit('error', new Error('devcontainer restart failed'));

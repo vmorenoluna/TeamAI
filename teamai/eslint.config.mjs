@@ -396,6 +396,74 @@ const localPlugin = {
         };
       },
     },
+    /**
+     * Flags bare empty catch blocks that silently swallow errors.
+     *
+     * Antipattern (flagged):
+     *   catch {}                    // no comment, no body
+     *   .catch(() => {})           // empty callback
+     *
+     * Acceptable (allowed):
+     *   catch { ... comment ... }        // documented intent
+     *   catch (err) { warn(err) }        // error is surfaced
+     *   catch { throw err }              // re-thrown
+     */
+    "no-bare-catch": {
+      meta: {
+        type: "suggestion",
+        docs: {
+          description:
+            "Prevent empty catch blocks and .catch() handlers that silently swallow errors.",
+        },
+      },
+      create(context) {
+        /** A catch block or .catch() callback body is acceptable if it has
+         *  at least one statement OR at least one comment (documented intent). */
+        function isEmptyAndBare(blockNode) {
+          if (blockNode.body.length > 0) return false;
+          const comments = context.sourceCode.getCommentsInside(blockNode);
+          return comments.length === 0;
+        }
+
+        return {
+          // catch {} or catch (err) {}
+          CatchClause(node) {
+            if (node.body.type === "BlockStatement" && isEmptyAndBare(node.body)) {
+              context.report({
+                node,
+                message:
+                  "Empty catch block silently swallows errors. " +
+                  "Log or re-throw the error, or add a comment documenting why it's safe to swallow.",
+              });
+            }
+          },
+
+          // .catch(() => {}) or .catch(err => {})
+          CallExpression(node) {
+            if (
+              node.callee.type === "MemberExpression" &&
+              node.callee.property.type === "Identifier" &&
+              node.callee.property.name === "catch" &&
+              node.arguments.length >= 1
+            ) {
+              const arg = node.arguments[0];
+              if (
+                (arg.type === "ArrowFunctionExpression" || arg.type === "FunctionExpression") &&
+                arg.body.type === "BlockStatement" &&
+                isEmptyAndBare(arg.body)
+              ) {
+                context.report({
+                  node,
+                  message:
+                    "Empty .catch() handler silently swallows errors. " +
+                    "Log the error, or add a comment documenting why it's safe to swallow.",
+                });
+              }
+            }
+          },
+        };
+      },
+    },
   },
 };
 
@@ -437,6 +505,7 @@ const eslintConfig = defineConfig([
     },
     rules: {
       "local/no-real-projects-json": "error",
+      "local/no-bare-catch": "error",
     },
   },
   // Allow underscore-prefixed unused variables (intentionally ignored)
@@ -465,6 +534,7 @@ const eslintConfig = defineConfig([
       "local/no-useTransition-useRouter": "warn",
       "local/no-raw-router-refresh": "warn",
       "local/no-async-fetch-on-mount": "warn",
+      "local/no-bare-catch": "warn",
     },
   },
 ]);

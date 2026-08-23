@@ -370,6 +370,26 @@ export class Orchestrator {
   }
 
   private async executePhase(pipeline: TaskPipeline): Promise<void> {
+    // Cooperative pause/cancellation check: cancelPipeline deletes the
+    // pipeline from this.pipelines, and a restart/move creates a fresh
+    // pipeline object for the same taskId. If our pipeline reference is
+    // not the one currently tracked in the map (either because it was
+    // deleted entirely, or because a newer pipeline replaced it), bail
+    // out without spawning a new agent session.
+    //
+    // This fixes the race where a user pauses or restarts a task right
+    // as one phase finishes and the cascade is about to spawn the next
+    // phase's session. Without this check, the old cascading pipeline
+    // reference would proceed to spawn a session for a task the user
+    // believes they stopped. An identity check (not just membership)
+    // is needed because runTask / moveTaskToPhase both call cancelPipeline
+    // (which deletes the old pipeline) then create a fresh pipeline for
+    // the same taskId — a membership-only check would see the new
+    // pipeline and let the old one's cascade proceed.
+    if (this.pipelines.get(pipeline.taskId) !== pipeline) {
+      return;
+    }
+
     // Container-mode gate: also checked here (not just in runTask) because
     // phase transitions via advancePhase (e.g. autoReviseSpec → spec,
     // approveTask → create-pr, rate-limit-resume) bypass runTask entirely.

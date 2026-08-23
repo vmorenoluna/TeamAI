@@ -79,7 +79,7 @@ export function GitHubImport() {
       const parsed = parseIssuesFromText(fullText);
       setIssues(parsed);
       if (parsed.length > 0) {
-        saveIssuesToFile(sid, parsed).catch(() => {});
+        saveIssuesToFile(sid, parsed).catch(err => console.warn('[github-import] Failed to save issues to file:', err));
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps

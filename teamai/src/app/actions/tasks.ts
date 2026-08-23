@@ -15,6 +15,7 @@ import { execFileSync } from 'child_process';
 import { NO_STOP_PHASES, RESTARTABLE_PHASES } from '@/constants/phases';
 import { removeStaleWorktreeRegistration } from '@/lib/orchestrator/worktree-utils';
 import { isFeedbackTarget, type FeedbackTarget } from '@/lib/orchestrator/feedback-target';
+import { error as logError } from '@/lib/logger';
 
 async function getStores() {
   const projectPath = await getActiveProjectPath();
@@ -38,7 +39,7 @@ export async function createTask(formData: FormData) {
 export async function moveTask(taskId: string, targetPhase: string) {
   const { orchestrator } = await getStores();
   // Fire-and-forget (pipeline runs async)
-  orchestrator.moveTaskToPhase(taskId, targetPhase).catch(console.error);
+  orchestrator.moveTaskToPhase(taskId, targetPhase).catch(err => logError('tasks', `moveTask ${taskId} failed`, err));
   revalidatePath('/');
 }
 
@@ -72,7 +73,7 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
   _preRestoreFailedTask(taskStore, taskId);
 
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
-  orchestrator.moveTaskToPhase(taskId, resumePhase).catch(console.error);
+  orchestrator.moveTaskToPhase(taskId, resumePhase).catch(err => logError('tasks', `retryTask ${taskId} failed`, err));
   revalidatePath('/');
   return { success: true };
 }
@@ -164,7 +165,7 @@ export async function retryTaskWithOptions(
   }
 
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
-  orchestrator.moveTaskToPhase(taskId, phase).catch(console.error);
+  orchestrator.moveTaskToPhase(taskId, phase).catch(err => logError('tasks', `stopTask ${taskId} failed`, err));
   revalidatePath('/');
   return { success: true };
 }
@@ -205,7 +206,7 @@ export async function resumeTask(taskId: string): Promise<{ success: boolean; er
   taskStore.update(taskId, { isPaused: false, rateLimitedUntil: undefined, wakeupUntil: undefined });
 
   // Resume from current phase — re-run the pipeline at whatever phase the task was in
-  orchestrator.moveTaskToPhase(taskId, task.phase).catch(console.error);
+  orchestrator.moveTaskToPhase(taskId, task.phase).catch(err => logError('tasks', `restartPhase ${taskId} failed`, err));
   revalidatePath('/');
   revalidatePath(`/task/${taskId}`);
   return { success: true };
@@ -246,7 +247,7 @@ export async function playTask(taskId: string): Promise<{ success: boolean; erro
   if (task.phase !== 'backlog') return { success: false, error: `Task is in "${task.phase}" phase, not "backlog"` };
 
   // Resume the task — detects completed artifacts and fast-forwards to the next phase
-  orchestrator.resumeTask(taskId).catch(console.error);
+  orchestrator.resumeTask(taskId).catch(err => logError('tasks', `restart ${taskId} failed`, err));
   revalidatePath('/');
   return { success: true };
 }
@@ -265,7 +266,7 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
     // moveTaskToPhase would set startPhase='implement' (since plan exists),
     // but the user asked to restart _this_ phase from scratch — not the pipeline.
     taskStore.clearArtifacts(taskId, 'qa');
-    orchestrator.runTask(taskId, task.description, 'qa-review').catch(console.error);
+    orchestrator.runTask(taskId, task.description, 'qa-review').catch(err => logError('tasks', `restartCurrentPhase ${taskId} failed`, err));
   } else if (task.phase === 'implement') {
     // For implement: reset subtask completions in plan.json so the UI shows a fresh
     // slate. moveTaskToPhase clears QA artifacts but doesn't touch plan.json subtask
@@ -281,12 +282,12 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
         writeFileSync(planPath, JSON.stringify(plan, null, 2));
       } catch { /* best-effort */ }
     }
-    orchestrator.moveTaskToPhase(taskId, task.phase).catch(console.error);
+    orchestrator.moveTaskToPhase(taskId, task.phase).catch(err => logError('tasks', `restartPhase ${taskId} failed`, err));
   } else {
     // spec / plan: moveTaskToPhase handles clearing stale artifacts
     // and setting the correct startPhase (e.g. spec redoes everything,
     // plan redoes plan→implement→qa).
-    orchestrator.moveTaskToPhase(taskId, task.phase).catch(console.error);
+    orchestrator.moveTaskToPhase(taskId, task.phase).catch(err => logError('tasks', `restartPhase ${taskId} failed`, err));
   }
 
   revalidatePath('/');
@@ -299,7 +300,7 @@ export async function runTask(taskId: string) {
   const task = taskStore.getById(taskId);
   if (!task) throw new Error(`Task ${taskId} not found`);
   // Fire and forget — pipeline runs asynchronously, phase changes broadcast via WebSocket
-  orchestrator.runTask(taskId, task.description).catch(console.error);
+  orchestrator.runTask(taskId, task.description).catch(err => logError('tasks', `restartFromSpec ${taskId} failed`, err));
   revalidatePath('/');
 }
 
@@ -439,7 +440,17 @@ export async function getTaskFull(taskId: string) {
 
   const specPath = join(dir, 'spec.md');
 
-  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath };
+  // Read events to surface approval-failure info in the review panel.
+  let approvalError: string | null = null;
+  try {
+    const events = taskStore.getEvents(taskId);
+    const lastEvent = events[events.length - 1];
+    if (lastEvent && typeof lastEvent.approvalError === 'string' && lastEvent.phase === 'awaiting-review') {
+      approvalError = lastEvent.approvalError;
+    }
+  } catch { /* best-effort */ }
+
+  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, approvalError };
 }
 
 export async function addDependency(taskId: string, depId: string): Promise<void> {

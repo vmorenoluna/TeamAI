@@ -102,6 +102,6 @@ export function pipelineAdvancePhase(
   eventExtra?: Record<string, unknown>,
 ): void {
   pipeline.phase = phase;
-  taskStore.updatePhase(pipeline.taskId, phase);
+  taskStore.updatePhase(pipeline.taskId, phase, eventExtra);
   processManager.emit('phase-change', { taskId: pipeline.taskId, phase, projectRoot, ...eventExtra });
 }

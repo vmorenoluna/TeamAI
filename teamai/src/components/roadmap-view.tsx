@@ -191,7 +191,7 @@ export function RoadmapView({ noProject, projectPath }: { noProject: boolean; pr
     startTransition(async () => {
       const id = await startRoadmapGeneration(skipCompetitors);
       if (rmCancelRequestedRef.current) {
-        await cancelRoadmapGeneration('roadmap').catch(() => {});
+        await cancelRoadmapGeneration('roadmap').catch(err => console.warn('[roadmap-view] Failed to cancel roadmap generation:', err));
         setRmRunning(false);
         return;
       }
