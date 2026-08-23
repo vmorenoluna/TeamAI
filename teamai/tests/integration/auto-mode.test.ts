@@ -664,24 +664,40 @@ describe('Auto Mode Integration', () => {
       });
     });
 
-    it('still approves when the autoProcessed stamp fails (and logs the failure)', async () => {
+    it('still marks the task done when the .finally() autoProcessed stamp fails (_finishTask guard)', async () => {
+      vi.useFakeTimers();
+
       autoMode.setAutoModeState(testDir, true, 1);
 
       await vi.waitFor(() => {
         expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
       });
 
-      // Make the autoProcessed stamp throw — approval must still proceed.
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({ state: 'MERGED', statusCheckRollup: [] });
+        }
+        return '';
+      });
+
       const { TaskStore } = await import('@/lib/task-store');
+      const store = new TaskStore(testDir);
+      // Set prUrl so _getPrNumber can extract the PR number for CI polling.
+      store.update(taskId, { prUrl: 'https://github.com/owner/repo/pull/42' });
+      store.updatePhase(taskId, 'pr-open');
+      fireEvent('phase-change', { taskId, phase: 'pr-open', projectRoot: testDir });
+
+      // Make the autoProcessed stamp in .finally() throw — markTaskDone must
+      // still have been called (the stamp is deferred, not blocking).
+      mockOrch.markTaskDone.mockResolvedValue(undefined);
       const updateSpy = vi.spyOn(TaskStore.prototype, 'update').mockImplementation(() => {
         throw new Error('disk full');
       });
 
-      mockOrch.approveTask.mockClear();
-      fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
+      await vi.advanceTimersByTimeAsync(31_000);
 
       await vi.waitFor(() => {
-        expect(mockOrch.approveTask).toHaveBeenCalledWith(taskId, 'pull-request');
+        expect(mockOrch.markTaskDone).toHaveBeenCalledWith(taskId);
       });
       expect(mockWarn).toHaveBeenCalledWith(
         'auto-mode',
@@ -712,7 +728,7 @@ describe('Auto Mode Integration', () => {
       });
     });
 
-    it('stamps autoProcessed: true on the live task.json before approving', async () => {
+    it('does NOT stamp autoProcessed on the live task.json until after markTaskDone completes', async () => {
       autoMode.setAutoModeState(testDir, true, 1);
 
       mockOrch.approveTask.mockClear();
@@ -722,13 +738,13 @@ describe('Auto Mode Integration', () => {
         expect(mockOrch.approveTask).toHaveBeenCalledWith(taskId, 'pull-request');
       });
 
-      // The stamp lands before approveTask, so the create-pr artifact commit
-      // copies it into the snapshot and the amber border survives the
-      // delete-on-done + pull flow.
+      // autoProcessed is NOT stamped at approve time — it's deferred until
+      // CI passes, PR is merged, and markTaskDone completes. This prevents
+      // leaking the flag onto human-approved tasks.
       const taskJson = JSON.parse(
         readFileSync(join(testDir, '.teamai', taskId, 'task.json'), 'utf-8'),
       );
-      expect(taskJson.autoProcessed).toBe(true);
+      expect(taskJson.autoProcessed).toBe(false);
     });
 
     it('does not double-approve while an approval is already in flight', async () => {
@@ -988,7 +1004,7 @@ describe('Auto Mode Integration', () => {
       });
     });
 
-    it('sets autoProcessed before markTaskDone (flag is on disk even if markTaskDone fails)', async () => {
+    it('autoProcessed is still set via .finally() even when markTaskDone fails', async () => {
       vi.useFakeTimers();
 
       autoMode.setAutoModeState(testDir, true, 1);
@@ -1021,14 +1037,15 @@ describe('Auto Mode Integration', () => {
         expect(mockOrch.markTaskDone).toHaveBeenCalledWith(taskId);
       });
 
-      // autoProcessed IS set — it's written BEFORE markTaskDone, so even if
-      // markTaskDone fails, the flag persists. The PR WAS genuinely auto-processed
-      // (merged), so autoProcessed:true is semantically correct regardless.
-      const taskData = store.getById(taskId);
-      expect(taskData?.autoProcessed).toBe(true);
+      // autoProcessed IS set even though markTaskDone failed — the stamp
+      // runs in .finally(), which fires regardless of success or failure.
+      await vi.waitFor(() => {
+        const taskData = store.getById(taskId);
+        expect(taskData?.autoProcessed).toBe(true);
+      });
     });
 
-    it('autoProcessed is on disk BEFORE markTaskDone executes (ordering verified via mockImplementation)', async () => {
+    it('autoProcessed is set by _finishTask after markTaskDone completes (not before)', async () => {
       vi.useFakeTimers();
 
       autoMode.setAutoModeState(testDir, true, 1);
@@ -1045,11 +1062,9 @@ describe('Auto Mode Integration', () => {
         return '';
       });
 
-      // Use mockImplementation to PROVE ordering: capture the value of
-      // autoProcessed at the moment markTaskDone runs. Since _finishTask writes
-      // autoProcessed BEFORE calling markTaskDone, the flag must already be
-      // true on disk. (Use a captured variable rather than expect() inside the
-      // mock because _finishTask's .catch() would swallow assertion errors.)
+      // Capture whether autoProcessed was already set when markTaskDone runs.
+      // _finishTask now stamps autoProcessed in the .then() callback, AFTER
+      // markTaskDone completes — not before.
       let autoProcessedAtCallTime = false;
       mockOrch.markTaskDone.mockImplementation(async () => {
         const { TaskStore: TSm } = await import('@/lib/task-store');
@@ -1066,18 +1081,20 @@ describe('Auto Mode Integration', () => {
       // Advance 30s to trigger CI poll → MERGED → _finishTask
       await vi.advanceTimersByTimeAsync(31_000);
 
-      // Wait for markTaskDone to have been called (meaning the mockImplementation ran)
+      // Wait for markTaskDone to have been called
       await vi.waitFor(() => {
         expect(mockOrch.markTaskDone).toHaveBeenCalledWith(taskId);
       });
 
-      // Assert on the captured value: proves autoProcessed was already on disk
-      // when markTaskDone executed, confirming the write-before-call ordering
-      expect(autoProcessedAtCallTime).toBe(true);
+      // autoProcessed was NOT set when markTaskDone was called — the stamp
+      // happens in .then() after markTaskDone resolves.
+      expect(autoProcessedAtCallTime).toBe(false);
 
-      // Confirm the flag is also still set after everything completes
-      const taskData = store.getById(taskId);
-      expect(taskData?.autoProcessed).toBe(true);
+      // After _finishTask's .then() completes, autoProcessed IS set.
+      await vi.waitFor(() => {
+        const t = store.getById(taskId);
+        expect(t?.autoProcessed).toBe(true);
+      });
     });
 
     it('does NOT merge when CI checks are failing', async () => {

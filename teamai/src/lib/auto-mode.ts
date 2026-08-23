@@ -184,11 +184,11 @@ function _start(projectRoot: string, state: AutoProjectState): void {
  * Auto-approve a task sitting in awaiting-review. Shared by the phase-change
  * listener and _adoptStalledTasks.
  *
- * Stamps autoProcessed: true on the live task.json BEFORE approving: the
- * create-pr artifact commit copies the live task.json into the committed
- * snapshot, so the flag survives the delete-on-done + pull flow and the amber
- * "auto-processed" border persists after the merge. (Stamping later, at merge
- * time, would only reach the live copy — which markTaskDone deletes.)
+ * Does NOT stamp autoProcessed here — the stamp is applied only after the
+ * task is fully auto-processed (CI passes → auto-merge → markTaskDone).
+ * Stamping at this point would leak the flag onto tasks that a human
+ * manually approves after auto mode is turned on, since the create-pr
+ * artifact commit copies the live task.json into the committed snapshot.
  *
  * The autoApprovedIds guard prevents double-approval while one is in flight;
  * on failure the id is removed (one-shot, no retry loop).
@@ -196,13 +196,6 @@ function _start(projectRoot: string, state: AutoProjectState): void {
 function _autoApprove(taskId: string, projectRoot: string, state: AutoProjectState): void {
   if (state.autoApprovedIds.has(taskId)) return;
   state.autoApprovedIds.add(taskId);
-  try {
-    new TaskStore(projectRoot).update(taskId, { autoProcessed: true });
-  } catch (err) {
-    // Approval proceeds regardless, but a failed stamp must not be silent —
-    // it would leave the task without the "auto-processed" border and no trace.
-    logWarn('auto-mode', `Failed to stamp autoProcessed on task ${taskId} before approval`, err);
-  }
   getOrchestrator(projectRoot).approveTask(taskId, 'pull-request')
     .catch(err => {
       logError('auto-mode', `Failed to auto-approve task ${taskId}`, err);
@@ -479,26 +472,23 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
 }
 
 function _finishTask(taskId: string, projectRoot: string, _state: AutoProjectState): void {
-  // Belt-and-braces autoProcessed stamp. The flag is normally already in the
-  // committed artifact snapshot (set by _autoApprove before create-pr), which
-  // markTaskDone's pull restores. This live-copy stamp covers the pull-failure
-  // fallback, which recreates task.json from the live copy read at the start
-  // of markTaskDone. (On pull success the snapshot wins by design — a task
-  // approved manually and only merged by auto mode won't carry the flag.)
-  try {
-    new TaskStore(projectRoot).update(taskId, { autoProcessed: true });
-  } catch (err) {
-    // A failed stamp must NOT prevent markTaskDone — the CI-poll timer has
-    // already been cleared by the caller, so swallowing this would orphan the
-    // task in pr-open forever. Log and continue to markTaskDone.
-    logWarn('auto-mode', `Failed to stamp autoProcessed on task ${taskId} before marking done`, err);
-  }
-
   const orchestrator = getOrchestrator(projectRoot);
   orchestrator.markTaskDone(taskId).then(() => {
     log('auto-mode', `Task ${taskId} marked as done (auto-processed)`);
   }).catch(err => {
     logError('auto-mode', `Failed to mark task ${taskId} as done`, err);
+  }).finally(() => {
+    // Stamp autoProcessed AFTER markTaskDone runs (success or failure).
+    // Stamping before would be overwritten when markTaskDone restores the
+    // committed artifact snapshot (which does not carry the flag — it's set
+    // here, not in _autoApprove, to avoid leaking onto human-approved tasks).
+    // Using .finally() instead of .then() ensures the flag survives even if
+    // markTaskDone itself rejects (the PR was auto-merged regardless).
+    try {
+      new TaskStore(projectRoot).update(taskId, { autoProcessed: true });
+    } catch (err) {
+      logWarn('auto-mode', `Failed to stamp autoProcessed on task ${taskId} after markTaskDone`, err);
+    }
   });
 }
 
