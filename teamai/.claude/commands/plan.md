@@ -118,4 +118,14 @@ in place instead of generating from scratch:
 - Mark only affected/invalidated subtasks `completed: false` (and drop any stale
   `qa_flagged`) so they re-run.
 - Rewrite `plan.json` in place — do NOT delete it.
+- **Scoped re-plan (human preserve-list):** when the human directive scopes the
+  replan to specific subtasks (a `Subtasks: N,M` line in `human_feedback.md`),
+  re-plan ONLY those subtasks. Every subtask NOT listed must be preserved
+  byte-for-byte — same `id`, `title`, `description`, `files`, `depends_on`,
+  `acceptance_criteria`, `completed`, and `qa_flagged` — do not renumber their
+  ids or rewrite their fields, even cosmetically. If fixing a dependency or file
+  ownership issue would reach into a preserved subtask, resolve it WITHIN the
+  selected set (e.g. adjust the selected subtask's `depends_on`), never by
+  editing a preserved one. (The orchestrator deterministically restores any
+  unlisted subtask that drifts — but a clean replan avoids the churn.)
 ```

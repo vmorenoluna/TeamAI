@@ -55,6 +55,18 @@ describe('writeHumanFeedback / readHumanFeedback', () => {
     });
   });
 
+  it('parses reviewer-selected subtask ids for a planner target', () => {
+    writeHumanFeedback(dir, 'planner', 'Re-plan only the migration', [2, 5]);
+    expect(readFileSync(feedbackFilePath(dir), 'utf-8')).toBe(
+      '# Human Review Feedback\nTarget: planner\nSubtasks: 2,5\n\nRe-plan only the migration\n',
+    );
+    expect(readHumanFeedback(dir)).toEqual({
+      target: 'planner',
+      subtaskIds: [2, 5],
+      message: 'Re-plan only the migration',
+    });
+  });
+
   it('returns null when no feedback file exists', () => {
     expect(readHumanFeedback(dir)).toBeNull();
   });
@@ -112,7 +124,7 @@ describe('directive blocks', () => {
 });
 
 describe('buildSubtaskScopeNote', () => {
-  it('formats the scoped subtasks as a bullet list', () => {
+  it('formats the scoped subtasks as a bullet list (rework mode)', () => {
     const note = buildSubtaskScopeNote([
       { id: 2, title: 'Fix auth module' },
       { id: 5, title: 'Add rate limiting' },
@@ -122,8 +134,31 @@ describe('buildSubtaskScopeNote', () => {
     expect(note).toContain('#5: Add rate limiting');
   });
 
-  it('returns an empty string for no subtasks', () => {
+  it('expresses preserve-list semantics in replan mode', () => {
+    const note = buildSubtaskScopeNote(
+      [
+        { id: 2, title: 'Fix auth module' },
+        { id: 4, title: 'Add rate limiting' },
+      ],
+      'replan',
+    );
+    expect(note).toContain('re-plan ONLY these, do not regenerate or alter any other subtask');
+    expect(note).toContain('#2: Fix auth module');
+    expect(note).toContain('#4: Add rate limiting');
+    expect(note).toContain('Every subtask NOT listed above must be preserved byte-for-byte');
+    expect(note).toContain('acceptance_criteria');
+  });
+
+  it('keeps the coder note wording for the default rework mode', () => {
+    const note = buildSubtaskScopeNote([{ id: 2, title: 'Fix auth module' }]);
+    expect(note).toContain('rework ONLY these, do not touch others');
+    expect(note).not.toContain('re-plan ONLY these');
+    expect(note).not.toContain('byte-for-byte');
+  });
+
+  it('returns an empty string for no subtasks in either mode', () => {
     expect(buildSubtaskScopeNote([])).toBe('');
+    expect(buildSubtaskScopeNote([], 'replan')).toBe('');
   });
 });
 
@@ -146,6 +181,23 @@ describe('humanDirectiveFor', () => {
     expect(block).toContain('OVERRIDES EVERYTHING');
     expect(block).toContain('#2: Fix auth module');
     expect(block).toContain('#5: Add rate limiting');
+  });
+
+  it('surfaces the planner preserve-list note in the planner override when plan.json lists them', () => {
+    writeFileSync(join(dir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 2, title: 'Fix auth module' },
+        { id: 5, title: 'Add rate limiting' },
+      ],
+    }));
+    writeHumanFeedback(dir, 'planner', 'Re-plan only the migration', [2]);
+    const block = humanDirectiveFor(dir, 'planner');
+    expect(block).toContain('OVERRIDES EVERYTHING');
+    expect(block).toContain('re-plan ONLY these');
+    expect(block).toContain('#2: Fix auth module');
+    expect(block).toContain('byte-for-byte');
+    // The planner note must NOT use the coder's rework wording.
+    expect(block).not.toContain('rework ONLY these');
   });
 
   it('omits the scope note when plan.json is missing or no ids are selected', () => {

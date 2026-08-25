@@ -484,6 +484,57 @@ describe('ReviewPanel', () => {
       expect(mockRejectTask).toHaveBeenCalledWith('task-2', 'Rework these modules', 'coder', [1, 3]);
       expect(mockRouterRefresh).toHaveBeenCalled();
     });
+
+    it('shows a subtask checklist for the Planner target with preserve-list helper text and passes the selection', async () => {
+      render(
+        <ReviewPanel
+          taskId="task-2"
+          spec={null}
+          qaReport={QA_REPORT_PASS}
+          diff={null}
+          prUrl={null}
+          phase="awaiting-review"
+          subtasks={[
+            { id: 1, title: 'Auth module', files: ['src/auth.ts'] },
+            { id: 2, title: 'UI module', files: ['src/ui.ts'] },
+            { id: 3, title: 'API module', files: ['src/api.ts'] },
+          ]}
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Request Changes'));
+      });
+
+      // Checklist is hidden until the Planner target is chosen.
+      expect(screen.queryByText(/Affected subtasks/)).not.toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Planner'));
+      });
+
+      // Checklist renders with the planner-specific helper text.
+      expect(screen.getByText(/scopes which subtasks may be re-planned; others are left unchanged/)).toBeInTheDocument();
+      const checkboxes = screen.getAllByRole('checkbox');
+      expect(checkboxes).toHaveLength(3);
+
+      // Select subtask #2 only.
+      await act(async () => {
+        fireEvent.click(checkboxes[1]);
+      });
+
+      await act(async () => {
+        fireEvent.change(screen.getByPlaceholderText('Describe what needs to change...'), {
+          target: { value: 'Re-plan only the migration subtask' },
+        });
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('Send to Planner'));
+      });
+
+      expect(mockRejectTask).toHaveBeenCalledWith('task-2', 'Re-plan only the migration subtask', 'planner', [2]);
+      expect(mockRouterRefresh).toHaveBeenCalled();
+    });
   });
 
   // ── QA report rendering ─────────────────────────────────────────────

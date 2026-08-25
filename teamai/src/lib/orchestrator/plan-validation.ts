@@ -165,3 +165,123 @@ export function applyPlanFileSerialization(specPath: string): SharedFileFix[] {
 
   return fixes;
 }
+
+// ── Scoped re-plan preserve-list guardrail ────────────────────────────────
+
+/**
+ * Snapshot the subtasks a scoped planner directive must NOT touch, keyed by id.
+ *
+ * When the pending human feedback targets the planner and carries `subtaskIds`,
+ * the reviewer's selection is a **preserve-list**: every subtask NOT in the
+ * selection must survive the re-plan byte-for-byte. This captures that set
+ * (with each subtask's pre-session array index so a dropped/renumbered subtask
+ * can be re-inserted in place) before the planner session runs.
+ *
+ * Returns an empty map when plan.json is missing or malformed, or when the
+ * selection covers every subtask.
+ */
+export function snapshotPreservedPlanSubtasks(
+  specPath: string,
+  selectedIds: number[],
+): Map<number, { subtask: PlanSubtask; index: number }> {
+  const planPath = path.join(specPath, 'plan.json');
+  if (!existsSync(planPath)) return new Map();
+  try {
+    const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+    const selected = new Set(selectedIds);
+    const preserved = new Map<number, { subtask: PlanSubtask; index: number }>();
+    const subtasks: PlanSubtask[] = Array.isArray(plan.subtasks) ? plan.subtasks : [];
+    for (let i = 0; i < subtasks.length; i++) {
+      const s = subtasks[i];
+      if (s && typeof s.id === 'number' && !selected.has(s.id)) {
+        preserved.set(s.id, { subtask: s, index: i });
+      }
+    }
+    return preserved;
+  } catch {
+    return new Map();
+  }
+}
+
+/** Compare two subtasks ignoring only `id` — used to detect renumbered orphans. */
+function subtaskContentEquals(a: PlanSubtask, b: PlanSubtask): boolean {
+  const arrEq = (x: string[] | undefined, y: string[] | undefined) =>
+    (x ?? []).join('\u0000') === (y ?? []).join('\u0000');
+  return a.title === b.title
+    && a.description === b.description
+    && arrEq(a.files, b.files)
+    && arrEq(a.acceptance_criteria, b.acceptance_criteria)
+    && (a.completed ?? false) === (b.completed ?? false)
+    && (a.qa_flagged ?? false) === (b.qa_flagged ?? false)
+    && (a.depends_on ?? []).join(',') === (b.depends_on ?? []).join(',');
+}
+
+/**
+ * Restore the preserved subtasks into plan.json after a scoped re-plan.
+ *
+ * The planner is instructed to leave unlisted subtasks byte-for-byte identical
+ * (see the replan scope note in human-feedback.ts), but the preserve-list is
+ * enforced here, unconditionally:
+ * - Any subtask whose id is in the snapshot is overwritten with the original
+ *   object, whatever the planner wrote for that id.
+ * - Subtasks the planner ADDED (ids outside the preserve-list) are kept.
+ * - If the planner dropped or renumbered a preserved subtask, the original is
+ *   re-inserted at its pre-session index; a renumbered copy whose content still
+ *   matches the original is dropped as an orphan. Every corrective action is
+ *   flagged in output.log so drift is diagnosable.
+ */
+export function restorePreservedPlanSubtasks(
+  specPath: string,
+  preserved: Map<number, { subtask: PlanSubtask; index: number }>,
+): void {
+  if (preserved.size === 0) return;
+  const planPath = path.join(specPath, 'plan.json');
+  if (!existsSync(planPath)) return;
+
+  let plan: { subtasks?: PlanSubtask[] };
+  try {
+    plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+  } catch (err) {
+    logToOutput(specPath,
+      `\n[PLAN] plan.json is malformed after re-plan — cannot restore preserved subtasks: ${err instanceof Error ? err.message : String(err)}\n`);
+    return;
+  }
+
+  const postReplan: PlanSubtask[] = Array.isArray(plan.subtasks) ? plan.subtasks : [];
+  const preservedIds = new Set(preserved.keys());
+
+  // 1. Overwrite every preserved id the planner left (or rewrote) in place.
+  const restored = postReplan.map(s => preserved.get(s.id)?.subtask ?? s);
+  const seen = new Set<number>();
+  for (const s of restored) if (preservedIds.has(s.id)) seen.add(s.id);
+
+  // 2. Re-insert preserved ids the planner dropped or renumbered, dropping any
+  //    content-duplicate orphan (the renumbered copy) in the process.
+  const missing = [...preservedIds].filter(id => !seen.has(id));
+  for (const id of missing) {
+    const entry = preserved.get(id)!;
+    const orphanIdx = restored.findIndex(s =>
+      !preservedIds.has(s.id) && subtaskContentEquals(s, entry.subtask),
+    );
+    if (orphanIdx >= 0) {
+      restored.splice(orphanIdx, 1);
+      logToOutput(specPath,
+        `\n[PLAN] Preserved subtask #${id} was renumbered by the planner — removed the orphan duplicate and restored the original at its pre-replan position\n`);
+    } else {
+      logToOutput(specPath,
+        `\n[PLAN] Preserved subtask #${id} was dropped by the planner — restored the original at its pre-replan position\n`);
+    }
+    const insertAt = Math.min(entry.index, restored.length);
+    restored.splice(insertAt, 0, entry.subtask);
+  }
+
+  try {
+    plan.subtasks = restored;
+    const tmpPath = planPath + '.tmp';
+    writeFileSync(tmpPath, JSON.stringify(plan, null, 2));
+    renameSync(tmpPath, planPath);
+  } catch (err) {
+    logToOutput(specPath,
+      `\n[PLAN] Failed to persist preserved subtasks to plan.json: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+}

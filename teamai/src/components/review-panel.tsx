@@ -33,7 +33,7 @@ interface Props {
   specRevision?: number;
   /** Absolute path to spec.md on disk. Used by the "Open spec" button. */
   specPath?: string;
-  /** Plan subtasks — shown as a checklist to scope coder-targeted feedback. */
+  /** Plan subtasks — shown as a checklist to scope coder- or planner-targeted feedback. */
   subtasks?: { id: number; title: string; files?: string[] }[];
   /** Populated from the latest events.jsonl entry when an approval attempt
    *  failed and the task bounced back to awaiting-review. Persisted so the
@@ -388,10 +388,15 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
                 ))}
               </div>
             </div>
-            {target === 'coder' && subtasks && subtasks.length > 0 && (
+            {(target === 'coder' || target === 'planner') && subtasks && subtasks.length > 0 && (
               <div className="flex flex-col gap-1.5">
                 <span className="text-xs font-medium text-slate-400">
-                  Affected subtasks <span className="text-slate-500">(optional — scopes the rework)</span>
+                  Affected subtasks{' '}
+                  <span className="text-slate-500">
+                    {target === 'planner'
+                      ? '(optional — scopes which subtasks may be re-planned; others are left unchanged)'
+                      : '(optional — scopes the rework)'}
+                  </span>
                 </span>
                 <div className="max-h-44 overflow-y-auto rounded-md border border-[#334155] bg-[#11131b] p-1.5 space-y-1">
                   {subtasks.map(s => {

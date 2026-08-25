@@ -12,9 +12,9 @@ import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody }
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
 import { updateSessionMap, logToOutput } from './helpers';
-import { humanDirectiveFor, consumeFeedbackIfDue } from './human-feedback';
+import { humanDirectiveFor, consumeFeedbackIfDue, readHumanFeedback } from './human-feedback';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
-import { applyPlanFileSerialization } from './plan-validation';
+import { applyPlanFileSerialization, snapshotPreservedPlanSubtasks, restorePreservedPlanSubtasks } from './plan-validation';
 import { warn } from '../logger';
 import { WorktreeError, PipelineConfigError } from './errors';
 import type { PipelinePhase } from '@/constants/phases';
@@ -274,10 +274,28 @@ export async function runPlanPhase(
       `IMPORTANT: Write the updated plan to \`${agentSpecPath}/plan.json\` (overwrite the existing file).`
     : `/plan ${agentSpecPath}/spec.md`;
 
+  // Scoped re-plan preserve-list guardrail: when the pending human feedback
+  // targets the planner and carries a subtask selection, snapshot the subtasks
+  // NOT in the selection before the session runs. The directive (humanDirectiveFor
+  // emits a replan scope note) asks the planner to leave them byte-for-byte
+  // unchanged, but the restore below is the guarantee — an LLM re-planning will
+  // naturally rewrite descriptions it shouldn't.
+  const plannerFeedback = readHumanFeedback(pipeline.specPath);
+  const preservedPlanSubtasks =
+    plannerFeedback?.target === 'planner' && plannerFeedback.subtaskIds?.length
+      ? snapshotPreservedPlanSubtasks(pipeline.specPath, plannerFeedback.subtaskIds)
+      : null;
+
   processManager.sendMessage(sessionId,
     humanDirectiveFor(pipeline.specPath, 'planner') + planInstruction);
   await deps.waitForCompletion(sessionId);
   processManager.killSession(sessionId);
+
+  // Enforce the preserve-list unconditionally: whatever the planner wrote for
+  // the unselected subtasks is overwritten with the pre-session snapshot.
+  if (preservedPlanSubtasks && preservedPlanSubtasks.size > 0) {
+    restorePreservedPlanSubtasks(pipeline.specPath, preservedPlanSubtasks);
+  }
   consumeFeedbackIfDue(pipeline.specPath, 'plan');
 
   // Evidence producibility gate (#4): if the planner rejected the spec's
