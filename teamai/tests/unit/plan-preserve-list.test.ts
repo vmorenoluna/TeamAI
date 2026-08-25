@@ -169,6 +169,53 @@ describe('restorePreservedPlanSubtasks', () => {
     expect(plan.subtasks).toEqual([st(1), st(2), st(3), st(4, { title: 'New subtask' })]);
   });
 
+  it('always undoes a merge of preserved subtasks: restores both originals, keeps the merged new id', () => {
+    writePlan([st(1), st(2), st(3)]);
+    const snapshot = snapshotPreservedPlanSubtasks(dir, [1]);
+
+    // Planner merged preserved #2 + #3 into a single NEW subtask #7 (outside
+    // the preserve-list) and kept the selected #1. Neither original survives
+    // under its own id, so the guardrail must bring both back byte-for-byte
+    // (open question #1: merging of preserved subtasks is always undone).
+    writePlan([
+      st(1, { description: 'rewritten by planner' }),
+      st(7, {
+        title: 'Merged B and C',
+        description: 'B and C combined',
+        files: ['src/2.ts', 'src/3.ts'],
+        acceptance_criteria: ['b', 'c'],
+      }),
+    ]);
+
+    restorePreservedPlanSubtasks(dir, snapshot);
+
+    const plan = readPlan();
+    const byId = Object.fromEntries(plan.subtasks.map((s: { id: number }) => [s.id, s]));
+    // Both preserved subtasks come back byte-for-byte.
+    expect(byId[2]).toEqual(st(2));
+    expect(byId[3]).toEqual(st(3));
+    // The merged new id is outside the preserve-list, so it is kept.
+    expect(byId[7].title).toBe('Merged B and C');
+    // Selected #1 keeps its rewrite.
+    expect(byId[1].description).toBe('rewritten by planner');
+  });
+
+  it('flags in-place drift in output.log so the undo is diagnosable', () => {
+    writePlan([st(1), st(2)]);
+    const snapshot = snapshotPreservedPlanSubtasks(dir, [1]);
+
+    // Planner rewrote preserved #2 in place (same id, different content).
+    writePlan([st(1), st(2, { description: 'clobbered by planner' })]);
+
+    restorePreservedPlanSubtasks(dir, snapshot);
+
+    // The corrective action is logged, and the subtask is restored verbatim.
+    const log = readFileSync(join(dir, 'output.log'), 'utf-8');
+    expect(log).toContain('Preserved subtask #2 was modified by the planner');
+    const plan = readPlan();
+    expect(plan.subtasks[1]).toEqual(st(2));
+  });
+
   it('removes a renumbered orphan duplicate and restores the original id', () => {
     writePlan([st(1), st(2), st(3)]);
     const snapshot = snapshotPreservedPlanSubtasks(dir, [1]);
