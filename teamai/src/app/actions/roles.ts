@@ -1,9 +1,10 @@
 'use server';
 
-import { readFileSync, writeFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
+import { writeRoleFile } from '@/lib/role-files';
 
 async function getRolesDir(): Promise<string> {
   return join(await getActiveProjectPath(), '.claude', 'roles');
@@ -42,11 +43,7 @@ export async function getRole(filename: string): Promise<RoleDefinition> {
 
 export async function saveRole(filename: string, content: string): Promise<void> {
   const dir = await getRolesDir();
-  const allowedFiles = readdirSync(dir).filter(f => f.endsWith('.md'));
-  if (!allowedFiles.includes(filename)) {
-    throw new Error(`Unknown role file: ${filename}`);
-  }
-  writeFileSync(join(dir, filename), content, 'utf-8');
+  writeRoleFile(dir, filename, content);
   revalidatePath('/settings');
 }
 

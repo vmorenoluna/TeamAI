@@ -2,78 +2,9 @@
 
 import { useState, useEffect } from 'react';
 
-// ── Line-level diff for spec comparison ──────────────────────────────────
-
-interface DiffLine {
-  type: 'added' | 'removed' | 'unchanged';
-  line: string;
-  lineNum: number;
-}
-
-interface DiffHunk {
-  left: DiffLine[];
-  right: DiffLine[];
-}
-
-/** Compute a simple LCS-based line diff returning paired hunks for side-by-side display. */
-export function computeLineDiff(oldText: string, newText: string): DiffHunk[] {
-  const oldLines = oldText.split('\n');
-  const newLines = newText.split('\n');
-  const m = oldLines.length, n = newLines.length;
-
-  // LCS table
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = oldLines[i - 1] === newLines[j - 1]
-        ? dp[i - 1][j - 1] + 1
-        : Math.max(dp[i - 1][j], dp[i][j - 1]);
-    }
-  }
-
-  // Backtrack to produce aligned diff hunks
-  const hunks: DiffHunk[] = [];
-  let oi = m, ni = n;
-  while (oi > 0 || ni > 0) {
-    if (oi > 0 && ni > 0 && oldLines[oi - 1] === newLines[ni - 1]) {
-      hunks.unshift({
-        left: [{ type: 'unchanged', line: oldLines[oi - 1], lineNum: oi }],
-        right: [{ type: 'unchanged', line: newLines[ni - 1], lineNum: ni }],
-      });
-      oi--; ni--;
-    } else if (ni > 0 && (oi === 0 || dp[oi][ni - 1] >= dp[oi - 1][ni])) {
-      hunks.unshift({
-        left: [{ type: 'removed', line: '', lineNum: 0 }],
-        right: [{ type: 'added', line: newLines[ni - 1], lineNum: ni }],
-      });
-      ni--;
-    } else {
-      hunks.unshift({
-        left: [{ type: 'removed', line: oldLines[oi - 1], lineNum: oi }],
-        right: [{ type: 'added', line: '', lineNum: 0 }],
-      });
-      oi--;
-    }
-  }
-
-  // Merge adjacent pairs where possible
-  return mergeHunks(hunks);
-}
-
-function mergeHunks(hunks: DiffHunk[]): DiffHunk[] {
-  const merged: DiffHunk[] = [];
-  for (const h of hunks) {
-    const last = merged[merged.length - 1];
-    if (last && last.left.every(l => l.type === 'unchanged') && h.left.every(l => l.type === 'unchanged')) {
-      // Same type of hunk — merge
-      last.left.push(...h.left);
-      last.right.push(...h.right);
-    } else {
-      merged.push(h);
-    }
-  }
-  return merged;
-}
+// Line-level diff engine shared with the Role Refinement card.
+export { computeLineDiff, mergeHunks, type DiffLine, type DiffHunk } from './unified-diff';
+import { computeLineDiff } from './unified-diff';
 
 // ── SpecDiffView — side-by-side version comparison ─────────────────────────
 

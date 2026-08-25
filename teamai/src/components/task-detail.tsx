@@ -19,6 +19,8 @@ import type { PlanData, QAReportData } from '@/lib/stream-types';
 import { formatActionError } from '@/lib/error-format';
 import { PHASE_BADGE, PHASE_LABELS, RESTARTABLE_PHASES } from '@/constants/phases';
 import { SpecDiffView } from './spec-diff-view';
+import { RoleRefinementCard } from './role-refinement-card';
+import type { RoleRefinementMode, RoleRefinementSuggestion } from '@/lib/role-refinement';
 
 // Re-export sub-components for external consumers
 export { PlanSubtasks } from './plan-subtasks';
@@ -52,11 +54,19 @@ interface Props {
   project?: string;
   onClose?: () => void;
   readonly?: boolean;
+  /** Role Refinement Assistant — the latest suggestion for this task and the
+   *  current role-file contents (props-over-async-fetch, so the diff renders
+   *  without a client fetch). */
+  refinementSuggestion?: RoleRefinementSuggestion | null;
+  refinementMode?: RoleRefinementMode;
+  roleFiles?: Record<string, string>;
+  /** Client-managed data consumers (TaskPanel) re-fetch after apply/dismiss. */
+  onRefinementChanged?: () => void;
 }
 
 const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, approvalError, project, onClose, readonly = false }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, approvalError, project, onClose, readonly = false, refinementSuggestion, refinementMode = 'manual', roleFiles = {}, onRefinementChanged }: Props) {
   const router = useRouter();
   const { run, isPending } = useServerMutation();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -369,6 +379,17 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                   {task.completionSummary}
                 </pre>
               </div>
+            )}
+
+            {/* Role Refinement Assistant — post-mortem card on failed tasks */}
+            {!readonly && (
+              <RoleRefinementCard
+                task={task}
+                suggestion={refinementSuggestion ?? null}
+                roleFiles={roleFiles}
+                mode={refinementMode}
+                onRefinementChanged={onRefinementChanged}
+              />
             )}
 
             {/* Review panel */}

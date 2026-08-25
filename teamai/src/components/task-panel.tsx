@@ -42,12 +42,17 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
-  // Re-fetch silently on phase-change/container-log so tabs update without close+reopen
-  // Guarded by readonly at the message-handler level so the hook is always called at top level.
+  // Re-fetch silently on phase-change/container-log/refinement-update so tabs
+  // update without close+reopen. Guarded by readonly at the message-handler
+  // level so the hook is always called at top level.
   const onMessageRef = useRef<(data: Record<string, unknown>) => void>(undefined);
   // eslint-disable-next-line react-hooks/refs
   onMessageRef.current = (msg) => {
-    if (!readonly && ((msg.type === 'phase-change' && msg.taskId === taskId) || msg.type === 'container-log')) {
+    if (!readonly && (
+      (msg.type === 'phase-change' && msg.taskId === taskId)
+      || (msg.type === 'refinement-update' && msg.taskId === taskId)
+      || msg.type === 'container-log'
+    )) {
       refresh(true);
     }
   };
@@ -106,6 +111,10 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
             project={projectPath}
             onClose={onClose}
             readonly={readonly}
+            refinementSuggestion={data.refinementSuggestion}
+            refinementMode={data.refinementMode}
+            roleFiles={data.roleFiles}
+            onRefinementChanged={() => refresh(true)}
           />
         )}
       </div>
