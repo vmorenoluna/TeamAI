@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 
 import {
   routeHumanFeedback,
+  rejectTask,
   trimArtifactsForTarget,
 } from '../../src/lib/orchestrator/review-actions';
 import type { FeedbackTarget } from '../../src/lib/orchestrator/human-feedback';
@@ -212,5 +213,52 @@ describe('routeHumanFeedback', () => {
     });
     expect(existsSync(join(ctx.specPath, 'spec_revision_feedback.md'))).toBe(false);
     expect(ctx.pipeline.specRevision).toBe(1);
+  });
+});
+
+describe('rejectTask — Request Changes → Planner with subtask scoping from pr-open', () => {
+  let ctx: ReturnType<typeof makeCtx>;
+
+  beforeEach(() => {
+    ctx = makeCtx();
+    // The task is already in pr-open (a live PR exists on GitHub). rejectTask
+    // gates on the taskStore phase, so both it and the pipeline must agree.
+    ctx.pipeline.phase = 'pr-open';
+    ctx.deps.taskStore.getById = () => ({ id: 'task-1', description: 'd', phase: 'pr-open' });
+    // Reflect a realistic pr-open task: plan.json exists with subtasks to scope.
+    writeFileSync(join(ctx.specPath, 'spec.md'), '# spec');
+    writeFileSync(join(ctx.specPath, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'A', files: ['src/a.ts'], acceptance_criteria: ['a'] },
+        { id: 2, title: 'B', files: ['src/b.ts'], acceptance_criteria: ['b'] },
+        { id: 5, title: 'E', files: ['src/e.ts'], acceptance_criteria: ['e'] },
+      ],
+    }));
+  });
+
+  afterEach(() => {
+    try { rmSync(ctx.root, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+
+  it('writes the planner Subtasks: directive and resumes at plan (same code path as awaiting-review)', async () => {
+    await rejectTask('task-1', 'Re-plan only the migration subtask', 'planner', [2, 5], ctx.deps as never);
+
+    // The reviewer's subtask selection is carried into the directive verbatim.
+    const raw = readFileSync(join(ctx.specPath, 'human_feedback.md'), 'utf-8');
+    expect(raw).toContain('Target: planner');
+    expect(raw).toContain('Subtasks: 2,5');
+    expect(raw).toContain('Re-plan only the migration subtask');
+
+    // The pipeline resumes at the planner's phase, not create-pr or anything
+    // PR-specific — no duplicate PR is created; the existing PR is reused.
+    expect(ctx.pipeline.phase).toBe('plan');
+    expect(ctx.deps.executePhase).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects subtask scoping for planner only if the task is awaiting-review or pr-open', async () => {
+    ctx.deps.taskStore.getById = () => ({ id: 'task-1', description: 'd', phase: 'implement' });
+    await expect(
+      rejectTask('task-1', 'Scope this', 'planner', [1], ctx.deps as never),
+    ).rejects.toThrow('awaiting-review or pr-open');
   });
 });
