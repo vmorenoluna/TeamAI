@@ -127,6 +127,24 @@ describe('RoleRefinementCard', () => {
     expect(screen.getByText(/Reading QA reports and agent logs/)).toBeInTheDocument();
   });
 
+  it('keeps the spinner once the analyzing record lands (SSE refresh case)', () => {
+    // analyzeFailure writes the record synchronously with status 'analyzing',
+    // so a refresh delivers the record while the session is still running —
+    // the card must not blank out for the rest of the analysis.
+    const suggestion = makeSuggestion({ status: 'analyzing' });
+    renderCard(makeTask({ refinementStatus: 'analyzing' }), suggestion);
+    expect(screen.getByText(/Reading QA reports and agent logs/)).toBeInTheDocument();
+    expect(screen.queryByText('Suggested role-prompt refinement')).not.toBeInTheDocument();
+  });
+
+  it('shows the suggested card over a stale analyzing task flag', () => {
+    // Transient staleness: the record already resolved to 'suggested' but the
+    // task prop still says 'analyzing' — the terminal card must win.
+    renderCard(makeTask({ refinementStatus: 'analyzing' }), makeSuggestion());
+    expect(screen.getByText('Suggested role-prompt refinement')).toBeInTheDocument();
+    expect(screen.queryByText(/Reading QA reports and agent logs/)).not.toBeInTheDocument();
+  });
+
   it('renders the no-gap card with the diagnosis and no apply button', () => {
     const suggestion = makeSuggestion({
       status: 'no-gap',
