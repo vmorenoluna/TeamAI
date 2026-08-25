@@ -36,6 +36,9 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
       sessionMap={full.sessionMap}
       specPath={full.specPath}
       approvalError={full.approvalError}
+      refinementSuggestion={full.refinementSuggestion}
+      refinementMode={full.refinementMode}
+      roleFiles={full.roleFiles}
     />
   );
 }

@@ -1,7 +1,7 @@
 /**
  * E2E tests for Settings page subsections.
  *
- * Covers: ContainerConfig, PipelineConfig, RoleEditor, ProjectsSettings, ToolSettings.
+ * Covers: ContainerConfig, PipelineConfig, RoleEditor, RoleRefinements, ToolSettings.
  * These are all rendered on /settings when a project is selected.
  */
 import { test, expect } from '@playwright/test';
@@ -194,39 +194,27 @@ test.describe('Settings — Tool Settings', () => {
   });
 });
 
-test.describe('Settings — Projects Defaults', () => {
+test.describe('Settings — Role Refinements', () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
     await ensureProjectSelected(page);
-
   });
 
-  test('projects settings section is visible', async ({ page }) => {
-
+  test('role refinements section is visible with mode control', async ({ page }) => {
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
-    await expect(page.locator('text=Project Defaults')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('text=Role Refinements')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('[data-component="role-refinement-mode-off"]')).toBeVisible();
+    await expect(page.locator('[data-component="role-refinement-mode-manual"]')).toBeVisible();
   });
 
-  test('shows project sync status table', async ({ page }) => {
-
+  test('role refinements defaults to Manual mode', async ({ page }) => {
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
 
-    // Should show at least the seeded project's sync status
-    await expect(page.locator('[data-component="project-defaults"]').locator('text=E2E Test Project').first()).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('Refresh button is present in projects section', async ({ page }) => {
-
-    await page.goto('/settings');
-    await expect(page.locator('h1:has-text("Settings")')).toBeVisible({ timeout: 10_000 });
-
-    const refreshBtn = page.locator('[data-component="project-defaults"] button:has-text("Refresh")');
-    // May be hidden if still loading — just verify the section works
-    const count = await refreshBtn.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    // Default mode is manual — the Manual segment is active.
+    await expect(page.locator('[data-component="role-refinement-mode-manual"]')).toHaveClass(/bg-\[#2563eb\]/);
   });
 });

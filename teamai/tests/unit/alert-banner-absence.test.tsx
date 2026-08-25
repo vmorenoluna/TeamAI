@@ -22,8 +22,6 @@ const mockSavePipelineConfig = vi.hoisted(() => vi.fn());
 // provider-config
 const mockSaveProvidersConfig = vi.hoisted(() => vi.fn());
 const mockGetAvailableModels = vi.hoisted(() => vi.fn());
-// projects-settings
-const mockGetAllProjectsSyncStatus = vi.hoisted(() => vi.fn());
 // directory-browser
 const mockBrowseDirectory = vi.hoisted(() => vi.fn());
 // role-editor
@@ -79,11 +77,15 @@ vi.mock('@/app/actions/providers', () => ({
 }));
 
 vi.mock('@/app/actions/projects', () => ({
-  getAllProjectsSyncStatus: () => mockGetAllProjectsSyncStatus(),
-  // syncProjectDefaults is exported because projects-settings imports it;
-  // this absence test never triggers a sync so a literal fn is sufficient.
-  syncProjectDefaults: vi.fn(),
   browseDirectory: (path: string | undefined) => mockBrowseDirectory(path),
+}));
+
+vi.mock('@/app/actions/role-refinement', () => ({
+  analyzeFailedTask: vi.fn(async () => ({ success: true })),
+  applyRefinementAction: vi.fn(async () => ({ success: true })),
+  applyAndRetryRefinementAction: vi.fn(async () => ({ success: true })),
+  dismissRefinementAction: vi.fn(async () => ({ success: true })),
+  revertRefinementAction: vi.fn(async () => ({ success: true })),
 }));
 
 vi.mock('@/app/actions/roles', () => ({
@@ -167,7 +169,6 @@ import '@testing-library/jest-dom/vitest';
 
 import { PipelineConfigEditor } from '@/components/pipeline-config';
 import { ProviderConfigEditor } from '@/components/provider-config';
-import { ProjectsSettings } from '@/components/projects-settings';
 import { RoleEditor } from '@/components/role-editor';
 import { DirectoryBrowser } from '@/components/directory-browser';
 import { KanbanBoard } from '@/components/kanban-board';
@@ -211,10 +212,6 @@ describe('alert-banner absence contract', () => {
     // provider-config
     mockSaveProvidersConfig.mockResolvedValue(undefined);
     mockGetAvailableModels.mockResolvedValue({ models: [], error: undefined });
-    // projects-settings
-    mockGetAllProjectsSyncStatus.mockResolvedValue([
-      { projectName: 'alpha', projectPath: '/path/alpha', upToDate: true, outdatedFiles: [] },
-    ]);
     // directory-browser
     mockBrowseDirectory.mockResolvedValue({ path: '/initial', parent: null, entries: [] });
     // role-editor
@@ -267,16 +264,6 @@ describe('alert-banner absence contract', () => {
         }}
       />,
     );
-    assertNoAlert();
-  });
-
-  // ── projects-settings ────────────────────────────────────────────────
-
-  it('projects-settings: no role="alert" on initial render (after mount fetch succeeds)', async () => {
-    render(<ProjectsSettings />);
-    // The mount useEffect fetches getAllProjectsSyncStatus; mocked to
-    // resolve successfully → error stays null → no banner.
-    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
     assertNoAlert();
   });
 

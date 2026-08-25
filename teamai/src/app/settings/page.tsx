@@ -7,9 +7,11 @@ import { RoleEditor } from '@/components/role-editor';
 import { PipelineConfigEditor } from '@/components/pipeline-config';
 import { ProviderConfigEditor } from '@/components/provider-config';
 import { ContainerConfigEditor } from '@/components/container-config';
-import { ProjectsSettings } from '@/components/projects-settings';
+import { RoleRefinementSettings } from '@/components/role-refinement-settings';
 import { ToolSettings } from '@/components/tool-settings';
 import { checkTools } from '@/app/actions/tools';
+import { getRoleRefinementConfigAction, getRefinementSuggestions } from '@/app/actions/role-refinement';
+import { getTasks as getAllTasks } from '@/app/actions/tasks';
 
 export default async function SettingsPage() {
   const activeProject = await getActiveProject();
@@ -18,9 +20,14 @@ export default async function SettingsPage() {
     return <div className="p-6 text-sm text-slate-400">No active project selected.</div>;
   }
 
-  const [roles, pipelineConfig, providersConfig, containerConfig, containerState, tools] = await Promise.all([
+  const [roles, pipelineConfig, providersConfig, containerConfig, containerState, tools, refinementConfig, refinementSuggestions, allTasks] = await Promise.all([
     getRoles(), getPipelineConfig(), getProvidersConfig(), getContainerConfig(), getContainerState(), checkTools(),
+    getRoleRefinementConfigAction(),
+    getRefinementSuggestions(),
+    getAllTasks(),
   ]);
+
+  const taskMap = Object.fromEntries(allTasks.map(t => [t.id, t.title]));
 
   return (
     <div className="flex flex-col h-full">
@@ -61,6 +68,15 @@ export default async function SettingsPage() {
           <ProviderConfigEditor config={providersConfig} />
         </section>
 
+        {/* Role Refinements */}
+        <section>
+          <RoleRefinementSettings
+            config={refinementConfig}
+            suggestions={refinementSuggestions}
+            tasks={taskMap}
+          />
+        </section>
+
         {/* Role editor */}
         <section>
           <h2 className="text-sm font-semibold text-slate-200 mb-1">Agent Roles</h2>
@@ -76,9 +92,6 @@ export default async function SettingsPage() {
 
         {/* Tool paths */}
         <ToolSettings initialTools={tools} />
-
-        {/* Project defaults sync */}
-        <ProjectsSettings />
       </div>
     </div>
   );

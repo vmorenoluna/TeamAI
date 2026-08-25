@@ -74,6 +74,14 @@ export interface Task {
   autoProcessed?: boolean;      // set to true when auto mode marks the task as done (PR auto-merged)
   autoReviewed?: boolean;       // set to true when user marks the auto-done task as manually reviewed
   isPaused?: boolean;            // set to true when user pauses the task (session killed, stays in current phase)
+  /** Latest role-refinement analysis outcome — drives the inline card on the
+   *  failed task without a directory scan on every render (Role Refinement
+   *  Assistant). 'none' is the absent default. */
+  refinementStatus?: 'none' | 'analyzing' | 'suggested' | 'no-gap';
+  /** Newest role-refinement suggestion record for this task. */
+  refinementSuggestionId?: string;
+  /** Retry-loop guard — how many times Apply & Retry has re-run this task after a refinement (Phase 3). */
+  refinementRetryCount?: number;
   createdAt: string;
   updatedAt: string;
 }

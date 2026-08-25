@@ -59,6 +59,10 @@ export function usePhaseSync(opts?: UsePhaseSyncOptions) {
         } else {
           router.refresh();
         }
+      } else if (data.type === 'refinement-update') {
+        // Role Refinement Assistant — a failure analysis finished; refresh so
+        // the inline card shows the verdict.
+        router.refresh();
       }
     }, [router, debounceMs]),
     onConnectionChange: useCallback(

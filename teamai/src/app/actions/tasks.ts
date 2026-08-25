@@ -10,7 +10,9 @@ import type { PlanData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'fs';
 import { getResumePhaseForFailedTask } from '@/lib/task-utils';
+import { getRoleRefinementConfig, getSuggestion, type RoleRefinementMode, type RoleRefinementSuggestion } from '@/lib/role-refinement';
 import { join, resolve } from 'path';
+import { readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { NO_STOP_PHASES, RESTARTABLE_PHASES } from '@/constants/phases';
 import { removeStaleWorktreeRegistration } from '@/lib/orchestrator/worktree-utils';
@@ -450,7 +452,25 @@ export async function getTaskFull(taskId: string) {
     }
   } catch { /* best-effort */ }
 
-  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, approvalError };
+  // ── Role Refinement Assistant ──
+  // The inline card is driven by the task's refinementStatus, with the
+  // suggestion record + current role file contents passed as props (the
+  // props-over-async-fetch rule) so the diff renders without a client fetch.
+  let refinementSuggestion: RoleRefinementSuggestion | null = null;
+  if (task.refinementSuggestionId) {
+    refinementSuggestion = getSuggestion(projectPath, task.refinementSuggestionId);
+  }
+  let refinementMode: RoleRefinementMode = 'manual';
+  try { refinementMode = getRoleRefinementConfig(projectPath).mode; } catch { /* default */ }
+  const roleFiles: Record<string, string> = {};
+  try {
+    const rolesDir = join(projectPath, '.claude', 'roles');
+    for (const f of readdirSync(rolesDir).filter(f => f.endsWith('.md'))) {
+      roleFiles[f] = readFileSync(join(rolesDir, f), 'utf-8');
+    }
+  } catch { /* roles dir missing — empty map is fine */ }
+
+  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, approvalError, refinementSuggestion, refinementMode, roleFiles };
 }
 
 export async function addDependency(taskId: string, depId: string): Promise<void> {

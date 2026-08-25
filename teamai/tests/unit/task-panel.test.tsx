@@ -155,6 +155,9 @@ function makeFullData(overrides: Partial<{
     sessionMap: {},
     specPath: overrides.specPath ?? '/test/spec.md',
     approvalError: null,
+    refinementSuggestion: null,
+    refinementMode: 'manual',
+    roleFiles: {},
   };
 }
 
