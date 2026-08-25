@@ -20,7 +20,11 @@ vi.mock('../../src/lib/logger', () => ({
 import {
   snapshotPreservedPlanSubtasks,
   restorePreservedPlanSubtasks,
+  loadPreservedPlanSubtasks,
+  clearPreservedPlanSubtasks,
 } from '../../src/lib/orchestrator/plan-validation';
+
+const PRESERVE_SNAPSHOT_FILE = 'plan_preserve_snapshot.json';
 
 let dir: string;
 
@@ -82,6 +86,49 @@ describe('snapshotPreservedPlanSubtasks', () => {
     // 99 is stale — silently ignored; 1 is preserved.
     const snapshot = snapshotPreservedPlanSubtasks(dir, [99]);
     expect([...snapshot.keys()]).toEqual([1, 2]);
+  });
+});
+
+describe('persisted snapshot (crash recovery)', () => {
+  it('snapshotPreservedPlanSubtasks persists the snapshot to disk', () => {
+    writePlan([st(1), st(2), st(3)]);
+    snapshotPreservedPlanSubtasks(dir, [2]);
+    expect(existsSync(join(dir, PRESERVE_SNAPSHOT_FILE))).toBe(true);
+  });
+
+  it('loadPreservedPlanSubtasks round-trips the persisted snapshot byte-for-byte', () => {
+    writePlan([st(1), st(2, { completed: true, qa_flagged: false }), st(3)]);
+    snapshotPreservedPlanSubtasks(dir, [1]);
+    const loaded = loadPreservedPlanSubtasks(dir);
+    expect(loaded).not.toBeNull();
+    expect([...loaded!.keys()].sort()).toEqual([2, 3]);
+    expect(loaded!.get(2)).toEqual({ subtask: st(2, { completed: true, qa_flagged: false }), index: 1 });
+    expect(loaded!.get(3)).toEqual({ subtask: st(3), index: 2 });
+  });
+
+  it('does not persist when the selection covers every subtask (nothing to preserve)', () => {
+    writePlan([st(1), st(2)]);
+    const snapshot = snapshotPreservedPlanSubtasks(dir, [1, 2]);
+    expect(snapshot.size).toBe(0);
+    expect(existsSync(join(dir, PRESERVE_SNAPSHOT_FILE))).toBe(false);
+  });
+
+  it('returns null for a missing or malformed persisted snapshot', () => {
+    expect(loadPreservedPlanSubtasks(dir)).toBeNull();
+    writeFileSync(join(dir, PRESERVE_SNAPSHOT_FILE), 'not json');
+    expect(loadPreservedPlanSubtasks(dir)).toBeNull();
+  });
+
+  it('clearPreservedPlanSubtasks deletes the persisted snapshot', () => {
+    writePlan([st(1), st(2)]);
+    snapshotPreservedPlanSubtasks(dir, [1]);
+    expect(existsSync(join(dir, PRESERVE_SNAPSHOT_FILE))).toBe(true);
+    clearPreservedPlanSubtasks(dir);
+    expect(existsSync(join(dir, PRESERVE_SNAPSHOT_FILE))).toBe(false);
+  });
+
+  it('clearPreservedPlanSubtasks is a safe no-op when no snapshot exists', () => {
+    expect(() => clearPreservedPlanSubtasks(dir)).not.toThrow();
   });
 });
 

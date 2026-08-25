@@ -80,6 +80,16 @@ describe('writeHumanFeedback / readHumanFeedback', () => {
     writeFileSync(feedbackFilePath(dir), '# Human Review Feedback\r\n\r\nFix the colors\r\n');
     expect(readHumanFeedback(dir)).toEqual({ message: 'Fix the colors' });
   });
+
+  it('clears any pending preserve-list snapshot from a prior interrupted replan', () => {
+    // A crash mid-replan can leave plan_preserve_snapshot.json on disk. Any new
+    // directive must invalidate it — it would otherwise be mistaken for a fresh
+    // baseline on the next scoped planner replan.
+    const snapshotPath = join(dir, 'plan_preserve_snapshot.json');
+    writeFileSync(snapshotPath, '[{"subtask":{"id":2},"index":1}]');
+    writeHumanFeedback(dir, 'planner', 'Re-plan the migration only', [1]);
+    expect(existsSync(snapshotPath)).toBe(false);
+  });
 });
 
 describe('isFeedbackTarget', () => {

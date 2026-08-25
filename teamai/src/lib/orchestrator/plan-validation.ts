@@ -17,7 +17,7 @@
  * Subtasks without an explicit `parallel_group` already run sequentially (one
  * per group, editing the feature branch directly) and are left untouched.
  */
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'fs';
 import path from 'path';
 import { logToOutput } from './helpers';
 import type { PlanSubtask } from './types';
@@ -169,6 +169,62 @@ export function applyPlanFileSerialization(specPath: string): SharedFileFix[] {
 // ── Scoped re-plan preserve-list guardrail ────────────────────────────────
 
 /**
+ * Persisted snapshot file so a scoped planner replan can recover from a crash
+ * mid-replan. Written by snapshotPreservedPlanSubtasks, read by
+ * loadPreservedPlanSubtasks, cleared by clearPreservedPlanSubtasks.
+ */
+const PRESERVE_SNAPSHOT_FILE = 'plan_preserve_snapshot.json';
+
+/** Serialise the preserve-list map to JSON for crash-recovery persistence. */
+function persistPreservedPlanSubtasks(
+  specPath: string,
+  preserved: Map<number, { subtask: PlanSubtask; index: number }>,
+): void {
+  const entries: { subtask: PlanSubtask; index: number }[] = [];
+  for (const [id, entry] of preserved) {
+    // Normalise — the Map key IS the id, but embed it inside the subtask
+    // object too so restoration doesn't depend on key ordering.
+    entries.push({ subtask: { ...entry.subtask, id }, index: entry.index });
+  }
+  try {
+    writeFileSync(path.join(specPath, PRESERVE_SNAPSHOT_FILE), JSON.stringify(entries, null, 2));
+  } catch { /* best-effort — crash recovery is a nice-to-have, not a correctness requirement */ }
+}
+
+/**
+ * Load the preserve-list from the persisted snapshot, or return null when
+ * the file is missing/malformed. Used by runPlanPhase on crash recovery.
+ */
+export function loadPreservedPlanSubtasks(
+  specPath: string,
+): Map<number, { subtask: PlanSubtask; index: number }> | null {
+  const p = path.join(specPath, PRESERVE_SNAPSHOT_FILE);
+  if (!existsSync(p)) return null;
+  try {
+    const entries: { subtask: PlanSubtask; index: number }[] = JSON.parse(readFileSync(p, 'utf-8'));
+    if (!Array.isArray(entries) || entries.length === 0) return null;
+    const map = new Map<number, { subtask: PlanSubtask; index: number }>();
+    for (const e of entries) {
+      if (e && typeof e.subtask?.id === 'number' && typeof e.index === 'number') {
+        map.set(e.subtask.id, { subtask: e.subtask, index: e.index });
+      }
+    }
+    return map.size > 0 ? map : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Delete the persisted snapshot. Called unconditionally after every plan
+ * phase run so a stale file from a prior crash doesn't survive.
+ */
+export function clearPreservedPlanSubtasks(specPath: string): void {
+  const p = path.join(specPath, PRESERVE_SNAPSHOT_FILE);
+  try { if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
+}
+
+/**
  * Snapshot the subtasks a scoped planner directive must NOT touch, keyed by id.
  *
  * When the pending human feedback targets the planner and carries `subtaskIds`,
@@ -177,10 +233,24 @@ export function applyPlanFileSerialization(specPath: string): SharedFileFix[] {
  * (with each subtask's pre-session array index so a dropped/renumbered subtask
  * can be re-inserted in place) before the planner session runs.
  *
+ * Also persists the snapshot to `plan_preserve_snapshot.json` so it survives
+ * a crash mid-replan — on recovery, `loadPreservedPlanSubtasks` reads this
+ * file as the authoritative baseline.
+ *
  * Returns an empty map when plan.json is missing or malformed, or when the
  * selection covers every subtask.
  */
 export function snapshotPreservedPlanSubtasks(
+  specPath: string,
+  selectedIds: number[],
+): Map<number, { subtask: PlanSubtask; index: number }> {
+  const snapshot = snapshotPreservedPlanSubtasksInternal(specPath, selectedIds);
+  if (snapshot.size > 0) persistPreservedPlanSubtasks(specPath, snapshot);
+  return snapshot;
+}
+
+/** Pure computation — the in-memory snapshot without I/O side-effects. */
+function snapshotPreservedPlanSubtasksInternal(
   specPath: string,
   selectedIds: number[],
 ): Map<number, { subtask: PlanSubtask; index: number }> {

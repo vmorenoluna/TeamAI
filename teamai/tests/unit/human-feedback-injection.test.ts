@@ -50,6 +50,7 @@ vi.mock('child_process', () => ({
 }));
 
 import { runSpecPhase, runPlanPhase } from '../../src/lib/orchestrator/phase-runners';
+import { snapshotPreservedPlanSubtasks } from '../../src/lib/orchestrator/plan-validation';
 
 function makeRoot() {
   const root = join(tmpdir(), `teamai-inject-${randomUUID().slice(0, 8)}`);
@@ -201,7 +202,7 @@ describe('runPlanPhase — human directive injection', () => {
     expect(prompt).not.toContain('/plan ');
   });
 
-  it('enforces the preserve-list: restores unselected subtasks a scoped replan clobbered', async () => {
+  it('enforces the preserve-list: restores unselected subtasks a scoped replan clobbered, and clears the persisted snapshot', async () => {
     // Reviewer scoped the replan to subtask #1 only (Target: planner + Subtasks: 1).
     writeFileSync(join(ctx.specPath, 'human_feedback.md'),
       '# Human Review Feedback\nTarget: planner\nSubtasks: 1\n\nRe-plan only subtask 1\n');
@@ -268,5 +269,97 @@ describe('runPlanPhase — human directive injection', () => {
     expect(plan.subtasks.some((s: { id: number }) => s.id === 5)).toBe(false);
     expect(byId[4]).toBeDefined();
     expect(byId[1].description).toBe('A rewritten');
+
+    // The persisted snapshot is cleared after a successful run.
+    expect(existsSync(join(ctx.specPath, 'plan_preserve_snapshot.json'))).toBe(false);
+  });
+
+  it('crash recovery: loads the persisted snapshot when recovering from an interrupted scoped replan', async () => {
+    // Simulate the aftermath of a crash mid-replan:
+    // - human_feedback.md with Target: planner + Subtasks: 1 (unchanged)
+    // - plan.json ALREADY clobbered by the interrupted session
+    // - plan_preserve_snapshot.json holds the ORIGINAL subtasks from before the crash
+    writeFileSync(join(ctx.specPath, 'human_feedback.md'),
+      '# Human Review Feedback\nTarget: planner\nSubtasks: 1\n\nRe-plan only subtask 1\n');
+
+    const original2 = {
+      id: 2, title: 'Original B', description: 'Original description B', files: ['src/b.ts'],
+      acceptance_criteria: ['b'], completed: false, qa_flagged: false, parallel_group: 'A',
+    };
+    const original3 = {
+      id: 3, title: 'Original C', description: 'Original description C', files: ['src/c.ts'],
+      acceptance_criteria: ['c'], completed: true, qa_flagged: true, parallel_group: 'A',
+    };
+
+    // 1) Original plan.json → snapshot (persisted) → 2) overwrite with the
+    // clobbered version the interrupted first run left behind.
+    writeFileSync(join(ctx.specPath, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'A', description: 'A', files: ['src/a.ts'], acceptance_criteria: ['a'], parallel_group: 'A' },
+        original2,
+        original3,
+      ],
+    }));
+    snapshotPreservedPlanSubtasks(ctx.specPath, [1]);
+    expect(existsSync(join(ctx.specPath, 'plan_preserve_snapshot.json'))).toBe(true);
+
+    writeFileSync(join(ctx.specPath, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'A', description: 'A rewritten by first run', files: ['src/a.ts'], acceptance_criteria: ['a'], parallel_group: 'A' },
+        { id: 2, title: 'B', description: 'clobbered by first run', files: ['src/clobbered.ts'], acceptance_criteria: ['b'], completed: true, qa_flagged: false, parallel_group: 'B' },
+        { id: 4, title: 'D', description: 'new junk from first run', files: ['src/d.ts'], acceptance_criteria: ['d'], parallel_group: 'B' },
+      ],
+    }));
+
+    const pipeline = basePipeline(ctx.specPath, 'plan');
+    mkdirSync(pipeline.worktreePath, { recursive: true });
+
+    // The recovery-run mock planner writes yet another corrupted version.
+    const waitForCompletion = vi.fn(async () => {
+      writeFileSync(join(ctx.specPath, 'plan.json'), JSON.stringify({
+        subtasks: [
+          { id: 1, title: 'A', description: 'A rewritten by recovery run', files: ['src/a.ts'], acceptance_criteria: ['a'], parallel_group: 'A' },
+          { id: 2, title: 'B', description: 'clobbered again', files: ['src/fake.ts'], acceptance_criteria: ['b'], completed: false, parallel_group: 'B' },
+          { id: 4, title: 'D', description: 'still junk', files: ['src/d.ts'], acceptance_criteria: ['d'], parallel_group: 'B' },
+          { id: 5, title: 'E', description: 'new junk', files: ['src/e.ts'], acceptance_criteria: ['e'], parallel_group: 'C' },
+        ],
+      }));
+    });
+
+    const deps = {
+      projectRoot: ctx.root,
+      persistAndEmitPhase: vi.fn(),
+      sessionOpts: () => ({ role: 'planner', cwd: ctx.root, taskId: 'task-1' }),
+      waitForCompletion,
+      advancePhase: (p: typeof pipeline, phase: string) => { (p as { phase: string }).phase = phase; },
+      rotateOutputLog: vi.fn(),
+      phaseHeader: vi.fn(),
+      savePipelineState: vi.fn(),
+      toAgentPath: (p: string) => p,
+      executePhase: vi.fn(async () => undefined),
+      gitPush: vi.fn(),
+      execGit: vi.fn(),
+    };
+
+    await runPlanPhase(pipeline as never, deps as never);
+
+    // The guardrail must have restored from the PERSISTED snapshot (original
+    // subtasks 2 and 3), not from the clobbered plan.json that existed at the
+    // start of the recovery run, and not from whatever the recovery mock wrote.
+    const plan = JSON.parse(readFileSync(join(ctx.specPath, 'plan.json'), 'utf-8'));
+    const byId = Object.fromEntries(plan.subtasks.map((s: { id: number }) => [s.id, s]));
+
+    // #2 original restored (not the clobbered version from either run).
+    expect(byId[2]).toEqual(original2);
+    // #3 was dropped in both clobbered runs → restored from snapshot.
+    expect(byId[3]).toEqual(original3);
+    // #1 (selected) keeps the recovery run's rewrite.
+    expect(byId[1].description).toBe('A rewritten by recovery run');
+    // #4 (interrupted run's junk) and #5 (recovery run's junk) are kept — not preserve ids.
+    expect(byId[4]).toBeDefined();
+    expect(byId[5]).toBeDefined();
+
+    // Snapshot cleared after successful recovery run.
+    expect(existsSync(join(ctx.specPath, 'plan_preserve_snapshot.json'))).toBe(false);
   });
 });

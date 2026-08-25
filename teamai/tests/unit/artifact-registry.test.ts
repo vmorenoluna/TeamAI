@@ -269,6 +269,18 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
     inRequiredArtifacts: false,
     inRevisionCleanup: true,
   },
+  // ── Scoped planner replan preserve-list snapshot ────────────────────────
+  {
+    file: 'plan_preserve_snapshot.json',
+    usedIn: [
+      'plan-validation.ts (snapshot/load/clear preserve-list)',
+      'phase-runners.ts (runPlan crash recovery)',
+    ],
+    inPhaseArtifacts: true,
+    inCleanupArtifacts: false,
+    inRequiredArtifacts: false,
+    inRevisionCleanup: true,
+  },
 ];
 
 // ── Infrastructure files intentionally NOT in any artifact registry ───────
