@@ -321,7 +321,18 @@ export function restorePreservedPlanSubtasks(
   const preservedIds = new Set(preserved.keys());
 
   // 1. Overwrite every preserved id the planner left (or rewrote) in place.
-  const restored = postReplan.map(s => preserved.get(s.id)?.subtask ?? s);
+  //    Flag the drift so an undo is diagnosable in output.log — the preserve-list
+  //    is enforced unconditionally, but a silent correction hides that the
+  //    planner "helpfully" reformatted a subtask it was told to leave alone.
+  const restored = postReplan.map(s => {
+    const entry = preserved.get(s.id);
+    if (!entry) return s;
+    if (!subtaskContentEquals(s, entry.subtask)) {
+      logToOutput(specPath,
+        `\n[PLAN] Preserved subtask #${s.id} was modified by the planner — restored to its pre-replan state (preserve-list)\n`);
+    }
+    return entry.subtask;
+  });
   const seen = new Set<number>();
   for (const s of restored) if (preservedIds.has(s.id)) seen.add(s.id);
 
