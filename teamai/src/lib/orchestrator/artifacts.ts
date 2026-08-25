@@ -56,6 +56,7 @@ export const PHASE_ARTIFACTS: Record<string, string[]> = {
     'qa_report_v3.json',
     'qa_report_v4.json',
     'qa_report_v5.json',
+    'plan_preserve_snapshot.json',
   ],
   plan: [
     'plan.json',
@@ -118,6 +119,7 @@ export const REVISION_CLEANUP_EXTRA: string[] = [
   'human_feedback_before_bounce.md',
   'qa_report_before_bounce.json',
   'qa_report_before_failed.json',
+  'plan_preserve_snapshot.json',
 ];
 
 // ── Phase descriptions for the retry-phase dialog ─────────────────────────

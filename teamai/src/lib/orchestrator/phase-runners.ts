@@ -14,7 +14,7 @@ import { resolveBaseBranch } from '../git-platform';
 import { updateSessionMap, logToOutput } from './helpers';
 import { humanDirectiveFor, consumeFeedbackIfDue, readHumanFeedback } from './human-feedback';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
-import { applyPlanFileSerialization, snapshotPreservedPlanSubtasks, restorePreservedPlanSubtasks } from './plan-validation';
+import { applyPlanFileSerialization, snapshotPreservedPlanSubtasks, restorePreservedPlanSubtasks, loadPreservedPlanSubtasks, clearPreservedPlanSubtasks } from './plan-validation';
 import { warn } from '../logger';
 import { WorktreeError, PipelineConfigError } from './errors';
 import type { PipelinePhase } from '@/constants/phases';
@@ -283,7 +283,12 @@ export async function runPlanPhase(
   const plannerFeedback = readHumanFeedback(pipeline.specPath);
   const preservedPlanSubtasks =
     plannerFeedback?.target === 'planner' && plannerFeedback.subtaskIds?.length
-      ? snapshotPreservedPlanSubtasks(pipeline.specPath, plannerFeedback.subtaskIds)
+      // Crash recovery: a persisted snapshot from an interrupted replan is the
+      // authoritative baseline — the current plan.json may already have been
+      // rewritten by that interrupted session, so re-snapshotting it would
+      // bake the clobbered subtasks in as the "original".
+      ? (loadPreservedPlanSubtasks(pipeline.specPath)
+        ?? snapshotPreservedPlanSubtasks(pipeline.specPath, plannerFeedback.subtaskIds))
       : null;
 
   processManager.sendMessage(sessionId,
@@ -296,6 +301,11 @@ export async function runPlanPhase(
   if (preservedPlanSubtasks && preservedPlanSubtasks.size > 0) {
     restorePreservedPlanSubtasks(pipeline.specPath, preservedPlanSubtasks);
   }
+  // The snapshot exists only to survive a crash mid-replan. Once the plan
+  // phase has completed, clear it BEFORE the feedback is consumed — a crash
+  // after this point re-derives a fresh baseline from the restored, pristine
+  // plan.json instead of trusting a stale file.
+  clearPreservedPlanSubtasks(pipeline.specPath);
   consumeFeedbackIfDue(pipeline.specPath, 'plan');
 
   // Evidence producibility gate (#4): if the planner rejected the spec's

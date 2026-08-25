@@ -17,6 +17,7 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import path from 'path';
 import type { PipelinePhase } from '@/constants/phases';
 import type { FeedbackTarget } from './feedback-target';
+import { clearPreservedPlanSubtasks } from './plan-validation';
 import {
   FEEDBACK_TARGETS,
   isFeedbackTarget,
@@ -58,6 +59,10 @@ export function writeHumanFeedback(
     : '';
   const content = `${HEADER}\nTarget: ${target}\n${subtaskLine}\n${message.trim()}\n`;
   writeFileSync(feedbackFilePath(specPath), content);
+  // A new directive invalidates any pending preserve-list snapshot from a
+  // prior scoped planner replan — a crash mid-replan could have left one on
+  // disk, and it would otherwise be mistaken for a fresh baseline.
+  clearPreservedPlanSubtasks(specPath);
 }
 
 /** Read the feedback, parsing the `Target:` header when present. */
