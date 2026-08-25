@@ -33,7 +33,7 @@ export { FEEDBACK_TARGETS, isFeedbackTarget, targetToResumePhase, TARGET_TO_PHAS
 export interface HumanFeedback {
   /** Undefined only for legacy human_feedback.md files written before targeting. */
   target?: FeedbackTarget;
-  /** Sub-task ids the reviewer flagged (coder target only). Undefined when absent. */
+  /** Sub-task ids the reviewer flagged (coder and planner targets). Undefined when absent. */
   subtaskIds?: number[];
   message: string;
 }
@@ -130,12 +130,29 @@ export function buildContextNote(feedback: HumanFeedback): string {
 }
 
 /**
- * Format the list of subtasks a coder-targeted directive is scoped to, so the
- * engineer sees the narrowed scope (ids + titles) rather than only the raw id
- * list stored in human_feedback.md. Returns '' for an empty selection.
+ * Format the list of subtasks a coder- or planner-targeted directive is scoped
+ * to, so the agent sees the narrowed scope (ids + titles) rather than only the
+ * raw id list stored in human_feedback.md. Returns '' for an empty selection.
+ *
+ * `mode` captures the semantic difference between the two consumers:
+ * - 'rework' (coder): the selection is a **re-run filter** — only those
+ *   subtasks are re-executed, everything else stays untouched.
+ * - 'replan' (planner): the selection is a **preserve-list** — only those
+ *   subtasks may be re-planned; every unlisted subtask must come back
+ *   byte-for-byte identical (the orchestrator enforces this in code).
  */
-export function buildSubtaskScopeNote(subtasks: { id: number; title: string }[]): string {
+export function buildSubtaskScopeNote(
+  subtasks: { id: number; title: string }[],
+  mode: 'rework' | 'replan' = 'rework',
+): string {
   if (subtasks.length === 0) return '';
+  if (mode === 'replan') {
+    return [
+      'The human reviewer scoped this directive to the following subtasks — re-plan ONLY these, do not regenerate or alter any other subtask:',
+      ...subtasks.map(s => `  - #${s.id}: ${s.title}`),
+      'Every subtask NOT listed above must be preserved byte-for-byte (same id, title, description, files, depends_on, acceptance_criteria, completed, qa_flagged).',
+    ].join('\n');
+  }
   return [
     'The human reviewer scoped this directive to the following subtasks — rework ONLY these, do not touch others:',
     ...subtasks.map(s => `  - #${s.id}: ${s.title}`),
@@ -170,8 +187,10 @@ export function humanDirectiveFor(specPath: string, phaseRole: string): string {
   if (!fb || !fb.target) return '';
   if (fb.target === phaseRole) {
     let scopeNote: string | undefined;
-    if (fb.target === 'coder' && fb.subtaskIds?.length) {
-      scopeNote = buildSubtaskScopeNote(readScopedSubtasks(specPath, fb.subtaskIds));
+    if (fb.target === 'planner' && fb.subtaskIds?.length) {
+      scopeNote = buildSubtaskScopeNote(readScopedSubtasks(specPath, fb.subtaskIds), 'replan');
+    } else if (fb.target === 'coder' && fb.subtaskIds?.length) {
+      scopeNote = buildSubtaskScopeNote(readScopedSubtasks(specPath, fb.subtaskIds), 'rework');
     }
     return buildOverrideDirective(fb, scopeNote) + '\n\n';
   }

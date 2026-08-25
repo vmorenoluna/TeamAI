@@ -1,0 +1,165 @@
+/**
+ * Unit tests for the scoped planner re-plan preserve-list guardrail:
+ *   snapshotPreservedPlanSubtasks — capture the unselected subtasks before the
+ *     planner session runs (keyed by id, with their pre-session index).
+ *   restorePreservedPlanSubtasks — enforce the preserve-list after the session:
+ *     overwrite any drift on preserved ids, re-insert dropped ones, and drop
+ *     renumbered orphans. Everything unselected must come back byte-for-byte.
+ */
+// @vitest-environment node
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+
+vi.mock('../../src/lib/logger', () => ({
+  log: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(),
+}));
+
+import {
+  snapshotPreservedPlanSubtasks,
+  restorePreservedPlanSubtasks,
+} from '../../src/lib/orchestrator/plan-validation';
+
+let dir: string;
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'plan-preserve-'));
+});
+
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function writePlan(subtasks: unknown[]) {
+  writeFileSync(join(dir, 'plan.json'), JSON.stringify({ complexity: 2, subtasks }, null, 2));
+}
+
+function readPlan() {
+  return JSON.parse(readFileSync(join(dir, 'plan.json'), 'utf-8'));
+}
+
+function st(id: number, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    title: `Subtask ${id}`,
+    description: `description ${id}`,
+    files: [`src/${id}.ts`],
+    acceptance_criteria: [`criterion ${id}`],
+    parallel_group: 'A',
+    completed: false,
+    qa_flagged: false,
+    ...overrides,
+  };
+}
+
+describe('snapshotPreservedPlanSubtasks', () => {
+  it('captures every subtask NOT in the selection, keyed by id with its index', () => {
+    writePlan([st(1), st(2), st(3)]);
+    const snapshot = snapshotPreservedPlanSubtasks(dir, [2]);
+    expect([...snapshot.keys()].sort()).toEqual([1, 3]);
+    expect(snapshot.get(1)).toEqual({ subtask: st(1), index: 0 });
+    expect(snapshot.get(3)).toEqual({ subtask: st(3), index: 2 });
+  });
+
+  it('returns an empty map when plan.json is missing', () => {
+    expect(snapshotPreservedPlanSubtasks(dir, [1])).toEqual(new Map());
+  });
+
+  it('returns an empty map when plan.json is malformed', () => {
+    writeFileSync(join(dir, 'plan.json'), 'not json');
+    expect(snapshotPreservedPlanSubtasks(dir, [1])).toEqual(new Map());
+  });
+
+  it('returns an empty map when the selection covers every subtask', () => {
+    writePlan([st(1), st(2)]);
+    expect(snapshotPreservedPlanSubtasks(dir, [1, 2])).toEqual(new Map());
+  });
+
+  it('drops stale ids that no longer exist in the plan', () => {
+    writePlan([st(1), st(2)]);
+    // 99 is stale — silently ignored; 1 is preserved.
+    const snapshot = snapshotPreservedPlanSubtasks(dir, [99]);
+    expect([...snapshot.keys()]).toEqual([1, 2]);
+  });
+});
+
+describe('restorePreservedPlanSubtasks', () => {
+  it('overwrites a preserved subtask the planner rewrote, byte-for-byte', () => {
+    const original2 = st(2, { completed: true, qa_flagged: false });
+    writePlan([st(1), original2, st(3)]);
+    const snapshot = snapshotPreservedPlanSubtasks(dir, [1]);
+
+    // Planner rewrote #2 (preserved) and added a brand-new #4 (kept).
+    writePlan([
+      st(1, { description: 'rewritten by planner' }),
+      st(2, { description: 'clobbered', files: ['src/nope.ts'], completed: false }),
+      st(3),
+      st(4, { title: 'New subtask' }),
+    ]);
+
+    restorePreservedPlanSubtasks(dir, snapshot);
+
+    const plan = readPlan();
+    const byId = Object.fromEntries(plan.subtasks.map((s: { id: number }) => [s.id, s]));
+    // #2 restored verbatim; #4 (new id) kept; #1 is selected so its rewrite survives.
+    expect(byId[2]).toEqual(original2);
+    expect(byId[4]).toEqual(st(4, { title: 'New subtask' }));
+    expect(byId[1].description).toBe('rewritten by planner');
+  });
+
+  it('re-inserts a preserved subtask the planner dropped, at its pre-session index', () => {
+    writePlan([st(1), st(2), st(3)]);
+    const snapshot = snapshotPreservedPlanSubtasks(dir, [1]);
+
+    // Planner dropped #2 entirely and kept #3, added #4.
+    writePlan([st(1), st(3), st(4, { title: 'New subtask' })]);
+
+    restorePreservedPlanSubtasks(dir, snapshot);
+
+    const plan = readPlan();
+    expect(plan.subtasks).toEqual([st(1), st(2), st(3), st(4, { title: 'New subtask' })]);
+  });
+
+  it('removes a renumbered orphan duplicate and restores the original id', () => {
+    writePlan([st(1), st(2), st(3)]);
+    const snapshot = snapshotPreservedPlanSubtasks(dir, [1]);
+
+    // Planner renumbered preserved #2 → #5 (same content, including title).
+    writePlan([st(1), st(3), st(5, { title: 'Subtask 2', description: 'description 2', files: ['src/2.ts'], acceptance_criteria: ['criterion 2'] })]);
+
+    restorePreservedPlanSubtasks(dir, snapshot);
+
+    const plan = readPlan();
+    const ids = plan.subtasks.map((s: { id: number }) => s.id);
+    expect(ids).toContain(2);
+    expect(ids).not.toContain(5);
+    expect(plan.subtasks[1]).toEqual(st(2));
+  });
+
+  it('keeps preserved subtasks in the correct order when re-inserting', () => {
+    writePlan([st(1), st(2), st(3)]);
+    const snapshot = snapshotPreservedPlanSubtasks(dir, [2]);
+
+    // Planner dropped #1 and #3 (both preserved) but kept the selected #2.
+    writePlan([st(2)]);
+
+    restorePreservedPlanSubtasks(dir, snapshot);
+
+    const plan = readPlan();
+    expect(plan.subtasks.map((s: { id: number }) => s.id)).toEqual([1, 2, 3]);
+  });
+
+  it('is a no-op when the preserved snapshot is empty', () => {
+    writePlan([st(1)]);
+    const before = readFileSync(join(dir, 'plan.json'), 'utf-8');
+    restorePreservedPlanSubtasks(dir, new Map());
+    expect(readFileSync(join(dir, 'plan.json'), 'utf-8')).toBe(before);
+  });
+
+  it('is a no-op when plan.json is missing', () => {
+    expect(() => restorePreservedPlanSubtasks(dir, new Map([[1, { subtask: st(1), index: 0 }]]))).not.toThrow();
+    expect(existsSync(join(dir, 'plan.json'))).toBe(false);
+  });
+});
