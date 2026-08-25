@@ -270,6 +270,12 @@ describe('runPlanPhase — human directive injection', () => {
     expect(byId[4]).toBeDefined();
     expect(byId[1].description).toBe('A rewritten');
 
+    // Both corrective actions are flagged in output.log: the in-place drift on
+    // #2 and the renumbered orphan #5 that replaced #3.
+    const log = readFileSync(join(ctx.specPath, 'output.log'), 'utf-8');
+    expect(log).toContain('Preserved subtask #2 was modified by the planner');
+    expect(log).toContain('Preserved subtask #3 was renumbered by the planner');
+
     // The persisted snapshot is cleared after a successful run.
     expect(existsSync(join(ctx.specPath, 'plan_preserve_snapshot.json'))).toBe(false);
   });
