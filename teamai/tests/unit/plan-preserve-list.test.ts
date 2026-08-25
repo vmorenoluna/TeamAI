@@ -200,6 +200,21 @@ describe('restorePreservedPlanSubtasks', () => {
     expect(byId[1].description).toBe('rewritten by planner');
   });
 
+  it('does NOT flag drift when the planner leaves preserved subtasks untouched', () => {
+    writePlan([st(1), st(2)]);
+    const snapshot = snapshotPreservedPlanSubtasks(dir, [1]);
+
+    // Planner kept #2 (preserved) identical and only rewrote the selected #1.
+    writePlan([st(1, { description: 'rewritten by planner' }), st(2)]);
+
+    restorePreservedPlanSubtasks(dir, snapshot);
+
+    const plan = readPlan();
+    expect(plan.subtasks[1]).toEqual(st(2));
+    // No corrective action was needed — output.log was never created.
+    expect(existsSync(join(dir, 'output.log'))).toBe(false);
+  });
+
   it('flags in-place drift in output.log so the undo is diagnosable', () => {
     writePlan([st(1), st(2)]);
     const snapshot = snapshotPreservedPlanSubtasks(dir, [1]);
