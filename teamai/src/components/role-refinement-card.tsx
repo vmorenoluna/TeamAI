@@ -125,7 +125,13 @@ export function RoleRefinementCard({ task, suggestion, roleFiles, mode, onRefine
   }
 
   // ── Analyzing ────────────────────────────────────────────────────────────
-  if (analyzing && !suggestion) {
+  // Show the spinner both before the record exists (click → server stamp) and
+  // once it does (`analyzeFailure` writes the record synchronously with status
+  // 'analyzing' — the SSE refresh then delivers it while the session still
+  // runs for minutes). A 'suggested'/'no-gap' record always wins over a stale
+  // localAnalyzing / task flag so the terminal card never hides behind the
+  // spinner.
+  if (analyzing && (!suggestion || suggestion.status === 'analyzing')) {
     return (
       <div className="rounded-lg border border-[#334155]/60 bg-[#11131b] p-3 flex items-center gap-3">
         <span className="w-3.5 h-3.5 rounded-full border border-blue-400 border-t-transparent animate-spin" />
