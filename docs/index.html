@@ -250,6 +250,7 @@
       <a href="#subtasks" class="nav-link" onclick="closeNav()">Subtasks</a>
       <a href="#resume" class="nav-link" onclick="closeNav()">Recovery</a>
       <a href="#review" class="nav-link" onclick="closeNav()">Review</a>
+      <a href="#refine" class="nav-link" onclick="closeNav()">Refinements</a>
       <a href="#auto" class="nav-link" onclick="closeNav()">Auto Mode</a>
       <a href="#extras" class="nav-link" onclick="closeNav()">Roadmap</a>
     </div>
@@ -398,7 +399,6 @@
     </div>
 
     <img src="images/autoresume.jpg" alt="TeamAI auto-resume showing rate-limited task recovery" loading="lazy" style="max-width:900px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
-    </div>
   </div>
 </section>
 
@@ -427,6 +427,31 @@
     </div>
 
     <img src="images/review.jpg" alt="TeamAI review panel showing QA report with pass/fail criteria" loading="lazy" style="max-width:900px;width:100%;margin:36px auto 0;display:block;border-radius:12px;">
+  </div>
+</section>
+
+<!-- ==================== Role Refinement Assistant ==================== -->
+<section id="refine">
+  <div class="container">
+    <span class="section-label">Role Refinement Assistant</span>
+    <h2>When tasks fail, TeamAI learns why</h2>
+    <p class="section-desc">Not every failure is a hard task — sometimes an agent's role prompt is missing a project convention. TeamAI analyzes failed tasks, tells you whether a role prompt is the root cause, and proposes a fix that you approve.</p>
+    <div class="features-grid" style="margin-bottom: 36px;">
+      <div class="feature-card">
+        <div class="icon icon-blue">🔬</div>
+        <h3>Failure Post-Mortem</h3>
+        <p>One click on any failed task runs a dedicated analysis agent that reads the QA report, plan, and agent logs to classify the root cause: a role-prompt gap, a TeamAI contract gap, or just a genuinely hard task.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-purple">✏️</div>
+        <h3>Editable, Revertible Fixes</h3>
+        <p>Role gaps come back as a before/after diff you can hand-edit. Apply, apply and retry, or dismiss — every change is backed up for one-click revert.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon icon-emerald">🤖</div>
+        <h3>Optional Automation</h3>
+        <p>Auto mode watches for recurring failures and analyzes them within a daily budget. With a further opt-in, small high-confidence fixes can even be applied and retried automatically — with a safety guard that escalates back to you if a fix doesn't work.</p>
+      </div>
     </div>
   </div>
 </section>
