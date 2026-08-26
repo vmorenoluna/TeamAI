@@ -45,6 +45,24 @@ export function RoleRefinementCard({ task, suggestion, roleFiles, mode, onRefine
 
   if (mode === 'off' || task.phase !== 'failed') return null;
 
+  // ── Retry-loop escalation (Phase 3) ─────────────────────────────────────
+  // The watcher stamped this when auto-analysis hit the loop guard: a
+  // refinement was applied but the task failed the same way (or the retry cap
+  // was reached). Human review is the only remaining step.
+  if (task.refinementEscalated) {
+    return (
+      <div
+        className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-3 flex items-center gap-3 flex-wrap"
+        data-component="role-refinement-escalated"
+      >
+        <span className="text-sm">⚠️</span>
+        <p className="text-xs text-amber-300 flex-1 min-w-[200px]">
+          A role refinement was applied but the task failed the same way — human review needed.
+        </p>
+      </div>
+    );
+  }
+
   // ── State machine ────────────────────────────────────────────────────────
   // suggestion present → terminal states (suggested / no-gap); applied /
   // dismissed / superseded records collapse the card entirely.

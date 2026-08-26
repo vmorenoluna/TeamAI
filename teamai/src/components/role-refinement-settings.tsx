@@ -243,6 +243,11 @@ export function RoleRefinementSettings({ config, suggestions, tasks }: Props) {
             {applied.map(s => (
               <div key={s.id} className="px-4 py-3 bg-[#11131b] flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-slate-300 truncate">{taskLabel(s, tasks)}</span>
+                {s.appliedBy === 'auto' && (
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-900/40 text-purple-300" data-component="auto-applied-badge">
+                    auto
+                  </span>
+                )}
                 <span className="text-[10px] text-slate-600">
                   applied {s.appliedAt ? new Date(s.appliedAt).toLocaleString() : ''}
                 </span>

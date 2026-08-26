@@ -189,4 +189,16 @@ describe('RoleRefinementCard', () => {
     const textarea = container.querySelector('textarea[data-component="role-refinement-edit-planner.md"]');
     expect(textarea).not.toBeNull();
   });
+
+  it('shows the retry-loop escalation banner when the watcher stamped the task', () => {
+    renderCard(makeTask({ refinementEscalated: true }), null);
+    expect(screen.getByText(/A role refinement was applied but the task failed the same way/)).toBeInTheDocument();
+    // The escalation banner replaces the idle prompt / suggestion card.
+    expect(screen.queryByText(/Keeps failing the same way\?/)).not.toBeInTheDocument();
+  });
+
+  it('does not show the escalation banner for a clean task', () => {
+    renderCard(makeTask(), null);
+    expect(screen.queryByText(/human review needed/)).not.toBeInTheDocument();
+  });
 });

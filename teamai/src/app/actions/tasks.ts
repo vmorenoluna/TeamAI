@@ -8,7 +8,7 @@ import { processManager } from '@/lib/process-manager';
 import { revalidatePath } from 'next/cache';
 import type { PlanData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
-import { appendFileSync, existsSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { getResumePhaseForFailedTask } from '@/lib/task-utils';
 import { getRoleRefinementConfig, getSuggestion, type RoleRefinementMode, type RoleRefinementSuggestion } from '@/lib/role-refinement';
 import { join, resolve } from 'path';
@@ -18,6 +18,7 @@ import { NO_STOP_PHASES, RESTARTABLE_PHASES } from '@/constants/phases';
 import { removeStaleWorktreeRegistration } from '@/lib/orchestrator/worktree-utils';
 import { isFeedbackTarget, type FeedbackTarget } from '@/lib/orchestrator/feedback-target';
 import { error as logError } from '@/lib/logger';
+import { preRestoreFailedTask } from '@/lib/task-retry';
 
 async function getStores() {
   const projectPath = await getActiveProjectPath();
@@ -72,68 +73,12 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
     resumePhase = getResumePhaseForFailedTask(events);
   } catch { /* fall back to default */ }
 
-  _preRestoreFailedTask(taskStore, taskId);
+  preRestoreFailedTask(taskStore, taskId);
 
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
   orchestrator.moveTaskToPhase(taskId, resumePhase).catch(err => logError('tasks', `retryTask ${taskId} failed`, err));
   revalidatePath('/');
   return { success: true };
-}
-
-/**
- * Shared pre-restore logic for failed tasks.
- *
- * Restores qa_report.json and human_feedback.md from snapshots if deleted,
- * snapshots qa_report.json before re-running, clears completionSummary,
- * and clears output.log for a fresh terminal view on retry.
- */
-function _preRestoreFailedTask(taskStore: TaskStore, taskId: string): void {
-  const dir = taskStore.getDirById(taskId);
-
-  // ── Gap 4b: Restore qa_report.json from snapshot if deleted ──
-  const reportPath = join(dir, 'qa_report.json');
-  if (!existsSync(reportPath)) {
-    for (const snapName of ['qa_report_before_failed.json', 'qa_report_before_bounce.json']) {
-      const snapshotPath = join(dir, snapName);
-      if (existsSync(snapshotPath)) {
-        try {
-          const snapshot = readFileSync(snapshotPath, 'utf-8');
-          writeFileSync(reportPath, snapshot);
-          const logFile = join(dir, 'output.log');
-          appendFileSync(logFile, `\n[RETRY] Restored qa_report.json from ${snapName} — file was deleted before retry\n`);
-        } catch { /* best-effort */ }
-        break; // use the first available snapshot
-      }
-    }
-  }
-
-  // ── Gap 4b: Restore human_feedback.md from snapshot if deleted ──
-  const humanFeedbackPath = join(dir, 'human_feedback.md');
-  const humanFeedbackSnapshotPath = join(dir, 'human_feedback_before_bounce.md');
-  if (!existsSync(humanFeedbackPath) && existsSync(humanFeedbackSnapshotPath)) {
-    try {
-      const snapshot = readFileSync(humanFeedbackSnapshotPath, 'utf-8');
-      writeFileSync(humanFeedbackPath, snapshot);
-      const logFile = join(dir, 'output.log');
-      appendFileSync(logFile, '\n[RETRY] Restored human_feedback.md from human_feedback_before_bounce.md — file was deleted before retry\n');
-    } catch { /* best-effort */ }
-  }
-
-  // ── Gap 5: Snapshot qa_report.json before re-running so context is preserved ──
-  if (existsSync(reportPath)) {
-    const snapshotPath = join(dir, 'qa_report_before_failed.json');
-    try {
-      const reportContent = readFileSync(reportPath, 'utf-8');
-      writeFileSync(snapshotPath, reportContent);
-    } catch { /* best-effort — don't block retry on snapshot failure */ }
-  }
-
-  // Clear completionSummary so the failure indicator disappears
-  taskStore.update(taskId, { completionSummary: undefined });
-
-  // Clear output.log for a fresh terminal view on retry
-  const outputPath = join(dir, 'output.log');
-  try { if (existsSync(outputPath)) unlinkSync(outputPath); } catch { /* best-effort */ }
 }
 
 /**
@@ -157,7 +102,7 @@ export async function retryTaskWithOptions(
 
   // ── Pre-restore work (only for failed tasks) ──
   if (task.phase === 'failed') {
-    _preRestoreFailedTask(taskStore, taskId);
+    preRestoreFailedTask(taskStore, taskId);
   }
 
   // ── Budget reset (independent of phase choice) ──

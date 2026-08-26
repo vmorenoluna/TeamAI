@@ -28,6 +28,9 @@ import {
   applyRefinement,
   dismissRefinement,
   revertRefinement,
+  isAutoApplyEligible,
+  MAX_AUTO_APPEND_CHARS,
+  REFINEMENT_RETRY_LOOP_CAP,
   type RoleRefinementSuggestion,
 } from '../../src/lib/role-refinement';
 import { TaskStore } from '../../src/lib/task-store';
@@ -305,6 +308,64 @@ describe('applyRefinement', () => {
     }));
     applyRefinement(root, 'sug-1', { 'planner.md': 'HAND EDITED' });
     expect(readFileSync(join(root, '.claude', 'roles', 'planner.md'), 'utf-8')).toBe('HAND EDITED');
+  });
+
+  it('records appliedBy auto for an auto-apply', () => {
+    writeSuggestion(root, makeRecord());
+    applyRefinement(root, 'sug-1', undefined, 'auto');
+    expect(getSuggestion(root, 'sug-1')?.appliedBy).toBe('auto');
+    // Human apply stays the default.
+    writeSuggestion(root, makeRecord({ id: 'sug-2' }));
+    applyRefinement(root, 'sug-2');
+    expect(getSuggestion(root, 'sug-2')?.appliedBy).toBe('human');
+  });
+});
+
+describe('isAutoApplyEligible', () => {
+  function eligibleRecord(overrides: Partial<RoleRefinementSuggestion> = {}): RoleRefinementSuggestion {
+    return makeRecord({
+      trigger: 'auto',
+      status: 'suggested',
+      confidence: 'high',
+      isRolePromptGap: true,
+      ...overrides,
+    });
+  }
+
+  it('accepts a high-confidence additive append within the size cap', () => {
+    expect(isAutoApplyEligible(eligibleRecord(), { refinementRetryCount: 0 }).eligible).toBe(true);
+  });
+
+  it('rejects manual-trigger records (human analysis stays human-approved)', () => {
+    const r = isAutoApplyEligible(makeRecord(), {});
+    expect(r.eligible).toBe(false);
+    expect(r.reason).toContain('not auto');
+  });
+
+  it('rejects non-high confidence', () => {
+    expect(isAutoApplyEligible(eligibleRecord({ confidence: 'medium' }), {}).eligible).toBe(false);
+  });
+
+  it('rejects modifying / replace edits', () => {
+    const rec = eligibleRecord({
+      edits: [{ roleFile: 'planner.md', mode: 'replace', rationale: 'r', proposedContent: 'x', riskClass: 'modifying' }],
+    });
+    expect(isAutoApplyEligible(rec, {}).eligible).toBe(false);
+  });
+
+  it('rejects oversized append blocks', () => {
+    const rec = eligibleRecord({
+      edits: [{ roleFile: 'planner.md', mode: 'append', rationale: 'r', proposedContent: 'x'.repeat(MAX_AUTO_APPEND_CHARS + 1), riskClass: 'additive' }],
+    });
+    expect(isAutoApplyEligible(rec, {}).eligible).toBe(false);
+  });
+
+  it('rejects once the retry-loop cap is reached', () => {
+    expect(isAutoApplyEligible(eligibleRecord(), { refinementRetryCount: REFINEMENT_RETRY_LOOP_CAP }).eligible).toBe(false);
+  });
+
+  it('rejects non-role-gap records', () => {
+    expect(isAutoApplyEligible(eligibleRecord({ isRolePromptGap: false, edits: [] }), {}).eligible).toBe(false);
   });
 });
 

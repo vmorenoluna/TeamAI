@@ -6,18 +6,24 @@
  *  real (detectRecurrence reads real task artifacts). */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-const { mockAnalyzeFailure } = vi.hoisted(() => ({
+const { mockAnalyzeFailure, mockRetryFailedTask } = vi.hoisted(() => ({
   mockAnalyzeFailure: vi.fn(async (_projectRoot: string, _taskId: string, _trigger: string, _deps: unknown, _sig?: string) => 'sug-x'),
+  mockRetryFailedTask: vi.fn(),
 }));
 
 vi.mock('../../src/lib/role-refinement', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/lib/role-refinement')>();
   return { ...actual, analyzeFailure: mockAnalyzeFailure };
 });
+
+vi.mock('../../src/lib/task-retry', () => ({
+  retryFailedTask: mockRetryFailedTask,
+  preRestoreFailedTask: vi.fn(),
+}));
 
 vi.mock('../../src/lib/logger', () => ({
   log: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(),
@@ -29,10 +35,12 @@ import {
   setRoleRefinementConfig,
   writeSuggestion,
   detectRecurrence,
+  getSuggestion,
   type RoleRefinementSuggestion,
 } from '../../src/lib/role-refinement';
 import {
   maybeAutoAnalyze,
+  maybeAutoApplyAndRetry,
   startRoleRefinementWatcher,
   stopRoleRefinementWatcher,
   REFINEMENT_RETRY_LOOP_CAP,
@@ -49,7 +57,14 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
   stopRoleRefinementWatcher();
+  delete (globalThis as { __autoModeProjectStates?: unknown }).__autoModeProjectStates;
 });
+
+/** Flip the pipeline auto-runner (auto-mode) state that isAutoModeEnabled reads. */
+function setAutoRunner(enabled: boolean): void {
+  (globalThis as { __autoModeProjectStates?: Map<string, { enabled: boolean; maxParallel: number }> }).__autoModeProjectStates =
+    new Map([[root, { enabled, maxParallel: 1 }]]);
+}
 
 /** Create a failed task that triggers detectRecurrence (persisted criterion). */
 function seedRecurringFailure(taskId: string, failCriteria: string[]): string {
@@ -187,6 +202,110 @@ describe('maybeAutoAnalyze', () => {
     setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
     await maybeAutoAnalyze(root, 'ghost');
     expect(mockAnalyzeFailure).not.toHaveBeenCalled();
+  });
+
+  it('stamps refinementEscalated when the retry-loop cap is reached', async () => {
+    seedRecurringFailure('t-1', ['Evidence missing']);
+    new TaskStore(root).update('t-1', { refinementRetryCount: REFINEMENT_RETRY_LOOP_CAP });
+    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+
+    await maybeAutoAnalyze(root, 't-1');
+    expect(mockAnalyzeFailure).not.toHaveBeenCalled();
+    expect(new TaskStore(root).getById('t-1')?.refinementEscalated).toBe(true);
+  });
+
+  it('stamps refinementEscalated when an applied refinement shares the signature', async () => {
+    seedRecurringFailure('t-1', ['Evidence missing']);
+    writeSuggestion(root, makeRecord({
+      status: 'applied',
+      appliedBy: 'human',
+      appliedAt: new Date().toISOString(),
+      signature: detectRecurrence(root, 't-1').signature,
+    }));
+    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+
+    await maybeAutoAnalyze(root, 't-1');
+    expect(mockAnalyzeFailure).not.toHaveBeenCalled();
+    expect(new TaskStore(root).getById('t-1')?.refinementEscalated).toBe(true);
+  });
+});
+
+describe('maybeAutoApplyAndRetry', () => {
+  /** Seed a suggested, auto-triggered, high-confidence record + a role file to edit. */
+  function seedAutoSuggested(): string {
+    const store = new TaskStore(root);
+    store.create('t-1', 'Task t-1', 'desc');
+    const dir = store.getDirById('t-1');
+    writeFileSync(join(dir, 'qa_report.json'), JSON.stringify({ criteria: [{ name: 'x', status: 'FAIL' }] }));
+    writeFileSync(join(dir, 'qa_report_before_bounce.json'), JSON.stringify({ criteria: [{ name: 'x', status: 'FAIL' }] }));
+    store.updatePhase('t-1', 'failed');
+    const rolesDir = join(root, '.claude', 'roles');
+    mkdirSync(rolesDir, { recursive: true });
+    writeFileSync(join(rolesDir, 'planner.md'), '# Role: Planner\n\nold body\n', 'utf-8');
+    writeSuggestion(root, makeRecord({
+      id: 's-1',
+      status: 'suggested',
+      trigger: 'auto',
+      confidence: 'high',
+      signature: detectRecurrence(root, 't-1').signature,
+      sourceTaskIds: ['t-1'],
+      edits: [{ roleFile: 'planner.md', mode: 'append', rationale: 'r', proposedContent: 'Always use git add -f.', riskClass: 'additive' }],
+    }));
+    return 's-1';
+  }
+
+  it('auto-applies an eligible suggestion and retries when all gates pass', async () => {
+    seedAutoSuggested();
+    setRoleRefinementConfig(root, { mode: 'auto', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setAutoRunner(true);
+
+    await maybeAutoApplyAndRetry(root, 's-1');
+
+    const record = getSuggestion(root, 's-1')!;
+    expect(record.status).toBe('applied');
+    expect(record.appliedBy).toBe('auto');
+    expect(new TaskStore(root).getById('t-1')?.refinementRetryCount).toBe(1);
+    expect(mockRetryFailedTask).toHaveBeenCalledWith(root, 't-1');
+    // The edit actually landed, backed up first.
+    expect(readFileSync(join(root, '.claude', 'roles', 'planner.md'), 'utf-8')).toContain('git add -f');
+  });
+
+  it('does nothing when autoApply is not opted in', async () => {
+    seedAutoSuggested();
+    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setAutoRunner(true);
+
+    await maybeAutoApplyAndRetry(root, 's-1');
+    expect(getSuggestion(root, 's-1')?.status).toBe('suggested');
+    expect(mockRetryFailedTask).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when the pipeline auto-runner is off (compounded opt-in)', async () => {
+    seedAutoSuggested();
+    setRoleRefinementConfig(root, { mode: 'auto', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setAutoRunner(false);
+
+    await maybeAutoApplyAndRetry(root, 's-1');
+    expect(getSuggestion(root, 's-1')?.status).toBe('suggested');
+    expect(mockRetryFailedTask).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for an ineligible (modifying) record — human review required', async () => {
+    seedAutoSuggested();
+    writeSuggestion(root, makeRecord({
+      id: 's-2',
+      status: 'suggested',
+      trigger: 'auto',
+      confidence: 'high',
+      sourceTaskIds: ['t-1'],
+      edits: [{ roleFile: 'planner.md', mode: 'replace', rationale: 'r', proposedContent: 'FULL REWRITE', riskClass: 'modifying' }],
+    }));
+    setRoleRefinementConfig(root, { mode: 'auto', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setAutoRunner(true);
+
+    await maybeAutoApplyAndRetry(root, 's-2');
+    expect(getSuggestion(root, 's-2')?.status).toBe('suggested');
+    expect(mockRetryFailedTask).not.toHaveBeenCalled();
   });
 });
 
