@@ -367,6 +367,10 @@ describe('isAutoApplyEligible', () => {
   it('rejects non-role-gap records', () => {
     expect(isAutoApplyEligible(eligibleRecord({ isRolePromptGap: false, edits: [] }), {}).eligible).toBe(false);
   });
+
+  it('rejects a role-gap record with no edits to apply', () => {
+    expect(isAutoApplyEligible(eligibleRecord({ edits: [] }), {}).eligible).toBe(false);
+  });
 });
 
 describe('dismissRefinement / revertRefinement', () => {

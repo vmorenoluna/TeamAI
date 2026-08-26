@@ -1,5 +1,5 @@
 /**
- * Role Refinement Assistant — Phase 2: recurrence watcher.
+ * Role Refinement Assistant — Phases 2–3: recurrence watcher + auto-apply.
  *
  * A boot-time listener (independent of auto-mode) that turns the `failed`
  * phase-change event into an auto-triggered failure analysis when ALL gates
@@ -13,8 +13,11 @@
  *     a same-signature failure after an applied refinement escalates to the
  *     user instead of looping edit → retry → fail → edit).
  *
- * Analysis still runs with `trigger: 'auto'` and lands in the same store as
- * manual analysis; a human still approves every edit (auto-apply is Phase 3).
+ * Analysis runs with `trigger: 'auto'` and lands in the same store as manual
+ * analysis. Phase 3: when the analysis resolves to a `suggested` record,
+ * `maybeAutoApplyAndRetry` auto-applies + retries — but only under compounded
+ * opt-ins (auto mode + autoApply + the pipeline auto-runner) and the
+ * `isAutoApplyEligible` policy. Everything is still backed up and revertable.
  */
 import { processManager } from './process-manager';
 import { TaskStore } from './task-store';
