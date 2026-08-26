@@ -224,6 +224,22 @@ describe('analyzeFailure', () => {
     await analyzeFailure(root, taskId, 'manual', deps);
     expect(deps.killSession).toHaveBeenCalledWith('sess-1');
   });
+
+  it('clears a prior retry-loop escalation when a fresh analysis starts', async () => {
+    const taskId = seedTask();
+    taskStore.update(taskId, { refinementEscalated: true });
+    const { deps } = fakeDeps({
+      isRolePromptGap: false,
+      contractGap: false,
+      contractFile: null,
+      rootCause: '',
+      confidence: 'low',
+      diagnosis: 'not a gap',
+      edits: [],
+    });
+    await analyzeFailure(root, taskId, 'auto', deps);
+    expect(taskStore.getById(taskId)?.refinementEscalated).toBe(false);
+  });
 });
 
 describe('parseAnalysisOutput', () => {

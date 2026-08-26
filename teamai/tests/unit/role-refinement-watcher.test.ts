@@ -6,7 +6,7 @@
  *  real (detectRecurrence reads real task artifacts). */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -36,6 +36,7 @@ import {
   writeSuggestion,
   detectRecurrence,
   getSuggestion,
+  revertRefinement,
   type RoleRefinementSuggestion,
 } from '../../src/lib/role-refinement';
 import {
@@ -266,8 +267,13 @@ describe('maybeAutoApplyAndRetry', () => {
     expect(record.appliedBy).toBe('auto');
     expect(new TaskStore(root).getById('t-1')?.refinementRetryCount).toBe(1);
     expect(mockRetryFailedTask).toHaveBeenCalledWith(root, 't-1');
-    // The edit actually landed, backed up first.
+    // The edit actually landed, with a backup for one-click revert (§7/§8).
     expect(readFileSync(join(root, '.claude', 'roles', 'planner.md'), 'utf-8')).toContain('git add -f');
+    expect(record.backups).toHaveLength(1);
+    expect(existsSync(record.backups[0].backupPath)).toBe(true);
+    // Revert restores the pre-apply body — auto-apply is fully revertable.
+    revertRefinement(root, 's-1');
+    expect(readFileSync(join(root, '.claude', 'roles', 'planner.md'), 'utf-8')).toContain('old body');
   });
 
   it('does nothing when autoApply is not opted in', async () => {
@@ -307,6 +313,17 @@ describe('maybeAutoApplyAndRetry', () => {
     expect(getSuggestion(root, 's-2')?.status).toBe('suggested');
     expect(mockRetryFailedTask).not.toHaveBeenCalled();
   });
+
+  it('does nothing once the retry-loop cap is reached (escalation, not auto-apply)', async () => {
+    seedAutoSuggested();
+    new TaskStore(root).update('t-1', { refinementRetryCount: REFINEMENT_RETRY_LOOP_CAP });
+    setRoleRefinementConfig(root, { mode: 'auto', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setAutoRunner(true);
+
+    await maybeAutoApplyAndRetry(root, 's-1');
+    expect(getSuggestion(root, 's-1')?.status).toBe('suggested');
+    expect(mockRetryFailedTask).not.toHaveBeenCalled();
+  });
 });
 
 describe('startRoleRefinementWatcher', () => {
@@ -331,5 +348,39 @@ describe('startRoleRefinementWatcher', () => {
     processManager.emit('phase-change', { taskId: 't-1', phase: 'implement', projectRoot: root });
     await new Promise(r => setTimeout(r, 20));
     expect(mockAnalyzeFailure).not.toHaveBeenCalled();
+  });
+
+  it('runs the full closed loop: phase-change → auto-analysis → auto-apply → retry', async () => {
+    seedRecurringFailure('t-1', ['Evidence missing']);
+    setRoleRefinementConfig(root, { mode: 'auto', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setAutoRunner(true);
+
+    // The mocked analyzer writes a REAL suggested record so the continuation
+    // (maybeAutoApplyAndRetry) has something to apply.
+    mockAnalyzeFailure.mockImplementation(async (_p: string, taskId: string, _t: string, _deps: unknown, sig?: string) => {
+      const mod = await vi.importActual<typeof import('../../src/lib/role-refinement')>('../../src/lib/role-refinement');
+      const rolesDir = join(root, '.claude', 'roles');
+      mkdirSync(rolesDir, { recursive: true });
+      writeFileSync(join(rolesDir, 'planner.md'), '# Role: Planner\n\nold body\n', 'utf-8');
+      mod.writeSuggestion(root, makeRecord({
+        id: 'closed-loop-sug',
+        status: 'suggested',
+        trigger: 'auto',
+        confidence: 'high',
+        signature: sig ?? 'sha256:x',
+        sourceTaskIds: [taskId],
+        edits: [{ roleFile: 'planner.md', mode: 'append', rationale: 'r', proposedContent: 'Use git add -f.', riskClass: 'additive' }],
+      }));
+      return 'closed-loop-sug';
+    });
+
+    startRoleRefinementWatcher();
+    processManager.emit('phase-change', { taskId: 't-1', phase: 'failed', projectRoot: root });
+
+    await vi.waitFor(() => expect(mockRetryFailedTask).toHaveBeenCalledWith(root, 't-1'));
+    const record = getSuggestion(root, 'closed-loop-sug')!;
+    expect(record.status).toBe('applied');
+    expect(record.appliedBy).toBe('auto');
+    expect(new TaskStore(root).getById('t-1')?.refinementRetryCount).toBe(1);
   });
 });
