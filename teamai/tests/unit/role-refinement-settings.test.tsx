@@ -92,10 +92,36 @@ beforeEach(() => {
 });
 
 describe('RoleRefinementSettings', () => {
-  it('switches mode via the Off/Manual segments', () => {
+  it('switches mode via the Off/Manual/Auto segments', () => {
     render(<RoleRefinementSettings config={CONFIG} suggestions={[]} tasks={{}} />);
     fireEvent.click(screen.getByTestId('role-refinement-mode-off'));
     expect(mockSetConfig).toHaveBeenCalledWith({ ...CONFIG, mode: 'off' });
+    fireEvent.click(screen.getByTestId('role-refinement-mode-auto'));
+    expect(mockSetConfig).toHaveBeenCalledWith({ ...CONFIG, mode: 'auto' });
+  });
+
+  it('reveals the autoApply opt-in and daily spend cap when Auto is active', () => {
+    const autoConfig: RoleRefinementConfig = { ...CONFIG, mode: 'auto' };
+    const { unmount } = render(<RoleRefinementSettings config={autoConfig} suggestions={[]} tasks={{}} />);
+    expect(screen.getByTestId('role-refinement-autoapply')).toBeInTheDocument();
+    expect(screen.getByTestId('role-refinement-max-auto')).toBeInTheDocument();
+    expect(screen.getByText(/Only additive, low-risk edits are ever auto-applied/)).toBeInTheDocument();
+
+    // Hidden again when Auto is turned off.
+    unmount();
+    render(<RoleRefinementSettings config={CONFIG} suggestions={[]} tasks={{}} />);
+    expect(screen.queryByTestId('role-refinement-autoapply')).not.toBeInTheDocument();
+  });
+
+  it('persists autoApply and the daily cap from the Auto-mode controls', () => {
+    const autoConfig: RoleRefinementConfig = { ...CONFIG, mode: 'auto' };
+    render(<RoleRefinementSettings config={autoConfig} suggestions={[]} tasks={{}} />);
+
+    fireEvent.click(screen.getByTestId('role-refinement-autoapply'));
+    expect(mockSetConfig).toHaveBeenCalledWith({ ...autoConfig, autoApply: true });
+
+    fireEvent.change(screen.getByTestId('role-refinement-max-auto'), { target: { value: '3' } });
+    expect(mockSetConfig).toHaveBeenCalledWith({ ...autoConfig, maxAutoAnalysesPerDay: 3 });
   });
 
   it('lists pending suggestions with task title, root cause, and apply/dismiss', async () => {

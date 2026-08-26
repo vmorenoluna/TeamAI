@@ -23,11 +23,14 @@ import {
   suggestionsForTask,
   updateSuggestion,
   buildFailureSignature,
+  detectRecurrence,
+  countAutoAnalysesToday,
   applyRefinement,
   dismissRefinement,
   revertRefinement,
   type RoleRefinementSuggestion,
 } from '../../src/lib/role-refinement';
+import { TaskStore } from '../../src/lib/task-store';
 
 let root: string;
 
@@ -145,6 +148,87 @@ describe('buildFailureSignature', () => {
     // Different criterion set → different signature.
     writeFileSync(join(dir, 'qa_report.json'), JSON.stringify({ criteria: [{ name: 'a', status: 'FAIL' }] }));
     expect(buildFailureSignature(dir, 'task-1')).not.toBe(s1);
+  });
+});
+
+describe('detectRecurrence', () => {
+  function createFailedTask(id: string, failCriteria: string[] = [], withFailedEvent = true) {
+    const store = new TaskStore(root);
+    store.create(id, `Task ${id}`, 'desc');
+    const dir = store.getDirById(id);
+    if (failCriteria.length > 0) {
+      writeFileSync(join(dir, 'qa_report.json'), JSON.stringify({
+        criteria: failCriteria.map(name => ({ name, status: 'FAIL' })),
+      }));
+    }
+    if (withFailedEvent) store.updatePhase(id, 'failed');
+    return { store, dir };
+  }
+
+  it('hits on a persisted FAIL criterion (current report vs previous-cycle snapshot)', () => {
+    const { dir } = createFailedTask('t1', ['Evidence missing']);
+    // Previous QA cycle failed the same criterion.
+    writeFileSync(join(dir, 'qa_report_before_bounce.json'), JSON.stringify({
+      criteria: [{ name: 'Evidence missing', status: 'FAIL' }],
+    }));
+
+    const r = detectRecurrence(root, 't1');
+    expect(r.hit).toBe(true);
+    expect(r.cluster).toEqual(['t1']);
+    expect(r.signature).toMatch(/^sha256:/);
+  });
+
+  it('hits when the same task has reached failed >= recurrenceThreshold times', () => {
+    const { store } = createFailedTask('t1');
+    store.updatePhase('t1', 'failed'); // second failed transition
+
+    const r = detectRecurrence(root, 't1');
+    expect(r.hit).toBe(true);
+    expect(r.cluster).toEqual(['t1']);
+  });
+
+  it('clusters two distinct tasks that failed with overlapping FAIL criteria', () => {
+    createFailedTask('t1', ['Evidence missing']);
+    createFailedTask('t2', ['Evidence missing', 'Other']);
+
+    const r = detectRecurrence(root, 't1');
+    expect(r.hit).toBe(true);
+    expect(r.cluster).toContain('t1');
+    expect(r.cluster).toContain('t2');
+    // Same cluster viewed from either task yields the same signature (dedupe key).
+    expect(detectRecurrence(root, 't2').signature).toBe(r.signature);
+  });
+
+  it('does not hit on a single first-time failure', () => {
+    createFailedTask('t1', ['Evidence missing']);
+    const r = detectRecurrence(root, 't1');
+    expect(r.hit).toBe(false);
+    expect(r.signature).toBe('');
+  });
+
+  it('ignores sibling tasks outside the rolling window', () => {
+    createFailedTask('t1', ['Evidence missing']);
+    const { dir: t2Dir } = createFailedTask('t2', ['Evidence missing']);
+    // Age t2's failed event beyond the window by rewriting events.jsonl.
+    const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    writeFileSync(join(t2Dir, 'events.jsonl'),
+      JSON.stringify({ phase: 'failed', timestamp: old }) + '\n');
+
+    const r = detectRecurrence(root, 't1');
+    expect(r.hit).toBe(false);
+    expect(r.cluster).toEqual(['t1']);
+  });
+});
+
+describe('countAutoAnalysesToday', () => {
+  it('counts only auto-triggered records created today', () => {
+    const today = new Date().toISOString();
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString();
+    writeSuggestion(root, makeRecord({ id: 'a', trigger: 'auto', createdAt: today }));
+    writeSuggestion(root, makeRecord({ id: 'b', trigger: 'auto', createdAt: today }));
+    writeSuggestion(root, makeRecord({ id: 'c', trigger: 'manual', createdAt: today }));
+    writeSuggestion(root, makeRecord({ id: 'd', trigger: 'auto', createdAt: yesterday }));
+    expect(countAutoAnalysesToday(root)).toBe(2);
   });
 });
 

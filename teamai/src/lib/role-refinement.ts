@@ -24,6 +24,8 @@ import { TaskStore } from './task-store';
 import { writeRoleFile } from './role-files';
 import { resolveProvider, providerToSessionOpts } from './providers';
 import { processManager } from './process-manager';
+import { waitForCompletion } from './orchestrator/rate-limit';
+import { parseSessionLimitReset } from './orchestrator/helpers';
 import { log as logInfo, warn as logWarn } from './logger';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -108,6 +110,22 @@ export interface RoleRefinementAnalyzeDeps {
   sendMessage: (sessionId: string, content: string) => void;
   waitForCompletion: (sessionId: string) => Promise<void>;
   killSession: (sessionId: string) => void;
+}
+
+/**
+ * Real session recipe for analyzeFailure — the insights-session pattern with
+ * the project's configured analyst model and rate-limit-aware completion.
+ * Shared by the manual server action and the Phase-2 recurrence watcher so
+ * both entry points run the identical session lifecycle.
+ */
+export function makeRoleRefinementAnalyzeDeps(): RoleRefinementAnalyzeDeps {
+  return {
+    createSession: (opts: Parameters<typeof processManager.createSession>[0]) =>
+      processManager.createSession(opts),
+    sendMessage: (sessionId: string, content: string) => processManager.sendMessage(sessionId, content),
+    waitForCompletion: (sessionId: string) => waitForCompletion(sessionId, { parseSessionLimitReset }),
+    killSession: (sessionId: string) => processManager.killSession(sessionId),
+  };
 }
 
 // ── Config ─────────────────────────────────────────────────────────────────
@@ -270,6 +288,119 @@ export function buildFailureSignature(taskDir: string, fallbackSeed: string): st
   return `sha256:${createHash('sha256').update(payload).digest('hex')}`;
 }
 
+// ── Recurrence detection (Phase 2 — auto-trigger) ─────────────────────────
+
+/** Rolling window (7 days) for the cross-task recurrence signal. */
+export const RECURRENCE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface RecurrenceDetection {
+  hit: boolean;
+  /** Task ids in the recurrence cluster — the target plus any cross-task siblings. */
+  cluster: string[];
+  /** Dedupe signature for the cluster (union of FAIL criteria, sorted + hashed). */
+  signature: string;
+}
+
+/** Read the sorted, deduped set of FAIL-criterion names from a QA report file. */
+function readFailCriteria(reportPath: string): Set<string> {
+  try {
+    if (!existsSync(reportPath)) return new Set();
+    const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+    if (!Array.isArray(report.criteria)) return new Set();
+    const names = report.criteria
+      .filter((c: { status?: string }) => c?.status === 'FAIL')
+      .map((c: { criterion?: unknown; name?: unknown }) => String(c?.criterion ?? c?.name ?? '').trim())
+      .filter(Boolean);
+    return new Set(names);
+  } catch {
+    return new Set();
+  }
+}
+
+/** sha256 signature over a FAIL-criterion set + a seed (see buildFailureSignature). */
+function hashFailCriteria(criteria: Set<string>, seed: string): string {
+  const payload = `criteria:${[...criteria].sort().join('|')}||seed:${seed}`;
+  return `sha256:${createHash('sha256').update(payload).digest('hex')}`;
+}
+
+/**
+ * Phase-2 recurrence detection (§2.3 / §6.1). Fires on any of:
+ *  1. **Persisted criterion** — the target's current `qa_report.json` shares a
+ *     FAIL-criterion name with a previous cycle's snapshot
+ *     (`qa_report_before_bounce.json` / `qa_report_before_failed.json`), i.e.
+ *     the same criterion has persisted-failed across ≥2 consecutive QA cycles.
+ *  2. **Repeated task failure** — the target has reached `failed` ≥
+ *     `recurrenceThreshold` times (the events.jsonl count includes the current
+ *     failure, so ≥2 means at least one prior failure).
+ *  3. **Cross-task cluster** — ≥2 distinct tasks failed with overlapping
+ *     FAIL-criterion names within the rolling window.
+ *
+ * The returned `signature` is built over the whole cluster's union of FAIL
+ * criteria, seeded with the sorted cluster ids so the same cluster yields the
+ * same signature no matter which member task triggers the detection.
+ */
+export function detectRecurrence(projectRoot: string, taskId: string): RecurrenceDetection {
+  const taskStore = new TaskStore(projectRoot);
+  const task = taskStore.getById(taskId);
+  if (!task) return { hit: false, cluster: [], signature: '' };
+
+  const threshold = getRoleRefinementConfig(projectRoot).recurrenceThreshold;
+  const taskDir = taskStore.getDirById(taskId);
+  const currentFail = readFailCriteria(join(taskDir, 'qa_report.json'));
+
+  // 1. Persisted-criterion signal: same FAIL name in a previous cycle's snapshot.
+  let persistedCriterion = false;
+  if (currentFail.size > 0) {
+    for (const snap of ['qa_report_before_bounce.json', 'qa_report_before_failed.json']) {
+      const prev = readFailCriteria(join(taskDir, snap));
+      if (prev.size > 0 && [...currentFail].some(name => prev.has(name))) {
+        persistedCriterion = true;
+        break;
+      }
+    }
+  }
+
+  // 2. Repeated-failure signal: failed transitions ≥ threshold.
+  const failedCount = taskStore.getEvents(taskId).filter(e => e.phase === 'failed').length;
+
+  // 3. Cross-task signal: other tasks with a recent failed transition sharing a
+  //    FAIL-criterion name with the target (cluster members).
+  const cluster = [taskId];
+  const clusterFail = new Set<string>(currentFail);
+  const now = Date.now();
+  for (const t of taskStore.getAll()) {
+    if (t.id === taskId) continue;
+    const lastFailed = [...taskStore.getEvents(t.id)].reverse().find(e => e.phase === 'failed');
+    if (!lastFailed) continue;
+    if (now - new Date(lastFailed.timestamp).getTime() > RECURRENCE_WINDOW_MS) continue;
+    const failNames = readFailCriteria(join(taskStore.getDirById(t.id), 'qa_report.json'));
+    if (failNames.size === 0) continue;
+    if (currentFail.size > 0 && [...currentFail].some(name => failNames.has(name))) {
+      cluster.push(t.id);
+      for (const name of failNames) clusterFail.add(name);
+    }
+  }
+
+  const hit = persistedCriterion || failedCount >= threshold || cluster.length >= 2;
+  return {
+    hit,
+    cluster,
+    signature: hit ? hashFailCriteria(clusterFail, [...cluster].sort().join(',')) : '',
+  };
+}
+
+/**
+ * Count auto-triggered analyses started today — the `maxAutoAnalysesPerDay`
+ * spend ceiling for the 'auto' trigger. Records are counted by local calendar
+ * day of `createdAt` (the analysis is stamped synchronously at start).
+ */
+export function countAutoAnalysesToday(projectRoot: string, now: Date = new Date()): number {
+  const sameLocalDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  return listSuggestions(projectRoot)
+    .filter(s => s.trigger === 'auto' && sameLocalDay(new Date(s.createdAt), now)).length;
+}
+
 // ── Analyzer ───────────────────────────────────────────────────────────────
 
 const ROLE_FILES = ['analyst', 'planner', 'coder', 'qa-reviewer', 'merger'];
@@ -397,6 +528,7 @@ export async function analyzeFailure(
   taskId: string,
   trigger: RoleRefinementTrigger,
   deps: RoleRefinementAnalyzeDeps,
+  signatureOverride?: string,
 ): Promise<string> {
   const taskStore = new TaskStore(projectRoot);
   const task = taskStore.getById(taskId);
@@ -411,7 +543,10 @@ export async function analyzeFailure(
     status: 'analyzing',
     trigger,
     sourceTaskIds: [taskId],
-    signature: buildFailureSignature(taskDir, taskId),
+    // The watcher passes the cluster signature (whole cluster's FAIL criteria)
+    // so a recurrence record dedupes against itself across triggers; the manual
+    // path defaults to this task's own signature.
+    signature: signatureOverride ?? buildFailureSignature(taskDir, taskId),
     isRolePromptGap: true,
     contractGap: false,
     contractFile: null,

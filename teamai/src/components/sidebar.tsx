@@ -8,9 +8,13 @@ import type { Project } from '@/lib/project-store';
 interface Props {
   projects: Project[];
   activeProjectPath: string | null;
+  /** Number of pending role-refinement suggestions — shown as a badge on the
+   *  Settings nav item (Role Refinement Assistant, Phase 2). Server-supplied
+   *  so it refreshes with router.refresh() on refinement-update events. */
+  refinementPendingCount?: number;
 }
 
-export function Sidebar({ projects: _projects, activeProjectPath: _activeProjectPath }: Props) {
+export function Sidebar({ projects: _projects, activeProjectPath: _activeProjectPath, refinementPendingCount = 0 }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -42,8 +46,8 @@ export function Sidebar({ projects: _projects, activeProjectPath: _activeProject
           { href: '/analytics', label: 'Analytics', icon: '⬡' },
           { href: '/roadmap', label: 'Roadmap', icon: '◉' },
           { href: '/github', label: 'GitHub', icon: '⌂' },
-          { href: '/settings', label: 'Settings', icon: '⚙' },
-        ].map(({ href, label, icon, match }) => {
+          { href: '/settings', label: 'Settings', icon: '⚙', badge: refinementPendingCount },
+        ].map(({ href, label, icon, match, badge }) => {
           const isActive = match ? match(pathname) : pathname === href;
           return (
           <Link
@@ -67,6 +71,15 @@ export function Sidebar({ projects: _projects, activeProjectPath: _activeProject
           >
             <span className="shrink-0 text-base leading-none">{icon}</span>
             {!collapsed && label}
+            {(badge ?? 0) > 0 && (
+              <span
+                data-component="sidebar-refinement-badge"
+                className="ml-auto shrink-0 min-w-[1.25rem] h-5 px-1.5 inline-flex items-center justify-center rounded-full bg-[#2563eb]/30 text-[#93c5fd] text-[10px] font-semibold border border-[#2563eb]/50"
+                title={`${badge} pending role refinement${badge === 1 ? '' : 's'}`}
+              >
+                {badge}
+              </span>
+            )}
           </Link>
         )})}
       </nav>

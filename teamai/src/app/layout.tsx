@@ -16,6 +16,7 @@ import { getAutoModeState } from '@/lib/auto-mode-state';
 import { getOnboardingState } from '@/lib/onboarding';
 import { OnboardingGate } from '@/components/onboarding-gate';
 import { checkTools } from '@/app/actions/tools';
+import { getRefinementSuggestions } from '@/app/actions/role-refinement';
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
@@ -36,10 +37,24 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const onboardingState = getOnboardingState();
   const needsOnboarding = !onboardingState.completed && projects.length === 0;
 
+  // Role Refinement Assistant — pending-suggestion count for the sidebar badge.
+  // Only fetched when a project is active (getActiveProjectPath throws otherwise).
+  let refinementPendingCount = 0;
+  if (activeProject) {
+    try {
+      refinementPendingCount = (await getRefinementSuggestions())
+        .filter(s => s.status === 'suggested').length;
+    } catch { /* no active project / unreadable store — badge stays hidden */ }
+  }
+
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full`}>
       <body className="h-full flex antialiased bg-[#11131b]">
-        <Sidebar projects={projects} activeProjectPath={activeProject?.path ?? null} />
+        <Sidebar
+          projects={projects}
+          activeProjectPath={activeProject?.path ?? null}
+          refinementPendingCount={refinementPendingCount}
+        />
         <div className="flex-1 min-w-0 overflow-auto flex flex-col">
           {/* Project tabs row - moved above main content */}
           <div className="flex items-center justify-between gap-1">

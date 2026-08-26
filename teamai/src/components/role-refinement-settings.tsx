@@ -35,15 +35,19 @@ export function RoleRefinementSettings({ config, suggestions, tasks }: Props) {
   const applied = suggestions.filter(s => s.status === 'applied');
   const history = suggestions.filter(s => s.status === 'dismissed' || s.status === 'superseded');
 
-  function setMode(mode: RoleRefinementMode) {
+  function patchConfig(patch: Partial<RoleRefinementConfig>) {
     setError(null);
     startTransition(async () => {
       try {
-        await setRoleRefinementConfigAction({ ...config, mode });
+        await setRoleRefinementConfigAction({ ...config, ...patch });
       } catch (err) {
-        setError(formatActionError('update role refinement mode', err));
+        setError(formatActionError('update role refinement config', err));
       }
     });
+  }
+
+  function setMode(mode: RoleRefinementMode) {
+    patchConfig({ mode });
   }
 
   function runAction(action: () => Promise<{ success: boolean; error?: string }>) {
@@ -68,9 +72,11 @@ export function RoleRefinementSettings({ config, suggestions, tasks }: Props) {
           on the next pipeline run and are backed up for one-click revert.
         </p>
 
-        {/* Mode control — Phase 1 exposes Off / Manual (Auto arrives with the recurrence watcher). */}
+        {/* Mode control — Off / Manual / Auto. Auto auto-triggers analysis on
+            recurrence but every edit still needs human approval (Phase 3 adds
+            auto-apply, gated by the autoApply checkbox below). */}
         <div className="flex items-center gap-1">
-          {(['off', 'manual'] as RoleRefinementMode[]).map(m => (
+          {(['off', 'manual', 'auto'] as RoleRefinementMode[]).map(m => (
             <button
               key={m}
               onClick={() => setMode(m)}
@@ -82,15 +88,54 @@ export function RoleRefinementSettings({ config, suggestions, tasks }: Props) {
                   : 'bg-[#1a1f2e] text-slate-400 border border-[#1e293b] hover:text-slate-200'
               }`}
             >
-              {m === 'off' ? 'Off' : 'Manual'}
+              {m === 'off' ? 'Off' : m === 'manual' ? 'Manual' : 'Auto'}
             </button>
           ))}
           <span className="ml-2 text-[10px] text-slate-500">
             {config.mode === 'off'
               ? 'Hidden everywhere — no analysis runs.'
-              : 'Analyze on demand from the failed task card.'}
+              : config.mode === 'manual'
+                ? 'Analyze on demand from the failed task card.'
+                : 'Auto-analyzes recurring failures; you still approve every edit.'}
           </span>
         </div>
+
+        {/* Auto-mode controls (§5.2): daily spend cap + the Phase-3 auto-apply opt-in. */}
+        {config.mode === 'auto' && (
+          <div className="mt-3 space-y-3 border border-[#1e293b] rounded-lg bg-[#0f1219] p-3">
+            <label className="flex items-start gap-2 text-xs text-slate-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={config.autoApply}
+                onChange={e => patchConfig({ autoApply: e.target.checked })}
+                disabled={isPending}
+                data-component="role-refinement-autoapply"
+                className="mt-0.5 accent-[#2563eb]"
+              />
+              <span>
+                Auto-apply suggested edits
+                <span className="block text-[10px] text-slate-600 mt-0.5">
+                  Only additive, low-risk edits are ever auto-applied, and every
+                  change is backed up and revertable. (Takes effect with the
+                  Phase-3 auto-apply policy.)
+                </span>
+              </span>
+            </label>
+            <label className="flex items-center gap-2 text-xs text-slate-400">
+              <span>Max auto-analyses per day</span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={config.maxAutoAnalysesPerDay}
+                onChange={e => patchConfig({ maxAutoAnalysesPerDay: Math.max(1, Number(e.target.value) || 1) })}
+                disabled={isPending}
+                data-component="role-refinement-max-auto"
+                className="w-16 px-2 py-1 text-xs bg-[#1a1f2e] border border-[#1e293b] rounded text-slate-200"
+              />
+            </label>
+          </div>
+        )}
 
         {error && <p className="mt-2 text-[11px] text-red-400">{error}</p>}
       </div>
