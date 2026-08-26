@@ -63,6 +63,7 @@ function makeSuggestion(overrides: Partial<RoleRefinementSuggestion> = {}): Role
     updatedAt: '2026-08-01T00:00:00.000Z',
     status: 'suggested',
     trigger: 'manual',
+    model: 'claude-sonnet-4-6',
     sourceTaskIds: ['t-1'],
     signature: 'sha256:x',
     isRolePromptGap: true,

@@ -79,6 +79,9 @@ export interface RoleRefinementSuggestion {
   updatedAt: string;
   status: RoleRefinementStatus;
   trigger: RoleRefinementTrigger;
+  /** Model that ran this analysis (Settings → Role Refinements). Null for
+   *  records written before the field existed. */
+  model: string | null;
   /** Failures that motivated this record. */
   sourceTaskIds: string[];
   /** Dedupe key: sha256 of sorted FAIL-criterion names + role set. */
@@ -214,11 +217,16 @@ function writeSuggestionRecord(projectRoot: string, record: RoleRefinementSugges
   }
 }
 
+/** Backfill fields older records predate (e.g. `model`) so readers are safe. */
+function normalizeSuggestion(raw: RoleRefinementSuggestion): RoleRefinementSuggestion {
+  return { ...raw, model: typeof raw.model === 'string' ? raw.model : null };
+}
+
 export function getSuggestion(projectRoot: string, id: string): RoleRefinementSuggestion | null {
   try {
     const p = suggestionPath(projectRoot, id);
     if (!existsSync(p)) return null;
-    return JSON.parse(readFileSync(p, 'utf-8')) as RoleRefinementSuggestion;
+    return normalizeSuggestion(JSON.parse(readFileSync(p, 'utf-8')) as RoleRefinementSuggestion);
   } catch {
     return null;
   }
@@ -233,7 +241,7 @@ export function listSuggestions(projectRoot: string): RoleRefinementSuggestion[]
     if (!f.endsWith('.json') || f.includes('.analysis.')) continue;
     try {
       const record = JSON.parse(readFileSync(join(dir, f), 'utf-8')) as RoleRefinementSuggestion;
-      if (record && record.id) records.push(record);
+      if (record && record.id) records.push(normalizeSuggestion(record));
     } catch { /* unreadable — skip */ }
   }
   return records.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
@@ -546,6 +554,7 @@ export async function analyzeFailure(
   const taskDir = taskStore.getDirById(taskId);
 
   const sourceTasks = sourceTaskIds && sourceTaskIds.length > 0 ? sourceTaskIds : [taskId];
+  const config = getRoleRefinementConfig(projectRoot);
 
   const id = randomUUID();
   const record: RoleRefinementSuggestion = {
@@ -554,6 +563,7 @@ export async function analyzeFailure(
     updatedAt: new Date().toISOString(),
     status: 'analyzing',
     trigger,
+    model: config.model,
     sourceTaskIds: sourceTasks,
     // The watcher passes the cluster signature (whole cluster's FAIL criteria)
     // so a recurrence record dedupes against itself across triggers; the manual
@@ -584,7 +594,6 @@ export async function analyzeFailure(
     // injected, and the model comes from the Role Refinements settings (default
     // sonnet), not the `analyst` role's provider override. Provider/env still
     // come from the project's providers config default.
-    const config = getRoleRefinementConfig(projectRoot);
     const providerCfg = { ...resolveProvider(projectRoot, 'general'), model: config.model };
     const providerOpts = providerToSessionOpts(providerCfg);
     sessionId = await deps.createSession({

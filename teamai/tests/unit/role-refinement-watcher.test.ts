@@ -89,6 +89,7 @@ function makeRecord(overrides: Partial<RoleRefinementSuggestion> = {}): RoleRefi
     updatedAt: new Date().toISOString(),
     status: 'suggested',
     trigger: 'auto',
+    model: 'claude-sonnet-4-6',
     sourceTaskIds: ['t-1'],
     signature: 'sha256:covered',
     isRolePromptGap: true,

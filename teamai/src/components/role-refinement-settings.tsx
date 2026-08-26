@@ -292,6 +292,11 @@ export function RoleRefinementSettings({ config, suggestions, tasks }: Props) {
                 <span className="text-[10px] text-slate-600">
                   applied {s.appliedAt ? new Date(s.appliedAt).toLocaleString() : ''}
                 </span>
+                {s.model && (
+                  <span className="text-[10px] font-mono text-slate-500" data-component="suggestion-model">
+                    {s.model}
+                  </span>
+                )}
                 <div className="ml-auto flex items-center gap-2">
                   {s.edits.map(e => (
                     <span key={e.roleFile} className="text-[10px] font-mono text-emerald-400/80">
