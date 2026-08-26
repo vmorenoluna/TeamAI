@@ -108,18 +108,18 @@ function makeRecord(overrides: Partial<RoleRefinementSuggestion> = {}): RoleRefi
 describe('maybeAutoAnalyze', () => {
   it('does not run when mode is off or manual', async () => {
     seedRecurringFailure('t-1', ['Evidence missing']);
-    setRoleRefinementConfig(root, { mode: 'off', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'off', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
     await maybeAutoAnalyze(root, 't-1');
     expect(mockAnalyzeFailure).not.toHaveBeenCalled();
 
-    setRoleRefinementConfig(root, { mode: 'manual', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'manual', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
     await maybeAutoAnalyze(root, 't-1');
     expect(mockAnalyzeFailure).not.toHaveBeenCalled();
   });
 
   it('auto-analyzes a recurring failure with trigger "auto" and the cluster signature', async () => {
     seedRecurringFailure('t-1', ['Evidence missing']);
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
 
     await maybeAutoAnalyze(root, 't-1');
     expect(mockAnalyzeFailure).toHaveBeenCalledTimes(1);
@@ -137,7 +137,7 @@ describe('maybeAutoAnalyze', () => {
     const dir2 = store.getDirById('t-2');
     writeFileSync(join(dir2, 'qa_report.json'), JSON.stringify({ criteria: [{ name: 'Evidence missing', status: 'FAIL' }] }));
     store.updatePhase('t-2', 'failed');
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
 
     await maybeAutoAnalyze(root, 't-1');
     expect(mockAnalyzeFailure).toHaveBeenCalledTimes(1);
@@ -151,7 +151,7 @@ describe('maybeAutoAnalyze', () => {
     const dir = store.getDirById('t-1');
     writeFileSync(join(dir, 'qa_report.json'), JSON.stringify({ criteria: [{ name: 'x', status: 'FAIL' }] }));
     store.updatePhase('t-1', 'failed');
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
 
     await maybeAutoAnalyze(root, 't-1');
     expect(mockAnalyzeFailure).not.toHaveBeenCalled();
@@ -161,7 +161,7 @@ describe('maybeAutoAnalyze', () => {
     seedRecurringFailure('t-1', ['Evidence missing']);
     // A different signature, so the dedupe gate doesn't fire first.
     writeSuggestion(root, makeRecord({ id: 'other', signature: 'sha256:other' }));
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 1, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 1, recurrenceThreshold: 2 });
 
     await maybeAutoAnalyze(root, 't-1');
     expect(mockAnalyzeFailure).not.toHaveBeenCalled();
@@ -170,7 +170,7 @@ describe('maybeAutoAnalyze', () => {
   it('skips when an existing record already covers the signature', async () => {
     seedRecurringFailure('t-1', ['Evidence missing']);
     writeSuggestion(root, makeRecord({ signature: detectRecurrence(root, 't-1').signature }));
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
 
     await maybeAutoAnalyze(root, 't-1');
     expect(mockAnalyzeFailure).not.toHaveBeenCalled();
@@ -184,7 +184,7 @@ describe('maybeAutoAnalyze', () => {
       appliedBy: 'human',
       signature: detectRecurrence(root, 't-1').signature,
     }));
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
 
     await maybeAutoAnalyze(root, 't-1');
     expect(mockAnalyzeFailure).not.toHaveBeenCalled();
@@ -193,14 +193,14 @@ describe('maybeAutoAnalyze', () => {
   it('escalates (does not auto-analyze) past the retry-loop cap', async () => {
     seedRecurringFailure('t-1', ['Evidence missing']);
     new TaskStore(root).update('t-1', { refinementRetryCount: REFINEMENT_RETRY_LOOP_CAP });
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
 
     await maybeAutoAnalyze(root, 't-1');
     expect(mockAnalyzeFailure).not.toHaveBeenCalled();
   });
 
   it('ignores unknown tasks', async () => {
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
     await maybeAutoAnalyze(root, 'ghost');
     expect(mockAnalyzeFailure).not.toHaveBeenCalled();
   });
@@ -208,7 +208,7 @@ describe('maybeAutoAnalyze', () => {
   it('stamps refinementEscalated when the retry-loop cap is reached', async () => {
     seedRecurringFailure('t-1', ['Evidence missing']);
     new TaskStore(root).update('t-1', { refinementRetryCount: REFINEMENT_RETRY_LOOP_CAP });
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
 
     await maybeAutoAnalyze(root, 't-1');
     expect(mockAnalyzeFailure).not.toHaveBeenCalled();
@@ -223,7 +223,7 @@ describe('maybeAutoAnalyze', () => {
       appliedAt: new Date().toISOString(),
       signature: detectRecurrence(root, 't-1').signature,
     }));
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
 
     await maybeAutoAnalyze(root, 't-1');
     expect(mockAnalyzeFailure).not.toHaveBeenCalled();
@@ -257,7 +257,7 @@ describe('maybeAutoApplyAndRetry', () => {
 
   it('auto-applies an eligible suggestion and retries when all gates pass', async () => {
     seedAutoSuggested();
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
     setAutoRunner(true);
 
     await maybeAutoApplyAndRetry(root, 's-1');
@@ -278,7 +278,7 @@ describe('maybeAutoApplyAndRetry', () => {
 
   it('does nothing when autoApply is not opted in', async () => {
     seedAutoSuggested();
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
     setAutoRunner(true);
 
     await maybeAutoApplyAndRetry(root, 's-1');
@@ -288,7 +288,7 @@ describe('maybeAutoApplyAndRetry', () => {
 
   it('does nothing when the pipeline auto-runner is off (compounded opt-in)', async () => {
     seedAutoSuggested();
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
     setAutoRunner(false);
 
     await maybeAutoApplyAndRetry(root, 's-1');
@@ -306,7 +306,7 @@ describe('maybeAutoApplyAndRetry', () => {
       sourceTaskIds: ['t-1'],
       edits: [{ roleFile: 'planner.md', mode: 'replace', rationale: 'r', proposedContent: 'FULL REWRITE', riskClass: 'modifying' }],
     }));
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
     setAutoRunner(true);
 
     await maybeAutoApplyAndRetry(root, 's-2');
@@ -317,7 +317,7 @@ describe('maybeAutoApplyAndRetry', () => {
   it('does nothing once the retry-loop cap is reached (escalation, not auto-apply)', async () => {
     seedAutoSuggested();
     new TaskStore(root).update('t-1', { refinementRetryCount: REFINEMENT_RETRY_LOOP_CAP });
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
     setAutoRunner(true);
 
     await maybeAutoApplyAndRetry(root, 's-1');
@@ -329,7 +329,7 @@ describe('maybeAutoApplyAndRetry', () => {
 describe('startRoleRefinementWatcher', () => {
   it('fires maybeAutoAnalyze on a phase-change to failed', async () => {
     seedRecurringFailure('t-1', ['Evidence missing']);
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
 
     startRoleRefinementWatcher();
     processManager.emit('phase-change', { taskId: 't-1', phase: 'failed', projectRoot: root });
@@ -342,7 +342,7 @@ describe('startRoleRefinementWatcher', () => {
 
   it('ignores non-failed phase changes', async () => {
     seedRecurringFailure('t-1', ['Evidence missing']);
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
 
     startRoleRefinementWatcher();
     processManager.emit('phase-change', { taskId: 't-1', phase: 'implement', projectRoot: root });
@@ -352,7 +352,7 @@ describe('startRoleRefinementWatcher', () => {
 
   it('runs the full closed loop: phase-change → auto-analysis → auto-apply → retry', async () => {
     seedRecurringFailure('t-1', ['Evidence missing']);
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: true, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
     setAutoRunner(true);
 
     // The mocked analyzer writes a REAL suggested record so the continuation

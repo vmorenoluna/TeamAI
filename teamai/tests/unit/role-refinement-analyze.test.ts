@@ -4,8 +4,8 @@
  *  the fake `waitForCompletion` writes the `.analysis.json` the real agent
  *  would write, letting us exercise the parse → record → task-stamp path. */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync } from 'fs';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -25,7 +25,8 @@ import { TaskStore } from '../../src/lib/task-store';
 import {
   analyzeFailure,
   getSuggestion,
-  buildAnalysisPrompt,
+  buildAnalysisCommand,
+  ROLE_REFINEMENT_ANALYSIS_COMMAND,
   parseAnalysisOutput,
   type RoleRefinementAnalyzeDeps,
 } from '../../src/lib/role-refinement';
@@ -63,11 +64,13 @@ function seedTask(phase = 'failed'): string {
 /** Fake deps whose waitForCompletion writes the analysis file like the agent would. */
 function fakeDeps(analysis: Record<string, unknown>): {
   deps: RoleRefinementAnalyzeDeps;
+  createSpy: Mock<[], Promise<string>>;
   sentPrompt: () => string | undefined;
 } {
   let prompt: string | undefined;
+  const createSpy = vi.fn(async () => 'sess-1');
   const deps: RoleRefinementAnalyzeDeps = {
-    createSession: vi.fn(async () => 'sess-1'),
+    createSession: createSpy,
     sendMessage: vi.fn((_id: string, content: string) => { prompt = content; }),
     waitForCompletion: vi.fn(async () => {
       // The record file exists before the session; derive the id from the
@@ -79,13 +82,13 @@ function fakeDeps(analysis: Record<string, unknown>): {
     }),
     killSession: vi.fn(),
   };
-  return { deps, sentPrompt: () => prompt };
+  return { deps, createSpy, sentPrompt: () => prompt };
 }
 
 describe('analyzeFailure', () => {
   it('routes a role-prompt gap to suggested with edits, stamps the task, and emits', async () => {
     const taskId = seedTask();
-    const { deps, sentPrompt } = fakeDeps({
+    const { deps, createSpy, sentPrompt } = fakeDeps({
       isRolePromptGap: true,
       contractGap: false,
       contractFile: null,
@@ -112,11 +115,19 @@ describe('analyzeFailure', () => {
     expect(taskStore.getById(taskId)?.refinementStatus).toBe('suggested');
     expect(taskStore.getById(taskId)?.refinementSuggestionId).toBe(id);
 
-    // The prompt handed the artifacts + role files as paths and demanded JSON.
+    // The session is a generic one — no pipeline role persona — and the model
+    // comes from the Role Refinements config (default sonnet), not the analyst role.
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ role: 'general', model: 'claude-sonnet-4-6' }));
+
+    // The message invokes the internal command and hands the artifacts + role
+    // files as paths; the classification instructions live in the command file.
     const prompt = sentPrompt()!;
+    expect(prompt).toContain(`/${ROLE_REFINEMENT_ANALYSIS_COMMAND}`);
     expect(prompt).toContain('qa_report.json');
     expect(prompt).toContain(joinPath(root, '.claude', 'roles', 'planner.md'));
-    expect(prompt).toContain('isRolePromptGap');
+    expect(prompt).toContain('OUTPUT_FILE:');
+    expect(prompt).toContain('FAILURE_ARTIFACTS:');
+    expect(prompt).not.toContain('isRolePromptGap'); // instructions live in the command template
 
     // A refinement-update event fires so open panels refresh.
     expect(mockEmit).toHaveBeenCalledWith('refinement-update', { taskId, projectRoot: root });
@@ -270,15 +281,18 @@ describe('parseAnalysisOutput', () => {
   });
 });
 
-describe('buildAnalysisPrompt', () => {
-  it('lists only existing artifacts and role files as paths', () => {
+describe('buildAnalysisCommand', () => {
+  it('invokes the internal command with existing artifacts and role files as path args', () => {
     seedTask();
     const dir = taskStore.getDirById('task-1');
-    const prompt = buildAnalysisPrompt(root, [dir], join(root, '.teamai', 'role-refinements', 'x.analysis.json'));
-    expect(prompt).toContain(join(dir, 'qa_report.json'));
-    expect(prompt).toContain(join(dir, 'completion_summary.md'));
-    expect(prompt).not.toContain('output-plan.log'); // does not exist
-    expect(prompt).toContain(join(root, '.teamai', 'role-refinements', 'x.analysis.json'));
+    const command = buildAnalysisCommand(root, [dir], join(root, '.teamai', 'role-refinements', 'x.analysis.json'));
+    expect(command.startsWith(`/${ROLE_REFINEMENT_ANALYSIS_COMMAND}`)).toBe(true);
+    expect(command).toContain(join(dir, 'qa_report.json'));
+    expect(command).toContain(join(dir, 'completion_summary.md'));
+    expect(command).not.toContain('output-plan.log'); // does not exist
+    expect(command).toContain('OUTPUT_FILE: ' + join(root, '.teamai', 'role-refinements', 'x.analysis.json'));
+    expect(command).toContain('FAILURE_ARTIFACTS:');
+    expect(command).toContain('ROLE_FILES:');
   });
 
   it('includes artifact paths from every task dir in the cluster', () => {
@@ -287,8 +301,39 @@ describe('buildAnalysisPrompt', () => {
     taskStore.updatePhase(id2, 'failed');
     writeFileSync(join(taskStore.getDirById(id2), 'completion_summary.md'), 'second failure\n');
 
-    const prompt = buildAnalysisPrompt(root, [taskStore.getDirById(id1), taskStore.getDirById(id2)], '/tmp/x.json');
-    expect(prompt).toContain(join(taskStore.getDirById(id1), 'qa_report.json'));
-    expect(prompt).toContain(join(taskStore.getDirById(id2), 'completion_summary.md'));
+    const command = buildAnalysisCommand(root, [taskStore.getDirById(id1), taskStore.getDirById(id2)], '/tmp/x.json');
+    expect(command).toContain(join(taskStore.getDirById(id1), 'qa_report.json'));
+    expect(command).toContain(join(taskStore.getDirById(id2), 'completion_summary.md'));
+  });
+});
+
+describe('role-refinement-analysis command template', () => {
+  it('carries the classification contract so the agent is not sent inline instructions', () => {
+    // The analysis agent is instructed via the internal command (force-synced
+    // from defaults/, like the other pipeline commands) — the instructions must
+    // live in the template, not in the sent message.
+    const template = readFileSync(joinPath(process.cwd(), 'defaults', 'commands', 'role-refinement-analysis.md'), 'utf-8');
+    expect(template).toContain('$ARGUMENTS');
+    expect(template).toContain('role-prompt gap');
+    expect(template).toContain('orchestration-contract gap');
+    expect(template).toContain('isRolePromptGap');
+    expect(template).toContain('OUTPUT_FILE');
+    expect(template).toContain('FAILURE_ARTIFACTS');
+    expect(template).toContain('ROLE_FILES');
+  });
+
+  it('uses the Role Refinements configured model for the analysis session', async () => {
+    const taskId = seedTask();
+    // A custom model in the project config overrides the default.
+    mkdirSync(join(root, '.teamai'), { recursive: true });
+    writeFileSync(join(root, '.teamai', 'role-refinement.json'), JSON.stringify({ model: 'claude-opus-4-8' }));
+
+    const { deps, createSpy } = fakeDeps({
+      isRolePromptGap: false, contractGap: false, contractFile: null,
+      rootCause: '', confidence: 'low', diagnosis: 'n/a', edits: [],
+    });
+    await analyzeFailure(root, taskId, 'manual', deps);
+
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ role: 'general', model: 'claude-opus-4-8' }));
   });
 });

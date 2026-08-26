@@ -82,13 +82,19 @@ describe('config', () => {
   });
 
   it('round-trips a custom config', () => {
-    setRoleRefinementConfig(root, { mode: 'off', autoApply: true, maxAutoAnalysesPerDay: 2, recurrenceThreshold: 3 });
-    expect(getRoleRefinementConfig(root)).toEqual({ mode: 'off', autoApply: true, maxAutoAnalysesPerDay: 2, recurrenceThreshold: 3 });
+    setRoleRefinementConfig(root, { mode: 'off', model: 'claude-opus-4-8', autoApply: true, maxAutoAnalysesPerDay: 2, recurrenceThreshold: 3 });
+    expect(getRoleRefinementConfig(root)).toEqual({ mode: 'off', model: 'claude-opus-4-8', autoApply: true, maxAutoAnalysesPerDay: 2, recurrenceThreshold: 3 });
   });
 
-  it('clamps an invalid mode back to manual', () => {
-    writeFileSync(join(root, '.teamai', 'role-refinement.json'), JSON.stringify({ mode: 'nope' }));
+  it('clamps an invalid mode back to manual but keeps the configured model', () => {
+    writeFileSync(join(root, '.teamai', 'role-refinement.json'), JSON.stringify({ mode: 'nope', model: 'claude-opus-4-8' }));
     expect(getRoleRefinementConfig(root).mode).toBe('manual');
+    expect(getRoleRefinementConfig(root).model).toBe('claude-opus-4-8');
+  });
+
+  it('defaults the analysis model to sonnet when unset', () => {
+    writeFileSync(join(root, '.teamai', 'role-refinement.json'), JSON.stringify({ mode: 'auto' }));
+    expect(getRoleRefinementConfig(root).model).toBe('claude-sonnet-4-6');
   });
 });
 
@@ -204,7 +210,7 @@ describe('detectRecurrence', () => {
     // No FAIL criteria, so only the repeated-failure signal can fire.
     const { store } = createFailedTask('t1');
     store.updatePhase('t1', 'failed'); // 2 failed transitions total
-    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 3 });
+    setRoleRefinementConfig(root, { mode: 'auto', model: 'claude-sonnet-4-6', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 3 });
 
     expect(detectRecurrence(root, 't1').hit).toBe(false);
 

@@ -22,6 +22,12 @@ vi.mock('@/app/actions/role-refinement', () => ({
   revertRefinementAction: (...args: unknown[]) => mockRevert(...args),
 }));
 
+const { mockGetAvailableModels } = vi.hoisted(() => ({ mockGetAvailableModels: vi.fn() }));
+
+vi.mock('@/app/actions/providers', () => ({
+  getAvailableModels: (...args: unknown[]) => mockGetAvailableModels(...args),
+}));
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
@@ -51,6 +57,7 @@ import { RoleRefinementSettings } from '@/components/role-refinement-settings';
 
 const CONFIG: RoleRefinementConfig = {
   mode: 'manual',
+  model: 'claude-sonnet-4-6',
   autoApply: false,
   maxAutoAnalysesPerDay: 5,
   recurrenceThreshold: 2,
@@ -85,6 +92,9 @@ beforeEach(() => {
   mockApply.mockResolvedValue({ success: true });
   mockDismiss.mockResolvedValue({ success: true });
   mockRevert.mockResolvedValue({ success: true });
+  // By default the model fetch never settles, so tests that don't care about
+  // the dropdown don't get async state updates outside act().
+  mockGetAvailableModels.mockReturnValue(new Promise(() => {}));
   Object.defineProperty(navigator, 'clipboard', {
     value: { writeText: vi.fn().mockResolvedValue(undefined) },
     configurable: true,
@@ -98,6 +108,18 @@ describe('RoleRefinementSettings', () => {
     expect(mockSetConfig).toHaveBeenCalledWith({ ...CONFIG, mode: 'off' });
     fireEvent.click(screen.getByTestId('role-refinement-mode-auto'));
     expect(mockSetConfig).toHaveBeenCalledWith({ ...CONFIG, mode: 'auto' });
+  });
+
+  it('lets the user pick the analysis model (default sonnet) and persists it', async () => {
+    mockGetAvailableModels.mockResolvedValue({ models: ['claude-sonnet-4-6', 'claude-opus-4-8'] });
+    render(<RoleRefinementSettings config={CONFIG} suggestions={[]} tasks={{}} />);
+    const select = screen.getByTestId('role-refinement-model') as HTMLSelectElement;
+    expect(select.value).toBe('claude-sonnet-4-6');
+    // The provider model list populates the dropdown.
+    expect(await screen.findByRole('option', { name: 'claude-opus-4-8' })).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: 'claude-opus-4-8' } });
+    expect(mockSetConfig).toHaveBeenCalledWith({ ...CONFIG, model: 'claude-opus-4-8' });
   });
 
   it('reveals the autoApply opt-in and daily spend cap when Auto is active', () => {
