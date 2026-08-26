@@ -2,6 +2,27 @@
 
 Multi-agent [Claude Code](https://docs.anthropic.com/en/docs/claude-code) orchestrator — an Electron desktop app that runs parallel Claude CLI agents through automated software development pipelines.
 
+## Features
+
+### Sidebar sections (currently visible)
+
+| Section | Route | Description |
+|---|---|---|
+| **Kanban** | `/` | Drag-and-drop task board spanning all pipeline phases (`backlog` → `done`) with task detail, review, and retry actions |
+| **Workflow** | `/workflow` | Pipeline orchestration view showing how tasks advance through spec → plan → implement → QA review → merge |
+| **Terminals** | `/terminals` | Unified terminal UI (xterm.js) streaming live agent session output |
+| **Roadmap** | `/roadmap` | Long-horizon roadmap planning view |
+| **Settings** | `/settings` | Project configuration: LLM providers, pipeline phases, auto mode, and the Role Refinement Assistant |
+
+### Core platform features
+
+- **Multi-agent pipeline** — role-specialized Claude agents (analyst, planner, coder, qa-reviewer, merger) drive each task through spec → plan → implement → QA review → merge
+- **Auto Mode** — automatically advances tasks: picks backlog tasks, auto-approves reviews, creates PRs, polls CI, and auto-merges. State persists across restarts
+- **Role Refinement Assistant** — analyzes failed tasks and suggests role-prompt improvements (with auto-apply + auto-retry as opt-in)
+- **Git worktree isolation** — parallel agents run in isolated git worktrees, preventing file conflicts
+- **Multi-project support** — manage multiple target codebases, each with its own `.teamai/` state and `.claude/` config
+- **Crash recovery** — interrupted tasks and rate-limited sessions auto-resume on restart
+
 ## Prerequisites
 
 - **Node.js** ≥ 20
@@ -218,6 +239,15 @@ Per-project `.teamai/` directory:
 | `container.json` | Enable/disable Docker devcontainer sandboxing |
 
 Default configs live in `defaults/` and are synced to projects on startup.
+
+## TODO
+
+Features temporarily hidden from the sidebar (routes still exist and can be re-enabled by adding them back to the nav list in `src/components/sidebar.tsx`):
+
+- [ ] **GitHub** (`/github`) — import tasks from GitHub issues
+- [ ] **Analytics** (`/analytics`) — agent performance, pipeline bottlenecks, and QA trends dashboard
+- [ ] **Insights** (`/insights`) — pipeline analytics (completion rate, phase distribution) and project chat
+- [ ] **Ideation** (`/ideation`) — scan the codebase for improvements, vulnerabilities, and tech debt
 
 ## Contributing
 

@@ -40,12 +40,8 @@ export function Sidebar({ projects: _projects, activeProjectPath: _activeProject
         {[
           { href: '/', label: 'Kanban', icon: '▦', match: (p: string) => p === '/' || p.startsWith('/task') },
           { href: '/workflow', label: 'Workflow', icon: '⇢' },
-          { href: '/insights', label: 'Insights', icon: '◎' },
-          { href: '/ideation', label: 'Ideation', icon: '◈' },
           { href: '/terminals', label: 'Terminals', icon: '▶' },
-          { href: '/analytics', label: 'Analytics', icon: '⬡' },
           { href: '/roadmap', label: 'Roadmap', icon: '◉' },
-          { href: '/github', label: 'GitHub', icon: '⌂' },
           { href: '/settings', label: 'Settings', icon: '⚙', badge: refinementPendingCount },
         ].map(({ href, label, icon, match, badge }) => {
           const isActive = match ? match(pathname) : pathname === href;
