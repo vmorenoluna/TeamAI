@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { setRoleRefinementConfigAction, applyRefinementAction, dismissRefinementAction, revertRefinementAction } from '@/app/actions/role-refinement';
+import { getAvailableModels } from '@/app/actions/providers';
 import type { RoleRefinementConfig, RoleRefinementMode, RoleRefinementSuggestion } from '@/lib/role-refinement';
 import { CopyButton } from './copy-button';
 import { formatActionError } from '@/lib/error-format';
@@ -29,6 +30,22 @@ function taskLabel(suggestion: RoleRefinementSuggestion, tasks: Record<string, s
 export function RoleRefinementSettings({ config, suggestions, tasks }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [models, setModels] = useState<string[]>([]);
+
+  // Model dropdown options (same pattern as the provider-config editor): load
+  // once on mount from the provider model list; a failure is non-fatal because
+  // the select always includes the currently configured model.
+  const loadModels = useCallback(async () => {
+    try {
+      const result = await getAvailableModels('anthropic');
+      if (result.models.length > 0) setModels(result.models);
+    } catch { /* non-fatal */ }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadModels();
+  }, [loadModels]);
 
   const pending = suggestions.filter(s => s.status === 'suggested' || s.status === 'analyzing');
   const noGaps = suggestions.filter(s => s.status === 'no-gap');
@@ -98,6 +115,30 @@ export function RoleRefinementSettings({ config, suggestions, tasks }: Props) {
                 ? 'Analyze on demand from the failed task card.'
                 : 'Auto-analyzes recurring failures; you still approve every edit.'}
           </span>
+        </div>
+
+        {/* Analysis model — the failure-analysis agent is a generic session
+            (no pipeline role persona), so its model is configured here, not via
+            the role providers. Defaults to sonnet. */}
+        <div className="mt-3">
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            <span className="shrink-0">Analysis model</span>
+            <select
+              value={config.model}
+              onChange={e => patchConfig({ model: e.target.value })}
+              disabled={isPending}
+              data-component="role-refinement-model"
+              className="flex-1 min-w-0 px-2 py-1 text-xs bg-[#1a1f2e] border border-[#1e293b] rounded text-slate-200 disabled:opacity-50"
+            >
+              {(models.includes(config.model) ? models : [config.model, ...models]).map(m => (
+                <option key={m} value={m} className="bg-[#11131b]">{m}</option>
+              ))}
+            </select>
+          </label>
+          <p className="text-[10px] text-slate-600 mt-1">
+            The model that runs the failure analysis. The analysis agent is a generic session — it
+            is not told to act as any pipeline role (its instructions come from an internal command).
+          </p>
         </div>
 
         {/* Auto-mode controls (§5.2): daily spend cap + the Phase-3 auto-apply opt-in. */}

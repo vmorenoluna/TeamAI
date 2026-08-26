@@ -1,8 +1,9 @@
 /**
  * Role Refinement Assistant — core lib (Phase 1: manual analysis + review UI).
  *
- * When a task fails, a headless `analyst` session (the insights side-channel
- * recipe) reads the failure artifacts and the five role files, then classifies
+ * When a task fails, a headless *generic* session (no pipeline role persona —
+ * it is instructed via the internal `role-refinement-analysis` command instead)
+ * reads the failure artifacts and the five role files, then classifies
  * the root cause:
  *
  * - **Role-prompt gap** → emits diffable `edits[]` against `.claude/roles/*.md`
@@ -44,6 +45,8 @@ export type RefinementConfidence = 'high' | 'medium' | 'low';
 export interface RoleRefinementConfig {
   /** 'off' hides the feature entirely; 'manual' is button-only (Phase 1 default); 'auto' is Phase 2. */
   mode: RoleRefinementMode;
+  /** Model for the failure-analysis agent. Defaults to sonnet. */
+  model: string;
   /** Phase 3 only — additive/low-risk edits only. */
   autoApply: boolean;
   /** Hard spend ceiling for the 'auto' trigger. */
@@ -97,11 +100,14 @@ export interface RoleRefinementSuggestion {
   backups: RoleRefinementBackup[];
 }
 
-/** Session seam for analyzeFailure — injectable so tests can fake the agent. */
+/** Session seam for analyzeFailure — injectable so tests can fake the agent.
+ *  The session is `role: 'general'`: it must NOT carry a pipeline role persona
+ *  (those describe how to develop the project) — the internal
+ *  `role-refinement-analysis` command supplies its instructions instead. */
 export interface RoleRefinementAnalyzeDeps {
   createSession: (opts: {
     taskId: string;
-    role: 'analyst';
+    role: 'general';
     cwd: string;
     projectRoot: string;
     permissionMode: 'bypassPermissions';
@@ -115,9 +121,10 @@ export interface RoleRefinementAnalyzeDeps {
 
 /**
  * Real session recipe for analyzeFailure — the insights-session pattern with
- * the project's configured analyst model and rate-limit-aware completion.
- * Shared by the manual server action and the Phase-2 recurrence watcher so
- * both entry points run the identical session lifecycle.
+ * the project's configured role-refinement model (Settings → Role Refinements,
+ * default sonnet) and rate-limit-aware completion. Shared by the manual server
+ * action and the Phase-2 recurrence watcher so both entry points run the
+ * identical session lifecycle.
  */
 export function makeRoleRefinementAnalyzeDeps(): RoleRefinementAnalyzeDeps {
   return {
@@ -133,6 +140,7 @@ export function makeRoleRefinementAnalyzeDeps(): RoleRefinementAnalyzeDeps {
 
 export const DEFAULT_ROLE_REFINEMENT_CONFIG: RoleRefinementConfig = {
   mode: 'manual',
+  model: 'claude-sonnet-4-6',
   autoApply: false,
   maxAutoAnalysesPerDay: 5,
   recurrenceThreshold: 2,
@@ -425,10 +433,17 @@ const ANALYSIS_ARTIFACTS = [
   'output-plan.log',
 ];
 
-/** Build the analysis prompt (§6.3) — inputs handed as paths, never pre-summarized.
- *  `taskDirs` holds every task in the recurrence cluster (just one for a manual
- *  trigger), so on the auto path the analyst sees the sibling failures too. */
-export function buildAnalysisPrompt(projectRoot: string, taskDirs: string[], analysisPath: string): string {
+/** Name of the internal analysis command synced to `.claude/commands/`. */
+export const ROLE_REFINEMENT_ANALYSIS_COMMAND = 'role-refinement-analysis';
+
+/** Build the analysis session's first message — a slash-command invocation.
+ *  The classification instructions + JSON output contract live in the internal
+ *  command template `defaults/commands/role-refinement-analysis.md` (force-synced
+ *  into `.claude/commands/`, not user-customisable); `$ARGUMENTS` carries the
+ *  dynamic paths. `taskDirs` holds every task in the recurrence cluster (just one
+ *  for a manual trigger), so on the auto path the agent sees the sibling failures
+ *  too. */
+export function buildAnalysisCommand(projectRoot: string, taskDirs: string[], analysisPath: string): string {
   const artifactPaths: string[] = [];
   for (const taskDir of taskDirs) {
     for (const f of ANALYSIS_ARTIFACTS) {
@@ -441,42 +456,14 @@ export function buildAnalysisPrompt(projectRoot: string, taskDirs: string[], ana
     .filter(p => existsSync(p));
 
   return [
-    'You are diagnosing why a TeamAI pipeline ticket failed repeatedly. Classify the root cause as exactly one of:',
-    '(a) a **role-prompt gap** — a missing or misworded *project-specific* persona/convention in `.claude/roles/*.md`;',
-    '(b) an **orchestration-contract gap** — an undocumented TeamAI mechanism or environment rule that belongs in `.claude/commands/*.md`, not a role;',
-    '(c) genuine task difficulty, a spec problem, or a code bug.',
-    'Only (a) produces role edits. (b) is an upstream command change, never a role edit.',
+    `/${ROLE_REFINEMENT_ANALYSIS_COMMAND}`,
     '',
-    'Known contract-gap classes that are NOT role edits:',
-    '- an undocumented orchestrator mechanism (e.g. the `subtask_wakeup-st<id>.json` schema and its detach/nohup requirement, worktree/port discipline),',
-    '- a `.gitignore` / `git add -f` trap when committing verification evidence,',
-    '- an interactive-only tool that no-ops in headless sessions.',
-    '',
-    'A role gap is project-specific persona/convention: missing house style, a repo-specific convention, or a misworded project convention that misleads the agent.',
-    '',
-    'Read these failure artifacts as **paths** (do not rely on summaries):',
+    `OUTPUT_FILE: ${analysisPath}`,
+    'FAILURE_ARTIFACTS:',
     ...artifactPaths.map(p => `- ${p}`),
     '',
-    'Read the current role files as **paths**:',
+    'ROLE_FILES:',
     ...rolePaths.map(p => `- ${p}`),
-    '',
-    `Write a single JSON object to ${analysisPath} with exactly this shape:`,
-    '{',
-    '  "isRolePromptGap": boolean,',
-    '  "contractGap": boolean,',
-    '  "contractFile": string|null,',
-    '  "rootCause": string,',
-    '  "confidence": "high"|"medium"|"low",',
-    '  "diagnosis": string,',
-    '  "edits": [ { "roleFile": string, "mode": "append"|"replace", "rationale": string, "proposedContent": string, "riskClass": "additive"|"modifying" } ]',
-    '}',
-    '',
-    'Rules:',
-    '- Prefer mode:"append" for additive fixes (a short block appended to the role file).',
-    '- If it is NOT a role-prompt gap, set isRolePromptGap:false, leave edits empty, and explain the real cause in diagnosis.',
-    '- If it IS a contract gap, also set contractGap:true and contractFile to the affected file under defaults/commands/ (e.g. "implement.md"), say so explicitly in diagnosis, and name the file that needs the upstream fix — never emit a role edit for it.',
-    '- Write diagnosis as a self-contained, copyable prompt the user can paste into a TeamAI-repo agent.',
-    'Write ONLY the JSON file. Do not write anything else.',
   ].join('\n');
 }
 
@@ -530,8 +517,10 @@ export function parseAnalysisOutput(raw: string): {
  * Run a failure post-mortem (manual trigger + Phase-2 auto trigger).
  *
  * 1. Writes a `analyzing` record + stamps the task.
- * 2. Spawns a headless `analyst` session (insights-session recipe) with the
- *    project's configured analyst model.
+ * 2. Spawns a headless generic session (insights-session recipe, no pipeline
+ *    role persona) with the project's configured role-refinement model
+ *    (default sonnet), instructed via the internal
+ *    `role-refinement-analysis` command.
  * 3. The agent writes `<id>.analysis.json`; we parse it defensively.
  * 4. Records `suggested` or `no-gap`, stamps the task, emits a
  *    `refinement-update` processManager event so open task panels refresh.
@@ -587,21 +576,26 @@ export async function analyzeFailure(
   taskStore.update(taskId, { refinementStatus: 'analyzing', refinementSuggestionId: id, refinementEscalated: false });
 
   const analysisPath = join(refinementsDir(projectRoot), `${id}.analysis.json`);
-  const prompt = buildAnalysisPrompt(projectRoot, sourceTasks.map(tid => taskStore.getDirById(tid)), analysisPath);
+  const command = buildAnalysisCommand(projectRoot, sourceTasks.map(tid => taskStore.getDirById(tid)), analysisPath);
 
   let sessionId: string | undefined;
   try {
-    const providerCfg = resolveProvider(projectRoot, 'analyst');
+    // The analysis agent is NOT a pipeline role: `general` gets no role persona
+    // injected, and the model comes from the Role Refinements settings (default
+    // sonnet), not the `analyst` role's provider override. Provider/env still
+    // come from the project's providers config default.
+    const config = getRoleRefinementConfig(projectRoot);
+    const providerCfg = { ...resolveProvider(projectRoot, 'general'), model: config.model };
     const providerOpts = providerToSessionOpts(providerCfg);
     sessionId = await deps.createSession({
       taskId: `role-refinement::${taskId}`,
-      role: 'analyst',
+      role: 'general',
       cwd: projectRoot,
       projectRoot,
       ...providerOpts,
       permissionMode: 'bypassPermissions',
     });
-    deps.sendMessage(sessionId, prompt);
+    deps.sendMessage(sessionId, command);
     await deps.waitForCompletion(sessionId);
   } catch (err) {
     logWarn('role-refinement', `Analysis session failed for task ${taskId}`, err);
