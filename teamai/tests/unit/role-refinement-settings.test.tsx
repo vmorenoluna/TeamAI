@@ -70,6 +70,7 @@ function makeSuggestion(overrides: Partial<RoleRefinementSuggestion> = {}): Role
     updatedAt: '2026-08-01T00:00:00.000Z',
     status: 'suggested',
     trigger: 'manual',
+    model: 'claude-sonnet-4-6',
     sourceTaskIds: ['t-1'],
     signature: 'sha256:x',
     isRolePromptGap: true,
@@ -190,6 +191,17 @@ describe('RoleRefinementSettings', () => {
     expect(screen.getByText(/applied/)).toBeInTheDocument();
     fireEvent.click(screen.getByText('↺ Revert'));
     await vi.waitFor(() => expect(mockRevert).toHaveBeenCalledWith('s-1'));
+  });
+
+  it('shows the analysis model on applied refinements', () => {
+    const applied = makeSuggestion({
+      status: 'applied',
+      model: 'claude-opus-4-8',
+      appliedAt: '2026-08-02T00:00:00.000Z',
+      backups: [{ roleFile: 'planner.md', backupPath: '/tmp/x.md' }],
+    });
+    render(<RoleRefinementSettings config={CONFIG} suggestions={[applied]} tasks={{ 't-1': 'Broken migration' }} />);
+    expect(screen.getByTestId('suggestion-model').textContent).toBe('claude-opus-4-8');
   });
 
   it('tags auto-applied refinements in the history', () => {

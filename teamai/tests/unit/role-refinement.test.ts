@@ -60,6 +60,7 @@ function makeRecord(overrides: Partial<RoleRefinementSuggestion> = {}): RoleRefi
     updatedAt: '2026-08-01T00:00:00.000Z',
     status: 'suggested',
     trigger: 'manual',
+    model: 'claude-sonnet-4-6',
     sourceTaskIds: ['task-1'],
     signature: 'sha256:abc',
     isRolePromptGap: true,
@@ -114,6 +115,19 @@ describe('suggestion store', () => {
     // A stray raw analysis payload in the same dir must be ignored.
     writeFileSync(join(root, '.teamai', 'role-refinements', 'b.analysis.json'), '{"raw":true}');
     expect(listSuggestions(root).map(s => s.id)).toEqual(['b', 'a']);
+  });
+
+  it('normalizes legacy records that predate the model field', () => {
+    const record = makeRecord();
+    const legacy: Record<string, unknown> = { ...record };
+    delete legacy.model; // simulate a record written before the model field existed
+    const dir = join(root, '.teamai', 'role-refinements');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'legacy.json'), JSON.stringify(legacy));
+
+    const read = getSuggestion(root, 'legacy')!;
+    expect(read.model).toBeNull();
+    expect({ ...read, model: 'claude-sonnet-4-6' }).toEqual(record);
   });
 
   it('supersedes a pending/suggested record with the same signature', () => {

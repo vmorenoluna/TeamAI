@@ -105,6 +105,7 @@ describe('analyzeFailure', () => {
     const record = getSuggestion(root, id)!;
     expect(record.status).toBe('suggested');
     expect(record.trigger).toBe('manual');
+    expect(record.model).toBe('claude-sonnet-4-6'); // the analysis model is recorded on the suggestion
     expect(record.sourceTaskIds).toEqual(['task-1']);
     expect(record.isRolePromptGap).toBe(true);
     expect(record.edits).toHaveLength(1);
@@ -332,8 +333,10 @@ describe('role-refinement-analysis command template', () => {
       isRolePromptGap: false, contractGap: false, contractFile: null,
       rootCause: '', confidence: 'low', diagnosis: 'n/a', edits: [],
     });
-    await analyzeFailure(root, taskId, 'manual', deps);
+    const id = await analyzeFailure(root, taskId, 'manual', deps);
 
     expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ role: 'general', model: 'claude-opus-4-8' }));
+    // The model that ran the analysis is recorded on the suggestion itself.
+    expect(getSuggestion(root, id)?.model).toBe('claude-opus-4-8');
   });
 });
