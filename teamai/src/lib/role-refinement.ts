@@ -138,6 +138,12 @@ export const DEFAULT_ROLE_REFINEMENT_CONFIG: RoleRefinementConfig = {
   recurrenceThreshold: 2,
 };
 
+/** §7 retry-loop guard — how many refinement-retries before auto-analysis escalates. */
+export const REFINEMENT_RETRY_LOOP_CAP = 2;
+
+/** Phase-3 auto-apply size cap — an appended block may be at most this many characters. */
+export const MAX_AUTO_APPEND_CHARS = 1500;
+
 const CONFIG_FILE = 'role-refinement.json';
 const REFINEMENTS_DIR = 'role-refinements';
 
@@ -576,7 +582,9 @@ export async function analyzeFailure(
     backups: [],
   };
   writeSuggestion(projectRoot, record);
-  taskStore.update(taskId, { refinementStatus: 'analyzing', refinementSuggestionId: id });
+  // A fresh analysis is the user (or watcher) taking action — clear any
+  // prior retry-loop escalation so the banner doesn't linger across attempts.
+  taskStore.update(taskId, { refinementStatus: 'analyzing', refinementSuggestionId: id, refinementEscalated: false });
 
   const analysisPath = join(refinementsDir(projectRoot), `${id}.analysis.json`);
   const prompt = buildAnalysisPrompt(projectRoot, sourceTasks.map(tid => taskStore.getDirById(tid)), analysisPath);
@@ -668,11 +676,14 @@ function backupsDir(projectRoot: string): string {
  * Apply a suggested refinement: snapshot each edited role file, then write via
  * the shared `writeRoleFile` (same validation as the Role Editor). `overrides`
  * lets the user's hand-edited text replace an edit's proposedContent.
+ * `appliedBy` distinguishes human review applies from Phase-3 auto-apply
+ * (which is gated on `isAutoApplyEligible` by the watcher).
  */
 export function applyRefinement(
   projectRoot: string,
   id: string,
   overrides?: Record<string, string>,
+  appliedBy: 'human' | 'auto' = 'human',
 ): RoleRefinementSuggestion {
   const record = getSuggestion(projectRoot, id);
   if (!record) throw new Error(`Suggestion ${id} not found`);
@@ -719,9 +730,47 @@ export function applyRefinement(
   return updateSuggestion(projectRoot, id, {
     status: 'applied',
     appliedAt: now,
-    appliedBy: 'human',
+    appliedBy,
     backups,
   })!;
+}
+
+// ── Phase-3 auto-apply eligibility ─────────────────────────────────────────
+
+export interface AutoApplyEligibility {
+  eligible: boolean;
+  /** Human-readable reason when ineligible — logged by the watcher. */
+  reason?: string;
+}
+
+/**
+ * Phase-3 auto-apply gate (§2.5 / §2.6 / §7). Auto-apply is restricted to
+ * additive, size-capped, high-confidence edits only — anything else still
+ * requires human review. `config.autoApply` and the pipeline auto-runner are
+ * checked by the watcher (compounded opt-ins); this function checks the
+ * record itself plus the retry-loop guard.
+ */
+export function isAutoApplyEligible(
+  record: RoleRefinementSuggestion,
+  task: { refinementRetryCount?: number },
+): AutoApplyEligibility {
+  if (record.trigger !== 'auto') return { eligible: false, reason: `trigger is ${record.trigger}, not auto` };
+  if (record.status !== 'suggested') return { eligible: false, reason: `record is ${record.status}, not suggested` };
+  if (!record.isRolePromptGap) return { eligible: false, reason: 'not a role-prompt gap' };
+  if (record.confidence !== 'high') return { eligible: false, reason: `confidence is ${record.confidence}, not high` };
+  if (record.edits.length === 0) return { eligible: false, reason: 'no edits to apply' };
+  for (const edit of record.edits) {
+    if (edit.mode !== 'append' || edit.riskClass !== 'additive') {
+      return { eligible: false, reason: `${edit.roleFile} is ${edit.mode}/${edit.riskClass}, not additive append` };
+    }
+    if (edit.proposedContent.trim().length > MAX_AUTO_APPEND_CHARS) {
+      return { eligible: false, reason: `${edit.roleFile} append exceeds ${MAX_AUTO_APPEND_CHARS} chars` };
+    }
+  }
+  if ((task.refinementRetryCount ?? 0) >= REFINEMENT_RETRY_LOOP_CAP) {
+    return { eligible: false, reason: 'retry-loop cap reached' };
+  }
+  return { eligible: true };
 }
 
 /** Dismiss a suggestion (no role edits are made). */

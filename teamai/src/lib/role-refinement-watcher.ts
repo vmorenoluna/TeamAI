@@ -25,11 +25,17 @@ import {
   listSuggestions,
   countAutoAnalysesToday,
   makeRoleRefinementAnalyzeDeps,
+  getSuggestion,
+  applyRefinement,
+  isAutoApplyEligible,
+  REFINEMENT_RETRY_LOOP_CAP,
 } from './role-refinement';
+import { isAutoModeEnabled } from './auto-mode-state';
+import { retryFailedTask } from './task-retry';
 import { log as logInfo, warn as logWarn } from './logger';
 
 /** §7 retry-loop guard — how many refinement-retries before auto-analysis escalates. */
-export const REFINEMENT_RETRY_LOOP_CAP = 2;
+export { REFINEMENT_RETRY_LOOP_CAP };
 
 let started = false;
 let cleanup: (() => void) | null = null;
@@ -76,8 +82,8 @@ export async function maybeAutoAnalyze(projectRoot: string, taskId: string): Pro
   // Retry-loop guard (§7): a task that has already been through Apply & Retry
   // and failed again is escalated to a human, never auto-analyzed in a loop.
   if ((task.refinementRetryCount ?? 0) >= REFINEMENT_RETRY_LOOP_CAP) {
-    logInfo('role-refinement',
-      `[ESCALATE] task ${taskId} failed again after ${task.refinementRetryCount} refinement retries — human review needed`);
+    escalate(projectRoot, taskId,
+      `task ${taskId} failed again after ${task.refinementRetryCount} refinement retries — human review needed`);
     return;
   }
 
@@ -98,8 +104,8 @@ export async function maybeAutoAnalyze(projectRoot: string, taskId: string): Pro
   const covering = listSuggestions(projectRoot).find(s => s.signature === signature);
   if (covering) {
     if (covering.status === 'applied') {
-      logInfo('role-refinement',
-        `[ESCALATE] task ${taskId} failed with the same signature as applied refinement ${covering.id} — human review needed`);
+      escalate(projectRoot, taskId,
+        `task ${taskId} failed with the same signature as applied refinement ${covering.id} — human review needed`);
     } else {
       logInfo('role-refinement',
         `Skipping auto-analysis for task ${taskId} — signature already covered by ${covering.id} (${covering.status})`);
@@ -110,5 +116,68 @@ export async function maybeAutoAnalyze(projectRoot: string, taskId: string): Pro
   logInfo('role-refinement',
     `Auto-analyzing failure for task ${taskId} (trigger: auto, cluster: ${cluster.join(', ')})`);
   analyzeFailure(projectRoot, taskId, 'auto', makeRoleRefinementAnalyzeDeps(), signature, cluster)
+    .then(id => maybeAutoApplyAndRetry(projectRoot, id))
     .catch(err => logWarn('role-refinement', `auto analyzeFailure ${taskId} failed`, err));
+}
+
+/**
+ * Phase-3 auto-apply + auto-retry (§2.5, §2.6, §8). Runs after an auto
+ * analysis completes with a `suggested` record. Fires only when ALL gates
+ * pass:
+ *   - config.mode === 'auto' AND config.autoApply is opted in,
+ *   - the pipeline auto-runner (auto-mode) is also enabled (compounded
+ *     opt-in — auto-retry only advances tasks when the runner is on),
+ *   - `isAutoApplyEligible`: role-prompt gap, confidence high, every edit
+ *     additive/append and within the size cap, retry-loop guard clear.
+ * Applies with `appliedBy: 'auto'` (backed up + revertable like any apply),
+ * bumps `refinementRetryCount`, and retries the failed task.
+ */
+export async function maybeAutoApplyAndRetry(projectRoot: string, suggestionId: string): Promise<void> {
+  const config = getRoleRefinementConfig(projectRoot);
+  if (config.mode !== 'auto' || !config.autoApply) {
+    logInfo('role-refinement', `Skipping auto-apply for ${suggestionId} — autoApply is off`);
+    return;
+  }
+  if (!isAutoModeEnabled(projectRoot)) {
+    logInfo('role-refinement', `Skipping auto-apply for ${suggestionId} — pipeline auto-runner is off`);
+    return;
+  }
+
+  const record = getSuggestion(projectRoot, suggestionId);
+  const taskId = record?.sourceTaskIds?.[0];
+  if (!record || !taskId) return;
+
+  const taskStore = new TaskStore(projectRoot);
+  const task = taskStore.getById(taskId);
+  if (!task) return;
+
+  const eligibility = isAutoApplyEligible(record, task);
+  if (!eligibility.eligible) {
+    logInfo('role-refinement', `Skipping auto-apply for ${suggestionId} — ${eligibility.reason}`);
+    return;
+  }
+
+  logInfo('role-refinement', `Auto-applying refinement ${suggestionId} to task ${taskId}`);
+  try {
+    applyRefinement(projectRoot, suggestionId, undefined, 'auto');
+  } catch (err) {
+    logWarn('role-refinement', `Auto-apply failed for ${suggestionId}`, err);
+    return;
+  }
+
+  // Bump the loop-guard counter BEFORE the retry so a re-entrant failure on
+  // the same task sees the incremented value and escalates instead of looping.
+  taskStore.update(taskId, { refinementRetryCount: (task.refinementRetryCount ?? 0) + 1 });
+  retryFailedTask(projectRoot, taskId);
+}
+
+/** Stamp the retry-loop escalation on the task and surface it to the UI. */
+function escalate(projectRoot: string, taskId: string, message: string): void {
+  try {
+    new TaskStore(projectRoot).update(taskId, { refinementEscalated: true });
+  } catch { /* best-effort — the record is persisted regardless */ }
+  logInfo('role-refinement', `[ESCALATE] ${message}`);
+  try {
+    processManager.emit('refinement-update', { taskId, projectRoot });
+  } catch { /* best-effort */ }
 }

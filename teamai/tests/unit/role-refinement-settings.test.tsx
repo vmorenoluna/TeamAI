@@ -170,6 +170,22 @@ describe('RoleRefinementSettings', () => {
     await vi.waitFor(() => expect(mockRevert).toHaveBeenCalledWith('s-1'));
   });
 
+  it('tags auto-applied refinements in the history', () => {
+    const autoApplied = makeSuggestion({
+      status: 'applied',
+      appliedBy: 'auto',
+      appliedAt: '2026-08-02T00:00:00.000Z',
+      backups: [{ roleFile: 'planner.md', backupPath: '/tmp/x.md' }],
+    });
+    const { unmount } = render(<RoleRefinementSettings config={CONFIG} suggestions={[autoApplied]} tasks={{ 't-1': 'Broken migration' }} />);
+    expect(screen.getByTestId('auto-applied-badge')).toBeInTheDocument();
+    expect(screen.getByTestId('auto-applied-badge').textContent).toBe('auto');
+    unmount();
+    // A human-applied refinement has no auto badge.
+    render(<RoleRefinementSettings config={CONFIG} suggestions={[makeSuggestion({ status: 'applied', appliedBy: 'human' })]} tasks={{}} />);
+    expect(screen.queryByTestId('auto-applied-badge')).not.toBeInTheDocument();
+  });
+
   it('renders empty states', () => {
     render(<RoleRefinementSettings config={CONFIG} suggestions={[]} tasks={{}} />);
     expect(screen.getByText('No pending suggestions.')).toBeInTheDocument();

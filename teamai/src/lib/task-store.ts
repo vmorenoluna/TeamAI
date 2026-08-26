@@ -82,6 +82,10 @@ export interface Task {
   refinementSuggestionId?: string;
   /** Retry-loop guard — how many times Apply & Retry has re-run this task after a refinement (Phase 3). */
   refinementRetryCount?: number;
+  /** Set by the watcher when auto-analysis escalates to a human (a refinement
+   *  was applied but the task failed the same way, or the retry-loop cap was
+   *  hit). Drives the escalation banner on the failed-task card. */
+  refinementEscalated?: boolean;
   createdAt: string;
   updatedAt: string;
 }
