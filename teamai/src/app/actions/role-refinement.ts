@@ -2,9 +2,6 @@
 
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
-import { processManager } from '@/lib/process-manager';
-import { waitForCompletion } from '@/lib/orchestrator/rate-limit';
-import { parseSessionLimitReset } from '@/lib/orchestrator/helpers';
 import { TaskStore } from '@/lib/task-store';
 import {
   getRoleRefinementConfig,
@@ -16,22 +13,12 @@ import {
   applyRefinement,
   dismissRefinement,
   revertRefinement,
+  makeRoleRefinementAnalyzeDeps,
   type RoleRefinementConfig,
   type RoleRefinementSuggestion,
 } from '@/lib/role-refinement';
 import { retryTask } from './tasks';
 import { error as logError } from '@/lib/logger';
-
-/** Session seam for analyzeFailure — real processManager + rate-limit-aware wait. */
-function makeAnalyzeDeps() {
-  return {
-    createSession: (opts: Parameters<typeof processManager.createSession>[0]) =>
-      processManager.createSession(opts),
-    sendMessage: (sessionId: string, content: string) => processManager.sendMessage(sessionId, content),
-    waitForCompletion: (sessionId: string) => waitForCompletion(sessionId, { parseSessionLimitReset }),
-    killSession: (sessionId: string) => processManager.killSession(sessionId),
-  };
-}
 
 /** Start a manual failure analysis (fire-and-forget). Guards mode !== 'off' and phase === 'failed'. */
 export async function analyzeFailedTask(taskId: string): Promise<{ success: boolean; error?: string }> {
@@ -53,7 +40,7 @@ export async function analyzeFailedTask(taskId: string): Promise<{ success: bool
   revalidatePath('/');
   revalidatePath(`/task/${taskId}`);
 
-  analyzeFailure(projectPath, taskId, 'manual', makeAnalyzeDeps())
+  analyzeFailure(projectPath, taskId, 'manual', makeRoleRefinementAnalyzeDeps())
     .catch(err => logError('role-refinement', `analyzeFailure ${taskId} failed`, err));
   return { success: true };
 }

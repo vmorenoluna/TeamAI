@@ -9,6 +9,7 @@ import { processManager } from './src/lib/process-manager';
 import { containerManager } from './src/lib/container-manager';
 import { startupCleanup, autoResumeInterruptedTasks, sweepStalledTasks } from './src/lib/recovery';
 import { restoreAutoModeStates } from './src/lib/auto-mode';
+import { startRoleRefinementWatcher } from './src/lib/role-refinement-watcher';
 import { error as logError } from './src/lib/logger';
 import { checkAllTools } from './src/lib/tool-checker';
 import { projectStore } from './src/lib/project-store';
@@ -351,6 +352,18 @@ app.prepare().then(async () => {
       }
     } catch (err) {
       logError('auto-mode', 'Failed to restore auto-mode states from disk', err);
+    }
+
+    // ── Role Refinement watcher (Phase 2) ─────────────────────────────
+    // Independent of auto-mode: when a project is in 'auto' mode it listens
+    // for failed tasks and auto-triggers a failure analysis on recurrence
+    // (still human-approved to apply). Fires on live phase-change events
+    // only — no boot-time adoption of already-failed tasks.
+    try {
+      startRoleRefinementWatcher();
+      console.log('[role-refinement] Watcher started (auto-analysis on recurrence)');
+    } catch (err) {
+      logError('role-refinement', 'Failed to start role-refinement watcher', err);
     }
 
     // ── Periodic stall-detection sweep ──────────────────────────────────
