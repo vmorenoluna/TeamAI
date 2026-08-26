@@ -109,6 +109,6 @@ export async function maybeAutoAnalyze(projectRoot: string, taskId: string): Pro
 
   logInfo('role-refinement',
     `Auto-analyzing failure for task ${taskId} (trigger: auto, cluster: ${cluster.join(', ')})`);
-  analyzeFailure(projectRoot, taskId, 'auto', makeRoleRefinementAnalyzeDeps(), signature)
+  analyzeFailure(projectRoot, taskId, 'auto', makeRoleRefinementAnalyzeDeps(), signature, cluster)
     .catch(err => logWarn('role-refinement', `auto analyzeFailure ${taskId} failed`, err));
 }

@@ -13,9 +13,10 @@
  *   defaults at every startup, so a per-project command/role patch would be
  *   clobbered and would hide the gap from every other project.
  *
- * This module is Phase 1 scope: `mode` gating, the suggestion store, the
- * manual-only analysis engine, and apply/dismiss/revert. The watcher
- * (auto-trigger on recurrence), sidebar badge, and auto-apply are Phase 2/3.
+ * This module covers Phases 1–2: `mode` gating, the suggestion store, the
+ * analysis engine (manual + auto triggers), recurrence detection, the shared
+ * session seam, and apply/dismiss/revert. The watcher (auto-trigger on
+ * recurrence) and sidebar badge live elsewhere; auto-apply is Phase 3.
  */
 import { randomUUID, createHash } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync } from 'fs';
@@ -405,20 +406,29 @@ export function countAutoAnalysesToday(projectRoot: string, now: Date = new Date
 
 const ROLE_FILES = ['analyst', 'planner', 'coder', 'qa-reviewer', 'merger'];
 
-/** Build the analysis prompt (§6.3) — inputs handed as paths, never pre-summarized. */
-export function buildAnalysisPrompt(projectRoot: string, taskDir: string, analysisPath: string): string {
-  const artifactPaths = [
-    'qa_report.json',
-    'qa_report_before_bounce.json',
-    'qa_report_before_failed.json',
-    'completion_summary.md',
-    'qa_feedback.md',
-    'plan.json',
-    'events.jsonl',
-    'output-st1.log',
-    'output-qa.log',
-    'output-plan.log',
-  ].filter(f => existsSync(join(taskDir, f))).map(f => join(taskDir, f));
+const ANALYSIS_ARTIFACTS = [
+  'qa_report.json',
+  'qa_report_before_bounce.json',
+  'qa_report_before_failed.json',
+  'completion_summary.md',
+  'qa_feedback.md',
+  'plan.json',
+  'events.jsonl',
+  'output-st1.log',
+  'output-qa.log',
+  'output-plan.log',
+];
+
+/** Build the analysis prompt (§6.3) — inputs handed as paths, never pre-summarized.
+ *  `taskDirs` holds every task in the recurrence cluster (just one for a manual
+ *  trigger), so on the auto path the analyst sees the sibling failures too. */
+export function buildAnalysisPrompt(projectRoot: string, taskDirs: string[], analysisPath: string): string {
+  const artifactPaths: string[] = [];
+  for (const taskDir of taskDirs) {
+    for (const f of ANALYSIS_ARTIFACTS) {
+      if (existsSync(join(taskDir, f))) artifactPaths.push(join(taskDir, f));
+    }
+  }
 
   const rolePaths = ROLE_FILES
     .map(r => join(projectRoot, '.claude', 'roles', `${r}.md`))
@@ -511,7 +521,7 @@ export function parseAnalysisOutput(raw: string): {
 }
 
 /**
- * Run a failure post-mortem (Phase 1: manual trigger only).
+ * Run a failure post-mortem (manual trigger + Phase-2 auto trigger).
  *
  * 1. Writes a `analyzing` record + stamps the task.
  * 2. Spawns a headless `analyst` session (insights-session recipe) with the
@@ -519,6 +529,10 @@ export function parseAnalysisOutput(raw: string): {
  * 3. The agent writes `<id>.analysis.json`; we parse it defensively.
  * 4. Records `suggested` or `no-gap`, stamps the task, emits a
  *    `refinement-update` processManager event so open task panels refresh.
+ *
+ * `sourceTaskIds` (the recurrence cluster) becomes the record's motivating
+ * task list and drives which task dirs the analyst reads. `taskId` remains the
+ * primary task (stamped for the inline card, kept first in sourceTaskIds).
  *
  * Returns the suggestion id. Never throws on session/parse failure — the
  * record is marked `no-gap` with the failure in the diagnosis instead.
@@ -529,11 +543,14 @@ export async function analyzeFailure(
   trigger: RoleRefinementTrigger,
   deps: RoleRefinementAnalyzeDeps,
   signatureOverride?: string,
+  sourceTaskIds?: string[],
 ): Promise<string> {
   const taskStore = new TaskStore(projectRoot);
   const task = taskStore.getById(taskId);
   if (!task) throw new Error(`Task ${taskId} not found`);
   const taskDir = taskStore.getDirById(taskId);
+
+  const sourceTasks = sourceTaskIds && sourceTaskIds.length > 0 ? sourceTaskIds : [taskId];
 
   const id = randomUUID();
   const record: RoleRefinementSuggestion = {
@@ -542,7 +559,7 @@ export async function analyzeFailure(
     updatedAt: new Date().toISOString(),
     status: 'analyzing',
     trigger,
-    sourceTaskIds: [taskId],
+    sourceTaskIds: sourceTasks,
     // The watcher passes the cluster signature (whole cluster's FAIL criteria)
     // so a recurrence record dedupes against itself across triggers; the manual
     // path defaults to this task's own signature.
@@ -562,7 +579,7 @@ export async function analyzeFailure(
   taskStore.update(taskId, { refinementStatus: 'analyzing', refinementSuggestionId: id });
 
   const analysisPath = join(refinementsDir(projectRoot), `${id}.analysis.json`);
-  const prompt = buildAnalysisPrompt(projectRoot, taskDir, analysisPath);
+  const prompt = buildAnalysisPrompt(projectRoot, sourceTasks.map(tid => taskStore.getDirById(tid)), analysisPath);
 
   let sessionId: string | undefined;
   try {

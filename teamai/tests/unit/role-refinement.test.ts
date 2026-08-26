@@ -178,6 +178,37 @@ describe('detectRecurrence', () => {
     expect(r.signature).toMatch(/^sha256:/);
   });
 
+  it('hits on a persisted FAIL criterion from the retry snapshot (qa_report_before_failed.json)', () => {
+    const { dir } = createFailedTask('t1', ['Evidence missing']);
+    writeFileSync(join(dir, 'qa_report_before_failed.json'), JSON.stringify({
+      criteria: [{ name: 'Evidence missing', status: 'FAIL' }],
+    }));
+
+    const r = detectRecurrence(root, 't1');
+    expect(r.hit).toBe(true);
+  });
+
+  it('matches persisted criteria by the criterion field, not just name', () => {
+    const { dir } = createFailedTask('t1', ['Evidence missing']);
+    writeFileSync(join(dir, 'qa_report_before_bounce.json'), JSON.stringify({
+      criteria: [{ criterion: 'Evidence missing', status: 'FAIL' }],
+    }));
+
+    expect(detectRecurrence(root, 't1').hit).toBe(true);
+  });
+
+  it('respects a custom recurrenceThreshold for the repeated-failure signal', () => {
+    // No FAIL criteria, so only the repeated-failure signal can fire.
+    const { store } = createFailedTask('t1');
+    store.updatePhase('t1', 'failed'); // 2 failed transitions total
+    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 3 });
+
+    expect(detectRecurrence(root, 't1').hit).toBe(false);
+
+    store.updatePhase('t1', 'failed'); // 3 transitions → reaches the threshold
+    expect(detectRecurrence(root, 't1').hit).toBe(true);
+  });
+
   it('hits when the same task has reached failed >= recurrenceThreshold times', () => {
     const { store } = createFailedTask('t1');
     store.updatePhase('t1', 'failed'); // second failed transition

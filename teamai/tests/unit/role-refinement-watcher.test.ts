@@ -113,6 +113,22 @@ describe('maybeAutoAnalyze', () => {
     expect(signature).toMatch(/^sha256:/);
   });
 
+  it('passes the whole recurrence cluster as sourceTaskIds to analyzeFailure', async () => {
+    seedRecurringFailure('t-1', ['Evidence missing']);
+    // A sibling task failing the same way forms a cluster.
+    const store = new TaskStore(root);
+    store.create('t-2', 'Task t-2', 'desc');
+    const dir2 = store.getDirById('t-2');
+    writeFileSync(join(dir2, 'qa_report.json'), JSON.stringify({ criteria: [{ name: 'Evidence missing', status: 'FAIL' }] }));
+    store.updatePhase('t-2', 'failed');
+    setRoleRefinementConfig(root, { mode: 'auto', autoApply: false, maxAutoAnalysesPerDay: 5, recurrenceThreshold: 2 });
+
+    await maybeAutoAnalyze(root, 't-1');
+    expect(mockAnalyzeFailure).toHaveBeenCalledTimes(1);
+    const [, , , , , sourceTaskIds] = mockAnalyzeFailure.mock.calls[0] as unknown[];
+    expect(sourceTaskIds).toEqual(expect.arrayContaining(['t-1', 't-2']));
+  });
+
   it('does not run when recurrence is not detected (single first-time failure)', async () => {
     const store = new TaskStore(root);
     store.create('t-1', 'Task t-1', 'desc');

@@ -122,6 +122,31 @@ describe('analyzeFailure', () => {
     expect(mockEmit).toHaveBeenCalledWith('refinement-update', { taskId, projectRoot: root });
   });
 
+  it('records the recurrence cluster as sourceTaskIds and feeds sibling artifacts to the analyst', async () => {
+    const taskId = seedTask();
+    const siblingId = taskStore.create('task-2', 'Second failure', 'desc').id;
+    taskStore.updatePhase(siblingId, 'failed');
+    writeFileSync(join(taskStore.getDirById(siblingId), 'completion_summary.md'), 'second failure\n');
+
+    const { deps, sentPrompt } = fakeDeps({
+      isRolePromptGap: false,
+      contractGap: false,
+      contractFile: null,
+      rootCause: '',
+      confidence: 'low',
+      diagnosis: 'not a gap',
+      edits: [],
+    });
+
+    const id = await analyzeFailure(root, taskId, 'auto', deps, 'sha256:cluster', ['task-1', 'task-2']);
+    const record = getSuggestion(root, id)!;
+    expect(record.sourceTaskIds).toEqual(['task-1', 'task-2']);
+    expect(record.signature).toBe('sha256:cluster');
+
+    // The prompt includes the sibling's artifact path.
+    expect(sentPrompt()!).toContain(join(taskStore.getDirById('task-2'), 'completion_summary.md'));
+  });
+
   it('routes a no-gap verdict with an empty edit list', async () => {
     const taskId = seedTask();
     const { deps } = fakeDeps({
@@ -233,10 +258,21 @@ describe('buildAnalysisPrompt', () => {
   it('lists only existing artifacts and role files as paths', () => {
     seedTask();
     const dir = taskStore.getDirById('task-1');
-    const prompt = buildAnalysisPrompt(root, dir, join(root, '.teamai', 'role-refinements', 'x.analysis.json'));
+    const prompt = buildAnalysisPrompt(root, [dir], join(root, '.teamai', 'role-refinements', 'x.analysis.json'));
     expect(prompt).toContain(join(dir, 'qa_report.json'));
     expect(prompt).toContain(join(dir, 'completion_summary.md'));
     expect(prompt).not.toContain('output-plan.log'); // does not exist
     expect(prompt).toContain(join(root, '.teamai', 'role-refinements', 'x.analysis.json'));
+  });
+
+  it('includes artifact paths from every task dir in the cluster', () => {
+    const id1 = seedTask();
+    const id2 = taskStore.create('task-2', 'Second failure', 'desc').id;
+    taskStore.updatePhase(id2, 'failed');
+    writeFileSync(join(taskStore.getDirById(id2), 'completion_summary.md'), 'second failure\n');
+
+    const prompt = buildAnalysisPrompt(root, [taskStore.getDirById(id1), taskStore.getDirById(id2)], '/tmp/x.json');
+    expect(prompt).toContain(join(taskStore.getDirById(id1), 'qa_report.json'));
+    expect(prompt).toContain(join(taskStore.getDirById(id2), 'completion_summary.md'));
   });
 });
