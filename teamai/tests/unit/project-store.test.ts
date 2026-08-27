@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { ProjectStore } from '@/lib/project-store';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, rmSync, mkdirSync, cpSync } from 'fs';
-import { createHash } from 'crypto';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 
@@ -215,25 +214,13 @@ describe('ProjectStore', () => {
     expect(freshStore.getAll()).toEqual([]);
   });
 
-  // ── Defaults version tracking ───────────────────────────────────
+  // ── Defaults force-sync ────────────────────────────────────────
 
-  it('scaffold writes .teamai-scaffold.json manifest after copying defaults', () => {
+  it('scaffold does not write a .teamai-scaffold.json manifest (sync compares file content directly)', () => {
     store.add(projectDir, 'Test Project');
 
     const manifestPath = join(projectDir, '.claude', '.teamai-scaffold.json');
-    expect(existsSync(manifestPath)).toBe(true);
-
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-    expect(manifest.version).toBe(1);
-    expect(manifest.files).toBeDefined();
-    // Should have entries for commands and workflow — roles are user-customisable and excluded
-    expect(manifest.files['commands/implement.md']).toBeDefined();
-    expect(manifest.files['teamai-workflow.md']).toBeDefined();
-    expect(manifest.files['roles/coder.md']).toBeUndefined();
-    // Checksums should be sha256:...
-    for (const checksum of Object.values(manifest.files) as string[]) {
-      expect(checksum).toMatch(/^sha256:[a-f0-9]{16}$/);
-    }
+    expect(existsSync(manifestPath)).toBe(false);
   });
 
   it('syncDefaults detects a changed default and updates an uncustomized project file', () => {
@@ -242,16 +229,6 @@ describe('ProjectStore', () => {
     // Simulate a default update: modify the project's implement.md to match
     // what would happen if a newer TeamAI version shipped a different file.
     const implPath = join(projectDir, '.claude', 'commands', 'implement.md');
-    const originalContent = readFileSync(implPath, 'utf-8');
-
-    // First, read the manifest to get the stored checksum
-    const manifestPath = join(projectDir, '.claude', '.teamai-scaffold.json');
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-    const storedChecksum = manifest.files['commands/implement.md'];
-
-    // Verify the project file matches the stored checksum (uncustomized)
-    const projectChecksum = 'sha256:' + createHash('sha256').update(originalContent).digest('hex').slice(0, 16);
-    expect(projectChecksum).toBe(storedChecksum);
 
     // Modify the default source to simulate a TeamAI update
     const defaultImplSrc = join(process.cwd(), 'defaults', 'commands', 'implement.md');
@@ -268,10 +245,6 @@ describe('ProjectStore', () => {
       const updatedContent = readFileSync(implPath, 'utf-8');
       expect(updatedContent).toBe(modifiedDefault);
       expect(updatedContent).toContain('Updated in TeamAI v2.0');
-
-      // The manifest should have the new checksum
-      const newManifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-      expect(newManifest.files['commands/implement.md']).not.toBe(storedChecksum);
     } finally {
       // Restore the default file
       retryOnLock(() => writeFileSync(defaultImplSrc, defaultBackup));
@@ -332,7 +305,7 @@ describe('ProjectStore', () => {
     }
   });
 
-  it('syncDefaults handles projects without a manifest (older TeamAI projects)', () => {
+  it('syncDefaults handles projects with missing command files', () => {
     // Manually create project dirs without calling scaffold
     mkdirSync(join(projectDir, '.claude', 'commands'), { recursive: true });
 
@@ -340,15 +313,7 @@ describe('ProjectStore', () => {
     const defaultImplSrc = join(process.cwd(), 'defaults', 'commands', 'implement.md');
     cpSync(defaultImplSrc, join(projectDir, '.claude', 'commands', 'implement.md'));
 
-    // No manifest exists
-    expect(existsSync(join(projectDir, '.claude', '.teamai-scaffold.json'))).toBe(false);
-
-    // syncDefaults should create the manifest and not crash
     store.syncDefaults(projectDir);
-
-    // Should have created the manifest
-    const manifestPath = join(projectDir, '.claude', '.teamai-scaffold.json');
-    expect(existsSync(manifestPath)).toBe(true);
 
     // Missing commands should be copied (merge.md was not manually placed)
     expect(existsSync(join(projectDir, '.claude', 'commands', 'merge.md'))).toBe(true);
@@ -360,7 +325,7 @@ describe('ProjectStore', () => {
   });
   // ── syncDefaults dryRun edge cases ───────────────────────────────
 
-  it('syncDefaults dryRun does not write any files or manifest', () => {
+  it('syncDefaults dryRun does not write any files', () => {
     store.add(projectDir, 'Test Project');
 
     // Simulate a TeamAI update by modifying the default source
@@ -370,8 +335,6 @@ describe('ProjectStore', () => {
 
     const implPath = join(projectDir, '.claude', 'commands', 'implement.md');
     const originalContent = readFileSync(implPath, 'utf-8');
-    const manifestPath = join(projectDir, '.claude', '.teamai-scaffold.json');
-    const manifestBefore = readFileSync(manifestPath, 'utf-8');
 
     try {
       const updated = store.syncDefaults(projectDir, true);
@@ -382,10 +345,6 @@ describe('ProjectStore', () => {
       // But the file should NOT have been changed
       const currentContent = readFileSync(implPath, 'utf-8');
       expect(currentContent).toBe(originalContent);
-
-      // And the manifest should NOT have been rewritten
-      const manifestAfter = readFileSync(manifestPath, 'utf-8');
-      expect(manifestAfter).toBe(manifestBefore);
     } finally {
       retryOnLock(() => writeFileSync(defaultImplSrc, defaultBackup));
     }
@@ -446,23 +405,24 @@ describe('ProjectStore', () => {
     }
   });
 
-  it('syncDefaults handles malformed manifest JSON gracefully', () => {
+  it('syncDefaults ignores a stale legacy .teamai-scaffold.json left by older versions', () => {
     store.add(projectDir, 'Test Project');
 
     const manifestPath = join(projectDir, '.claude', '.teamai-scaffold.json');
     const implPath = join(projectDir, '.claude', 'commands', 'implement.md');
     const originalImpl = readFileSync(implPath, 'utf-8');
 
-    // Corrupt the manifest
+    // Drop a corrupt manifest where older TeamAI versions used to write one —
+    // sync compares live file content against the shipped defaults directly,
+    // so the orphaned file must be ignored entirely (never read, never rewritten).
     writeFileSync(manifestPath, '{ not valid json }');
 
-    // Delete one command file so we can verify missing files ARE copied even
-    // when the manifest is malformed (treated as empty).
+    // Delete one command file so the sync has real work to do.
     const cmdPath = join(projectDir, '.claude', 'commands', 'merge.md');
     unlinkSync(cmdPath);
     expect(existsSync(cmdPath)).toBe(false);
 
-    // Should not throw — treats malformed as empty manifest
+    // Should not throw and should behave as if the file didn't exist
     const updated = store.syncDefaults(projectDir);
 
     // Missing command files should be copied (reported in updated)
@@ -473,12 +433,8 @@ describe('ProjectStore', () => {
     expect(updated).not.toContain('commands/implement.md');
     expect(readFileSync(implPath, 'utf-8')).toBe(originalImpl);
 
-    // Manifest should have been rewritten with correct JSON
-    const newManifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-    expect(newManifest.version).toBe(1);
-    expect(newManifest.files).toBeDefined();
-    // All defaults should now have checksum entries
-    expect(newManifest.files['commands/implement.md']).toMatch(/^sha256:[a-f0-9]{16}$/);
+    // The stale manifest is left untouched (still the corrupt content)
+    expect(readFileSync(manifestPath, 'utf-8')).toBe('{ not valid json }');
   });
 
   it('syncDefaults copies a brand-new default file not yet in the project', () => {
@@ -507,7 +463,7 @@ describe('ProjectStore', () => {
     }
   });
 
-  it('syncDefaults OVERWRITES an existing project file even without a stored baseline', () => {
+  it('syncDefaults OVERWRITES an existing project file with the default', () => {
     store.add(projectDir, 'Test Project');
 
     // Create a temp default file
@@ -522,12 +478,6 @@ describe('ProjectStore', () => {
     try {
       const updated = store.syncDefaults(projectDir);
       expect(updated).toContain('commands/.test-new-command-2.md');
-
-      // The manifest records the DEFAULT's checksum (not the project's).
-      const manifestPath = join(projectDir, '.claude', '.teamai-scaffold.json');
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-      const defaultChecksum = 'sha256:' + createHash('sha256').update('# New default version\n').digest('hex').slice(0, 16);
-      expect(manifest.files['commands/.test-new-command-2.md']).toBe(defaultChecksum);
 
       // Project file is overwritten with the default.
       expect(readFileSync(destPath, 'utf-8')).toBe('# New default version\n');
@@ -577,12 +527,6 @@ describe('ProjectStore', () => {
       expect(first).toContain('commands/.test-lifecycle.md');
       expect(readFileSync(destPath, 'utf-8')).toBe('# Default v1\n');
 
-      // Manifest records the DEFAULT v1 checksum.
-      const manifestPath = join(projectDir, '.claude', '.teamai-scaffold.json');
-      const manifestAfterFirst = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-      const defaultV1Checksum = 'sha256:' + createHash('sha256').update('# Default v1\n').digest('hex').slice(0, 16);
-      expect(manifestAfterFirst.files['commands/.test-lifecycle.md']).toBe(defaultV1Checksum);
-
       // Step 3: Update the default to v2.
       writeFileSync(newDefaultPath, '# Default v2 (updated)\n');
 
@@ -590,11 +534,6 @@ describe('ProjectStore', () => {
       const second = store.syncDefaults(projectDir);
       expect(second).toContain('commands/.test-lifecycle.md');
       expect(readFileSync(destPath, 'utf-8')).toBe('# Default v2 (updated)\n');
-
-      // Manifest now has the v2 default checksum.
-      const manifestAfterSecond = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-      const defaultV2Checksum = 'sha256:' + createHash('sha256').update('# Default v2 (updated)\n').digest('hex').slice(0, 16);
-      expect(manifestAfterSecond.files['commands/.test-lifecycle.md']).toBe(defaultV2Checksum);
 
       // Step 5: Third run — file already matches default v2, no changes.
       const third = store.syncDefaults(projectDir);
@@ -606,13 +545,13 @@ describe('ProjectStore', () => {
   });
 
   it('syncDefaults overwrites a customised project file when the default is updated', () => {
-    // Register and establish a manifest baseline
+    // Register the project
     store.add(projectDir, 'Test Project');
 
     const newDefaultPath = join(process.cwd(), 'defaults', 'commands', '.test-new-command-2.md');
     const destPath = join(projectDir, '.claude', 'commands', '.test-new-command-2.md');
 
-    // First: create the default and sync so the manifest records its checksum
+    // First: create the default and sync so the project has the original
     writeFileSync(newDefaultPath, '# Original default\n');
     store.syncDefaults(projectDir);
 

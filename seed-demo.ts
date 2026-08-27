@@ -6,7 +6,6 @@
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, cpSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
-import { createHash } from 'crypto';
 
 const DEMO_DIR = join(process.cwd(), 'demo');
 const DEFAULTS_DIR = join(process.cwd(), 'teamai', 'defaults');
@@ -19,10 +18,6 @@ if (!skipConfirm) {
   console.log('This will DELETE and re-create demo/.teamai/ and demo/.claude/.');
   console.log('Run with --yes to skip this prompt.');
   process.exit(0);
-}
-
-function checksum(content: string): string {
-  return 'sha256:' + createHash('sha256').update(content).digest('hex').slice(0, 16);
 }
 
 function rmDir(dir: string) {
@@ -58,16 +53,6 @@ function scaffoldClaude() {
   const workflowSrc = join(DEFAULTS_DIR, 'teamai-workflow.md');
   const workflowDest = join(claudeDir, 'teamai-workflow.md');
   if (existsSync(workflowSrc)) cpSync(workflowSrc, workflowDest);
-
-  // Write scaffold manifest
-  const manifest: Record<string, string> = {};
-  for (const file of readdirSync(cmdsDest)) {
-    manifest[`commands/${file}`] = checksum(readFileSync(join(cmdsDest, file), 'utf-8'));
-  }
-  if (existsSync(workflowDest)) {
-    manifest['teamai-workflow.md'] = checksum(readFileSync(workflowDest, 'utf-8'));
-  }
-  writeFileSync(join(claudeDir, '.teamai-scaffold.json'), JSON.stringify({ version: 1, files: manifest }, null, 2));
 
   // Write CLAUDE.md at demo root
   writeFileSync(join(DEMO_DIR, 'CLAUDE.md'), '@.claude/teamai-workflow.md\n');
