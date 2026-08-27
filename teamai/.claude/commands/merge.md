@@ -25,7 +25,6 @@ You are merging branch `{branch}` into the current branch using
    - Understand the intent of each change.
    - Produce a merged version that preserves both intents.
    - Follow the **prefer** rule from the merge direction detection above.
-   - Never leave conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) in resolved code.
 4. Run the project's test suite after resolving conflicts. Run the command ONCE
    and wait for it to complete — do NOT re-run it repeatedly. Capture only the
    pass/fail summary line — do not read the full test output into context unless a

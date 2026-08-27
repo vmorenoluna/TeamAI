@@ -57,12 +57,6 @@ This means on a rework pass where only one criterion failed and its file was cha
        is interrupted, partial results are preserved and the next pass can continue from
        where it left off rather than restarting entirely. Replace `"IN_PROGRESS"` with the
        final `"PASS"` or `"FAIL"` once all criteria are evaluated.
-5. Check for:
-   - Correctness: Does the code do what the spec says?
-   - Edge cases: Are error states handled?
-   - Tests: Are there tests for the new functionality?
-   - Style: Does it match existing code conventions?
-   - Regressions: Could this break existing functionality?
 
 ### Step 5a: Label/Assertion Mismatch Detection
 
