@@ -291,12 +291,6 @@ const SAMPLE_TASKS: SeedTask[] = [
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-function computeSeedChecksum(content: string): string {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { createHash } = require('crypto');
-  return 'sha256:' + createHash('sha256').update(content).digest('hex').slice(0, 16);
-}
-
 function slugify(title: string): string {
   return title.toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -501,14 +495,12 @@ async function main(): Promise<void> {
   // Copy default role files so pages that call getRoles() don't crash
   const defaultRolesDir = join(process.cwd(), 'defaults', 'roles');
   const defaultCommandsDir = join(process.cwd(), 'defaults', 'commands');
-  const scaffoldManifest: Record<string, string> = {};
 
   if (existsSync(defaultRolesDir)) {
     const roles = readdirSync(defaultRolesDir).filter(f => f.endsWith('.md'));
     for (const role of roles) {
       const content = readFileSync(join(defaultRolesDir, role), 'utf-8');
       writeFileSync(join(SEED_DIR, '.claude', 'roles', role), content);
-      scaffoldManifest[`roles/${role}`] = computeSeedChecksum(content);
     }
     console.log(`  Copied ${roles.length} role files to .claude/roles/`);
   }
@@ -519,23 +511,16 @@ async function main(): Promise<void> {
     for (const cmd of cmds) {
       const content = readFileSync(join(defaultCommandsDir, cmd), 'utf-8');
       writeFileSync(join(SEED_DIR, '.claude', 'commands', cmd), content);
-      scaffoldManifest[`commands/${cmd}`] = computeSeedChecksum(content);
     }
     console.log(`  Copied ${cmds.length} command files to .claude/commands/`);
   }
 
-  // Write .teamai-scaffold.json manifest so syncDefaults can track versions
+  // Copy teamai-workflow.md
   const workflowSrc = join(process.cwd(), 'defaults', 'teamai-workflow.md');
   if (existsSync(workflowSrc)) {
     const wfContent = readFileSync(workflowSrc, 'utf-8');
     writeFileSync(join(SEED_DIR, '.claude', 'teamai-workflow.md'), wfContent);
-    scaffoldManifest['teamai-workflow.md'] = computeSeedChecksum(wfContent);
   }
-  writeFileSync(
-    join(SEED_DIR, '.claude', '.teamai-scaffold.json'),
-    JSON.stringify({ version: 1, files: scaffoldManifest }, null, 2),
-  );
-  console.log(`  Wrote .teamai-scaffold.json manifest with ${Object.keys(scaffoldManifest).length} entries`);
 
   // Write default pipeline config
   writeFileSync(

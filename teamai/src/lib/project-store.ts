@@ -163,12 +163,7 @@ export class ProjectStore {
     }
   }
 
-  // ── Defaults version tracking ────────────────────────────────────
-
-  /** Manifest path for tracking which default versions were copied to a project. */
-  private _manifestPath(projectPath: string): string {
-    return join(projectPath, '.claude', '.teamai-scaffold.json');
-  }
+  // ── Defaults force-sync ──────────────────────────────────────────
 
   /** Compute a SHA-256 checksum for content comparison. */
   private _computeChecksum(content: string): string {
@@ -309,10 +304,11 @@ export class ProjectStore {
    *
    * Commands are TeamAI's orchestration contract — the pipeline reads them
    * from each project and depends on them matching the shipped defaults.
-   * Unlike roles (the user-owned persona surface, excluded from the manifest
-   * and never auto-synced), commands are overwritten unconditionally so a
+   * Unlike roles (the user-owned persona surface, never auto-synced), commands are overwritten unconditionally so a
    * customized command can never drift the workflow away from what the
-   * orchestrator expects.
+   * orchestrator expects. Overwrite detection compares each live project
+   * file's content against the shipped defaults' checksums directly — no
+   * per-project manifest is persisted.
    *
    * When `dryRun` is true, computes what WOULD be overwritten without
    * writing any files. Returns the relative paths of files that were (or
@@ -320,9 +316,7 @@ export class ProjectStore {
    */
   syncDefaults(projectPath: string, dryRun = false): string[] {
     const updated: string[] = [];
-    const manifestPath = this._manifestPath(projectPath);
     const currentManifest = this._getDefaultsManifest();
-    const newManifest: Record<string, string> = {};
 
     for (const [relPath, currentChecksum] of Object.entries(currentManifest)) {
       const srcFile = join(getDefaultsDir(), relPath);
@@ -338,18 +332,6 @@ export class ProjectStore {
           cpSync(srcFile, destFile);
         }
         updated.push(relPath);
-      }
-      newManifest[relPath] = currentChecksum;
-    }
-
-    // Always rewrite the manifest (idempotent) so it reflects the current
-    // defaults — including dropping entries for defaults that were removed.
-    if (!dryRun) {
-      try {
-        mkdirSync(dirname(manifestPath), { recursive: true });
-        writeFileSync(manifestPath, JSON.stringify({ version: 1, files: newManifest }, null, 2));
-      } catch (err) {
-        logError('ProjectStore', `Failed to write scaffold manifest at ${manifestPath}`, err);
       }
     }
 
