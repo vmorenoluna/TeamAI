@@ -1,7 +1,7 @@
 # TeamAI Workflow
 
 This project uses an automated pipeline managed by an external orchestrator.
-When you receive slash commands (/spec, /plan, /implement, /qa-review, /qa-fix, /merge),
+When you receive slash commands (/spec, /plan, /implement, /qa-review, /merge),
 follow their instructions precisely and output structured files as specified.
 
 ## Key Conventions
@@ -25,7 +25,7 @@ Everything is included **except** these two files:
 
 | Excluded file | Reason |
 |---------------|--------|
-| `output.log` | Raw terminal output — may contain sensitive data (API keys, errors, code snippets) |
+| `output.log`, `output-*.log` | Raw session logs — may contain sensitive data (API keys, errors, code snippets). All per-phase (`output-spec.log`, `output-plan.log`, `output-qa.log`, `output-merge.log`) and per-subtask (`output-st1.log`, `output-st2.log`, ...) variants are excluded. |
 | `.pipeline_state.json` | Transient crash-recovery checkpoint — session IDs and runtime paths, meaningless after commit |
 
 Everything else that tells the story of the implementation is included:
