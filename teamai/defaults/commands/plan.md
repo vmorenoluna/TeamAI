@@ -33,7 +33,6 @@ Rules:
 - Subtasks with the same `parallel_group` letter can run concurrently.
 - Subtasks with `depends_on` entries must wait for those IDs to complete.
 - Each subtask must be self-contained enough for an independent agent to implement.
-- Subtasks must be small enough to complete in a single session — no multi-day epics.
 - Include ALL files that need to change (INCLUDING associated test files). NEVER isolate test updates into a separate subtask from the implementation changes they verify. A feature and its tests must be in the same subtask — parallel test-only subtasks will cause cherry-pick conflicts when the implementation also touches those test files.
 - Order subtasks so dependencies are resolved top-down.
 - Flag risks explicitly in the subtask description — don't assume things will work out.
