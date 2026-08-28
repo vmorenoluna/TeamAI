@@ -91,7 +91,12 @@ export class Orchestrator {
       restoreQaReportFromSnapshot: (specPath) => restoreQaReportFromSnapshot(specPath),
       restoreHumanFeedbackFromSnapshot: (specPath) => restoreHumanFeedbackFromSnapshot(specPath),
 
-      writeQaFeedback: (pipeline, report) => writeQaFeedback(pipeline.specPath, report, pipeline.persistedCriterionFailCounts),
+      writeQaFeedback: (pipeline, report) => writeQaFeedback(
+        pipeline.specPath,
+        report,
+        pipeline.persistedCriterionFailCounts,
+        pipeline.persistedAdditionalIssueCounts,
+      ),
       writeCompletionSummary: (pipeline) => writeCompletionSummary(pipeline.specPath, pipeline.qaAttempt, pipeline.taskId, taskStore),
       autoReviseSpec: (pipeline) => this._autoReviseSpec(pipeline),
 
@@ -311,6 +316,8 @@ export class Orchestrator {
       if (savedState.wakeupProgressPath !== undefined) pipeline.wakeupProgressPath = savedState.wakeupProgressPath;
       if (savedState.wakeupAttemptCount !== undefined) pipeline.wakeupAttemptCount = savedState.wakeupAttemptCount;
       if (savedState.persistedCriterionFailCounts !== undefined) pipeline.persistedCriterionFailCounts = savedState.persistedCriterionFailCounts;
+      if (savedState.persistedAdditionalIssueCounts !== undefined) pipeline.persistedAdditionalIssueCounts = savedState.persistedAdditionalIssueCounts;
+      if (savedState.qaRoundCount !== undefined) pipeline.qaRoundCount = savedState.qaRoundCount;
       if (savedState.specRevision !== undefined) pipeline.specRevision = savedState.specRevision;
       if (savedState.qaRevision !== undefined) pipeline.qaRevision = savedState.qaRevision;
       if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;
