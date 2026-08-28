@@ -14,6 +14,7 @@ import {
 } from 'fs';
 import { join } from 'path';
 import { mkdtempSync } from 'fs';
+import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -80,7 +81,7 @@ let orch: Orchestrator;
 let worktreeName: string;
 
 beforeEach(() => {
-  testDir = mkdtempSync('human-feedback-test-');
+  testDir = mkdtempSync(join(tmpdir(), 'human-feedback-test-'));
   worktreeName = randomUUID().slice(0, 8);
   vi.clearAllMocks();
   onHandlers.clear();

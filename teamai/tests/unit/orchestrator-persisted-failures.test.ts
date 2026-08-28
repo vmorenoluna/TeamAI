@@ -1034,13 +1034,9 @@ describe('QA mixed spec concerns and recurring additional issues', () => {
         await promise;
         if (index === 0) {
           expect(pipeline.phase).toBe('spec');
-          // Spec revision cleanup removes the comparison snapshot as part of
-          // starting a fresh revision. Restore only the production-produced
-          // cycle-1 report, never hand-seeding it before a QA round.
-          writeFileSync(join(project.taskDir, 'qa_report_before_bounce.json'), JSON.stringify({
-            overall: 'FAIL', additional_issues: [issue],
-            spec_concerns: [{ issue: 'Ambiguous requirement', reasoning }],
-          }));
+          // The production spec-revision path preserves the cycle-1
+          // snapshot, so the next QA round can detect recurrence directly.
+          expect(existsSync(join(project.taskDir, 'qa_report_before_bounce.json'))).toBe(true);
           pipeline.phase = 'qa-review';
         }
       }
@@ -1048,6 +1044,32 @@ describe('QA mixed spec concerns and recurring additional issues', () => {
     } finally {
       executeSpy.mockRestore();
     }
+  });
+
+  it('preserves the QA snapshot through spec revision for immediate next-round recurrence', async () => {
+    writeFileSync(join(project.taskDir, 'spec.md'), '# Existing spec');
+    const priorReport = {
+      overall: 'FAIL',
+      criteria: [{ name: 'Persistent criterion', status: 'FAIL', notes: 'Still broken' }],
+      additional_issues: [{ description: 'Persistent issue', file: 'src/feature.ts' }],
+      spec_concerns: [{ issue: 'Ambiguous requirement', reasoning: 'Needs clarification' }],
+    };
+    const snapshotPath = join(project.taskDir, 'qa_report_before_bounce.json');
+    writeFileSync(snapshotPath, JSON.stringify(priorReport));
+    const deps = {
+      taskStore: { getById: vi.fn(), update: vi.fn(), clearArtifacts: vi.fn() },
+      pipelines: new Map(),
+      restorePipeline: vi.fn(),
+      advancePhase: vi.fn(),
+      executePhase: vi.fn().mockResolvedValue(undefined),
+      savePipelineState: vi.fn(),
+    };
+    const pipeline = makePipeline(project.taskId, project.taskDir, { specRevision: 1 });
+    writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(priorReport));
+    const { autoReviseSpec } = await import('../../src/lib/orchestrator/review-actions');
+    await autoReviseSpec(pipeline, deps as any);
+    expect(existsSync(snapshotPath)).toBe(true);
+    expect(readFileSync(snapshotPath, 'utf8')).toBe(JSON.stringify(priorReport));
   });
 
   it('writeQaFeedback includes recurring additional issues in the coder feedback', () => {
