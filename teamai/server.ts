@@ -13,6 +13,7 @@ import { startRoleRefinementWatcher } from './src/lib/role-refinement-watcher';
 import { error as logError } from './src/lib/logger';
 import { checkAllTools } from './src/lib/tool-checker';
 import { projectStore } from './src/lib/project-store';
+import { prewarmModelsCache } from './src/app/actions/providers';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
 const handle = app.getRequestHandler();
@@ -249,6 +250,25 @@ app.prepare().then(async () => {
     } else {
       console.log('[tools] All prerequisite tools found');
     }
+
+    // ── Model list prefetch (warms the Settings model dropdowns) ────────
+    // Fetch the Anthropic model list once at boot into an in-memory prewarm
+    // cache so the first Settings visit serves live data instead of a
+    // loading spinner + fresh fetch (or CURATED_MODELS as a "first paint"
+    // fallback). Project-agnostic by design: the model list is provider-
+    // global data, so no per-project cache files are created here (see
+    // prewarmModelsCache in src/app/actions/providers.ts). Fire-and-forget —
+    // a network error, missing API key, or timeout is caught inside
+    // prewarmModelsCache and must never block or fail startup.
+    prewarmModelsCache('anthropic')
+      .then(result => {
+        if (result.ok) {
+          console.log(`[providers] Prefetched ${result.modelCount} Anthropic model(s) at startup`);
+        } else {
+          console.log(`[providers] Startup model prefetch skipped: ${result.error ?? 'unknown error'}`);
+        }
+      })
+      .catch(err => logError('providers', 'Startup model prefetch failed', err));
 
     // ── Demo project registration ──────────────────────────────────────
     // The demo project only appears when --with-demo is passed on the

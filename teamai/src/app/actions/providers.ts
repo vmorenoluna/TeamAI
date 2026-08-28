@@ -73,6 +73,106 @@ function setCachedModels(projectRoot: string, provider: string, models: string[]
   writeModelsCache(projectRoot, cache);
 }
 
+// ── In-memory prewarm (server startup prefetch) ────────────────────────
+
+/** Model list warmed once at process startup — see prewarmModelsCache. */
+interface PrewarmedModels {
+  models: string[];
+  fetchedAt: number; // epoch ms
+}
+
+/** Same freshness window as the per-project file cache (1 hour). */
+const PREWARM_TTL_MS = 3_600_000;
+
+/**
+ * Access the prewarm store. Pinned on globalThis (same pattern as
+ * auto-mode's `__autoModeProjectStates`) so the server.ts instance and the
+ * Next.js runtime instance of this module share one store even if bundling
+ * ever duplicates the module.
+ */
+function getPrewarmStore(): Map<string, PrewarmedModels> {
+  const g = globalThis as unknown as { __teamaiModelsPrewarm?: Map<string, PrewarmedModels> };
+  if (!g.__teamaiModelsPrewarm) g.__teamaiModelsPrewarm = new Map();
+  return g.__teamaiModelsPrewarm;
+}
+
+/** Return the prewarmed model list for a provider if fresh, else null. */
+function getFreshPrewarmedModels(provider: string): string[] | null {
+  const entry = getPrewarmStore().get(provider);
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt > PREWARM_TTL_MS) return null;
+  return entry.models;
+}
+
+/**
+ * Fetch and cache a provider's model list once at process startup, before
+ * any UI asks for it. Called from server.ts's startup sequence so the first
+ * Settings visit gets live data from the prewarm cache instead of a loading
+ * spinner followed by a fresh fetch (or CURATED_MODELS as a "first paint"
+ * fallback when the on-mount fetch fails).
+ *
+ * Scoping decision — deliberately project-agnostic: the model list is
+ * provider-global data; the per-project keying of
+ * `.teamai/models-cache.json` is incidental (it exists only because
+ * getAvailableModels resolves the active project from a request cookie).
+ * Prefetching per registered project would silently create cache files in
+ * projects the user never opens, and the "active" project is unknowable at
+ * boot (no request context yet). getAvailableModels consults this store
+ * when the per-project file cache is cold and writes through to that
+ * project's file cache on the first real UI call — so cache files appear
+ * only for projects the user actually uses.
+ *
+ * Never throws: a network error, missing API key, or timeout resolves to
+ * `{ ok: false, error }` so the startup sequence is never blocked or failed
+ * (CURATED_MODELS remains the usable fallback through the normal path).
+ */
+export async function prewarmModelsCache(
+  provider: string,
+): Promise<{ ok: boolean; modelCount: number; error?: string }> {
+  try {
+    // Already warmed and fresh? Don't refetch.
+    const existing = getPrewarmStore().get(provider);
+    if (existing && Date.now() - existing.fetchedAt <= PREWARM_TTL_MS) {
+      return { ok: true, modelCount: existing.models.length };
+    }
+
+    // Guard against a hung fetch keeping the prewarm pending forever: race
+    // the real fetch against a timeout (the loser is simply discarded —
+    // fetchModelsFromProvider catches its own errors and never rejects).
+    const FETCH_TIMEOUT_MS = 30_000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        fetchModelsFromProvider(provider),
+        new Promise<{ models: string[]; error: string }>(resolve => {
+          timer = setTimeout(
+            () => resolve({ models: [], error: `Model prefetch timed out after ${FETCH_TIMEOUT_MS / 1000}s` }),
+            FETCH_TIMEOUT_MS,
+          );
+          // Don't keep the process alive just for a pending prefetch.
+          if (typeof timer.unref === 'function') timer.unref();
+        }),
+      ]);
+
+      if (result.models.length === 0) {
+        // Fetch failed (no API key, network error, non-2xx). Cache nothing —
+        // CURATED_MODELS stays the fallback via the normal resolution path.
+        return { ok: false, modelCount: 0, error: result.error ?? 'no models returned' };
+      }
+
+      getPrewarmStore().set(provider, { models: result.models, fetchedAt: Date.now() });
+      return { ok: true, modelCount: result.models.length };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  } catch (err) {
+    // Last resort — fetchModelsFromProvider already handles its own errors;
+    // this guards the prewarm bookkeeping itself.
+    logError('providers', 'Startup model prefetch failed', err);
+    return { ok: false, modelCount: 0, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 // ── Config read/write ──────────────────────────────────────────────────
 
 export async function getProvidersConfig(): Promise<ProvidersConfig> {
@@ -178,8 +278,11 @@ function deduplicateByLatestFamily(modelIds: string[]): string[] {
  *
  * Resolution order:
  * 1. File cache (`.teamai/models-cache.json`) — returned if fresh (< 1 hour)
- * 2. Curated defaults (`CURATED_MODELS`) — always available fallback
- * 3. On explicit refresh: tries API/CLI, updates cache
+ * 2. In-memory prewarm (warmed at server startup by prewarmModelsCache) —
+ *    returned if fresh; also written through to the file cache so the data
+ *    survives restarts (only when a project is active)
+ * 3. Curated defaults (`CURATED_MODELS`) — always available fallback
+ * 4. On explicit refresh: tries API/CLI, updates cache
  *
  * @param provider - Provider name
  * @param refresh  - If true, bypass cache and fetch fresh from the provider
@@ -194,6 +297,25 @@ export async function getAvailableModels(
   if (!refresh && projectPath) {
     const cached = getCachedModels(projectPath, provider);
     if (cached) return { models: cached };
+  }
+
+  // If not refreshing, consult the in-memory prewarm warmed at server
+  // startup before falling back to a live fetch. On a hit, write through to
+  // the active project's file cache (same as a live fetch would) so the
+  // warm data survives restarts — cache files are only ever created for
+  // projects the user actually opens.
+  if (!refresh) {
+    const prewarmed = getFreshPrewarmedModels(provider);
+    if (prewarmed) {
+      if (projectPath) {
+        try {
+          setCachedModels(projectPath, provider, prewarmed);
+        } catch {
+          // non-fatal: cache write failure
+        }
+      }
+      return { models: prewarmed };
+    }
   }
 
   // Try to fetch fresh (refresh or no cache available)
