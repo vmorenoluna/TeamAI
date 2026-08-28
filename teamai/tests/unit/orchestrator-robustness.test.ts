@@ -864,13 +864,13 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
     // Should advance to awaiting-review (PASS — no bounce)
     expect(pipeline.phase).toBe('awaiting-review');
 
-    // No bounce — no snapshot should be created
-    expect(existsSync(join(project.taskDir, 'qa_report_before_bounce.json'))).toBe(false);
+    // The latest QA report is retained for recurrence comparison even on PASS.
+    expect(existsSync(join(project.taskDir, 'qa_report_before_bounce.json'))).toBe(true);
   });
 
-  it('does not create snapshot when max QA attempts reached (goes to failed — no bounce)', async () => {
+  it('creates snapshot when max QA attempts reached (goes to failed — no bounce)', async () => {
     // When overall !== PASS and qaAttempt >= maxQaAttempts, the task goes to failed.
-    // The snapshot is only created on bounce — it should NOT exist when failing directly.
+    // The latest report is still retained for recurrence comparison.
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (args && args[0] === 'fetch') return '';
       if (args && args[0] === 'log') return '';
@@ -902,8 +902,8 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
     // Should advance to failed (max attempts reached — no bounce)
     expect(pipeline.phase).toBe('failed');
 
-    // No bounce means no bounce snapshot
-    expect(existsSync(join(project.taskDir, 'qa_report_before_bounce.json'))).toBe(false);
+    // The latest QA report is retained even when the QA budget is exhausted.
+    expect(existsSync(join(project.taskDir, 'qa_report_before_bounce.json'))).toBe(true);
   });
 
   it('increments qaRevision and writes qa_report_v{N}.json on QA PASS', async () => {
