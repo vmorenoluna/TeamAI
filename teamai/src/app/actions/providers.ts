@@ -8,6 +8,8 @@ import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
 import { error as logError } from '@/lib/logger';
 import { CURATED_MODELS } from '@/defaults/models';
+import { migrateProvidersConfig, migrationSignature } from '@/lib/providers-migration';
+import type { ModelMigrationChange } from '@/lib/providers-migration';
 
 const execFileAsync = promisify(execFile);
 
@@ -191,6 +193,87 @@ export async function saveProvidersConfig(config: ProvidersConfig): Promise<void
   const cfgPath = join(projectPath, '.teamai', 'providers.json');
   writeFileSync(cfgPath, JSON.stringify(config, null, 2));
   revalidatePath('/settings');
+}
+
+// ── Superseded-model migration hint ────────────────────────────────────
+// Projects registered before a defaults bump keep their seeded
+// .teamai/providers.json (by design — saved model choices are never
+// force-overwritten). These actions power an opt-in Settings hint that
+// migrates ONLY the superseded IDs to the current generation, preserving
+// every other field of the user's config.
+
+const MIGRATION_MARKER_PREFIX = 'providers-migration-dismissed-';
+
+/**
+ * Pending migration hint for the active project, or null when there is
+ * nothing to offer: no project, no project-level providers.json (the project
+ * already tracks the shipped defaults), no superseded IDs, an unreadable
+ * config, or the user dismissed this migration signature.
+ * Never throws — the Settings page renders regardless.
+ */
+export async function getProvidersMigrationHint(): Promise<{ changes: ModelMigrationChange[] } | null> {
+  try {
+    const projectPath = await getActiveProjectPath().catch(() => null);
+    if (!projectPath) return null;
+    const cfgPath = join(projectPath, '.teamai', 'providers.json');
+    if (!existsSync(cfgPath)) return null;
+    const config = JSON.parse(readFileSync(cfgPath, 'utf-8')) as ProvidersConfig;
+    const { changes } = migrateProvidersConfig(config);
+    if (changes.length === 0) return null;
+    const marker = join(
+      projectPath, '.teamai', `${MIGRATION_MARKER_PREFIX}${migrationSignature()}`,
+    );
+    if (existsSync(marker)) return null;
+    return { changes };
+  } catch {
+    return null; // unreadable/invalid config — non-fatal
+  }
+}
+
+/**
+ * Migrate the active project's on-disk providers.json, replacing only the
+ * superseded model IDs (see MODEL_MIGRATIONS). The editor mirrors the same
+ * pure migration into its local state, so the UI reflects the new IDs
+ * immediately without a reload.
+ */
+export async function applyProvidersMigration(): Promise<{
+  ok: boolean;
+  changes?: ModelMigrationChange[];
+  error?: string;
+}> {
+  try {
+    const projectPath = await getActiveProjectPath();
+    const cfgPath = join(projectPath, '.teamai', 'providers.json');
+    if (!existsSync(cfgPath)) {
+      return { ok: false, error: 'No project-level providers.json — this project already tracks the built-in defaults.' };
+    }
+    const config = JSON.parse(readFileSync(cfgPath, 'utf-8')) as ProvidersConfig;
+    const { config: migrated, changes } = migrateProvidersConfig(config);
+    if (changes.length === 0) {
+      return { ok: false, error: 'No superseded model IDs found in this project\'s config.' };
+    }
+    writeFileSync(cfgPath, JSON.stringify(migrated, null, 2));
+    revalidatePath('/settings');
+    return { ok: true, changes };
+  } catch (err) {
+    logError('providers', 'Failed to apply model migration', err);
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Dismiss the migration hint for the CURRENT migration signature. A future
+ * default bump changes the signature, so its hint will still be shown.
+ */
+export async function dismissProvidersMigrationHint(): Promise<void> {
+  try {
+    const projectPath = await getActiveProjectPath();
+    const dir = join(projectPath, '.teamai');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${MIGRATION_MARKER_PREFIX}${migrationSignature()}`), '');
+  } catch (err) {
+    logError('providers', 'Failed to dismiss model migration hint', err);
+  }
 }
 
 // ── Model deduplication ─────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import { getRoles } from '@/app/actions/roles';
 import { getActiveProject } from '@/app/actions/projects';
 import { getPipelineConfig } from '@/app/actions/pipeline';
-import { getProvidersConfig } from '@/app/actions/providers';
+import { getProvidersConfig, getProvidersMigrationHint } from '@/app/actions/providers';
 import { getContainerConfig, getContainerState } from '@/app/actions/containers';
 import { RoleEditor } from '@/components/role-editor';
 import { PipelineConfigEditor } from '@/components/pipeline-config';
@@ -20,11 +20,12 @@ export default async function SettingsPage() {
     return <div className="p-6 text-sm text-slate-400">No active project selected.</div>;
   }
 
-  const [roles, pipelineConfig, providersConfig, containerConfig, containerState, tools, refinementConfig, refinementSuggestions, allTasks] = await Promise.all([
+  const [roles, pipelineConfig, providersConfig, containerConfig, containerState, tools, refinementConfig, refinementSuggestions, allTasks, providersMigrationHint] = await Promise.all([
     getRoles(), getPipelineConfig(), getProvidersConfig(), getContainerConfig(), getContainerState(), checkTools(),
     getRoleRefinementConfigAction(),
     getRefinementSuggestions(),
     getAllTasks(),
+    getProvidersMigrationHint(),
   ]);
 
   const taskMap = Object.fromEntries(allTasks.map(t => [t.id, t.title]));
@@ -65,7 +66,7 @@ export default async function SettingsPage() {
           <p className="text-xs text-slate-400 mb-4">
             Configure which Claude model each agent role uses. Leave role fields blank to inherit the default.
           </p>
-          <ProviderConfigEditor config={providersConfig} />
+          <ProviderConfigEditor config={providersConfig} migrationHint={providersMigrationHint} />
         </section>
 
         {/* Role Refinements */}

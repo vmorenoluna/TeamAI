@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useTransition, useEffect, useCallback, useRef } from 'react';
-import { saveProvidersConfig, getAvailableModels } from '@/app/actions/providers';
+import { saveProvidersConfig, getAvailableModels, applyProvidersMigration, dismissProvidersMigrationHint } from '@/app/actions/providers';
 import type { ProvidersConfig } from '@/app/actions/providers';
+import { migrateProvidersConfig } from '@/lib/providers-migration';
+import type { ModelMigrationChange } from '@/lib/providers-migration';
 import { formatActionError } from '@/lib/error-format';
 
 const ROLES = ['analyst', 'planner', 'coder', 'qa-reviewer', 'merger'] as const;
@@ -199,12 +201,51 @@ function ModelRow({
   );
 }
 
-export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
+export function ProviderConfigEditor({
+  config,
+  migrationHint = null,
+}: {
+  config: ProvidersConfig;
+  /** Pending superseded-model migration for this project (server-fetched), or null when nothing to offer. */
+  migrationHint?: { changes: ModelMigrationChange[] } | null;
+}) {
   const [cfg, setCfg] = useState(config);
   const [saved, setSaved] = useState(false);
   // Regression-fix contract: surfaces Server Action failures (raw-throw path).
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [hint, setHint] = useState(migrationHint);
+
+  function handleApplyMigration() {
+    setError(null);
+    startTransition(async () => {
+      try {
+        const result = await applyProvidersMigration();
+        if (!result.ok) {
+          setError(result.error ?? 'Model migration failed');
+          return;
+        }
+        // Mirror the same pure migration into the editor's local state — the
+        // editor may hold DEFAULT-merged fields that aren't in the on-disk
+        // file, so don't replace state with the action's file-shaped result.
+        setCfg(current => migrateProvidersConfig(current).config);
+        setHint(null);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      } catch (err) {
+        setError(formatActionError('apply model migration', err));
+      }
+    });
+  }
+
+  function handleDismissMigration() {
+    setHint(null);
+    startTransition(async () => {
+      try {
+        await dismissProvidersMigrationHint();
+      } catch { /* non-fatal — hint stays hidden for this session either way */ }
+    });
+  }
 
   function setDefault(value: string) {
     setCfg(c => ({ ...c, default: { ...c.default, model: value, provider: 'anthropic' } }));
@@ -239,6 +280,47 @@ export function ProviderConfigEditor({ config }: { config: ProvidersConfig }) {
 
   return (
     <div className="space-y-4">
+      {/* Superseded-model migration hint — server-fetched, opt-in adoption of newer defaults. */}
+      {hint && hint.changes.length > 0 && (
+        <div
+          role="status"
+          className="p-3 bg-amber-900/20 border border-amber-800/50 rounded-lg space-y-2"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-amber-200">
+                Superseded model IDs in this project&apos;s config
+              </p>
+              <p className="text-xs text-amber-200/80 mt-1">
+                This project was seeded with models one generation behind the current defaults.
+                Updating replaces only the IDs below — your other settings are kept.
+              </p>
+            </div>
+            <button
+              onClick={handleDismissMigration}
+              aria-label="Dismiss migration hint"
+              className="text-amber-500 hover:text-amber-300 text-sm leading-none transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+          <ul className="text-xs text-amber-100/90 font-mono space-y-0.5">
+            {hint.changes.map(c => (
+              <li key={c.from}>
+                {c.from} → {c.to}
+                <span className="text-amber-400/70"> ({c.count} {c.count === 1 ? 'entry' : 'entries'})</span>
+              </li>
+            ))}
+          </ul>
+          <button
+            onClick={handleApplyMigration}
+            disabled={isPending}
+            className="px-3 py-1 text-xs font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-500 disabled:opacity-40 transition-colors"
+          >
+            {isPending ? 'Updating…' : 'Update to current defaults'}
+          </button>
+        </div>
+      )}
       {/* Error banner — surfaces Server Action throws from handleSave. */}
       {error && (
         <div
