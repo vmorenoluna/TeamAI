@@ -128,4 +128,47 @@ describe('runSpecPhase — spec_v1.md snapshot', () => {
       expect.anything(),
     );
   });
+
+  // ── Defensive v1 backfill on a pre-seeded task's first revision ────
+
+  it('backfills spec_v1.md from the pre-revision snapshot when a pre-seeded task (no tracked /spec run) takes its first QA revision', async () => {
+    // Task entered tracked execution already at `plan`: spec.md pre-exists,
+    // no spec_v1.md was ever written (the non-revision branch never ran).
+    // autoReviseSpec wrote the pre-revision marker, then bumped the restored
+    // counter (0 → 1) before runSpecPhase executes.
+    realWriteFileSync.current!(join(ctx.specPath, 'spec.md'), '# revised spec (v2 content)');
+    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_feedback.md'), 'QA concerns');
+    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_before.md'), '# original spec');
+    ctx.pipeline.specRevision = 1;
+
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    const { readFileSync, existsSync } = await import('fs');
+    // v1 = the ORIGINAL spec, recovered from the pre-revision snapshot —
+    // not missing, and not clobbered by the revised text.
+    expect(existsSync(join(ctx.specPath, 'spec_v1.md'))).toBe(true);
+    expect(readFileSync(join(ctx.specPath, 'spec_v1.md'), 'utf-8')).toBe('# original spec');
+    // The revision itself archives as v2 (not v1), and the bumped counter
+    // is persisted so future revisions keep numbering forward.
+    expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# revised spec (v2 content)');
+    expect(ctx.pipeline.specRevision).toBe(2);
+    expect(ctx.deps.savePipelineState).toHaveBeenCalled();
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  it('backfills a missing spec_v1.md without disturbing the archive index when the counter is already past 1', async () => {
+    // Same pre-seeded start, but the restored counter is 2 (e.g. state file
+    // survived while v1 was lost) — the revision archives as v2 as usual.
+    realWriteFileSync.current!(join(ctx.specPath, 'spec.md'), '# revised spec');
+    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_feedback.md'), 'QA concerns');
+    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_before.md'), '# original spec');
+    ctx.pipeline.specRevision = 2;
+
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    const { readFileSync } = await import('fs');
+    expect(readFileSync(join(ctx.specPath, 'spec_v1.md'), 'utf-8')).toBe('# original spec');
+    expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# revised spec');
+    expect(ctx.pipeline.specRevision).toBe(2);
+  });
 });

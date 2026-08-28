@@ -201,8 +201,35 @@ export async function runSpecPhase(
     // never surfaced as a finished version in the spec comparison UI.
     try {
       if (existsSync(specMdPath)) {
+        // Defensive v1 backfill: a task whose pipeline first enters tracked
+        // execution after spec.md already exists (resumed/pre-seeded state)
+        // never ran the non-revision branch below, so spec_v1.md was never
+        // written. Without this, the first revision permanently skips v1 —
+        // or, when the restored counter was 0, overwrites v1 with the
+        // REVISED text. spec_revision_before.md holds exactly the
+        // pre-revision content (it is the no-op guard's baseline) and is
+        // deleted right after this block, so archive it as v1 now. Detect
+        // the situation by file existence, not by specRevision — the counter
+        // is not a reliable proxy for "has a tracked /spec run ever run".
+        const specV1Path = path.join(pipeline.specPath, 'spec_v1.md');
+        let archiveIndex = pipeline.specRevision;
+        if (!existsSync(specV1Path) && existsSync(preRevisionSnapshotPath)) {
+          try {
+            writeFileSync(specV1Path, readFileSync(preRevisionSnapshotPath, 'utf-8'));
+            // The original now occupies v1 — this revision must not reuse
+            // that index, and the bumped counter must survive restarts.
+            if (archiveIndex <= 1) {
+              archiveIndex = 2;
+              pipeline.specRevision = 2;
+              deps.savePipelineState(pipeline);
+            }
+          } catch (backfillErr) {
+            // Backfill failed — v1 stays missing rather than being faked.
+            warn('spec', `Failed to backfill spec v1 from the pre-revision snapshot for ${pipeline.taskId}`, backfillErr);
+          }
+        }
         writeFileSync(
-          path.join(pipeline.specPath, `spec_v${pipeline.specRevision}.md`),
+          path.join(pipeline.specPath, `spec_v${archiveIndex}.md`),
           readFileSync(specMdPath, 'utf-8'),
         );
       }

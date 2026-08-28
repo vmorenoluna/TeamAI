@@ -99,6 +99,12 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
     ? Math.max(0, ...Object.keys(specVersions).map(k => parseInt(k.replace('v', ''), 10)))
     : undefined;
 
+  // v1 can be absent on tasks whose pipeline entered tracked execution after
+  // spec.md already existed (resumed/pre-seeded state) or whose original
+  // spec was never archived. The version chips only show what's on disk, but
+  // without a note a v2..vN run reads like a miscount — say so explicitly.
+  const hasSpecV1Gap = !!specVersions && Object.keys(specVersions).length > 0 && !specVersions['v1'];
+
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'terminal', label: 'Terminal' },
@@ -535,6 +541,15 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                           </button>
                         ))}
                       </div>
+                    )}
+
+                    {hasSpecV1Gap && (
+                      <span
+                        className="text-[10px] text-slate-500 italic"
+                        title="spec_v1.md is missing for this task — it predates version tracking or its original spec could not be archived"
+                      >
+                        original version unavailable
+                      </span>
                     )}
                   </div>
 
