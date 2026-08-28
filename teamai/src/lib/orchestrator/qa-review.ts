@@ -426,15 +426,15 @@ export async function runQaReview(
       }],
     };
     writeFailReport(pipeline, failReport, 'unpushed-commits');
+    // Keep the precheck report as the previous-round input too. This path
+    // returns before the normal post-QA snapshot below.
+    snapshotQaReportBeforeBounce(pipeline);
     logToOutput(pipeline.specPath, '[QA-PRECHECK] FAIL — unpushed commits detected, engineer must push first\n');
 
     if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts) {
       deps.writeCompletionSummary(pipeline);
       deps.advancePhase(pipeline, 'failed');
     } else {
-      if (existsSync(reportPath)) {
-        snapshotQaReportBeforeBounce(pipeline);
-      }
       deps.writeQaFeedback(pipeline, failReport);
       deps.advancePhase(pipeline, 'implement');
       deps.savePipelineState(pipeline);
@@ -518,6 +518,9 @@ export async function runQaReview(
   pipeline.qaRevision++;
   deps.savePipelineState(pipeline);
   snapshotQaReportVersioned(pipeline);
+  // Preserve the completed report for recurrence comparison on the next QA round,
+  // regardless of whether this round routes through spec revision or implement.
+  snapshotQaReportBeforeBounce(pipeline);
 
   const hasSpecConcerns = report.spec_concerns && Array.isArray(report.spec_concerns) && report.spec_concerns.length > 0;
   const priorReport = previousQaReport(pipeline.specPath);
@@ -551,9 +554,6 @@ export async function runQaReview(
     deps.writeCompletionSummary(pipeline);
     deps.advancePhase(pipeline, 'failed');
   } else {
-    // Snapshot QA report before bouncing back (overwrites previous snapshot)
-    snapshotQaReportBeforeBounce(pipeline);
-
     // FAIL-type router
     if (report.fail_type === 'cleanup') {
       logToOutput(pipeline.specPath, '\n[QA-ROUTER] fail_type=cleanup — routing to implement for automated mechanical fix\n');
