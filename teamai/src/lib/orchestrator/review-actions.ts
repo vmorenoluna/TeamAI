@@ -130,9 +130,15 @@ const QA_REGENERATION_ARTIFACTS: readonly string[] = PHASE_ARTIFACTS.qa;
  * - coder: nothing — implementation re-runs against the existing spec/plan.
  * - analyst/planner/qa-reviewer: clear the QA-level artifacts only.
  */
-export function trimArtifactsForTarget(specPath: string, target: FeedbackTarget): void {
+export function trimArtifactsForTarget(
+  specPath: string,
+  target: FeedbackTarget,
+  options?: { preserve?: readonly string[] },
+): void {
   if (target === 'coder') return;
+  const preserved = new Set(options?.preserve ?? []);
   for (const f of QA_REGENERATION_ARTIFACTS) {
+    if (preserved.has(f)) continue;
     try {
       const p = path.join(specPath, f);
       if (existsSync(p)) unlinkSync(p);
@@ -183,9 +189,12 @@ async function beginSpecRevision(
   // re-plans in place, keeping completed subtasks still valid under the
   // revised spec. Only QA artifacts (and, for the QA path, stale human
   // feedback) are cleared.
-  trimArtifactsForTarget(specPath, 'analyst');
+  trimArtifactsForTarget(specPath, 'analyst', {
+    preserve: ['qa_report_before_bounce.json'],
+  });
   if (opts.clearStaleFeedback) {
     for (const f of REVISION_CLEANUP_EXTRA) {
+      if (f === 'qa_report_before_bounce.json') continue;
       try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
     }
   }
@@ -346,8 +355,9 @@ export async function autoReviseSpec(
     // Preserve plan.json and code (no blind cleanup) — the planner re-plans in
     // place. Clear only QA artifacts and stale human feedback (historical
     // qa_report_v{N}.json and spec_v{N}.md are permanent audit records).
-    trimArtifactsForTarget(specPath, 'analyst');
+    trimArtifactsForTarget(specPath, 'analyst', { preserve: ['qa_report_before_bounce.json'] });
     for (const f of REVISION_CLEANUP_EXTRA) {
+      if (f === 'qa_report_before_bounce.json') continue;
       try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
     }
 
