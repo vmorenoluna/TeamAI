@@ -2,6 +2,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { execFile } from 'child_process';
+import { homedir } from 'os';
 import { promisify } from 'util';
 import { join } from 'path';
 import { revalidatePath } from 'next/cache';
@@ -433,15 +434,115 @@ export async function getAvailableModels(
 }
 
 /**
+ * Auth headers for the Anthropic /v1/models request. `kind` is for diagnostics
+ * only — never log the credential value itself.
+ */
+interface AnthropicCredential {
+  kind: 'api-key' | 'bearer-env' | 'bearer-claude-login';
+  headers: Record<string, string>;
+}
+
+/**
+ * Read the subscription OAuth access token Claude Code stores for its own
+ * logged-in sessions. Storage locations per Claude Code's documented layout:
+ * `%USERPROFILE%\.claude\.credentials.json` on Windows,
+ * `~/.claude/.credentials.json` on Linux (macOS uses the Keychain, which has
+ * no non-interactive read — skipped), both relocated by CLAUDE_CONFIG_DIR.
+ *
+ * Returns null when the file is absent, unreadable, has no claude.ai OAuth
+ * access token, or the token's `expiresAt` has passed (Claude Code refreshes
+ * it on its own schedule; we never refresh or persist it here). Never logs or
+ * returns the token to callers — the caller only receives request headers.
+ */
+function readClaudeCodeSubscriptionCredential(): AnthropicCredential | null {
+  try {
+    const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+    const credPath = join(claudeDir, '.credentials.json');
+    if (!existsSync(credPath)) return null;
+    const parsed = JSON.parse(readFileSync(credPath, 'utf8')) as {
+      claudeAiOauth?: { accessToken?: string; expiresAt?: number };
+    };
+    const oauth = parsed.claudeAiOauth;
+    const token = oauth?.accessToken;
+    if (!token || typeof token !== 'string') return null;
+    if (typeof oauth?.expiresAt === 'number' && Date.now() > oauth.expiresAt) return null;
+    return {
+      kind: 'bearer-claude-login',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'anthropic-version': '2023-06-01',
+      },
+    };
+  } catch {
+    // Absent/unreadable/malformed credential file is an expected state —
+    // fall through silently to the curated list.
+    return null;
+  }
+}
+
+/**
+ * Resolve Anthropic credentials for the /v1/models listing, in precedence
+ * order:
+ *
+ * 1. ANTHROPIC_API_KEY        → x-api-key header (existing path, unchanged;
+ *                               kept first — an explicit Console key is the
+ *                               most specific credential for this endpoint)
+ * 2. ANTHROPIC_AUTH_TOKEN     → Authorization: Bearer (documented Claude Code
+ *                               bearer-credential env var)
+ * 3. CLAUDE_CODE_OAUTH_TOKEN  → Authorization: Bearer (long-lived token minted
+ *                               by `claude setup-token`)
+ * 4. Claude Code's stored     → Authorization: Bearer (subscription login:
+ *    subscription OAuth token    machines logged in via claude.ai have a live
+ *                                access token on disk even with no API key)
+ *
+ * Returns null when no credential resolves — the caller falls back to the
+ * curated list exactly as before.
+ */
+function resolveAnthropicCredential(): AnthropicCredential | null {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (apiKey) {
+    return {
+      kind: 'api-key',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+    };
+  }
+  const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
+  if (authToken) {
+    return {
+      kind: 'bearer-env',
+      headers: { Authorization: `Bearer ${authToken}`, 'anthropic-version': '2023-06-01' },
+    };
+  }
+  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (oauthToken) {
+    return {
+      kind: 'bearer-env',
+      headers: { Authorization: `Bearer ${oauthToken}`, 'anthropic-version': '2023-06-01' },
+    };
+  }
+  return readClaudeCodeSubscriptionCredential();
+}
+
+/**
  * Internal: actually call the provider's API/CLI to fetch models.
  * Does NOT use cache.
  */
 async function fetchModelsFromProvider(provider: string): Promise<{ models: string[]; error?: string }> {
   switch (provider) {
     case 'anthropic': {
-      const apiKey = process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) {
-        return { models: [], error: 'ANTHROPIC_API_KEY not set — using curated model list' };
+      // Credential fallback chain: API key → bearer env vars → Claude Code's
+      // stored subscription login (see resolveAnthropicCredential). No
+      // credential at all is an expected, non-interactive state — curated
+      // list remains the fallback.
+      const credential = resolveAnthropicCredential();
+      if (!credential) {
+        return {
+          models: [],
+          error: 'No Anthropic credential (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, or a Claude Code login) — using curated model list',
+        };
       }
       try {
         // Paginate through all available models. Default page size is 20;
@@ -455,10 +556,7 @@ async function fetchModelsFromProvider(provider: string): Promise<{ models: stri
         while (hasMore) {
           const url = afterId ? `${baseUrl}&after_id=${afterId}` : baseUrl;
           const res = await fetch(url, {
-            headers: {
-              'x-api-key': apiKey,
-              'anthropic-version': '2023-06-01',
-            },
+            headers: credential.headers,
           });
           if (!res.ok) {
             logError('providers', `Anthropic API returned ${res.status}`);

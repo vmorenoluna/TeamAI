@@ -416,6 +416,10 @@ describe('getAvailableModels Integration', () => {
 
     it('handles corrupted cache file gracefully', async () => {
       vi.stubEnv('ANTHROPIC_API_KEY', '');
+      // Also isolate from any real Claude Code login on this machine — the
+      // credential fallback would otherwise find ~/.claude/.credentials.json
+      // and attempt a fetch, instead of taking the no-credential path.
+      vi.stubEnv('CLAUDE_CONFIG_DIR', join(tmpdir(), `no-such-claude-config-${randomUUID().slice(0, 8)}`));
 
       // Write corrupted cache file
       const cachePath = join(projectDir, '.teamai', 'models-cache.json');
@@ -426,7 +430,7 @@ describe('getAvailableModels Integration', () => {
 
       // Should ignore corrupted cache and fall through to curated defaults
       expect(result.models.length).toBeGreaterThan(0);
-      expect(result.error).toContain('ANTHROPIC_API_KEY not set');
+      expect(result.error).toContain('No Anthropic credential');
     });
 
     it('bypasses cache when refresh flag is set', async () => {

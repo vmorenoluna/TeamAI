@@ -54,6 +54,10 @@ describe('startup model prefetch (prewarmModelsCache)', () => {
     mockProjectPath = '/tmp/teamai-test-prewarm';
     cleanTestDir();
     clearPrewarmStore();
+    // Isolate from any real Claude Code login on this machine — the
+    // credential fallback would otherwise read ~/.claude/.credentials.json
+    // when no env credential is set, making tests machine-dependent.
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/nonexistent-teamai-test-claude-config');
   });
 
   afterEach(() => {
@@ -165,16 +169,45 @@ describe('startup model prefetch (prewarmModelsCache)', () => {
     expect(result.error).toBe('Anthropic API returned 500');
   });
 
-  it('prefetch without ANTHROPIC_API_KEY records failure and the curated list is still served', async () => {
+  it('prefetch with no credential records failure and the curated list is still served', async () => {
     vi.stubEnv('ANTHROPIC_API_KEY', '');
 
     const prewarm = await prewarmModelsCache('anthropic');
     expect(prewarm.ok).toBe(false);
-    expect(prewarm.error).toContain('ANTHROPIC_API_KEY not set');
+    expect(prewarm.error).toContain('No Anthropic credential');
 
     const result = await getAvailableModels('anthropic');
     expect(result.models).toEqual(CURATED_MODELS.anthropic);
-    expect(result.error).toBe('ANTHROPIC_API_KEY not set — using curated model list');
+    expect(result.error).toContain('No Anthropic credential');
+  });
+
+  it('prefetch uses ANTHROPIC_AUTH_TOKEN when no API key is set — first UI call gets the warmed list', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'sk-ant-oat01-fixture-token');
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: 'claude-opus-5', type: 'model' },
+          { id: 'claude-sonnet-5', type: 'model' },
+        ],
+        has_more: false,
+      }),
+    });
+
+    // Startup prefetch succeeds with only the bearer credential
+    const prewarm = await prewarmModelsCache('anthropic');
+    expect(prewarm).toMatchObject({ ok: true, modelCount: 2 });
+
+    // The fetch used the Bearer header (and never x-api-key)
+    const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer sk-ant-oat01-fixture-token');
+    expect(headers['x-api-key']).toBeUndefined();
+
+    // First UI call is served from the prewarm without a second fetch
+    const result = await getAvailableModels('anthropic');
+    expect(result.models).toEqual(['claude-opus-5', 'claude-sonnet-5']);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('a hung fetch times out instead of pinning the prefetch forever', async () => {

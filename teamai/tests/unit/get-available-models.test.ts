@@ -47,6 +47,12 @@ describe('getAvailableModels', () => {
     vi.clearAllMocks();
     mockProjectPath = '/tmp/teamai-test-providers';
     cleanTestDir();
+    // Isolate from any real Claude Code login on this machine — the
+    // credential fallback reads ~/.claude/.credentials.json when no env
+    // credential is set, which would make no-credential tests
+    // machine-dependent. Point CLAUDE_CONFIG_DIR at a nonexistent dir;
+    // file-credential tests re-stub it to a fixture dir.
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/nonexistent-teamai-test-claude-config');
   });
 
   afterEach(() => {
@@ -81,11 +87,117 @@ describe('getAvailableModels', () => {
 
   // ── Curated defaults (always available, no API keys needed) ──────────
 
-  it('returns curated Anthropic models when no API key and no cache', async () => {
+  it('returns curated Anthropic models when no credential resolves and no cache exists', async () => {
     vi.stubEnv('ANTHROPIC_API_KEY', '');
     const result = await getAvailableModels('anthropic');
     expect(result.models).toEqual(CURATED_MODELS.anthropic);
-    expect(result.error).toBe('ANTHROPIC_API_KEY not set — using curated model list');
+    expect(result.error).toContain('No Anthropic credential');
+  });
+
+  // ── Credential fallback chain (API key → env bearer → Claude Code login) ──
+
+  it('falls back to ANTHROPIC_AUTH_TOKEN as a Bearer credential when no API key is set', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'sk-ant-oat01-fixture-token');
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: [{ id: 'claude-opus-5', type: 'model' }],
+        has_more: false,
+      }),
+    });
+
+    const result = await getAvailableModels('anthropic');
+    expect(result.models).toEqual(['claude-opus-5']);
+    const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer sk-ant-oat01-fixture-token');
+    expect(headers['x-api-key']).toBeUndefined();
+  });
+
+  it('falls back to CLAUDE_CODE_OAUTH_TOKEN when neither API key nor ANTHROPIC_AUTH_TOKEN is set', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', '');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'cc-oauth-fixture-token');
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: [{ id: 'claude-sonnet-5', type: 'model' }],
+        has_more: false,
+      }),
+    });
+
+    const result = await getAvailableModels('anthropic');
+    expect(result.models).toEqual(['claude-sonnet-5']);
+    const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer cc-oauth-fixture-token');
+  });
+
+  it('reads the stored Claude Code subscription credential when no env credential is set', async () => {
+    // Fixture credential file (fake token — fixtures never contain real
+    // credentials). Mirrors Claude Code's documented layout:
+    // CLAUDE_CONFIG_DIR/.credentials.json with claudeAiOauth.accessToken.
+    const claudeDir = join(mockProjectPath, 'claude-config');
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(
+      join(claudeDir, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'fixture-oat-token',
+          expiresAt: Date.now() + 3_600_000,
+        },
+      }),
+    );
+    vi.stubEnv('CLAUDE_CONFIG_DIR', claudeDir);
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: [{ id: 'claude-fable-5', type: 'model' }],
+        has_more: false,
+      }),
+    });
+
+    const result = await getAvailableModels('anthropic');
+    expect(result.models).toEqual(['claude-fable-5']);
+    const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer fixture-oat-token');
+  });
+
+  it('ignores an expired Claude Code subscription credential and falls back to curated', async () => {
+    const claudeDir = join(mockProjectPath, 'claude-config');
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(
+      join(claudeDir, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'expired-fixture-oat-token',
+          expiresAt: Date.now() - 1000,
+        },
+      }),
+    );
+    vi.stubEnv('CLAUDE_CONFIG_DIR', claudeDir);
+
+    const result = await getAvailableModels('anthropic');
+    expect(result.models).toEqual(CURATED_MODELS.anthropic);
+    expect(result.error).toContain('No Anthropic credential');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('prefers the x-api-key path when both ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN are set', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-anthropic');
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'sk-ant-oat01-should-not-be-used');
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: [{ id: 'claude-opus-5', type: 'model' }],
+        has_more: false,
+      }),
+    });
+
+    const result = await getAvailableModels('anthropic');
+    expect(result.models).toEqual(['claude-opus-5']);
+    const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers['x-api-key']).toBe('sk-test-anthropic');
+    expect(headers.Authorization).toBeUndefined();
   });
 
   it('returns empty models for OpenAI when no API key and no curated default', async () => {
@@ -241,7 +353,7 @@ describe('getAvailableModels', () => {
 
     const result = await getAvailableModels('anthropic');
     expect(result.models).toEqual(CURATED_MODELS.anthropic);
-    expect(result.error).toBe('ANTHROPIC_API_KEY not set — using curated model list');
+    expect(result.error).toContain('No Anthropic credential');
   });
 
   it('uses cache when available with refresh=false', async () => {
@@ -301,7 +413,7 @@ describe('getAvailableModels', () => {
     const result = await getAvailableModels('anthropic');
     // readModelsCache catches parse error → falls through to curated defaults
     expect(result.models).toEqual(CURATED_MODELS.anthropic);
-    expect(result.error).toBe('ANTHROPIC_API_KEY not set — using curated model list');
+    expect(result.error).toContain('No Anthropic credential');
   });
 
   it('handles cache write failure gracefully', async () => {
@@ -565,7 +677,7 @@ describe('getAvailableModels', () => {
 
     const result = await getAvailableModels('anthropic');
     expect(result.models).toEqual(CURATED_MODELS.anthropic);
-    expect(result.error).toBe('ANTHROPIC_API_KEY not set — using curated model list');
+    expect(result.error).toContain('No Anthropic credential');
   });
 
   it('refreshes from API even without active project (no cache write)', async () => {
