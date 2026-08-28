@@ -171,4 +171,48 @@ describe('runSpecPhase — spec_v1.md snapshot', () => {
     expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# revised spec');
     expect(ctx.pipeline.specRevision).toBe(2);
   });
+
+  it('leaves v1 missing and archives as v2 when the pre-revision marker is absent', async () => {
+    // A crash or legacy task may reach the revision branch without the
+    // spec_revision_before.md marker. The revised content must never be
+    // written to spec_v1.md in that case.
+    realWriteFileSync.current!(join(ctx.specPath, 'spec.md'), '# revised spec');
+    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_feedback.md'), 'QA concerns');
+    ctx.pipeline.specRevision = 1;
+
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    const { existsSync, readFileSync } = await import('fs');
+    expect(existsSync(join(ctx.specPath, 'spec_v1.md'))).toBe(false);
+    expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# revised spec');
+    expect(ctx.pipeline.specRevision).toBe(2);
+    expect(ctx.deps.savePipelineState).toHaveBeenCalled();
+  });
+
+  it('leaves v1 missing and archives as v2 when the v1 backfill write fails', async () => {
+    realWriteFileSync.current!(join(ctx.specPath, 'spec.md'), '# revised spec');
+    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_feedback.md'), 'QA concerns');
+    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_before.md'), '# original spec');
+    ctx.pipeline.specRevision = 1;
+
+    mockWriteFileSync.mockImplementation((...args: unknown[]) => {
+      // Fail only the defensive v1 backfill. The subsequent v2 archive must
+      // still be allowed to complete.
+      if (String(args[0]).endsWith('spec_v1.md')) throw new Error('disk full');
+      return realWriteFileSync.current!(...args);
+    });
+
+    await expect(runSpecPhase(ctx.pipeline as never, ctx.deps as never)).resolves.toBeUndefined();
+
+    const { existsSync, readFileSync } = await import('fs');
+    expect(existsSync(join(ctx.specPath, 'spec_v1.md'))).toBe(false);
+    expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# revised spec');
+    expect(ctx.pipeline.specRevision).toBe(2);
+    expect(ctx.deps.savePipelineState).toHaveBeenCalled();
+    expect(mockWarn).toHaveBeenCalledWith(
+      'spec',
+      expect.stringContaining('Failed to backfill spec v1'),
+      expect.anything(),
+    );
+  });
 });
