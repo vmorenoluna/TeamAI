@@ -9,7 +9,7 @@
     "dev": "cross-env PORT=3002 tsx watch server.ts",
     "build": "next build",
     "build:server": "node scripts/build-server.mjs",
-    "build:electron": "npm run build && npm run build:server",
+    "build:electron": "npm run build && node scripts/fix-external-symlinks.mjs && npm run build:server",
     "start": "cross-env NODE_ENV=production tsx server.ts",
     "lint": "eslint --max-warnings 0",
     "typecheck": "tsc --noEmit",
@@ -89,6 +89,7 @@
     "files": [
       "electron/**/*",
       "dist-server/**/*",
+      "external-shims/**/*",
       ".next/**/*",
       "node_modules/**/*",
       "package.json",

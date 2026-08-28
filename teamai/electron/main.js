@@ -68,6 +68,12 @@ function startServer() {
       HOST,
       // Suppress Next.js telemetry in packaged app
       NEXT_TELEMETRY_DISABLED: '1',
+      // Next's build marks native-addon deps (e.g. node-pty) as server
+      // externals resolved by bare specifier at runtime. scripts/fix-external-symlinks.mjs
+      // (run as part of build:electron) places a portable proxy for each
+      // one under external-shims/ instead of node_modules — see that
+      // script for why — so Node needs this to find them.
+      NODE_PATH: path.join(unpackedRoot, 'external-shims'),
     };
 
     // In dev mode, use tsx watch for HMR; in production, run compiled JS.
