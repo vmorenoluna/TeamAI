@@ -4706,7 +4706,7 @@ describe('Orchestrator', () => {
     });
   });
 
-    it('falls back to awaiting-review when max spec revisions reached', async () => {
+    it('marks the task failed (spec-revision-exhausted) when max spec revisions reached', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -4716,12 +4716,12 @@ describe('Orchestrator', () => {
         qaAttempt: 0,
         maxQaAttempts: 3,
       });
-      // Already at max revisions (3) � next auto-revision should fall back
+      // Already at max revisions (3) -- next auto-revision should fall back
       pipeline.specRevision = 4;
 
       let csCount = 0; mockCreateSession.mockImplementation(() => { csCount++; if (csCount === 1) return Promise.resolve('sess-qa-max-rev'); return Promise.reject(new Error('simulated abort')); });
 
-      // QA report with spec_concerns � but we're out of revision budget
+      // QA report with spec_concerns -- but we're out of revision budget
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'FAIL',
         criteria: [
@@ -4741,15 +4741,28 @@ describe('Orchestrator', () => {
       fireEvent('event', { sessionId: 'sess-qa-max-rev', event: { type: 'result' } });
       await promise;
 
-      // Max revisions exhausted — QA path parks in awaiting-review (no auto-restart).
-      // The human can safely edit spec.md, then click "Revise Spec" (UI path) to restart.
-      expect(pipeline.phase).toBe('awaiting-review');
+      // Max revisions exhausted -- the spec-revision budget is separate from
+      // and exhausted independently of maxQaAttempts, so this must not be
+      // indistinguishable from a genuine QA PASS: the task is marked failed
+      // with a failureReason a human can see, instead of parked in
+      // awaiting-review (which also covers "genuinely passed, sign off").
+      expect(pipeline.phase).toBe('failed');
       expect(pipeline.specRevision).toBe(5); // was 4, incremented to 5 before bail-out
       expect(pipeline.qaAttempt).toBe(0); // resetAllCounters gives fresh budget
       // Should have written spec_revision_feedback.md so the human can see the concerns
       const feedbackPath = join(testData.taskDir, 'spec_revision_feedback.md');
       expect(existsSync(feedbackPath)).toBe(true);
-      // Pipeline should NOT auto-execute — parked awaiting human action
+
+      const taskStore = (orch as AnyOrch).taskStore;
+      const task = taskStore.getById(testData.taskId);
+      expect(task.failureReason).toBe('spec-revision-exhausted');
+      expect(task.completionSummary).toContain('spec revisions');
+
+      // qa_report.json must survive this transition -- it's the only artifact
+      // the QA tab reads, and there's no next QA round to regenerate it.
+      expect(existsSync(join(testData.taskDir, 'qa_report.json'))).toBe(true);
+      expect(JSON.parse(readFileSync(join(testData.taskDir, 'qa_report.json'), 'utf-8')).overall).toBe('FAIL');
+      // Pipeline should NOT auto-execute -- parked awaiting human action
       // (mockCreateSession for spec phase should NOT have been called)
     });
 

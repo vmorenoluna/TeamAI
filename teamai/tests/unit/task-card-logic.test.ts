@@ -169,4 +169,31 @@ describe('getResumePhaseForFailedTask', () => {
     ];
     expect(getResumePhaseForFailedTask(events)).toBe('awaiting-review');
   });
+
+  it("resumes at 'spec' for a spec-revision-exhausted failure regardless of the last event", () => {
+    // The autoReviseSpec bailout transitions straight from 'qa-review' to
+    // 'failed' without ever recording an intermediate 'spec' phase-change
+    // event, so the events-based lookup alone would return 'qa-review' here
+    // — re-running QA against the same code the spec-revision budget
+    // already proved doesn't work. failureReason must override it.
+    const events = [
+      { phase: 'backlog', timestamp: '2025-01-01T00:00:00Z' },
+      { phase: 'spec', timestamp: '2025-01-01T01:00:00Z' },
+      { phase: 'plan', timestamp: '2025-01-01T02:00:00Z' },
+      { phase: 'implement', timestamp: '2025-01-01T03:00:00Z' },
+      { phase: 'qa-review', timestamp: '2025-01-01T04:00:00Z' },
+      { phase: 'failed', timestamp: '2025-01-01T05:00:00Z' },
+    ];
+    expect(getResumePhaseForFailedTask(events, 'spec-revision-exhausted')).toBe('spec');
+  });
+
+  it('ignores an unset or unrelated failureReason and falls back to the events-based lookup', () => {
+    const events = [
+      { phase: 'implement', timestamp: '2025-01-01T00:00:00Z' },
+      { phase: 'qa-review', timestamp: '2025-01-01T01:00:00Z' },
+      { phase: 'failed', timestamp: '2025-01-01T02:00:00Z' },
+    ];
+    expect(getResumePhaseForFailedTask(events, 'qa-attempts-exhausted')).toBe('qa-review');
+    expect(getResumePhaseForFailedTask(events, undefined)).toBe('qa-review');
+  });
 });

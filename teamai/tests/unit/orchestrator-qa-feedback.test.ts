@@ -490,6 +490,51 @@ describe('_writeCompletionSummary', () => {
     const content = readFileSync(summaryPath, 'utf-8');
     expect(content).toContain('3 QA attempts');
   });
+
+  it("writes the qa-attempts-exhausted header and stores that failureReason", () => {
+    (orch as AnyOrch)._ctx.writeCompletionSummary(
+      pipeline(project.taskId, project.taskDir),
+      'qa-attempts-exhausted',
+    );
+
+    const content = readFileSync(join(project.taskDir, 'completion_summary.md'), 'utf-8');
+    expect(content).toContain('3 QA attempts');
+    expect(content).not.toContain('spec revisions');
+
+    const task = JSON.parse(readFileSync(join(project.taskDir, 'task.json'), 'utf-8'));
+    expect(task.failureReason).toBe('qa-attempts-exhausted');
+  });
+
+  it("writes a spec-revision-exhausted header distinct from the QA-attempts one, and stores that failureReason", () => {
+    const p = { ...pipeline(project.taskId, project.taskDir), qaRoundCount: 7, specRevision: 5 };
+    (orch as AnyOrch)._ctx.writeCompletionSummary(p, 'spec-revision-exhausted');
+
+    const content = readFileSync(join(project.taskDir, 'completion_summary.md'), 'utf-8');
+    expect(content).toContain('5 spec revisions');
+    expect(content).toContain('7 total QA rounds');
+    expect(content).not.toContain('Task failed after 3 QA attempts');
+
+    const task = JSON.parse(readFileSync(join(project.taskDir, 'task.json'), 'utf-8'));
+    expect(task.failureReason).toBe('spec-revision-exhausted');
+  });
+
+  it('includes spec_concerns from the last QA report in the spec-revision-exhausted summary', () => {
+    writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+      overall: 'FAIL',
+      criteria: [{ criterion: 'X', status: 'FAIL' }],
+      spec_concerns: [
+        { issue: 'Calibration lever does not converge', reasoning: 'golden_zone_pct declines as weight increases', suggested_fix: 'Redesign the constraint' },
+      ],
+    }));
+
+    const p = { ...pipeline(project.taskId, project.taskDir), qaRoundCount: 4, specRevision: 5 };
+    (orch as AnyOrch)._ctx.writeCompletionSummary(p, 'spec-revision-exhausted');
+
+    const content = readFileSync(join(project.taskDir, 'completion_summary.md'), 'utf-8');
+    expect(content).toContain('Spec Concerns');
+    expect(content).toContain('Calibration lever does not converge');
+    expect(content).toContain('Redesign the constraint');
+  });
 });
 
 // ── Severity cleaning regex in subtaskFeedback (runImplement) ─────────

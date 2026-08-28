@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 import { UnifiedTerminal } from './unified-terminal';
 import { ReviewPanel } from './review-panel';
+import { RejectFeedbackPanel } from './reject-feedback-panel';
 import { PhaseSyncer } from './phase-syncer';
 import { ErrorBanner } from './error-banner';
 import { DepPicker, TaskPill } from './dep-picker';
@@ -27,6 +28,14 @@ export { PlanSubtasks } from './plan-subtasks';
 export { QAReportView } from './qa-report-view';
 
 type Tab = 'overview' | 'terminal' | 'spec' | 'plan' | 'qa';
+
+// Reason-aware label for the "Task Failed" banner — see task-card.tsx's
+// FAILURE_REASON_TOOLTIP for the compact-card equivalent.
+const FAILURE_REASON_LABEL: Record<'qa-attempts-exhausted' | 'spec-revision-exhausted' | 'unknown', string> = {
+  'qa-attempts-exhausted': 'QA attempt budget exhausted',
+  'spec-revision-exhausted': 'Spec revision budget exhausted — QA never passed',
+  unknown: 'Max QA attempts reached',
+};
 
 interface Props {
   task: Task;
@@ -378,12 +387,25 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                       )}
                       Retry
                     </button>
-                    <span className="text-[10px] text-red-400/60">Max QA attempts reached</span>
+                    <span className="text-[10px] text-red-400/60">
+                      {FAILURE_REASON_LABEL[task.failureReason ?? 'unknown']}
+                    </span>
                   </div>
                 </div>
                 <pre className="text-xs text-slate-400 whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-y-auto">
                   {task.completionSummary}
                 </pre>
+                {!readonly && (
+                  <div className="mt-3 pt-3 border-t border-red-900/30">
+                    <RejectFeedbackPanel
+                      taskId={task.id}
+                      specConcerns={qaReport?.spec_concerns}
+                      subtasks={plan?.subtasks?.map(s => ({ id: Number(s.id), title: s.title, files: s.files }))}
+                      toggleLabel="Send Feedback"
+                      disabled={isPending}
+                    />
+                  </div>
+                )}
               </div>
             )}
 

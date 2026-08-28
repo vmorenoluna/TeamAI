@@ -153,16 +153,30 @@ export function writeQaFeedback(
   }
 }
 
-/** Write a completion summary when the task fails (max QA attempts reached) */
+/** Why a `failed` task failed — see Task.failureReason in task-store.ts for
+ *  the full distinction between these two. */
+export type FailureReason = 'qa-attempts-exhausted' | 'spec-revision-exhausted';
+
+/** Write a completion summary when the task fails — either the QA-attempt
+ *  budget or the spec-revision budget was exhausted. */
 export function writeCompletionSummary(
   specPath: string,
-  qaAttempt: number,
   taskId: string,
   taskStore: TaskStore,
+  reason: FailureReason,
+  counters: { qaAttempt: number; qaRoundCount?: number; specRevision?: number },
 ): void {
   const summaryPath = path.join(specPath, 'completion_summary.md');
   let content = `# Completion Summary\n\n`;
-  content += `Task failed after ${qaAttempt} QA attempts.\n\n`;
+  if (reason === 'spec-revision-exhausted') {
+    const rounds = counters.qaRoundCount ?? counters.qaAttempt;
+    content += `Task failed after ${counters.specRevision ?? '?'} spec revisions ` +
+      `(${rounds} total QA rounds) — the spec revision budget was exhausted ` +
+      `without QA ever passing. This usually means the approach itself needs ` +
+      `to be redesigned, not just re-implemented.\n\n`;
+  } else {
+    content += `Task failed after ${counters.qaAttempt} QA attempts.\n\n`;
+  }
 
   const planPath = path.join(specPath, 'plan.json');
   if (existsSync(planPath)) {
@@ -200,10 +214,17 @@ export function writeCompletionSummary(
           content += `- ${desc}\n`;
         }
       }
+      if (report.spec_concerns && report.spec_concerns.length > 0) {
+        content += `\n### Spec Concerns\n\n`;
+        for (const sc of report.spec_concerns) {
+          content += `- **${sc.issue}**: ${sc.reasoning}` +
+            (sc.suggested_fix ? ` — *Suggested fix:* ${sc.suggested_fix}` : '') + `\n`;
+        }
+      }
     } catch { /* skip */ }
   }
 
   content += `\n---\n*Generated automatically on ${new Date().toISOString()}*\n`;
   writeFileSync(summaryPath, content);
-  taskStore.update(taskId, { completionSummary: content });
+  taskStore.update(taskId, { completionSummary: content, failureReason: reason });
 }

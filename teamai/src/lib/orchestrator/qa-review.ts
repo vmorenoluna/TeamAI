@@ -17,6 +17,7 @@ import { RateLimitError } from './rate-limit';
 import { warn } from '../logger';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, QaIssue, SessionOptsResult, PlanSubtask } from './types';
+import type { FailureReason } from './qa-feedback';
 
 function additionalIssueKey(issue: QaIssue): string {
   const file = (issue.file || '').trim().replace(/\\/g, '/').toLowerCase();
@@ -99,7 +100,7 @@ export interface QaReviewDeps {
   waitForCompletion: (sessionId: string) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
   writeQaFeedback: (pipeline: TaskPipeline, report: QaReport) => void;
-  writeCompletionSummary: (pipeline: TaskPipeline) => void;
+  writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason) => void;
   phaseHeader: (logFile: string, phase: string) => void;
   toAgentPath: (hostPath: string) => string;
   autoReviseSpec: (pipeline: TaskPipeline) => Promise<void>;
@@ -432,7 +433,7 @@ export async function runQaReview(
     logToOutput(pipeline.specPath, '[QA-PRECHECK] FAIL — unpushed commits detected, engineer must push first\n');
 
     if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts) {
-      deps.writeCompletionSummary(pipeline);
+      deps.writeCompletionSummary(pipeline, 'qa-attempts-exhausted');
       deps.advancePhase(pipeline, 'failed');
     } else {
       deps.writeQaFeedback(pipeline, failReport);
@@ -489,7 +490,7 @@ export async function runQaReview(
     };
     writeFailReport(pipeline, failReport, 'unreadable-report');
     if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts) {
-      deps.writeCompletionSummary(pipeline);
+      deps.writeCompletionSummary(pipeline, 'qa-attempts-exhausted');
       deps.advancePhase(pipeline, 'failed');
     } else {
       deps.writeQaFeedback(pipeline, failReport);
@@ -535,7 +536,7 @@ export async function runQaReview(
   // implement→QA rounds merely because every report also has spec_concerns.
   if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts && report.overall !== 'PASS') {
     deps.writeQaFeedback(pipeline, report);
-    deps.writeCompletionSummary(pipeline);
+    deps.writeCompletionSummary(pipeline, 'qa-attempts-exhausted');
     deps.advancePhase(pipeline, 'failed');
     return;
   }
@@ -550,7 +551,7 @@ export async function runQaReview(
     await reconcileCompletedSubtasksOnQaPass(pipeline, deps);
     deps.advancePhase(pipeline, 'awaiting-review');
   } else if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
-    deps.writeCompletionSummary(pipeline);
+    deps.writeCompletionSummary(pipeline, 'qa-attempts-exhausted');
     deps.advancePhase(pipeline, 'failed');
   } else {
     // FAIL-type router

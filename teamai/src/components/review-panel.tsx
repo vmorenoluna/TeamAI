@@ -1,10 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { approveTask, rejectTask, markTaskDone } from '@/app/actions/tasks';
+import { approveTask, markTaskDone } from '@/app/actions/tasks';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 import { formatActionError } from '@/lib/error-format';
-import { FEEDBACK_TARGETS, FEEDBACK_TARGET_LABELS, type FeedbackTarget } from '@/lib/orchestrator/feedback-target';
+import { RejectFeedbackPanel } from './reject-feedback-panel';
 
 interface SpecConcern {
   issue: string;
@@ -70,28 +70,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-/** Format QA spec_concerns into a readable text block for the analyst textarea. */
-function specConcernsToText(concerns: SpecConcern[]): string {
-  return concerns
-    .map((sc) => {
-      const lines = [`- ${sc.issue}`];
-      if (sc.reasoning) lines.push(`  Reasoning: ${sc.reasoning}`);
-      if (sc.suggested_fix) lines.push(`  Suggested fix: ${sc.suggested_fix}`);
-      return lines.join('\n');
-    })
-    .join('\n\n');
-}
-
-type PendingAction = 'approve-local' | 'approve-pr' | 'reject' | 'mark-done' | null;
+type PendingAction = 'approve-local' | 'approve-pr' | 'mark-done' | null;
 
 export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase, specRevision, specPath, subtasks, approvalError }: Props) {
   const { run } = useServerMutation();
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showReject, setShowReject] = useState(false);
-  const [feedback, setFeedback] = useState('');
-  const [target, setTarget] = useState<FeedbackTarget | null>(null);
-  const [selectedSubtasks, setSelectedSubtasks] = useState<number[]>([]);
   const isPrOpen = phase === 'pr-open' || !!prUrl;
 
   /**
@@ -129,34 +113,6 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
       strategy === 'local-merge' ? 'merge task' : 'create pull request',
       () => approveTask(taskId, strategy),
     );
-  }
-
-  async function handleReject() {
-    if (!feedback.trim() || !target) return;
-    await runAction('reject', 'send task back', async () => {
-      await rejectTask(taskId, feedback, target, selectedSubtasks.length ? selectedSubtasks : undefined);
-      setShowReject(false);
-      setFeedback('');
-      setTarget(null);
-      setSelectedSubtasks([]);
-    });
-  }
-
-  function toggleSubtask(id: number) {
-    setSelectedSubtasks(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id],
-    );
-  }
-
-  function selectTarget(t: FeedbackTarget) {
-    setTarget(t);
-    setSelectedSubtasks([]);
-    // Fold the old "Revise Spec" shortcut into Request Changes: selecting the
-    // analyst pre-fills the QA's structured spec_concerns so the reviewer
-    // doesn't have to re-type them (and can still edit before sending).
-    if (t === 'analyst' && !feedback.trim() && qaReport?.spec_concerns?.length) {
-      setFeedback(specConcernsToText(qaReport.spec_concerns));
-    }
   }
 
   async function handleMarkDone() {
@@ -358,98 +314,14 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
             </button>
           )}
 
-          <button
-            onClick={() => setShowReject(r => !r)}
-            disabled={pendingAction !== null}
-            className="flex-1 px-4 py-2 text-sm font-medium bg-[#1a1f2e] hover:bg-[#1e293b] text-slate-200 rounded-md transition-colors"
-          >
-            Request Changes
-          </button>
         </div>
 
-        {showReject && (
-          <div className="space-y-2">
-            <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-slate-400">Send to</span>
-              <div className="flex flex-wrap gap-1.5">
-                {FEEDBACK_TARGETS.map(t => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => selectTarget(t)}
-                    className={`px-2.5 py-1 text-xs font-medium rounded-md border transition-colors ${
-                      target === t
-                        ? 'bg-blue-900/40 text-blue-300 border-blue-600'
-                        : 'bg-[#1a1f2e] text-slate-300 border-[#334155] hover:bg-[#1e293b]'
-                    }`}
-                  >
-                    {FEEDBACK_TARGET_LABELS[t]}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {(target === 'coder' || target === 'planner') && subtasks && subtasks.length > 0 && (
-              <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-slate-400">
-                  Affected subtasks{' '}
-                  <span className="text-slate-500">
-                    {target === 'planner'
-                      ? '(optional — scopes which subtasks may be re-planned; others are left unchanged)'
-                      : '(optional — scopes the rework)'}
-                  </span>
-                </span>
-                <div className="max-h-44 overflow-y-auto rounded-md border border-[#334155] bg-[#11131b] p-1.5 space-y-1">
-                  {subtasks.map(s => {
-                    const checked = selectedSubtasks.includes(s.id);
-                    return (
-                      <label
-                        key={s.id}
-                        className={`flex items-start gap-2 px-2 py-1.5 rounded cursor-pointer text-xs ${
-                          checked ? 'bg-blue-900/30' : 'hover:bg-[#1a1f2e]'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleSubtask(s.id)}
-                          className="mt-0.5 accent-blue-500"
-                        />
-                        <span className="text-slate-300 min-w-0">
-                          <span className="font-medium">#{s.id}</span> {s.title}
-                          {s.files && s.files.length > 0 && (
-                            <span className="block text-slate-500 truncate">{s.files.join(', ')}</span>
-                          )}
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            <textarea
-              value={feedback}
-              onChange={e => setFeedback(e.target.value)}
-              rows={4}
-              placeholder="Describe what needs to change..."
-              className="w-full px-3 py-2 text-sm border border-[#334155] rounded-lg bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] resize-none placeholder-slate-500"
-            />
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => { setShowReject(false); setTarget(null); }}
-                className="px-3 py-1.5 text-sm text-slate-400 hover:text-white transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleReject}
-                disabled={pendingAction !== null || !target || !feedback.trim()}
-                className="px-4 py-1.5 text-sm font-medium bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white rounded-md transition-colors"
-              >
-                {pendingAction === 'reject' ? 'Sending…' : (target ? `Send to ${FEEDBACK_TARGET_LABELS[target]}` : 'Send Back')}
-              </button>
-            </div>
-          </div>
-        )}
+        <RejectFeedbackPanel
+          taskId={taskId}
+          specConcerns={qaReport?.spec_concerns}
+          subtasks={subtasks}
+          disabled={pendingAction !== null}
+        />
       </div>
     </div>
   );

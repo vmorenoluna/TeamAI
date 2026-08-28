@@ -70,7 +70,7 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
   let resumePhase = 'qa-review'; // default for failed tasks (most common failure point)
   try {
     const events = taskStore.getEvents(taskId);
-    resumePhase = getResumePhaseForFailedTask(events);
+    resumePhase = getResumePhaseForFailedTask(events, task.failureReason);
   } catch { /* fall back to default */ }
 
   preRestoreFailedTask(taskStore, taskId);
