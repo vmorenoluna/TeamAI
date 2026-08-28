@@ -34,10 +34,14 @@ export interface ReviewActionsDeps {
 
 /** Reset all retry counters on the pipeline — used when the spec is revised
  *  or the task is rejected, giving the next attempt a clean failure budget. */
-function resetAllCounters(pipeline: TaskPipeline): void {
+function resetAllCounters(pipeline: TaskPipeline, preserveQaHistory = false): void {
   pipeline.qaAttempt = 0;
   pipeline.deliverableFailCounts = {};
-  pipeline.persistedCriterionFailCounts = {};
+  if (!preserveQaHistory) {
+    pipeline.persistedCriterionFailCounts = {};
+    pipeline.persistedAdditionalIssueCounts = {};
+    pipeline.qaRoundCount = 0;
+  }
   // Wakeup state — counters AND identity fields MUST reset together.
   // Leaving wakeupSubtaskId set would cause incorrect subtask isolation
   // on the next implement pass (ADR 002), and a lingering wakeupUntil
@@ -186,7 +190,10 @@ async function beginSpecRevision(
     }
   }
 
-  resetAllCounters(pipeline);
+  // A spec revision restarts the per-revision attempt counter, but QA
+  // history must survive so repeated code defects remain visible/escalated
+  // and the task still consumes the global maxQaAttempts budget.
+  resetAllCounters(pipeline, true);
   deps.savePipelineState(pipeline);
   deps.advancePhase(pipeline, 'spec');
   await deps.executePhase(pipeline);

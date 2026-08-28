@@ -944,6 +944,84 @@ describe('E2E — persisted failures escalation full cycle', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Mixed spec concerns + additional issues regression
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('QA mixed spec concerns and recurring additional issues', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+  });
+
+  afterEach(() => project.clean());
+
+  it('surfaces recurring additional issues with spec concerns and fails at the global QA budget', async () => {
+    const previous = {
+      overall: 'FAIL',
+      additional_issues: [{ description: 'Duplicate test block', file: 'src/feature.test.ts' }],
+      spec_concerns: [{ issue: 'Ambiguous requirement', reasoning: 'The spec omits a boundary case' }],
+    };
+    writeFileSync(join(project.taskDir, 'qa_report_before_bounce.json'), JSON.stringify(previous));
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'fetch') return '';
+      if (args && args[0] === 'log') return '';
+      if (args && args[0] === 'rev-parse') return 'abc123\\n';
+      return '';
+    });
+    mockCreateSession.mockResolvedValue('sess-mixed');
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      qaAttempt: 0,
+      qaRoundCount: 2,
+      maxQaAttempts: 3,
+    });
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    try {
+      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      await vi.waitFor(() => expect(mockSendMessage).toHaveBeenCalled());
+      writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        additional_issues: [{ description: 'Duplicate test block', file: 'src/feature.test.ts' }],
+        spec_concerns: [{ issue: 'Ambiguous requirement', reasoning: 'Still unresolved', suggested_fix: 'Clarify boundary' }],
+      }));
+      fireEvent('event', { sessionId: 'sess-mixed', event: { type: 'result' } });
+      await promise;
+
+      expect(pipeline.qaRoundCount).toBe(3);
+      expect(pipeline.persistedAdditionalIssueCounts?.['src/feature.test.ts::duplicate test block']).toBe(2);
+      expect(pipeline.phase).toBe('failed');
+      const feedback = readFileSync(join(project.taskDir, 'qa_feedback.md'), 'utf8');
+      expect(feedback).toContain('Duplicate test block');
+      expect(feedback).toContain('PERSISTED ADDITIONAL ISSUES');
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('writeQaFeedback includes recurring additional issues in the coder feedback', () => {
+    const report = {
+      overall: 'FAIL',
+      additional_issues: [{ description: 'Duplicate test block', file: 'src/feature.test.ts' }],
+    };
+    writeQaFeedback(project.taskDir, report, undefined, {
+      'src/feature.test.ts::duplicate test block': 2,
+    });
+    const feedback = readFileSync(join(project.taskDir, 'qa_feedback.md'), 'utf8');
+    expect(feedback).toContain('PERSISTED ADDITIONAL ISSUES');
+    expect(feedback).toContain('Duplicate test block');
+    expect(feedback).toContain('2 times in a row');
+    expect(feedback).toContain('src/feature.test.ts');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 //  resetAllCounters — persistedCriterionFailCounts clearing
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -1039,8 +1117,10 @@ describe('resetAllCounters — persistedCriterionFailCounts clearing', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'qa-review',
       qaAttempt: 2,
-      maxQaAttempts: 3,
+      maxQaAttempts: 5,
+      qaRoundCount: 2,
       persistedCriterionFailCounts: { 'Must have at least 3 positive cases': 3 },
+      persistedAdditionalIssueCounts: { 'src/test.ts::duplicate test block': 2 },
       deliverableFailCounts: { 1: 2 },
       worktreePath: join(project.root, 'worktrees', 'test-task'),
     });
@@ -1069,13 +1149,13 @@ describe('resetAllCounters — persistedCriterionFailCounts clearing', () => {
 
       await promise;
 
-      // After autoReviseSpec called resetAllCounters:
-      // - persistedCriterionFailCounts should be {}
-      // - deliverableFailCounts should be {}
-      // - qaAttempt should be 0
-      expect(pipeline.persistedCriterionFailCounts).toEqual({});
+      // Spec revision resets per-revision operational counters but preserves
+      // cross-round QA history and the global round budget.
+      expect(pipeline.persistedCriterionFailCounts).toEqual({ 'Must have at least 3 positive cases': 3 });
+      expect(pipeline.persistedAdditionalIssueCounts).toEqual({ 'src/test.ts::duplicate test block': 2 });
       expect(pipeline.deliverableFailCounts).toEqual({});
       expect(pipeline.qaAttempt).toBe(0);
+      expect(pipeline.qaRoundCount).toBe(3);
       expect(pipeline.wakeupSubtaskId).toBeUndefined();
     } finally {
       executeSpy.mockRestore();

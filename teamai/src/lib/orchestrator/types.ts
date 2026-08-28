@@ -23,6 +23,8 @@ export interface TaskPipeline {
   worktreePath: string;
   branch: string;
   qaAttempt: number;
+  /** Total completed QA round-trips for this task, preserved across spec revisions. */
+  qaRoundCount?: number;
   maxQaAttempts: number;
   specRevision: number;
   qaRevision: number;
@@ -57,6 +59,8 @@ export interface TaskPipeline {
   /** Map of FAIL criterion text → number of consecutive QA cycles it has appeared unchanged.
    *  Used by the orchestrator to escalate persisted failures in the rework prompt. */
   persistedCriterionFailCounts?: Record<string, number>;
+  /** Map of normalized file + issue description → consecutive QA-cycle count. */
+  persistedAdditionalIssueCounts?: Record<string, number>;
   /** Handle for a pending rate-limit or wakeup setTimeout — cleared by cancelPipeline. */
   pendingTimer?: ReturnType<typeof setTimeout>;
 }

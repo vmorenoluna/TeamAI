@@ -9,6 +9,7 @@ export function writeQaFeedback(
   specPath: string,
   report: QaReport,
   persistedCriterionFailCounts?: Record<string, number>,
+  persistedAdditionalIssueCounts?: Record<string, number>,
 ): void {
   const feedbackPath = path.join(specPath, 'qa_feedback.md');
   let content = `# QA Feedback\n\n`;
@@ -28,6 +29,18 @@ export function writeQaFeedback(
       for (const { name, count } of escalated) {
         content += `> **"${name}"** — this exact criterion has failed **${count} times in a row**.\n`;
         content += `> Before considering it resolved, enumerate every case, verify each assertion direction (not comments/labels), and confirm the count meets the requirement.\n\n`;
+      }
+      content += `---\n\n`;
+    }
+  }
+
+  if (persistedAdditionalIssueCounts) {
+    const escalated = Object.entries(persistedAdditionalIssueCounts).filter(([, count]) => count >= 2);
+    if (escalated.length > 0) {
+      content += `## ⚠️ PERSISTED ADDITIONAL ISSUES — RESOLVE THESE FIRST ⚠️\n\n`;
+      content += `The following additional issues have recurred unchanged across consecutive QA cycles and MUST be resolved:\n\n`;
+      for (const [key, count] of escalated) {
+        content += `> **${key}** — this exact issue has recurred **${count} times in a row**.\n\n`;
       }
       content += `---\n\n`;
     }

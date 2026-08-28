@@ -16,7 +16,76 @@ import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
 import { warn } from '../logger';
 import type { PipelinePhase } from '@/constants/phases';
-import type { TaskPipeline, QaReport, SessionOptsResult, PlanSubtask } from './types';
+import type { TaskPipeline, QaReport, QaIssue, SessionOptsResult, PlanSubtask } from './types';
+
+function additionalIssueKey(issue: QaIssue): string {
+  const file = (issue.file || '').trim().replace(/\\/g, '/').toLowerCase();
+  const description = (issue.description || issue.message || '').trim().replace(/\\s+/g, ' ').toLowerCase();
+  return `${file}::${description}`;
+}
+
+function additionalIssueKeys(report: QaReport): Set<string> {
+  return new Set((report.additional_issues || report.issues || [])
+    .map(additionalIssueKey)
+    .filter(key => key !== '::'));
+}
+
+function updateAdditionalIssueCounts(
+  pipeline: TaskPipeline,
+  report: QaReport,
+  previousReport: QaReport | null,
+): void {
+  const current = additionalIssueKeys(report);
+  const previous = previousReport ? additionalIssueKeys(previousReport) : new Set<string>();
+  if (current.size === 0 || previous.size === 0) return;
+  if (!pipeline.persistedAdditionalIssueCounts) pipeline.persistedAdditionalIssueCounts = {};
+
+  for (const key of current) {
+    if (previous.has(key)) {
+      pipeline.persistedAdditionalIssueCounts[key] = (pipeline.persistedAdditionalIssueCounts[key] || 1) + 1;
+    }
+  }
+  for (const key of Object.keys(pipeline.persistedAdditionalIssueCounts)) {
+    if (!current.has(key)) delete pipeline.persistedAdditionalIssueCounts[key];
+  }
+}
+
+function previousQaReport(specPath: string): QaReport | null {
+  const previousPath = path.join(specPath, 'qa_report_before_bounce.json');
+  if (!existsSync(previousPath)) return null;
+  try { return JSON.parse(readFileSync(previousPath, 'utf-8')) as QaReport; } catch { return null; }
+}
+
+function failCriterionNames(report: QaReport): Set<string> {
+  return new Set((report.criteria || [])
+    .filter(c => c.status === 'FAIL')
+    .map(c => (c.criterion || c.name || '').trim())
+    .filter(Boolean));
+}
+
+function updateCriterionCounts(
+  pipeline: TaskPipeline,
+  report: QaReport,
+  previousReport: QaReport | null,
+): void {
+  const current = failCriterionNames(report);
+  const previous = previousReport ? failCriterionNames(previousReport) : new Set<string>();
+  if (current.size === 0 || previous.size === 0) return;
+  if (!pipeline.persistedCriterionFailCounts) pipeline.persistedCriterionFailCounts = {};
+
+  for (const name of current) {
+    if (previous.has(name)) {
+      pipeline.persistedCriterionFailCounts[name] = (pipeline.persistedCriterionFailCounts[name] || 1) + 1;
+      logToOutput(pipeline.specPath, `\\n[QA-ESCALATE] Persisted FAIL criterion detected: "${name}" has failed ${pipeline.persistedCriterionFailCounts[name]} times in a row\\n`);
+    }
+  }
+  for (const name of Object.keys(pipeline.persistedCriterionFailCounts)) {
+    if (!current.has(name)) {
+      delete pipeline.persistedCriterionFailCounts[name];
+      logToOutput(pipeline.specPath, `\\n[QA-ESCALATE] Criterion "${name}" resolved — removed from persisted failures tracking\\n`);
+    }
+  }
+}
 
 // ── Dependencies ──────────────────────────────────────────────────────────
 
@@ -251,6 +320,7 @@ export async function runQaReview(
 ): Promise<void> {
   deps.persistAndEmitPhase(pipeline);
   pipeline.qaAttempt++;
+  pipeline.qaRoundCount = (pipeline.qaRoundCount || 0) + 1;
   deps.savePipelineState(pipeline);
   const logFile = path.join(pipeline.specPath, 'output.log'); // kept for deps.phaseHeader and deps.gitPush
   const qaLogFile = path.join(pipeline.specPath, 'output-qa.log');
@@ -358,7 +428,7 @@ export async function runQaReview(
     writeFailReport(pipeline, failReport, 'unpushed-commits');
     logToOutput(pipeline.specPath, '[QA-PRECHECK] FAIL — unpushed commits detected, engineer must push first\n');
 
-    if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
+    if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts) {
       deps.writeCompletionSummary(pipeline);
       deps.advancePhase(pipeline, 'failed');
     } else {
@@ -418,7 +488,7 @@ export async function runQaReview(
       }],
     };
     writeFailReport(pipeline, failReport, 'unreadable-report');
-    if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
+    if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts) {
       deps.writeCompletionSummary(pipeline);
       deps.advancePhase(pipeline, 'failed');
     } else {
@@ -450,8 +520,28 @@ export async function runQaReview(
   snapshotQaReportVersioned(pipeline);
 
   const hasSpecConcerns = report.spec_concerns && Array.isArray(report.spec_concerns) && report.spec_concerns.length > 0;
+  const priorReport = previousQaReport(pipeline.specPath);
+
+  // Persist recurrence history before any routing decision. Spec revisions
+  // preserve these maps, so a defect cannot evade escalation by repeatedly
+  // attaching an unrelated spec concern.
+  updateCriterionCounts(pipeline, report, priorReport);
+  updateAdditionalIssueCounts(pipeline, report, priorReport);
+
+  // The QA budget is global across spec revisions. Check it before
+  // spec-concern routing so a task cannot loop through unlimited real
+  // implement→QA rounds merely because every report also has spec_concerns.
+  if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts && report.overall !== 'PASS') {
+    deps.writeQaFeedback(pipeline, report);
+    deps.writeCompletionSummary(pipeline);
+    deps.advancePhase(pipeline, 'failed');
+    return;
+  }
 
   if (hasSpecConcerns) {
+    // Keep the coder's QA feedback alongside the analyst's spec revision
+    // feedback; spec concerns must not discard concrete code defects.
+    deps.writeQaFeedback(pipeline, report);
     await deps.autoReviseSpec(pipeline);
     return;
   } else if (report.overall === 'PASS') {
@@ -461,46 +551,8 @@ export async function runQaReview(
     deps.writeCompletionSummary(pipeline);
     deps.advancePhase(pipeline, 'failed');
   } else {
-    // Persisted FAIL criterion detection: compare current FAIL criteria
-    // against the PREVIOUS cycle's report (read before snapshot overwrite).
-    const prevSnapshotPath = path.join(pipeline.specPath, 'qa_report_before_bounce.json');
-    const currentFailNames = new Set<string>(
-      (report.criteria || []).filter(c => c.status === 'FAIL').map(c => (c.criterion || c.name || '').trim())
-    );
-    let prevFailNames = new Set<string>();
-    if (existsSync(prevSnapshotPath) && currentFailNames.size > 0) {
-      try {
-        const prevReport: QaReport = JSON.parse(readFileSync(prevSnapshotPath, 'utf-8'));
-        prevFailNames = new Set<string>(
-          (prevReport.criteria || []).filter(c => c.status === 'FAIL').map(c => (c.criterion || c.name || '').trim())
-        );
-      } catch { /* best-effort */ }
-    }
-
     // Snapshot QA report before bouncing back (overwrites previous snapshot)
     snapshotQaReportBeforeBounce(pipeline);
-
-    // Update persisted criterion fail counts based on comparison
-    if (currentFailNames.size > 0 && prevFailNames.size > 0) {
-      if (!pipeline.persistedCriterionFailCounts) pipeline.persistedCriterionFailCounts = {};
-      for (const name of currentFailNames) {
-        if (prevFailNames.has(name)) {
-          // persistedCriterionFailCounts tracks the total number of consecutive
-          // QA cycles where this criterion has appeared unchanged. On first
-          // detection: previous cycle (at least 1) + current cycle = 2 total.
-          const prevTotal = pipeline.persistedCriterionFailCounts[name] || 1;
-          pipeline.persistedCriterionFailCounts[name] = prevTotal + 1;
-          logToOutput(pipeline.specPath, `\n[QA-ESCALATE] Persisted FAIL criterion detected: "${name}" has failed ${pipeline.persistedCriterionFailCounts[name]} times in a row\n`);
-        }
-      }
-      // Remove criteria that are no longer failing (they got fixed)
-      for (const name of Object.keys(pipeline.persistedCriterionFailCounts)) {
-        if (!currentFailNames.has(name)) {
-          delete pipeline.persistedCriterionFailCounts[name];
-          logToOutput(pipeline.specPath, `\n[QA-ESCALATE] Criterion "${name}" resolved — removed from persisted failures tracking\n`);
-        }
-      }
-    }
 
     // FAIL-type router
     if (report.fail_type === 'cleanup') {
