@@ -21,64 +21,27 @@ The development server uses port `3002`. Production Electron uses port `3000`.
 
 ## Electron builds
 
-Electron builds use the Next production build plus a standalone Node runtime for the custom server. The runtime is required because the packaged app must not depend on Node being installed on the user's machine.
+The packaged app doesn't bundle a separate Node runtime. Production Electron runs its
+custom server (`dist-server/server.mjs`) by spawning its own Electron binary with
+`ELECTRON_RUN_AS_NODE=1` (see `electron/main.js`) — this makes Electron behave as a
+plain Node process while keeping its built-in support for reading `node_modules`
+packed inside `app.asar`, which a real standalone Node binary does not have.
 
-Build each platform on that platform. Do not copy a runtime binary from one operating system into another platform's package.
-
-### Windows
-
-Run on Windows:
-
-```bash
-npm ci
-mkdir runtime
-copy (Get-Command node).Source runtime\node.exe
-npm run electron:build
-```
-
-Outputs are written to `dist-electron/` as an NSIS installer and ZIP archive.
-
-### macOS
-
-Run on macOS:
+Build each platform on that platform — native dependencies (`sharp`, `esbuild`,
+`node-pty`) are platform-specific and electron-builder can't cross-compile them from a
+different OS.
 
 ```bash
 npm ci
-mkdir -p runtime/bin
-cp "$(command -v node)" runtime/bin/node
-chmod +x runtime/bin/node
-npm run electron:build:mac
+npm run electron:build        # Windows — NSIS installer + ZIP
+npm run electron:build:mac    # macOS — DMG + ZIP
+npm run electron:build:linux  # Linux — AppImage + deb
 ```
 
-Outputs are written to `dist-electron/` as DMG and ZIP files.
-
-### Linux
-
-Run on Linux:
-
-```bash
-npm ci
-mkdir -p runtime/bin
-cp "$(command -v node)" runtime/bin/node
-chmod +x runtime/bin/node
-npm run electron:build:linux
-```
-
-Outputs are written to `dist-electron/` as AppImage and deb packages.
-
-### Building all platforms
-
-`npm run electron:build:all` invokes all Electron targets, but it does not create valid cross-platform Node runtimes from a single host. Prefer separate Windows, macOS, and Linux CI jobs. Each job should install dependencies, create its native runtime file, and run its platform-specific build command.
-
-The expected runtime paths are:
-
-```text
-Windows: runtime/node.exe
-macOS:   runtime/bin/node
-Linux:   runtime/bin/node
-```
-
-The runtime must be executable and must be produced by the target platform's Node installation. The local development runtime is not automatically portable to other operating systems.
+Outputs are written to `dist-electron/`. `npm run electron:build:all` runs all three
+targets on the current host, but only produces a working build for the host's own
+platform (the native modules for the other platforms aren't available) — prefer
+separate per-platform CI jobs for real multi-platform releases.
 
 ## Verification
 

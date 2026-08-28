@@ -45,27 +45,25 @@ let serverProcess = null;
 function startServer() {
   return new Promise((resolve, reject) => {
     const projectRoot = path.join(__dirname, '..');
-
-    // In the packaged app, the compiled server entry point and .next/
-    // are unpacked from the asar so they're on the real filesystem.
-    // The server runs as an Electron child process (no ELECTRON_RUN_AS_NODE)
-    // so it retains asar support for resolving node_modules imports.
-    // Tradeoff: ~150MB Chromium overhead per server process.
-    const unpackedRoot = isDev
-      ? projectRoot
-      : projectRoot.replace(/app\.asar$/, 'app.asar.unpacked');
+    // The build disables asar (see package.json "build.asar": false) so
+    // the packaged app's files live directly on the real filesystem —
+    // unpackedRoot is just an alias for projectRoot in production.
+    const unpackedRoot = projectRoot;
     const serverEntry = path.join(unpackedRoot, 'dist-server', 'server.cjs');
-    const bundledNode = path.join(unpackedRoot, 'runtime', process.platform === 'win32' ? 'node.exe' : 'bin/node');
 
     const env = {
       ...process.env,
       PORT: String(PORT),
       ...(isDev ? {} : {
         NODE_ENV: 'production',
-        // NOTE: Not using ELECTRON_RUN_AS_NODE here — the server needs
-        // asar support to resolve node_modules imports (next, ws, etc.)
-        // from inside the asar archive. Tradeoff: ~150MB Chromium overhead
-        // per server process. Optimize later with a standalone Node binary.
+        // Run the Electron binary as plain Node instead of relaunching the
+        // Electron GUI. This still uses Electron's own embedded Node build
+        // (Next.js's app-router requires globalThis.AsyncLocalStorage,
+        // which needs a plain Node.js module-loading environment to set up
+        // correctly — hence disabling asar above and avoiding Electron's
+        // GUI bootstrap here), so no separate Node runtime needs to be
+        // bundled/copied per platform.
+        ELECTRON_RUN_AS_NODE: '1',
       }),
       HOST,
       // Suppress Next.js telemetry in packaged app
@@ -80,8 +78,7 @@ function startServer() {
 
     console.log(`[electron] Starting server: ${args.join(' ')} (cwd: ${unpackedRoot})`);
 
-    const serverExecutable = isDev ? process.execPath : bundledNode;
-    serverProcess = spawn(serverExecutable, args, {
+    serverProcess = spawn(process.execPath, args, {
       cwd: unpackedRoot,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],

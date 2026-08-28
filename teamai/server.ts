@@ -1,3 +1,11 @@
+// Must be the first import: static imports evaluate before any of this
+// file's own top-level statements run, so an imperative polyfill placed
+// here in source order would still lose the race against the `next` import
+// below. Putting the polyfill in its own module and importing it first
+// guarantees it runs before `next`'s module graph does. See that module for
+// why this is needed.
+import './src/lib/node-environment-polyfill';
+
 import { createServer } from 'http';
 import { writeFileSync, unlinkSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
