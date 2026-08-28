@@ -88,7 +88,6 @@
     },
     "files": [
       "electron/**/*",
-      "runtime/**/*",
       "dist-server/**/*",
       ".next/**/*",
       "node_modules/**/*",
@@ -152,14 +151,6 @@
       "repo": "TeamAI"
     },
     "npmRebuild": false,
-    "asarUnpack": [
-      "dist-server/**/*",
-      "runtime/**/*",
-      ".next/**/*",
-      "node_modules/@esbuild/**/*",
-      "node_modules/@img/sharp-*/**",
-      "node_modules/@next/swc-*/**",
-      "node_modules/node-pty/**/*"
-    ]
+    "asar": false
   }
 }

@@ -7,5 +7,7 @@ await build({
   format: 'cjs',
   packages: 'external',
   outfile: 'dist-server/server.cjs',
-  external: ['next/*', './scripts/clear-port-3001.mjs'],
+  // Not bundled — it's expected to be missing in production; server.ts's
+  // dynamic import()+try/catch around it relies on that to no-op there.
+  external: ['./scripts/clear-port-3001.mjs'],
 });
