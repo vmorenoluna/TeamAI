@@ -228,6 +228,15 @@ export async function runSpecPhase(
             warn('spec', `Failed to backfill spec v1 from the pre-revision snapshot for ${pipeline.taskId}`, backfillErr);
           }
         }
+        // If the pre-revision marker was unavailable or the backfill failed,
+        // never let the revised content occupy v1. Keep v1 genuinely absent,
+        // archive this revision as v2, and persist the corrected counter so a
+        // restart cannot reuse index 1.
+        if (!existsSync(specV1Path) && archiveIndex <= 1) {
+          archiveIndex = 2;
+          pipeline.specRevision = 2;
+          deps.savePipelineState(pipeline);
+        }
         writeFileSync(
           path.join(pipeline.specPath, `spec_v${archiveIndex}.md`),
           readFileSync(specMdPath, 'utf-8'),
