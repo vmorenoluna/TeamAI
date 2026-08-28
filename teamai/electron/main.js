@@ -54,7 +54,8 @@ function startServer() {
     const unpackedRoot = isDev
       ? projectRoot
       : projectRoot.replace(/app\.asar$/, 'app.asar.unpacked');
-    const serverEntry = path.join(unpackedRoot, 'dist-server', 'server.mjs');
+    const serverEntry = path.join(unpackedRoot, 'dist-server', 'server.cjs');
+    const bundledNode = path.join(unpackedRoot, 'runtime', process.platform === 'win32' ? 'node.exe' : 'bin/node');
 
     const env = {
       ...process.env,
@@ -79,7 +80,8 @@ function startServer() {
 
     console.log(`[electron] Starting server: ${args.join(' ')} (cwd: ${unpackedRoot})`);
 
-    serverProcess = spawn(process.execPath, args, {
+    const serverExecutable = isDev ? process.execPath : bundledNode;
+    serverProcess = spawn(serverExecutable, args, {
       cwd: unpackedRoot,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
