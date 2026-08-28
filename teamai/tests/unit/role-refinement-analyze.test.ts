@@ -105,7 +105,7 @@ describe('analyzeFailure', () => {
     const record = getSuggestion(root, id)!;
     expect(record.status).toBe('suggested');
     expect(record.trigger).toBe('manual');
-    expect(record.model).toBe('claude-sonnet-4-6'); // the analysis model is recorded on the suggestion
+    expect(record.model).toBe('claude-sonnet-5'); // the analysis model is recorded on the suggestion
     expect(record.sourceTaskIds).toEqual(['task-1']);
     expect(record.isRolePromptGap).toBe(true);
     expect(record.edits).toHaveLength(1);
@@ -118,7 +118,7 @@ describe('analyzeFailure', () => {
 
     // The session is a generic one — no pipeline role persona — and the model
     // comes from the Role Refinements config (default sonnet), not the analyst role.
-    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ role: 'general', model: 'claude-sonnet-4-6' }));
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ role: 'general', model: 'claude-sonnet-5' }));
 
     // The message invokes the internal command and hands the artifacts + role
     // files as paths; the classification instructions live in the command file.

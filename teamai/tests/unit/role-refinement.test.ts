@@ -95,7 +95,7 @@ describe('config', () => {
 
   it('defaults the analysis model to sonnet when unset', () => {
     writeFileSync(join(root, '.teamai', 'role-refinement.json'), JSON.stringify({ mode: 'auto' }));
-    expect(getRoleRefinementConfig(root).model).toBe('claude-sonnet-4-6');
+    expect(getRoleRefinementConfig(root).model).toBe('claude-sonnet-5');
   });
 });
 
