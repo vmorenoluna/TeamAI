@@ -129,7 +129,7 @@ describe('getAvailableModels Integration', () => {
       const readBack = await getProvidersConfig();
 
       // Default should be filled in from DEFAULT constant
-      expect(readBack.default.model).toBe('claude-sonnet-4-6');
+      expect(readBack.default.model).toBe('claude-sonnet-5');
       expect(readBack.default.provider).toBe('anthropic');
       expect(readBack.roles.coder?.provider).toBe('bedrock');
     });
@@ -140,7 +140,7 @@ describe('getAvailableModels Integration', () => {
 
       const config = await getProvidersConfig();
 
-      expect(config.default.model).toBe('claude-sonnet-4-6');
+      expect(config.default.model).toBe('claude-sonnet-5');
       expect(config.default.provider).toBe('anthropic');
       // getProvidersConfig merges with DEFAULT_PROVIDERS_CONFIG which includes role defaults
       expect(config.roles).toBeDefined();
@@ -152,7 +152,7 @@ describe('getAvailableModels Integration', () => {
 
       const config = await getProvidersConfig();
 
-      expect(config.exploration?.model).toBe('claude-sonnet-4-6');
+      expect(config.exploration?.model).toBe('claude-sonnet-5');
     });
 
     it('keeps the Sonnet exploration default when a config omits the exploration key', async () => {
@@ -161,7 +161,7 @@ describe('getAvailableModels Integration', () => {
 
       const config = await getProvidersConfig();
 
-      expect(config.exploration?.model).toBe('claude-sonnet-4-6');
+      expect(config.exploration?.model).toBe('claude-sonnet-5');
     });
 
     it('persists the config to the actual filesystem', async () => {

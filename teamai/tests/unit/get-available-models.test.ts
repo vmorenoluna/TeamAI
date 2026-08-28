@@ -60,12 +60,15 @@ describe('getAvailableModels', () => {
     const models = CURATED_MODELS.anthropic;
     expect(models).toHaveLength(4);
     expect(models).toContain('claude-fable-5');
-    expect(models).toContain('claude-opus-4-8');
-    expect(models).toContain('claude-sonnet-4-6');
+    expect(models).toContain('claude-opus-5');
+    expect(models).toContain('claude-sonnet-5');
     expect(models).toContain('claude-haiku-4-5-20251001');
     // Ensure no old gen-3 models leaked in
     const gen3 = models.filter(m => /claude-3/.test(m));
     expect(gen3).toHaveLength(0);
+    // Superseded gen-4 opus/sonnet IDs must not linger in the curated fallback
+    expect(models).not.toContain('claude-opus-4-8');
+    expect(models).not.toContain('claude-sonnet-4-6');
   });
 
   // ── Unknown provider ────────────────────────────────────────────────
@@ -521,6 +524,36 @@ describe('getAvailableModels', () => {
     expect(older).toHaveLength(0);
   });
 
+  it('keeps fable alongside the opus-5/sonnet-5 families — no collision, nothing dropped', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-anthropic');
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: 'claude-fable-5', type: 'model' },
+          { id: 'claude-opus-5', type: 'model' },
+          { id: 'claude-opus-4-8', type: 'model' },
+          { id: 'claude-sonnet-5', type: 'model' },
+          { id: 'claude-sonnet-4-6', type: 'model' },
+          { id: 'claude-haiku-4-5-20251001', type: 'model' },
+        ],
+        has_more: false,
+      }),
+    });
+
+    const result = await getAvailableModels('anthropic');
+    expect(result.error).toBeUndefined();
+    // All four families survive the dedup; within opus/sonnet the gen-5 ID wins
+    // (claude-opus-5 > claude-opus-4-8, claude-sonnet-5 > claude-sonnet-4-6),
+    // and the fable family is untouched by the bump.
+    expect(result.models).toEqual([
+      'claude-fable-5',
+      'claude-haiku-4-5-20251001',
+      'claude-opus-5',
+      'claude-sonnet-5',
+    ]);
+  });
+
   // ── No active project (getActiveProjectPath fails) ───────────────────
 
   it('works when no active project (falls back to curated defaults)', async () => {
@@ -693,6 +726,15 @@ describe('extractClaudeFamily', () => {
 
   it('auto-detects a new family like fable', async () => {
     expect(await extractClaudeFamily('claude-fable-4-1')).toBe('fable');
+  });
+
+  it('extracts fable from claude-fable-5 (curated fallback entry, unaffected by opus/sonnet bump)', async () => {
+    expect(await extractClaudeFamily('claude-fable-5')).toBe('fable');
+  });
+
+  it('extracts the bumped gen-5 IDs to their families', async () => {
+    expect(await extractClaudeFamily('claude-opus-5')).toBe('opus');
+    expect(await extractClaudeFamily('claude-sonnet-5')).toBe('sonnet');
   });
 
   it('auto-detects a new family like mythos', async () => {

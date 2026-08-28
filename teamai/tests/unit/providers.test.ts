@@ -24,7 +24,7 @@ describe('resolveProvider', () => {
   it('falls back to defaults when no project-level providers file exists', () => {
     const result = resolveProvider('/tmp/nonexistent-dir-12345', 'coder');
     // Coder has no role override in defaults → inherits default model
-    expect(result.model).toBe('claude-sonnet-4-6');
+    expect(result.model).toBe('claude-sonnet-5');
     expect(result.provider).toBe('anthropic');
   });
 

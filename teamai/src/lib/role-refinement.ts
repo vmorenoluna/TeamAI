@@ -143,7 +143,7 @@ export function makeRoleRefinementAnalyzeDeps(): RoleRefinementAnalyzeDeps {
 
 export const DEFAULT_ROLE_REFINEMENT_CONFIG: RoleRefinementConfig = {
   mode: 'manual',
-  model: 'claude-sonnet-4-6',
+  model: 'claude-sonnet-5',
   autoApply: false,
   maxAutoAnalysesPerDay: 5,
   recurrenceThreshold: 2,

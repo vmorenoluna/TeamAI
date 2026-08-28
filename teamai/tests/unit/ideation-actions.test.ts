@@ -76,7 +76,8 @@ describe('ideation server actions', () => {
         taskId: `ideation::${root}`,
         role: 'general',
         cwd: root,
-        model: 'claude-sonnet-4-6',
+        // Resolved from the shipped defaults/providers.json exploration model
+        model: 'claude-sonnet-5',
         projectRoot: root,
         permissionMode: 'bypassPermissions',
       });
