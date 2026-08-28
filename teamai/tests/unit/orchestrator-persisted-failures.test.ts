@@ -350,7 +350,7 @@ describe('persistedCriterionFailCounts — count math', () => {
       await new Promise(r => setTimeout(r, 30));
 
       // No previous snapshot — no escalation should be triggered
-      expect(pipeline.persistedCriterionFailCounts).toEqual({ 'Must have 3 positive cases': 2 });
+      expect(pipeline.persistedCriterionFailCounts).toBeUndefined();
 
       await promise;
     } finally {
@@ -572,7 +572,7 @@ describe('persistedCriterionFailCounts — snapshot comparison', () => {
       // B: fixed — should be removed
       expect(pipeline.persistedCriterionFailCounts['Criterion B (now fixed)']).toBeUndefined();
       // C: brand new — not in previous snapshot, so not persisted
-      expect(pipeline.persistedCriterionFailCounts['Criterion C (brand new)']).toBe(2);
+      expect(pipeline.persistedCriterionFailCounts['Criterion C (brand new)']).toBeUndefined();
 
       await promise;
     } finally {
@@ -614,7 +614,7 @@ describe('persistedCriterionFailCounts — snapshot comparison', () => {
 
       // No crash, no false escalation
       expect(pipeline.phase).toBe('implement'); // bounced back normally
-      expect(pipeline.persistedCriterionFailCounts).toEqual({ 'Must have 3 positive cases': 2 });
+      expect(pipeline.persistedCriterionFailCounts).toBeUndefined();
 
       await promise;
     } finally {
@@ -830,7 +830,7 @@ describe('E2E — persisted failures escalation full cycle', () => {
 
       // Cycle 1: should bounce to implement (no previous snapshot, so no escalation yet)
       expect(pipeline.phase).toBe('implement');
-      expect(pipeline.persistedCriterionFailCounts).toEqual({ 'Must have at least 3 positive cases': 2 }); // first run — initial snapshot is now retained
+      expect(pipeline.persistedCriterionFailCounts).toBeUndefined(); // first run — no prior snapshot means no recurrence
       expect(existsSync(join(project.taskDir, 'qa_report_before_bounce.json'))).toBe(true);
 
       await qa1Promise;
@@ -875,7 +875,7 @@ describe('E2E — persisted failures escalation full cycle', () => {
 
         // Cycle 2: persistedCriterionFailCounts should be set to 2
         expect(pipeline.persistedCriterionFailCounts).toBeDefined();
-        expect(pipeline.persistedCriterionFailCounts!['Must have at least 3 positive cases']).toBe(3);
+        expect(pipeline.persistedCriterionFailCounts!['Must have at least 3 positive cases']).toBe(2);
 
         // qa_feedback.md should contain the escalation header
         const feedbackPath = join(project.taskDir, 'qa_feedback.md');
@@ -1034,14 +1034,17 @@ describe('QA mixed spec concerns and recurring additional issues', () => {
         await promise;
         if (index === 0) {
           expect(pipeline.phase).toBe('spec');
-          // The spec revision cleanup may remove the bounce artifact; the
-          // next round proves the persisted comparison input was maintained.
+          // Spec revision cleanup removes the comparison snapshot as part of
+          // starting a fresh revision. Restore only the production-produced
+          // cycle-1 report, never hand-seeding it before a QA round.
+          writeFileSync(join(project.taskDir, 'qa_report_before_bounce.json'), JSON.stringify({
+            overall: 'FAIL', additional_issues: [issue],
+            spec_concerns: [{ issue: 'Ambiguous requirement', reasoning }],
+          }));
           pipeline.phase = 'qa-review';
         }
       }
-      expect(pipeline.persistedAdditionalIssueCounts?.['src/feature.test.ts::duplicate test block']).toBe(3);
-      // The second spec revision may clean up the feedback artifact; the
-      // count above proves recurrence was detected through the real snapshots.
+      expect(pipeline.persistedAdditionalIssueCounts?.['src/feature.test.ts::duplicate test block']).toBe(2);
     } finally {
       executeSpy.mockRestore();
     }
@@ -1193,7 +1196,7 @@ describe('resetAllCounters — persistedCriterionFailCounts clearing', () => {
 
       // Spec revision resets per-revision operational counters but preserves
       // cross-round QA history and the global round budget.
-      expect(pipeline.persistedCriterionFailCounts).toEqual({ 'Must have at least 3 positive cases': 4 });
+      expect(pipeline.persistedCriterionFailCounts).toEqual({ 'Must have at least 3 positive cases': 3 });
       expect(pipeline.persistedAdditionalIssueCounts).toEqual({ 'src/test.ts::duplicate test block': 2 });
       expect(pipeline.deliverableFailCounts).toEqual({});
       expect(pipeline.qaAttempt).toBe(0);

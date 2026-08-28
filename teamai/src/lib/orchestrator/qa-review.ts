@@ -518,11 +518,8 @@ export async function runQaReview(
   pipeline.qaRevision++;
   deps.savePipelineState(pipeline);
   snapshotQaReportVersioned(pipeline);
-  // Preserve the completed report for recurrence comparison on the next QA round,
-  // regardless of whether this round routes through spec revision or implement.
-  snapshotQaReportBeforeBounce(pipeline);
-
   const hasSpecConcerns = report.spec_concerns && Array.isArray(report.spec_concerns) && report.spec_concerns.length > 0;
+  // Read the prior round before replacing it with the current report.
   const priorReport = previousQaReport(pipeline.specPath);
 
   // Persist recurrence history before any routing decision. Spec revisions
@@ -530,6 +527,8 @@ export async function runQaReview(
   // attaching an unrelated spec concern.
   updateCriterionCounts(pipeline, report, priorReport);
   updateAdditionalIssueCounts(pipeline, report, priorReport);
+  // Preserve the completed report for the next QA round, regardless of routing.
+  snapshotQaReportBeforeBounce(pipeline);
 
   // The QA budget is global across spec revisions. Check it before
   // spec-concern routing so a task cannot loop through unlimited real
