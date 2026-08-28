@@ -22,10 +22,18 @@ The development server uses port `3002`. Production Electron uses port `3000`.
 ## Electron builds
 
 The packaged app doesn't bundle a separate Node runtime. Production Electron runs its
-custom server (`dist-server/server.mjs`) by spawning its own Electron binary with
+custom server (`dist-server/server.cjs`) by spawning its own Electron binary with
 `ELECTRON_RUN_AS_NODE=1` (see `electron/main.js`) — this makes Electron behave as a
-plain Node process while keeping its built-in support for reading `node_modules`
-packed inside `app.asar`, which a real standalone Node binary does not have.
+plain Node process. The build also disables asar packing (`"asar": false` in
+`package.json`'s `build` config) so the packaged app's files sit directly on the real
+filesystem, where plain Node module resolution works normally.
+
+One consequence of that: Next's build marks native-addon dependencies (`node-pty`) as
+server externals via a symlink with an absolute target path, which doesn't survive
+being copied into the package. `npm run build:electron` runs
+`scripts/fix-external-symlinks.mjs` after `next build` to replace those with portable
+proxies under `external-shims/` (a generated directory, not checked in) — see that
+script's comments for the full explanation.
 
 Build each platform on that platform — native dependencies (`sharp`, `esbuild`,
 `node-pty`) are platform-specific and electron-builder can't cross-compile them from a
