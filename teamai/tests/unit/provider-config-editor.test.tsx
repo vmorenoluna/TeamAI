@@ -8,10 +8,14 @@ import { ProviderConfigEditor } from '@/components/provider-config';
 
 const mockGetAvailableModels = vi.fn();
 const mockSaveProvidersConfig = vi.fn().mockResolvedValue(undefined);
+const mockApplyMigration = vi.fn();
+const mockDismissMigration = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@/app/actions/providers', () => ({
   getAvailableModels: (...args: unknown[]) => mockGetAvailableModels(...args),
   saveProvidersConfig: (...args: unknown[]) => mockSaveProvidersConfig(...args),
+  applyProvidersMigration: (...args: unknown[]) => mockApplyMigration(...args),
+  dismissProvidersMigrationHint: (...args: unknown[]) => mockDismissMigration(...args),
 }));
 
 // ── Fixtures ───────────────────────────────────────────────────────────
@@ -537,5 +541,109 @@ describe('ProviderConfigEditor', () => {
         expect(screen.getByText('Saved!')).toBeInTheDocument();
       });
     });
+  });
+
+  // ── Superseded-model migration hint ───────────────────────────────────
+
+  const MIGRATION_HINT = {
+    changes: [
+      { from: 'claude-sonnet-4-6', to: 'claude-sonnet-5', count: 2 },
+      { from: 'claude-opus-4-8', to: 'claude-opus-5', count: 1 },
+    ],
+  };
+
+  it('renders no migration banner when migrationHint is null/omitted', async () => {
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
+    });
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByText(/Superseded model IDs/)).toBeNull();
+  });
+
+  it('renders the pending changes when a migration hint is provided', async () => {
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} migrationHint={MIGRATION_HINT} />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
+    });
+
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    const entries = screen.getAllByRole('listitem');
+    expect(entries[0].textContent).toBe('claude-sonnet-4-6 → claude-sonnet-5 (2 entries)');
+    expect(entries[1].textContent).toBe('claude-opus-4-8 → claude-opus-5 (1 entry)');
+    expect(screen.getByRole('button', { name: 'Update to current defaults' })).toBeInTheDocument();
+  });
+
+  it('apply migrates the editor state to the new IDs and hides the banner', async () => {
+    mockApplyMigration.mockResolvedValueOnce({ ok: true, changes: MIGRATION_HINT.changes });
+
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} migrationHint={MIGRATION_HINT} />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
+    });
+    await waitFor(() => expect(screen.queryByText('Loading models…')).toBeNull());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Update to current defaults' }));
+    });
+
+    await waitFor(() => {
+      expect(mockApplyMigration).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('status')).toBeNull();
+      // Apply writes the file via its own action — surfaced by the saved indicator
+      expect(screen.getByText('Saved!')).toBeInTheDocument();
+    });
+
+    // The mocked model list doesn't include gen-5 IDs, so the migrated default
+    // renders as a custom input (in production the live/prewarmed model list
+    // carries the gen-5 IDs once refreshed)
+    const customInput = await screen.findByPlaceholderText('Type a model name…');
+    expect(customInput).toHaveValue('claude-sonnet-5');
+
+    // Apply persists via its own server action — the editor does not auto-save
+    expect(mockSaveProvidersConfig).not.toHaveBeenCalled();
+  });
+
+  it('apply failure surfaces the error banner and keeps the migration hint visible', async () => {
+    mockApplyMigration.mockResolvedValueOnce({ ok: false, error: 'disk exploded' });
+
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} migrationHint={MIGRATION_HINT} />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Update to current defaults' }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+      expect(screen.getByRole('alert').textContent).toContain('disk exploded');
+    });
+    expect(screen.queryByRole('status')).not.toBeNull();
+  });
+
+  it('dismiss hides the banner and calls the dismiss action', async () => {
+    await act(async () => {
+      render(<ProviderConfigEditor config={DEFAULT_CONFIG} migrationHint={MIGRATION_HINT} />);
+      if (!vi.isFakeTimers()) {
+        await new Promise(r => setTimeout(r, 0));
+      }
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss migration hint' }));
+    });
+
+    expect(mockDismissMigration).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('status')).toBeNull();
   });
 });
