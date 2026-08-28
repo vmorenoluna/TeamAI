@@ -255,10 +255,46 @@ describe('rejectTask — Request Changes → Planner with subtask scoping from p
     expect(ctx.deps.executePhase).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects subtask scoping for planner only if the task is awaiting-review or pr-open', async () => {
+  it('rejects subtask scoping for planner only if the task is awaiting-review, pr-open, or failed', async () => {
     ctx.deps.taskStore.getById = () => ({ id: 'task-1', description: 'd', phase: 'implement' });
     await expect(
       rejectTask('task-1', 'Scope this', 'planner', [1], ctx.deps as never),
-    ).rejects.toThrow('awaiting-review or pr-open');
+    ).rejects.toThrow('awaiting-review, pr-open, or failed');
+  });
+});
+
+describe('rejectTask from a failed task', () => {
+  let ctx: ReturnType<typeof makeCtx>;
+
+  beforeEach(() => {
+    ctx = makeCtx();
+    // A task that exhausted its spec-revision budget (or QA-attempt budget)
+    // lands in `failed`, not `awaiting-review` — reject must still work from
+    // there, since redirecting feedback to an agent (most often the analyst,
+    // for a spec-revision-exhausted task) is the primary recovery action.
+    ctx.pipeline.phase = 'failed';
+    ctx.deps.taskStore.getById = () => ({ id: 'task-1', description: 'd', phase: 'failed' });
+    writeFileSync(join(ctx.specPath, 'spec.md'), '# spec');
+  });
+
+  afterEach(() => {
+    try { rmSync(ctx.root, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+
+  it('routes feedback to the analyst from a failed task, same as from awaiting-review', async () => {
+    await rejectTask('task-1', 'The weight-scaling approach does not converge — redesign the constraint', 'analyst', undefined, ctx.deps as never);
+
+    const raw = readFileSync(join(ctx.specPath, 'human_feedback.md'), 'utf-8');
+    expect(raw).toContain('Target: analyst');
+    expect(raw).toContain('redesign the constraint');
+    expect(ctx.pipeline.phase).toBe('spec');
+    expect(ctx.deps.executePhase).toHaveBeenCalledTimes(1);
+  });
+
+  it('still rejects a phase that is neither awaiting-review, pr-open, nor failed', async () => {
+    ctx.deps.taskStore.getById = () => ({ id: 'task-1', description: 'd', phase: 'implement' });
+    await expect(
+      rejectTask('task-1', 'x', 'coder', undefined, ctx.deps as never),
+    ).rejects.toThrow('awaiting-review, pr-open, or failed');
   });
 });

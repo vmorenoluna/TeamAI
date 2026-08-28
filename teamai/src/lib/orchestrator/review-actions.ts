@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs';
 import path from 'path';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy, QaReport } from './types';
+import type { FailureReason } from './qa-feedback';
 import { REVISION_CLEANUP_EXTRA, PHASE_ARTIFACTS } from './artifacts';
 import { writeHumanFeedback, targetToResumePhase, type FeedbackTarget } from './human-feedback';
 import { logToOutput } from './helpers';
@@ -28,6 +29,7 @@ export interface ReviewActionsDeps {
   advancePhase: (pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
   savePipelineState: (pipeline: TaskPipeline) => void;
+  writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason) => void;
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────
@@ -259,6 +261,12 @@ export async function approveTask(
  * Writes human_feedback.md, snapshots it for bounce-cycle survival,
  * updates the QA report with the rejection reason, resets qaAttempt,
  * and bounces back to the implement phase.
+ *
+ * Also accepts `failed` tasks — a task can reach `failed` with a QA-attempt
+ * or spec-revision budget exhausted rather than a clean PASS, and reject is
+ * the primary recovery action for that case (e.g. redirecting feedback to
+ * the analyst for a spec-revision-exhausted task, whose problem is usually
+ * the approach itself rather than an implementation bug).
  */
 export async function rejectTask(
   taskId: string,
@@ -270,8 +278,8 @@ export async function rejectTask(
   const task = deps.taskStore.getById(taskId);
   if (!task) throw new TaskNotFoundError(taskId);
   const phase = task.phase;
-  if (phase !== 'awaiting-review' && phase !== 'pr-open') {
-    throw new PhaseTransitionError(taskId, phase, 'awaiting-review or pr-open', 'reject');
+  if (phase !== 'awaiting-review' && phase !== 'pr-open' && phase !== 'failed') {
+    throw new PhaseTransitionError(taskId, phase, 'awaiting-review, pr-open, or failed', 'reject');
   }
 
   const pipeline = deps.pipelines.get(taskId) ?? deps.restorePipeline(taskId, phase);
@@ -355,22 +363,40 @@ export async function autoReviseSpec(
     // Preserve plan.json and code (no blind cleanup) — the planner re-plans in
     // place. Clear only QA artifacts and stale human feedback (historical
     // qa_report_v{N}.json and spec_v{N}.md are permanent audit records).
-    trimArtifactsForTarget(specPath, 'analyst', { preserve: ['qa_report_before_bounce.json'] });
+    // qa_report.json itself is also preserved (unlike a normal in-flight
+    // revision, this task has no next QA round to regenerate it — deleting
+    // it here would leave the task's QA tab empty for the human reviewing
+    // why it failed).
+    trimArtifactsForTarget(specPath, 'analyst', {
+      preserve: ['qa_report_before_bounce.json', 'qa_report.json'],
+    });
     for (const f of REVISION_CLEANUP_EXTRA) {
       if (f === 'qa_report_before_bounce.json') continue;
       try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
     }
 
-    // Reset counters — fresh spec gets a clean budget
+    // Capture the true historical counters (qaRoundCount, specRevision) into
+    // the completion summary before resetAllCounters zeroes them below —
+    // this summary is a record of what just happened, not a preview of the
+    // next attempt's fresh budget.
+    deps.writeCompletionSummary(pipeline, 'spec-revision-exhausted');
+
+    // Reset counters — a future retry (after a human edits the spec, or
+    // redirects feedback to the analyst) gets a clean budget.
     resetAllCounters(pipeline);
     deps.savePipelineState(pipeline);
 
-    // Park in awaiting-review so the human can edit the spec without an agent
-    // writing concurrently.
+    // The spec-revision budget was exhausted without QA ever passing — this
+    // usually means the approach itself needs a redesign, not another
+    // automated attempt. Mark the task failed (with failureReason recorded
+    // above) rather than awaiting-review, which is otherwise indistinguishable
+    // from a genuine QA PASS in the UI. A human can still reject this task
+    // (rejectTask now accepts the 'failed' phase) to route feedback to the
+    // analyst, or retry it directly.
     try {
-      logToOutput(specPath, `\n[REFINE] Max auto-revisions (3) reached — pausing for human-guided revision\n`);
+      logToOutput(specPath, `\n[REFINE] Max auto-revisions (3) reached — spec revision budget exhausted, marking task failed for human review\n`);
     } catch { /* best-effort */ }
-    deps.advancePhase(pipeline, 'awaiting-review');
+    deps.advancePhase(pipeline, 'failed');
     return;
   }
 

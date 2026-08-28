@@ -59,8 +59,9 @@ export function preRestoreFailedTask(taskStore: TaskStore, taskId: string): void
     } catch { /* best-effort — don't block retry on snapshot failure */ }
   }
 
-  // Clear completionSummary so the failure indicator disappears
-  taskStore.update(taskId, { completionSummary: undefined });
+  // Clear completionSummary and failureReason so the failure indicator
+  // disappears and a subsequent failure isn't mislabeled with a stale reason
+  taskStore.update(taskId, { completionSummary: undefined, failureReason: undefined });
 
   // Clear output.log for a fresh terminal view on retry
   const outputPath = join(dir, 'output.log');
@@ -80,7 +81,7 @@ export function retryFailedTask(projectRoot: string, taskId: string): void {
   // Determine the phase the task was in when it failed — read from events.
   let resumePhase = 'qa-review'; // default for failed tasks (most common failure point)
   try {
-    resumePhase = getResumePhaseForFailedTask(taskStore.getEvents(taskId));
+    resumePhase = getResumePhaseForFailedTask(taskStore.getEvents(taskId), task.failureReason);
   } catch { /* fall back to default */ }
 
   preRestoreFailedTask(taskStore, taskId);

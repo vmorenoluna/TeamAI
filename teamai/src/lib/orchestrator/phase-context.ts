@@ -13,6 +13,7 @@ import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
 import type { TaskStore } from '../task-store';
 import type { TaskPipeline, QaReport, SessionOptsResult } from './types';
+import type { FailureReason } from './qa-feedback';
 import type { SensorsConfig } from '../sensors';
 
 // Forward-declare to avoid circular imports with implement.ts
@@ -70,7 +71,7 @@ export interface PhaseContext {
 
   // ── QA / review ──
   writeQaFeedback: (pipeline: TaskPipeline, report: QaReport) => void;
-  writeCompletionSummary: (pipeline: TaskPipeline) => void;
+  writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason) => void;
   autoReviseSpec: (pipeline: TaskPipeline) => Promise<void>;
 
   // ── Config ──

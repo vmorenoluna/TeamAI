@@ -21,6 +21,17 @@ const RETRY_PHASE_OPTIONS: DialogPhaseOption[] = [
 
 const DESCRIPTION_LIMIT = 80;
 
+// Reason-aware tooltip for the failure indicator — distinguishes "ran out of
+// QA-attempt budget on a genuine code defect" from "ran out of spec-revision
+// budget without QA ever passing" (the latter usually means the approach
+// itself needs a redesign). 'unknown' covers legacy failed tasks written
+// before failureReason existed.
+const FAILURE_REASON_TOOLTIP: Record<'qa-attempts-exhausted' | 'spec-revision-exhausted' | 'unknown', string> = {
+  'qa-attempts-exhausted': 'Task failed — QA attempt budget exhausted',
+  'spec-revision-exhausted': 'Task failed — spec revision budget exhausted (QA never passed)',
+  unknown: 'Task failed',
+};
+
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60000);
@@ -367,7 +378,7 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
           {task.phase === 'failed' && (
             <span
               data-component="failure-indicator"
-              title="Task failed"
+              title={FAILURE_REASON_TOOLTIP[task.failureReason ?? 'unknown']}
               className="text-[10px] font-medium text-red-400/70"
             >
               ✕
