@@ -1037,6 +1037,19 @@ describe('Orchestrator', () => {
       expect(result).toBe(5);
     });
 
+    it('returns the highest snapshot even when v1 is missing (gap-tolerant)', () => {
+      // Pre-seeded/resumed tasks can have v2..vN with no v1 — the old
+      // break-at-first-missing loop returned 0 here, silently resetting
+      // revision numbering when .pipeline_state.json was lost.
+      writeFileSync(join(testData.taskDir, 'spec_v2.md'), '# Spec v2');
+      writeFileSync(join(testData.taskDir, 'spec_v3.md'), '# Spec v3');
+      writeFileSync(join(testData.taskDir, 'spec_v4.md'), '# Spec v4');
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreSpecRevision(testData.taskId);
+      expect(result).toBe(4);
+    });
+
     it('handles corrupt .pipeline_state.json gracefully via fallback', () => {
       const statePath = join(testData.taskDir, '.pipeline_state.json');
       writeFileSync(statePath, 'not valid json {{{');
@@ -1108,6 +1121,15 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
       const result = (orch as AnyOrch)._restoreQaRevision(testData.taskId);
       expect(result).toBe(5);
+    });
+
+    it('returns the highest snapshot even when v1 is missing (gap-tolerant)', () => {
+      writeFileSync(join(testData.taskDir, 'qa_report_v2.json'), '{}');
+      writeFileSync(join(testData.taskDir, 'qa_report_v3.json'), '{}');
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const result = (orch as AnyOrch)._restoreQaRevision(testData.taskId);
+      expect(result).toBe(3);
     });
 
     it('handles corrupt .pipeline_state.json gracefully via fallback', () => {

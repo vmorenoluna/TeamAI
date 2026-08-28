@@ -733,13 +733,16 @@ export class Orchestrator {
         }
       }
     } catch { /* fall through to on-disk counting */ }
-    // Fallback: count spec_v{N}.md files on disk
+    // Fallback: find the highest existing spec_v{N}.md on disk. Scan a fixed
+    // range and take the max instead of stopping at the first gap — v1 can
+    // legitimately be missing on tasks whose pipeline entered tracked
+    // execution after spec.md already existed, and breaking at the first
+    // missing file would return 0 for a task with v2..v4 on disk, silently
+    // resetting revision numbering if .pipeline_state.json is ever lost.
     let maxN = 0;
-    for (let v = 1; ; v++) {
+    for (let v = 1; v <= MAX_REVISION_SNAPSHOTS; v++) {
       if (existsSync(path.join(dir, `spec_v${v}.md`))) {
         maxN = v;
-      } else {
-        break;
       }
     }
     return maxN;
@@ -761,12 +764,12 @@ export class Orchestrator {
         }
       }
     } catch { /* fall through to on-disk counting */ }
+    // Same gap-tolerant max scan as _restoreSpecRevision (qa_report_v1.json
+    // can be absent while v2+ exist).
     let maxN = 0;
-    for (let v = 1; ; v++) {
+    for (let v = 1; v <= MAX_REVISION_SNAPSHOTS; v++) {
       if (existsSync(path.join(dir, `qa_report_v${v}.json`))) {
         maxN = v;
-      } else {
-        break;
       }
     }
     return maxN;
@@ -1200,6 +1203,12 @@ const TRANSIENT_TASK_FILES = new Set([
 ]);
 
 const OUTPUT_LOG_PATTERN = /^output(-.*)?\.log$/;
+
+/** Upper bound for the on-disk revision-snapshot fallback scans
+ *  (_restoreSpecRevision / _restoreQaRevision). Auto-revision caps at 3
+ *  (spec) and maxQaAttempts (QA), so 20 is generous headroom while keeping
+ *  the fallback O(20) existsSync calls. */
+const MAX_REVISION_SNAPSHOTS = 20;
 
 /**
  * Recursively remove only transient pipeline state under `dir`, preserving
