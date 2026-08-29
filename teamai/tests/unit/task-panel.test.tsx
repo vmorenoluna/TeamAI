@@ -416,6 +416,46 @@ describe('TaskPanel', () => {
       expect(mockGetTaskFull).not.toHaveBeenCalled();
     });
 
+    it('re-fetches silently on subtask-progress for the same taskId', async () => {
+      // subtask-progress is the ONLY live signal during the whole implement run
+      // (phase stays "implement"), so the panel must re-fetch on it.
+      mockGetTaskFull.mockResolvedValue(makeFullData({ task: { id: 'task-1', title: 'Subtask Test' } }));
+
+      renderPanel();
+
+      await waitFor(() => {
+        expect(screen.getAllByText('Subtask Test').length).toBeGreaterThanOrEqual(1);
+      });
+
+      mockGetTaskFull.mockClear();
+
+      act(() => {
+        gOnMessageCbs.forEach(cb => cb({ type: 'subtask-progress', taskId: 'task-1', completed: 2, total: 3 }));
+      });
+
+      await waitFor(() => {
+        expect(mockGetTaskFull).toHaveBeenCalledWith('task-1');
+      });
+    });
+
+    it('does NOT re-fetch on subtask-progress for a different taskId', async () => {
+      mockGetTaskFull.mockResolvedValue(makeFullData({ task: { id: 'task-1' } }));
+
+      renderPanel();
+
+      await waitFor(() => {
+        expect(screen.getAllByText('Test Task').length).toBeGreaterThanOrEqual(1);
+      });
+
+      mockGetTaskFull.mockClear();
+
+      act(() => {
+        gOnMessageCbs.forEach(cb => cb({ type: 'subtask-progress', taskId: 'task-2', completed: 1, total: 3 }));
+      });
+
+      expect(mockGetTaskFull).not.toHaveBeenCalled();
+    });
+
     it('re-fetches silently on container-log', async () => {
       mockGetTaskFull.mockResolvedValue(makeFullData());
 
