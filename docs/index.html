@@ -72,37 +72,18 @@
       font-size: 1rem; font-weight: 600; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
       text-decoration: none;
     }
-    /* ========== Available soon badge ========== */
-    .soon-badge {
-      position: absolute;
-      top: -10px;
-      right: -10px;
-      background: linear-gradient(135deg, #f59e0b, #ef4444);
-      color: #fff;
-      font-size: 0.7rem;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      padding: 4px 10px;
-      border-radius: 100px;
-      white-space: nowrap;
-      z-index: 2;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    }
-    .cta-wrapper {
-      position: relative;
-      display: inline-block;
-    }
-    .cta-wrapper .hero-cta {
-      pointer-events: none;
-      opacity: 0.5;
+    /* ========== CTA row ========== */
+    .cta-row {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 12px; flex-wrap: wrap;
     }
     .hero-cta-secondary {
       display: inline-flex; align-items: center; gap: 10px;
       background: transparent; color: #cbd5e1; border: 1px solid #334155;
       border-radius: 8px; padding: 14px 32px; font-size: 1rem; font-weight: 600;
-      margin-left: 12px; cursor: pointer; text-decoration: none;
+      cursor: pointer; text-decoration: none;
     }
+    .hero-cta:hover { text-decoration: none; transform: translateY(-1px); box-shadow: 0 6px 16px rgba(37,99,235,0.35); }
     .hero-cta-secondary:hover { border-color: #64748b; text-decoration: none; }
 
     /* ========== Feature Cards ========== */
@@ -211,7 +192,8 @@
       .pipeline-flow { gap: 8px; }
       .pipeline-arrow { display: none; }
       .hero { padding: 110px 0 64px; }
-      .hero-cta-secondary { margin-left: 0; margin-top: 12px; }
+      .hero-cta-secondary { margin-left: 0; }
+      .cta-row { flex-direction: column; }
       /* Mobile nav */
       nav .nav-links {
         display: flex; flex-direction: column; align-items: stretch;
@@ -253,6 +235,7 @@
       <a href="#refine" class="nav-link" onclick="closeNav()">Refinements</a>
       <a href="#auto" class="nav-link" onclick="closeNav()">Auto Mode</a>
       <a href="#extras" class="nav-link" onclick="closeNav()">Roadmap</a>
+      <a href="https://github.com/vmorenoluna/TeamAI" class="nav-link" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
   </div>
 </nav>
@@ -278,9 +261,9 @@
   <div class="container">
     <h1>A Team of AI Agents<br>for Your Codebase</h1>
     <p class="subtitle">      TeamAI puts a full development team at your fingertips. An analyst, a planner, a coder, and a QA reviewer work together, turning feature requests into shipped code.</p>
-    <div class="cta-wrapper">
-      <span class="soon-badge">Available soon</span>
-      <span class="hero-cta">View on GitHub</span>
+    <div class="cta-row">
+      <a class="hero-cta" href="https://github.com/vmorenoluna/TeamAI">View on GitHub</a>
+      <a class="hero-cta-secondary" href="https://github.com/vmorenoluna/TeamAI/releases">Download</a>
     </div>
   </div>
 </section>
@@ -511,11 +494,11 @@
     <span class="section-label">Get Started</span>
     <h2>Ready to put AI agents to work?</h2>
     <p class="section-desc" style="margin:16px auto 32px;">
-      TeamAI is open source. Clone the repo, install the dependencies, and launch the desktop app to deploy your team of AI agents.
+      TeamAI is open source. Grab an installer for Windows, macOS, or Linux from GitHub Releases — the app keeps itself up to date automatically. Prefer running from source? Clone the repo and follow the README.
     </p>
-    <div class="cta-wrapper">
-      <span class="soon-badge">Available soon</span>
-      <span class="hero-cta">View on GitHub</span>
+    <div class="cta-row">
+      <a class="hero-cta" href="https://github.com/vmorenoluna/TeamAI/releases">Download</a>
+      <a class="hero-cta-secondary" href="https://github.com/vmorenoluna/TeamAI">View on GitHub</a>
     </div>
   </div>
 </section>
