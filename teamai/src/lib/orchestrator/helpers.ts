@@ -12,6 +12,7 @@ import { readContainerConfig } from '../container-manager';
 import { resolveProvider, providerToSessionOpts } from '../providers';
 import { containerSessionOpts, type AgentSession } from '../process-manager';
 import { readPipelineSensors, type SensorsConfig } from '../sensors';
+import type { PipelinePhase } from '@/constants/phases';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -256,4 +257,53 @@ export function buildSessionOpts(
   const providerCfg = resolveProvider(projectRoot, role);
   const providerOpts = providerToSessionOpts(providerCfg);
   return { taskId, role, cwd, ...containerSessionOpts(projectRoot), logFile, ...providerOpts };
+}
+
+// ── Artifact-based phase resolution ───────────────────────────────────────
+
+/**
+ * Determine which phase to start (or resume) a task's pipeline at, based on
+ * which artifacts already exist on disk.
+ *
+ * A task's spec.md and/or plan.json can exist before the orchestrator's own
+ * `spec`/`plan` phases ever run against it — e.g. a ticket authored outside
+ * the pipeline with its spec already written, or a task resumed after a
+ * crash. `moveTaskToPhase` and `resumeTask` both need this exact fallback
+ * chain (previously duplicated 4x across those two methods); consolidated
+ * here so a future change to the rule only needs to happen once.
+ */
+export function startPhaseFromArtifacts(hasPlan: boolean, hasSpec: boolean): PipelinePhase {
+  if (hasPlan) return 'implement';
+  if (hasSpec) return 'plan';
+  return 'spec';
+}
+
+/**
+ * Guarantee spec_v1.md exists whenever spec.md does — a no-op if it's
+ * already there.
+ *
+ * spec_v1.md is normally written by runSpecPhase's non-revision branch
+ * (phase-runners.ts), which only runs when a task's pipeline actually goes
+ * through the `spec` phase. A task whose spec.md was written before the
+ * orchestrator ever saw it (see startPhaseFromArtifacts above) skips that
+ * phase entirely — routed straight to `plan` — so that branch never runs,
+ * and without this call, spec_v1.md would only ever get backfilled
+ * reactively on the task's FIRST revision (see the `spec_v1.md` backfill in
+ * phase-runners.ts's revision branch). That backfill is only correct if
+ * nothing has touched spec.md yet by the time it runs; calling this here,
+ * at the earliest point the orchestrator detects a pre-existing spec.md,
+ * removes that timing dependency entirely — v1 is captured before a
+ * revision could ever have a chance to run.
+ */
+export function ensureSpecV1Snapshot(specPath: string): void {
+  const specMdPath = path.join(specPath, 'spec.md');
+  const specV1Path = path.join(specPath, 'spec_v1.md');
+  if (!existsSync(specMdPath) || existsSync(specV1Path)) return;
+  try {
+    writeFileSync(specV1Path, readFileSync(specMdPath, 'utf-8'));
+  } catch (err) {
+    // A failed snapshot leaves v1 missing rather than faked — the spec tab
+    // already renders "original version unavailable" for that case.
+    logWarn('orchestrator', `Failed to snapshot spec v1 for pre-seeded spec.md at ${specPath}`, err);
+  }
 }

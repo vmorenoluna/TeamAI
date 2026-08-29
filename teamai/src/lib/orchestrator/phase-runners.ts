@@ -201,16 +201,22 @@ export async function runSpecPhase(
     // never surfaced as a finished version in the spec comparison UI.
     try {
       if (existsSync(specMdPath)) {
-        // Defensive v1 backfill: a task whose pipeline first enters tracked
-        // execution after spec.md already exists (resumed/pre-seeded state)
-        // never ran the non-revision branch below, so spec_v1.md was never
-        // written. Without this, the first revision permanently skips v1 —
-        // or, when the restored counter was 0, overwrites v1 with the
-        // REVISED text. spec_revision_before.md holds exactly the
-        // pre-revision content (it is the no-op guard's baseline) and is
-        // deleted right after this block, so archive it as v1 now. Detect
-        // the situation by file existence, not by specRevision — the counter
-        // is not a reliable proxy for "has a tracked /spec run ever run".
+        // Defensive v1 backfill (secondary layer). The primary guarantee now
+        // lives in orchestrator/helpers.ts's ensureSpecV1Snapshot, called by
+        // moveTaskToPhase/resumeTask the moment a pre-existing spec.md is
+        // first detected — before this task could ever reach a revision. So
+        // in the common case, spec_v1.md already exists by the time this
+        // code runs and the block below is a no-op. This stays as a fallback
+        // for tasks that already lost their true v1 before that guarantee
+        // existed, or reach here via some path that didn't go through it —
+        // it archives whatever spec_revision_before.md holds (which is only
+        // guaranteed to BE the true original if this really is the task's
+        // first-ever revision; for a task with prior lost history, it is at
+        // best "state before this round", not the true origin — there is no
+        // way to distinguish the two purely from file existence at this
+        // point). spec_revision_before.md is the no-op guard's baseline and
+        // is deleted right after this block, so archive it as v1 now if
+        // needed.
         const specV1Path = path.join(pipeline.specPath, 'spec_v1.md');
         let archiveIndex = pipeline.specRevision;
         if (!existsSync(specV1Path) && existsSync(preRevisionSnapshotPath)) {

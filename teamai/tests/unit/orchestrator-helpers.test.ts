@@ -5,7 +5,7 @@
  *   - logToOutput: timestamped output.log appends, warn (not throw) on failure
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, readFileSync } from 'fs';
+import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -59,7 +59,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 
 // ── Imports after mocks ──
 
-import { logToOutput, updateSessionMap } from '../../src/lib/orchestrator/helpers';
+import { logToOutput, updateSessionMap, startPhaseFromArtifacts, ensureSpecV1Snapshot } from '../../src/lib/orchestrator/helpers';
 
 // ── Helpers ──
 
@@ -123,4 +123,49 @@ describe('updateSessionMap', () => {
       expect.anything(),
     );
   });
+});
+
+describe('startPhaseFromArtifacts', () => {
+  it('returns implement when a plan exists, regardless of spec', () => {
+    expect(startPhaseFromArtifacts(true, true)).toBe('implement');
+    expect(startPhaseFromArtifacts(true, false)).toBe('implement');
+  });
+
+  it('returns plan when only a spec exists', () => {
+    expect(startPhaseFromArtifacts(false, true)).toBe('plan');
+  });
+
+  it('returns spec when neither artifact exists', () => {
+    expect(startPhaseFromArtifacts(false, false)).toBe('spec');
+  });
+});
+
+describe('ensureSpecV1Snapshot', () => {
+  it('snapshots spec.md as spec_v1.md when v1 is missing', () => {
+    writeFileSync(join(specPath, 'spec.md'), '# pre-seeded spec\n\nWritten outside the pipeline.');
+
+    ensureSpecV1Snapshot(specPath);
+
+    expect(existsSync(join(specPath, 'spec_v1.md'))).toBe(true);
+    expect(readFileSync(join(specPath, 'spec_v1.md'), 'utf-8')).toBe('# pre-seeded spec\n\nWritten outside the pipeline.');
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when spec_v1.md already exists — never overwrites it', () => {
+    writeFileSync(join(specPath, 'spec.md'), '# revised content');
+    writeFileSync(join(specPath, 'spec_v1.md'), '# the true original');
+
+    ensureSpecV1Snapshot(specPath);
+
+    // v1 must stay exactly what it already was — this function only fills a
+    // gap, it never treats a later spec.md as a replacement for v1.
+    expect(readFileSync(join(specPath, 'spec_v1.md'), 'utf-8')).toBe('# the true original');
+  });
+
+  it('does nothing when spec.md does not exist', () => {
+    ensureSpecV1Snapshot(specPath);
+    expect(existsSync(join(specPath, 'spec_v1.md'))).toBe(false);
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
 });

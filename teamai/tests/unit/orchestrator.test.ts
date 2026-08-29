@@ -1591,6 +1591,38 @@ describe('Orchestrator', () => {
       expect(mockCreateSession).toHaveBeenCalled();
     });
 
+    it('snapshots spec_v1.md when routing past a pre-existing spec.md that was never versioned', async () => {
+      testData = setupTestProject();
+      // A spec.md written outside the pipeline (e.g. by an external task
+      // writer) — no spec_v1.md alongside it, unlike a spec the orchestrator
+      // generated itself via runSpecPhase.
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Externally authored spec');
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.moveTaskToPhase(testData.taskId, 'plan').catch(() => { /* best-effort */ });
+
+      // v1 must be captured the moment hasSpec is detected — before this
+      // task could ever reach a revision — so its true original state is
+      // never at risk of being lost or, on a later revision, backfilled
+      // from a stale pre-revision snapshot instead of the real original.
+      const v1Path = join(testData.taskDir, 'spec_v1.md');
+      expect(existsSync(v1Path)).toBe(true);
+      expect(readFileSync(v1Path, 'utf-8')).toBe('# Externally authored spec');
+    });
+
+    it('does not touch an already-versioned spec_v1.md', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Current spec');
+      writeFileSync(join(testData.taskDir, 'spec_v1.md'), '# The true original');
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.moveTaskToPhase(testData.taskId, 'plan').catch(() => { /* best-effort */ });
+
+      expect(readFileSync(join(testData.taskDir, 'spec_v1.md'), 'utf-8')).toBe('# The true original');
+    });
+
     // Coverage: line 116 — hasPlan = true when plan.json exists
     it('starts from implement when hasSpec and hasPlan are true and target is implement', async () => {
       testData = setupTestProject();
@@ -3586,6 +3618,22 @@ describe('Orchestrator', () => {
       await orch.resumeTask(testData.taskId).catch(() => { /* best-effort */ });
 
       expect(mockCreateSession).toHaveBeenCalled();
+    });
+
+    it('snapshots spec_v1.md when resuming a task whose spec.md was never versioned', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Pre-seeded spec');
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.resumeTask(testData.taskId).catch(() => { /* best-effort */ });
+
+      // Same guarantee as moveTaskToPhase — v1 must exist before this task
+      // could ever reach a revision, regardless of which of the two entry
+      // points (resumeTask vs moveTaskToPhase) first sees its spec.md.
+      const v1Path = join(testData.taskDir, 'spec_v1.md');
+      expect(existsSync(v1Path)).toBe(true);
+      expect(readFileSync(v1Path, 'utf-8')).toBe('# Pre-seeded spec');
     });
 
     it('resumes from spec when no artifacts exist', async () => {
