@@ -199,52 +199,20 @@ export async function runSpecPhase(
     // Versioned snapshot: archive the completed revision as spec_v{N}.md.
     // Only written now (after the no-op guard) so an in-flight revision is
     // never surfaced as a finished version in the spec comparison UI.
+    //
+    // spec_v1.md is guaranteed to already exist by this point — either
+    // written by the non-revision branch below on a normal first /spec run,
+    // or by ensureSpecV1Snapshot (orchestrator/helpers.ts), called from
+    // moveTaskToPhase/resumeTask the moment a pre-existing spec.md is first
+    // detected, always before a task could reach a revision. And
+    // pipeline.specRevision is always incremented to at least 2 before a
+    // revision runs (autoReviseSpec / routeHumanFeedback's analyst target
+    // both do this before calling beginSpecRevision), so this write can
+    // never land on spec_v1.md and overwrite it with the revised text.
     try {
       if (existsSync(specMdPath)) {
-        // Defensive v1 backfill (secondary layer). The primary guarantee now
-        // lives in orchestrator/helpers.ts's ensureSpecV1Snapshot, called by
-        // moveTaskToPhase/resumeTask the moment a pre-existing spec.md is
-        // first detected — before this task could ever reach a revision. So
-        // in the common case, spec_v1.md already exists by the time this
-        // code runs and the block below is a no-op. This stays as a fallback
-        // for tasks that already lost their true v1 before that guarantee
-        // existed, or reach here via some path that didn't go through it —
-        // it archives whatever spec_revision_before.md holds (which is only
-        // guaranteed to BE the true original if this really is the task's
-        // first-ever revision; for a task with prior lost history, it is at
-        // best "state before this round", not the true origin — there is no
-        // way to distinguish the two purely from file existence at this
-        // point). spec_revision_before.md is the no-op guard's baseline and
-        // is deleted right after this block, so archive it as v1 now if
-        // needed.
-        const specV1Path = path.join(pipeline.specPath, 'spec_v1.md');
-        let archiveIndex = pipeline.specRevision;
-        if (!existsSync(specV1Path) && existsSync(preRevisionSnapshotPath)) {
-          try {
-            writeFileSync(specV1Path, readFileSync(preRevisionSnapshotPath, 'utf-8'));
-            // The original now occupies v1 — this revision must not reuse
-            // that index, and the bumped counter must survive restarts.
-            if (archiveIndex <= 1) {
-              archiveIndex = 2;
-              pipeline.specRevision = 2;
-              deps.savePipelineState(pipeline);
-            }
-          } catch (backfillErr) {
-            // Backfill failed — v1 stays missing rather than being faked.
-            warn('spec', `Failed to backfill spec v1 from the pre-revision snapshot for ${pipeline.taskId}`, backfillErr);
-          }
-        }
-        // If the pre-revision marker was unavailable or the backfill failed,
-        // never let the revised content occupy v1. Keep v1 genuinely absent,
-        // archive this revision as v2, and persist the corrected counter so a
-        // restart cannot reuse index 1.
-        if (!existsSync(specV1Path) && archiveIndex <= 1) {
-          archiveIndex = 2;
-          pipeline.specRevision = 2;
-          deps.savePipelineState(pipeline);
-        }
         writeFileSync(
-          path.join(pipeline.specPath, `spec_v${archiveIndex}.md`),
+          path.join(pipeline.specPath, `spec_v${pipeline.specRevision}.md`),
           readFileSync(specMdPath, 'utf-8'),
         );
       }

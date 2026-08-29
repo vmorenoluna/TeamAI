@@ -129,90 +129,41 @@ describe('runSpecPhase — spec_v1.md snapshot', () => {
     );
   });
 
-  // ── Defensive v1 backfill on a pre-seeded task's first revision ────
+  // ── Revision archival never touches spec_v1.md ─────────────────────
+  // spec_v1.md is now guaranteed to exist before any revision can run (see
+  // ensureSpecV1Snapshot in orchestrator/helpers.ts, called from
+  // moveTaskToPhase/resumeTask). These tests document and protect the
+  // invariant this simplification relies on: pipeline.specRevision is
+  // always >= 2 by the time a revision archives (autoReviseSpec /
+  // routeHumanFeedback's analyst target increment it before calling
+  // beginSpecRevision), so the plain `spec_v${pipeline.specRevision}.md`
+  // write can never land on v1 — even if v1 happens to be missing (e.g. a
+  // legacy task that predates the guarantee).
 
-  it('backfills spec_v1.md from the pre-revision snapshot when a pre-seeded task (no tracked /spec run) takes its first QA revision', async () => {
-    // Task entered tracked execution already at `plan`: spec.md pre-exists,
-    // no spec_v1.md was ever written (the non-revision branch never ran).
-    // autoReviseSpec wrote the pre-revision marker, then bumped the restored
-    // counter (0 → 1) before runSpecPhase executes.
-    realWriteFileSync.current!(join(ctx.specPath, 'spec.md'), '# revised spec (v2 content)');
-    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_feedback.md'), 'QA concerns');
-    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_before.md'), '# original spec');
-    ctx.pipeline.specRevision = 1;
-
-    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
-
-    const { readFileSync, existsSync } = await import('fs');
-    // v1 = the ORIGINAL spec, recovered from the pre-revision snapshot —
-    // not missing, and not clobbered by the revised text.
-    expect(existsSync(join(ctx.specPath, 'spec_v1.md'))).toBe(true);
-    expect(readFileSync(join(ctx.specPath, 'spec_v1.md'), 'utf-8')).toBe('# original spec');
-    // The revision itself archives as v2 (not v1), and the bumped counter
-    // is persisted so future revisions keep numbering forward.
-    expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# revised spec (v2 content)');
-    expect(ctx.pipeline.specRevision).toBe(2);
-    expect(ctx.deps.savePipelineState).toHaveBeenCalled();
-    expect(mockWarn).not.toHaveBeenCalled();
-  });
-
-  it('backfills a missing spec_v1.md without disturbing the archive index when the counter is already past 1', async () => {
-    // Same pre-seeded start, but the restored counter is 2 (e.g. state file
-    // survived while v1 was lost) — the revision archives as v2 as usual.
+  it('archives a revision at spec_v{specRevision} without touching spec_v1.md when v1 already exists', async () => {
     realWriteFileSync.current!(join(ctx.specPath, 'spec.md'), '# revised spec');
+    realWriteFileSync.current!(join(ctx.specPath, 'spec_v1.md'), '# the true original');
     realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_feedback.md'), 'QA concerns');
-    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_before.md'), '# original spec');
+    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_before.md'), '# state before this round');
     ctx.pipeline.specRevision = 2;
 
     await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
 
     const { readFileSync } = await import('fs');
-    expect(readFileSync(join(ctx.specPath, 'spec_v1.md'), 'utf-8')).toBe('# original spec');
+    expect(readFileSync(join(ctx.specPath, 'spec_v1.md'), 'utf-8')).toBe('# the true original');
     expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# revised spec');
-    expect(ctx.pipeline.specRevision).toBe(2);
+    expect(mockWarn).not.toHaveBeenCalled();
   });
 
-  it('leaves v1 missing and archives as v2 when the pre-revision marker is absent', async () => {
-    // A crash or legacy task may reach the revision branch without the
-    // spec_revision_before.md marker. The revised content must never be
-    // written to spec_v1.md in that case.
+  it('archives at spec_v{specRevision} even when v1 is missing (legacy task predating the guarantee) — never falls back to v1', async () => {
     realWriteFileSync.current!(join(ctx.specPath, 'spec.md'), '# revised spec');
     realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_feedback.md'), 'QA concerns');
-    ctx.pipeline.specRevision = 1;
+    ctx.pipeline.specRevision = 2;
 
     await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
 
     const { existsSync, readFileSync } = await import('fs');
     expect(existsSync(join(ctx.specPath, 'spec_v1.md'))).toBe(false);
     expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# revised spec');
-    expect(ctx.pipeline.specRevision).toBe(2);
-    expect(ctx.deps.savePipelineState).toHaveBeenCalled();
-  });
-
-  it('leaves v1 missing and archives as v2 when the v1 backfill write fails', async () => {
-    realWriteFileSync.current!(join(ctx.specPath, 'spec.md'), '# revised spec');
-    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_feedback.md'), 'QA concerns');
-    realWriteFileSync.current!(join(ctx.specPath, 'spec_revision_before.md'), '# original spec');
-    ctx.pipeline.specRevision = 1;
-
-    mockWriteFileSync.mockImplementation((...args: unknown[]) => {
-      // Fail only the defensive v1 backfill. The subsequent v2 archive must
-      // still be allowed to complete.
-      if (String(args[0]).endsWith('spec_v1.md')) throw new Error('disk full');
-      return realWriteFileSync.current!(...args);
-    });
-
-    await expect(runSpecPhase(ctx.pipeline as never, ctx.deps as never)).resolves.toBeUndefined();
-
-    const { existsSync, readFileSync } = await import('fs');
-    expect(existsSync(join(ctx.specPath, 'spec_v1.md'))).toBe(false);
-    expect(readFileSync(join(ctx.specPath, 'spec_v2.md'), 'utf-8')).toBe('# revised spec');
-    expect(ctx.pipeline.specRevision).toBe(2);
-    expect(ctx.deps.savePipelineState).toHaveBeenCalled();
-    expect(mockWarn).toHaveBeenCalledWith(
-      'spec',
-      expect.stringContaining('Failed to backfill spec v1'),
-      expect.anything(),
-    );
   });
 });
