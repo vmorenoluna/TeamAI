@@ -9,7 +9,7 @@ import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitF
 import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelineState, pipelineAdvancePhase } from './orchestrator/pipeline-state';
 import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedback';
 import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './orchestrator/phase-runners';
-import { parseSessionLimitReset, extractPrUrl, phaseHeader, logToOutput, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, resolveWorktreeDirName, computePipelineConfig, buildSessionOpts, type PipelineConfig } from './orchestrator/helpers';
+import { parseSessionLimitReset, extractPrUrl, phaseHeader, logToOutput, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, resolveWorktreeDirName, computePipelineConfig, buildSessionOpts, startPhaseFromArtifacts, ensureSpecV1Snapshot, type PipelineConfig } from './orchestrator/helpers';
 import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn } from './orchestrator/worktree-ops';
 import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
 import { gitPush } from './orchestrator/git-push';
@@ -169,6 +169,15 @@ export class Orchestrator {
     const hasSpec = existsSync(path.join(dir, 'spec.md'));
     const hasPlan = existsSync(path.join(dir, 'plan.json'));
 
+    // Guarantee spec_v1.md exists whenever spec.md does — this is the
+    // earliest point the orchestrator can see a pre-existing spec.md (e.g.
+    // one authored outside the pipeline), before any branch below might
+    // route straight past the `spec` phase and skip runSpecPhase's own v1
+    // write. A no-op if v1 is already there. (If targetPhase === 'spec'
+    // below, clearArtifacts wipes it again moments later — that's fine, an
+    // explicit restart-from-spec is meant to discard prior history too.)
+    if (hasSpec) ensureSpecV1Snapshot(dir);
+
     // Determine actual start phase and clear stale artifacts
     let startPhase: PipelinePhase = 'spec';
     if (targetPhase === 'spec') {
@@ -178,17 +187,10 @@ export class Orchestrator {
     } else if (targetPhase === 'plan') {
       this.taskStore.clearArtifacts(taskId, 'plan');
       this.clearPipelineStateFile(dir);
-      startPhase = hasSpec ? 'plan' : 'spec';
-    } else if (targetPhase === 'implement') {
+      startPhase = startPhaseFromArtifacts(false, hasSpec);
+    } else if (targetPhase === 'implement' || targetPhase === 'qa-review') {
       this.taskStore.clearArtifacts(taskId, 'qa');
-      if (hasPlan) startPhase = 'implement';
-      else if (hasSpec) startPhase = 'plan';
-      else startPhase = 'spec';
-    } else if (targetPhase === 'qa-review') {
-      this.taskStore.clearArtifacts(taskId, 'qa');
-      if (hasPlan) startPhase = 'implement';
-      else if (hasSpec) startPhase = 'plan';
-      else startPhase = 'spec';
+      startPhase = startPhaseFromArtifacts(hasPlan, hasSpec);
     } else if (targetPhase === 'merge' || targetPhase === 'create-pr') {
       // Merge/PR requires the worktree and branch to exist. If missing,
       // restart from the earliest phase needed to recreate them.
@@ -202,10 +204,8 @@ export class Orchestrator {
       } else if (hasPlan) {
         // Plan exists but worktree/branch missing — recreate from implement
         startPhase = 'implement';
-      } else if (hasSpec) {
-        startPhase = 'plan';
       } else {
-        startPhase = 'spec';
+        startPhase = startPhaseFromArtifacts(false, hasSpec);
       }
     } else {
       startPhase = targetPhase as PipelinePhase;
@@ -995,19 +995,15 @@ export class Orchestrator {
         `should have handled this task, not the tick loop.`
       );
     } else {
-      // backlog / done / failed — restart from artifact detection
+      // backlog / done / failed — restart from artifact detection.
+      // Subtask completions are preserved when hasPlan — runImplement skips
+      // already-completed subtasks. If the user wants a full re-run, they
+      // should stop the task (move to backlog) and restart it, which calls
+      // cleanupTaskArtifacts.
       const hasSpec = existsSync(path.join(dir, 'spec.md'));
       const hasPlan = existsSync(path.join(dir, 'plan.json'));
-      if (hasPlan) {
-        startPhase = 'implement';
-        // Subtask completions are preserved — runImplement skips already-completed
-        // subtasks. If the user wants a full re-run, they should stop the task
-        // (move to backlog) and restart it, which calls cleanupTaskArtifacts.
-      } else if (hasSpec) {
-        startPhase = 'plan';
-      } else {
-        startPhase = 'spec';
-      }
+      if (hasSpec) ensureSpecV1Snapshot(dir);
+      startPhase = startPhaseFromArtifacts(hasPlan, hasSpec);
     }
 
     // Clear output.log for a fresh terminal view
