@@ -1819,22 +1819,15 @@ describe('Crash Recovery Integration', () => {
 
   // ── Crash mid-markTaskDone ─────────────────────────────────────────────
   //
-  // markTaskDone used to delete the live .teamai/{slug}/ directory up front
-  // and only restore it from the merged snapshot afterwards. An interruption
-  // (crash / OOM / server restart) between that rmSync and the restore left
-  // the directory permanently gone — findInterruptedTasks() had no
-  // subdirectory left to scan, so the task silently vanished from the board.
-  //
-  // These tests exercise markTaskDone against a real git repo to prove the
-  // reorder closes that window: the restore now overwrites the live directory
-  // in place, and stale local-only leftovers are pruned only after the restore
-  // has provably landed — an interruption at any point leaves either the old
-  // content or a superset of the new content, never nothing.
+  // Ticket-history refactor (§3d): the committed artifact snapshot no longer
+  // exists — the folder-commit mechanism was replaced by the trailer-bearing
+  // pre-merge squash. markTaskDone is now a deterministic finalize + delete:
+  // flip the record to done, remove .teamai/{slug}/ unconditionally, emit
+  // once. These tests exercise that against a real git repo.
 
   describe('Crash mid-markTaskDone', () => {
     let originDir: string;
     let projectDir: string;
-    let snapshotDir: string;
     let mtdTaskId: string;
     let mtdTaskDir: string;
 
@@ -1845,8 +1838,7 @@ describe('Crash Recovery Integration', () => {
 
       mtdTaskId = randomUUID();
 
-      // Bare origin repo — the "remote" whose main branch receives the task's
-      // committed artifact snapshot (what the PR merge would have produced).
+      // Bare origin repo — the "remote" the merged PR would have landed on.
       originDir = join(tmpdir(), `teamai-mtd-origin-${randomUUID().slice(0, 8)}`);
       mkdirSync(originDir, { recursive: true });
       execFileSync('git', ['init', '--bare', '-b', 'main'], { cwd: originDir, stdio: 'ignore' });
@@ -1863,17 +1855,7 @@ describe('Crash Recovery Integration', () => {
       execFileSync('git', ['commit', '-m', 'initial'], { cwd: projectDir, stdio: 'ignore' });
       execFileSync('git', ['push', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
 
-      // Mirror project-store's _updateGitignore: the live .teamai/ directory
-      // is untracked in the project repo — exactly the local-only content the
-      // old delete-before-restore rmSync was working around.
-      writeFileSync(join(projectDir, '.gitignore'), '.teamai/*\n');
-      execFileSync('git', ['add', '.gitignore'], { cwd: projectDir, stdio: 'ignore' });
-      execFileSync('git', ['commit', '-m', 'gitignore teamai'], { cwd: projectDir, stdio: 'ignore' });
-      execFileSync('git', ['push', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
-
       // Live task directory: the in-progress state markTaskDone finalises.
-      // task.json is still at awaiting-review; output.log is a local-only
-      // transient file that the committed snapshot does NOT contain.
       mkdirSync(join(projectDir, '.teamai'), { recursive: true });
       mtdTaskDir = join(projectDir, '.teamai', mtdTaskId);
       mkdirSync(mtdTaskDir, { recursive: true });
@@ -1887,37 +1869,10 @@ describe('Crash Recovery Integration', () => {
       }));
       writeFileSync(join(mtdTaskDir, 'spec.md'), '# live spec\n');
       writeFileSync(join(mtdTaskDir, 'output.log'), 'transient session output\n');
-
-      // Commit the final artifact snapshot to origin/main from a separate
-      // clone so the project's live directory stays untracked. task.json is
-      // phase "done", as commitArtifactsToWorktree would have written it.
-      snapshotDir = join(tmpdir(), `teamai-mtd-snap-${randomUUID().slice(0, 8)}`);
-      execFileSync('git', ['clone', originDir, snapshotDir], { stdio: 'ignore' });
-      execFileSync('git', ['config', 'user.email', 'test@teamai.dev'], { cwd: snapshotDir, stdio: 'ignore' });
-      execFileSync('git', ['config', 'user.name', 'TeamAI Test'], { cwd: snapshotDir, stdio: 'ignore' });
-      execFileSync('git', ['config', 'core.autocrlf', 'false'], { cwd: snapshotDir, stdio: 'ignore' });
-      const snapTaskDir = join(snapshotDir, '.teamai', mtdTaskId);
-      mkdirSync(snapTaskDir, { recursive: true });
-      writeFileSync(join(snapTaskDir, 'task.json'), JSON.stringify({
-        id: mtdTaskId,
-        title: 'markTaskDone crash test',
-        description: 'desc',
-        phase: 'done',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }));
-      writeFileSync(join(snapTaskDir, 'spec.md'), '# committed spec\n');
-      execFileSync('git', ['add', '-f', `.teamai/${mtdTaskId}`], { cwd: snapshotDir, stdio: 'ignore' });
-      execFileSync('git', ['commit', '-m', 'artifact snapshot'], { cwd: snapshotDir, stdio: 'ignore' });
-      execFileSync('git', ['push', 'origin', 'main'], { cwd: snapshotDir, stdio: 'ignore' });
-
-      // Bring origin/main into the project clone so markTaskDone's fetch and
-      // restore see the just-pushed snapshot.
-      execFileSync('git', ['fetch', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
     });
 
     afterEach(() => {
-      for (const d of [projectDir, snapshotDir, originDir]) {
+      for (const d of [projectDir, originDir]) {
         if (d && existsSync(d)) {
           try { rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ }
         }
@@ -1926,29 +1881,20 @@ describe('Crash Recovery Integration', () => {
       vi.resetModules();
     });
 
-    it('restores the snapshot over the live directory and prunes stale files afterward — never deleting the directory first', async () => {
+    it('finalizes the record and deletes the task folder unconditionally', async () => {
       const mod = await import('@/lib/orchestrator');
       orch = mod.getOrchestrator(projectDir);
 
       await (orch as AnyOrch).markTaskDone(mtdTaskId);
 
-      // Directory still exists and holds the committed snapshot's task.json.
-      expect(existsSync(mtdTaskDir)).toBe(true);
-      const taskJson = JSON.parse(readFileSync(join(mtdTaskDir, 'task.json'), 'utf-8'));
-      expect(taskJson.phase).toBe('done');
-
-      // Committed snapshot files survived the restore in place.
-      expect(readFileSync(join(mtdTaskDir, 'spec.md'), 'utf-8')).toBe('# committed spec\n');
-
-      // The local-only transient file (not in the snapshot) was pruned.
-      expect(existsSync(join(mtdTaskDir, 'output.log'))).toBe(false);
+      // The folder is gone — the durable record is the trailer-bearing
+      // merge commit and (for PR tasks) the PR body, not the local folder.
+      expect(existsSync(mtdTaskDir)).toBe(false);
     });
 
-    it('keeps the task discoverable when the restore cannot run (fetch fails) — the live directory is never emptied', async () => {
-      // Remove the origin remote so git fetch fails — the worst-case point at
-      // which the old code had ALREADY deleted the directory. The new code
-      // must still leave a task.json on disk so findInterruptedTasks() and
-      // the TaskStore can discover the task after a restart.
+    it('still finalizes when the remote is unreachable (no fetch in the new flow)', async () => {
+      // Remove the origin remote entirely — the new markTaskDone flow never
+      // touches the network, so completion must succeed regardless.
       execFileSync('git', ['remote', 'remove', 'origin'], { cwd: projectDir, stdio: 'ignore' });
 
       const mod = await import('@/lib/orchestrator');
@@ -1956,11 +1902,7 @@ describe('Crash Recovery Integration', () => {
 
       await (orch as AnyOrch).markTaskDone(mtdTaskId);
 
-      expect(existsSync(mtdTaskDir)).toBe(true);
-      const taskJson = JSON.parse(readFileSync(join(mtdTaskDir, 'task.json'), 'utf-8'));
-      expect(taskJson.phase).toBe('done');
-      // Fallback also writes the done event so the kanban still sees the task.
-      expect(existsSync(join(mtdTaskDir, 'events.jsonl'))).toBe(true);
+      expect(existsSync(mtdTaskDir)).toBe(false);
     });
   });
 });
