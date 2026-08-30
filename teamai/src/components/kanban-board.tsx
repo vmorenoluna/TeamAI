@@ -8,6 +8,8 @@ import { TaskCard } from './task-card';
 import { ConnectionIndicator } from './connection-indicator';
 import { ErrorBanner } from './error-banner';
 import { TaskModal } from './task-modal';
+import { DoneHistoryCard, DoneHistoryModal } from './done-history';
+import type { DoneTicketFromHistory } from '@/lib/history-scanner';
 import { NewTaskDialog } from './new-task-dialog';
 import { KanbanFilters } from './kanban-filters';
 import { COLUMNS, normalizePhase, resolveTargetPhase, TEMPLATES } from './kanban-utils';
@@ -19,6 +21,8 @@ import type { Task } from '@/lib/task-store';
 interface Props {
   tasks: Task[];
   projectPath: string;
+  /** History-reconstructed DONE tickets (§3f) — empty when recordHistoryInGit is off. */
+  doneHistory?: DoneTicketFromHistory[];
 }
 
 // ── Phase options per kanban column ────────────────────────────────────────
@@ -118,9 +122,12 @@ function topoSortBacklog(tasks: Task[]): Task[] {
   return result;
 }
 
-export function KanbanBoard({ tasks, projectPath }: Props) {
+export function KanbanBoard({ tasks, projectPath, doneHistory = [] }: Props) {
   const { run, isPending } = useServerMutation();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // History tickets whose local folder was deleted — opened via the
+  // read-only DoneHistoryModal (spec fetched on open, never preloaded).
+  const [selectedHistorySlug, setSelectedHistorySlug] = useState<string | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [dragOverPhase, setDragOverPhase] = useState<string | null>(null);
 
@@ -195,6 +202,17 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [selectedTaskId]);
+
+  // History-modal Escape handling (DoneHistoryModal also handles its own,
+  // but this keeps the board's overlay guard in sync).
+  useEffect(() => {
+    if (!selectedHistorySlug) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setSelectedHistorySlug(null);
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [selectedHistorySlug]);
 
   const effectivePhase = useCallback((task: Task): string => {
     return optimisticPhases.get(task.id) ?? task.phase;
@@ -527,8 +545,8 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
       )}
 
       {/* Board columns */}
-      <div className={`flex-1 min-h-0 relative ${selectedTaskId ? 'overflow-hidden' : ''}`}>
-        <div className={`h-full overflow-x-auto ${selectedTaskId ? 'pointer-events-none select-none' : ''}`}>
+      <div className={`flex-1 min-h-0 relative ${selectedTaskId || selectedHistorySlug ? 'overflow-hidden' : ''}`}>
+        <div className={`h-full overflow-x-auto ${selectedTaskId || selectedHistorySlug ? 'pointer-events-none select-none' : ''}`}>
           <div className="flex gap-3 p-4 h-full" style={{ minWidth: 'max-content' }}>
             {(() => {
               const filtered = processedTasks();
@@ -539,6 +557,16 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
               if (col.phase === 'done') {
                 colTasks = [...colTasks].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
               }
+              // §3f: history-reconstructed DONE tickets — tasks whose local
+              // folder was deleted on completion, rebuilt from git/PR history.
+              // Rendered below the disk tasks (fresh completions first),
+              // filtered by the same search box.
+              const historyTickets = col.phase === 'done'
+                ? doneHistory.filter(t =>
+                    !searchQuery.trim() ||
+                    t.title.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
+                    t.slug.toLowerCase().includes(searchQuery.toLowerCase().trim()))
+                : [];
               // Backlog column: topological sort by dependency order, breaking
               // ties by creation time (oldest first). If task B depends on A,
               // A stacks above B — only when both are still in backlog.
@@ -565,7 +593,7 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
                     <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full transition-colors ${
                       isDropTarget && !isSameColumn ? 'bg-[#2563eb]/20 text-blue-300' : 'bg-[#1e293b] text-slate-500'
                     }`}>
-                      {colTasks.length}
+                      {colTasks.length + historyTickets.length}
                     </span>
                   </div>
                   <div className="flex-1 overflow-y-auto p-2 space-y-2">
@@ -602,6 +630,13 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
                       </div>
                       );
                     })}
+                    {historyTickets.map(ticket => (
+                      <DoneHistoryCard
+                        key={`history-${ticket.slug}`}
+                        ticket={ticket}
+                        onSelect={setSelectedHistorySlug}
+                      />
+                    ))}
                   </div>
                 </div>
               );
@@ -612,6 +647,11 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
         {/* Task modal */}
         {selectedTaskId && (
           <TaskModal taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} projectPath={projectPath} />
+        )}
+
+        {/* §3f: read-only detail for history-reconstructed DONE tickets */}
+        {selectedHistorySlug && (
+          <DoneHistoryModal slug={selectedHistorySlug} onClose={() => setSelectedHistorySlug(null)} />
         )}
       </div>
 
