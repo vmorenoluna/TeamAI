@@ -11,7 +11,7 @@ import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedb
 import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './orchestrator/phase-runners';
 import { parseSessionLimitReset, extractPrUrl, phaseHeader, logToOutput, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, resolveWorktreeDirName, computePipelineConfig, buildSessionOpts, startPhaseFromArtifacts, ensureSpecV1Snapshot, type PipelineConfig } from './orchestrator/helpers';
 import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn } from './orchestrator/worktree-ops';
-import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
+import { commitArtifactsToWorktree, buildTicketMessageForPipeline } from './orchestrator/artifact-commit';
 import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
 import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError, SessionKilledError, ContainerDockerMissingError } from './orchestrator/errors';
@@ -113,10 +113,19 @@ export class Orchestrator {
       scheduleWakeup: (pipeline) => this._scheduleWakeup(pipeline),
 
       extractPrUrl: (logFile) => extractPrUrl(logFile),
+      // Transitional: folder commit is no longer called by the phase runners
+      // (replaced by the trailer-bearing pre-merge squash), but markTaskDone's
+      // snapshot-restore logic and its tests still reference it. Removed in
+      // the markTaskDone-simplification slice.
       commitArtifactsToWorktree: (pipeline) =>
         commitArtifactsToWorktree(pipeline, {
           restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, projectRoot),
           worktreeGitEnv: (h, c) => worktreeGitEnv(h, projectRoot, c),
+        }),
+      buildTicketMessage: (pipeline) =>
+        buildTicketMessageForPipeline(pipeline, {
+          recordHistoryInGit: this.getPipelineConfig().recordHistoryInGit,
+          includePhasesTrailer: this.getPipelineConfig().includePhasesTrailer,
         }),
 
       restorePipeline: (taskId, requiredPhase) => this.restorePipeline(taskId, requiredPhase),

@@ -57,9 +57,17 @@ export function resolveBaseBranch(projectRoot: string, invalidate?: boolean): st
 /**
  * Build a PR/MR body from the task description and spec content.
  * Used for direct CLI PR creation (no AI agent needed).
+ *
+ * `trailerLines` — optional trailer block lines (Task/Task-ID/QA/Phases/
+ * Reviewed-by), built via buildTrailerBlock() and shared with the commit
+ * message builder so the two cannot drift. Appended after the spec section.
  */
-export function buildPRBody(description: string, specContent: string): string {
-  return [
+export function buildPRBody(
+  description: string,
+  specContent: string,
+  trailerLines: string[] = [],
+): string {
+  const parts = [
     '## Summary',
     '',
     description,
@@ -73,7 +81,11 @@ export function buildPRBody(description: string, specContent: string): string {
     '## Specification',
     '',
     specContent,
-  ].join('\n');
+  ];
+  if (trailerLines.length) {
+    parts.push('', '---', '', ...trailerLines);
+  }
+  return parts.join('\n');
 }
 
 /**

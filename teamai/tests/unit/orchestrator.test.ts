@@ -3251,16 +3251,13 @@ describe('Orchestrator', () => {
       expect(mockCreateSession).not.toHaveBeenCalled();
     });
 
-    // Regression test: commitArtifactsToWorktree used to run once, before
-    // prUrl was ever determined. The task.json snapshot it commits into the
-    // worktree (and thus into the PR, and thus into whatever markTaskDone
-    // restores from origin/master after merge) was permanently missing
-    // prUrl as a result — every pull-request-strategy task's committed
-    // artifacts lacked the PR reference, even though the live task.json had
-    // it. Fixed by re-running the artifact commit + push once prUrl is
-    // known. This test verifies the *committed worktree copy*, not just the
-    // live task.json, actually contains prUrl.
-    it('commits the artifact snapshot with prUrl included, not just the live task.json', async () => {
+    // Ticket-history refactor: the artifact folder is no longer committed to
+    // the worktree/PR at all (replaced by the trailer-bearing pre-merge
+    // squash). The old second commit+push pass that backfilled prUrl into a
+    // committed snapshot is gone. This test verifies the new contract: no
+    // artifact snapshot is staged in the worktree, while the live task.json
+    // (source of truth) still gets prUrl.
+    it('does not commit an artifact snapshot; live task.json still gets prUrl', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       const taskStore = (orch as AnyOrch).taskStore;
@@ -3289,17 +3286,11 @@ describe('Orchestrator', () => {
 
       await orch.approveTask(testData.taskId, 'pull-request');
 
-      // commitArtifactsToWorktree derives the committed subdirectory name
-      // from path.basename(pipeline.specPath) — the task's UUID directory
-      // name — not from the branch slug used above.
+      // No artifact snapshot is committed into the worktree anymore.
       const committedTaskJsonPath = join(worktreePath, '.teamai', testData.taskId, 'task.json');
-      expect(existsSync(committedTaskJsonPath)).toBe(true);
-      const committed = JSON.parse(readFileSync(committedTaskJsonPath, 'utf-8'));
-      expect(committed.phase).toBe('done');
-      expect(committed.prUrl).toBe('https://github.com/owner/repo/pull/42');
+      expect(existsSync(committedTaskJsonPath)).toBe(false);
 
-      // The live task.json (source of truth pre-merge) also has it — this
-      // part already worked before the fix, included for contrast.
+      // The live task.json (source of truth) still gets prUrl.
       const liveTaskJson = JSON.parse(readFileSync(join(testData.taskDir, 'task.json'), 'utf-8'));
       expect(liveTaskJson.prUrl).toBe('https://github.com/owner/repo/pull/42');
     });

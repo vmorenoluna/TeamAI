@@ -205,3 +205,19 @@ The orchestrator uses this to route cleanup failures directly without spawning a
 **Any `additional_issues` entry means overall FAIL.** There are no severity levels — every issue found beyond the spec's acceptance criteria is a hard blocker. The coder MUST fix all of them.
 
 Only include `spec_concerns` if spec gaps were detected. Omit the field entirely if all FAILs are implementation bugs.
+
+## Final Step: Write the Implementation Summary (PASS verdict only)
+
+When the final verdict is **PASS**, write `implementation_summary.md` next to the QA report (same directory) as your very last action:
+
+- **2–4 lines of plain prose**, present/past tense, describing what was actually implemented — the outcome, not the request. This text becomes the commit/PR body for the ticket, so write it for a human reading the repo history later.
+- Describe the outcome, not the process: no session mechanics, no QA-report references, no file-by-file walkthroughs.
+- Never write this file on a FAIL outcome — the task loops back to implement/qa-review, so a "here's what was done" summary would be premature and likely stale by the time the task actually passes.
+
+Example:
+
+```
+Added password reset via signed, time-limited tokens delivered by email.
+The reset flow validates the token, enforces single use, and expires after 30 minutes.
+Covered by 6 new integration tests; the existing suite passes unchanged.
+```

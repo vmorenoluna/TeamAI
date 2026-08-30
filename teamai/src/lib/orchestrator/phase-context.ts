@@ -87,6 +87,8 @@ export interface PhaseContext {
   // ── PR / merge ──
   extractPrUrl: (logFile: string) => string | null;
   commitArtifactsToWorktree: (pipeline: TaskPipeline) => void;
+  /** Build the trailer-bearing commit message for this task (null when recordHistoryInGit is off). */
+  buildTicketMessage: (pipeline: TaskPipeline) => import('./artifact-commit').TicketMessageResult | null;
 
   // ── Pipeline multi-task state ──
   pipelines: Map<string, TaskPipeline>;

@@ -9,6 +9,8 @@ import path from 'path';
 import { processManager } from '../process-manager';
 import { TaskStore } from '../task-store';
 import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody } from '../git-platform';
+import { squashWithMessage } from './artifact-commit';
+import { restoreWorktreeGitFileToHostPaths, worktreeGitEnv } from './worktree-utils';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
 import { updateSessionMap, logToOutput } from './helpers';
@@ -383,9 +385,10 @@ export async function runPlanPhase(
 interface MergePhaseDeps extends BasePhaseDeps {
   execGit: (args: string[], hostCwd: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
-  commitArtifactsToWorktree: (pipeline: TaskPipeline) => void;
   getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig };
   removeWorktree: (taskId: string) => void;
+  /** Build the trailer-bearing commit message for this task (null when recordHistoryInGit is off). */
+  buildTicketMessage: (pipeline: TaskPipeline) => import('./artifact-commit').TicketMessageResult | null;
 }
 
 export async function runMergePhase(
@@ -412,7 +415,18 @@ export async function runMergePhase(
     );
   }
 
-  deps.commitArtifactsToWorktree(pipeline);
+  // Pre-merge squash: collapse the feature branch to a single trailer-bearing
+  // commit so the trailers survive the merge (merge/rebase keep messages
+  // verbatim; squash pre-fills from the sole commit). No-op when
+  // recordHistoryInGit is off or the worktree has nothing to commit.
+  const ticketMessage = deps.buildTicketMessage(pipeline);
+  if (ticketMessage) {
+    squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
+      restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
+      worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
+    });
+    logToOutput(pipeline.specPath, '[MERGE] Feature branch squashed to a single trailer-bearing commit\n');
+  }
 
   const pipelineConfig = deps.getPipelineConfig();
   if (pipelineConfig.sensors?.pre_merge?.length) {
@@ -472,9 +486,10 @@ export async function runMergePhase(
 interface CreatePRDeps extends BasePhaseDeps {
   taskStore: TaskStore;
   execGit: (args: string[], hostCwd: string) => void;
-  commitArtifactsToWorktree: (pipeline: TaskPipeline) => void;
   gitPush: (pushArgs: string[], logFile: string) => void;
   extractPrUrl: (logFile: string) => string | null;
+  /** Build the trailer-bearing commit message for this task (null when recordHistoryInGit is off). */
+  buildTicketMessage: (pipeline: TaskPipeline) => import('./artifact-commit').TicketMessageResult | null;
 }
 
 export async function runCreatePRPhase(
@@ -496,7 +511,18 @@ export async function runCreatePRPhase(
     logToOutput(pipeline.specPath, '\n[WARN] PR may require manual conflict resolution\n');
   }
 
-  deps.commitArtifactsToWorktree(pipeline);
+  // Pre-push squash: collapse the feature branch to a single trailer-bearing
+  // commit so the trailers survive any GitHub merge method (merge/rebase keep
+  // messages verbatim; squash pre-fills from the sole commit). No-op when
+  // recordHistoryInGit is off or the worktree has nothing to commit.
+  const ticketMessage = deps.buildTicketMessage(pipeline);
+  if (ticketMessage) {
+    squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
+      restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
+      worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
+    });
+    logToOutput(pipeline.specPath, '[PR] Feature branch squashed to a single trailer-bearing commit\n');
+  }
   deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
 
   const specContent = readFileSync(path.join(pipeline.specPath, 'spec.md'), 'utf-8');
@@ -508,7 +534,7 @@ export async function runCreatePRPhase(
     logToOutput(pipeline.specPath, `[PR] Open PR already exists for branch ${pipeline.branch}: ${prUrl}\n`);
   } else {
     // Create PR directly via CLI (gh) instead of spawning a merger agent
-    const body = buildPRBody(pipeline.description, specContent);
+    const body = buildPRBody(pipeline.description, specContent, ticketMessage?.trailerLines ?? []);
     prUrl = createPRViaCLI(platform, pipeline.branch, pipeline.title, body, deps.projectRoot, logFile);
     // Fallback: scan log for PR URL (handles unknown platforms where CLI returns null)
     if (!prUrl) {
@@ -521,17 +547,8 @@ export async function runCreatePRPhase(
     ...(prUrl ? { prUrl } : {}),
   });
 
-  // Re-commit + push so the artifact snapshot that lands in the PR (and
-  // later in master, and later in whatever markTaskDone restores after
-  // merge) actually includes prUrl. The commit above ran before the PR
-  // existed, so its task.json snapshot is necessarily prUrl-less — without
-  // this second pass, every pull-request-strategy task's committed
-  // artifacts permanently lack the PR reference, even though the live
-  // task.json has it.
-  if (prUrl) {
-    deps.commitArtifactsToWorktree(pipeline);
-    deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
-  }
+  // The old second commit+push pass (backfilling prUrl into a committed
+  // artifact snapshot) is gone — there is no committed snapshot anymore.
 
   deps.advancePhase(pipeline, 'pr-open', {
     ...(prUrl ? { prUrl } : {}),

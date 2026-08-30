@@ -85,7 +85,7 @@ describe('commitArtifactsToWorktree — committed task.json phase stamp', () => 
   it('stamps the committed task.json with phase=done', () => {
     const slug = basename(ctx.specPath);
     commitArtifactsToWorktree(
-      { taskId: 't1', description: 'd', specPath: ctx.specPath, worktreePath: ctx.worktreePath },
+      { taskId: 't1', title: 'T', description: 'd', specPath: ctx.specPath, worktreePath: ctx.worktreePath },
       deps,
     );
 
@@ -99,7 +99,7 @@ describe('commitArtifactsToWorktree — committed task.json phase stamp', () => 
     mockWriteFileSync.mockImplementationOnce(() => { throw new Error('disk full'); });
 
     expect(() => commitArtifactsToWorktree(
-      { taskId: 't1', description: 'd', specPath: ctx.specPath, worktreePath: ctx.worktreePath },
+      { taskId: 't1', title: 'T', description: 'd', specPath: ctx.specPath, worktreePath: ctx.worktreePath },
       deps,
     )).not.toThrow();
 
