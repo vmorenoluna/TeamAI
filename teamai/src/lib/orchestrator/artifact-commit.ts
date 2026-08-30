@@ -27,7 +27,7 @@ export interface CommitArtifactsDeps {
   worktreeGitEnv: (hostCwd: string, containerWs?: string) => Record<string, string>;
 }
 
-type ArtifactPipeline = Pick<TaskPipeline, 'taskId' | 'title' | 'description' | 'specPath' | 'worktreePath'>;
+type ArtifactPipeline = Pick<TaskPipeline, 'taskId' | 'title' | 'description' | 'specPath'>;
 
 /** Data the message builder needs, all read-only. */
 export interface TicketMessageInput {

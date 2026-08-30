@@ -59,6 +59,10 @@ export interface Task {
    *  than reading `slug` directly. */
   worktreeDirName?: string;
   phase: string;
+  /** Conventional-Commits type for the ticket-history commit subject
+   *  (feat/fix/refactor/chore/docs). Falls back to 'feat' when unset —
+   *  e.g. tasks created before this field existed. */
+  taskType?: string;
   branch?: string;
   dependencies?: string[];     // IDs of tasks this task depends on
   rateLimitedUntil?: string;   // ISO timestamp — set when pipeline is paused by API rate limit

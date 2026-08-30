@@ -212,7 +212,7 @@ describe('buildTicketMessageForPipeline', () => {
 
   it('truncates the subject to 72 chars', () => {
     const long = buildTicketMessageForPipeline({
-      taskId: 't', title: 'x'.repeat(120), description: 'd', specPath: dir, worktreePath: '/unused',
+      taskId: 't', title: 'x'.repeat(120), description: 'd', specPath: dir,
     })!;
     const subject = long.message.split('\n')[0];
     expect(subject.startsWith('feat: ')).toBe(true);
