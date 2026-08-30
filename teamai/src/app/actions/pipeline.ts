@@ -11,6 +11,10 @@ export interface PipelineConfig {
   autoModeMaxParallel: number;
   idleStallMinutes: number;
   toolStallMinutes: number;
+  /** Write Task/Task-ID/QA/Phases trailers into merge commits + PR bodies. */
+  recordHistoryInGit: boolean;
+  /** Include the `Phases:` trailer line (subordinate to recordHistoryInGit). */
+  includePhasesTrailer: boolean;
 }
 
 const DEFAULT_CONFIG: PipelineConfig = {
@@ -19,6 +23,8 @@ const DEFAULT_CONFIG: PipelineConfig = {
   autoModeMaxParallel: 1,
   idleStallMinutes: 15,
   toolStallMinutes: 30,
+  recordHistoryInGit: true,
+  includePhasesTrailer: true,
 };
 
 export async function getPipelineConfig(): Promise<PipelineConfig> {

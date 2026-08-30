@@ -61,6 +61,8 @@ const defaultConfig: PipelineConfig = {
   autoModeMaxParallel: 1,
   idleStallMinutes: 15,
   toolStallMinutes: 30,
+  recordHistoryInGit: true,
+  includePhasesTrailer: true,
 };
 
 function renderComponent(config: PipelineConfig = defaultConfig) {
@@ -93,7 +95,7 @@ describe('PipelineConfigEditor', () => {
     it('renders the Parallel subtasks label and checkbox', () => {
       renderComponent();
       expect(screen.getByText('Parallel subtasks')).toBeInTheDocument();
-      const checkbox = screen.getByRole('checkbox');
+      const checkbox = screen.getAllByRole('checkbox')[0];
       expect(checkbox).toBeInTheDocument();
       expect(checkbox).toBeChecked();
     });
@@ -106,9 +108,9 @@ describe('PipelineConfigEditor', () => {
     });
 
     it('renders with custom config values from props', () => {
-      renderComponent({ maxQaAttempts: 5, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 });
+      renderComponent({ maxQaAttempts: 5, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, recordHistoryInGit: true, includePhasesTrailer: true });
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(5);
-      expect(screen.getByRole('checkbox')).not.toBeChecked();
+      expect(screen.getAllByRole('checkbox')[0]).not.toBeChecked();
     });
 
     it('does not show Saved! or Saving… initially', () => {
@@ -129,8 +131,8 @@ describe('PipelineConfigEditor', () => {
     });
 
     it('toggles parallelSubtasks when the checkbox is clicked', () => {
-      renderComponent({ maxQaAttempts: 3, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 });
-      const checkbox = screen.getByRole('checkbox');
+      renderComponent({ maxQaAttempts: 3, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, recordHistoryInGit: true, includePhasesTrailer: true });
+      const checkbox = screen.getAllByRole('checkbox')[0];
       fireEvent.click(checkbox);
       expect(checkbox).not.toBeChecked();
       fireEvent.click(checkbox);
@@ -138,8 +140,8 @@ describe('PipelineConfigEditor', () => {
     });
 
     it('defaults parallelSubtasks to unchecked when config says false', () => {
-      renderComponent({ maxQaAttempts: 3, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 });
-      expect(screen.getByRole('checkbox')).not.toBeChecked();
+      renderComponent({ maxQaAttempts: 3, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, recordHistoryInGit: true, includePhasesTrailer: true });
+      expect(screen.getAllByRole('checkbox')[0]).not.toBeChecked();
     });
   });
 
@@ -151,7 +153,7 @@ describe('PipelineConfigEditor', () => {
 
       // Change values to non-defaults
       fireEvent.change(screen.getAllByRole('spinbutton')[0], { target: { value: '4' } });
-      fireEvent.click(screen.getByRole('checkbox'));
+      fireEvent.click(screen.getAllByRole('checkbox')[0]);
 
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: 'Save Pipeline Config' }));
@@ -163,6 +165,8 @@ describe('PipelineConfigEditor', () => {
         autoModeMaxParallel: 1,
         idleStallMinutes: 15,
         toolStallMinutes: 30,
+        recordHistoryInGit: true,
+        includePhasesTrailer: true,
       });
     });
 
@@ -302,22 +306,22 @@ describe('PipelineConfigEditor', () => {
     it('initializes state from props on first render', () => {
       // Render with non-default values
       const { rerender } = render(
-        <PipelineConfigEditor config={{ maxQaAttempts: 1, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 }} />
+        <PipelineConfigEditor config={{ maxQaAttempts: 1, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, recordHistoryInGit: true, includePhasesTrailer: true }} />
       );
 
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(1);
-      expect(screen.getByRole('checkbox')).not.toBeChecked();
+      expect(screen.getAllByRole('checkbox')[0]).not.toBeChecked();
 
       // NOTE: The component uses useState(config.maxQaAttempts) without
       // a useEffect to re-sync, so prop changes after initial render don't
       // update the input values — this is the expected behaviour.
       rerender(
-        <PipelineConfigEditor config={{ maxQaAttempts: 8, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 }} />
+        <PipelineConfigEditor config={{ maxQaAttempts: 8, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, recordHistoryInGit: true, includePhasesTrailer: true }} />
       );
 
       // Values remain at the initial render values, not the new props.
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(1);
-      expect(screen.getByRole('checkbox')).not.toBeChecked();
+      expect(screen.getAllByRole('checkbox')[0]).not.toBeChecked();
     });
   });
 
@@ -325,19 +329,19 @@ describe('PipelineConfigEditor', () => {
 
   describe('edge cases', () => {
     it('handles maxQaAttempts at the minimum boundary (1)', () => {
-      renderComponent({ maxQaAttempts: 1, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 });
+      renderComponent({ maxQaAttempts: 1, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, recordHistoryInGit: true, includePhasesTrailer: true });
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(1);
     });
 
     it('handles maxQaAttempts at the maximum boundary (10)', () => {
-      renderComponent({ maxQaAttempts: 10, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 });
+      renderComponent({ maxQaAttempts: 10, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, recordHistoryInGit: true, includePhasesTrailer: true });
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(10);
     });
 
     it('saves immediately after toggling parallelSubtasks', async () => {
-      renderComponent({ maxQaAttempts: 2, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30 });
+      renderComponent({ maxQaAttempts: 2, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, recordHistoryInGit: true, includePhasesTrailer: true });
 
-      fireEvent.click(screen.getByRole('checkbox'));
+      fireEvent.click(screen.getAllByRole('checkbox')[0]);
 
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: 'Save Pipeline Config' }));
@@ -349,6 +353,8 @@ describe('PipelineConfigEditor', () => {
         autoModeMaxParallel: 1,
         idleStallMinutes: 15,
         toolStallMinutes: 30,
+        recordHistoryInGit: true,
+        includePhasesTrailer: true,
       });
     });
 

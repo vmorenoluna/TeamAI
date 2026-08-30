@@ -960,8 +960,11 @@ describe('Auto Mode Integration', () => {
 
       await vi.advanceTimersByTimeAsync(31_000);
 
+      // Ticket-history refactor (§3h): for squash merges, auto-mode now passes
+      // the trailer-bearing subject/body built from the task's ticket data.
       expect(mockExecFileSync).toHaveBeenCalledWith(
-        'gh', ['pr', 'merge', '42', '--squash'],
+        'gh',
+        ['pr', 'merge', '42', '--squash', '--subject', expect.any(String), '--body-file', expect.stringContaining('.teamai')],
         expect.objectContaining({ cwd: testDir }),
       );
     });
