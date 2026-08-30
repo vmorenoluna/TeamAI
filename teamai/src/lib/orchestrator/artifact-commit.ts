@@ -81,9 +81,9 @@ export function buildTrailerBlock(
 
   // QA: trailer — overall comes straight from qa_report.json's top-level
   // `overall` field, never recomputed from criteria[].
+  // Format: QA: PASS (x/y criteria[, n deferred][, retried N times])
   let qaLine = 'QA: ?';
   if (qaReport && typeof qaReport.overall === 'string' && qaReport.overall) {
-    const parts: string[] = [qaReport.overall];
     const counts = { pass: 0, fail: 0, other: 0 };
     for (const c of qaReport.criteria || []) {
       const status = String(c.status || '').toUpperCase();
@@ -91,15 +91,15 @@ export function buildTrailerBlock(
       else if (status === 'FAIL') counts.fail++;
       else counts.other++;
     }
+    const segs: string[] = [];
     const total = counts.pass + counts.fail;
-    if (total > 0) parts.push(`(${counts.pass}/${total} criteria`);
-    if (counts.other > 0) parts.push(`, ${counts.other} deferred`);
-    if (total > 0) parts.push(')');
+    if (total > 0) segs.push(`${counts.pass}/${total} criteria`);
+    if (counts.other > 0) segs.push(`${counts.other} deferred`);
     // Retry count: number of qa-review phase re-entries in events minus 1.
     const qaEntries = (events || []).filter(e => e.phase === 'qa-review').length;
     const retries = qaEntries > 1 ? qaEntries - 1 : 0;
-    if (retries > 0) parts.push(`, retried ${retries} times`);
-    qaLine = `QA: ${parts.join('')}`;
+    if (retries > 0) segs.push(`retried ${retries} times`);
+    qaLine = `QA: ${qaReport.overall}` + (segs.length ? ` (${segs.join(', ')})` : '');
   }
   lines.push(qaLine);
 
