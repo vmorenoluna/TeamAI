@@ -157,7 +157,7 @@ export class TaskStore {
     }
   }
 
-  create(id: string, title: string, description: string, source?: string, competitiveContext?: string): Task {
+  create(id: string, title: string, description: string, source?: string, competitiveContext?: string, taskType?: string): Task {
     // Canonical unique slug (BUG-13): two tasks whose titles share a 40-char
     // prefix must not share a directory (and later a branch/worktree).
     // A title of only symbols slugifies to hyphens — fall back to 'task'.
@@ -177,6 +177,7 @@ export class TaskStore {
       phase: 'backlog',
       source,
       competitiveContext,
+      taskType: taskType || undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

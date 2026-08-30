@@ -34,7 +34,11 @@ export async function createTask(formData: FormData) {
   const id = randomUUID();
   const title = formData.get('title') as string;
   const description = formData.get('description') as string;
-  taskStore.create(id, title, description);
+  // Conventional-Commits type for the ticket-history commit subject (§3a).
+  // Optional; validated against the known set, falls back to 'feat'.
+  const rawType = (formData.get('taskType') as string | null)?.trim().toLowerCase();
+  const taskType = ['feat', 'fix', 'refactor', 'chore', 'docs'].includes(rawType ?? '') ? rawType! : undefined;
+  taskStore.create(id, title, description, undefined, undefined, taskType);
   revalidatePath('/');
   return { id };
 }
