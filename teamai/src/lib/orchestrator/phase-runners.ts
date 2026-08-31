@@ -9,7 +9,7 @@ import path from 'path';
 import { processManager } from '../process-manager';
 import { TaskStore } from '../task-store';
 import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody } from '../git-platform';
-import { squashWithMessage } from './artifact-commit';
+import { squashWithMessage, readImplementationSummary } from './artifact-commit';
 import { restoreWorktreeGitFileToHostPaths, worktreeGitEnv } from './worktree-utils';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
@@ -533,8 +533,16 @@ export async function runCreatePRPhase(
   if (prUrl) {
     logToOutput(pipeline.specPath, `[PR] Open PR already exists for branch ${pipeline.branch}: ${prUrl}\n`);
   } else {
-    // Create PR directly via CLI (gh) instead of spawning a merger agent
-    const body = buildPRBody(pipeline.description, specContent, ticketMessage?.trailerLines ?? []);
+    // Create PR directly via CLI (gh) instead of spawning a merger agent.
+    // implementation_summary.md is independent of recordHistoryInGit (it's
+    // prose, not a trailer) — read it directly rather than through
+    // ticketMessage, which is null when that toggle is off.
+    const body = buildPRBody(
+      pipeline.description,
+      specContent,
+      ticketMessage?.trailerLines ?? [],
+      readImplementationSummary(pipeline.specPath),
+    );
     prUrl = createPRViaCLI(platform, pipeline.branch, pipeline.title, body, deps.projectRoot, logFile);
     // Fallback: scan log for PR URL (handles unknown platforms where CLI returns null)
     if (!prUrl) {

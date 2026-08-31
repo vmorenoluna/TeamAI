@@ -123,6 +123,24 @@ export function buildTrailerBlock(
 // ── Message builder (loads inputs from specPath) ──────────────────────────
 
 /**
+ * Read implementation_summary.md if the qa-reviewer wrote one (§3i, PASS
+ * verdict only). Returns null when missing/empty/unreadable so callers
+ * decide their own fallback — a commit needs *some* body (falls back to the
+ * task description), while a PR section that would just restate the
+ * description verbatim should be omitted instead of duplicated.
+ */
+export function readImplementationSummary(specPath: string): string | null {
+  const summaryPath = path.join(specPath, 'implementation_summary.md');
+  if (!existsSync(summaryPath)) return null;
+  try {
+    const content = readFileSync(summaryPath, 'utf-8').trim();
+    return content || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Build the trailer-bearing commit message for a task, loading
  * qa_report.json / events.jsonl / implementation_summary.md from specPath.
  * Returns null when recordHistoryInGit is off — no message, no squash, no
@@ -160,14 +178,7 @@ export function buildTicketMessageForPipeline(
   );
 
   // Body: from implementation_summary.md, falling back to the task description.
-  let body = '';
-  const summaryPath = path.join(pipeline.specPath, 'implementation_summary.md');
-  if (existsSync(summaryPath)) {
-    try {
-      body = readFileSync(summaryPath, 'utf-8').trim();
-    } catch { /* fall back to description */ }
-  }
-  if (!body) body = (pipeline.description || '').trim();
+  const body = readImplementationSummary(pipeline.specPath) || (pipeline.description || '').trim();
 
   // Subject: "<type>: <task title — imperative, ≤72 chars>"
   const taskType = opts.taskType || 'feat';

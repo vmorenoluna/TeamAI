@@ -18,6 +18,7 @@ import { randomUUID } from 'crypto';
 import {
   buildTrailerBlock,
   buildTicketMessageForPipeline,
+  readImplementationSummary,
 } from '../../src/lib/orchestrator/artifact-commit';
 
 // ── Helpers ──
@@ -177,6 +178,22 @@ describe('buildTicketMessageForPipeline', () => {
     const result = buildTicketMessageForPipeline(pipeline(dir))!;
     expect(result.message).toContain('\nAdded password reset via signed tokens.\n');
     expect(result.message).not.toContain('Full task description here.');
+  });
+
+  describe('readImplementationSummary', () => {
+    it('returns the trimmed file content when present', () => {
+      writeFileSync(join(dir, 'implementation_summary.md'), '  Added password reset.  \n', 'utf-8');
+      expect(readImplementationSummary(dir)).toBe('Added password reset.');
+    });
+
+    it('returns null when the file is missing', () => {
+      expect(readImplementationSummary(dir)).toBeNull();
+    });
+
+    it('returns null when the file is empty/whitespace-only', () => {
+      writeFileSync(join(dir, 'implementation_summary.md'), '   \n', 'utf-8');
+      expect(readImplementationSummary(dir)).toBeNull();
+    });
   });
 
   it('reads the QA trailer from qa_report.json in specPath', () => {

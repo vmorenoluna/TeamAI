@@ -61,16 +61,31 @@ export function resolveBaseBranch(projectRoot: string, invalidate?: boolean): st
  * `trailerLines` — optional trailer block lines (Task/Task-ID/QA/Phases/
  * Reviewed-by), built via buildTrailerBlock() and shared with the commit
  * message builder so the two cannot drift. Appended after the spec section.
+ *
+ * `implementationSummary` — the qa-reviewer's own account of what was built
+ * (implementation_summary.md, §3i), the same text used for the squashed
+ * commit's body. Omitted from the PR body entirely when absent, rather than
+ * falling back to the description — repeating the description under a new
+ * heading would just be noise, not additional coverage. This is what makes
+ * the PR body the fuller of the two: description (the ask) + this section
+ * (the outcome) + the full spec (the requirements) + trailers, vs. the
+ * commit's message + trailers alone.
  */
 export function buildPRBody(
   description: string,
   specContent: string,
   trailerLines: string[] = [],
+  implementationSummary?: string | null,
 ): string {
   const parts = [
     '## Summary',
     '',
     description,
+  ];
+  if (implementationSummary) {
+    parts.push('', '## What Was Implemented', '', implementationSummary);
+  }
+  parts.push(
     '',
     '## Testing',
     '',
@@ -81,7 +96,7 @@ export function buildPRBody(
     '## Specification',
     '',
     specContent,
-  ];
+  );
   if (trailerLines.length) {
     parts.push('', '---', '', ...trailerLines);
   }
