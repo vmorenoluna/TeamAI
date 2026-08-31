@@ -1,3 +1,5 @@
+'use server';
+
 import { getActiveProjectPath } from './projects';
 import { getPipelineConfig } from './pipeline';
 import {
