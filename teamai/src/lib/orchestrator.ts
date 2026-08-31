@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, rmSync, readdirSync, rmdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, rmSync } from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { processManager } from './process-manager';
@@ -11,7 +11,8 @@ import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedb
 import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './orchestrator/phase-runners';
 import { parseSessionLimitReset, extractPrUrl, phaseHeader, logToOutput, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, resolveWorktreeDirName, computePipelineConfig, buildSessionOpts, startPhaseFromArtifacts, ensureSpecV1Snapshot, type PipelineConfig } from './orchestrator/helpers';
 import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn } from './orchestrator/worktree-ops';
-import { commitArtifactsToWorktree } from './orchestrator/artifact-commit';
+import { buildTicketMessageForPipeline } from './orchestrator/artifact-commit';
+import { appendSessionTicket, synthesizeDoneTicket } from './history-session';
 import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
 import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError, SessionKilledError, ContainerDockerMissingError } from './orchestrator/errors';
@@ -20,7 +21,7 @@ import { runImplement, _recoverStBranchCommits } from './orchestrator/implement'
 import { runQaReview } from './orchestrator/qa-review';
 import { CLEANUP_ARTIFACTS } from './orchestrator/artifacts';
 import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec } from './orchestrator/review-actions';
-import { detectGitPlatform, isPrMerged, resolveBaseBranch } from './git-platform';
+import { detectGitPlatform, isPrMerged } from './git-platform';
 import { warn as logWarn, log, error as logError } from './logger';
 import type { PhaseContext } from './orchestrator/phase-context';
 import type { PipelinePhase } from '@/constants/phases';
@@ -113,11 +114,17 @@ export class Orchestrator {
       scheduleWakeup: (pipeline) => this._scheduleWakeup(pipeline),
 
       extractPrUrl: (logFile) => extractPrUrl(logFile),
-      commitArtifactsToWorktree: (pipeline) =>
-        commitArtifactsToWorktree(pipeline, {
-          restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, projectRoot),
-          worktreeGitEnv: (h, c) => worktreeGitEnv(h, projectRoot, c),
-        }),
+      buildTicketMessage: (pipeline) => {
+        // taskType from the task record — the user-picked Conventional-Commits
+        // type must reach the REAL squash commit / PR subject, not just the
+        // session-preview ticket in markTaskDone.
+        const t = taskStore.getById(pipeline.taskId);
+        return buildTicketMessageForPipeline(pipeline, {
+          recordHistoryInGit: this.getPipelineConfig().recordHistoryInGit,
+          includePhasesTrailer: this.getPipelineConfig().includePhasesTrailer,
+          taskType: t?.taskType,
+        });
+      },
 
       restorePipeline: (taskId, requiredPhase) => this.restorePipeline(taskId, requiredPhase),
     };
@@ -481,202 +488,74 @@ export class Orchestrator {
 
     this._ctx.removeWorktree(taskId);
 
+    // Ticket-history refactor (§3d): no committed artifact snapshot exists
+    // anymore (the folder-commit mechanism was replaced by the
+    // trailer-bearing pre-merge squash), so the old fetch → ls-tree →
+    // fast-forward → scoped-checkout → restore machinery is gone.
+    // Finalization is deterministic:
+    //   1. flip the task record to 'done' (task.json + events.jsonl),
+    //   2. delete the local .teamai/<slug>/ folder — unconditionally, for
+    //      both merge strategies and regardless of recordHistoryInGit
+    //      (§3j). The PR body (spec embedded by buildPRBody) and the
+    //      trailer-bearing merge commit are the durable record now.
     const dir = this.taskStore.getDirById(taskId);
-    const relDir = path.relative(this.projectRoot, dir);
 
-    // Restore this task's committed artifact snapshot from origin/master.
-    // Primary path: fast-forward local HEAD to match origin/<base> outright.
-    // When this succeeds, the snapshot (and everything else outstanding)
-    // lands as ordinary, fully-committed, clean content — nothing left in
-    // the index or working tree needing attention. Try this FIRST, not as
-    // a best-effort afterthought: it can only ever fail closed (never
-    // partially apply), so there is no dirty-tree hazard from attempting it
-    // before the scoped fallback below.
-    //
-    // Note: `dir` is deliberately NOT deleted up front anymore. The old
-    // order (rmSync first, then restore) left a crash window where an
-    // interruption between the delete and the restore permanently lost the
-    // task's directory — no live files, no snapshot, and nothing for
-    // findInterruptedTasks() to even scan (the subdirectory was gone). By
-    // leaving `dir` in place, every interruption point now leaves either the
-    // old content or a superset of the new content. The fast-forward can
-    // therefore fail closed when the live files are untracked local content
-    // (the common .teamai/-gitignored case, since they collide with the
-    // incoming tracked snapshot) — that's expected, and the scoped fallback
-    // below restores the directory in-place. Stale local-only leftovers are
-    // pruned afterward, only once the restore has provably landed.
-    const baseBranch = resolveBaseBranch(this.projectRoot);
-    let fetched = false;
+    // §3f incremental append: synthesize the fresh DONE card from data the
+    // pipeline already built (message builder over the artifacts) BEFORE the
+    // folder is deleted — no history re-query needed. Also covers the
+    // recordHistoryInGit-off case: the card shows for the rest of the
+    // session (from the task record), then disappears on restart, exactly as
+    // the doc specifies. Best-effort: never block completion on this.
     try {
-      execFileSync('git', ['fetch', 'origin', baseBranch], {
-        cwd: this.projectRoot,
-        stdio: 'pipe',
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-      });
-      fetched = true;
-    } catch (err) {
-      logWarn('orchestrator', `markTaskDone: git fetch origin ${baseBranch} failed for ${taskId}`, err);
-    }
-
-    // Deterministic snapshot detection: the committed artifact snapshot for
-    // this task exists iff .teamai/{slug}/task.json is tracked on
-    // origin/<base>. `git ls-tree` is the single source of truth here — no
-    // inference from a possibly-no-op fast-forward. When fetch failed (or
-    // ls-tree reports no task.json), there is no snapshot to restore and the
-    // git restore below is skipped entirely in favor of finalize-in-place.
-    const snapshotFiles = this._snapshotKeepPaths(fetched, baseBranch, relDir);
-    const hasSnapshot = snapshotFiles.has('task.json');
-
-    let fastForwarded = false;
-    if (hasSnapshot) {
-      try {
-        execFileSync('git', ['merge', '--ff-only', `origin/${baseBranch}`], {
-          cwd: this.projectRoot,
-          stdio: 'pipe',
-        });
-        fastForwarded = true;
-      } catch (err) {
-        logWarn('orchestrator', `markTaskDone: fast-forwarding local ${baseBranch} failed`, err);
-      }
-    }
-
-    // After a fast-forward, only treat the snapshot as restored when task.json
-    // now carries the snapshot's "done" phase (defensive: commitArtifactsToWorktree
-    // always stamps the snapshot's task.json with phase "done", so any other
-    // phase means the fast-forward did not actually bring the snapshot).
-    let restored = false;
-    if (fastForwarded) {
-      try {
-        restored = JSON.parse(readFileSync(path.join(dir, 'task.json'), 'utf-8')).phase === 'done';
-      } catch { /* leave restored=false → fallback */ }
-    }
-
-    // Fallback: scoped, dirty-tolerant restore of just this task's
-    // directory, only attempted when a snapshot exists (hasSnapshot) but the
-    // fast-forward above didn't happen.
-    // Deliberately scoped to just `relDir` via `git checkout <ref> --
-    // <path>` rather than retrying a whole-repo pull — a repo-wide pull
-    // requires the ENTIRE working tree to be clean/fast-forwardable and
-    // fails the moment any unrelated file is dirty, which is exactly the
-    // case the fast-forward above couldn't already handle. Unlike the
-    // fast-forward, this path can never advance local HEAD itself, so it
-    // always leaves the restored files as ordinary untracked/modified
-    // content rather than a clean commit — that's the accepted tradeoff for
-    // resilience to a dirty tree elsewhere, not the common case.
-    if (hasSnapshot && !fastForwarded) {
-      try {
-        execFileSync('git', ['checkout', `origin/${baseBranch}`, '--', relDir], {
-          cwd: this.projectRoot,
-          stdio: 'pipe',
-        });
-        restored = existsSync(path.join(dir, 'task.json'));
-      } catch (err) {
-        logWarn('orchestrator', `markTaskDone: git checkout of ${relDir} from origin/${baseBranch} failed`, err);
-      } finally {
-        // `git checkout <ref> -- <path>` stages <path> in the index as a
-        // side effect, despite the subcommand name — and unlike the
-        // fast-forward above, this path can never itself advance local HEAD
-        // to reconcile that, so the staged entries must always be undone
-        // here rather than left for a later best-effort pass. Otherwise
-        // they'd be stranded in this shared main-project-root index
-        // indefinitely: not part of any commit, not flagged as needing
-        // attention, just silently waiting to be swept into the next
-        // unrelated `git commit` run in this directory. Un-stage
-        // immediately — the restored files stay on disk (visible as
-        // ordinary untracked/modified files) either way; only the
-        // accidental index write is undone. If any future change adds
-        // another `checkout -- <path>` against projectRoot here, pair it
-        // with the same reset.
-        try {
-          execFileSync('git', ['reset', '--', relDir], { cwd: this.projectRoot, stdio: 'pipe' });
-        } catch { /* best-effort */ }
-      }
-    }
-
-    // If the restore brought back the committed snapshot, leave it
-    // untouched: the snapshot's task.json already has phase: "done" (set by
-    // commitArtifactsToWorktree), and those files are tracked — rewriting
-    // updatedAt or appending to events.jsonl would leave the repo dirty on
-    // every completed task.
-    let restoredSnapshot = false;
-    const pulledTaskJson = path.join(dir, 'task.json');
-    if (restored && existsSync(pulledTaskJson)) {
-      try {
-        restoredSnapshot = JSON.parse(readFileSync(pulledTaskJson, 'utf-8')).phase === 'done';
-      } catch { /* unreadable — patch it below */ }
-      if (!restoredSnapshot) {
-        // Snapshot came back without phase: "done" — patch it in place.
-        this.taskStore.updatePhase(taskId, 'done');
-        restoredSnapshot = true;
-      }
-    }
-
-    if (!restoredSnapshot) {
-      // No committed snapshot landed: fetch failed (offline), .teamai/ is
-      // gitignored so the artifact commit was skipped, or the PR was never
-      // actually merged. Finalize the live record deterministically IN PLACE
-      // — keep every durable artifact (spec/plan/qa_report/events), just flip
-      // the phase to "done". The old code instead recreated a bare task.json
-      // and pruned spec/plan/qa_report, so the outcome depended on which
-      // sub-case was hit; now all of them converge on the same non-lossy
-      // result.
-      this.taskStore.updatePhase(taskId, 'done');
-    }
-
-    // Prune leftovers. Both modes run only after the directory provably holds
-    // valid, settled content (so an interruption at any earlier point leaves
-    // the old content, never an empty dir — the deferred replacement for the
-    // old delete-before-restore rmSync):
-    //   - snapshot restored → keep only what the committed snapshot tracks,
-    //     drop local-only extras (transient logs, crash-recovery state).
-    //   - finalized in place → keep all durable artifacts, drop only the
-    //     transient session state.
-    if (restoredSnapshot) {
-      const keepPaths = new Set(snapshotFiles);
-      keepPaths.add('task.json');
-      pruneStaleTaskFiles(dir, keepPaths);
-    } else {
-      pruneTransientTaskFiles(dir);
-    }
-
-    // Only emit phase-change once, after the full pull→settle→prune sequence
-    // resolves — UI listeners refetch exactly once against the final, settled
-    // state.
-    processManager.emit('phase-change', { taskId, phase: 'done', projectRoot: this.projectRoot });
-  }
-
-  /**
-   * Compute the set of file paths (relative to `dir`) that the committed
-   * snapshot tracks under `relDir` on origin/<base>. Returns an empty set when
-   * the snapshot can't be determined (fetch failed or ls-tree errored).
-   * markTaskDone uses this as the deterministic "does a snapshot exist" signal
-   * (`has('task.json')`) and, after a successful restore, as the keep-set for
-   * pruning local-only leftovers.
-   */
-  private _snapshotKeepPaths(fetched: boolean, baseBranch: string, relDir: string): Set<string> {
-    if (!fetched) return new Set();
-    try {
-      const out = execFileSync(
-        'git', ['ls-tree', '-r', '--name-only', `origin/${baseBranch}`, '--', relDir],
-        {
-          cwd: this.projectRoot,
-          stdio: 'pipe',
-          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-        },
-      ).toString();
-      const relDirFwd = relDir.replace(/\\/g, '/');
-      const prefix = relDirFwd.endsWith('/') ? relDirFwd : relDirFwd + '/';
-      return new Set(
-        out
-          .split('\n')
-          .map((p) => p.trim())
-          .filter(Boolean)
-          .map((p) => p.replace(/\\/g, '/'))
-          .map((p) => (p.startsWith(prefix) ? p.slice(prefix.length) : p)),
+      const config = this.getPipelineConfig();
+      const msg = buildTicketMessageForPipeline(
+        { taskId, title: task.title, description: task.description, specPath: dir },
+        { recordHistoryInGit: config.recordHistoryInGit, includePhasesTrailer: config.includePhasesTrailer, taskType: task.taskType },
       );
-    } catch {
-      return new Set();
+      const slug = path.basename(dir);
+      if (msg) {
+        // Message = subject + blank + body + blank + trailer lines. Summary
+        // = body lines (what was done); trailers parsed separately.
+        const lines = msg.message.replace(/\n+$/, '').split('\n');
+        const trailerStart = lines.findIndex((l, i) => i > 0 && /^(Task|Task-ID|QA|Phases|Reviewed-by):/i.test(l));
+        const bodyLines = (trailerStart > 0 ? lines.slice(1, trailerStart) : lines.slice(1))
+          .filter(l => l.trim());
+        appendSessionTicket(this.projectRoot, synthesizeDoneTicket({
+          slug,
+          taskId,
+          title: task.title,
+          summary: bodyLines.slice(0, 4).join(' ') || task.description,
+          trailerLines: msg.trailerLines,
+          prUrl: task.prUrl || undefined,
+        }));
+      } else {
+        // recordHistoryInGit off — session-only card from the task record.
+        appendSessionTicket(this.projectRoot, synthesizeDoneTicket({
+          slug,
+          taskId,
+          title: task.title,
+          summary: task.description,
+          trailerLines: [],
+          prUrl: task.prUrl || undefined,
+        }));
+      }
+    } catch (err) {
+      logWarn('orchestrator', `markTaskDone: failed to append session DONE ticket for ${taskId}`, err);
     }
+
+    this.taskStore.updatePhase(taskId, 'done');
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch (err) {
+      // Non-fatal: the task is already finalized as done. Surface it for
+      // visibility but never fail the completion flow over cleanup.
+      logWarn('orchestrator', `markTaskDone: failed to delete task folder ${dir} for ${taskId}`, err);
+    }
+
+    // Only emit phase-change once, after the record is finalized and the
+    // folder removed — UI listeners refetch exactly once against the final,
+    // settled state.
+    processManager.emit('phase-change', { taskId, phase: 'done', projectRoot: this.projectRoot });
   }
 
   // Serializes writes to plan.json to prevent race conditions during
@@ -1161,97 +1040,11 @@ export class Orchestrator {
 
 }
 
-
-// ── markTaskDone stale-file pruning ────────────────────────────────────────
-
-/**
- * Recursively remove files under `dir` whose path (relative to `dir`) is not
- * in `keepRelative`, then remove any directories left empty. `keepRelative`
- * uses forward-slash separators and paths relative to `dir`.
- *
- * This is the post-restore replacement for the old delete-before-restore
- * rmSync in markTaskDone: it prunes local-only leftovers without ever leaving
- * the directory in a state where its task.json is missing. The caller is
- * responsible for always including 'task.json' (and 'events.jsonl' when it
- * wrote the minimal fallback) in `keepRelative`.
- */
-function pruneStaleTaskFiles(dir: string, keepRelative: Set<string>): void {
-  const walk = (current: string): void => {
-    let entries;
-    try {
-      entries = readdirSync(current, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-        try {
-          if (readdirSync(full).length === 0) rmdirSync(full);
-        } catch { /* best-effort */ }
-      } else if (entry.isFile() || entry.isSymbolicLink()) {
-        const rel = path.relative(dir, full).replace(/\\/g, '/');
-        if (!keepRelative.has(rel)) {
-          try { rmSync(full, { force: true }); } catch { /* best-effort */ }
-        }
-      }
-    }
-  };
-
-  walk(dir);
-}
-
-// Filenames that are transient pipeline state rather than durable artifacts.
-// Matches the transient patterns the project's own .gitignore excludes
-// (.teamai/*/output*.log, .teamai/*/session_map.json, .teamai/*/.pipeline_state.json).
-const TRANSIENT_TASK_FILES = new Set([
-  'output.log',
-  'session_map.json',
-  '.pipeline_state.json',
-]);
-
-const OUTPUT_LOG_PATTERN = /^output(-.*)?\.log$/;
-
 /** Upper bound for the on-disk revision-snapshot fallback scans
  *  (_restoreSpecRevision / _restoreQaRevision). Auto-revision caps at 3
  *  (spec) and maxQaAttempts (QA), so 20 is generous headroom while keeping
  *  the fallback O(20) existsSync calls. */
 const MAX_REVISION_SNAPSHOTS = 20;
-
-/**
- * Recursively remove only transient pipeline state under `dir`, preserving
- * every durable artifact (task.json, events.jsonl, spec, plan, QA report,
- * human feedback, etc.). Used by markTaskDone's finalize-in-place path when
- * no committed snapshot exists to restore: the live record is kept intact
- * and only the files that must never be version-controlled are dropped.
- */
-function pruneTransientTaskFiles(dir: string): void {
-  const walk = (current: string): void => {
-    let entries;
-    try {
-      entries = readdirSync(current, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-        try {
-          if (readdirSync(full).length === 0) rmdirSync(full);
-        } catch { /* best-effort */ }
-      } else if (entry.isFile() || entry.isSymbolicLink()) {
-        if (TRANSIENT_TASK_FILES.has(entry.name) || OUTPUT_LOG_PATTERN.test(entry.name)) {
-          try { rmSync(full, { force: true }); } catch { /* best-effort */ }
-        }
-      }
-    }
-  };
-
-  walk(dir);
-}
-
 
 // ── Global orchestrator manager ────────────────────────────────────────────
 

@@ -799,156 +799,6 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
   });
 });
 
-describe('_commitArtifactsToWorktree — GIT_DIR bypass', () => {
-  let env: ReturnType<typeof setupTestEnv>;
-
-  beforeEach(() => {
-    vi.resetAllMocks();
-    onHandlers.clear();
-    vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
-    vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
-    vi.mocked(readContainerRemoteUser).mockReturnValue('node');
-    vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
-  });
-
-  afterEach(() => {
-    if (env) env.clean();
-  });
-
-  function makePipeline(taskDir: string, worktreePath: string) {
-    return {
-      taskId: 'test-task',
-      description: 'my-feature',
-      phase: 'merge',
-      specPath: taskDir,
-      worktreePath,
-      branch: 'feat/my-feature',
-      qaAttempt: 0,
-      maxQaAttempts: 3,
-    };
-  }
-
-  it('injects GIT_DIR and GIT_WORK_TREE for git add and commit', () => {
-    env = setupTestEnv();
-    const orch = makeOrch(env.root);
-
-    const taskDir = join(env.root, '.teamai', randomUUID().slice(0, 8));
-    mkdirSync(taskDir, { recursive: true });
-    writeFileSync(join(taskDir, 'spec.md'), '# Spec');
-    writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
-      id: 'test-task', title: 'T', description: 'my-feature',
-      phase: 'merge', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    }));
-
-    mockExecFileSync.mockReturnValue('');
-
-    (orch as AnyOrch)._ctx.commitArtifactsToWorktree(makePipeline(taskDir, env.worktreePath));
-
-    const gitCalls = mockExecFileSync.mock.calls.filter((c: unknown[]) => c[0] === 'git');
-    expect(gitCalls.length).toBeGreaterThanOrEqual(2);
-
-    for (const call of gitCalls) {
-      const opts = call[2] as { env?: Record<string, string> };
-      expect(opts.env?.GIT_DIR).toContain(`/worktrees/${env.worktreeName}`);
-      expect(opts.env?.GIT_WORK_TREE).toBeDefined();
-    }
-  });
-
-  it('works even when .git file contains container-style paths', () => {
-    env = setupTestEnv();
-    const orch = makeOrch(env.root);
-
-    // Simulate state left by _patchWorktreeGitFile (before agent session)
-    writeFileSync(
-      join(env.worktreePath, '.git'),
-      `gitdir: /workspaces/project/.git/worktrees/${env.worktreeName}\n`,
-    );
-
-    const taskDir = join(env.root, '.teamai', randomUUID().slice(0, 8));
-    mkdirSync(taskDir, { recursive: true });
-    writeFileSync(join(taskDir, 'spec.md'), '# Spec');
-    writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
-      id: 'test-task', title: 'T', description: 'my-feature',
-      phase: 'merge', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    }));
-
-    mockExecFileSync.mockReturnValue('');
-
-    // Should not throw even with stale container paths in .git
-    expect(() =>
-      (orch as AnyOrch)._ctx.commitArtifactsToWorktree(makePipeline(taskDir, env.worktreePath))
-    ).not.toThrow();
-
-    // git add must use GIT_DIR (bypasses the stale .git file)
-    const addCall = mockExecFileSync.mock.calls.find(
-      (c: unknown[]) => c[0] === 'git' && (c[1] as string[]).includes('add')
-    );
-    expect(addCall).toBeDefined();
-    const opts = addCall![2] as { env?: Record<string, string> };
-    expect(opts.env?.GIT_DIR).toContain(`/worktrees/${env.worktreeName}`);
-  });
-
-  it('must use host git, NOT docker exec, even in container mode', () => {
-    env = setupTestEnv();
-    const orch = makeOrch(env.root);
-
-    vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-    vi.mocked(containerManager.getRunningContainer).mockReturnValue({
-      containerId: 'cont-test',
-      remoteWorkspaceFolder: '/workspaces/project',
-    } as any);
-
-    const taskDir = join(env.root, '.teamai', randomUUID().slice(0, 8));
-    mkdirSync(taskDir, { recursive: true });
-    writeFileSync(join(taskDir, 'spec.md'), '# Spec');
-    writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
-      id: 'test-task', title: 'T', description: 'my-feature',
-      phase: 'merge', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    }));
-
-    mockExecFileSync.mockReturnValue('');
-
-    (orch as AnyOrch)._ctx.commitArtifactsToWorktree(makePipeline(taskDir, env.worktreePath));
-
-    // Must not have called docker exec
-    const dockerCalls = mockExecFileSync.mock.calls.filter((c: unknown[]) => c[0] === 'docker');
-    expect(dockerCalls.length).toBe(0);
-
-    // Must have called host git
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'git',
-      expect.arrayContaining(['add', '-f', expect.stringContaining('.teamai/')]),
-      expect.any(Object),
-    );
-  });
-
-  it('best-effort restores .git file to host paths for external tooling', () => {
-    env = setupTestEnv();
-    const orch = makeOrch(env.root);
-
-    writeFileSync(
-      join(env.worktreePath, '.git'),
-      `gitdir: /workspaces/project/.git/worktrees/${env.worktreeName}\n`,
-    );
-
-    const taskDir = join(env.root, '.teamai', randomUUID().slice(0, 8));
-    mkdirSync(taskDir, { recursive: true });
-    writeFileSync(join(taskDir, 'spec.md'), '# Spec');
-    writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
-      id: 'test-task', title: 'T', description: 'my-feature',
-      phase: 'merge', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    }));
-
-    mockExecFileSync.mockReturnValue('');
-
-    (orch as AnyOrch)._ctx.commitArtifactsToWorktree(makePipeline(taskDir, env.worktreePath));
-
-    // .git file should have been restored to host paths as a best-effort cleanup
-    const hostRoot = env.root.replace(/\\/g, '/');
-    const content = readFileSync(join(env.worktreePath, '.git'), 'utf-8').trim();
-    expect(content).toBe(`gitdir: ${hostRoot}/.git/worktrees/${env.worktreeName}`);
-  });
-});
 
 describe('_patchWorktreeGitFile and _restoreWorktreeGitFileToHostPaths — idempotency round-trip', () => {
   let env: ReturnType<typeof setupTestEnv>;
@@ -1109,8 +959,12 @@ describe('_isWorktreeHealthy — container-mode path detection', () => {
 // container-patched and the ordinary case.
 
 describe('removeStaleWorktreeRegistration', () => {
-  const projectRoot = 'C:\\proj';
-  const worktreePath = 'C:\\proj\\.worktrees\\my-task-st2';
+  // path.basename() is platform-dependent (backslash is only a separator on
+  // win32) — build these with `join` so the test exercises the same parsing
+  // the production code actually hits on whichever host runs it, instead of
+  // hardcoding a Windows-only literal that CI (linux) can't parse the same way.
+  const projectRoot = join('proj');
+  const worktreePath = join('proj', '.worktrees', 'my-task-st2');
 
   beforeEach(() => {
     vi.resetAllMocks();

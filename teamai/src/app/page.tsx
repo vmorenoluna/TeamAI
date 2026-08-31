@@ -1,7 +1,9 @@
 import { getTasks } from './actions/tasks';
 import { getActiveProject } from './actions/projects';
+import { getDoneHistory } from './actions/history';
 import { KanbanBoard } from '@/components/kanban-board';
 import type { Task } from '@/lib/task-store';
+import type { DoneTicketFromHistory } from '@/lib/history-scanner';
 
 export default async function Home() {
   const activeProject = await getActiveProject();
@@ -16,8 +18,19 @@ export default async function Home() {
 
   let tasks: Task[] = [];
   let tasksError: string | null = null;
+  let doneHistory: DoneTicketFromHistory[] = [];
+  let doneHistoryHasMore = false;
   try {
     tasks = await getTasks();
+    // §3f — history-reconstructed DONE tickets (no-throw: history is an
+    // enhancement, never a blocker for rendering the board).
+    try {
+      const history = await getDoneHistory();
+      doneHistory = history.tickets;
+      doneHistoryHasMore = history.hasMore;
+    } catch {
+      // gh missing / not a git repo / scan failure — render without history.
+    }
   } catch (err) {
     // Active project path may be stale; surface a meaningful message rather than
     // silently rendering an empty board (silent-failure regression fix).
@@ -41,5 +54,12 @@ export default async function Home() {
     );
   }
 
-  return <KanbanBoard tasks={tasks} projectPath={activeProject.path} />;
+  return (
+    <KanbanBoard
+      tasks={tasks}
+      projectPath={activeProject.path}
+      doneHistory={doneHistory}
+      doneHistoryHasMore={doneHistoryHasMore}
+    />
+  );
 }

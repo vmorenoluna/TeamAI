@@ -76,9 +76,13 @@ function setupGitRepo() {
   testDir = join(tmpdir(), `teamai-wt-test-${randomUUID().slice(0, 8)}`);
   remoteDir = join(tmpdir(), `teamai-wt-remote-${randomUUID().slice(0, 8)}`);
 
-  // Create bare remote
+  // Create bare remote. -b main pins the default branch explicitly — the
+  // later `git push -u origin main` below assumes the clone's local branch
+  // is named "main", which otherwise depends on the git client's own
+  // init.defaultBranch config (not set to "main" on GitHub's ubuntu-latest
+  // runners, unlike this dev machine).
   mkdirSync(remoteDir, { recursive: true });
-  execFileSync('git', ['init', '--bare'], { cwd: remoteDir, stdio: 'ignore' });
+  execFileSync('git', ['init', '--bare', '-b', 'main'], { cwd: remoteDir, stdio: 'ignore' });
 
   // Clone from remote
   execFileSync('git', ['clone', remoteDir, testDir], { stdio: 'ignore' });

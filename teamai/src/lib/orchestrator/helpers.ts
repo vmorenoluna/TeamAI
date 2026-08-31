@@ -35,6 +35,14 @@ export interface PipelineConfig {
   autoMergeMethod?: 'merge' | 'squash' | 'rebase';
   /** When true, all pipeline processing is skipped — demo data stays pristine. */
   demo?: boolean;
+  /** When true (default), completed tasks get a trailer-bearing commit message
+   *  (Task/Task-ID/QA/Phases/Reviewed-by) and the PR body gets the same block —
+   *  the basis for DONE-ticket reconstruction from git/PR history. When false,
+   *  no trailer block is written and no DONE-history reconstruction happens. */
+  recordHistoryInGit: boolean;
+  /** When true (default), the `Phases:` trailer line is included in the
+   *  trailer block. Only meaningful when recordHistoryInGit is true. */
+  includePhasesTrailer: boolean;
 }
 
 // ── Pure: session-limit parsing ───────────────────────────────────────────
@@ -205,12 +213,14 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
         idleStallMinutes: typeof raw.idleStallMinutes === 'number' ? raw.idleStallMinutes : 15,
         toolStallMinutes: typeof raw.toolStallMinutes === 'number' ? raw.toolStallMinutes : 30,
         autoMergeMethod: raw.autoMergeMethod === 'squash' || raw.autoMergeMethod === 'rebase' ? raw.autoMergeMethod : 'merge',
+        recordHistoryInGit: typeof raw.recordHistoryInGit === 'boolean' ? raw.recordHistoryInGit : true,
+        includePhasesTrailer: typeof raw.includePhasesTrailer === 'boolean' ? raw.includePhasesTrailer : true,
         demo: typeof raw.demo === 'boolean' ? raw.demo : undefined,
         ...(sensors ? { sensors } : {}),
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
   }
-  return { maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge' };
+  return { maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true };
 }
 
 // ── Session map ───────────────────────────────────────────────────────────

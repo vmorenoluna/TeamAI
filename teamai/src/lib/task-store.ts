@@ -59,6 +59,10 @@ export interface Task {
    *  than reading `slug` directly. */
   worktreeDirName?: string;
   phase: string;
+  /** Conventional-Commits type for the ticket-history commit subject
+   *  (feat/fix/refactor/chore/docs). Falls back to 'feat' when unset —
+   *  e.g. tasks created before this field existed. */
+  taskType?: string;
   branch?: string;
   dependencies?: string[];     // IDs of tasks this task depends on
   rateLimitedUntil?: string;   // ISO timestamp — set when pipeline is paused by API rate limit
@@ -153,7 +157,7 @@ export class TaskStore {
     }
   }
 
-  create(id: string, title: string, description: string, source?: string, competitiveContext?: string): Task {
+  create(id: string, title: string, description: string, source?: string, competitiveContext?: string, taskType?: string): Task {
     // Canonical unique slug (BUG-13): two tasks whose titles share a 40-char
     // prefix must not share a directory (and later a branch/worktree).
     // A title of only symbols slugifies to hyphens — fall back to 'task'.
@@ -173,6 +177,7 @@ export class TaskStore {
       phase: 'backlog',
       source,
       competitiveContext,
+      taskType: taskType || undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

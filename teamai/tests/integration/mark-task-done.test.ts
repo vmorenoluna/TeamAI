@@ -1,35 +1,30 @@
 /**
  * Integration tests for markTaskDone end-to-end flow.
  *
- * Tests verify the fetch→ff-only-merge→(scoped-checkout fallback)→
- * finalize-in-place→emit sequence with a real git repository on disk. The
- * processManager and execFileSync are mocked so no real remote operations
- * occur, but filesystem operations (mkdir, rm, readFileSync) use real
- * Node.js APIs against a temp directory.
+ * Ticket-history refactor (§3d): the committed artifact snapshot no longer
+ * exists — the folder-commit mechanism was replaced by the trailer-bearing
+ * pre-merge squash. markTaskDone is therefore deterministic:
  *
- * The primary restore path is a whole-repo `git merge --ff-only
- * origin/<base>` — when it succeeds, HEAD lands fully in sync with origin
- * and the task's directory comes along as ordinary, clean, committed
- * content. Only when that fails does the restore fall back to a checkout
- * scoped to just the task's own directory (`git checkout origin/master --
- * <dir>`) rather than retrying a whole-repo pull — see orchestrator.ts
- * markTaskDone for why: a repo-wide pull fails the moment ANY unrelated
- * file elsewhere in the tree is dirty, which was the actual bug that left
- * completed tasks stuck with bare-bones fallback artifacts instead of
- * their real committed snapshot. The scoped fallback tolerates that
- * dirtiness but leaves the restored files as untracked/modified content
- * rather than a clean commit — an accepted tradeoff for the fallback case.
+ *   PR-merge guard  →  finalize record (task.json phase=done + events.jsonl)
+ *   →  delete .teamai/<slug>/ unconditionally  →  emit phase-change once
+ *
+ * No git fetch / ls-tree / ff-only merge / scoped checkout is attempted.
+ * The durable record after completion is the trailer-bearing merge commit
+ * and (for PR-strategy tasks) the PR body — not the local folder.
+ *
+ * The processManager and execFileSync are mocked so no real remote
+ * operations occur, but filesystem operations use real Node.js APIs
+ * against a temp directory.
  *
  * Coverage:
- *  - Fetch failure: live record finalized in place (task.json → done, durable artifacts kept, transient files pruned)
- *  - Fast-forward success: directory restored directly by the merge, scoped checkout never attempted
- *  - Checkout fallback success: fast-forward fails, directory restored by checkout simulation, snapshot left untouched
- *  - Pull restores no snapshot: live record finalized in place (artifacts kept)
- *  - Single emit: phase-change fires exactly once after the full sequence
+ *  - Finalize + folder deletion (unconditional, both merge strategies)
+ *  - Single emit after the record is settled
+ *  - PR-merge guard still refuses unmerged PRs and leaves everything intact
+ *  - Task-not-found error
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -128,16 +123,6 @@ function setupTestProject() {
   // Default: return '' for all execFileSync calls
   mockExecFileSync.mockReturnValue('');
 
-  // Init git repo
-  try {
-    mockExecFileSync('git', ['init'], { cwd: testDir, stdio: 'ignore' });
-    mockExecFileSync('git', ['config', 'user.email', 'test@teamai.dev'], { cwd: testDir, stdio: 'ignore' });
-    mockExecFileSync('git', ['config', 'user.name', 'TeamAI Test'], { cwd: testDir, stdio: 'ignore' });
-    writeFileSync(join(testDir, '.gitkeep'), '');
-    mockExecFileSync('git', ['add', '.gitkeep'], { cwd: testDir, stdio: 'ignore' });
-    mockExecFileSync('git', ['commit', '-m', 'initial'], { cwd: testDir, stdio: 'ignore' });
-  } catch { /* git might not be available in test env */ }
-
   const teamaiDir = join(testDir, '.teamai');
   mkdirSync(teamaiDir, { recursive: true });
 
@@ -196,63 +181,19 @@ describe('markTaskDone Integration', () => {
     vi.resetModules();
   });
 
-  // ── Pull failure: fallback recreates task.json + events.jsonl ────────────
-
-  describe('fetch failure — fallback path', () => {
-    it('deletes directory, attempts fetch, recreates task.json + events.jsonl on failure, emits once', async () => {
-      // Verify initial state
+  describe('finalize + folder deletion', () => {
+    it('deletes the task folder, emits phase-change exactly once', async () => {
       expect(existsSync(taskDir)).toBe(true);
       expect(existsSync(join(taskDir, 'task.json'))).toBe(true);
-      expect(existsSync(join(taskDir, 'spec.md'))).toBe(true);
-
-      // Make git fetch fail (simulating no remote / offline)
-      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('fetch')) {
-          throw new Error('fatal: Could not read from remote repository');
-        }
-        return '';
-      });
 
       mockEmit.mockClear();
       await orch.markTaskDone(taskId);
 
-      // ── Finalized in place ──
-      // No snapshot landed (fetch failed), so the live record is finalized
-      // in place: task.json flipped to done, events.jsonl appended, and
-      // every durable artifact preserved rather than pruned away.
-      expect(existsSync(taskDir)).toBe(true);
-      expect(existsSync(join(taskDir, 'task.json'))).toBe(true);
-      expect(existsSync(join(taskDir, 'events.jsonl'))).toBe(true);
+      // Folder is gone — the durable record is the trailer-bearing commit
+      // and (for PR tasks) the PR body, not the local folder (§3d/§3j).
+      expect(existsSync(taskDir)).toBe(false);
 
-      // Durable artifacts survive the finalize-in-place path
-      expect(existsSync(join(taskDir, 'spec.md'))).toBe(true);
-      expect(existsSync(join(taskDir, 'plan.json'))).toBe(true);
-      expect(existsSync(join(taskDir, 'qa_report.json'))).toBe(true);
-
-      // ── task.json has phase: "done" ──
-      const taskJson = JSON.parse(readFileSync(join(taskDir, 'task.json'), 'utf-8'));
-      expect(taskJson.phase).toBe('done');
-      expect(taskJson.updatedAt).toBeDefined();
-
-      // ── events.jsonl has the "done" entry ──
-      const eventsContent = readFileSync(join(taskDir, 'events.jsonl'), 'utf-8');
-      const events = eventsContent.split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
-      expect(events.some((e: any) => e.phase === 'done')).toBe(true);
-
-      // ── git fetch was attempted with correct args; checkout was skipped
-      //    since fetch failed ──
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['fetch', 'origin', 'main']),
-        expect.objectContaining({ cwd: testDir }),
-      );
-      expect(mockExecFileSync).not.toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['checkout']),
-        expect.anything(),
-      );
-
-      // ── phase-change emitted exactly once ──
+      // phase-change emitted exactly once, after the folder is settled
       expect(mockEmit).toHaveBeenCalledTimes(1);
       expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId,
@@ -260,165 +201,90 @@ describe('markTaskDone Integration', () => {
       }));
     });
 
-    it('handles fetch failure when directory has many artifact files', async () => {
-      // Add extra artifacts to verify rmSync truly removes everything
-      writeFileSync(join(taskDir, 'output.log'), 'sensitive terminal output');
+    it('deletes the folder regardless of merge strategy (local-merge included)', async () => {
+      writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
+        id: taskId,
+        title: 'Mark Task Done Test',
+        description: 'Integration test for markTaskDone flow',
+        phase: 'awaiting-review',
+        mergeStrategy: 'local-merge',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }));
+
+      await orch.markTaskDone(taskId);
+
+      expect(existsSync(taskDir)).toBe(false);
+      expect(mockEmit).toHaveBeenCalledTimes(1);
+    });
+
+    it('deletes the folder regardless of recordHistoryInGit (§3j — no keep-folder safety net)', async () => {
+      // recordHistoryInGit off must not preserve the folder; the toggle only
+      // controls whether trailers are written, not whether folders persist.
+      writeFileSync(
+        join(testDir, '.teamai', 'pipeline.json'),
+        JSON.stringify({ maxQaAttempts: 3, parallelSubtasks: true, recordHistoryInGit: false }),
+      );
+
+      await orch.markTaskDone(taskId);
+
+      expect(existsSync(taskDir)).toBe(false);
+      expect(mockEmit).toHaveBeenCalledTimes(1);
+    });
+
+    it('removes every artifact file with the folder — including transient logs', async () => {
+      writeFileSync(join(taskDir, 'output.log'), 'terminal output');
       writeFileSync(join(taskDir, 'completion_summary.md'), '# Summary');
       writeFileSync(join(taskDir, 'qa_feedback.md'), 'feedback');
 
-      // Make fetch fail
-      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('fetch')) {
-          throw new Error('fatal: not a git repository');
-        }
-        return '';
-      });
-
-      mockEmit.mockClear();
       await orch.markTaskDone(taskId);
 
-      // Directory exists (finalized in place)
-      expect(existsSync(taskDir)).toBe(true);
-
-      // task.json + events.jsonl updated, durable artifacts preserved
-      expect(existsSync(join(taskDir, 'task.json'))).toBe(true);
-      expect(existsSync(join(taskDir, 'events.jsonl'))).toBe(true);
-      expect(existsSync(join(taskDir, 'spec.md'))).toBe(true);
-      expect(existsSync(join(taskDir, 'plan.json'))).toBe(true);
-      expect(existsSync(join(taskDir, 'completion_summary.md'))).toBe(true);
-      expect(existsSync(join(taskDir, 'qa_feedback.md'))).toBe(true);
-
-      // Only transient session state is pruned
+      expect(existsSync(taskDir)).toBe(false);
+      expect(existsSync(join(taskDir, 'task.json'))).toBe(false);
       expect(existsSync(join(taskDir, 'output.log'))).toBe(false);
-
-      // Single emit
-      expect(mockEmit).toHaveBeenCalledTimes(1);
-    });
-
-    it('preserves task identity fields in recreated task.json', async () => {
-      // Make fetch fail
-      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('fetch')) {
-          throw new Error('fatal: remote not found');
-        }
-        return '';
-      });
-
-      await orch.markTaskDone(taskId);
-
-      const taskJson = JSON.parse(readFileSync(join(taskDir, 'task.json'), 'utf-8'));
-
-      // Identity fields preserved from snapshot
-      expect(taskJson.id).toBe(taskId);
-      expect(taskJson.title).toBe('Mark Task Done Test');
-      expect(taskJson.description).toBe('Integration test for markTaskDone flow');
-      expect(taskJson.createdAt).toBeDefined();
-
-      // Phase updated
-      expect(taskJson.phase).toBe('done');
     });
   });
 
-  // ── Pull success: directory restored, events.jsonl updated ──────────────
+  // ── PR-merge guard ──────────────────────────────────────────────────────
 
-  describe('fast-forward success path', () => {
-    it('deletes directory, restores directly via ff-only merge, never attempts the scoped checkout fallback', async () => {
-      const restoredSnapshot = JSON.stringify({
+  describe('PR-merge guard', () => {
+    function writeTaskJsonWithPr(taskDir: string, taskId: string) {
+      writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
         id: taskId,
-        title: 'Mark Task Done Test',
-        description: 'Integration test for markTaskDone flow',
-        phase: 'done',   // phase was set to 'done' by commitArtifactsToWorktree before the merge
+        title: 'Test Task',
+        description: 'A test task for full coverage',
+        phase: 'pr-open',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      });
-
-      // Make `git merge --ff-only` succeed and simulate restoring the
-      // directory — this is the primary path, tried before any checkout.
-      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args[0] === 'ls-tree') {
-          // The committed snapshot tracks task.json on origin/main.
-          return `.teamai/${taskId}/task.json\n`;
-        }
-        if (cmd === 'git' && args[0] === 'merge' && args.includes('--ff-only')) {
-          // Simulate a fast-forward bringing HEAD (and the working tree)
-          // in sync with origin, which includes the committed
-          // .teamai/{slug}/ directory.
-          mkdirSync(taskDir, { recursive: true });
-          writeFileSync(join(taskDir, 'task.json'), restoredSnapshot);
-          return '';
-        }
-        return '';
-      });
-
-      mockEmit.mockClear();
-      await orch.markTaskDone(taskId);
-
-      // ── Directory exists from the fast-forward restore ──
-      expect(existsSync(taskDir)).toBe(true);
-      expect(existsSync(join(taskDir, 'task.json'))).toBe(true);
-
-      // ── The restored (tracked) snapshot is byte-identical: rewriting it
-      //    would leave the repo dirty after every completed task ──
-      expect(readFileSync(join(taskDir, 'task.json'), 'utf-8')).toBe(restoredSnapshot);
-      expect(existsSync(join(taskDir, 'events.jsonl'))).toBe(false);
-
-      // ── git fetch + ff-only merge were attempted ──
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['fetch', 'origin', 'main']),
-        expect.objectContaining({ cwd: testDir }),
-      );
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'git',
-        ['merge', '--ff-only', 'origin/main'],
-        expect.objectContaining({ cwd: testDir }),
-      );
-
-      // ── The scoped checkout fallback must never run — the fast-forward
-      //    already settled everything ──
-      expect(mockExecFileSync).not.toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['checkout']),
-        expect.anything(),
-      );
-
-      // ── phase-change emitted exactly once ──
-      expect(mockEmit).toHaveBeenCalledTimes(1);
-      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
-        taskId,
-        phase: 'done',
+        platform: 'github',
+        prUrl: 'https://github.com/example/repo/pull/42',
+        mergeStrategy: 'pull-request',
       }));
-    });
-  });
+    }
 
-  describe('checkout fallback path (fast-forward merge fails)', () => {
-    it('deletes directory, restores via scoped checkout, leaves restored snapshot untouched, emits once', async () => {
-      const restoredSnapshot = JSON.stringify({
-        id: taskId,
-        title: 'Mark Task Done Test',
-        description: 'Integration test for markTaskDone flow',
-        phase: 'done',   // phase was set to 'done' by commitArtifactsToWorktree before the merge
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+    it('refuses to mark done when the PR is still open, leaving the folder untouched', async () => {
+      writeTaskJsonWithPr(taskDir, taskId);
+      mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+        if (args.includes('view') && args.includes('state')) {
+          return JSON.stringify({ state: 'OPEN' });
+        }
+        return '';
       });
 
-      // Fast-forward fails first (e.g. an unrelated dirty file elsewhere
-      // blocks it) — the scoped checkout fallback is what actually
-      // restores the directory here.
-      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args[0] === 'ls-tree') {
-          return `.teamai/${taskId}/task.json\n`;
-        }
-        if (cmd === 'git' && args[0] === 'merge' && args.includes('--ff-only')) {
-          throw new Error('fatal: Not possible to fast-forward, aborting.');
-        }
-        if (cmd === 'git' && args.includes('checkout')) {
-          // Simulate `git checkout origin/master -- <dir>` restoring the
-          // committed .teamai/{slug}/ directory, regardless of how dirty
-          // the rest of the working tree is.
-          mkdirSync(taskDir, { recursive: true });
-          writeFileSync(join(taskDir, 'task.json'), restoredSnapshot);
-          return '';
+      mockEmit.mockClear();
+      await expect(orch.markTaskDone(taskId)).rejects.toThrow(/has not been merged yet/);
+
+      // Nothing destructive happened — folder intact, no phase-change.
+      expect(existsSync(taskDir)).toBe(true);
+      expect(existsSync(join(taskDir, 'task.json'))).toBe(true);
+      expect(mockEmit).not.toHaveBeenCalled();
+    });
+
+    it('proceeds when the PR is confirmed merged', async () => {
+      writeTaskJsonWithPr(taskDir, taskId);
+      mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+        if (args.includes('view') && args.includes('state')) {
+          return JSON.stringify({ state: 'MERGED' });
         }
         return '';
       });
@@ -426,34 +292,7 @@ describe('markTaskDone Integration', () => {
       mockEmit.mockClear();
       await orch.markTaskDone(taskId);
 
-      // ── Directory exists from checkout restore ──
-      expect(existsSync(taskDir)).toBe(true);
-      expect(existsSync(join(taskDir, 'task.json'))).toBe(true);
-
-      // ── The restored (tracked) snapshot is byte-identical: rewriting it
-      //    would leave the repo dirty after every completed task ──
-      expect(readFileSync(join(taskDir, 'task.json'), 'utf-8')).toBe(restoredSnapshot);
-      expect(existsSync(join(taskDir, 'events.jsonl'))).toBe(false);
-
-      // ── git fetch, the failed ff-only merge, and the scoped checkout
-      //    fallback were all attempted, in that order ──
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['fetch', 'origin', 'main']),
-        expect.objectContaining({ cwd: testDir }),
-      );
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'git',
-        ['merge', '--ff-only', 'origin/main'],
-        expect.objectContaining({ cwd: testDir }),
-      );
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['checkout', 'origin/main', '--']),
-        expect.objectContaining({ cwd: testDir }),
-      );
-
-      // ── phase-change emitted exactly once ──
+      expect(existsSync(taskDir)).toBe(false);
       expect(mockEmit).toHaveBeenCalledTimes(1);
       expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId,
@@ -461,25 +300,11 @@ describe('markTaskDone Integration', () => {
       }));
     });
 
-    it('patches phase via updatePhase when the restored snapshot lacks phase:done', async () => {
-      // Simulate a checkout restoring a snapshot whose task.json was frozen
-      // at an earlier phase (artifact commit ran on an older orchestrator).
-      // Fast-forward fails first so the checkout fallback is the one doing
-      // the restoring.
-      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args[0] === 'ls-tree') {
-          return `.teamai/${taskId}/task.json\n`;
-        }
-        if (cmd === 'git' && args[0] === 'merge' && args.includes('--ff-only')) {
-          throw new Error('fatal: Not possible to fast-forward, aborting.');
-        }
-        if (cmd === 'git' && args.includes('checkout')) {
-          mkdirSync(taskDir, { recursive: true });
-          writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
-            id: taskId, title: 'Mark Task Done Test', description: 'desc',
-            phase: 'pr-open', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-          }));
-          return '';
+    it('proceeds when merge state cannot be determined (CLI failure) rather than blocking indefinitely', async () => {
+      writeTaskJsonWithPr(taskDir, taskId);
+      mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+        if (args.includes('view') && args.includes('state')) {
+          throw new Error('gh: command not found');
         }
         return '';
       });
@@ -487,99 +312,8 @@ describe('markTaskDone Integration', () => {
       mockEmit.mockClear();
       await orch.markTaskDone(taskId);
 
-      const taskJson = JSON.parse(readFileSync(join(taskDir, 'task.json'), 'utf-8'));
-      expect(taskJson.phase).toBe('done');
+      expect(existsSync(taskDir)).toBe(false);
       expect(mockEmit).toHaveBeenCalledTimes(1);
-    });
-
-    it('finalizes the live record in place (keeping artifacts) when pull restores no snapshot', async () => {
-      // Fetch + ff-only merge succeed but restore no snapshot — e.g. the
-      // project gitignores .teamai/ in-repo, so commitArtifactsToWorktree
-      // skipped the commit. The live record is finalized in place rather
-      // than recreated from scratch.
-      mockExecFileSync.mockReturnValue('');
-
-      mockEmit.mockClear();
-      await orch.markTaskDone(taskId);
-
-      // task.json flipped to done, events.jsonl appended
-      expect(existsSync(join(taskDir, 'task.json'))).toBe(true);
-      const taskJson = JSON.parse(readFileSync(join(taskDir, 'task.json'), 'utf-8'));
-      expect(taskJson.phase).toBe('done');
-      expect(taskJson.title).toBe('Mark Task Done Test');
-      expect(existsSync(join(taskDir, 'events.jsonl'))).toBe(true);
-
-      // Durable artifacts survive finalize-in-place
-      expect(existsSync(join(taskDir, 'spec.md'))).toBe(true);
-      expect(existsSync(join(taskDir, 'plan.json'))).toBe(true);
-      expect(existsSync(join(taskDir, 'qa_report.json'))).toBe(true);
-
-      // The explicit ls-tree gate saw no snapshot, so neither the
-      // fast-forward merge nor the scoped checkout was attempted.
-      expect(mockExecFileSync).not.toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['merge', '--ff-only']),
-        expect.anything(),
-      );
-      expect(mockExecFileSync).not.toHaveBeenCalledWith(
-        'git',
-        expect.arrayContaining(['checkout']),
-        expect.anything(),
-      );
-
-      // Emitted exactly once, after everything settled
-      expect(mockEmit).toHaveBeenCalledTimes(1);
-    });
-
-    it('does not double-emit when checkout succeeds', async () => {
-      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args[0] === 'ls-tree') {
-          return `.teamai/${taskId}/task.json\n`;
-        }
-        if (cmd === 'git' && args[0] === 'merge' && args.includes('--ff-only')) {
-          throw new Error('fatal: Not possible to fast-forward, aborting.');
-        }
-        if (cmd === 'git' && args.includes('checkout')) {
-          mkdirSync(taskDir, { recursive: true });
-          writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
-            id: taskId, title: 'Checkout Test', description: 'desc',
-            phase: 'done', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-          }));
-          return '';
-        }
-        return '';
-      });
-
-      mockEmit.mockClear();
-      await orch.markTaskDone(taskId);
-
-      // Exactly one emit — no intermediate emits, no double emits
-      expect(mockEmit).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  // ── No delete-before-restore window ─────────────────────────────────────
-
-  describe('no delete-before-restore window', () => {
-    it('leaves the live directory (and task.json) intact while the restore runs', async () => {
-      // Record whether task.json still exists at the moment `git fetch` runs.
-      // The old delete-before-restore rmSync removed the whole directory
-      // BEFORE fetch — an interruption in that gap left the directory
-      // permanently empty. Observing task.json here proves that window is
-      // closed: the restore now runs against an intact live directory.
-      let taskJsonPresentAtFetch = false;
-
-      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('fetch')) {
-          taskJsonPresentAtFetch = existsSync(join(taskDir, 'task.json'));
-          throw new Error('fatal: could not read from remote repository');
-        }
-        return '';
-      });
-
-      await orch.markTaskDone(taskId);
-
-      expect(taskJsonPresentAtFetch).toBe(true);
     });
   });
 
@@ -590,55 +324,14 @@ describe('markTaskDone Integration', () => {
       await expect(orch.markTaskDone('nonexistent-task-id')).rejects.toThrow('not found');
     });
 
-    it('handles multiple calls to markTaskDone gracefully (idempotent second call fails)', async () => {
-      // First call: fetch fails, fallback recreates
-      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('fetch')) {
-          throw new Error('fatal: remote not found');
-        }
-        return '';
-      });
-
+    it('is idempotent-safe: a second call on a deleted folder fails cleanly without emitting', async () => {
       await orch.markTaskDone(taskId);
-      expect(existsSync(join(taskDir, 'events.jsonl'))).toBe(true);
+      expect(existsSync(taskDir)).toBe(false);
 
-      // Second call: the task directory exists from the fallback, so it gets
-      // deleted again. But getDirById reads from disk and should find it.
       mockEmit.mockClear();
-      await orch.markTaskDone(taskId);
-
-      // Should still work — single emit for the second call
-      expect(mockEmit).toHaveBeenCalledTimes(1);
-    });
-
-    it('does not emit phase-change before the fetch attempt', async () => {
-      // Use a mock that tracks call order
-      const callOrder: string[] = [];
-
-      mockEmit.mockImplementation(() => { callOrder.push('emit'); });
-
-      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('fetch')) {
-          callOrder.push('fetch');
-          throw new Error('fatal: remote not found');
-        }
-        return '';
-      });
-
-      try {
-        await orch.markTaskDone(taskId);
-
-        // 'fetch' must come BEFORE 'emit' in the call order
-        const fetchIdx = callOrder.indexOf('fetch');
-        const emitIdx = callOrder.indexOf('emit');
-        expect(fetchIdx).toBeGreaterThanOrEqual(0);
-        expect(fetchIdx).toBeLessThan(emitIdx);
-      } finally {
-        // Restore defaults so mock implementations don't leak to other tests.
-        // mockReset() returns vi.fn() to its default (no-op returning undefined).
-        mockEmit.mockReset();
-        mockExecFileSync.mockReturnValue('');
-      }
+      // Second call: folder is gone — getDirById can no longer resolve it.
+      await expect(orch.markTaskDone(taskId)).rejects.toThrow();
+      expect(mockEmit).not.toHaveBeenCalled();
     });
   });
 });

@@ -10,6 +10,11 @@ interface Template {
   icon: string;
 }
 
+/** Conventional-Commits types used for the ticket-history commit subject. */
+const TASK_TYPES = ['feat', 'fix', 'refactor', 'chore', 'docs'] as const;
+
+type TaskType = (typeof TASK_TYPES)[number];
+
 interface Props {
   templates: readonly Template[];
   isPending: boolean;
@@ -21,6 +26,7 @@ export function NewTaskDialog({ templates, isPending, onClose, onSubmit }: Props
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  const [taskType, setTaskType] = useState<TaskType>('feat');
 
   function selectTemplate(name: string) {
     const t = templates.find(t => t.name === name);
@@ -40,6 +46,7 @@ export function NewTaskDialog({ templates, isPending, onClose, onSubmit }: Props
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    formData.set('taskType', taskType);
     onSubmit(formData);
   }
 
@@ -117,6 +124,27 @@ export function NewTaskDialog({ templates, isPending, onClose, onSubmit }: Props
               onChange={e => setNewDesc(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-[#334155] rounded-lg bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] placeholder-slate-500 resize-none"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1">
+              Type
+            </label>
+            <div className="flex gap-2 flex-wrap">
+              {TASK_TYPES.map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTaskType(t)}
+                  className={`px-3 py-1.5 text-xs rounded-lg border transition-all ${
+                    taskType === t
+                      ? 'border-[#2563eb] bg-[#2563eb]/10 text-blue-300'
+                      : 'border-[#334155] bg-[#1a1f2e] text-slate-400 hover:text-slate-300 hover:border-[#475569]'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">

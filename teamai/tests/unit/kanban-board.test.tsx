@@ -57,6 +57,16 @@ vi.mock('@/components/task-panel', () => ({
   ),
 }));
 
+const mockGetDoneTicketSpec = vi.hoisted(() => vi.fn());
+const mockLoadMoreDoneHistory = vi.hoisted(() => vi.fn());
+const mockRescanDoneHistory = vi.hoisted(() => vi.fn());
+
+vi.mock('@/app/actions/history', () => ({
+  getDoneTicketSpec: (...args: unknown[]) => mockGetDoneTicketSpec(...args),
+  loadMoreDoneHistory: (...args: unknown[]) => mockLoadMoreDoneHistory(...args),
+  rescanDoneHistory: (...args: unknown[]) => mockRescanDoneHistory(...args),
+}));
+
 vi.mock('@/components/connection-indicator', () => ({
   ConnectionIndicator: ({ connected, initial }: { connected: boolean; initial: boolean }) => (
     <span data-component="connection-indicator" data-connected={connected} data-initial={initial} />
@@ -83,6 +93,7 @@ vi.mock('react', async (importOriginal) => {
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import { KanbanBoard } from '@/components/kanban-board';
+import type { DoneTicketFromHistory } from '@/lib/history-scanner';
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -98,8 +109,19 @@ function task(overrides: Partial<Task> = {}): Task {
   };
 }
 
-function renderBoard(tasks: Task[] = []) {
-  render(<KanbanBoard tasks={tasks} projectPath="/test" />);
+function renderBoard(
+  tasks: Task[] = [],
+  doneHistory: DoneTicketFromHistory[] = [],
+  doneHistoryHasMore = false,
+) {
+  render(
+    <KanbanBoard
+      tasks={tasks}
+      projectPath="/test"
+      doneHistory={doneHistory}
+      doneHistoryHasMore={doneHistoryHasMore}
+    />,
+  );
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -901,6 +923,143 @@ describe('KanbanBoard', () => {
       await waitFor(() => {
         expect(screen.getByText('Undo')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('DONE history wiring (§3f)', () => {
+    const historyTicket: DoneTicketFromHistory = {
+      title: 'Add password reset flow',
+      summary: 'Implements the reset flow with email tokens.',
+      slug: 'add-password-reset-flow',
+      taskId: 'task-42',
+      qaResult: 'PASS (5/5 criteria)',
+      completedAt: new Date('2026-08-01T00:00:00Z'),
+      prUrl: 'https://github.com/acme/repo/pull/42',
+      source: 'both',
+    };
+
+    it('renders history-reconstructed tickets in the DONE column below disk tasks', () => {
+      renderBoard(
+        [task({ id: 'disk-1', title: 'Disk Done', phase: 'done' })],
+        [historyTicket],
+      );
+
+      expect(screen.getByText('Disk Done')).toBeInTheDocument();
+      expect(screen.getByText('Add password reset flow')).toBeInTheDocument();
+      // Local-merge marker absent because the ticket has a PR.
+      expect(screen.queryByText('local merge')).not.toBeInTheDocument();
+    });
+
+    it('counts history tickets in the DONE column badge', () => {
+      renderBoard(
+        [task({ id: 'disk-1', title: 'Disk Done', phase: 'done' })],
+        [historyTicket],
+      );
+
+      const doneColumn = screen.getByText('Done').closest('div')!;
+      expect(doneColumn).toHaveTextContent('2');
+    });
+
+    it('does not render history cards when none are provided', () => {
+      renderBoard([task({ id: 'disk-1', title: 'Disk Done', phase: 'done' })]);
+
+      expect(screen.getByText('Disk Done')).toBeInTheDocument();
+      expect(screen.queryByText('Add password reset flow')).not.toBeInTheDocument();
+    });
+
+    it('opens the read-only spec modal on click and loads the spec on open', async () => {
+      mockGetDoneTicketSpec.mockResolvedValue({ spec: 'Full spec text.' });
+      renderBoard([], [historyTicket]);
+
+      fireEvent.click(screen.getByText('Add password reset flow'));
+
+      await waitFor(() => {
+        expect(mockGetDoneTicketSpec).toHaveBeenCalledWith('add-password-reset-flow');
+      });
+      await waitFor(() => {
+        expect(screen.getByText('Full spec text.')).toBeInTheDocument();
+      });
+    });
+
+    it('closes the history modal on the close button', async () => {
+      mockGetDoneTicketSpec.mockResolvedValue({ spec: 'S' });
+      renderBoard([], [historyTicket]);
+
+      fireEvent.click(screen.getByText('Add password reset flow'));
+      await waitFor(() => {
+        expect(screen.getByText('Completed ticket')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Close'));
+
+      expect(screen.queryByText('Completed ticket')).not.toBeInTheDocument();
+    });
+
+    it('shows the Rescan button only when more Source B pages exist, and calls rescanDoneHistory on click', async () => {
+      mockRescanDoneHistory.mockResolvedValue({ enabled: true, tickets: [historyTicket], hasMore: false });
+
+      const { rerender } = render(<KanbanBoard tasks={[]} projectPath="/test" doneHistory={[historyTicket]} />);
+      expect(screen.queryByText('Rescan')).not.toBeInTheDocument();
+
+      rerender(
+        <KanbanBoard tasks={[]} projectPath="/test" doneHistory={[historyTicket]} doneHistoryHasMore />,
+      );
+      fireEvent.click(screen.getByText('Rescan'));
+
+      await waitFor(() => {
+        expect(mockRescanDoneHistory).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('loads the next Source B page when the DONE column is scrolled near the bottom', async () => {
+      const page2Ticket: DoneTicketFromHistory = {
+        ...historyTicket,
+        slug: 'second-page-ticket',
+        title: 'Second page ticket',
+      };
+      mockLoadMoreDoneHistory.mockResolvedValue({
+        enabled: true,
+        tickets: [page2Ticket],
+        hasMore: false,
+      });
+
+      renderBoard([], [historyTicket], true);
+
+      const columns = screen
+        .getAllByText('Done')
+        .map(el => el.closest('div'))
+        .filter((d): d is HTMLDivElement => d !== null);
+      const doneCol = columns[0]!.closest('.flex.flex-col')!.querySelector('.overflow-y-auto') as HTMLElement;
+
+      // Position the column near its bottom to trigger the pagination fetch.
+      Object.defineProperty(doneCol, 'scrollHeight', { value: 1000, configurable: true });
+      Object.defineProperty(doneCol, 'clientHeight', { value: 400, configurable: true });
+      Object.defineProperty(doneCol, 'scrollTop', { value: 900, configurable: true });
+      fireEvent.scroll(doneCol);
+
+      await waitFor(() => {
+        expect(mockLoadMoreDoneHistory).toHaveBeenCalledWith(1);
+      });
+      await waitFor(() => {
+        expect(screen.getByText('Second page ticket')).toBeInTheDocument();
+      });
+    });
+
+    it('does not fetch further pages when doneHistoryHasMore is false', () => {
+      renderBoard([], [historyTicket], false);
+
+      const columns = screen
+        .getAllByText('Done')
+        .map(el => el.closest('div'))
+        .filter((d): d is HTMLDivElement => d !== null);
+      const doneCol = columns[0]!.closest('.flex.flex-col')!.querySelector('.overflow-y-auto') as HTMLElement;
+
+      Object.defineProperty(doneCol, 'scrollHeight', { value: 1000, configurable: true });
+      Object.defineProperty(doneCol, 'clientHeight', { value: 400, configurable: true });
+      Object.defineProperty(doneCol, 'scrollTop', { value: 900, configurable: true });
+      fireEvent.scroll(doneCol);
+
+      expect(mockLoadMoreDoneHistory).not.toHaveBeenCalled();
     });
   });
 });
