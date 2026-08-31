@@ -9,6 +9,7 @@ import { getToolPath } from './tool-checker';
 import { log, error as logError, warn as logWarn } from './logger';
 import { TERMINAL_PHASES, PAUSED_PHASES } from '@/constants/phases';
 import { computePipelineConfig } from './orchestrator/helpers';
+import { buildTicketMessageForPipeline } from './orchestrator/artifact-commit';
 import { isAutoModeEnabled, getAutoModeState } from './auto-mode-state';
 import { ContainerDockerMissingError } from './orchestrator/errors';
 
@@ -419,7 +420,23 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
 
         try {
           const method = computePipelineConfig(projectRoot).autoMergeMethod ?? 'merge';
-          execFileSync(getToolPath('gh'), ['pr', 'merge', prNumber, `--${method}`], {
+          // Ticket-history refactor (§3h): 'squash' is the only merge method
+          // that always synthesizes a brand-new commit message, so the
+          // trailer-bearing message prepared by the pre-merge squash (§3b)
+          // must be passed explicitly or GitHub would replace it with a
+          // generic "Merge pull request #N" subject. 'merge' keeps the branch
+          // commit (already carrying the trailers) as an ancestor, and
+          // 'rebase' replays it verbatim — both findable via git log --grep
+          // regardless; passing --subject/--body-file there is cosmetic and
+          // 'rebase' ignores them entirely, so only squash gets the override.
+          const mergeArgs = ['pr', 'merge', prNumber, `--${method}`];
+          if (method === 'squash') {
+            const ticketMsg = buildTicketMessageForTask(projectRoot, taskId);
+            if (ticketMsg) {
+              mergeArgs.push('--subject', ticketMsg.subject, '--body-file', ticketMsg.bodyFile);
+            }
+          }
+          execFileSync(getToolPath('gh'), mergeArgs, {
             cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
           });
           log('auto-mode', `PR #${prNumber} merged successfully`);
@@ -469,6 +486,55 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
   }, 30_000); // poll every 30 seconds
 
   state.ciPollTimers.set(taskId, timer);
+}
+
+/**
+ * Build the trailer-bearing squash-merge subject/body for a task (§3h).
+ *
+ * Reads the task's title/description/spec dir via TaskStore, then reuses the
+ * shared message builder (same builder the phase runners use, so the squash
+ * merge subject matches the pre-merge squashed commit). The body is written
+ * to a temp file because `gh pr merge --body-file` requires a file path.
+ *
+ * Returns null when the task/folder is missing or recordHistoryInGit is off
+ * (in which case gh's default squash message is used — same as today).
+ */
+function buildTicketMessageForTask(
+  projectRoot: string,
+  taskId: string,
+): { subject: string; bodyFile: string } | null {
+  try {
+    const taskStore = new TaskStore(projectRoot);
+    const task = taskStore.getById(taskId);
+    const specPath = taskStore.getDirById(taskId);
+    if (!task || !specPath || !existsSync(specPath)) return null;
+
+    const config = computePipelineConfig(projectRoot);
+    const result = buildTicketMessageForPipeline(
+      {
+        taskId,
+        title: task.title,
+        description: task.description,
+        specPath,
+      },
+      {
+        recordHistoryInGit: config.recordHistoryInGit,
+        includePhasesTrailer: config.includePhasesTrailer,
+        taskType: task.taskType,
+      },
+    );
+    if (!result) return null;
+
+    // gh --subject takes the first line; --body-file takes the rest.
+    const [subject, ...bodyLines] = result.message.split('\n');
+    const body = bodyLines.join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+    const bodyFile = join(specPath, 'pr-squash-body.txt');
+    writeFileSync(bodyFile, body, 'utf-8');
+    return { subject, bodyFile };
+  } catch (err) {
+    logWarn('auto-mode', `Failed to build squash-merge message for task ${taskId}`, err);
+    return null;
+  }
 }
 
 function _finishTask(taskId: string, projectRoot: string, _state: AutoProjectState): void {

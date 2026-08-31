@@ -319,6 +319,26 @@ describe('buildPRBody', () => {
     expect(result).toContain('Empty spec');
     expect(result).toContain('## Specification');
   });
+
+  it('includes a "What Was Implemented" section when an implementation summary is given', () => {
+    const result = buildPRBody('Add login feature', '# Spec', [], 'Added login via signed tokens.');
+    expect(result).toContain('## What Was Implemented');
+    expect(result).toContain('Added login via signed tokens.');
+    // Both the ask and the outcome are present — the PR body is a superset
+    // of the commit message, not just a copy of the description.
+    expect(result.indexOf('## Summary')).toBeLessThan(result.indexOf('## What Was Implemented'));
+    expect(result.indexOf('## What Was Implemented')).toBeLessThan(result.indexOf('## Specification'));
+  });
+
+  it('omits the "What Was Implemented" section when no implementation summary is given', () => {
+    const result = buildPRBody('Add login feature', '# Spec');
+    expect(result).not.toContain('## What Was Implemented');
+  });
+
+  it('omits the "What Was Implemented" section for an empty/null implementation summary', () => {
+    expect(buildPRBody('Add login feature', '# Spec', [], null)).not.toContain('## What Was Implemented');
+    expect(buildPRBody('Add login feature', '# Spec', [], '')).not.toContain('## What Was Implemented');
+  });
 });
 
 describe('checkExistingPRViaCLI', () => {

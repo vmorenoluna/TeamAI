@@ -7,6 +7,7 @@ import { readdirSync, existsSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { error as logError } from '@/lib/logger';
+import { clearSessionTickets } from '@/lib/history-session';
 
 export interface BrowseResult {
   path: string;
@@ -68,6 +69,11 @@ export async function getActiveProject() {
 export async function setActiveProject(projectPath: string) {
   const cookieStore = await cookies();
   cookieStore.set(ACTIVE_PROJECT_COOKIE, projectPath);
+  // §3f: force a fresh DONE-history reconstruction for the project being
+  // switched into, rather than serving whatever session-only tickets
+  // (recordHistoryInGit-off completions, in particular) happen to still be
+  // sitting in memory from a previous visit this server session.
+  clearSessionTickets(projectPath);
   revalidateRoot();
 }
 

@@ -2,12 +2,15 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { createTask, moveTask, bulkDeleteTasks, retryTaskWithOptions } from '@/app/actions/tasks';
+import { loadMoreDoneHistory, rescanDoneHistory } from '@/app/actions/history';
 import { useServerMutation } from '@/hooks/use-server-mutation';
 import { usePhaseSync } from '@/hooks/use-phase-sync';
 import { TaskCard } from './task-card';
 import { ConnectionIndicator } from './connection-indicator';
 import { ErrorBanner } from './error-banner';
 import { TaskModal } from './task-modal';
+import { DoneHistoryCard, DoneHistoryModal } from './done-history';
+import type { DoneTicketFromHistory } from '@/lib/history-scanner';
 import { NewTaskDialog } from './new-task-dialog';
 import { KanbanFilters } from './kanban-filters';
 import { COLUMNS, normalizePhase, resolveTargetPhase, TEMPLATES } from './kanban-utils';
@@ -19,6 +22,10 @@ import type { Task } from '@/lib/task-store';
 interface Props {
   tasks: Task[];
   projectPath: string;
+  /** History-reconstructed DONE tickets (§3f) — empty when recordHistoryInGit is off. */
+  doneHistory?: DoneTicketFromHistory[];
+  /** Whether more Source B (merged-PR) pages may be available (scroll pagination). */
+  doneHistoryHasMore?: boolean;
 }
 
 // ── Phase options per kanban column ────────────────────────────────────────
@@ -118,9 +125,18 @@ function topoSortBacklog(tasks: Task[]): Task[] {
   return result;
 }
 
-export function KanbanBoard({ tasks, projectPath }: Props) {
+export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryHasMore = false }: Props) {
   const { run, isPending } = useServerMutation();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // History tickets whose local folder was deleted — opened via the
+  // read-only DoneHistoryModal (spec fetched on open, never preloaded).
+  const [selectedHistorySlug, setSelectedHistorySlug] = useState<string | null>(null);
+  // §3f scroll-driven Source B pagination + manual rescan state.
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPages, setHistoryPages] = useState<DoneTicketFromHistory[][]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [rescanning, setRescanning] = useState(false);
+  const doneColScrollRef = useRef<HTMLDivElement | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [dragOverPhase, setDragOverPhase] = useState<string | null>(null);
 
@@ -196,6 +212,17 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
     return () => window.removeEventListener('keydown', handleKey);
   }, [selectedTaskId]);
 
+  // History-modal Escape handling (DoneHistoryModal also handles its own,
+  // but this keeps the board's overlay guard in sync).
+  useEffect(() => {
+    if (!selectedHistorySlug) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setSelectedHistorySlug(null);
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [selectedHistorySlug]);
+
   const effectivePhase = useCallback((task: Task): string => {
     return optimisticPhases.get(task.id) ?? task.phase;
   }, [optimisticPhases]);
@@ -228,6 +255,56 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
   }, [tasks, searchQuery, phaseFilter, sourceFilter, sortBy, effectivePhase]);
 
   const hasActiveFilters = searchQuery.trim() !== '' || phaseFilter.size > 0 || sourceFilter !== null || sortBy !== 'newest';
+
+  // §3f: server page-1 history merged with locally loaded pages (scroll
+  // pagination accumulates pages client-side; deduped by slug).
+  const mergedHistory = (() => {
+    const bySlug = new Map<string, DoneTicketFromHistory>();
+    for (const t of doneHistory) bySlug.set(t.slug, t);
+    for (const page of historyPages) {
+      for (const t of page) if (!bySlug.has(t.slug)) bySlug.set(t.slug, t);
+    }
+    return [...bySlug.values()];
+  })();
+
+  // §3f scroll-driven Source B pagination: near the bottom of the DONE
+  // column, fetch the next merged-PR page and accumulate it client-side.
+  const handleDoneColumnScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      if (!doneHistoryHasMore || historyLoading) return;
+      const el = e.currentTarget;
+      if (el.scrollTop + el.clientHeight < el.scrollHeight - 120) return;
+      setHistoryLoading(true);
+      loadMoreDoneHistory(historyPage)
+        .then(res => {
+          if (res.tickets.length > 0) {
+            setHistoryPages(prev => [...prev, res.tickets]);
+            setHistoryPage(p => p + 1);
+          }
+        })
+        .catch(() => {
+          // Pagination is best-effort; keep the already-loaded pages.
+        })
+        .finally(() => setHistoryLoading(false));
+    },
+    [doneHistoryHasMore, historyLoading, historyPage],
+  );
+
+  // §3f manual rescan escape hatch (force-pushes, manual git surgery).
+  const handleRescanHistory = useCallback(() => {
+    setRescanning(true);
+    rescanDoneHistory()
+      .then(() => {
+        // The fresh scan arrives via router.refresh() in the server action's
+        // revalidation; drop stale locally accumulated pages.
+        setHistoryPages([]);
+        setHistoryPage(1);
+      })
+      .catch(() => {
+        // Best-effort escape hatch — keep current view on failure.
+      })
+      .finally(() => setRescanning(false));
+  }, []);
 
   const filteredTaskList = useCallback(() => processedTasks(), [processedTasks]);
 
@@ -527,8 +604,8 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
       )}
 
       {/* Board columns */}
-      <div className={`flex-1 min-h-0 relative ${selectedTaskId ? 'overflow-hidden' : ''}`}>
-        <div className={`h-full overflow-x-auto ${selectedTaskId ? 'pointer-events-none select-none' : ''}`}>
+      <div className={`flex-1 min-h-0 relative ${selectedTaskId || selectedHistorySlug ? 'overflow-hidden' : ''}`}>
+        <div className={`h-full overflow-x-auto ${selectedTaskId || selectedHistorySlug ? 'pointer-events-none select-none' : ''}`}>
           <div className="flex gap-3 p-4 h-full" style={{ minWidth: 'max-content' }}>
             {(() => {
               const filtered = processedTasks();
@@ -539,6 +616,16 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
               if (col.phase === 'done') {
                 colTasks = [...colTasks].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
               }
+              // §3f: history-reconstructed DONE tickets — tasks whose local
+              // folder was deleted on completion, rebuilt from git/PR history.
+              // Rendered below the disk tasks (fresh completions first),
+              // filtered by the same search box.
+              const historyTickets = col.phase === 'done'
+                ? mergedHistory.filter(t =>
+                    !searchQuery.trim() ||
+                    t.title.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
+                    t.slug.toLowerCase().includes(searchQuery.toLowerCase().trim()))
+                : [];
               // Backlog column: topological sort by dependency order, breaking
               // ties by creation time (oldest first). If task B depends on A,
               // A stacks above B — only when both are still in backlog.
@@ -562,13 +649,37 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
                 >
                   <div className="flex items-center justify-between px-3 py-2.5 border-b border-[#1e293b]">
                     <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">{col.label}</span>
-                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full transition-colors ${
-                      isDropTarget && !isSameColumn ? 'bg-[#2563eb]/20 text-blue-300' : 'bg-[#1e293b] text-slate-500'
-                    }`}>
-                      {colTasks.length}
-                    </span>
+                    {col.phase === 'done' ? (
+                      <div className="flex items-center gap-1.5">
+                        {doneHistoryHasMore && (
+                          <button
+                            onClick={handleRescanHistory}
+                            disabled={rescanning}
+                            title="Rescan git/PR history (force-pushes, manual git surgery)"
+                            className="text-[10px] text-slate-500 hover:text-blue-300 transition-colors disabled:opacity-50"
+                          >
+                            {rescanning ? 'Rescanning…' : 'Rescan'}
+                          </button>
+                        )}
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full transition-colors ${
+                          isDropTarget && !isSameColumn ? 'bg-[#2563eb]/20 text-blue-300' : 'bg-[#1e293b] text-slate-500'
+                        }`}>
+                          {colTasks.length + historyTickets.length}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full transition-colors ${
+                        isDropTarget && !isSameColumn ? 'bg-[#2563eb]/20 text-blue-300' : 'bg-[#1e293b] text-slate-500'
+                      }`}>
+                        {colTasks.length + historyTickets.length}
+                      </span>
+                    )}
                   </div>
-                  <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                  <div
+                    className="flex-1 overflow-y-auto p-2 space-y-2"
+                    ref={col.phase === 'done' ? doneColScrollRef : undefined}
+                    onScroll={col.phase === 'done' ? handleDoneColumnScroll : undefined}
+                  >
                     {colTasks.map((task) => {
                       const globalIdx = filteredTaskList().findIndex(t => t.id === task.id);
                       const isSelected = selectedIds.has(task.id);
@@ -602,6 +713,16 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
                       </div>
                       );
                     })}
+                    {historyTickets.map(ticket => (
+                      <DoneHistoryCard
+                        key={`history-${ticket.slug}`}
+                        ticket={ticket}
+                        onSelect={setSelectedHistorySlug}
+                      />
+                    ))}
+                    {col.phase === 'done' && historyLoading && (
+                      <div className="text-center text-[10px] text-slate-500 py-1">Loading more…</div>
+                    )}
                   </div>
                 </div>
               );
@@ -612,6 +733,11 @@ export function KanbanBoard({ tasks, projectPath }: Props) {
         {/* Task modal */}
         {selectedTaskId && (
           <TaskModal taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} projectPath={projectPath} />
+        )}
+
+        {/* §3f: read-only detail for history-reconstructed DONE tickets */}
+        {selectedHistorySlug && (
+          <DoneHistoryModal slug={selectedHistorySlug} onClose={() => setSelectedHistorySlug(null)} />
         )}
       </div>
 

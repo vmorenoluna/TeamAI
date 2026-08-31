@@ -3,7 +3,12 @@ import { ensureProjectSelected } from './helpers';
 
 test.describe('Sidebar Navigation', () => {
   test('sidebar is visible with all navigation links', async ({ page }) => {
-    await page.goto('/');
+    // Insights/Ideation are project-gated links — without an active project
+    // selected, the E2E harness's 5 simultaneously-registered seed projects
+    // (base + 4 per-worker copies, T31) defeat getActiveProjectPath()'s
+    // single-project auto-select fallback, so the sidebar renders its
+    // reduced, project-independent link set instead.
+    await ensureProjectSelected(page);
 
     // Sidebar should be visible
     const sidebar = page.locator('aside');
@@ -79,7 +84,9 @@ test.describe('Sidebar — Collapsed State Navigation', () => {
 
   /** Helper: collapse the sidebar and verify it's collapsed */
   async function collapseSidebar(page: Page) {
-    await page.goto('/');
+    // Project-gated links (Insights/Ideation/Workflow/GitHub) only render
+    // with an active project selected — see note on the first test above.
+    await ensureProjectSelected(page);
     await page.waitForTimeout(1500);
 
     const sidebar = page.locator('aside');
@@ -264,7 +271,8 @@ test.describe('Sidebar — Keyboard Accessibility', () => {
   });
 
   test('all sidebar links are keyboard focusable (not tabindex=-1)', async ({ page }) => {
-    await page.goto('/');
+    // Needs an active project — the >=8-link count includes project-gated links.
+    await ensureProjectSelected(page);
     await page.waitForTimeout(1500);
 
     const sidebar = page.locator('aside');
