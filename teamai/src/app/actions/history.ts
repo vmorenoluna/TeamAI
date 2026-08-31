@@ -21,6 +21,47 @@ export interface DoneHistoryPayload {
 }
 
 /**
+ * HistoryScanner.rescan() runs two synchronous, blocking execFileSync calls
+ * — a local `git log` and a live network call to `gh pr list` against
+ * GitHub's rate-limited Search API. getDoneHistory() runs on every
+ * navigation to '/' (the most-visited route), and execFileSync blocks
+ * Node's entire single-threaded event loop for its duration — so without
+ * caching, rapid repeated navigations (real users clicking around, or an
+ * E2E suite hammering the page) serialize behind that live network call and
+ * stall *every other concurrent request*, not just the history fetch.
+ *
+ * Caches the HistoryScanner *instance* (not just its ticket list) so a
+ * cache hit also reuses the instance's already-populated internal
+ * slug→ticket map — getDoneTicketSpec()'s lookup, and its own per-slug
+ * specContent cache, depend on that map being populated, which a fresh
+ * scanner instance never is until rescan() runs on it.
+ */
+const SCAN_CACHE_TTL_MS = 30_000;
+interface ScanCacheEntry {
+  at: number;
+  recordHistoryInGit: boolean;
+  scanner: HistoryScanner;
+  tickets: DoneTicketFromHistory[];
+}
+const scanCache = new Map<string, ScanCacheEntry>();
+
+function getCachedScan(projectPath: string, recordHistoryInGit: boolean): ScanCacheEntry {
+  const cached = scanCache.get(projectPath);
+  if (
+    cached &&
+    cached.recordHistoryInGit === recordHistoryInGit &&
+    Date.now() - cached.at < SCAN_CACHE_TTL_MS
+  ) {
+    return cached;
+  }
+  const scanner = new HistoryScanner({ projectRoot: projectPath, recordHistoryInGit });
+  const tickets = scanner.isEnabled ? scanner.rescan() : [];
+  const entry: ScanCacheEntry = { at: Date.now(), recordHistoryInGit, scanner, tickets };
+  scanCache.set(projectPath, entry);
+  return entry;
+}
+
+/**
  * Reconstruct DONE tickets from git/PR history (§3f).
  *
  * Source A (local commit trailers) runs eagerly; Source B (merged PRs) loads
@@ -30,21 +71,19 @@ export interface DoneHistoryPayload {
 export async function getDoneHistory(): Promise<DoneHistoryPayload> {
   const projectPath = await getActiveProjectPath();
   const config = await getPipelineConfig();
-  const scanner = new HistoryScanner({
-    projectRoot: projectPath,
-    recordHistoryInGit: config.recordHistoryInGit,
-  });
+  const { scanner, tickets } = getCachedScan(projectPath, config.recordHistoryInGit);
   if (!scanner.isEnabled) return { enabled: false, tickets: [], hasMore: false };
-  const scanned = scanner.rescan();
   return {
     enabled: true,
-    tickets: mergedDoneTickets(projectPath, scanned),
+    tickets: mergedDoneTickets(projectPath, tickets),
     hasMore: true,
   };
 }
 
-/** Manual "rescan history" escape hatch (force-pushes, manual git surgery). */
+/** Manual "rescan history" escape hatch (force-pushes, manual git surgery) — bypasses the cache. */
 export async function rescanDoneHistory(): Promise<DoneHistoryPayload> {
+  const projectPath = await getActiveProjectPath();
+  scanCache.delete(projectPath);
   return getDoneHistory();
 }
 
@@ -78,12 +117,8 @@ export async function getDoneTicketSpec(
 ): Promise<{ spec: string | null }> {
   const projectPath = await getActiveProjectPath();
   const config = await getPipelineConfig();
-  const scanner = new HistoryScanner({
-    projectRoot: projectPath,
-    recordHistoryInGit: config.recordHistoryInGit,
-  });
+  const { scanner } = getCachedScan(projectPath, config.recordHistoryInGit);
   if (!scanner.isEnabled) return { spec: null };
-  scanner.rescan();
   return { spec: await scanner.getSpecContent(slug) };
 }
 
