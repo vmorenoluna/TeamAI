@@ -959,8 +959,12 @@ describe('_isWorktreeHealthy — container-mode path detection', () => {
 // container-patched and the ordinary case.
 
 describe('removeStaleWorktreeRegistration', () => {
-  const projectRoot = 'C:\\proj';
-  const worktreePath = 'C:\\proj\\.worktrees\\my-task-st2';
+  // path.basename() is platform-dependent (backslash is only a separator on
+  // win32) — build these with `join` so the test exercises the same parsing
+  // the production code actually hits on whichever host runs it, instead of
+  // hardcoding a Windows-only literal that CI (linux) can't parse the same way.
+  const projectRoot = join('proj');
+  const worktreePath = join('proj', '.worktrees', 'my-task-st2');
 
   beforeEach(() => {
     vi.resetAllMocks();
