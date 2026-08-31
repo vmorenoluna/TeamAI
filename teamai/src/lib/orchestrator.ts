@@ -12,6 +12,7 @@ import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './o
 import { parseSessionLimitReset, extractPrUrl, phaseHeader, logToOutput, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, resolveWorktreeDirName, computePipelineConfig, buildSessionOpts, startPhaseFromArtifacts, ensureSpecV1Snapshot, type PipelineConfig } from './orchestrator/helpers';
 import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn } from './orchestrator/worktree-ops';
 import { buildTicketMessageForPipeline } from './orchestrator/artifact-commit';
+import { appendSessionTicket, synthesizeDoneTicket } from './history-session';
 import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
 import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError, SessionKilledError, ContainerDockerMissingError } from './orchestrator/errors';
@@ -113,11 +114,17 @@ export class Orchestrator {
       scheduleWakeup: (pipeline) => this._scheduleWakeup(pipeline),
 
       extractPrUrl: (logFile) => extractPrUrl(logFile),
-      buildTicketMessage: (pipeline) =>
-        buildTicketMessageForPipeline(pipeline, {
+      buildTicketMessage: (pipeline) => {
+        // taskType from the task record — the user-picked Conventional-Commits
+        // type must reach the REAL squash commit / PR subject, not just the
+        // session-preview ticket in markTaskDone.
+        const t = taskStore.getById(pipeline.taskId);
+        return buildTicketMessageForPipeline(pipeline, {
           recordHistoryInGit: this.getPipelineConfig().recordHistoryInGit,
           includePhasesTrailer: this.getPipelineConfig().includePhasesTrailer,
-        }),
+          taskType: t?.taskType,
+        });
+      },
 
       restorePipeline: (taskId, requiredPhase) => this.restorePipeline(taskId, requiredPhase),
     };
@@ -492,6 +499,50 @@ export class Orchestrator {
     //      (§3j). The PR body (spec embedded by buildPRBody) and the
     //      trailer-bearing merge commit are the durable record now.
     const dir = this.taskStore.getDirById(taskId);
+
+    // §3f incremental append: synthesize the fresh DONE card from data the
+    // pipeline already built (message builder over the artifacts) BEFORE the
+    // folder is deleted — no history re-query needed. Also covers the
+    // recordHistoryInGit-off case: the card shows for the rest of the
+    // session (from the task record), then disappears on restart, exactly as
+    // the doc specifies. Best-effort: never block completion on this.
+    try {
+      const config = this.getPipelineConfig();
+      const msg = buildTicketMessageForPipeline(
+        { taskId, title: task.title, description: task.description, specPath: dir },
+        { recordHistoryInGit: config.recordHistoryInGit, includePhasesTrailer: config.includePhasesTrailer, taskType: task.taskType },
+      );
+      const slug = path.basename(dir);
+      if (msg) {
+        // Message = subject + blank + body + blank + trailer lines. Summary
+        // = body lines (what was done); trailers parsed separately.
+        const lines = msg.message.replace(/\n+$/, '').split('\n');
+        const trailerStart = lines.findIndex((l, i) => i > 0 && /^(Task|Task-ID|QA|Phases|Reviewed-by):/i.test(l));
+        const bodyLines = (trailerStart > 0 ? lines.slice(1, trailerStart) : lines.slice(1))
+          .filter(l => l.trim());
+        appendSessionTicket(this.projectRoot, synthesizeDoneTicket({
+          slug,
+          taskId,
+          title: task.title,
+          summary: bodyLines.slice(0, 4).join(' ') || task.description,
+          trailerLines: msg.trailerLines,
+          prUrl: task.prUrl || undefined,
+        }));
+      } else {
+        // recordHistoryInGit off — session-only card from the task record.
+        appendSessionTicket(this.projectRoot, synthesizeDoneTicket({
+          slug,
+          taskId,
+          title: task.title,
+          summary: task.description,
+          trailerLines: [],
+          prUrl: task.prUrl || undefined,
+        }));
+      }
+    } catch (err) {
+      logWarn('orchestrator', `markTaskDone: failed to append session DONE ticket for ${taskId}`, err);
+    }
+
     this.taskStore.updatePhase(taskId, 'done');
     try {
       rmSync(dir, { recursive: true, force: true });

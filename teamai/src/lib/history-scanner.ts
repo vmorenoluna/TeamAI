@@ -153,8 +153,12 @@ export class HistoryScanner {
    * (30 req/min on the Search API), so callers should invoke this lazily
    * (page-by-page) rather than eagerly at load.
    */
+  /** Number of tickets returned by the most recent Source B page (for hasMore). */
+  lastPrPageCount = 0;
+
   scanMergedPrBodies(limit = 10): Map<string, DoneTicketFromHistory> {
     const result = new Map<string, DoneTicketFromHistory>();
+    this.lastPrPageCount = 0;
     if (!this._enabled) return result;
 
     let raw: string;
@@ -181,6 +185,8 @@ export class HistoryScanner {
       logWarn('history', 'scanMergedPrBodies: failed to parse gh output', err);
       return result;
     }
+
+    this.lastPrPageCount = items.length;
 
     for (const pr of items) {
       const body = pr.body || '';

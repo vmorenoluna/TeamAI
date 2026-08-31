@@ -520,6 +520,7 @@ function buildTicketMessageForTask(
       {
         recordHistoryInGit: config.recordHistoryInGit,
         includePhasesTrailer: config.includePhasesTrailer,
+        taskType: task.taskType,
       },
     );
     if (!result) return null;

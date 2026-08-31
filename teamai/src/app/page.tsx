@@ -19,12 +19,15 @@ export default async function Home() {
   let tasks: Task[] = [];
   let tasksError: string | null = null;
   let doneHistory: DoneTicketFromHistory[] = [];
+  let doneHistoryHasMore = false;
   try {
     tasks = await getTasks();
     // §3f — history-reconstructed DONE tickets (no-throw: history is an
     // enhancement, never a blocker for rendering the board).
     try {
-      doneHistory = (await getDoneHistory()).tickets;
+      const history = await getDoneHistory();
+      doneHistory = history.tickets;
+      doneHistoryHasMore = history.hasMore;
     } catch {
       // gh missing / not a git repo / scan failure — render without history.
     }
@@ -56,6 +59,7 @@ export default async function Home() {
       tasks={tasks}
       projectPath={activeProject.path}
       doneHistory={doneHistory}
+      doneHistoryHasMore={doneHistoryHasMore}
     />
   );
 }

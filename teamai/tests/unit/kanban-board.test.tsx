@@ -58,9 +58,13 @@ vi.mock('@/components/task-panel', () => ({
 }));
 
 const mockGetDoneTicketSpec = vi.hoisted(() => vi.fn());
+const mockLoadMoreDoneHistory = vi.hoisted(() => vi.fn());
+const mockRescanDoneHistory = vi.hoisted(() => vi.fn());
 
 vi.mock('@/app/actions/history', () => ({
   getDoneTicketSpec: (...args: unknown[]) => mockGetDoneTicketSpec(...args),
+  loadMoreDoneHistory: (...args: unknown[]) => mockLoadMoreDoneHistory(...args),
+  rescanDoneHistory: (...args: unknown[]) => mockRescanDoneHistory(...args),
 }));
 
 vi.mock('@/components/connection-indicator', () => ({
@@ -105,8 +109,19 @@ function task(overrides: Partial<Task> = {}): Task {
   };
 }
 
-function renderBoard(tasks: Task[] = [], doneHistory: DoneTicketFromHistory[] = []) {
-  render(<KanbanBoard tasks={tasks} projectPath="/test" doneHistory={doneHistory} />);
+function renderBoard(
+  tasks: Task[] = [],
+  doneHistory: DoneTicketFromHistory[] = [],
+  doneHistoryHasMore = false,
+) {
+  render(
+    <KanbanBoard
+      tasks={tasks}
+      projectPath="/test"
+      doneHistory={doneHistory}
+      doneHistoryHasMore={doneHistoryHasMore}
+    />,
+  );
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -978,6 +993,73 @@ describe('KanbanBoard', () => {
       fireEvent.click(screen.getByLabelText('Close'));
 
       expect(screen.queryByText('Completed ticket')).not.toBeInTheDocument();
+    });
+
+    it('shows the Rescan button only when more Source B pages exist, and calls rescanDoneHistory on click', async () => {
+      mockRescanDoneHistory.mockResolvedValue({ enabled: true, tickets: [historyTicket], hasMore: false });
+
+      const { rerender } = render(<KanbanBoard tasks={[]} projectPath="/test" doneHistory={[historyTicket]} />);
+      expect(screen.queryByText('Rescan')).not.toBeInTheDocument();
+
+      rerender(
+        <KanbanBoard tasks={[]} projectPath="/test" doneHistory={[historyTicket]} doneHistoryHasMore />,
+      );
+      fireEvent.click(screen.getByText('Rescan'));
+
+      await waitFor(() => {
+        expect(mockRescanDoneHistory).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('loads the next Source B page when the DONE column is scrolled near the bottom', async () => {
+      const page2Ticket: DoneTicketFromHistory = {
+        ...historyTicket,
+        slug: 'second-page-ticket',
+        title: 'Second page ticket',
+      };
+      mockLoadMoreDoneHistory.mockResolvedValue({
+        enabled: true,
+        tickets: [page2Ticket],
+        hasMore: false,
+      });
+
+      renderBoard([], [historyTicket], true);
+
+      const columns = screen
+        .getAllByText('Done')
+        .map(el => el.closest('div'))
+        .filter((d): d is HTMLDivElement => d !== null);
+      const doneCol = columns[0]!.closest('.flex.flex-col')!.querySelector('.overflow-y-auto') as HTMLElement;
+
+      // Position the column near its bottom to trigger the pagination fetch.
+      Object.defineProperty(doneCol, 'scrollHeight', { value: 1000, configurable: true });
+      Object.defineProperty(doneCol, 'clientHeight', { value: 400, configurable: true });
+      Object.defineProperty(doneCol, 'scrollTop', { value: 900, configurable: true });
+      fireEvent.scroll(doneCol);
+
+      await waitFor(() => {
+        expect(mockLoadMoreDoneHistory).toHaveBeenCalledWith(1);
+      });
+      await waitFor(() => {
+        expect(screen.getByText('Second page ticket')).toBeInTheDocument();
+      });
+    });
+
+    it('does not fetch further pages when doneHistoryHasMore is false', () => {
+      renderBoard([], [historyTicket], false);
+
+      const columns = screen
+        .getAllByText('Done')
+        .map(el => el.closest('div'))
+        .filter((d): d is HTMLDivElement => d !== null);
+      const doneCol = columns[0]!.closest('.flex.flex-col')!.querySelector('.overflow-y-auto') as HTMLElement;
+
+      Object.defineProperty(doneCol, 'scrollHeight', { value: 1000, configurable: true });
+      Object.defineProperty(doneCol, 'clientHeight', { value: 400, configurable: true });
+      Object.defineProperty(doneCol, 'scrollTop', { value: 900, configurable: true });
+      fireEvent.scroll(doneCol);
+
+      expect(mockLoadMoreDoneHistory).not.toHaveBeenCalled();
     });
   });
 });
