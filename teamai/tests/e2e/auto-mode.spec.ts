@@ -16,8 +16,8 @@ import { ensureProjectSelected, getActiveSeedDir } from './helpers';
 /**
  * Seed tasks that auto-mode's _adoptStalledTasks would otherwise adopt the
  * instant auto mode is enabled: an awaiting-review task gets auto-approved
- * (advancePhase runs synchronously, before any git/gh work — see
- * FIX_E2E_CI_CAPACITY.md) and a pr-open task starts CI polling. Since this
+ * (advancePhase runs synchronously, before any git/gh work) and a pr-open
+ * task starts CI polling. Since this
  * worker's seed project is shared with other spec files (kanban-behaviors.spec.ts,
  * task-detail-behaviors.spec.ts) that assert on these exact tasks staying in
  * their seeded phase, actually toggling real auto mode on here would corrupt
