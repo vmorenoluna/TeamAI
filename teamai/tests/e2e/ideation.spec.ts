@@ -1,8 +1,9 @@
 /**
  * E2E tests for the Ideation page (/ideation).
  *
- * Covers: page load, heading, Run Scan button, empty state message,
- * sidebar navigation, page refresh survival.
+ * Covers: page load, heading, Run Scan button, empty state message, page
+ * refresh survival. The sidebar link to this page is currently hidden
+ * (f1073700) — reachable only via direct URL.
  */
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
@@ -15,43 +16,11 @@ test.describe('Ideation Page', () => {
 
   });
 
-  test('sidebar navigation: clicking Ideation link navigates to /ideation and shows heading', async ({ page }) => {
-    await page.goto('/');
-
-    const sidebar = page.locator('aside');
-    await expect(sidebar).toBeVisible({ timeout: 10_000 });
-
-    const link = sidebar.locator('a[href="/ideation"]');
-    await expect(link).toBeVisible();
-    await link.click();
-
-    await expect(page).toHaveURL(/\/ideation/);
-    await expect(page.locator('h1:has-text("Ideation")')).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('collapsed sidebar: clicking Ideation icon navigates to /ideation and shows heading', async ({ page }) => {
-    await page.goto('/');
-    await page.waitForTimeout(1500);
-
-    const sidebar = page.locator('aside');
-    await expect(sidebar).toHaveClass(/w-60/);
-
-    // Collapse
-    await sidebar.evaluate((el) => {
-      const btn = el.querySelector('button');
-      if (btn instanceof HTMLElement) btn.click();
-    });
-    await page.waitForTimeout(500);
-    await expect(sidebar).toHaveClass(/w-12/);
-
-    // Click icon-only link
-    const link = sidebar.locator('a[href="/ideation"]');
-    await expect(link).toBeVisible();
-    await link.click();
-
-    await expect(page).toHaveURL(/\/ideation/);
-    await expect(page.locator('h1:has-text("Ideation")')).toBeVisible({ timeout: 10_000 });
-  });
+  // Sidebar-navigation tests for /ideation were removed: the sidebar link was
+  // deliberately hidden in f1073700 ("hide untested sections") — Ideation is
+  // still a live route (tested via direct page.goto below), just not reachable
+  // through the sidebar UI right now. Clicking a nonexistent `aside a[href="/ideation"]`
+  // was leaving these tests hanging (see FIX_E2E_CI_CAPACITY.md).
 
   test('page loads and shows Ideation heading', async ({ page }) => {
 

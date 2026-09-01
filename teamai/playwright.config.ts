@@ -36,7 +36,17 @@ export default defineConfig({
     // cleanly.  On Windows, shell && chains create orphaned grandchild
     // processes because SIGTERM doesn't propagate through the tree.
     // Port cleanup is handled inside server.ts itself.
-    command: 'npx tsx server.ts',
+    // Production build+start (not dev mode): Next.js dev mode compiles routes
+    // on-demand on first hit and does dev-only work (HMR, on-demand
+    // compilation) that is slow and unpredictable under concurrent SSR load —
+    // the direct cause of the suite-wide E2E flakiness (210/260 failures on
+    // CI, 0 failures per-spec in isolation). The production bundle serves
+    // precompiled routes with no per-request compilation cost.
+    // The build runs in the pretest:e2e / pretest:e2e:smoke npm hooks
+    // (npm run build:electron), NOT here — a `command` of
+    // `npm run build && npm run start` would be a shell chain, which the
+    // single-process rule below forbids (orphaned grandchildren on Windows).
+    command: 'npm run start',
     url: 'http://localhost:3001',
     // Force a fresh dev server per test run. If we allow reuseExistingServer,
     // the running server's projectStore.ts singleton has its CONFIG_DIR frozen
@@ -51,7 +61,19 @@ export default defineConfig({
     // import getTestServerUrl() from scripts/servers.ts instead
     // — to avoid drift.
     env: {
-      NODE_ENV: 'test',
+      // Must be 'production': server.ts boots next({ dev: NODE_ENV !== 'production' }).
+      // This env overrides the start script's `cross-env NODE_ENV=production`
+      // (Playwright merges webServer.env on top of the command's env), so a value
+      // of 'test' here silently re-enabled dev mode and reproduced the
+      // dev-server flakiness across the whole suite (197/260 failed).
+      NODE_ENV: 'production',
+      // Next's build marks native-addon deps (e.g. node-pty) as server
+      // externals resolved by bare specifier at runtime (node-pty-<hash>).
+      // scripts/fix-external-symlinks.mjs (run by build:electron in the
+      // pretest hook) places a portable proxy for each under external-shims/
+      // instead of node_modules — see that script for why — so Node needs
+      // NODE_PATH to find them (same mechanism electron/main.js uses).
+      NODE_PATH: join(__dirname, 'external-shims'),
       // Pass the temp config dir via env var so project-store.ts resolves
       // CONFIG_DIR at module-load time (before globalSetup runs). Playwright
       // starts webServer before globalSetup, so a file-based approach
