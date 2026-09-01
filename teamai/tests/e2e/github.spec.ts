@@ -20,8 +20,7 @@ test.describe('GitHub Issues Page', () => {
   // deliberately hidden in f1073700 ("hide untested sections") — GitHub Issues
   // is still a live route (tested via direct page.goto below), just not
   // reachable through the sidebar UI right now. Clicking a nonexistent
-  // `aside a[href="/github"]` was leaving these tests hanging (see
-  // FIX_E2E_CI_CAPACITY.md).
+  // `aside a[href="/github"]` was leaving these tests hanging.
 
   test('page loads and shows GitHub Issues heading', async ({ page }) => {
 

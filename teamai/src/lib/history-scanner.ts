@@ -39,8 +39,8 @@ import { warn as logWarn, info as logInfo } from './logger';
 // same `npm run start` process), one project's cache-miss `gh pr list` call
 // — a live, rate-limited network request with a 20s timeout — froze *every
 // other concurrent request* on *every other worker* until it returned. That
-// was the dominant cause of suite-wide E2E flakiness under concurrency (see
-// FIX_E2E_CI_CAPACITY.md): tests unrelated to history timed out waiting for
+// was the dominant cause of suite-wide E2E flakiness under concurrency:
+// tests unrelated to history timed out waiting for
 // basic page content because the shared event loop was stuck on someone
 // else's git/gh subprocess. execFile (async) still runs the subprocess
 // off-thread via libuv, so the event loop stays free to serve other

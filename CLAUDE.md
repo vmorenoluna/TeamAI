@@ -41,7 +41,7 @@ npx tsx scripts/test-process-manager.ts
 cd teamai && npm run precommit
 ```
 
-This runs `test:all` which chains: **typecheck → lint → unit + integration tests → E2E tests → changelog test**. The pre-commit hook (`./.husky/pre-commit`) runs a fast subset automatically (typecheck + lint-staged + vitest), but does NOT run E2E or changelog tests — those must be run manually before pushing.
+This runs `test:all` which chains: **typecheck → lint → unit + integration tests → E2E tests → changelog test**. CI runs the same suite as `test:all:coverage` (vitest coverage collected alongside a single E2E run; the coverage HTML report is uploaded as a build artifact). The pre-commit hook (`./.husky/pre-commit`) runs a fast subset automatically (typecheck + lint-staged + vitest), but does NOT run E2E or changelog tests — those must be run manually before pushing.
 
 Individual test commands:
 
@@ -56,7 +56,7 @@ npm run test:e2e         # playwright test (full suite, ~30 min)
 npm run test:e2e:smoke   # playwright test (5 critical specs, ~2 min)
 npm run test:changelog   # bash tests/unit/changelog-parsing.test.sh
 npm run test:all         # typecheck + lint + vitest + playwright + changelog
-npm run test:coverage    # vitest --coverage + playwright E2E (combined report)
+npm run test:all:coverage # test:all with vitest coverage (one E2E run) — this is the CI gate command
 npm run precommit        # alias for test:all with a banner
 ```
 

@@ -23,7 +23,7 @@
     "test:e2e:smoke": "playwright test tests/e2e/sidebar.spec.ts tests/e2e/task-detail.spec.ts tests/e2e/kanban.spec.ts tests/e2e/settings.spec.ts tests/e2e/workflow.spec.ts",
     "test:changelog": "bash tests/unit/changelog-parsing.test.sh",
     "test:all": "npm run typecheck && npm run lint && npm run test && npm run test:e2e && npm run test:changelog",
-    "test:coverage": "vitest run --coverage && npm run test:e2e && node -e \"console.log('\\n=== Combined Coverage ==='); console.log('  Vitest HTML: coverage/index.html'); console.log('  Vitest summary + Playwright results: see above.')\"",
+    "test:all:coverage": "npm run typecheck && npm run lint && vitest run --coverage && npm run test:e2e && npm run test:changelog && node -e \"console.log('\\n=== Combined Coverage ==='); console.log('  Vitest HTML: coverage/index.html'); console.log('  Vitest summary + Playwright results: see above.')\"",
     "precommit": "node -e \"console.log('Running full test suite before commit...')\" && npm run test:all",
     "prepare": "node -e \"var e=require('child_process').execSync;try{e('git config core.hooksPath .husky',{cwd:'..'})}catch(_){};if(process.platform!=='win32')try{e('chmod +x .husky/pre-commit',{cwd:'..'})}catch(_){};process.exit(0)\"",
     "electron:dev": "cross-env ELECTRON_DEV=true electron .",

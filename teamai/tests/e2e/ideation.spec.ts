@@ -20,7 +20,7 @@ test.describe('Ideation Page', () => {
   // deliberately hidden in f1073700 ("hide untested sections") — Ideation is
   // still a live route (tested via direct page.goto below), just not reachable
   // through the sidebar UI right now. Clicking a nonexistent `aside a[href="/ideation"]`
-  // was leaving these tests hanging (see FIX_E2E_CI_CAPACITY.md).
+  // was leaving these tests hanging.
 
   test('page loads and shows Ideation heading', async ({ page }) => {
 
