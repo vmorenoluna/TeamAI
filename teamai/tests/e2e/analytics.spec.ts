@@ -3,8 +3,8 @@
  *
  * Tests verify the page loads, renders dashboard components (summary cards,
  * phase distribution, timing charts, QA stats, weekly trends, bottleneck),
- * handles the empty/no-project state gracefully, and that sidebar navigation
- * to the analytics page works.
+ * and handles the empty/no-project state gracefully. The sidebar link to
+ * this page is currently hidden (f1073700) — reachable only via direct URL.
  */
 
 import { test, expect } from '@playwright/test';
@@ -32,21 +32,12 @@ test.describe('Analytics Dashboard', () => {
     expect(hasHeading + loadingOrError + hasFailedMsg).toBeGreaterThan(0);
   });
 
-  test('sidebar has Analytics navigation link that navigates to /analytics', async ({ page }) => {
-    await page.goto('/');
-
-    // Sidebar should be visible
-    const sidebar = page.locator('aside');
-    await expect(sidebar).toBeVisible({ timeout: 10_000 });
-
-    // Analytics link should be present
-    const analyticsLink = sidebar.locator('a[href="/analytics"]');
-    await expect(analyticsLink).toBeVisible();
-
-    // Clicking it should navigate to the analytics page
-    await analyticsLink.click();
-    await expect(page).toHaveURL(/\/analytics/);
-  });
+  // The sidebar-navigation test for /analytics was removed: the sidebar link
+  // was deliberately hidden in f1073700 ("hide untested sections") — Analytics
+  // is still a live route (tested via direct page.goto below), just not
+  // reachable through the sidebar UI right now. Clicking a nonexistent
+  // `aside a[href="/analytics"]` was leaving this test hanging (see
+  // FIX_E2E_CI_CAPACITY.md).
 
   test('analytics page renders dashboard components when project is active', async ({ page }) => {
     await page.goto('/analytics');

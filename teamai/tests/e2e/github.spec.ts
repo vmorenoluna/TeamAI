@@ -2,7 +2,8 @@
  * E2E tests for the GitHub Issues page (/github).
  *
  * Covers: page load, heading, description text, List Open Issues button,
- * empty state prompt, sidebar navigation, page refresh survival.
+ * empty state prompt, page refresh survival. The sidebar link to this page
+ * is currently hidden (f1073700) — reachable only via direct URL.
  */
 import { test, expect } from '@playwright/test';
 import { ensureProjectSelected } from './helpers';
@@ -15,43 +16,12 @@ test.describe('GitHub Issues Page', () => {
 
   });
 
-  test('sidebar navigation: clicking GitHub link navigates to /github and shows heading', async ({ page }) => {
-    await page.goto('/');
-
-    const sidebar = page.locator('aside');
-    await expect(sidebar).toBeVisible({ timeout: 10_000 });
-
-    const link = sidebar.locator('a[href="/github"]');
-    await expect(link).toBeVisible();
-    await link.click();
-
-    await expect(page).toHaveURL(/\/github/);
-    await expect(page.locator('h1:has-text("GitHub Issues")')).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('collapsed sidebar: clicking GitHub icon navigates to /github and shows heading', async ({ page }) => {
-    await page.goto('/');
-    await page.waitForTimeout(1500);
-
-    const sidebar = page.locator('aside');
-    await expect(sidebar).toHaveClass(/w-60/);
-
-    // Collapse
-    await sidebar.evaluate((el) => {
-      const btn = el.querySelector('button');
-      if (btn instanceof HTMLElement) btn.click();
-    });
-    await page.waitForTimeout(500);
-    await expect(sidebar).toHaveClass(/w-12/);
-
-    // Click icon-only link
-    const link = sidebar.locator('a[href="/github"]');
-    await expect(link).toBeVisible();
-    await link.click();
-
-    await expect(page).toHaveURL(/\/github/);
-    await expect(page.locator('h1:has-text("GitHub Issues")')).toBeVisible({ timeout: 10_000 });
-  });
+  // Sidebar-navigation tests for /github were removed: the sidebar link was
+  // deliberately hidden in f1073700 ("hide untested sections") — GitHub Issues
+  // is still a live route (tested via direct page.goto below), just not
+  // reachable through the sidebar UI right now. Clicking a nonexistent
+  // `aside a[href="/github"]` was leaving these tests hanging (see
+  // FIX_E2E_CI_CAPACITY.md).
 
   test('page loads and shows GitHub Issues heading', async ({ page }) => {
 

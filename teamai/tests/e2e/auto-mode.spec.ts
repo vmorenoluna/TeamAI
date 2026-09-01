@@ -65,6 +65,16 @@ test.describe('Auto Mode Toggle', () => {
 
     // At least one state should be true (button responded or stayed the same)
     expect(isEnabled + isDisabled).toBeGreaterThanOrEqual(1);
+
+    // Turn it back off. Auto mode runs a 5s tick loop plus (since this
+    // project's seed data includes a pr-open task) a CI-poll timer in the
+    // shared server process for as long as it stays enabled — leaving it on
+    // would keep that background work running against every other test in
+    // the suite for the rest of the whole run, not just this test.
+    if (isEnabled > 0) {
+      await autoBtn.click();
+      await page.waitForTimeout(500);
+    }
   });
 
   test('auto mode button survives page refresh', async ({ page }) => {
