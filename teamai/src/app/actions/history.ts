@@ -21,14 +21,13 @@ export interface DoneHistoryPayload {
 }
 
 /**
- * HistoryScanner.rescan() runs two synchronous, blocking execFileSync calls
- * — a local `git log` and a live network call to `gh pr list` against
- * GitHub's rate-limited Search API. getDoneHistory() runs on every
- * navigation to '/' (the most-visited route), and execFileSync blocks
- * Node's entire single-threaded event loop for its duration — so without
- * caching, rapid repeated navigations (real users clicking around, or an
- * E2E suite hammering the page) serialize behind that live network call and
- * stall *every other concurrent request*, not just the history fetch.
+ * HistoryScanner.rescan() runs a local `git log` and a live network call to
+ * `gh pr list` against GitHub's rate-limited Search API (both via async
+ * execFile — see history-scanner.ts — so they don't block the event loop).
+ * getDoneHistory() runs on every navigation to '/' (the most-visited
+ * route), so without caching, rapid repeated navigations (real users
+ * clicking around, or an E2E suite hammering the page) would still mean
+ * near-continuous subprocess/network round-trips.
  *
  * Caches the HistoryScanner *instance* (not just its ticket list) so a
  * cache hit also reuses the instance's already-populated internal
@@ -45,7 +44,7 @@ interface ScanCacheEntry {
 }
 const scanCache = new Map<string, ScanCacheEntry>();
 
-function getCachedScan(projectPath: string, recordHistoryInGit: boolean): ScanCacheEntry {
+async function getCachedScan(projectPath: string, recordHistoryInGit: boolean): Promise<ScanCacheEntry> {
   const cached = scanCache.get(projectPath);
   if (
     cached &&
@@ -55,7 +54,7 @@ function getCachedScan(projectPath: string, recordHistoryInGit: boolean): ScanCa
     return cached;
   }
   const scanner = new HistoryScanner({ projectRoot: projectPath, recordHistoryInGit });
-  const tickets = scanner.isEnabled ? scanner.rescan() : [];
+  const tickets = scanner.isEnabled ? await scanner.rescan() : [];
   const entry: ScanCacheEntry = { at: Date.now(), recordHistoryInGit, scanner, tickets };
   scanCache.set(projectPath, entry);
   return entry;
@@ -71,7 +70,7 @@ function getCachedScan(projectPath: string, recordHistoryInGit: boolean): ScanCa
 export async function getDoneHistory(): Promise<DoneHistoryPayload> {
   const projectPath = await getActiveProjectPath();
   const config = await getPipelineConfig();
-  const { scanner, tickets } = getCachedScan(projectPath, config.recordHistoryInGit);
+  const { scanner, tickets } = await getCachedScan(projectPath, config.recordHistoryInGit);
   if (!scanner.isEnabled) return { enabled: false, tickets: [], hasMore: false };
   return {
     enabled: true,
@@ -100,7 +99,7 @@ export async function loadMoreDoneHistory(
   });
   if (!scanner.isEnabled) return { enabled: false, tickets: [], hasMore: false };
 
-  const pageTickets = scanner.scanMergedPrBodies(page * pageSize);
+  const pageTickets = await scanner.scanMergedPrBodies(page * pageSize);
   return {
     enabled: true,
     tickets: mergedDoneTickets(projectPath, [...pageTickets.values()]),
@@ -117,7 +116,7 @@ export async function getDoneTicketSpec(
 ): Promise<{ spec: string | null }> {
   const projectPath = await getActiveProjectPath();
   const config = await getPipelineConfig();
-  const { scanner } = getCachedScan(projectPath, config.recordHistoryInGit);
+  const { scanner } = await getCachedScan(projectPath, config.recordHistoryInGit);
   if (!scanner.isEnabled) return { spec: null };
   return { spec: await scanner.getSpecContent(slug) };
 }

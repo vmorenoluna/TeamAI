@@ -76,17 +76,16 @@ test.describe('Responsive — Sidebar', () => {
     const sidebar = page.locator('aside');
     await expect(sidebar).toBeVisible({ timeout: 10_000 });
 
-    // Click the collapse toggle button (first button inside the aside)
-    const collapseBtn = sidebar.locator('button').first();
-    await expect(collapseBtn).toBeVisible({ timeout: 5_000 });
-    await collapseBtn.click();
-    await page.waitForTimeout(500);
-    // Click again in case the first click didn't register (hydration timing)
-    await collapseBtn.click();
-    await page.waitForTimeout(1000);
+    // Click the collapse toggle button via native DOM click (bypasses
+    // Playwright actionability/pointer-events timing — same pattern used in
+    // sidebar.spec.ts, which is reliable under concurrent load).
+    await sidebar.evaluate((el) => {
+      const btn = el.querySelector('button');
+      if (btn instanceof HTMLElement) btn.click();
+    });
 
     // After collapse, sidebar should have w-12 class
-    await expect(sidebar).toHaveClass(/w-12/);
+    await expect(sidebar).toHaveClass(/w-12/, { timeout: 10_000 });
   });
 });
 

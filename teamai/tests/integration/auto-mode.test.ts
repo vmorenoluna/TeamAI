@@ -35,8 +35,24 @@ const { mockLog, mockWarn, mockError } = vi.hoisted(() => ({
   mockError: vi.fn(),
 }));
 
+// auto-mode.ts's CI-poll timer calls the async (callback-based) execFile, not
+// execFileSync (see auto-mode.ts for why: execFileSync blocks the whole event
+// loop). This adapter routes execFile through the same mockExecFileSync mock
+// the rest of this file already configures with .mockImplementation/
+// .mockReturnValue/.mock.calls assertions, so none of that needs to change —
+// it just needs to be invoked as if synchronously, then reported back via
+// the callback (as a rejection if the mock throws, mirroring execFileSync's
+// synchronous-throw failure mode).
 vi.mock('child_process', () => ({
-  execFile: vi.fn(),
+  execFile: (...args: unknown[]) => {
+    const callback = args[args.length - 1] as (err: unknown, result?: { stdout: string; stderr: string }) => void;
+    try {
+      const stdout = mockExecFileSync(...args.slice(0, -1));
+      callback(null, { stdout, stderr: '' });
+    } catch (err) {
+      callback(err);
+    }
+  },
   execFileSync: mockExecFileSync,
 }));
 

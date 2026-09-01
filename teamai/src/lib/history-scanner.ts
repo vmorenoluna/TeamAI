@@ -25,9 +25,27 @@
  * being off means the user doesn't want ticket history kept at all, so no
  * reconstruction is attempted.
  */
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { getToolPath } from './tool-checker';
 import { warn as logWarn, info as logInfo } from './logger';
+
+// Node's *Sync child_process calls block the entire single-threaded event
+// loop for their duration. This module used to call execFileSync directly
+// from scanCommitTrailers/scanMergedPrBodies/getSpecContent — all reachable
+// from getDoneHistory(), which runs on every navigation to '/' (the
+// most-visited route). Under a single shared server process (as in the
+// Playwright E2E harness, where every worker's browser session hits the
+// same `npm run start` process), one project's cache-miss `gh pr list` call
+// — a live, rate-limited network request with a 20s timeout — froze *every
+// other concurrent request* on *every other worker* until it returned. That
+// was the dominant cause of suite-wide E2E flakiness under concurrency (see
+// FIX_E2E_CI_CAPACITY.md): tests unrelated to history timed out waiting for
+// basic page content because the shared event loop was stuck on someone
+// else's git/gh subprocess. execFile (async) still runs the subprocess
+// off-thread via libuv, so the event loop stays free to serve other
+// requests while this awaits.
+const execFileAsync = promisify(execFile);
 
 /** Lightweight DONE card rebuilt from trailers + PR body. */
 export interface DoneTicketFromHistory {
@@ -108,17 +126,17 @@ export class HistoryScanner {
    * Source A — local commit trailers. One git log pass over commit
    * metadata; typically well under a second even on large repos.
    */
-  scanCommitTrailers(): Map<string, DoneTicketFromHistory> {
+  async scanCommitTrailers(): Promise<Map<string, DoneTicketFromHistory>> {
     const result = new Map<string, DoneTicketFromHistory>();
     if (!this._enabled) return result;
 
     let raw: string;
     try {
-      raw = execFileSync('git', [
+      ({ stdout: raw } = await execFileAsync('git', [
         'log', '--grep', '^Task: ',
         '--format=%h%x1f%ad%x1f%s%x1f%b%x1e',
         '--date=iso',
-      ], { cwd: this._projectRoot, encoding: 'utf-8', maxBuffer: 32 * 1024 * 1024, timeout: 15_000 });
+      ], { cwd: this._projectRoot, encoding: 'utf-8', maxBuffer: 32 * 1024 * 1024, timeout: 15_000 }));
     } catch (err) {
       logWarn('history', 'scanCommitTrailers: git log failed (not a git repo?)', err);
       return result;
@@ -156,20 +174,20 @@ export class HistoryScanner {
   /** Number of tickets returned by the most recent Source B page (for hasMore). */
   lastPrPageCount = 0;
 
-  scanMergedPrBodies(limit = 10): Map<string, DoneTicketFromHistory> {
+  async scanMergedPrBodies(limit = 10): Promise<Map<string, DoneTicketFromHistory>> {
     const result = new Map<string, DoneTicketFromHistory>();
     this.lastPrPageCount = 0;
     if (!this._enabled) return result;
 
     let raw: string;
     try {
-      raw = execFileSync(getToolPath('gh'), [
+      ({ stdout: raw } = await execFileAsync(getToolPath('gh'), [
         'pr', 'list',
         '--state', 'merged',
         '--search', 'Task: in:body',
         '--limit', String(limit),
         '--json', 'url,body,mergedAt,title',
-      ], { cwd: this._projectRoot, encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024, timeout: 20_000 });
+      ], { cwd: this._projectRoot, encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024, timeout: 20_000 }));
     } catch (err) {
       logWarn('history', 'scanMergedPrBodies: gh pr list failed (offline / not github?)', err);
       return result;
@@ -213,14 +231,14 @@ export class HistoryScanner {
    * Merged by slug, preferring Source A. Returns tickets sorted
    * newest-first and primes the in-memory cache.
    */
-  rescan(): DoneTicketFromHistory[] {
+  async rescan(): Promise<DoneTicketFromHistory[]> {
     this._cache = new Map();
     if (!this._enabled) return [];
 
-    const commits = this.scanCommitTrailers();
+    const commits = await this.scanCommitTrailers();
     for (const [slug, ticket] of commits) this._cache.set(slug, ticket);
 
-    const prs = this.scanMergedPrBodies();
+    const prs = await this.scanMergedPrBodies();
     for (const [slug, prTicket] of prs) {
       const existing = this._cache.get(slug);
       if (existing) {
@@ -292,7 +310,7 @@ export class HistoryScanner {
     if (!ticket.prUrl) return ticket.summary; // local-merge fallback
 
     try {
-      const raw = execFileSync(getToolPath('gh'), [
+      const { stdout: raw } = await execFileAsync(getToolPath('gh'), [
         'pr', 'view', ticket.prUrl, '--json', 'body',
       ], { cwd: this._projectRoot, encoding: 'utf-8', timeout: 15_000 });
       const body = (JSON.parse(raw) as { body?: string }).body ?? '';

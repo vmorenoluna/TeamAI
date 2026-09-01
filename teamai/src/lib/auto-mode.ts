@@ -1,7 +1,8 @@
 import { TaskStore } from './task-store';
 import { getOrchestrator } from './orchestrator';
 import { processManager } from './process-manager';
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { projectStore } from './project-store';
@@ -12,6 +13,14 @@ import { computePipelineConfig } from './orchestrator/helpers';
 import { buildTicketMessageForPipeline } from './orchestrator/artifact-commit';
 import { isAutoModeEnabled, getAutoModeState } from './auto-mode-state';
 import { ContainerDockerMissingError } from './orchestrator/errors';
+
+// Async (non-blocking) execFile — see the comment on _startCIPolling for why
+// this matters: the *Sync variant blocks Node's entire single-threaded event
+// loop, and this module's CI-poll timer fires unconditionally every 30s for
+// as long as auto mode stays enabled for a project, which in a shared
+// single-process server (e.g. the Playwright E2E harness) freezes every
+// other concurrent request while `gh` runs.
+const execFileAsync = promisify(execFile);
 
 interface AutoProjectState {
   enabled: boolean;
@@ -227,6 +236,13 @@ function _adoptStalledTasks(projectRoot: string, state: AutoProjectState): void 
   let adopted = 0;
 
   for (const task of allTasks) {
+    // Respect user-paused tasks — same invariant as recovery.ts's
+    // autoResumeInterruptedTasks/sweepStalledTasks: a deliberate pause must
+    // only be lifted by clicking Resume in the UI, never by automated
+    // recovery/adoption. Without this, turning auto mode on would silently
+    // override a pause the user set specifically to prevent auto-processing.
+    if (task.isPaused) continue;
+
     if (task.phase === 'awaiting-review') {
       // Approve immediately — the phase-change event won't fire because the
       // task is already in this phase.
@@ -350,6 +366,11 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
   const MAX_MERGE_FAILURES = 5;
   let ciRerunAttempts = 0;
   const MAX_CI_RERUN_ATTEMPTS = 3;
+  // Guards against overlapping polls: the body below is now async (execFile,
+  // not execFileSync), so a slow `gh` call could still be in flight when the
+  // next 30s tick fires. Without this, overlapping polls could race each
+  // other's terminal actions (e.g. two concurrent merge attempts).
+  let pollInFlight = false;
 
   const timer = setInterval(() => {
     if (!state.enabled) {
@@ -357,7 +378,10 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
       state.ciPollTimers.delete(taskId);
       return;
     }
+    if (pollInFlight) return;
+    pollInFlight = true;
 
+    void (async () => {
     try {
       // Refresh task data to get latest prUrl (may have been updated)
       const currentTask = new TaskStore(projectRoot).getById(taskId);
@@ -367,11 +391,16 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
         return;
       }
 
-      // GitHub PR polling via gh
-      const prData = JSON.parse(execFileSync(getToolPath('gh'), [
+      // GitHub PR polling via gh. Async (not execFileSync) — this timer
+      // fires every 30s for as long as the project has an open PR under
+      // auto mode, and execFileSync would freeze the entire shared Node
+      // event loop (all other concurrent requests, on every worker) for the
+      // duration of each `gh` call. See the comment on execFileAsync above.
+      const { stdout } = await execFileAsync(getToolPath('gh'), [
         'pr', 'view', prNumber,
         '--json', 'state,statusCheckRollup',
-      ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 }));
+      ], { cwd: projectRoot, encoding: 'utf-8', timeout: 10_000 });
+      const prData = JSON.parse(stdout);
 
       if (prData.state === 'MERGED') {
         // Already merged externally — just mark done
@@ -436,8 +465,8 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
               mergeArgs.push('--subject', ticketMsg.subject, '--body-file', ticketMsg.bodyFile);
             }
           }
-          execFileSync(getToolPath('gh'), mergeArgs, {
-            cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
+          await execFileAsync(getToolPath('gh'), mergeArgs, {
+            cwd: projectRoot, encoding: 'utf-8', timeout: 15_000,
           });
           log('auto-mode', `PR #${prNumber} merged successfully`);
           clearInterval(timer);
@@ -470,8 +499,8 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
         ciRerunAttempts++;
         log('auto-mode', `PR #${prNumber} has failing CI check(s) — re-running failed jobs (attempt ${ciRerunAttempts}/${MAX_CI_RERUN_ATTEMPTS})`);
         try {
-          execFileSync(getToolPath('gh'), ['run', 'rerun', runId, '--failed'], {
-            cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 15_000,
+          await execFileAsync(getToolPath('gh'), ['run', 'rerun', runId, '--failed'], {
+            cwd: projectRoot, encoding: 'utf-8', timeout: 15_000,
           });
         } catch (rerunErr) {
           const msg = rerunErr instanceof Error ? rerunErr.message : String(rerunErr);
@@ -482,7 +511,10 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
       // Silently retry — gh might be temporarily unavailable or rate-limited
       const msg = err instanceof Error ? err.message : String(err);
       logError('auto-mode', `CI poll error for PR #${prNumber}: ${msg}`);
+    } finally {
+      pollInFlight = false;
     }
+    })();
   }, 30_000); // poll every 30 seconds
 
   state.ciPollTimers.set(taskId, timer);

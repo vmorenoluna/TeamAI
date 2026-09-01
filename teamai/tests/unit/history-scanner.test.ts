@@ -1,12 +1,12 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
 import {
   HistoryScanner,
   extractSpecification,
 } from '../../src/lib/history-scanner';
 
-vi.mock('child_process', () => ({ execFileSync: vi.fn() }));
+vi.mock('child_process', () => ({ execFile: vi.fn() }));
 vi.mock('../../src/lib/tool-checker', () => ({ getToolPath: vi.fn(() => 'gh') }));
 vi.mock('../../src/lib/logger', () => ({
   warn: vi.fn(),
@@ -14,14 +14,33 @@ vi.mock('../../src/lib/logger', () => ({
   error: vi.fn(),
 }));
 
-const mockedExec = vi.mocked(execFileSync);
+const mockedExecFile = vi.mocked(execFile);
+
+/**
+ * history-scanner.ts calls the async (callback-based) execFile, not
+ * execFileSync — see history-scanner.ts for why. This adapts a synchronous
+ * "(file, args) -> stdout" fixture selector into the callback shape
+ * promisify(execFile) expects, so the tests below can keep expressing
+ * fixtures the simple way.
+ */
+function execFileImpl(handler: (file: string, args: readonly string[]) => string) {
+  return (...callArgs: unknown[]) => {
+    const file = callArgs[0] as string;
+    const args = (callArgs[1] as readonly string[]) ?? [];
+    const callback = callArgs[callArgs.length - 1] as (
+      err: unknown,
+      result: { stdout: string; stderr: string },
+    ) => void;
+    callback(null, { stdout: handler(file, args), stderr: '' });
+  };
+}
 
 const COMMIT_LOG_FIXTURE = [
   // hash, date, subject, body — two tasks, one with a QA retry
-  'a1b2c3d\u001f2026-08-28 10:00:00 +0200\u001ffeat: add password reset flow\u001fImplemented password reset with email tokens.\n\nTask: add-password-reset-flow\nTask-ID: t-111\nQA: PASS (3/3 criteria)\nPhases: spec>plan>implement>qa-review\nReviewed-by: TeamAI QA agent\u001e',
-  'e4f5a6b\u001f2026-08-29 09:30:00 +0200\u001frefactor: simplify billing webhook\u001fExtracted the webhook parser into its own module.\n\nTask: simplify-billing-webhook\nTask-ID: t-222\nQA: PASS (2/3 criteria, 1 deferred, retried 2 times)\nPhases: spec>plan>implement>qa-review(x3)>merge\nReviewed-by: TeamAI QA agent\u001e',
-  '', // trailing record after final \u001e
-].join('\u001e');
+  'a1b2c3d2026-08-28 10:00:00 +0200feat: add password reset flowImplemented password reset with email tokens.\n\nTask: add-password-reset-flow\nTask-ID: t-111\nQA: PASS (3/3 criteria)\nPhases: spec>plan>implement>qa-review\nReviewed-by: TeamAI QA agent',
+  'e4f5a6b2026-08-29 09:30:00 +0200refactor: simplify billing webhookExtracted the webhook parser into its own module.\n\nTask: simplify-billing-webhook\nTask-ID: t-222\nQA: PASS (2/3 criteria, 1 deferred, retried 2 times)\nPhases: spec>plan>implement>qa-review(x3)>merge\nReviewed-by: TeamAI QA agent',
+  '', // trailing record after final 
+].join('');
 
 const PR_LIST_FIXTURE = JSON.stringify([
   {
@@ -42,22 +61,22 @@ describe('history-scanner', () => {
   });
 
   describe('toggle gating', () => {
-    it('returns empty results and never shells out when recordHistoryInGit is off', () => {
+    it('returns empty results and never shells out when recordHistoryInGit is off', async () => {
       const scanner = makeScanner(false);
       expect(scanner.isEnabled).toBe(false);
-      expect(scanner.scanCommitTrailers().size).toBe(0);
-      expect(scanner.scanMergedPrBodies().size).toBe(0);
-      expect(scanner.rescan()).toEqual([]);
-      expect(mockedExec).not.toHaveBeenCalled();
+      expect((await scanner.scanCommitTrailers()).size).toBe(0);
+      expect((await scanner.scanMergedPrBodies()).size).toBe(0);
+      expect(await scanner.rescan()).toEqual([]);
+      expect(mockedExecFile).not.toHaveBeenCalled();
     });
   });
 
   describe('scanCommitTrailers (Source A)', () => {
-    it('parses trailer commits into DONE tickets', () => {
+    it('parses trailer commits into DONE tickets', async () => {
       const scanner = makeScanner(true);
-      mockedExec.mockReturnValue(COMMIT_LOG_FIXTURE as never);
+      mockedExecFile.mockImplementation(execFileImpl(() => COMMIT_LOG_FIXTURE) as never);
 
-      const tickets = scanner.scanCommitTrailers();
+      const tickets = await scanner.scanCommitTrailers();
       expect(tickets.size).toBe(2);
 
       const t1 = tickets.get('add-password-reset-flow')!;
@@ -70,31 +89,31 @@ describe('history-scanner', () => {
       expect(t1.completedAt.getTime()).toBe(new Date('2026-08-28T10:00:00+02:00').getTime());
     });
 
-    it('records the phase chain with retry counts', () => {
+    it('records the phase chain with retry counts', async () => {
       const scanner = makeScanner(true);
-      mockedExec.mockReturnValue(COMMIT_LOG_FIXTURE as never);
+      mockedExecFile.mockImplementation(execFileImpl(() => COMMIT_LOG_FIXTURE) as never);
 
-      const t2 = scanner.scanCommitTrailers().get('simplify-billing-webhook')!;
+      const t2 = (await scanner.scanCommitTrailers()).get('simplify-billing-webhook')!;
       expect(t2.phaseChain).toBe('spec>plan>implement>qa-review(x3)>merge');
       expect(t2.qaResult).toContain('retried 2 times');
       expect(t2.qaResult).toContain('1 deferred');
     });
 
-    it('skips records without a Task: trailer', () => {
+    it('skips records without a Task: trailer', async () => {
       const scanner = makeScanner(true);
-      mockedExec.mockReturnValue(
-        'a1b2c3d\u001f2026-08-28 10:00:00 +0200\u001fchore: unrelated commit\u001fNo trailers here.\u001e' as never,
-      );
-      expect(scanner.scanCommitTrailers().size).toBe(0);
+      mockedExecFile.mockImplementation(execFileImpl(
+        () => 'a1b2c3d2026-08-28 10:00:00 +0200chore: unrelated commitNo trailers here.',
+      ) as never);
+      expect((await scanner.scanCommitTrailers()).size).toBe(0);
     });
   });
 
   describe('scanMergedPrBodies (Source B)', () => {
-    it('parses gh pr list JSON into DONE tickets with PR URLs', () => {
+    it('parses gh pr list JSON into DONE tickets with PR URLs', async () => {
       const scanner = makeScanner(true);
-      mockedExec.mockReturnValue(PR_LIST_FIXTURE as never);
+      mockedExecFile.mockImplementation(execFileImpl(() => PR_LIST_FIXTURE) as never);
 
-      const tickets = scanner.scanMergedPrBodies();
+      const tickets = await scanner.scanMergedPrBodies();
       expect(tickets.size).toBe(1);
       const t = tickets.get('add-password-reset-flow')!;
       expect(t.prUrl).toBe('https://github.com/acme/repo/pull/42');
@@ -104,14 +123,13 @@ describe('history-scanner', () => {
   });
 
   describe('rescan (merge by slug)', () => {
-    it('prefers Source A and enriches with Source B PR URL', () => {
+    it('prefers Source A and enriches with Source B PR URL', async () => {
       const scanner = makeScanner(true);
-      mockedExec.mockImplementation(((file: string) => {
-        if (file === 'git') return COMMIT_LOG_FIXTURE as never;
-        return PR_LIST_FIXTURE as never;
-      }) as never);
+      mockedExecFile.mockImplementation(execFileImpl(
+        (file) => (file === 'git' ? COMMIT_LOG_FIXTURE : PR_LIST_FIXTURE),
+      ) as never);
 
-      const tickets = scanner.rescan();
+      const tickets = await scanner.rescan();
       expect(tickets).toHaveLength(2);
 
       const t1 = scanner.getBySlug('add-password-reset-flow')!;
@@ -123,27 +141,25 @@ describe('history-scanner', () => {
       expect(tickets[0].slug).toBe('simplify-billing-webhook');
     });
 
-    it('keeps local-merge tickets that have no PR', () => {
+    it('keeps local-merge tickets that have no PR', async () => {
       const scanner = makeScanner(true);
-      mockedExec.mockImplementation((file: string) => {
-        if (file === 'git') return COMMIT_LOG_FIXTURE as never;
-        return '[]' as never; // no PRs
-      });
+      mockedExecFile.mockImplementation(execFileImpl(
+        (file) => (file === 'git' ? COMMIT_LOG_FIXTURE : '[]'),
+      ) as never);
 
-      const tickets = scanner.rescan();
+      const tickets = await scanner.rescan();
       expect(tickets).toHaveLength(2);
       expect(tickets.every(t => t.prUrl === undefined)).toBe(true);
     });
   });
 
   describe('appendOnCompletion', () => {
-    it('synthesizes the fresh ticket and makes it the newest entry', () => {
+    it('synthesizes the fresh ticket and makes it the newest entry', async () => {
       const scanner = makeScanner(true);
-      mockedExec.mockImplementation((file: string) => {
-        if (file === 'git') return COMMIT_LOG_FIXTURE as never;
-        return '[]' as never;
-      });
-      scanner.rescan();
+      mockedExecFile.mockImplementation(execFileImpl(
+        (file) => (file === 'git' ? COMMIT_LOG_FIXTURE : '[]'),
+      ) as never);
+      await scanner.rescan();
 
       const fresh = scanner.appendOnCompletion({
         slug: 'brand-new-task',
@@ -183,35 +199,34 @@ describe('history-scanner', () => {
   describe('getSpecContent', () => {
     it('fetches and caches the spec from the PR body', async () => {
       const scanner = makeScanner(true);
-      mockedExec.mockImplementation((file: string, args?: readonly string[]) => {
-        if (file === 'git') return COMMIT_LOG_FIXTURE as never;
-        const argsStr = (args || []).join(' ');
-        if (argsStr.includes('--search')) return PR_LIST_FIXTURE as never;
-        return JSON.stringify({ body: '## Specification\n\nFull spec text.' }) as never;
-      });
-      scanner.rescan();
-      const callsAfterRescan = mockedExec.mock.calls.length;
+      mockedExecFile.mockImplementation(execFileImpl((file, args) => {
+        if (file === 'git') return COMMIT_LOG_FIXTURE;
+        const argsStr = args.join(' ');
+        if (argsStr.includes('--search')) return PR_LIST_FIXTURE;
+        return JSON.stringify({ body: '## Specification\n\nFull spec text.' });
+      }) as never);
+      await scanner.rescan();
+      const callsAfterRescan = mockedExecFile.mock.calls.length;
 
       const spec = await scanner.getSpecContent('add-password-reset-flow');
       expect(spec).toBe('Full spec text.');
 
       // Second call is served from cache — no additional shell-out.
       await scanner.getSpecContent('add-password-reset-flow');
-      expect(mockedExec).toHaveBeenCalledTimes(callsAfterRescan + 1);
+      expect(mockedExecFile).toHaveBeenCalledTimes(callsAfterRescan + 1);
     });
 
     it('falls back to the summary for local-merge tickets without a PR', async () => {
       const scanner = makeScanner(true);
-      mockedExec.mockImplementation((file: string) => {
-        if (file === 'git') return COMMIT_LOG_FIXTURE as never;
-        return '[]' as never;
-      });
-      scanner.rescan();
-      const callsAfterRescan = mockedExec.mock.calls.length;
+      mockedExecFile.mockImplementation(execFileImpl(
+        (file) => (file === 'git' ? COMMIT_LOG_FIXTURE : '[]'),
+      ) as never);
+      await scanner.rescan();
+      const callsAfterRescan = mockedExecFile.mock.calls.length;
 
       const spec = await scanner.getSpecContent('simplify-billing-webhook');
       expect(spec).toBeTruthy();
-      expect(mockedExec).toHaveBeenCalledTimes(callsAfterRescan); // no gh call for local-merge
+      expect(mockedExecFile).toHaveBeenCalledTimes(callsAfterRescan); // no gh call for local-merge
     });
   });
 });

@@ -3,22 +3,17 @@ import { ensureProjectSelected } from './helpers';
 
 test.describe('Sidebar Navigation', () => {
   test('sidebar is visible with all navigation links', async ({ page }) => {
-    // Insights/Ideation are project-gated links — without an active project
-    // selected, the E2E harness's 5 simultaneously-registered seed projects
-    // (base + 4 per-worker copies, T31) defeat getActiveProjectPath()'s
-    // single-project auto-select fallback, so the sidebar renders its
-    // reduced, project-independent link set instead.
     await ensureProjectSelected(page);
 
     // Sidebar should be visible
     const sidebar = page.locator('aside');
     await expect(sidebar).toBeVisible({ timeout: 10_000 });
 
-    // All navigation links should be present
+    // All navigation links should be present. Insights/Ideation/Analytics/GitHub
+    // were deliberately removed from the sidebar in f1073700 ("hide untested
+    // sections") — they're still live routes, just not linked from here.
     const navLinks = [
       { href: '/' },
-      { href: '/insights' },
-      { href: '/ideation' },
       { href: '/terminals' },
       { href: '/roadmap' },
       { href: '/settings' },
@@ -84,8 +79,6 @@ test.describe('Sidebar — Collapsed State Navigation', () => {
 
   /** Helper: collapse the sidebar and verify it's collapsed */
   async function collapseSidebar(page: Page) {
-    // Project-gated links (Insights/Ideation/Workflow/GitHub) only render
-    // with an active project selected — see note on the first test above.
     await ensureProjectSelected(page);
     await page.waitForTimeout(1500);
 
@@ -105,12 +98,12 @@ test.describe('Sidebar — Collapsed State Navigation', () => {
 
     const sidebar = page.locator('aside');
 
-    // Each collapsed link should have a title attribute for the tooltip
+    // Each collapsed link should have a title attribute for the tooltip.
+    // Insights/Ideation/Analytics/GitHub are omitted — deliberately removed
+    // from the sidebar in f1073700 ("hide untested sections").
     const pages = [
-      { href: '/insights', label: 'Insights' },
-      { href: '/ideation', label: 'Ideation' },
       { href: '/workflow', label: 'Workflow' },
-      { href: '/github', label: 'GitHub' },
+      { href: '/roadmap', label: 'Roadmap' },
     ];
 
     for (const { href, label } of pages) {
@@ -121,27 +114,9 @@ test.describe('Sidebar — Collapsed State Navigation', () => {
     }
   });
 
-  test('collapsed: clicking Insights icon navigates to /insights', async ({ page }) => {
-    await collapseSidebar(page);
-
-    const link = page.locator('aside a[href="/insights"]');
-    await expect(link).toBeVisible();
-    await link.click();
-
-    await expect(page).toHaveURL(/\/insights/);
-    await expect(page.locator('h1:has-text("Insights")')).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('collapsed: clicking Ideation icon navigates to /ideation', async ({ page }) => {
-    await collapseSidebar(page);
-
-    const link = page.locator('aside a[href="/ideation"]');
-    await expect(link).toBeVisible();
-    await link.click();
-
-    await expect(page).toHaveURL(/\/ideation/);
-    await expect(page.locator('h1:has-text("Ideation")')).toBeVisible({ timeout: 10_000 });
-  });
+  // "collapsed: clicking Insights/Ideation icon" tests were removed — those
+  // sidebar links were deliberately hidden in f1073700 ("hide untested
+  // sections"), so `aside a[href="/insights"]` etc. no longer exist to click.
 
   test('collapsed: clicking Workflow icon navigates to /workflow', async ({ page }) => {
     await collapseSidebar(page);
@@ -158,24 +133,17 @@ test.describe('Sidebar — Collapsed State Navigation', () => {
     expect(hasHeading || hasNoProject).toBe(true);
   });
 
-  test('collapsed: clicking GitHub icon navigates to /github', async ({ page }) => {
-    await collapseSidebar(page);
-
-    const link = page.locator('aside a[href="/github"]');
-    await expect(link).toBeVisible();
-    await link.click();
-
-    await expect(page).toHaveURL(/\/github/);
-    await expect(page.locator('h1:has-text("GitHub Issues")')).toBeVisible({ timeout: 10_000 });
-  });
+  // "collapsed: clicking GitHub icon" test was removed — that sidebar link
+  // was deliberately hidden in f1073700 ("hide untested sections"), so
+  // `aside a[href="/github"]` no longer exists to click.
 
   test('collapsed: expand sidebar restores link labels', async ({ page }) => {
     await collapseSidebar(page);
 
     // Labels should NOT be visible when collapsed
     const sidebar = page.locator('aside');
-    await expect(sidebar.locator('text=Insights')).not.toBeVisible();
-    await expect(sidebar.locator('text=Ideation')).not.toBeVisible();
+    await expect(sidebar.locator('text=Workflow')).not.toBeVisible();
+    await expect(sidebar.locator('text=Roadmap')).not.toBeVisible();
 
     // Click expand
     await sidebar.evaluate((el) => {
@@ -188,10 +156,8 @@ test.describe('Sidebar — Collapsed State Navigation', () => {
     await expect(sidebar).toHaveClass(/w-60/);
 
     // Labels should now be visible
-    await expect(sidebar.locator('text=Insights')).toBeVisible();
-    await expect(sidebar.locator('text=Ideation')).toBeVisible();
     await expect(sidebar.locator('text=Workflow')).toBeVisible();
-    await expect(sidebar.locator('text=GitHub')).toBeVisible();
+    await expect(sidebar.locator('text=Roadmap')).toBeVisible();
   });
 });
 
@@ -271,14 +237,15 @@ test.describe('Sidebar — Keyboard Accessibility', () => {
   });
 
   test('all sidebar links are keyboard focusable (not tabindex=-1)', async ({ page }) => {
-    // Needs an active project — the >=8-link count includes project-gated links.
     await ensureProjectSelected(page);
     await page.waitForTimeout(1500);
 
     const sidebar = page.locator('aside');
     const links = sidebar.locator('a[href^="/"]');
     const count = await links.count();
-    expect(count).toBeGreaterThanOrEqual(8); // 9 nav links
+    // Current nav links: Kanban, Workflow, Terminals, Roadmap, Settings.
+    // Insights/Ideation/Analytics/GitHub are hidden (f1073700).
+    expect(count).toBeGreaterThanOrEqual(5);
 
     let focusableCount = 0;
     for (let i = 0; i < count; i++) {
@@ -288,6 +255,6 @@ test.describe('Sidebar — Keyboard Accessibility', () => {
       focusableCount++;
     }
 
-    expect(focusableCount).toBeGreaterThanOrEqual(8);
+    expect(focusableCount).toBeGreaterThanOrEqual(5);
   });
 });
