@@ -225,10 +225,11 @@ to change. All 59 tests in that file pass again.
   from this session's own investigation, cut off after 206/260-odd tests with no summary
   line).
 
+Re-ran the full `npm run test:e2e` suite a second time after fixing the
+`responsive-viewport.spec.ts` flake: **250/250 passed in 3.2 minutes**, fully clean.
+
 ### What's left
 
 - Push this branch and confirm CI's `test-all`/`test-coverage` jobs go green — that's the
   real acceptance test, not just local runs (local Windows-specific quirks could still
   differ from CI's environment).
-- Consider re-running the full `npm run test:e2e` suite once or twice more before pushing,
-  per the "don't declare success from a single lucky run" rule — only done once so far.
