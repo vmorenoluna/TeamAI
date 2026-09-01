@@ -100,10 +100,10 @@ jobs:
           REPO: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
 
-  # Run the exact same command developers use locally: `npm run test:all`.
-  # Serves as the single canonical CI gate — if this passes, all checks pass.
-  # Runs independently (not gated on the fast parallel jobs) to avoid
-  # redundant re-execution of typecheck/lint/vitest/changelog.
+  # Run the exact same suite developers use locally, with vitest coverage
+  # collected alongside (option 3): `test:all:coverage` = typecheck + lint +
+  # vitest --coverage + one E2E run + changelog. Single canonical gate, one
+  # Playwright run per PR, coverage artifact uploaded from the same run.
   test-all:
     runs-on: ubuntu-latest
     defaults:
@@ -127,38 +127,8 @@ jobs:
         run: |
           sudo lsof -ti:3001 | xargs -r sudo kill -9 2>/dev/null || true
           echo "Port 3001 cleared for E2E tests"
-      - name: Run full test suite
-        run: npm run test:all
-        env:
-          CI: 'true'
-
-  # Generate and upload code coverage reports as a CI artifact.
-  # Runs independently of the auto-merge gate — coverage is informational.
-  test-coverage:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: teamai
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: teamai/package-lock.json
-      - run: npm ci
-      - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
-      - name: Kill stale servers on port 3000
-        run: |
-          sudo lsof -ti:3000 | xargs -r sudo kill -9 2>/dev/null || true
-          echo "Port 3000 cleared for E2E tests"
-      - name: Kill stale servers on port 3001
-        run: |
-          sudo lsof -ti:3001 | xargs -r sudo kill -9 2>/dev/null || true
-          echo "Port 3001 cleared for E2E tests"
-      - name: Run coverage suite
-        run: npm run test:coverage
+      - name: Run full test suite (coverage collected alongside)
+        run: npm run test:all:coverage
         env:
           CI: 'true'
       - name: Upload coverage HTML report
