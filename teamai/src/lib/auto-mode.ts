@@ -236,6 +236,13 @@ function _adoptStalledTasks(projectRoot: string, state: AutoProjectState): void 
   let adopted = 0;
 
   for (const task of allTasks) {
+    // Respect user-paused tasks — same invariant as recovery.ts's
+    // autoResumeInterruptedTasks/sweepStalledTasks: a deliberate pause must
+    // only be lifted by clicking Resume in the UI, never by automated
+    // recovery/adoption. Without this, turning auto mode on would silently
+    // override a pause the user set specifically to prevent auto-processing.
+    if (task.isPaused) continue;
+
     if (task.phase === 'awaiting-review') {
       // Approve immediately — the phase-change event won't fire because the
       // task is already in this phase.

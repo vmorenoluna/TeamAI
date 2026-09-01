@@ -21,11 +21,21 @@ test.describe('Model Dropdown', () => {
 
       await expect(page.locator('text=Models').first()).toBeVisible({ timeout: 10_000 });
 
-      // Wait for model selects to appear (curated models load quickly via server action)
+      // Each of the 7 rows (Default + 5 roles + Exploration) fetches its own
+      // models independently — they usually share one deduped in-flight
+      // promise and resolve together, but under CI's slower/staggered
+      // hydration that dedup can miss (a row mounting after the shared
+      // promise already settled and was evicted from the cache re-fetches on
+      // its own). Wait for every "Loading models…" placeholder to clear
+      // before counting, instead of snapshotting count() right after the
+      // first select appears — otherwise this only proves the fastest row
+      // loaded, not that curated models finished loading across the board.
+      await expect(page.locator('text=Loading models…')).toHaveCount(0, { timeout: 10_000 });
+
+      // There should be multiple selects — one per row (Default + 5 role
+      // overrides + Exploration)
       const selects = page.locator('select');
       await expect(selects.first()).toBeVisible({ timeout: 5_000 });
-
-      // There should be multiple selects (provider + model per row)
       const count = await selects.count();
       expect(count).toBeGreaterThanOrEqual(6);
 

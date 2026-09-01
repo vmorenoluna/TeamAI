@@ -228,8 +228,86 @@ to change. All 59 tests in that file pass again.
 Re-ran the full `npm run test:e2e` suite a second time after fixing the
 `responsive-viewport.spec.ts` flake: **250/250 passed in 3.2 minutes**, fully clean.
 
+## Progress — session 3 (PR #8, first CI run)
+
+Pushed and opened PR #8. CI's `test-all` and `test-coverage` jobs each independently run
+the full `npm run test:e2e` suite (see "test-all and test-coverage both run E2E" below) —
+both surfaced failures that never reproduced locally (250/250 clean, twice, on Windows).
+Both are real, CI-environment-specific bugs — found and fixed:
+
+### `kanban-behaviors.spec.ts` › "Merge Locally and Open Pull Request buttons" — real
+### product bug: auto-mode's task adoption doesn't respect `isPaused`
+
+Root cause: `tests/e2e/auto-mode.spec.ts`'s "clicking auto mode button toggles it on" test
+enables *real* auto mode against the shared per-worker seed project. The instant it does,
+`auto-mode.ts`'s `_adoptStalledTasks()` scans that project for any task already sitting in
+`awaiting-review` or `pr-open` and immediately acts on it — `approveTask()` writes the new
+phase **synchronously, before any git/gh work** (`advancePhase(pipeline, next)` runs before
+`await executePhase(pipeline)` — see `review-actions.ts:220`). The seed project has exactly
+one task in each of those phases (`fix-navbar-dropdown-z-index-conflict`, awaiting-review;
+`refactor-migrate-api-to-v2-endpoints`, pr-open, fake PR #142) that four *other* spec files
+(`kanban-behaviors.spec.ts`, `task-detail-behaviors.spec.ts`) assert on staying in their
+seeded phase. Toggling auto mode back off afterward (this session's earlier fix) doesn't
+help — the phase write already happened by the time that runs. Whether this races depends
+on which spec files Playwright schedules onto the same worker, which is why it never
+reproduced in two clean local full-suite runs but hit reliably on CI's `ubuntu-latest`
+2-worker scheduling.
+
+Also found a real, narrower product bug while tracing this: `_adoptStalledTasks` never
+checked `task.isPaused`, unlike every other auto-resume path in the codebase
+(`recovery.ts`'s `autoResumeInterruptedTasks`/`sweepStalledTasks` both explicitly skip
+paused tasks — "the pause is deliberate and must only be lifted by clicking Resume in the
+UI, never by automated recovery"). Fixed `auto-mode.ts` to respect it there too.
+
+**Fix**: `auto-mode.spec.ts` now marks the two vulnerable seed tasks `isPaused: true`
+(directly on disk, matching the existing `writeTestSessionMap`/`writeTestLogFile` helper
+pattern) before toggling auto mode on, and restores them afterward in a `finally` block —
+using the now-real, respected `isPaused` guard to make this test's on/off round-trip a
+true no-op against shared fixtures, regardless of Playwright's worker scheduling. Verified:
+reran `auto-mode.spec.ts` + `kanban-behaviors.spec.ts` + `task-detail-behaviors.spec.ts` +
+`model-dropdown.spec.ts` together, single worker — 74/74 passed, including the specific
+test that failed on CI.
+
+### `model-dropdown.spec.ts` › "model select shows options after curated models load" —
+### test timing bug, not a product bug
+
+The settings page renders 7 independent `ModelRow` instances (Default + 5 role overrides +
+Exploration), each fetching curated models via a client-side in-flight-deduped call. They
+normally share one promise and resolve together, but the test asserted `count() >= 6`
+**immediately after only the first `<select>` became visible** — under CI's slower/
+staggered hydration, a later-mounting row can start its own independent fetch after the
+first one's promise already settled and was evicted from the dedup cache, so the rows
+don't all finish in the same tick. Got "Received: 1" instead of the real, eventual 7.
+
+**Fix**: wait for every `text=Loading models…` placeholder to clear (`toHaveCount(0)`)
+before counting selects, instead of snapshotting the count right after the first one
+appears. This waits for the actual terminal state — if models genuinely fail to load on
+some environment, the test still correctly fails (loading clears either way: success shows
+a `<select>`, failure shows a free-text `<input>` per `provider-config.tsx`'s
+`renderModelControl()`), it just no longer flags a real environment that's still mid-flight
+as broken.
+
+### `test-all` and `test-coverage` both run the full E2E suite — worth deciding, not fixing
+
+Per `.github/workflows/ci.yml`: `test-all` runs `npm run test:all` (the canonical merge
+gate) and `test-coverage` runs `npm run test:coverage` (informational, uploads a combined
+coverage report) — both include the full Playwright E2E suite, so every PR runs E2E twice,
+independently. This is *arguably* not pure waste — the two runs happening to disagree
+(as they did on this PR's first CI run: different single flakes in each) is itself a signal
+about flakiness that a single run wouldn't surface, which is exactly the kind of thing this
+whole doc has been chasing. But it does mean ~2x the CI minutes/wall-clock for the heaviest
+part of the suite on every PR. Options, roughly cheapest-to-implement first:
+1. Leave as-is — the redundancy has caught real bugs (this PR).
+2. Have `test-coverage` skip E2E and only cover unit/integration, accepting a coverage-report
+   gap for E2E-only code paths.
+3. Fold coverage collection into `test-all` itself (one E2E run, coverage collected
+   alongside) — cuts E2E CI time roughly in half, but couples the merge gate to coverage
+   instrumentation overhead.
+
+Not changed as part of this PR — this is a CI-cost/policy tradeoff for the repo owner to
+decide, not a bug fix.
+
 ### What's left
 
-- Push this branch and confirm CI's `test-all`/`test-coverage` jobs go green — that's the
-  real acceptance test, not just local runs (local Windows-specific quirks could still
-  differ from CI's environment).
+- Push these two additional fixes and confirm CI's `test-all`/`test-coverage` jobs go
+  green on the next run.
