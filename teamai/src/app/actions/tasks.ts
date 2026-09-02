@@ -2,6 +2,7 @@
 
 import { TaskStore } from '@/lib/task-store';
 import { getOrchestrator } from '@/lib/orchestrator';
+import { MAX_REVISION_SNAPSHOTS } from '@/lib/orchestrator/artifacts';
 import { readCommonArtifacts } from '@/lib/task-artifacts';
 import { getActiveProjectPath } from './projects';
 import { processManager } from '@/lib/process-manager';
@@ -381,7 +382,7 @@ export async function getTaskFull(taskId: string) {
   // view: a highest snapshot byte-identical to the live spec collapses into
   // that entry instead of double-counting it.
   const specVersions: Record<string, string> = {};
-  for (const version of [1, 2, 3, 4]) {
+  for (let version = 1; version <= MAX_REVISION_SNAPSHOTS; version++) {
     const vPath = join(dir, `spec_v${version}.md`);
     if (existsSync(vPath)) {
       specVersions[`v${version}`] = readFileSync(vPath, 'utf-8');

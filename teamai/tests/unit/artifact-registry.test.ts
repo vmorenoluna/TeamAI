@@ -22,6 +22,19 @@ function allFilesIn(record: Record<string, string[]>): Set<string> {
   return s;
 }
 
+// spec_v{N}.md / qa_report_v{N}.json are numbered families generated
+// programmatically up to MAX_REVISION_SNAPSHOTS (artifacts.ts) — the
+// registry documents each family with ONE entry using '{N}' as a
+// placeholder rather than one entry per revision number. This collapses
+// an actual numbered filename to its family template (e.g.
+// 'spec_v12.md' -> 'spec_v{N}.md') so it can be looked up against that
+// single entry; non-numbered filenames pass through unchanged.
+const NUMBERED_FAMILY_RE = /^(.*_v)\d+(\.\w+)$/;
+function toFamilyTemplate(file: string): string {
+  const m = file.match(NUMBERED_FAMILY_RE);
+  return m ? `${m[1]}{N}${m[2]}` : file;
+}
+
 // ── Registry coverage table ───────────────────────────────────────────────
 // Each entry: { file, usedIn, inPhaseArtifacts, inCleanupArtifacts,
 //               inRequiredArtifacts, inRevisionCleanup }
@@ -131,48 +144,12 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
     inRevisionCleanup: true,
   },
   // ── QA report versioned snapshots ───────────────────────────────────────
+  // One family entry for qa_report_v1.json .. qa_report_v{MAX_REVISION_SNAPSHOTS}.json
+  // — PHASE_ARTIFACTS generates all of them programmatically (artifacts.ts),
+  // and routeHumanFeedback's human-driven analyst path is uncapped, so the
+  // registry must cover the whole numbered range, not just the first few.
   {
-    file: 'qa_report_v1.json',
-    usedIn: [
-      'qa-review.ts (runQaReview versioned snapshot)',
-    ],
-    inPhaseArtifacts: true,
-    inCleanupArtifacts: false,
-    inRequiredArtifacts: false,
-    inRevisionCleanup: false,
-  },
-  {
-    file: 'qa_report_v2.json',
-    usedIn: [
-      'qa-review.ts (runQaReview versioned snapshot)',
-    ],
-    inPhaseArtifacts: true,
-    inCleanupArtifacts: false,
-    inRequiredArtifacts: false,
-    inRevisionCleanup: false,
-  },
-  {
-    file: 'qa_report_v3.json',
-    usedIn: [
-      'qa-review.ts (runQaReview versioned snapshot)',
-    ],
-    inPhaseArtifacts: true,
-    inCleanupArtifacts: false,
-    inRequiredArtifacts: false,
-    inRevisionCleanup: false,
-  },
-  {
-    file: 'qa_report_v4.json',
-    usedIn: [
-      'qa-review.ts (runQaReview versioned snapshot)',
-    ],
-    inPhaseArtifacts: true,
-    inCleanupArtifacts: false,
-    inRequiredArtifacts: false,
-    inRevisionCleanup: false,
-  },
-  {
-    file: 'qa_report_v5.json',
+    file: 'qa_report_v{N}.json',
     usedIn: [
       'qa-review.ts (runQaReview versioned snapshot)',
     ],
@@ -204,40 +181,13 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
     inRequiredArtifacts: false,
     inRevisionCleanup: false,
   },
+  // One family entry for spec_v1.md .. spec_v{MAX_REVISION_SNAPSHOTS}.md —
+  // see the qa_report_v{N}.json note above for why this isn't one entry
+  // per revision number.
   {
-    file: 'spec_v1.md',
+    file: 'spec_v{N}.md',
     usedIn: [
-      'review-actions.ts (beginSpecRevision renames the live spec.md here as the pre-revision baseline)',
-    ],
-    inPhaseArtifacts: true,
-    inCleanupArtifacts: false,
-    inRequiredArtifacts: false,
-    inRevisionCleanup: false,
-  },
-  {
-    file: 'spec_v2.md',
-    usedIn: [
-      'review-actions.ts (beginSpecRevision renames the live spec.md here on the second revision)',
-    ],
-    inPhaseArtifacts: true,
-    inCleanupArtifacts: false,
-    inRequiredArtifacts: false,
-    inRevisionCleanup: false,
-  },
-  {
-    file: 'spec_v3.md',
-    usedIn: [
-      'review-actions.ts (beginSpecRevision renames the live spec.md here on the third revision)',
-    ],
-    inPhaseArtifacts: true,
-    inCleanupArtifacts: false,
-    inRequiredArtifacts: false,
-    inRevisionCleanup: false,
-  },
-  {
-    file: 'spec_v4.md',
-    usedIn: [
-      'review-actions.ts (beginSpecRevision renames the live spec.md here on the fourth revision)',
+      'review-actions.ts (beginSpecRevision renames the live spec.md here at each revision)',
     ],
     inPhaseArtifacts: true,
     inCleanupArtifacts: false,
@@ -307,27 +257,34 @@ describe('Artifact registry coverage (T18 AC)', () => {
 
   for (const entry of REGISTRY_COVERAGE) {
     it(`${entry.file} is in the expected registries`, () => {
+      // A '{N}' entry is a family template — it has no literal file of that
+      // exact name, so check that at least one actual numbered file maps
+      // back to this template instead of an exact-name lookup.
+      const inSet = (set: Set<string>) => entry.file.includes('{N}')
+        ? Array.from(set).some(f => toFamilyTemplate(f) === entry.file)
+        : set.has(entry.file);
+
       // PHASE_ARTIFACTS
       if (entry.inPhaseArtifacts) {
-        expect(phaseFiles.has(entry.file),
+        expect(inSet(phaseFiles),
           `${entry.file} must be in PHASE_ARTIFACTS`).toBe(true);
       }
 
       // CLEANUP_ARTIFACTS
       if (entry.inCleanupArtifacts) {
-        expect(cleanupFiles.has(entry.file),
+        expect(inSet(cleanupFiles),
           `${entry.file} must be in CLEANUP_ARTIFACTS`).toBe(true);
       }
 
       // REQUIRED_ARTIFACTS
       if (entry.inRequiredArtifacts) {
-        expect(requiredFiles.has(entry.file),
+        expect(inSet(requiredFiles),
           `${entry.file} must be in REQUIRED_ARTIFACTS`).toBe(true);
       }
 
       // REVISION_CLEANUP_EXTRA
       if (entry.inRevisionCleanup) {
-        expect(revisionExtra.has(entry.file),
+        expect(inSet(revisionExtra),
           `${entry.file} must be in REVISION_CLEANUP_EXTRA`).toBe(true);
       }
     });
@@ -336,7 +293,7 @@ describe('Artifact registry coverage (T18 AC)', () => {
   it('every PHASE_ARTIFACTS file is accounted for in the coverage table', () => {
     const covered = new Set(REGISTRY_COVERAGE.filter(e => e.inPhaseArtifacts).map(e => e.file));
     for (const f of phaseFiles) {
-      expect(covered.has(f),
+      expect(covered.has(toFamilyTemplate(f)),
         `PHASE_ARTIFACTS contains "${f}" which has no coverage table entry — add one`).toBe(true);
     }
   });
@@ -344,7 +301,7 @@ describe('Artifact registry coverage (T18 AC)', () => {
   it('every CLEANUP_ARTIFACTS file is accounted for in the coverage table', () => {
     const covered = new Set(REGISTRY_COVERAGE.filter(e => e.inCleanupArtifacts).map(e => e.file));
     for (const f of cleanupFiles) {
-      expect(covered.has(f),
+      expect(covered.has(toFamilyTemplate(f)),
         `CLEANUP_ARTIFACTS contains "${f}" which has no coverage table entry — add one`).toBe(true);
     }
   });
@@ -352,7 +309,7 @@ describe('Artifact registry coverage (T18 AC)', () => {
   it('every REQUIRED_ARTIFACTS file is accounted for in the coverage table', () => {
     const covered = new Set(REGISTRY_COVERAGE.filter(e => e.inRequiredArtifacts).map(e => e.file));
     for (const f of requiredFiles) {
-      expect(covered.has(f),
+      expect(covered.has(toFamilyTemplate(f)),
         `REQUIRED_ARTIFACTS contains "${f}" which has no coverage table entry — add one`).toBe(true);
     }
   });
@@ -360,7 +317,7 @@ describe('Artifact registry coverage (T18 AC)', () => {
   it('every REVISION_CLEANUP_EXTRA file is accounted for in the coverage table', () => {
     const covered = new Set(REGISTRY_COVERAGE.filter(e => e.inRevisionCleanup).map(e => e.file));
     for (const f of revisionExtra) {
-      expect(covered.has(f),
+      expect(covered.has(toFamilyTemplate(f)),
         `REVISION_CLEANUP_EXTRA contains "${f}" which has no coverage table entry — add one`).toBe(true);
     }
   });
