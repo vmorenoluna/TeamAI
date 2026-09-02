@@ -196,7 +196,7 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
   {
     file: 'spec_revision_before.md',
     usedIn: [
-      'review-actions.ts (beginSpecRevision pre-revision marker)',
+      'RETIRED (rename-at-revision scheme) — beginSpecRevision renames spec.md to spec_v{R-1}.md instead of writing this marker',
       'phase-runners.ts (runSpec no-op guard baseline)',
     ],
     inPhaseArtifacts: true,
@@ -207,7 +207,7 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
   {
     file: 'spec_v1.md',
     usedIn: [
-      'phase-runners.ts (runSpec initial snapshot)',
+      'review-actions.ts (beginSpecRevision renames the live spec.md here as the pre-revision baseline)',
     ],
     inPhaseArtifacts: true,
     inCleanupArtifacts: false,
@@ -217,7 +217,7 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
   {
     file: 'spec_v2.md',
     usedIn: [
-      'phase-runners.ts (runSpec revision snapshot)',
+      'review-actions.ts (beginSpecRevision renames the live spec.md here on the second revision)',
     ],
     inPhaseArtifacts: true,
     inCleanupArtifacts: false,
@@ -227,7 +227,7 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
   {
     file: 'spec_v3.md',
     usedIn: [
-      'phase-runners.ts (runSpec revision snapshot)',
+      'review-actions.ts (beginSpecRevision renames the live spec.md here on the third revision)',
     ],
     inPhaseArtifacts: true,
     inCleanupArtifacts: false,
@@ -237,7 +237,7 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
   {
     file: 'spec_v4.md',
     usedIn: [
-      'phase-runners.ts (runSpec revision snapshot)',
+      'review-actions.ts (beginSpecRevision renames the live spec.md here on the fourth revision)',
     ],
     inPhaseArtifacts: true,
     inCleanupArtifacts: false,

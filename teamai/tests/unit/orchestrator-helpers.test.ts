@@ -5,7 +5,7 @@
  *   - logToOutput: timestamped output.log appends, warn (not throw) on failure
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -59,7 +59,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 
 // ── Imports after mocks ──
 
-import { logToOutput, updateSessionMap, startPhaseFromArtifacts, ensureSpecV1Snapshot } from '../../src/lib/orchestrator/helpers';
+import { logToOutput, updateSessionMap, startPhaseFromArtifacts } from '../../src/lib/orchestrator/helpers';
 
 // ── Helpers ──
 
@@ -140,32 +140,6 @@ describe('startPhaseFromArtifacts', () => {
   });
 });
 
-describe('ensureSpecV1Snapshot', () => {
-  it('snapshots spec.md as spec_v1.md when v1 is missing', () => {
-    writeFileSync(join(specPath, 'spec.md'), '# pre-seeded spec\n\nWritten outside the pipeline.');
-
-    ensureSpecV1Snapshot(specPath);
-
-    expect(existsSync(join(specPath, 'spec_v1.md'))).toBe(true);
-    expect(readFileSync(join(specPath, 'spec_v1.md'), 'utf-8')).toBe('# pre-seeded spec\n\nWritten outside the pipeline.');
-    expect(mockWarn).not.toHaveBeenCalled();
-  });
-
-  it('is a no-op when spec_v1.md already exists — never overwrites it', () => {
-    writeFileSync(join(specPath, 'spec.md'), '# revised content');
-    writeFileSync(join(specPath, 'spec_v1.md'), '# the true original');
-
-    ensureSpecV1Snapshot(specPath);
-
-    // v1 must stay exactly what it already was — this function only fills a
-    // gap, it never treats a later spec.md as a replacement for v1.
-    expect(readFileSync(join(specPath, 'spec_v1.md'), 'utf-8')).toBe('# the true original');
-  });
-
-  it('does nothing when spec.md does not exist', () => {
-    ensureSpecV1Snapshot(specPath);
-    expect(existsSync(join(specPath, 'spec_v1.md'))).toBe(false);
-    expect(mockWarn).not.toHaveBeenCalled();
-  });
-
-});
+// ensureSpecV1Snapshot was removed with the rename-at-revision scheme:
+// the live spec.md IS version 1, and the first revision renames it to
+// spec_v1.md — no proactive snapshot copy is ever needed.

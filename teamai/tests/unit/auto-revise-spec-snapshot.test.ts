@@ -1,8 +1,14 @@
 // @vitest-environment node
 
 /**
- * Tests autoReviseSpec's spec_revision_before.md pre-revision marker write:
- * a failed snapshot write must warn (not swallow).
+ * Tests autoReviseSpec's pre-revision handling under the rename-at-revision
+ * scheme: instead of copying spec.md to a spec_revision_before.md marker,
+ * beginSpecRevision RENAMES spec.md → spec_v{specRevision - 1}.md. The renamed
+ * file doubles as (a) the version history entry for the pre-revision spec and
+ * (b) the no-op guard's baseline in runSpecPhase.
+ *
+ * A failed rename must warn (not swallow) — losing the baseline would make
+ * the no-op guard silently pass on every future attempt.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, readFileSync, existsSync } from 'fs';
@@ -10,10 +16,12 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 
-const { mockWarn, mockWriteFileSync, realWriteFileSync } = vi.hoisted(() => ({
+const { mockWarn, mockWriteFileSync, realWriteFileSync, mockRenameSync, realRenameSync } = vi.hoisted(() => ({
   mockWarn: vi.fn(),
   mockWriteFileSync: vi.fn(),
   realWriteFileSync: { current: null as null | ((...args: unknown[]) => void) },
+  mockRenameSync: vi.fn(),
+  realRenameSync: { current: null as null | ((...args: unknown[]) => void) },
 }));
 
 vi.mock('../../src/lib/logger', () => ({
@@ -23,14 +31,17 @@ vi.mock('../../src/lib/logger', () => ({
   info: vi.fn(),
 }));
 
-// Override only writeFileSync with a controllable mock that defaults to the
-// real implementation (captured here so tests can delegate selectively).
+// Override writeFileSync and renameSync with controllable mocks that default
+// to the real implementations (captured here so tests can delegate selectively).
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
   realWriteFileSync.current = actual.writeFileSync as unknown as (...args: unknown[]) => void;
+  realRenameSync.current = actual.renameSync as unknown as (...args: unknown[]) => void;
   (mockWriteFileSync as unknown as { mockImplementation: (f: (...a: unknown[]) => void) => void })
     .mockImplementation((...args: unknown[]) => realWriteFileSync.current!(...args));
-  return { ...actual, writeFileSync: mockWriteFileSync };
+  (mockRenameSync as unknown as { mockImplementation: (f: (...a: unknown[]) => void) => void })
+    .mockImplementation((...args: unknown[]) => realRenameSync.current!(...args));
+  return { ...actual, writeFileSync: mockWriteFileSync, renameSync: mockRenameSync };
 });
 
 import { autoReviseSpec } from '../../src/lib/orchestrator/review-actions';
@@ -76,7 +87,7 @@ function makeCtx() {
   return { root, specPath, pipeline, deps };
 }
 
-describe('autoReviseSpec — pre-revision marker snapshot', () => {
+describe('autoReviseSpec — rename-at-revision baseline', () => {
   let ctx: ReturnType<typeof makeCtx>;
 
   beforeEach(() => {
@@ -88,29 +99,33 @@ describe('autoReviseSpec — pre-revision marker snapshot', () => {
     try { rmSync(ctx.root, { recursive: true, force: true }); } catch { /* best-effort */ }
   });
 
-  it('snapshots the pre-revision marker without writing spec_v{N}.md', async () => {
+  it('renames spec.md to spec_v{specRevision-1}.md as the pre-revision baseline', async () => {
     realWriteFileSync.current!(join(ctx.specPath, 'spec.md'), '# original spec');
+    // Fresh task: specRevision starts at 1, autoReviseSpec bumps it to 2,
+    // so the pre-revision spec is renamed to spec_v1.md.
+
     await autoReviseSpec(ctx.pipeline as never, ctx.deps as never);
     expect(mockWarn).not.toHaveBeenCalled();
+    expect(ctx.pipeline.specRevision).toBe(2);
 
-    // The pre-revision baseline lives in the dedicated marker for the no-op guard…
-    expect(readFileSync(join(ctx.specPath, 'spec_revision_before.md'), 'utf-8')).toBe('# original spec');
-    // …and spec_v{N}.md is NOT written until the revision completes, so an
-    // in-flight revision never surfaces as a finished version in the UI.
+    // The pre-revision spec now lives at the previous version number…
+    expect(readFileSync(join(ctx.specPath, 'spec_v1.md'), 'utf-8')).toBe('# original spec');
+    // …and spec.md is gone until the analyst writes the revised spec there.
+    expect(existsSync(join(ctx.specPath, 'spec.md'))).toBe(false);
+    // The old marker file scheme is retired.
+    expect(existsSync(join(ctx.specPath, 'spec_revision_before.md'))).toBe(false);
+    // The in-flight revision has NOT created spec_v2.md — the analyst writes
+    // the revised spec to spec.md, which the versions UI surfaces live.
     expect(existsSync(join(ctx.specPath, 'spec_v2.md'))).toBe(false);
   });
 
-  it('warns (does not throw) when the spec snapshot write fails', async () => {
+  it('warns (does not throw) when the pre-revision rename fails', async () => {
     realWriteFileSync.current!(join(ctx.specPath, 'spec.md'), '# original spec');
 
-    let calls = 0;
-    mockWriteFileSync.mockImplementation((...args: unknown[]) => {
-      calls += 1;
-      // 1st write = spec_revision_feedback.md (writeSpecRevisionFeedback);
-      // 2nd = the spec_revision_before.md pre-revision marker.
-      if (calls === 2) throw new Error('disk full');
-      return realWriteFileSync.current!(...args);
-    });
+    mockRenameSync.mockImplementation(((from: unknown, to: unknown) => {
+      if (String(to).includes('spec_v1.md')) throw new Error('disk full');
+      return realRenameSync.current!(from, to);
+    }) as never);
 
     await expect(autoReviseSpec(ctx.pipeline as never, ctx.deps as never)).resolves.toBeUndefined();
 

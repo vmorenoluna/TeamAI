@@ -179,10 +179,13 @@ describe('routeHumanFeedback', () => {
       message: 'Derive the formula from first principles',
     });
     expect(existsSync(join(ctx.specPath, 'plan.json'))).toBe(true);
-    expect(existsSync(join(ctx.specPath, 'spec.md'))).toBe(true);
+    // The pre-revision spec was renamed to spec_v1.md (the revision baseline)
+    // — spec.md itself is absent until the analyst writes the revised spec.
+    expect(existsSync(join(ctx.specPath, 'spec.md'))).toBe(false);
+    expect(readFileSync(join(ctx.specPath, 'spec_v1.md'), 'utf-8')).toBe('# spec');
   });
 
-  it('routes the analyst into revision mode: writes feedback + snapshots the pre-revision spec', async () => {
+  it('routes the analyst into revision mode: writes feedback + renames the pre-revision spec to spec_v{R-1}.md', async () => {
     seedArtifacts(ctx.specPath);
     await routeHumanFeedback(ctx.pipeline, ctx.deps as never, {
       target: 'analyst',
@@ -195,12 +198,15 @@ describe('routeHumanFeedback', () => {
       'Derive the formula from first principles',
     );
 
-    // Pre-revision spec snapshotted to the dedicated marker so runSpecPhase's
-    // no-op guard has a correct baseline (spec_v{N}.md is written on completion).
+    // The pre-revision spec is RENAMED to the previous version number — it
+    // doubles as the version-history entry and the no-op guard's baseline
+    // (the old spec_revision_before.md marker scheme is retired).
     expect(ctx.pipeline.specRevision).toBe(2);
-    expect(readFileSync(join(ctx.specPath, 'spec_revision_before.md'), 'utf-8')).toBe('# spec');
-    // The revision has not completed — spec_v2.md must not exist yet, or the
-    // UI would surface a phantom version before the analyst finishes.
+    expect(readFileSync(join(ctx.specPath, 'spec_v1.md'), 'utf-8')).toBe('# spec');
+    expect(existsSync(join(ctx.specPath, 'spec.md'))).toBe(false);
+    expect(existsSync(join(ctx.specPath, 'spec_revision_before.md'))).toBe(false);
+    // The revision has not completed — no spec_v2.md exists yet; the analyst
+    // writes the revised spec to spec.md, which the versions UI surfaces live.
     expect(existsSync(join(ctx.specPath, 'spec_v2.md'))).toBe(false);
     expect(ctx.deps.savePipelineState).toHaveBeenCalled();
   });
