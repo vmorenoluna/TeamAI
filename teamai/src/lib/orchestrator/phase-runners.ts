@@ -208,11 +208,14 @@ export async function runSpecPhase(
         warn('spec', `No-op spec revision detected for ${pipeline.taskId} — spec.md unchanged from the pre-revision baseline`);
         deps.savePipelineState(pipeline);
         deps.advancePhase(pipeline, 'awaiting-review');
-        // The unchanged live copy is a duplicate of the baseline — remove it so
-        // the versions UI shows exactly one version while the human reviews.
-        try { if (existsSync(specMdPath)) unlinkSync(specMdPath); } catch (err) {
-          warn('spec', `Failed to remove unchanged spec.md after no-op revision for ${pipeline.taskId}`, err);
-        }
+        // Leave spec.md in place even though it duplicates the baseline: the
+        // versions UI already dedupes a live spec that's byte-identical to
+        // its highest snapshot (getTaskFull in tasks.ts), and spec.md must
+        // keep existing so a follow-up "Request Changes → Analyst" can find
+        // it — routeHumanFeedback's analyst target only enters revision mode
+        // when spec.md exists, so deleting it here would silently downgrade
+        // the next revision attempt into a from-scratch /spec run that
+        // discards the human's feedback and orphans this baseline.
         return;
       }
     } catch (err) {

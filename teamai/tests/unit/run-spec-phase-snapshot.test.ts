@@ -179,7 +179,7 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
     expect(mockWarn).not.toHaveBeenCalled();
   });
 
-  it('parks in awaiting-review and removes the duplicate spec.md when the revision is a no-op', async () => {
+  it('parks in awaiting-review and keeps the duplicate spec.md when the revision is a no-op', async () => {
     const { writeFileSync, existsSync, readFileSync } = await import('fs');
     // The analyst "revised" spec.md back to exactly the pre-revision content.
     writeFileSync(join(ctx.specPath, 'spec_v1.md'), '# original spec\n\nold formula');
@@ -196,9 +196,11 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
       'spec',
       expect.stringContaining('No-op spec revision detected'),
     );
-    // The unchanged live copy is a duplicate of the v1 baseline — remove it so
-    // the versions UI shows exactly one version while the human reviews.
-    expect(existsSync(join(ctx.specPath, 'spec.md'))).toBe(false);
+    // spec.md is left in place (duplicating v1) — the versions UI dedupes it
+    // (getTaskFull in tasks.ts), and a follow-up "Request Changes → Analyst"
+    // requires spec.md to exist to enter revision mode instead of silently
+    // falling back to a from-scratch /spec run.
+    expect(readFileSync(join(ctx.specPath, 'spec.md'), 'utf-8')).toBe('# original spec\n\nold formula');
     expect(readFileSync(join(ctx.specPath, 'spec_v1.md'), 'utf-8')).toBe('# original spec\n\nold formula');
     expect(existsSync(join(ctx.specPath, 'spec_revision_feedback.md'))).toBe(false);
   });
@@ -244,26 +246,5 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
     writeFileSync(join(ctx.specPath, 'spec.md'), '# original spec');
     await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
     expect(mockWarn).not.toHaveBeenCalled();
-  });
-
-  it('warns (does not throw) when the no-op duplicate cleanup fails', async () => {
-    const { writeFileSync } = await import('fs');
-    writeFileSync(join(ctx.specPath, 'spec_v1.md'), '# original spec\n\nold formula');
-    writeFileSync(join(ctx.specPath, 'spec.md'), '# original spec\n\nold formula');
-    writeFileSync(join(ctx.specPath, 'spec_revision_feedback.md'), 'revise the formula');
-    ctx.pipeline.specRevision = 2;
-
-    // Make unlinkSync throw on the duplicate spec.md during the no-op cleanup.
-    mockUnlinkSync.mockImplementation(((p: unknown) => {
-      if (String(p).endsWith('spec.md')) throw new Error('EBUSY');
-      return realUnlinkSync.current!(p);
-    }) as never);
-
-    await expect(runSpecPhase(ctx.pipeline as never, ctx.deps as never)).resolves.toBeUndefined();
-    expect(mockWarn).toHaveBeenCalledWith(
-      'spec',
-      expect.stringContaining('Failed to remove unchanged spec.md after no-op revision'),
-      expect.anything(),
-    );
   });
 });

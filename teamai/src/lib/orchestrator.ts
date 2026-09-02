@@ -294,7 +294,13 @@ export class Orchestrator {
       branch,
       qaAttempt: 0,
       maxQaAttempts: config.maxQaAttempts,
-      specRevision: 1,
+      // Restore from disk (not hardcoded 1) — moveTaskToPhase can re-enter
+      // runTask on a task that already has spec_v*.md history (e.g. reset to
+      // 'plan' keeps prior spec revisions on disk). Under the rename-at-
+      // revision scheme, beginSpecRevision renames spec.md straight onto
+      // spec_v{specRevision - 1}.md — a stale specRevision here would collide
+      // with and clobber a real archived version. Mirrors restorePipeline.
+      specRevision: this._restoreSpecRevision(taskId),
       qaRevision: 0,
     };
 
@@ -594,11 +600,12 @@ export class Orchestrator {
   /**
    * Restore specRevision from persistent state or by counting on-disk snapshots.
    *
-   * When the in-memory pipeline is destroyed (runTask completes, server restarts),
-   * restorePipeline() and the retry/restart paths create a fresh pipeline with
-   * specRevision: 1. This method recovers the real revision count so the next
-   * autoReviseSpec() call creates spec_v{N+1}.md instead of overwriting
-   * spec_v1.md repeatedly.
+   * When the in-memory pipeline is destroyed (runTask completes, server
+   * restarts), restorePipeline() and runTask() itself (retry/restart/
+   * moveTaskToPhase paths) both call this rather than hardcoding
+   * specRevision: 1 — this method recovers the real revision count so the
+   * next autoReviseSpec()/beginSpecRevision() call renames spec.md onto
+   * spec_v{N+1}.md instead of clobbering an existing spec_v{N}.md.
    *
    * Precedence:
    *   1. .pipeline_state.json (persisted by savePipelineState during autoReviseSpec)
