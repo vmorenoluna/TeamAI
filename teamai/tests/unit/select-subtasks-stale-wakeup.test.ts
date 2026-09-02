@@ -20,6 +20,16 @@
  * isolation that matches nothing in this round's selection is dropped (with
  * a log line) instead of silently emptying the selection; one that matches
  * something is still applied, wakeupUntil or not.
+ *
+ * A second, related staleness mode surfaced on the very same task after it
+ * was replanned: the same task's plan.json was scoped-replanned to correct
+ * an earlier subtask, resetting it to `completed: false`, while task.json
+ * still carried the OLD wakeupSubtaskId pointing at a LATER subtask that
+ * depends_on the one just reset. Plain selection-membership isn't enough
+ * there — the later subtask is trivially "in" the selection (it was never
+ * completed either), so isolation would dispatch it while skipping the
+ * dependency the replan just invalidated. Isolation now also requires every
+ * depends_on id of the wakeup subtask to be completed in the full plan.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
@@ -156,6 +166,38 @@ describe('selectSubtasks — stale wakeup isolation must not empty the QA-rework
         pipeline(deferredSpecPath, { wakeupSubtaskId: 2, wakeupUntil: undefined }) as never,
       );
       expect(selection.effectiveSubtasks.map(s => s.id)).toEqual([2]);
+    } finally {
+      try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+
+  it('wakeup subtask whose dependency was reset by a replan is treated as stale, not isolated', () => {
+    // Shape after a scoped replan corrects an earlier subtask (resetting it
+    // to completed: false) while task.json still carries the OLD
+    // wakeupSubtaskId pointing at a LATER subtask that depends on it. Every
+    // subtask here is `!completed`, so plain selection membership would
+    // trivially include subtask 3 — the bug this test guards against is
+    // isolating to it anyway and running it before its now-incomplete
+    // dependency (subtask 2) has been redone.
+    const root = join(tmpdir(), `teamai-replan-stale-${randomUUID().slice(0, 8)}`);
+    const replanSpecPath = join(root, 'task-slug');
+    mkdirSync(replanSpecPath, { recursive: true });
+    writeFileSync(join(replanSpecPath, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'S1', description: '', files: ['src/a.ts'], acceptance_criteria: ['A works'], depends_on: [], completed: true },
+        { id: 2, title: 'S2 (reset by replan)', description: '', files: ['src/b.ts'], acceptance_criteria: ['B works'], depends_on: [], completed: false },
+        { id: 3, title: 'S3 (stale wakeup target, depends on S2)', description: '', files: ['src/c.ts'], acceptance_criteria: ['C works'], depends_on: [2], completed: false },
+      ],
+    }));
+
+    try {
+      const selection = selectSubtasks(
+        pipeline(replanSpecPath, { wakeupSubtaskId: 3, wakeupUntil: undefined }) as never,
+      );
+      // Isolation is dropped as stale — the full non-completed selection
+      // (subtasks 2 and 3, in dependency order via parallel groups) runs
+      // instead of isolating to subtask 3 alone.
+      expect(selection.effectiveSubtasks.map(s => s.id)).toEqual([2, 3]);
     } finally {
       try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
     }
