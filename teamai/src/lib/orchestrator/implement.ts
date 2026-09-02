@@ -525,9 +525,34 @@ export function selectSubtasks(
     effectiveSubtasks = subtasksToRun;
   }
 
-  // ADR 002: Wakeup isolation — only re-enter the wakeup-pending subtask
+  // ADR 002: Wakeup isolation — only re-enter the wakeup-pending subtask.
+  // Gate this on whether the wakeup subtask is actually still part of this
+  // round's selection, NOT on pipeline.wakeupUntil — orchestrator.ts's
+  // _fireWakeup clears wakeupUntil on the pipeline BEFORE re-entering this
+  // phase for a genuine resume (while deliberately leaving wakeupSubtaskId
+  // set, for the re-entry prompt below), so wakeupUntil is already falsy at
+  // this point on every real resume too, not just stale ones. Gating on it
+  // would disable isolation for real resumes as well, letting deferred
+  // subtasks (never started) run early — breaking the "deferred until the
+  // wakeup subtask's artifact is committed" guarantee this filter exists
+  // for. See tests/unit/orchestrator-robustness.test.ts's
+  // "only re-enters the wakeup subtask — deferred subtasks are excluded".
   if (pipeline.wakeupSubtaskId != null) {
-    effectiveSubtasks = effectiveSubtasks.filter(s => s.id === pipeline.wakeupSubtaskId);
+    const isolated = effectiveSubtasks.filter(s => s.id === pipeline.wakeupSubtaskId);
+    if (isolated.length > 0) {
+      effectiveSubtasks = isolated;
+    } else {
+      // Wakeup subtask isn't part of this round's selection (e.g. QA
+      // flagged a different subtask on bounce-back) — drop the stale
+      // isolation instead of silently emptying the run. Without this, the
+      // bounce fell straight through worktree setup to the mandatory push
+      // and on to the next QA round, burning QA attempts with zero rework
+      // dispatched. See tests/unit/select-subtasks-stale-wakeup.test.ts.
+      const staleWakeupSubtaskId = pipeline.wakeupSubtaskId;
+      pipeline.wakeupSubtaskId = undefined;
+      logToOutput(pipeline.specPath,
+        `\n[QA-REWORK] Stale wakeup isolation for subtask ${staleWakeupSubtaskId} cleared — it is not part of this round's selection\n`);
+    }
   }
 
   const groups = new Map<string, PlanSubtask[]>();
