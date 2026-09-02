@@ -179,6 +179,21 @@ test.describe('Roadmap — Item Cards', () => {
 
     await page.goto('/roadmap');
 
+    // convertToTask (a Server Action) writes to a small local fixture and can
+    // resolve fast enough that the whole click → "Converting…" →
+    // resolved cycle completes before this test's assertion ever samples the
+    // DOM — a race, not a slowness problem. Delay the Server Action POST so
+    // the transient loading state is guaranteed observable (same
+    // next-action interception pattern as add-project-error.spec.ts, which
+    // aborts/500s instead of delaying).
+    await page.route('**', async (route) => {
+      const req = route.request();
+      if (req.method() === 'POST' && req.headers()['next-action']) {
+        await new Promise(r => setTimeout(r, 300));
+      }
+      await route.continue();
+    });
+
     const convertBtn = page.locator('text=+ Convert to ticket').first();
     await convertBtn.click();
 
