@@ -582,4 +582,30 @@ describe('getTaskFull — returns specPath', () => {
     expect(result.specVersions).toEqual({ v1: '# Pre-revision spec' });
     expect(result.spec).toBeNull();
   });
+
+  // routeHumanFeedback's "Request Changes → Analyst" path has no cap on
+  // pipeline.specRevision (unlike autoReviseSpec's QA-driven cap of 3), so
+  // a human can push a task past spec_v4.md. Before this fix, getTaskFull's
+  // spec-version loop was hardcoded to [1, 2, 3, 4] and silently dropped
+  // v5+ from the Spec tab — this asserts the full history stays visible.
+  it('surfaces a 5th+ archived version instead of silently dropping it', async () => {
+    seedVersionTask('versions-deep-slug', 'task-versions-deep');
+    const dir = join(TEST_DIR, '.teamai', 'versions-deep-slug');
+    for (let v = 1; v <= 5; v++) {
+      writeFileSync(join(dir, `spec_v${v}.md`), `# v${v} content`);
+    }
+    writeFileSync(join(dir, 'spec.md'), '# v6 content (live)');
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull('task-versions-deep');
+
+    expect(result.specVersions).toEqual({
+      v1: '# v1 content',
+      v2: '# v2 content',
+      v3: '# v3 content',
+      v4: '# v4 content',
+      v5: '# v5 content',
+      v6: '# v6 content (live)',
+    });
+  });
 });
