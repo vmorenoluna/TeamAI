@@ -9,7 +9,7 @@ import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitF
 import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelineState, pipelineAdvancePhase } from './orchestrator/pipeline-state';
 import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedback';
 import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './orchestrator/phase-runners';
-import { parseSessionLimitReset, extractPrUrl, phaseHeader, logToOutput, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, resolveWorktreeDirName, computePipelineConfig, buildSessionOpts, startPhaseFromArtifacts, ensureSpecV1Snapshot, type PipelineConfig } from './orchestrator/helpers';
+import { parseSessionLimitReset, extractPrUrl, phaseHeader, logToOutput, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, resolveWorktreeDirName, computePipelineConfig, buildSessionOpts, startPhaseFromArtifacts, type PipelineConfig } from './orchestrator/helpers';
 import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn } from './orchestrator/worktree-ops';
 import { buildTicketMessageForPipeline } from './orchestrator/artifact-commit';
 import { appendSessionTicket, synthesizeDoneTicket } from './history-session';
@@ -175,15 +175,6 @@ export class Orchestrator {
 
     const hasSpec = existsSync(path.join(dir, 'spec.md'));
     const hasPlan = existsSync(path.join(dir, 'plan.json'));
-
-    // Guarantee spec_v1.md exists whenever spec.md does — this is the
-    // earliest point the orchestrator can see a pre-existing spec.md (e.g.
-    // one authored outside the pipeline), before any branch below might
-    // route straight past the `spec` phase and skip runSpecPhase's own v1
-    // write. A no-op if v1 is already there. (If targetPhase === 'spec'
-    // below, clearArtifacts wipes it again moments later — that's fine, an
-    // explicit restart-from-spec is meant to discard prior history too.)
-    if (hasSpec) ensureSpecV1Snapshot(dir);
 
     // Determine actual start phase and clear stale artifacts
     let startPhase: PipelinePhase = 'spec';
@@ -637,7 +628,14 @@ export class Orchestrator {
         maxN = v;
       }
     }
-    return maxN;
+    // Under the rename-at-revision scheme the live spec.md is one version
+    // AHEAD of the highest snapshot (snapshots = completed revisions − the
+    // pre-revision archives; the current spec is always un-archived at
+    // spec.md). The next beginSpecRevision renames spec.md to
+    // spec_v{maxN + 1}.md, so the restored counter must be maxN + 1 — under
+    // the old copy scheme maxN alone was correct, and reusing it here would
+    // clobber the highest snapshot on the next revision.
+    return maxN + 1;
   }
 
   /**
@@ -881,7 +879,6 @@ export class Orchestrator {
       // cleanupTaskArtifacts.
       const hasSpec = existsSync(path.join(dir, 'spec.md'));
       const hasPlan = existsSync(path.join(dir, 'plan.json'));
-      if (hasSpec) ensureSpecV1Snapshot(dir);
       startPhase = startPhaseFromArtifacts(hasPlan, hasSpec);
     }
 

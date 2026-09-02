@@ -147,10 +147,14 @@ export async function runSpecPhase(
   const humanDirective = humanDirectiveFor(pipeline.specPath, 'analyst');
 
   if (isRevision) {
+    // beginSpecRevision renamed the pre-revision spec to spec_v{R-1}.md — the
+    // analyst reads THAT baseline (spec.md no longer holds the original), and
+    // writes the revised spec to spec.md.
+    const baselineFile = `spec_v${pipeline.specRevision - 1}.md`;
     processManager.sendMessage(sessionId,
       humanDirective +
       `REVISION: ${pipeline.description}\n\n` +
-      `Read the existing spec at: \`${agentSpecPath}/spec.md\`\n` +
+      `Read the existing spec at: \`${agentSpecPath}/${baselineFile}\`\n` +
       `Read the spec revision feedback at: \`${agentSpecPath}/spec_revision_feedback.md\`\n` +
       `Revise the spec to address ALL concerns in the feedback.\n` +
       `Preserve parts of the spec that are still valid — only change what the feedback asks for.\n` +
@@ -167,79 +171,73 @@ export async function runSpecPhase(
   }
   consumeFeedbackIfDue(pipeline.specPath, 'spec');
 
-  // No-op revision guard: beginSpecRevision (review-actions.ts) snapshots the
-  // pre-revision spec to spec_revision_before.md before this session runs.
-  // If spec.md comes back byte-identical to that snapshot, the analyst
-  // session completed without actually addressing spec_revision_feedback.md
-  // — advancing to `plan` would silently replay the same QA failure through
-  // a full plan → implement → qa-review cycle. Park for human review instead
-  // of trusting the agent's self-reported summary.
+  // No-op revision guard: beginSpecRevision (review-actions.ts) renamed the
+  // pre-revision spec to spec_v{R-1}.md before this session ran. If spec.md
+  // comes back byte-identical to that baseline, the analyst session completed
+  // without actually addressing spec_revision_feedback.md — advancing to
+  // `plan` would silently replay the same QA failure through a full plan →
+  // implement → qa-review cycle. Park for human review instead of trusting
+  // the agent's self-reported summary.
   if (isRevision) {
-    const preRevisionSnapshotPath = path.join(pipeline.specPath, 'spec_revision_before.md');
+    const baselinePath = path.join(pipeline.specPath, `spec_v${pipeline.specRevision - 1}.md`);
     const specMdPath = path.join(pipeline.specPath, 'spec.md');
+    let after: string | null = null;
     try {
-      const before = existsSync(preRevisionSnapshotPath) ? readFileSync(preRevisionSnapshotPath, 'utf-8') : null;
-      const after = existsSync(specMdPath) ? readFileSync(specMdPath, 'utf-8') : null;
+      after = existsSync(specMdPath) ? readFileSync(specMdPath, 'utf-8') : null;
+    } catch (err) {
+      warn('spec', `Failed to read revised spec for ${pipeline.taskId}`, err);
+    }
+    if (after === null) {
+      // A missing post-session spec.md (crash, or the analyst deleted it)
+      // would break every downstream phase — park for human review rather
+      // than advancing to plan without a spec.
+      logToOutput(pipeline.specPath,
+        `\n[SPEC] Revision produced no spec.md — parking in awaiting-review for human review.\n`);
+      warn('spec', `Spec revision produced no spec.md for ${pipeline.taskId} — parking for human review`);
+      deps.savePipelineState(pipeline);
+      deps.advancePhase(pipeline, 'awaiting-review');
+      return;
+    }
+    try {
+      const before = existsSync(baselinePath) ? readFileSync(baselinePath, 'utf-8') : null;
       if (before !== null && before === after) {
         logToOutput(pipeline.specPath,
-          `\n[SPEC] No-op revision detected — spec.md is byte-identical to the pre-revision snapshot ` +
-          `(${path.basename(preRevisionSnapshotPath)}). The analyst session completed without addressing ` +
+          `\n[SPEC] No-op revision detected — spec.md is byte-identical to the pre-revision baseline ` +
+          `(${path.basename(baselinePath)}). The analyst session completed without addressing ` +
           `spec_concerns from this round. Pausing in awaiting-review instead of advancing to plan.\n`);
-        warn('spec', `No-op spec revision detected for ${pipeline.taskId} — spec.md unchanged from the pre-revision snapshot`);
+        warn('spec', `No-op spec revision detected for ${pipeline.taskId} — spec.md unchanged from the pre-revision baseline`);
         deps.savePipelineState(pipeline);
         deps.advancePhase(pipeline, 'awaiting-review');
-        // The marker served its purpose as the no-op guard's baseline.
-        try { if (existsSync(preRevisionSnapshotPath)) unlinkSync(preRevisionSnapshotPath); } catch { /* best-effort */ }
+        // The unchanged live copy is a duplicate of the baseline — remove it so
+        // the versions UI shows exactly one version while the human reviews.
+        try { if (existsSync(specMdPath)) unlinkSync(specMdPath); } catch (err) {
+          warn('spec', `Failed to remove unchanged spec.md after no-op revision for ${pipeline.taskId}`, err);
+        }
         return;
       }
     } catch (err) {
       // A failed comparison must not silently mask a real no-op — surface it,
       // but don't block the pipeline on a diagnostic-only check.
-      warn('spec', `Failed to compare revised spec against pre-revision snapshot for ${pipeline.taskId}`, err);
+      warn('spec', `Failed to compare revised spec against pre-revision baseline for ${pipeline.taskId}`, err);
     }
-
-    // Versioned snapshot: archive the completed revision as spec_v{N}.md.
-    // Only written now (after the no-op guard) so an in-flight revision is
-    // never surfaced as a finished version in the spec comparison UI.
-    //
-    // spec_v1.md is guaranteed to already exist by this point — either
-    // written by the non-revision branch below on a normal first /spec run,
-    // or by ensureSpecV1Snapshot (orchestrator/helpers.ts), called from
-    // moveTaskToPhase/resumeTask the moment a pre-existing spec.md is first
-    // detected, always before a task could reach a revision. And
-    // pipeline.specRevision is always incremented to at least 2 before a
-    // revision runs (autoReviseSpec / routeHumanFeedback's analyst target
-    // both do this before calling beginSpecRevision), so this write can
-    // never land on spec_v1.md and overwrite it with the revised text.
-    try {
-      if (existsSync(specMdPath)) {
-        writeFileSync(
-          path.join(pipeline.specPath, `spec_v${pipeline.specRevision}.md`),
-          readFileSync(specMdPath, 'utf-8'),
-        );
-      }
-    } catch (err) {
-      // A failed snapshot loses the revision history — surface it, but don't
-      // block the pipeline on an archive-only write.
-      warn('spec', `Failed to snapshot spec v${pipeline.specRevision} for ${pipeline.taskId}`, err);
-    }
-
-    // Clean up the pre-revision marker — its only purpose is the no-op guard.
-    try { if (existsSync(preRevisionSnapshotPath)) unlinkSync(preRevisionSnapshotPath); } catch { /* best-effort */ }
+    // No archive copy here: the baseline rename in beginSpecRevision IS the
+    // version history (v{R-1}), and the revised spec lives on as spec.md —
+    // which the versions UI surfaces live as v{R}. Copying again would
+    // double-count the revision in the spec versions UI.
   } else {
-    // Versioned snapshot: preserve the initial spec as v1 so every version
-    // has a numbered file on disk — v1 = original spec, v2+ = revisions.
-    try {
-      const specMdPath = path.join(pipeline.specPath, 'spec.md');
-      if (existsSync(specMdPath)) {
-        writeFileSync(path.join(pipeline.specPath, 'spec_v1.md'), readFileSync(specMdPath, 'utf-8'));
-        pipeline.specRevision = 1;
-        deps.savePipelineState(pipeline);
-      }
-    } catch (err) {
-      // A failed v1 snapshot loses the original-spec history and leaves
-      // specRevision unset. Surface it.
-      warn('spec', `Failed to snapshot spec v1 for ${pipeline.taskId}`, err);
+    // First (non-revision) run: no snapshot copy — the live spec.md IS v1
+    // under the rename-at-revision scheme. It only becomes a numbered file
+    // when beginSpecRevision renames it at the task's first revision, so a
+    // task with no revisions has exactly one spec file on disk.
+    if (!existsSync(path.join(pipeline.specPath, 'spec.md'))) {
+      // The analyst produced no spec — advancing to plan without one would
+      // break every downstream phase. Park for human review.
+      logToOutput(pipeline.specPath,
+        `\n[SPEC] Spec phase produced no spec.md — parking in awaiting-review for human review.\n`);
+      warn('spec', `Spec phase produced no spec.md for ${pipeline.taskId} — parking for human review`);
+      deps.savePipelineState(pipeline);
+      deps.advancePhase(pipeline, 'awaiting-review');
+      return;
     }
   }
 

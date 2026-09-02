@@ -68,6 +68,10 @@ interface SeedTask {
   rateLimitedUntil?: string;
   /** IDs of tasks this task depends on (blocked by). */
   dependencies?: string[];
+  /** Archived spec versions (spec_v{N}.md) — simulates a task whose spec has
+   *  been revised. The live spec.md (seed.spec) is the CURRENT version; the
+   *  UI merges it in as v{max+1} and these entries become v1..vN. */
+  specVersions?: Record<number, string>;
   /** Human reviewer feedback for awaiting-review tasks. */
   humanFeedback?: string;
   /** Write a session_map.json to simulate an active pipeline session. */
@@ -112,7 +116,11 @@ const SAMPLE_TASKS: SeedTask[] = [
     title: 'Docs: Update README with API reference',
     description: 'Document the public API endpoints',
     phase: 'qa-review',
-    spec: '# Spec: API Documentation\n\n## Endpoints to Document\n- `GET /api/tasks`\n- `POST /api/tasks`\n- `GET /api/tasks/:id`',
+    spec: '# Spec: API Documentation (revised)\n\n## Endpoints to Document\n- `GET /api/tasks`\n- `POST /api/tasks`\n- `GET /api/tasks/:id`\n- `DELETE /api/tasks/:id`\n\n## Changelog\nRevised after QA flagged the missing DELETE endpoint.',
+    // One archived pre-revision spec → UI shows v1 (snapshot) + v2 (live).
+    specVersions: {
+      1: '# Spec: API Documentation\n\n## Endpoints to Document\n- `GET /api/tasks`\n- `POST /api/tasks`\n- `GET /api/tasks/:id`',
+    },
     qaReport: {
       overall: 'FAIL',
       criteria: [
@@ -344,6 +352,13 @@ function writeSpec(dir: string, seed: SeedTask): void {
   }
 }
 
+function writeSpecVersions(dir: string, seed: SeedTask): void {
+  if (!seed.specVersions) return;
+  for (const [num, content] of Object.entries(seed.specVersions)) {
+    writeFileSync(join(dir, `spec_v${num}.md`), content);
+  }
+}
+
 function writePlan(dir: string, seed: SeedTask): void {
   if (seed.plan) {
     writeFileSync(join(dir, 'plan.json'), JSON.stringify(seed.plan, null, 2));
@@ -542,6 +557,7 @@ async function main(): Promise<void> {
     const taskId = makeTaskId();
     writeTask(taskDir, taskId, seed);
     writeSpec(taskDir, seed);
+    writeSpecVersions(taskDir, seed);
 
     if (withPlans || seed.plan) {
       writePlan(taskDir, seed);
