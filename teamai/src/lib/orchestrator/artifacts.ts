@@ -29,7 +29,26 @@
  *   `REVISION_CLEANUP_EXTRA` lists human-feedback / QA files that
  *   must be removed when the spec is revised.  Used by
  *   `review-actions.autoReviseSpec()`.
+ *
+ * - **Revision-snapshot numbering ceiling:**
+ *   `MAX_REVISION_SNAPSHOTS` bounds every place that enumerates
+ *   `spec_v{N}.md` / `qa_report_v{N}.json` by number — the disk-scan
+ *   fallbacks in `orchestrator.ts` and the version merge in
+ *   `getTaskFull` (tasks.ts) — so a revision past v4 never silently
+ *   falls outside what gets scanned, cleared, or displayed.
  */
+
+// ── Revision-snapshot upper bound ──────────────────────────────────────────
+// Shared ceiling for anything that enumerates spec_v{N}.md / qa_report_v{N}.json
+// by number: the on-disk fallback scans in orchestrator.ts
+// (_restoreSpecRevision / _restoreQaRevision), the spec-version merge in
+// getTaskFull (tasks.ts), and the PHASE_ARTIFACTS['spec'] list below.
+// autoReviseSpec caps QA-driven revisions at 3 (spec) / maxQaAttempts (QA),
+// but routeHumanFeedback's human-driven "Request Changes → Analyst" path is
+// uncapped — a human can keep revising past v4, so every one of the above
+// must scan/clear far enough that a revision never silently falls outside
+// the tracked range. 20 is generous headroom for that uncapped path.
+export const MAX_REVISION_SNAPSHOTS = 20;
 
 // ── Artifacts to clear per level (cumulative) ─────────────────────────────
 // Used by TaskStore.clearArtifacts(level).  Each level lists every
@@ -47,15 +66,8 @@ export const PHASE_ARTIFACTS: Record<string, string[]> = {
     'qa_report_before_failed.json',
     'spec_revision_feedback.md',
     'spec_revision_before.md',
-    'spec_v1.md',
-    'spec_v2.md',
-    'spec_v3.md',
-    'spec_v4.md',
-    'qa_report_v1.json',
-    'qa_report_v2.json',
-    'qa_report_v3.json',
-    'qa_report_v4.json',
-    'qa_report_v5.json',
+    ...Array.from({ length: MAX_REVISION_SNAPSHOTS }, (_, i) => `spec_v${i + 1}.md`),
+    ...Array.from({ length: MAX_REVISION_SNAPSHOTS }, (_, i) => `qa_report_v${i + 1}.json`),
     'plan_preserve_snapshot.json',
   ],
   plan: [

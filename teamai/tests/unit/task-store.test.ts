@@ -421,6 +421,22 @@ describe('TaskStore', () => {
       expect(existsSync(join(dir, 'human_feedback.md'))).toBe(true);
     });
 
+    // routeHumanFeedback's "Request Changes → Analyst" path has no cap on
+    // specRevision (unlike autoReviseSpec's QA-driven cap of 3), so a task
+    // can accumulate spec_v5.md+ / qa_report_v6.json+ from repeated
+    // human-driven revisions. PHASE_ARTIFACTS['spec'] must clear those too,
+    // not just the first few — otherwise a spec restart leaves old revision
+    // history littering the task directory.
+    it('clears spec_v and qa_report_v snapshots beyond the first few', () => {
+      writeFileSync(join(dir, 'spec_v5.md'), '# fifth revision snapshot');
+      writeFileSync(join(dir, 'qa_report_v6.json'), '{}');
+
+      store.clearArtifacts(taskId, 'spec');
+
+      expect(existsSync(join(dir, 'spec_v5.md'))).toBe(false);
+      expect(existsSync(join(dir, 'qa_report_v6.json'))).toBe(false);
+    });
+
     it('clears plan-level artifacts (plan + downstream QA files)', () => {
       store.clearArtifacts(taskId, 'plan');
 

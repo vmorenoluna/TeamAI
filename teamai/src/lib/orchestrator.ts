@@ -19,7 +19,7 @@ import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, Orche
 import { NO_RESUME_PHASES } from '@/constants/phases';
 import { runImplement, _recoverStBranchCommits } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
-import { CLEANUP_ARTIFACTS } from './orchestrator/artifacts';
+import { CLEANUP_ARTIFACTS, MAX_REVISION_SNAPSHOTS } from './orchestrator/artifacts';
 import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec } from './orchestrator/review-actions';
 import { detectGitPlatform, isPrMerged } from './git-platform';
 import { warn as logWarn, log, error as logError } from './logger';
@@ -1043,12 +1043,6 @@ export class Orchestrator {
   }
 
 }
-
-/** Upper bound for the on-disk revision-snapshot fallback scans
- *  (_restoreSpecRevision / _restoreQaRevision). Auto-revision caps at 3
- *  (spec) and maxQaAttempts (QA), so 20 is generous headroom while keeping
- *  the fallback O(20) existsSync calls. */
-const MAX_REVISION_SNAPSHOTS = 20;
 
 // ── Global orchestrator manager ────────────────────────────────────────────
 
