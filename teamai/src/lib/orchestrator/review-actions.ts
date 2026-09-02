@@ -5,7 +5,7 @@
  * All functions use dependency injection — the orchestrator passes its
  * internal state (taskStore, pipelines, etc.) as callbacks.
  */
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync, renameSync } from 'fs';
 import path from 'path';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy, QaReport } from './types';
@@ -170,19 +170,22 @@ async function beginSpecRevision(
   const specPath = pipeline.specPath;
 
   // Feedback first (flips runSpecPhase into REVISION mode), then the spec
-  // snapshot — order matters for the snapshot-failure warn contract.
+  // rename — order matters for the baseline-failure warn contract.
   writeFileSync(path.join(specPath, 'spec_revision_feedback.md'), feedbackContent);
 
+  // Rename (not copy) the pre-revision spec to the previous version number:
+  // the renamed file doubles as (a) the version-history entry the UI renders
+  // and (b) runSpecPhase's no-op guard baseline. The analyst writes the
+  // revised spec to spec.md, which the versions UI surfaces live as
+  // v{specRevision} — so a completed revision never needs a post-hoc archive
+  // copy (the old spec_revision_before.md marker scheme is retired).
   const specMdPath = path.join(specPath, 'spec.md');
   if (existsSync(specMdPath)) {
     try {
-      // Snapshot the pre-revision spec to a dedicated marker file (NOT
-      // spec_v{N}.md). runSpecPhase uses this as the no-op guard's "before"
-      // baseline, and spec_v{N}.md is only written once the revision actually
-      // completes — so an in-flight revision doesn't surface as a finished
-      // version in the spec comparison UI.
-      writeFileSync(path.join(specPath, 'spec_revision_before.md'), readFileSync(specMdPath, 'utf-8'));
+      renameSync(specMdPath, path.join(specPath, `spec_v${pipeline.specRevision - 1}.md`));
     } catch (err) {
+      // Losing the baseline would make the no-op guard silently pass on every
+      // future attempt — surface it, but don't block the pipeline.
       warn('review', `Failed to snapshot pre-revision spec for ${pipeline.taskId}`, err);
     }
   }

@@ -783,7 +783,17 @@ describe('TaskDetail', () => {
       expect(qaTab.className).toContain('border-[#2563eb]');
     });
 
-    it('shows badge count on Spec tab when spec exists', () => {
+    it('shows badge count 1 on Spec tab when only the live spec exists (no snapshot copies)', () => {
+      // Under the rename-at-revision scheme a task with no revisions has just
+      // spec.md — the badge counts viewable versions, and the live spec IS v1.
+      renderDetail({ spec: '# Specification', specVersions: {} });
+      const specTab = screen.getByText('Spec').closest('button')!;
+      const badgeSpans = specTab.querySelectorAll('span');
+      const badgeTexts = Array.from(badgeSpans).map(b => b.textContent);
+      expect(badgeTexts).toContain('1');
+    });
+
+    it('shows badge count 1 on Spec tab when specVersions is undefined', () => {
       renderDetail({ spec: '# Specification' });
       const specTab = screen.getByText('Spec').closest('button')!;
       const badgeSpans = specTab.querySelectorAll('span');
@@ -1048,18 +1058,31 @@ describe('TaskDetail', () => {
       expect(pre?.textContent).not.toContain('# Current Spec');
     });
 
-    it('shows correct badge count when spec and versions exist', () => {
+    it('shows correct badge count when spec and versions exist (live spec = highest version)', () => {
       renderDetail({
         spec: '# Current Spec',
         specVersions: { v1: '# v1', v2: '# v2', v3: '# v3' },
       });
       fireEvent.click(screen.getByText('Spec'));
 
-      // Badge should be 4: 1 (live spec) + 3 (v1, v2, v3)
+      // The live spec IS v4 (the highest version) — badge = 3, not 4. The old
+      // 1 + N formula double-counted the highest snapshot as a distinct doc.
       const specTab = screen.getByText('Spec').closest('button')!;
       const badgeSpans = specTab.querySelectorAll('span');
       const badgeTexts = Array.from(badgeSpans).map(b => b.textContent);
-      expect(badgeTexts).toContain('4');
+      expect(badgeTexts).toContain('3');
+    });
+
+    it('badge counts snapshot-only tasks (spec null but versions exist)', () => {
+      // Mid-revision: spec.md absent, snapshots are the only viewable versions.
+      renderDetail({
+        spec: null,
+        specVersions: { v1: '# v1', v2: '# v2' },
+      });
+      const specTab = screen.getByText('Spec').closest('button')!;
+      const badgeSpans = specTab.querySelectorAll('span');
+      const badgeTexts = Array.from(badgeSpans).map(b => b.textContent);
+      expect(badgeTexts).toContain('2');
     });
 
     it('does not show version buttons when specVersions is empty', () => {
@@ -1095,6 +1118,21 @@ describe('TaskDetail', () => {
       // Clicking the v1 snapshot should show the snapshot content
       fireEvent.click(screen.getByText('v1'));
       expect(document.querySelector('pre')?.textContent).toContain('# Spec v1 content');
+    });
+
+    it('shows the "original version unavailable" hint when v1 is missing', () => {
+      // Mid-revision (or legacy pre-tracking) dirs can have v2..vN without v1.
+      renderDetail({ spec: '# Current', specVersions: { v2: '# v2 content' } });
+      fireEvent.click(screen.getByText('Spec'));
+
+      expect(screen.getByText('original version unavailable')).toBeInTheDocument();
+    });
+
+    it('hides the "original version unavailable" hint when v1 exists', () => {
+      renderDetail({ spec: '# Current', specVersions: { v1: '# v1', v2: '# v2' } });
+      fireEvent.click(screen.getByText('Spec'));
+
+      expect(screen.queryByText('original version unavailable')).not.toBeInTheDocument();
     });
 
     it('preserves selected version when switching between Spec and other tabs', () => {
@@ -1173,6 +1211,19 @@ describe('TaskDetail', () => {
       const toggle = screen.getByTestId('compare-toggle');
       expect(toggle.className).toContain('border-emerald-600');
       expect(toggle.className).toContain('text-emerald-300');
+    });
+
+    it('auto-selects the two most recent versions when entering compare mode', () => {
+      renderDetail(specWithVersions);
+      clickSpec();
+      fireEvent.click(screen.getByTestId('compare-toggle'));
+
+      // SpecDiffView auto-initializes to (second-last, last) — with the live
+      // spec merged in as v2, the default comparison is predecessor vs current.
+      const leftSelect = screen.getByTestId('compare-left-select') as HTMLSelectElement;
+      const rightSelect = screen.getByTestId('compare-right-select') as HTMLSelectElement;
+      expect(leftSelect.value).toBe('v1');
+      expect(rightSelect.value).toBe('v2');
     });
 
     it('turning off compare mode returns to single-panel view', () => {

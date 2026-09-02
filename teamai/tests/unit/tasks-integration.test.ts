@@ -493,4 +493,93 @@ describe('getTaskFull — returns specPath', () => {
     expect(result.specPath).toContain('specpath-task-slug');
     expect(result.specPath).toContain('spec.md');
   });
+
+  // ── specVersions: live spec merges as v{maxSnapshot+1} ─────────────
+  //
+  // Under the rename-at-revision scheme the on-disk layout is: spec_v{1..N}.md
+  // are archived versions and spec.md is the CURRENT version (N+1) — except
+  // before the first revision, where spec.md alone IS v1 and no snapshot
+  // exists. getTaskFull must present both shapes as one consistent map so the
+  // Spec tab's version chips and compare dropdowns (built purely from
+  // specVersions keys) show every viewable version.
+  function seedVersionTask(slug: string, id: string): void {
+    mkdirSync(join(TEST_DIR, '.teamai', slug), { recursive: true });
+    const task = {
+      id,
+      title: 'Versioned Task',
+      description: 'test task for specVersions in getTaskFull',
+      phase: 'implement',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    writeFileSync(join(TEST_DIR, '.teamai', slug, 'task.json'), JSON.stringify(task, null, 2));
+  }
+
+  it('merges an unversioned live spec as v1 (no snapshots on disk)', async () => {
+    seedVersionTask('versions-fresh-slug', 'task-versions-fresh');
+    writeFileSync(join(TEST_DIR, '.teamai', 'versions-fresh-slug', 'spec.md'), '# Only version');
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull('task-versions-fresh');
+
+    expect(result.specVersions).toEqual({ v1: '# Only version' });
+    expect(result.spec).toBe('# Only version');
+  });
+
+  it('merges the live spec as v{maxSnapshot+1} when snapshots exist', async () => {
+    seedVersionTask('versions-rev1-slug', 'task-versions-rev1');
+    const dir = join(TEST_DIR, '.teamai', 'versions-rev1-slug');
+    writeFileSync(join(dir, 'spec_v1.md'), '# Original spec');
+    writeFileSync(join(dir, 'spec.md'), '# Revised spec\n\nNew formula.');
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull('task-versions-rev1');
+
+    // v1 = archive, v2 = live revised spec — exactly two viewable versions.
+    expect(result.specVersions).toEqual({ v1: '# Original spec', v2: '# Revised spec\n\nNew formula.' });
+  });
+
+  it('does not double-count a legacy spec_v1.md that is byte-identical to the live spec', async () => {
+    seedVersionTask('versions-legacy-slug', 'task-versions-legacy');
+    const dir = join(TEST_DIR, '.teamai', 'versions-legacy-slug');
+    // Old copy-scheme dir: spec_v1.md was a byte-copy of the initial spec.
+    writeFileSync(join(dir, 'spec_v1.md'), '# Same content\n');
+    writeFileSync(join(dir, 'spec.md'), '# Same content\n');
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull('task-versions-legacy');
+
+    // The identical highest snapshot collapses into the live entry — one
+    // version, not two.
+    expect(result.specVersions).toEqual({ v1: '# Same content\n' });
+  });
+
+  it('maps a multi-revision legacy dir to v1..vN without duplicate keys', async () => {
+    seedVersionTask('versions-multi-slug', 'task-versions-multi');
+    const dir = join(TEST_DIR, '.teamai', 'versions-multi-slug');
+    // Old copy-scheme dir after two revisions: v1 = initial, v2 = first
+    // revision (byte-identical to the current live spec.md).
+    writeFileSync(join(dir, 'spec_v1.md'), '# v1 content');
+    writeFileSync(join(dir, 'spec_v2.md'), '# v2 content');
+    writeFileSync(join(dir, 'spec.md'), '# v2 content');
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull('task-versions-multi');
+
+    expect(result.specVersions).toEqual({ v1: '# v1 content', v2: '# v2 content' });
+  });
+
+  it('returns snapshots only when the live spec.md is absent (mid-revision window)', async () => {
+    seedVersionTask('versions-inflight-slug', 'task-versions-inflight');
+    const dir = join(TEST_DIR, '.teamai', 'versions-inflight-slug');
+    // beginSpecRevision renamed spec.md away; the analyst has not written
+    // the revised spec yet.
+    writeFileSync(join(dir, 'spec_v1.md'), '# Pre-revision spec');
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull('task-versions-inflight');
+
+    expect(result.specVersions).toEqual({ v1: '# Pre-revision spec' });
+    expect(result.spec).toBeNull();
+  });
 });

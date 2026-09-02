@@ -373,12 +373,32 @@ export async function getTaskFull(taskId: string) {
   const mergeLogPath = join(dir, 'output-merge.log');
   const mergeLog = existsSync(mergeLogPath) ? readFileSync(mergeLogPath, 'utf-8') : null;
 
-  // Load spec revision snapshots for comparison UI
+  // Load spec versions for the comparison UI. Under the rename-at-revision
+  // scheme the on-disk layout is: spec_v{1..N}.md are archived versions and
+  // spec.md is the CURRENT version (N+1) — except before the first revision,
+  // where spec.md alone IS v1 and no snapshot exists. Legacy copy-scheme dirs
+  // (where spec_v{N}.md was a byte-copy of the live spec) map to the same
+  // view: a highest snapshot byte-identical to the live spec collapses into
+  // that entry instead of double-counting it.
   const specVersions: Record<string, string> = {};
   for (const version of [1, 2, 3, 4]) {
     const vPath = join(dir, `spec_v${version}.md`);
     if (existsSync(vPath)) {
       specVersions[`v${version}`] = readFileSync(vPath, 'utf-8');
+    }
+  }
+  const liveSpecPath = join(dir, 'spec.md');
+  if (existsSync(liveSpecPath)) {
+    const liveContent = readFileSync(liveSpecPath, 'utf-8');
+    const snapshotNums = Object.keys(specVersions)
+      .map(k => parseInt(k.slice(1), 10))
+      .sort((a, b) => a - b);
+    const highest = snapshotNums.length > 0 ? snapshotNums[snapshotNums.length - 1] : 0;
+    // Only surface the live spec as its own version when it differs from the
+    // highest archived snapshot — otherwise it IS that version (legacy dirs)
+    // and adding another key would double-count it.
+    if (highest === 0 || specVersions[`v${highest}`] !== liveContent) {
+      specVersions[`v${highest + 1}`] = liveContent;
     }
   }
 

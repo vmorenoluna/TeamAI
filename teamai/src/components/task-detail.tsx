@@ -114,10 +114,19 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   // without a note a v2..vN run reads like a miscount — say so explicitly.
   const hasSpecV1Gap = !!specVersions && Object.keys(specVersions).length > 0 && !specVersions['v1'];
 
+  // The Spec badge counts viewable versions. getTaskFull merges the live
+  // spec.md into specVersions as the highest v{N}, so the map length IS the
+  // version count — the old `1 + N` formula double-counted the highest
+  // snapshot (which under the copy scheme duplicated the live spec).
+  const specVersionCount = Math.max(
+    specVersions ? Object.keys(specVersions).length : 0,
+    spec ? 1 : 0,
+  );
+
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'terminal', label: 'Terminal' },
-    { id: 'spec', label: 'Spec', badge: spec ? 1 + (specVersions ? Object.keys(specVersions).length : 0) : 0 },
+    { id: 'spec', label: 'Spec', badge: specVersionCount },
     { id: 'plan', label: 'Plan', badge: plan?.subtasks?.length ?? 0 },
     { id: 'qa', label: 'QA', badge: qaReport ? 1 : 0 },
   ];
