@@ -537,21 +537,38 @@ export function selectSubtasks(
   // wakeup subtask's artifact is committed" guarantee this filter exists
   // for. See tests/unit/orchestrator-robustness.test.ts's
   // "only re-enters the wakeup subtask — deferred subtasks are excluded".
+  //
+  // Selection membership alone isn't sufficient, though: a scoped replan (a
+  // human directive that re-plans only some subtasks, or a fresh plan after
+  // a `failed` task is retried) can reset an EARLIER subtask back to
+  // `completed: false` while a LATER subtask's stale wakeupSubtaskId pointer
+  // survives untouched — that later subtask still trivially shows up in
+  // effectiveSubtasks (it was simply never completed either), so a
+  // membership-only check would isolate to it and skip the dependency the
+  // replan just invalidated. Require every depends_on id of the wakeup
+  // subtask to still be completed in the full plan before trusting the
+  // isolation. See tests/unit/select-subtasks-stale-wakeup.test.ts's
+  // "wakeup subtask whose dependency was reset by a replan" case.
   if (pipeline.wakeupSubtaskId != null) {
     const isolated = effectiveSubtasks.filter(s => s.id === pipeline.wakeupSubtaskId);
-    if (isolated.length > 0) {
+    const dependenciesSatisfied = isolated.length > 0 && (isolated[0].depends_on ?? []).every(
+      depId => plan.subtasks.find(s => s.id === depId)?.completed === true,
+    );
+    if (dependenciesSatisfied) {
       effectiveSubtasks = isolated;
     } else {
-      // Wakeup subtask isn't part of this round's selection (e.g. QA
-      // flagged a different subtask on bounce-back) — drop the stale
-      // isolation instead of silently emptying the run. Without this, the
-      // bounce fell straight through worktree setup to the mandatory push
-      // and on to the next QA round, burning QA attempts with zero rework
-      // dispatched. See tests/unit/select-subtasks-stale-wakeup.test.ts.
+      // Either the wakeup subtask isn't part of this round's selection (e.g.
+      // QA flagged a different subtask on bounce-back) or one of its
+      // dependencies was reset back to incomplete by a replan — either way,
+      // drop the stale isolation instead of silently emptying the run or
+      // dispatching a subtask whose prerequisite was just invalidated.
       const staleWakeupSubtaskId = pipeline.wakeupSubtaskId;
       pipeline.wakeupSubtaskId = undefined;
+      const reason = isolated.length > 0
+        ? 'its dependencies are no longer satisfied'
+        : "it is not part of this round's selection";
       logToOutput(pipeline.specPath,
-        `\n[QA-REWORK] Stale wakeup isolation for subtask ${staleWakeupSubtaskId} cleared — it is not part of this round's selection\n`);
+        `\n[QA-REWORK] Stale wakeup isolation for subtask ${staleWakeupSubtaskId} cleared — ${reason}\n`);
     }
   }
 
