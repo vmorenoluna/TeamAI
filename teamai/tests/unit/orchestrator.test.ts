@@ -1623,6 +1623,36 @@ describe('Orchestrator', () => {
       expect(readFileSync(join(testData.taskDir, 'spec_v1.md'), 'utf-8')).toBe('# The true original');
     });
 
+    // moveTaskToPhase clears .pipeline_state.json for a 'plan' target but
+    // leaves spec_v*.md history on disk. runTask (which moveTaskToPhase
+    // calls into) must restore specRevision from that on-disk history rather
+    // than hardcoding 1 — under the rename-at-revision scheme, a stale
+    // specRevision would make a later beginSpecRevision rename spec.md
+    // straight onto (clobbering) an already-archived spec_v1.md.
+    it('restores specRevision from on-disk spec_v*.md history instead of hardcoding 1', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Current spec (v2)');
+      writeFileSync(join(testData.taskDir, 'spec_v1.md'), '# The true original (v1)');
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      // runTask (which moveTaskToPhase calls into) registers the pipeline
+      // synchronously before its first await, so it's inspectable
+      // immediately — the promise is only awaited afterward, since
+      // runTask's finally block deletes the map entry once it settles.
+      const promise = orch.moveTaskToPhase(testData.taskId, 'plan');
+      const pipeline = (orch as AnyOrch).pipelines.get(testData.taskId);
+
+      expect(pipeline).toBeDefined();
+      // One archived version (v1) on disk means the live spec is v2, so
+      // specRevision must restore to 2 (not the hardcoded 1) — the next
+      // beginSpecRevision call increments to 3 and renames spec.md onto
+      // spec_v{3-1} = spec_v2.md, not the existing spec_v1.md.
+      expect(pipeline.specRevision).toBe(2);
+
+      await promise.catch(() => { /* best-effort */ });
+    });
+
     // Coverage: line 116 — hasPlan = true when plan.json exists
     it('starts from implement when hasSpec and hasPlan are true and target is implement', async () => {
       testData = setupTestProject();
