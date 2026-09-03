@@ -83,7 +83,7 @@ This document catalogs, for each pipeline phase, exactly what is handled by code
 - Per-subtask worktree isolation (multi-subtask groups)
 - Pre/post subtask sensors
 - Scope violation detection: snapshots HEAD before session, runs `git diff --name-only` after, rejects subtask if unassigned files modified
-- Deliverable verification: checks `files_to_create` exist on disk, circuit-breaker at `maxDeliverableFails`
+- Deliverable verification: checks `files_to_create` exist on disk, circuit-breaker at `maxImplementRetries`
 - Cherry-pick from st-branches to main worktree (Tier-1: direct, Tier-2: merger agent)
 - Wakeup scheduling for long-running background scripts
 - Plan.json serialization lock (prevents race conditions on per-subtask checkpointing)

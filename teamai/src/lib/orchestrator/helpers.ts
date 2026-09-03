@@ -20,16 +20,21 @@ export interface PipelineConfig {
   maxQaAttempts: number;
   parallelSubtasks: boolean;
   sensors?: SensorsConfig;
-  maxDeliverableFails: number;
-  maxWakeupAttempts: number;
-  /** Consecutive implement passes that may end with subtasks still
-   *  incomplete (an unmet dependency, a repeated scope violation, etc.)
-   *  before the task fails outright, WITHOUT ever reaching QA. QA is an
-   *  expensive full review; a pass the orchestrator already knows is
-   *  incomplete from plan.json alone would only confirm that at QA's cost
-   *  — and, with a low maxQaAttempts, could fail the whole task on a
-   *  review that was doomed before it started. Default 3. */
-  maxIncompleteImplementPasses: number;
+  /** Single cap governing every retry-and-give-up circuit breaker inside
+   *  the implement phase — the same category of question ("how persistent
+   *  should coding be before giving up?") at three different granularities:
+   *  - a subtask's `files_to_create` deliverable still missing after its
+   *    session ends (previously maxDeliverableFails, per-subtask)
+   *  - a wakeup-pending subtask's background job never producing its
+   *    artifact (previously maxWakeupAttempts, per-wakeup-cycle)
+   *  - a full implement pass ending with any subtask still `!completed`
+   *    (previously maxIncompleteImplementPasses, per-pass)
+   *  All three bypass QA entirely and advance straight to `failed` once
+   *  exceeded — QA is an expensive full review; a failure the orchestrator
+   *  can already see structurally from plan.json alone would only confirm
+   *  that at QA's cost, and with a low maxQaAttempts could fail the whole
+   *  task on a review that was doomed before it started. Default 3. */
+  maxImplementRetries: number;
   /** Consecutive stall-detector kills a subtask may recover from (fresh
    *  session + retry) before the subtask fails outright. */
   maxStallRecoveries: number;
@@ -215,9 +220,7 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
       return {
         maxQaAttempts: typeof raw.maxQaAttempts === 'number' ? raw.maxQaAttempts : 3,
         parallelSubtasks: typeof raw.parallelSubtasks === 'boolean' ? raw.parallelSubtasks : true,
-        maxDeliverableFails: typeof raw.maxDeliverableFails === 'number' ? raw.maxDeliverableFails : 3,
-        maxWakeupAttempts: typeof raw.maxWakeupAttempts === 'number' ? raw.maxWakeupAttempts : 3,
-        maxIncompleteImplementPasses: typeof raw.maxIncompleteImplementPasses === 'number' ? raw.maxIncompleteImplementPasses : 3,
+        maxImplementRetries: typeof raw.maxImplementRetries === 'number' ? raw.maxImplementRetries : 3,
         maxStallRecoveries: typeof raw.maxStallRecoveries === 'number' ? raw.maxStallRecoveries : 3,
         idleStallMinutes: typeof raw.idleStallMinutes === 'number' ? raw.idleStallMinutes : 15,
         toolStallMinutes: typeof raw.toolStallMinutes === 'number' ? raw.toolStallMinutes : 30,
@@ -229,7 +232,7 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
   }
-  return { maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 3, maxIncompleteImplementPasses: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true };
+  return { maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true };
 }
 
 // ── Session map ───────────────────────────────────────────────────────────

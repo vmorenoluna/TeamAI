@@ -56,7 +56,7 @@ export interface ImplementDeps {
   restoreQaReportFromSnapshot: (specPath: string) => void;
   restoreHumanFeedbackFromSnapshot: (specPath: string) => void;
   writeQaFeedback: (pipeline: ImplementPipeline, report: QaReport) => void;
-  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxDeliverableFails: number; maxWakeupAttempts: number; maxIncompleteImplementPasses: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number };
+  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxImplementRetries: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number };
   phaseHeader: (logFile: string, phase: string) => void;
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
@@ -751,7 +751,7 @@ export async function runSubtaskSession(
   let deliverableHeader = '';
   if (!hasQaFeedback && !wakeupHeader && pipeline.deliverableFailCounts?.[subtask.id]) {
     const attemptCount = pipeline.deliverableFailCounts[subtask.id];
-    const maxFails = deps.getPipelineConfig().maxDeliverableFails;
+    const maxFails = deps.getPipelineConfig().maxImplementRetries;
     deliverableHeader = '⚠️ DELIVERABLE RE-VERIFICATION (attempt ' + attemptCount + '/' + maxFails + ')\n\n' +
       'Your previous session for this subtask ended but the following required\n' +
       'deliverable files were NOT created:\n\n' +
@@ -1030,13 +1030,13 @@ export async function runSubtaskSession(
   // actually advanced during this cycle before trusting that silence:
   // unchanged (or still missing) mtime means nothing new was produced, so
   // auto-reschedule a follow-up check instead — bounded by the same
-  // maxWakeupAttempts cap used for explicit reschedules (the wakeup-timer
+  // maxImplementRetries cap used for explicit reschedules (the wakeup-timer
   // block later in this file), so a genuinely stuck job still eventually
   // fails the task rather than looping forever.
   //
   // Gated on !subtask.files_to_create?.length — a subtask that declares
   // files_to_create already has a more specific, purpose-built deliverable
-  // check just below (with its own maxDeliverableFails circuit breaker);
+  // check just below (with its own maxImplementRetries circuit breaker);
   // this mtime check exists for the case that check can't cover, an
   // existing file the subtask overwrites rather than creates.
   if (wasWakeupReentry && !wakeupDetected && pipeline.wakeupArtifact && !subtask.files_to_create?.length) {
@@ -1078,7 +1078,7 @@ export async function runSubtaskSession(
     }
     if (skipCompletion) {
       if (!pipeline.deliverableFailCounts) pipeline.deliverableFailCounts = {};
-      const maxFails = deps.getPipelineConfig().maxDeliverableFails;
+      const maxFails = deps.getPipelineConfig().maxImplementRetries;
       const count = (pipeline.deliverableFailCounts[subtask.id] || 0) + 1;
       pipeline.deliverableFailCounts[subtask.id] = count;
       const missingFiles = subtask.files_to_create.filter(f => !existsSync(path.join(cwd, f))).join(', ');
@@ -1669,8 +1669,8 @@ export async function runImplement(
 
   // ADR 002: Wakeup timer — pause implement phase until wakeup time
   if (pipeline.wakeupUntil) {
-    if ((pipeline.wakeupAttemptCount || 0) >= deps.getPipelineConfig().maxWakeupAttempts) {
-      logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + pipeline.wakeupSubtaskId + ' exceeded wakeup attempt cap (' + deps.getPipelineConfig().maxWakeupAttempts + ') — advancing to failed\n');
+    if ((pipeline.wakeupAttemptCount || 0) >= deps.getPipelineConfig().maxImplementRetries) {
+      logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + pipeline.wakeupSubtaskId + ' exceeded wakeup attempt cap (' + deps.getPipelineConfig().maxImplementRetries + ') — advancing to failed\n');
       const reportPath = path.join(pipeline.specPath, 'qa_report.json');
       writeFileSync(reportPath, JSON.stringify({
         overall: 'FAIL',
@@ -1678,7 +1678,7 @@ export async function runImplement(
           criterion: 'Wakeup attempt limit exceeded',
           name: 'Wakeup attempt limit exceeded',
           status: 'FAIL',
-          notes: 'Subtask ' + pipeline.wakeupSubtaskId + ' failed to produce artifact after ' + deps.getPipelineConfig().maxWakeupAttempts + ' wakeup attempts. Expected artifact: ' + (pipeline.wakeupArtifact || 'unknown'),
+          notes: 'Subtask ' + pipeline.wakeupSubtaskId + ' failed to produce artifact after ' + deps.getPipelineConfig().maxImplementRetries + ' wakeup attempts. Expected artifact: ' + (pipeline.wakeupArtifact || 'unknown'),
         }],
       }, null, 2));
       // Clear wakeup state before failing: a truthy wakeupUntil with no armed
@@ -1719,7 +1719,7 @@ export async function runImplement(
   if (incompleteSubtasks.length > 0) {
     const attemptCount = (pipeline.incompleteImplementPassCount || 0) + 1;
     pipeline.incompleteImplementPassCount = attemptCount;
-    const maxPasses = deps.getPipelineConfig().maxIncompleteImplementPasses;
+    const maxPasses = deps.getPipelineConfig().maxImplementRetries;
     const ids = incompleteSubtasks.map(s => s.id).join(', ');
     logToOutput(pipeline.specPath,
       '\n[IMPLEMENT-GATE] ' + incompleteSubtasks.length + ' subtask(s) still incomplete after this pass (id' +
