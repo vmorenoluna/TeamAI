@@ -180,7 +180,14 @@ describe('runQaReview — Gap 3: locked / manual override QA reports', () => {
     expect(pipeline.phase).toBe('awaiting-review');
   });
 
-  it('reconciles plan.json completed flags when skipping via locked report', async () => {
+  // A locked/override report is a deliberate human bypass of the pipeline's
+  // own judgment — it does NOT also stamp plan.json's subtask completion
+  // flags. Reconciliation was removed in favor of the implement-phase
+  // completeness gate (which already guarantees plan.json reflects reality
+  // before a genuine QA PASS can ever be reached); a manual override that
+  // skips QA entirely leaves the kanban's "N/M subtasks" honestly showing
+  // whatever was actually completed, rather than papering over it.
+  it('does not stamp plan.json completed flags when skipping via locked report', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
         { id: 1, title: 'Done', description: '', files: [], acceptance_criteria: [], completed: true },
@@ -200,15 +207,12 @@ describe('runQaReview — Gap 3: locked / manual override QA reports', () => {
     expect(pipeline.phase).toBe('awaiting-review');
     const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
     expect(plan.subtasks).toHaveLength(3);
-    for (const s of plan.subtasks) expect(s.completed).toBe(true);
-    expect(mockEmit).toHaveBeenCalledWith('subtask-progress', expect.objectContaining({
-      taskId: project.taskId,
-      completed: 3,
-      total: 3,
-    }));
+    expect(plan.subtasks[0].completed).toBe(true);
+    expect(plan.subtasks[1].completed).toBeUndefined();
+    expect(plan.subtasks[2].completed).toBe(false);
   });
 
-  it('reconciles plan.json completed flags when skipping via manual override', async () => {
+  it('does not stamp plan.json completed flags when skipping via manual override', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
         { id: 1, title: 'Done', description: '', files: [], acceptance_criteria: [], completed: true },
@@ -228,12 +232,9 @@ describe('runQaReview — Gap 3: locked / manual override QA reports', () => {
     expect(pipeline.phase).toBe('awaiting-review');
     const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
     expect(plan.subtasks).toHaveLength(3);
-    for (const s of plan.subtasks) expect(s.completed).toBe(true);
-    expect(mockEmit).toHaveBeenCalledWith('subtask-progress', expect.objectContaining({
-      taskId: project.taskId,
-      completed: 3,
-      total: 3,
-    }));
+    expect(plan.subtasks[0].completed).toBe(true);
+    expect(plan.subtasks[1].completed).toBeUndefined();
+    expect(plan.subtasks[2].completed).toBe(false);
   });
 
   it('proceeds with normal QA when qa_report.json has no lock or override', async () => {
@@ -4772,7 +4773,7 @@ describe('runImplement — depends_on gates dispatch across groups', () => {
 // low, a pass that pushes with subtasks the orchestrator already knows
 // (from plan.json) are incomplete burns the ENTIRE QA budget confirming
 // something no LLM review was needed to discover. Retry implement instead,
-// bounded by maxIncompleteImplementPasses so a task that can never
+// bounded by maxImplementRetries so a task that can never
 // structurally converge still fails rather than looping forever.
 
 describe('runImplement — implement completeness gate', () => {
@@ -5878,7 +5879,7 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
       restoreQaReportFromSnapshot: vi.fn(),
       restoreHumanFeedbackFromSnapshot: vi.fn(),
       writeQaFeedback: vi.fn(),
-      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 10, maxIncompleteImplementPasses: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30 })),
+      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30 })),
       phaseHeader: vi.fn(),
       planWriteLock: { current: Promise.resolve() },
       scheduleWakeup: vi.fn(),
@@ -6001,7 +6002,7 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
       restoreQaReportFromSnapshot: vi.fn(),
       restoreHumanFeedbackFromSnapshot: vi.fn(),
       writeQaFeedback: vi.fn(),
-      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 10, maxIncompleteImplementPasses: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30 })),
+      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30 })),
       phaseHeader: vi.fn(),
       planWriteLock: { current: Promise.resolve() },
       scheduleWakeup: vi.fn(),

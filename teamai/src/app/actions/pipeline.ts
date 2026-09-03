@@ -11,6 +11,14 @@ export interface PipelineConfig {
   autoModeMaxParallel: number;
   idleStallMinutes: number;
   toolStallMinutes: number;
+  /** Single cap governing every retry-and-give-up circuit breaker inside
+   *  the implement phase: a subtask's declared deliverable still missing
+   *  after its session ends, a wakeup-pending subtask's background job
+   *  never producing its artifact, or a full implement pass ending with
+   *  any subtask still incomplete. All bypass QA entirely and fail the
+   *  task once exceeded, rather than pushing to an expensive QA review
+   *  that would only confirm what plan.json already shows. */
+  maxImplementRetries: number;
   /** Write Task/Task-ID/QA/Phases trailers into merge commits + PR bodies. */
   recordHistoryInGit: boolean;
   /** Include the `Phases:` trailer line (subordinate to recordHistoryInGit). */
@@ -23,6 +31,7 @@ const DEFAULT_CONFIG: PipelineConfig = {
   autoModeMaxParallel: 1,
   idleStallMinutes: 15,
   toolStallMinutes: 30,
+  maxImplementRetries: 3,
   recordHistoryInGit: true,
   includePhasesTrailer: true,
 };
@@ -42,7 +51,7 @@ export async function savePipelineConfig(config: PipelineConfig): Promise<void> 
   const projectPath = await getActiveProjectPath();
   const cfgPath = join(projectPath, '.teamai', 'pipeline.json');
   // Merge with existing config to preserve orchestrator-only fields
-  // (maxDeliverableFails, maxWakeupAttempts, sensors) that the UI doesn't know about.
+  // (sensors, maxStallRecoveries, autoMergeMethod) that the UI doesn't know about.
   const existing = existsSync(cfgPath)
     ? JSON.parse(readFileSync(cfgPath, 'utf-8'))
     : {};

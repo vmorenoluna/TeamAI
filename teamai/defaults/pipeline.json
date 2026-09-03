@@ -2,7 +2,5 @@
   "phases": ["spec", "plan", "implement", "qa-review", "merge"],
   "maxQaAttempts": 3,
   "parallelSubtasks": true,
-  "maxDeliverableFails": 3,
-  "maxWakeupAttempts": 3,
-  "maxIncompleteImplementPasses": 3
+  "maxImplementRetries": 3
 }

@@ -69,7 +69,7 @@ export interface TaskPipeline {
   wakeupArtifactMtimeAtSchedule?: number | null;
   /** Consecutive implement passes that ended with one or more subtasks
    *  still `!completed` in plan.json — an unmet dependency, a repeated
-   *  scope violation, etc. Bounded by maxIncompleteImplementPasses: below
+   *  scope violation, etc. Bounded by maxImplementRetries: below
    *  the cap, implement is retried immediately without ever reaching QA
    *  (cheap — QA is an expensive full review that would only confirm what
    *  plan.json already shows); at the cap, the task fails outright instead
