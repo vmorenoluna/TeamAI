@@ -56,6 +56,17 @@ export interface TaskPipeline {
   wakeupProgressPath?: string;
   /** Consecutive wakeup attempts for the current subtask (ADR 002) */
   wakeupAttemptCount?: number;
+  /**
+   * mtime (epoch ms) of `wakeupArtifact` at the moment the current wakeup
+   * cycle was (re)scheduled, or null if the artifact didn't exist yet.
+   * Lets a wakeup re-entry session that ends WITHOUT writing a fresh
+   * wakeup file be verified rather than blindly trusted: if the artifact's
+   * mtime hasn't advanced past this value, nothing was actually produced
+   * during this cycle — the coder likely ran out of turns mid-monitoring
+   * without reaching its own "reschedule if still running" instruction,
+   * not that the job genuinely finished.
+   */
+  wakeupArtifactMtimeAtSchedule?: number | null;
   /** Map of FAIL criterion text → number of consecutive QA cycles it has appeared unchanged.
    *  Used by the orchestrator to escalate persisted failures in the rework prompt. */
   persistedCriterionFailCounts?: Record<string, number>;
