@@ -100,7 +100,7 @@ export interface QaReviewDeps {
   waitForCompletion: (sessionId: string) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
   writeQaFeedback: (pipeline: TaskPipeline, report: QaReport) => void;
-  writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason) => void;
+  writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
   toAgentPath: (hostPath: string) => string;
   autoReviseSpec: (pipeline: TaskPipeline) => Promise<void>;

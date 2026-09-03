@@ -4872,6 +4872,14 @@ describe('runImplement — implement completeness gate', () => {
       const report = JSON.parse(readFileSync(join(project.taskDir, 'qa_report.json'), 'utf-8'));
       expect(report.overall).toBe('FAIL');
       expect(report.criteria[0].criterion).toBe('Implement completeness gate');
+
+      // This path fails the task without ever running QA — it must still
+      // regenerate task.json's completionSummary/failureReason (previously
+      // left stale from whatever QA-driven failure happened last, or never
+      // set at all) so the UI reflects why THIS run actually failed.
+      const task = (orch as AnyOrch).taskStore.getById(project.taskId);
+      expect(task?.failureReason).toBe('implement-failure');
+      expect(task?.completionSummary).toContain('Implement completeness gate');
     } finally {
       executeSpy.mockRestore();
     }
@@ -5879,6 +5887,7 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
       restoreQaReportFromSnapshot: vi.fn(),
       restoreHumanFeedbackFromSnapshot: vi.fn(),
       writeQaFeedback: vi.fn(),
+      writeCompletionSummary: vi.fn(),
       getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30 })),
       phaseHeader: vi.fn(),
       planWriteLock: { current: Promise.resolve() },
@@ -6002,6 +6011,7 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
       restoreQaReportFromSnapshot: vi.fn(),
       restoreHumanFeedbackFromSnapshot: vi.fn(),
       writeQaFeedback: vi.fn(),
+      writeCompletionSummary: vi.fn(),
       getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30 })),
       phaseHeader: vi.fn(),
       planWriteLock: { current: Promise.resolve() },

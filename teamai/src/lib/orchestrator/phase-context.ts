@@ -71,7 +71,7 @@ export interface PhaseContext {
 
   // ── QA / review ──
   writeQaFeedback: (pipeline: TaskPipeline, report: QaReport) => void;
-  writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason) => void;
+  writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
   autoReviseSpec: (pipeline: TaskPipeline) => Promise<void>;
 
   // ── Config ──

@@ -98,12 +98,13 @@ export class Orchestrator {
         pipeline.persistedCriterionFailCounts,
         pipeline.persistedAdditionalIssueCounts,
       ),
-      writeCompletionSummary: (pipeline, reason) => writeCompletionSummary(
+      writeCompletionSummary: (pipeline, reason, detail) => writeCompletionSummary(
         pipeline.specPath,
         pipeline.taskId,
         taskStore,
         reason,
         { qaAttempt: pipeline.qaAttempt, qaRoundCount: pipeline.qaRoundCount, specRevision: pipeline.specRevision },
+        detail,
       ),
       autoReviseSpec: (pipeline) => this._autoReviseSpec(pipeline),
 

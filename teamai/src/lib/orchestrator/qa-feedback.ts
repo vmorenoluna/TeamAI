@@ -154,17 +154,26 @@ export function writeQaFeedback(
 }
 
 /** Why a `failed` task failed — see Task.failureReason in task-store.ts for
- *  the full distinction between these two. */
-export type FailureReason = 'qa-attempts-exhausted' | 'spec-revision-exhausted';
+ *  the full distinction between these four. */
+export type FailureReason =
+  | 'qa-attempts-exhausted'
+  | 'spec-revision-exhausted'
+  | 'implement-failure'
+  | 'session-crashed';
 
-/** Write a completion summary when the task fails — either the QA-attempt
- *  budget or the spec-revision budget was exhausted. */
+/** Write a completion summary when the task fails — a QA-attempt budget, a
+ *  spec-revision budget, or an implement-phase retry/verification cap was
+ *  exhausted, or the coder session crashed outside any of those caps.
+ *  `detail` carries the raw error for 'session-crashed', which has no
+ *  qa_report.json to fall back on (unlike the other three reasons, which
+ *  all write one — real or synthetic — before calling this). */
 export function writeCompletionSummary(
   specPath: string,
   taskId: string,
   taskStore: TaskStore,
   reason: FailureReason,
   counters: { qaAttempt: number; qaRoundCount?: number; specRevision?: number },
+  detail?: string,
 ): void {
   const summaryPath = path.join(specPath, 'completion_summary.md');
   let content = `# Completion Summary\n\n`;
@@ -174,6 +183,18 @@ export function writeCompletionSummary(
       `(${rounds} total QA rounds) — the spec revision budget was exhausted ` +
       `without QA ever passing. This usually means the approach itself needs ` +
       `to be redesigned, not just re-implemented.\n\n`;
+  } else if (reason === 'implement-failure') {
+    content += `Task failed during implementation — a retry or verification cap ` +
+      `was exceeded before the change ever reached QA. This did NOT go through ` +
+      `a normal QA review; see the report below for the specific cause (scope ` +
+      `violation, missing deliverable, stalled session, push failure, or an ` +
+      `unmet subtask dependency).\n\n`;
+  } else if (reason === 'session-crashed') {
+    content += `Task failed because the coder session exited unexpectedly` +
+      (detail ? `: ${detail}` : '') +
+      `. This did NOT go through a normal QA review — the session process ` +
+      `exited or was killed (e.g. an app/server restart, an OS-level kill, ` +
+      `or a crash) before it could finish its work.\n\n`;
   } else {
     content += `Task failed after ${counters.qaAttempt} QA attempts.\n\n`;
   }

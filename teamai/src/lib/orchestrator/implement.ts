@@ -27,6 +27,7 @@ import { warn } from '../logger';
 import type { TaskStore } from '../task-store';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
+import type { FailureReason } from './qa-feedback';
 
 export interface ImplementPipeline extends TaskPipeline {
   /** Internal flag: set when wakeup completes during this run so post-groups code re-enters (ADR 002) */
@@ -56,6 +57,11 @@ export interface ImplementDeps {
   restoreQaReportFromSnapshot: (specPath: string) => void;
   restoreHumanFeedbackFromSnapshot: (specPath: string) => void;
   writeQaFeedback: (pipeline: ImplementPipeline, report: QaReport) => void;
+  /** Regenerates task.json's completionSummary/failureReason and
+   *  completion_summary.md — every implement-phase path that fails the task
+   *  directly (bypassing QA) must call this so the UI reflects the actual
+   *  cause instead of a stale summary from a prior QA-driven failure. */
+  writeCompletionSummary: (pipeline: ImplementPipeline, reason: FailureReason, detail?: string) => void;
   getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxImplementRetries: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number };
   phaseHeader: (logFile: string, phase: string) => void;
   /** Mutable reference to the plan-write serialization lock. */
@@ -877,6 +883,7 @@ export async function runSubtaskSession(
             notes: 'Subtask ' + subtask.id + ' had its session killed for stalling (' + stallDescription + ' on its most recent kill) ' + maxRecoveries + ' time(s) in a row. This may indicate a genuine hang introduced by the change (an infinite loop, unbounded recursion, a non-terminating solver configuration) rather than an environment issue.',
           }],
         }, null, 2));
+        deps.writeCompletionSummary(pipeline, 'implement-failure');
         deps.advancePhase(pipeline, 'failed');
         return;
       }
@@ -1095,6 +1102,7 @@ export async function runSubtaskSession(
           }],
         }, null, 2));
         logToOutput(pipeline.specPath, '[VERIFY] Subtask ' + subtask.id + ' exceeded deliverable verification cap (' + maxFails + ') — advancing to failed\n');
+        deps.writeCompletionSummary(pipeline, 'implement-failure');
         deps.advancePhase(pipeline, 'failed');
         return;
       }
@@ -1352,6 +1360,7 @@ export function pushAndVerify(
           notes: 'Git push failed: ' + pushMsg + '. The engineer must be able to push commits before QA can verify.',
         }],
       }, null, 2));
+      deps.writeCompletionSummary(pipeline, 'implement-failure');
       deps.advancePhase(pipeline, 'failed');
     }
   }
@@ -1690,6 +1699,7 @@ export async function runImplement(
       pipeline.wakeupArtifact = undefined;
       pipeline.wakeupProgressPath = undefined;
       pipeline.wakeupAttemptCount = 0;
+      deps.writeCompletionSummary(pipeline, 'implement-failure');
       deps.advancePhase(pipeline, 'failed');
       return;
     }
@@ -1736,6 +1746,7 @@ export async function runImplement(
         }],
       }, null, 2));
       logToOutput(pipeline.specPath, '[IMPLEMENT-GATE] Exceeded incomplete-pass cap (' + maxPasses + ') — advancing to failed\n');
+      deps.writeCompletionSummary(pipeline, 'implement-failure');
       deps.advancePhase(pipeline, 'failed');
       return;
     }

@@ -16,6 +16,7 @@ import type { TaskStore } from '../task-store';
 import type { TaskPipeline } from './types';
 import type { PipelinePhase } from '@/constants/phases';
 import { NO_RESUME_PHASES } from '@/constants/phases';
+import type { FailureReason } from './qa-feedback';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -141,6 +142,10 @@ export interface HandleRateLimitDeps {
   advancePhase: (pipeline: TaskPipeline, phase: PipelinePhase) => void;
   /** Recursive call for nested rate limits — passes through the orchestrator so spies intercept it. */
   handleRateLimit: (pipeline: TaskPipeline, resetsAt: number) => void;
+  /** Regenerates task.json's completionSummary/failureReason so a crash on
+   *  resume-after-rate-limit doesn't leave the UI showing a stale summary
+   *  from some earlier, unrelated QA-driven failure. */
+  writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
 }
 
 /**
@@ -221,6 +226,8 @@ export function handleRateLimit(
         logToOutput(pipeline.specPath,
           `\n[ERROR] Task failed after rate-limit retry: ${errMsg}\n`);
         logError('orchestrator', `Task ${pipeline.taskId} failed after rate-limit retry`, e);
+        deps.writeCompletionSummary(pipeline, 'session-crashed',
+          e instanceof Error ? e.message : String(e));
         deps.advancePhase(pipeline, 'failed');
       }
     } finally {

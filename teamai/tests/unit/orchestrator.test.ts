@@ -1919,6 +1919,13 @@ describe('Orchestrator', () => {
       // (wasRateLimited is false since it's not a RateLimitError)
       expect((orch as AnyOrch).pipelines.has(testData.taskId)).toBe(false);
       expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(false);
+
+      // This failure path bypasses QA entirely, so it must regenerate the
+      // completion summary itself rather than leaving task.json showing
+      // whatever a prior, unrelated QA-driven failure left behind.
+      const failedTask = tStore.getById(testData.taskId);
+      expect(failedTask?.failureReason).toBe('session-crashed');
+      expect(failedTask?.completionSummary).toContain('simulated createSession failure');
     });
 
     it('skips resume when task is user-paused (isPaused flag)', async () => {
