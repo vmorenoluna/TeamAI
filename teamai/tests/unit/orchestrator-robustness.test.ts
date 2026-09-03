@@ -4218,6 +4218,68 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
     }
   });
 
+  // Regression coverage for a real production failure (task 585a32e0):
+  // Subtask 8 discovered its dependency, Subtask 7, was still blocked on a
+  // live background job. Rather than silently completing, it scheduled a
+  // wakeup for the ACTUAL blocked subtask (7) — but wrote it to
+  // subtask_wakeup-st7.json, not subtask_wakeup-st8.json (its own id).
+  // Wakeup-file discovery used to be scoped to only the currently-running
+  // subtask's own filename, so this file was invisible: nothing prevented
+  // Subtask 8 (which wrote it) from being marked completed:true anyway,
+  // and the file just sat on disk, unconsumed, forever. Discovery now
+  // scans for ANY subtask_wakeup-st<N>.json, so a session can legitimately
+  // schedule a wakeup on behalf of the subtask that's actually blocking
+  // progress — and finding one, regardless of which id it names, still
+  // means the CURRENT subtask isn't done either.
+  it('picks up a wakeup file scheduled for a DIFFERENT subtask than the one currently running', async () => {
+    // Only Subtask 8 dispatches here — its dependency on Subtask 7 is
+    // deliberately omitted so this test isolates the wakeup-misdirection
+    // fix from the separate depends_on runtime-gating fix (covered by its
+    // own describe block below), rather than conflating the two.
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 8, title: 'Final regression gate', description: 'Gate', files: [], acceptance_criteria: ['All ACs pass'] },
+      ],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-gate');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      // Subtask 8's session, discovering Subtask 7 is what's actually
+      // blocked, schedules 7's wakeup instead of its own.
+      writeFileSync(join(project.taskDir, 'subtask_wakeup-st7.json'), JSON.stringify({
+        subtask_id: 7,
+        wakeup_at: '2026-09-03T14:30:00Z',
+        background_command: 'python sweep.py',
+        expected_artifact: 'scripts/sweep_logs/evidence.log',
+      }));
+
+      fireEvent('event', { sessionId: 'sess-gate', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      expect(existsSync(join(project.taskDir, 'subtask_wakeup-st7.json'))).toBe(false);
+      expect(pipeline.wakeupSubtaskId).toBe(7);
+      expect(pipeline.wakeupUntil).toBe('2026-09-03T14:30:00Z');
+
+      // Subtask 8 itself must NOT be marked complete — its own session
+      // said as much by scheduling a wakeup at all, regardless of whose id
+      // it named.
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 8).completed).toBeUndefined();
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   it('adopts the EARLIEST wakeup when two parallel subtasks both schedule one (BUG-10)', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
@@ -4586,6 +4648,120 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
 
     const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
     expect(plan.subtasks.find((s: any) => s.id === 3).completed).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  depends_on runtime enforcement across groups
+// ═══════════════════════════════════════════════════════════════════════
+// Regression coverage for a real production failure (task 585a32e0):
+// parallel_group ordering reflects the planner's INTENDED sequencing, but
+// nothing at runtime verified a subtask's depends_on were actually
+// completed before dispatching it — the group loop just marched through
+// every group regardless of whether earlier subtasks succeeded. Subtask 7
+// (depends_on a never-completed Subtask 3) and Subtask 8 (depends_on a
+// never-completed Subtask 7) both ran anyway, producing a "final
+// regression gate" that verified nothing real about work that never
+// landed.
+
+describe('runImplement — depends_on gates dispatch across groups', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\\n';
+      }
+      return '';
+    });
+  });
+
+  afterEach(() => { project.clean(); });
+    vi.useRealTimers();
+
+  it('defers a subtask whose dependency never completed instead of dispatching it anyway', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        // Never completes — its files_to_create deliverable is never
+        // produced by the mocked session, so it stays incomplete without
+        // needing to simulate a full scope violation.
+        { id: 1, title: 'Produce artifact', description: 'Produce it', files: [], files_to_create: ['out/artifact.txt'], acceptance_criteria: ['Artifact exists'], parallel_group: 'A' },
+        { id: 2, title: 'Consume artifact', description: 'Consume it', files: ['src/b.ts'], acceptance_criteria: ['B done'], depends_on: [1], parallel_group: 'B' },
+      ],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-dep-1');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      fireEvent('event', { sessionId: 'sess-dep-1', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      // Only Subtask 1 ever dispatched — Subtask 2 was deferred, never
+      // started, because its dependency never completed.
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBeUndefined();
+      expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBeUndefined();
+
+      const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(log).toContain('[DEPENDS-ON] Subtask 2 deferred');
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('dispatches a subtask once its dependency completes within the same pass', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'Produce artifact', description: 'Produce it', files: ['src/a.ts'], acceptance_criteria: ['A done'], parallel_group: 'A' },
+        { id: 2, title: 'Consume artifact', description: 'Consume it', files: ['src/b.ts'], acceptance_criteria: ['B done'], depends_on: [1], parallel_group: 'B' },
+      ],
+    }));
+
+    mockCreateSession
+      .mockResolvedValueOnce('sess-dep-a')
+      .mockResolvedValueOnce('sess-dep-b');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      fireEvent('event', { sessionId: 'sess-dep-a', event: { type: 'result' } });
+
+      await vi.waitFor(() => { expect(mockCreateSession).toHaveBeenCalledTimes(2); });
+      fireEvent('event', { sessionId: 'sess-dep-b', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(true);
+      expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
   });
 });
 
