@@ -3,5 +3,6 @@
   "maxQaAttempts": 3,
   "parallelSubtasks": true,
   "maxDeliverableFails": 3,
-  "maxWakeupAttempts": 3
+  "maxWakeupAttempts": 3,
+  "maxIncompleteImplementPasses": 3
 }

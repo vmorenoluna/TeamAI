@@ -56,7 +56,7 @@ export interface ImplementDeps {
   restoreQaReportFromSnapshot: (specPath: string) => void;
   restoreHumanFeedbackFromSnapshot: (specPath: string) => void;
   writeQaFeedback: (pipeline: ImplementPipeline, report: QaReport) => void;
-  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxDeliverableFails: number; maxWakeupAttempts: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number };
+  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxDeliverableFails: number; maxWakeupAttempts: number; maxIncompleteImplementPasses: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number };
   phaseHeader: (logFile: string, phase: string) => void;
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
@@ -1697,6 +1697,54 @@ export async function runImplement(
     deps.scheduleWakeup(pipeline);
     return;
   }
+
+  // Structural completeness gate: don't push to QA when plan.json already
+  // shows subtasks left incomplete (an unmet dependency, a repeated scope
+  // violation, an exhausted-but-under-cap deliverable check, etc.). QA is
+  // an expensive full LLM review; burning one confirming what the
+  // orchestrator can already see for free in plan.json wastes it — and
+  // with a low maxQaAttempts, can fail the whole task on a review that was
+  // doomed before it started. Re-read plan.json fresh (awaiting
+  // planWriteLock so every prior group's persisted completion is visible)
+  // rather than trusting the in-memory `plan` snapshot taken before this
+  // pass ran. Checked against the FULL plan, not just this round's
+  // effectiveSubtasks — a subtask QA never flagged (and so wasn't
+  // targeted for rework) but that never completed either is just as real
+  // a blocker for anything depending on it.
+  await deps.planWriteLock.current;
+  const finalPlanResult = readJsonFile<{ subtasks: PlanSubtask[] }>(
+    path.join(pipeline.specPath, 'plan.json'), { required: true },
+  );
+  const incompleteSubtasks = (finalPlanResult.data?.subtasks ?? []).filter(s => !s.completed);
+  if (incompleteSubtasks.length > 0) {
+    const attemptCount = (pipeline.incompleteImplementPassCount || 0) + 1;
+    pipeline.incompleteImplementPassCount = attemptCount;
+    const maxPasses = deps.getPipelineConfig().maxIncompleteImplementPasses;
+    const ids = incompleteSubtasks.map(s => s.id).join(', ');
+    logToOutput(pipeline.specPath,
+      '\n[IMPLEMENT-GATE] ' + incompleteSubtasks.length + ' subtask(s) still incomplete after this pass (id' +
+      (incompleteSubtasks.length > 1 ? 's' : '') + ' ' + ids + ') — skipping QA (attempt ' + attemptCount + '/' + maxPasses + ')\n');
+    if (attemptCount >= maxPasses) {
+      const reportPath = path.join(pipeline.specPath, 'qa_report.json');
+      writeFileSync(reportPath, JSON.stringify({
+        overall: 'FAIL',
+        criteria: [{
+          criterion: 'Implement completeness gate',
+          name: 'Implement completeness gate',
+          status: 'FAIL',
+          notes: 'Subtask(s) ' + ids + ' remained incomplete after ' + maxPasses + ' implement passes. See output.log for the specific reason on each (scope violation, unmet dependency, deliverable verification failure, etc.).',
+        }],
+      }, null, 2));
+      logToOutput(pipeline.specPath, '[IMPLEMENT-GATE] Exceeded incomplete-pass cap (' + maxPasses + ') — advancing to failed\n');
+      deps.advancePhase(pipeline, 'failed');
+      return;
+    }
+    deps.savePipelineState(pipeline);
+    deps.advancePhase(pipeline, 'implement');
+    await deps.executePhase(pipeline);
+    return;
+  }
+  pipeline.incompleteImplementPassCount = 0;
 
   // Clean up feedback files
   if (hasQaFeedback && existsSync(qaFeedbackPath)) unlinkSync(qaFeedbackPath);

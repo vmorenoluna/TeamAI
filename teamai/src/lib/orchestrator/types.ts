@@ -67,6 +67,16 @@ export interface TaskPipeline {
    * not that the job genuinely finished.
    */
   wakeupArtifactMtimeAtSchedule?: number | null;
+  /** Consecutive implement passes that ended with one or more subtasks
+   *  still `!completed` in plan.json — an unmet dependency, a repeated
+   *  scope violation, etc. Bounded by maxIncompleteImplementPasses: below
+   *  the cap, implement is retried immediately without ever reaching QA
+   *  (cheap — QA is an expensive full review that would only confirm what
+   *  plan.json already shows); at the cap, the task fails outright instead
+   *  of burning a QA attempt on a review that was doomed before it
+   *  started. Reset to 0 whenever a pass completes with nothing left
+   *  incomplete. */
+  incompleteImplementPassCount?: number;
   /** Map of FAIL criterion text → number of consecutive QA cycles it has appeared unchanged.
    *  Used by the orchestrator to escalate persisted failures in the rework prompt. */
   persistedCriterionFailCounts?: Record<string, number>;
