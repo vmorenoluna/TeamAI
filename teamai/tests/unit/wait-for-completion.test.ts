@@ -100,6 +100,40 @@ describe('waitForCompletion — Defect 7 (killed session vs clean exit)', () => 
     await expect(promise).rejects.toBeInstanceOf(RateLimitError);
   });
 
+  it('rejects with SessionKilledError when wasExplicitlyKilled is set but no signal was reported (Docker exec masks the signal as an exit code)', async () => {
+    // In container mode the immediate child is `docker exec`; Docker delivers
+    // the signal to the process INSIDE the container and reports its own
+    // exit purely via a `128 + signal` code (143 for SIGTERM) with
+    // `signal: null` on the host side. killSession() sets
+    // wasExplicitlyKilled unconditionally specifically so this case is still
+    // detectable even though the OS-level signal itself never reaches us.
+    const sessionId = `test-docker-masked-kill-${Date.now()}`;
+    (processManager as any).sessions.set(sessionId, { wasExplicitlyKilled: true, killReason: undefined, stallKind: undefined });
+
+    const promise = waitForCompletion(sessionId, deps);
+    processManager.emit('exit', { sessionId, code: 143, signal: null });
+
+    try {
+      await expect(promise).rejects.toBeInstanceOf(SessionKilledError);
+    } finally {
+      (processManager as any).sessions.delete(sessionId);
+    }
+  });
+
+  it('does NOT misclassify a genuine non-zero exit as a kill when wasExplicitlyKilled is unset', async () => {
+    const sessionId = `test-not-killed-${Date.now()}`;
+    (processManager as any).sessions.set(sessionId, { wasExplicitlyKilled: false });
+
+    const promise = waitForCompletion(sessionId, deps);
+    processManager.emit('exit', { sessionId, code: 143, signal: null });
+
+    try {
+      await expect(promise).rejects.toBeInstanceOf(SessionExitedError);
+    } finally {
+      (processManager as any).sessions.delete(sessionId);
+    }
+  });
+
   it('ignores exit events for a different sessionId', async () => {
     const sessionId = `test-scoped-${Date.now()}`;
     const promise = waitForCompletion(sessionId, deps);

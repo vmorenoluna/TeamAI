@@ -105,13 +105,24 @@ export function waitForCompletion(
       // completion. Signal-killed processes report code=null, which the old
       // handler resolved as success — causing the pipeline to deadlock
       // indefinitely with no Retry button and no failure path.
-      if (signal) {
+      //
+      // `killedSession?.wasExplicitlyKilled` is the fallback for when the
+      // OS-level signal never reaches us at all: in container mode the
+      // immediate child is `docker exec`, and Docker delivers the signal to
+      // the process INSIDE the container, then reports its own exit purely
+      // via a `128 + signal` exit code (143 for SIGTERM) with `signal: null`
+      // on the host side. Without this flag that case fell through to the
+      // generic SessionExitedError branch below — a deliberate kill (stall
+      // recovery, cancelPipeline) silently misclassified as a random crash,
+      // permanently failing the task instead of going through
+      // SessionKilledError's recoverable handling.
+      const killedSession = processManager.getSession(sessionId);
+      if (signal || killedSession?.wasExplicitlyKilled) {
         // Read killReason/stallKind before the session record is cleaned up
         // elsewhere — distinguishes a stall-detector kill (recoverable) from
         // a deliberate stop (must never auto-retry), and which stall
         // threshold actually fired (idle vs tool-in-flight).
-        const killedSession = processManager.getSession(sessionId);
-        reject(new SessionKilledError(signal, killedSession?.killReason, killedSession?.stallKind));
+        reject(new SessionKilledError(signal ?? 'SIGTERM', killedSession?.killReason, killedSession?.stallKind));
       } else if (sessionLimitResetsAt) {
         reject(new RateLimitError(sessionLimitResetsAt));
       } else if (code === 0) {

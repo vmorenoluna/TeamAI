@@ -73,6 +73,20 @@ export interface AgentSession {
    */
   stallKind?: 'idle' | 'tool';
   /**
+   * Set unconditionally by killSession, regardless of `reason` — records
+   * that OUR code initiated the termination, as opposed to the process
+   * dying on its own. Exists because the child's exit event's `signal`
+   * field is not a reliable way to detect this: in container mode the
+   * immediate child is `docker exec`, and Docker delivers SIGTERM to the
+   * process INSIDE the container, then reports its own exit purely via a
+   * `128 + signal` exit code (e.g. 143 for SIGTERM) with `signal: null` on
+   * the host-side `docker exec` process — Node never sees a real signal, so
+   * a deliberate kill was silently misclassified as a generic
+   * SessionExitedError crash, and none of SessionKilledError's downstream
+   * handling (e.g. stall-recovery retry) ever ran under Docker.
+   */
+  wasExplicitlyKilled?: boolean;
+  /**
    * Per-session EventEmitter scoped to this session only.
    * Used by {@link waitForCompletion} to avoid piling listeners
    * on the global {@link processManager} emitter (BUG-20 / T29).
@@ -343,6 +357,7 @@ export class ProcessManager extends EventEmitter {
   killSession(sessionId: string, reason?: 'stalled', stallKind?: 'idle' | 'tool'): void {
     const session = this.sessions.get(sessionId);
     if (session) {
+      session.wasExplicitlyKilled = true;
       if (reason) session.killReason = reason;
       if (stallKind) session.stallKind = stallKind;
       session.process.kill('SIGTERM');
