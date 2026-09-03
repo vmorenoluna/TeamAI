@@ -22,6 +22,14 @@ export interface PipelineConfig {
   sensors?: SensorsConfig;
   maxDeliverableFails: number;
   maxWakeupAttempts: number;
+  /** Consecutive implement passes that may end with subtasks still
+   *  incomplete (an unmet dependency, a repeated scope violation, etc.)
+   *  before the task fails outright, WITHOUT ever reaching QA. QA is an
+   *  expensive full review; a pass the orchestrator already knows is
+   *  incomplete from plan.json alone would only confirm that at QA's cost
+   *  — and, with a low maxQaAttempts, could fail the whole task on a
+   *  review that was doomed before it started. Default 3. */
+  maxIncompleteImplementPasses: number;
   /** Consecutive stall-detector kills a subtask may recover from (fresh
    *  session + retry) before the subtask fails outright. */
   maxStallRecoveries: number;
@@ -209,6 +217,7 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
         parallelSubtasks: typeof raw.parallelSubtasks === 'boolean' ? raw.parallelSubtasks : true,
         maxDeliverableFails: typeof raw.maxDeliverableFails === 'number' ? raw.maxDeliverableFails : 3,
         maxWakeupAttempts: typeof raw.maxWakeupAttempts === 'number' ? raw.maxWakeupAttempts : 3,
+        maxIncompleteImplementPasses: typeof raw.maxIncompleteImplementPasses === 'number' ? raw.maxIncompleteImplementPasses : 3,
         maxStallRecoveries: typeof raw.maxStallRecoveries === 'number' ? raw.maxStallRecoveries : 3,
         idleStallMinutes: typeof raw.idleStallMinutes === 'number' ? raw.idleStallMinutes : 15,
         toolStallMinutes: typeof raw.toolStallMinutes === 'number' ? raw.toolStallMinutes : 30,
@@ -220,7 +229,7 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
   }
-  return { maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true };
+  return { maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 3, maxIncompleteImplementPasses: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true };
 }
 
 // ── Session map ───────────────────────────────────────────────────────────

@@ -4766,6 +4766,147 @@ describe('runImplement — depends_on gates dispatch across groups', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Implement completeness gate — don't push to QA on known-incomplete work
+// ═══════════════════════════════════════════════════════════════════════
+// Prompted by a real cost, not just a hypothetical: with maxQaAttempts set
+// low, a pass that pushes with subtasks the orchestrator already knows
+// (from plan.json) are incomplete burns the ENTIRE QA budget confirming
+// something no LLM review was needed to discover. Retry implement instead,
+// bounded by maxIncompleteImplementPasses so a task that can never
+// structurally converge still fails rather than looping forever.
+
+describe('runImplement — implement completeness gate', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\\n';
+      }
+      return '';
+    });
+  });
+
+  afterEach(() => { project.clean(); });
+    vi.useRealTimers();
+
+  it('retries implement instead of pushing to QA when a subtask remains incomplete, under the cap', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 1, title: 'Produce artifact', description: 'x', files: [],
+        files_to_create: ['out/artifact.txt'], acceptance_criteria: ['Artifact exists'],
+      }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-gate-retry');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      fireEvent('event', { sessionId: 'sess-gate-retry', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      // Retried implement — never advanced to qa-review, never pushed.
+      expect(pipeline.phase).toBe('implement');
+      expect(pipeline.incompleteImplementPassCount).toBe(1);
+      const pushCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'git' && Array.isArray(call[1]) && call[1][0] === 'push',
+      );
+      expect(pushCalls.length).toBe(0);
+
+      const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(log).toContain('[IMPLEMENT-GATE]');
+      expect(log).not.toContain('PUSH TO REMOTE');
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('advances directly to failed once the incomplete-pass cap is exceeded, without ever reaching QA', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 1, title: 'Produce artifact', description: 'x', files: [],
+        files_to_create: ['out/artifact.txt'], acceptance_criteria: ['Artifact exists'],
+      }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-gate-cap');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    // Already one pass short of the default cap (3) — this pass's failure
+    // to complete pushes it over.
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+      incompleteImplementPassCount: 2,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      fireEvent('event', { sessionId: 'sess-gate-cap', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      expect(pipeline.phase).toBe('failed');
+      const pushCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'git' && Array.isArray(call[1]) && call[1][0] === 'push',
+      );
+      expect(pushCalls.length).toBe(0);
+
+      const report = JSON.parse(readFileSync(join(project.taskDir, 'qa_report.json'), 'utf-8'));
+      expect(report.overall).toBe('FAIL');
+      expect(report.criteria[0].criterion).toBe('Implement completeness gate');
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('resets the counter and proceeds to QA normally once a pass fully completes', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{ id: 1, title: 'Do it', description: 'x', files: ['src/a.ts'], acceptance_criteria: ['Done'] }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-gate-complete');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+      incompleteImplementPassCount: 2,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      fireEvent('event', { sessionId: 'sess-gate-complete', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      expect(pipeline.phase).toBe('qa-review');
+      expect(pipeline.incompleteImplementPassCount).toBe(0);
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 //  Wakeup inside a multi-subtask parallel group (ADR 002 x parallel groups)
 // ═══════════════════════════════════════════════════════════════════════
 // Regression coverage for a real production failure: a group with 2
@@ -5737,7 +5878,7 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
       restoreQaReportFromSnapshot: vi.fn(),
       restoreHumanFeedbackFromSnapshot: vi.fn(),
       writeQaFeedback: vi.fn(),
-      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 10, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30 })),
+      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 10, maxIncompleteImplementPasses: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30 })),
       phaseHeader: vi.fn(),
       planWriteLock: { current: Promise.resolve() },
       scheduleWakeup: vi.fn(),
@@ -5860,7 +6001,7 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
       restoreQaReportFromSnapshot: vi.fn(),
       restoreHumanFeedbackFromSnapshot: vi.fn(),
       writeQaFeedback: vi.fn(),
-      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 10, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30 })),
+      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxDeliverableFails: 3, maxWakeupAttempts: 10, maxIncompleteImplementPasses: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30 })),
       phaseHeader: vi.fn(),
       planWriteLock: { current: Promise.resolve() },
       scheduleWakeup: vi.fn(),
