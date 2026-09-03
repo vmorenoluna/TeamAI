@@ -4935,6 +4935,76 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
     expect(execGit).toHaveBeenCalledWith(['commit', '-m', 'chore: auto-save worktree state before cherry-pick'], pipeline.worktreePath);
   });
 
+  // Regression coverage for a real production failure (task 585a32e0, found
+  // by QA's own forensic trace): the auto-commit safety net above only ever
+  // covered the MAIN worktree. A per-subtask ISOLATED worktree had no
+  // equivalent — cherry-pick only moves what's already committed on the
+  // subtask's branch, so an edit the coder made but never committed before
+  // its session ended was invisible to it, and the unconditional
+  // `git worktree remove --force` cleanup afterward destroyed it silently.
+  it('auto-commits stray uncommitted changes in a per-subtask ISOLATED worktree before cherry-picking from it', async () => {
+    const execGitCapture = vi.fn((args: string[], cwd: string) => {
+      if (args[0] === 'status' && cwd.endsWith('-st2')) return ' M MelodyConstraintProvider.scala\n';
+      return '';
+    });
+    const execGit = vi.fn();
+    const deps = {
+      execGit,
+      execGitCapture,
+      projectRoot: project.root,
+      sessionOpts: vi.fn() as any,
+    } as unknown as ImplementDeps;
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    const stWorktreePath = join(project.root, 'worktrees', 'test-task-st2');
+    const subtaskWorktrees = new Map<number, string>([[2, stWorktreePath]]);
+    await integrateGroup(
+      pipeline, deps,
+      [{ id: 2, title: 'Fix Scaladoc', description: 'x', files: [], acceptance_criteria: [], depends_on: [] }],
+      [{ status: 'fulfilled', value: undefined }],
+      new Set(), subtaskWorktrees, join(project.root, 'output.log'),
+    );
+
+    expect(execGitCapture).toHaveBeenCalledWith(['status', '--porcelain'], stWorktreePath);
+    expect(execGit).toHaveBeenCalledWith(['add', '-A', '--', '.', ':!.teamai'], stWorktreePath);
+    expect(execGit).toHaveBeenCalledWith(['commit', '-m', 'chore: auto-save subtask 2 state before cherry-pick'], stWorktreePath);
+  });
+
+  it('does NOT auto-commit a per-subtask worktree that has a wakeup pending or a scope violation', async () => {
+    const execGitCapture = vi.fn(() => ' M some-file.txt\n');
+    const execGit = vi.fn();
+    const deps = {
+      execGit,
+      execGitCapture,
+      projectRoot: project.root,
+      sessionOpts: vi.fn() as any,
+    } as unknown as ImplementDeps;
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+      wakeupSubtaskId: 1,
+    });
+
+    const st1Worktree = join(project.root, 'worktrees', 'test-task-st1');
+    const st2Worktree = join(project.root, 'worktrees', 'test-task-st2');
+    const subtaskWorktrees = new Map<number, string>([[1, st1Worktree], [2, st2Worktree]]);
+    await integrateGroup(
+      pipeline, deps,
+      [
+        { id: 1, title: 'Wakeup pending', description: 'x', files: [], acceptance_criteria: [], depends_on: [] },
+        { id: 2, title: 'Scope violated', description: 'x', files: [], acceptance_criteria: [], depends_on: [] },
+      ],
+      [{ status: 'fulfilled', value: undefined }, { status: 'fulfilled', value: undefined }],
+      new Set([2]), subtaskWorktrees, join(project.root, 'output.log'),
+    );
+
+    expect(execGit).not.toHaveBeenCalledWith(expect.arrayContaining(['commit']), st1Worktree);
+    expect(execGit).not.toHaveBeenCalledWith(expect.arrayContaining(['commit']), st2Worktree);
+  });
+
   it('resumes the wakeup subtask in its preserved isolated worktree once the group has collapsed to just that subtask', async () => {
     // Simulate: subtask 2 already completed/integrated in a prior round;
     // subtask 1 is the sole remaining subtask, resuming after its wakeup fired.
