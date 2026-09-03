@@ -9,7 +9,7 @@
  */
 import { execFileSync } from 'child_process';
 import { getToolPath } from '../tool-checker';
-import { readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync, renameSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync, renameSync, rmSync, statSync } from 'fs';
 import { PipelineConfigError, WorktreeError, PushVerificationError, SessionKilledError } from './errors';
 import { readJsonFile } from '../json-io';
 import path from 'path';
@@ -977,6 +977,17 @@ export async function runSubtaskSession(
             pipeline.wakeupCommand = wd.background_command;
             pipeline.wakeupArtifact = wd.expected_artifact;
             pipeline.wakeupProgressPath = wd.progress_log_path;
+            // Snapshot the artifact's current mtime so a FUTURE re-entry that
+            // ends without writing another wakeup file can be verified — see
+            // the freshness check below and the field's doc in types.ts.
+            try {
+              const artifactPath = wd.expected_artifact ? path.join(cwd, wd.expected_artifact) : null;
+              pipeline.wakeupArtifactMtimeAtSchedule = artifactPath && existsSync(artifactPath)
+                ? statSync(artifactPath).mtimeMs
+                : null;
+            } catch {
+              pipeline.wakeupArtifactMtimeAtSchedule = null;
+            }
           }
           pipeline.wakeupAttemptCount = (pipeline.wakeupAttemptCount || 0) + 1;
           wakeupDetected = true;
@@ -987,6 +998,47 @@ export async function runSubtaskSession(
         logToOutput(pipeline.specPath, '[WAKEUP] Malformed subtask_wakeup.json — treating as missing\n');
       }
       try { unlinkSync(wakeupPath); } catch { /* best-effort */ }
+    }
+  }
+
+  // A wakeup re-entry session that ends without writing a fresh wakeup file
+  // is normally trusted as genuinely complete (see the `wasWakeupReentry &&
+  // !wakeupDetected` block below). But a coder session monitoring a
+  // long-running background job can run out of turns mid-check and simply
+  // stop — without ever reaching its own "if still running, write an
+  // updated wakeup file" instruction (see the WAKEUP RE-ENTRY prompt above)
+  // — leaving the job still running, uncollected, while the orchestrator
+  // silently moves on to the next subtask. Verify the declared artifact
+  // actually advanced during this cycle before trusting that silence:
+  // unchanged (or still missing) mtime means nothing new was produced, so
+  // auto-reschedule a follow-up check instead — bounded by the same
+  // maxWakeupAttempts cap used for explicit reschedules (the wakeup-timer
+  // block later in this file), so a genuinely stuck job still eventually
+  // fails the task rather than looping forever.
+  //
+  // Gated on !subtask.files_to_create?.length — a subtask that declares
+  // files_to_create already has a more specific, purpose-built deliverable
+  // check just below (with its own maxDeliverableFails circuit breaker);
+  // this mtime check exists for the case that check can't cover, an
+  // existing file the subtask overwrites rather than creates.
+  if (wasWakeupReentry && !wakeupDetected && pipeline.wakeupArtifact && !subtask.files_to_create?.length) {
+    let currentMtime: number | null = null;
+    try {
+      const artifactPath = path.join(cwd, pipeline.wakeupArtifact);
+      currentMtime = existsSync(artifactPath) ? statSync(artifactPath).mtimeMs : null;
+    } catch { /* treat as not produced */ }
+    const producedThisCycle = currentMtime != null
+      && (pipeline.wakeupArtifactMtimeAtSchedule == null || currentMtime > pipeline.wakeupArtifactMtimeAtSchedule);
+    if (!producedThisCycle) {
+      const attemptCount = (pipeline.wakeupAttemptCount || 0) + 1;
+      pipeline.wakeupAttemptCount = attemptCount;
+      pipeline.wakeupArtifactMtimeAtSchedule = currentMtime;
+      pipeline.wakeupUntil = new Date(Date.now() + 15 * 60_000).toISOString();
+      wakeupDetected = true;
+      logToOutput(pipeline.specPath,
+        '[WAKEUP] Subtask ' + subtask.id + ' re-entry ended without a fresh wakeup file, but the expected artifact (' +
+        pipeline.wakeupArtifact + ') was not updated since the last check — the background job is likely still ' +
+        'running. Auto-rescheduling a follow-up check in 15 minutes (attempt ' + attemptCount + ')\n');
     }
   }
 

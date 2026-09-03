@@ -7,7 +7,7 @@
  *   - Snapshot restore on QA bounce and task retry
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, statSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { createTestProject } from '../utils/test-project';
@@ -4447,6 +4447,71 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
     }
   });
 
+  // Regression coverage for a real production failure (task 585a32e0): a
+  // ~2h background sweep was still genuinely running (605-cell solve log
+  // still being written) when the wakeup re-entry coder session ran out of
+  // turns mid-monitoring and ended WITHOUT writing a fresh wakeup file —
+  // never reaching its own "if still running, reschedule" instruction. The
+  // orchestrator saw no new wakeup file and, with no files_to_create
+  // declared on this subtask (it overwrites an existing evidence file
+  // rather than creating a new one), had no other check to catch this —
+  // silently declared the subtask complete and moved on, so the analysis
+  // subtask that followed ran against months-old evidence instead of the
+  // fresh sweep. The fix verifies the declared wakeupArtifact actually
+  // advanced past its mtime at the last schedule point before trusting
+  // silence as completion; an unchanged artifact auto-reschedules another
+  // check instead.
+  it('does not trust silent "completion" when the wakeup artifact was never actually produced', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 3,
+        title: 'Run fresh sweep and extract evidence',
+        description: 'Run the sweep and overwrite the existing evidence file',
+        files: ['scripts/sweep_logs/evidence.log'],
+        acceptance_criteria: ['Fresh evidence committed'],
+      }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-stuck');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    // The stale evidence file already exists (from before this sweep even
+    // started) — its presence alone must not be mistaken for freshness.
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+    mkdirSync(join(worktreePath, 'scripts/sweep_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts/sweep_logs/evidence.log'), 'stale evidence from a prior sweep');
+    const staleMtime = statSync(join(worktreePath, 'scripts/sweep_logs/evidence.log')).mtimeMs;
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath,
+      wakeupSubtaskId: 3, wakeupCommand: 'python sweep.py', wakeupArtifact: 'scripts/sweep_logs/evidence.log',
+      wakeupAttemptCount: 1, wakeupArtifactMtimeAtSchedule: staleMtime,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      // No fresh wakeup file this session, and the evidence file's mtime is
+      // unchanged from when the wakeup was scheduled — nothing was produced.
+      fireEvent('event', { sessionId: 'sess-wakeup-stuck', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      // Subtask must NOT be silently marked complete.
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks[0].completed).toBeUndefined();
+
+      // A follow-up check must be auto-scheduled instead — isolation stays
+      // pointed at subtask 3, and the attempt count advanced.
+      expect(pipeline.wakeupSubtaskId).toBe(3);
+      expect(pipeline.wakeupUntil).toBeDefined();
+      expect(pipeline.wakeupAttemptCount).toBe(2);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   // Regression coverage for a real production failure: a subtask whose FINAL
   // wakeup re-entry session ended cleanly (no fresh wakeup file written, no
   // deliverable missing) was added to completedIds, but the wakeup-reentry
@@ -4469,10 +4534,18 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
 
     mockCreateSession.mockResolvedValue('sess-wakeup-complete');
 
+    // The background job actually finished and wrote its artifact — mtime
+    // check must see this as newer than wakeupArtifactMtimeAtSchedule (a
+    // minute in the past here) and trust the completion.
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+    mkdirSync(join(worktreePath, 'scripts/sweep_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts/sweep_logs/evidence.log'), 'sweep evidence');
+
     // Resuming after an earlier, legitimate wakeup cycle on the same subtask.
     const pipeline = makePipeline(project.taskId, project.taskDir, {
-      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+      phase: 'implement', qaAttempt: 0, worktreePath,
       wakeupSubtaskId: 3, wakeupCommand: 'python sweep.py', wakeupArtifact: 'scripts/sweep_logs/evidence.log', wakeupAttemptCount: 1,
+      wakeupArtifactMtimeAtSchedule: Date.now() - 60_000,
     });
 
     const subtask: PlanSubtask = {
