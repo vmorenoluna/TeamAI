@@ -958,10 +958,28 @@ export async function runSubtaskSession(
   // burning a QA attempt on a false negative unrelated to code or spec quality.
   let wakeupDetected = false;
   {
-    const wakeupPathId = path.join(pipeline.specPath, `subtask_wakeup-st${subtask.id}.json`);
+    // Scan for ANY subtask_wakeup-st<N>.json, not just this subtask's own
+    // id — a session can legitimately determine that a DIFFERENT subtask
+    // (one it depends on, or one whose still-running background job it
+    // discovered) is what's actually blocking progress, and schedule that
+    // subtask's wakeup instead of its own. Restricting discovery to only
+    // this subtask's own filename made such a file invisible to every
+    // future check: it just sat on disk, unconsumed, while the CURRENT
+    // subtask — having found none of ITS OWN structural completion
+    // blockers (no files_to_create, no wakeup file matching its own id) —
+    // got silently marked complete despite explicitly reporting it wasn't.
+    // Found on task 585a32e0: Subtask 8 wrote subtask_wakeup-st7.json for
+    // its still-running dependency and was marked completed:true anyway.
+    const wakeupPaths: string[] = [];
+    try {
+      for (const f of readdirSync(pipeline.specPath)) {
+        if (/^subtask_wakeup-st\d+\.json$/.test(f)) wakeupPaths.push(path.join(pipeline.specPath, f));
+      }
+    } catch { /* best-effort */ }
     const wakeupPathLegacy = path.join(pipeline.specPath, 'subtask_wakeup.json');
-    const wakeupPath = existsSync(wakeupPathId) ? wakeupPathId : (existsSync(wakeupPathLegacy) ? wakeupPathLegacy : null);
-    if (wakeupPath) {
+    if (existsSync(wakeupPathLegacy)) wakeupPaths.push(wakeupPathLegacy);
+
+    for (const wakeupPath of wakeupPaths) {
       try {
         const wd = JSON.parse(readFileSync(wakeupPath, 'utf-8'));
         if (wd.subtask_id != null && wd.wakeup_at) {
@@ -995,7 +1013,7 @@ export async function runSubtaskSession(
             (wd.progress_log_path ? ' — progress log: ' + wd.progress_log_path : '') + '\n');
         }
       } catch {
-        logToOutput(pipeline.specPath, '[WAKEUP] Malformed subtask_wakeup.json — treating as missing\n');
+        logToOutput(pipeline.specPath, '[WAKEUP] Malformed ' + path.basename(wakeupPath) + ' — treating as missing\n');
       }
       try { unlinkSync(wakeupPath); } catch { /* best-effort */ }
     }
@@ -1403,8 +1421,44 @@ export async function runImplement(
   }
 
   // ── Phase 3: Process groups of subtasks ──
+  // Tracks every subtask id completed so far — both before this pass
+  // started and by earlier groups within it — so a later group can verify
+  // its subtasks' depends_on are actually satisfied before dispatching.
+  // `parallel_group` alone doesn't guarantee this: it only reflects the
+  // planner's INTENDED order, and a subtask can fail to complete (scope
+  // violation, exhausted wakeup attempts) without anything stopping the
+  // group loop from moving on to the next group regardless.
+  const completedThisRun = new Set(plan.subtasks.filter(s => s.completed).map(s => s.id));
+
   for (const [, subtasks] of groups) {
     if (pipeline.phase === 'failed') break;
+
+    // Depends_on gate: a subtask whose dependencies aren't all satisfied
+    // yet (an earlier subtask was rejected for scope violation, never
+    // finished a wakeup cycle, etc.) is deferred to a future pass instead
+    // of running against a dependency that doesn't actually exist yet.
+    // Found on task 585a32e0: Subtask 7 (depends_on a never-completed
+    // Subtask 3) and Subtask 8 (depends_on a never-completed Subtask 7)
+    // both ran anyway, producing a "final regression gate" that verified
+    // nothing real about the fresh evidence it was supposed to gate.
+    const readySubtasks = subtasks.filter(s =>
+      (s.depends_on ?? []).every(depId => completedThisRun.has(depId)));
+    const blockedSubtasks = subtasks.filter(s => !readySubtasks.includes(s));
+    for (const b of blockedSubtasks) {
+      const unmetDeps = (b.depends_on ?? []).filter(depId => !completedThisRun.has(depId));
+      logToOutput(pipeline.specPath,
+        '\n[DEPENDS-ON] Subtask ' + b.id + ' deferred to a future pass — depends_on [' +
+        unmetDeps.join(', ') + '] not yet completed\n');
+    }
+    if (readySubtasks.length === 0) continue;
+
+    // Shadow the outer `subtasks` (the full, unfiltered group) with the
+    // ready-only subset for the rest of this iteration — every existing
+    // reference below this point (worktree isolation, dispatch,
+    // integrateGroup, the wakeup break check) should only ever see
+    // subtasks that were actually dispatched this pass.
+    {
+    const subtasks = readySubtasks;
     const completedIds: number[] = [];
     const isMultiGroup = deps.getPipelineConfig().parallelSubtasks !== false && subtasks.length >= 2;
     const subtaskWorktrees = new Map<number, string>();
@@ -1570,6 +1624,9 @@ export async function runImplement(
     // through to the Phase 4 logic below, which schedules the wakeup timer
     // and returns.
     if (pipeline.wakeupUntil) break;
+
+    for (const id of completedIds) completedThisRun.add(id);
+    } // end of the `const subtasks = readySubtasks` shadow block
   }
 
   // ── Phase 4: Post-groups logic ──
