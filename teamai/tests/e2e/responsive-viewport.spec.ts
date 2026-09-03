@@ -76,6 +76,15 @@ test.describe('Responsive — Sidebar', () => {
     const sidebar = page.locator('aside');
     await expect(sidebar).toBeVisible({ timeout: 10_000 });
 
+    // Wait for the expanded class before clicking — `toBeVisible` alone
+    // passes on the server-rendered DOM before React hydration attaches
+    // the collapse button's onClick handler, letting the native click
+    // below fire into a dead listener and silently no-op (the sidebar
+    // then never gains w-12, and the assertion times out). Same
+    // hydration-completion checkpoint sidebar.spec.ts uses before its own
+    // native-click collapse, which is why that one is reliable.
+    await expect(sidebar).toHaveClass(/w-48/, { timeout: 10_000 });
+
     // Click the collapse toggle button via native DOM click (bypasses
     // Playwright actionability/pointer-events timing — same pattern used in
     // sidebar.spec.ts, which is reliable under concurrent load).
