@@ -77,9 +77,11 @@ export interface Task {
   /** Why a `failed` task failed — distinguishes "ran out of QA-attempt budget
    *  on a genuine code defect" from "ran out of spec-revision budget without
    *  QA ever passing" (the latter usually means the approach itself needs a
-   *  redesign, not another implement pass). Undefined for legacy failed tasks
-   *  written before this field existed. */
-  failureReason?: 'qa-attempts-exhausted' | 'spec-revision-exhausted';
+   *  redesign, not another implement pass) from "an implement-phase retry
+   *  cap was exceeded before QA ever ran" from "the coder session crashed
+   *  outside any of those caps (e.g. an app restart)". Undefined for legacy
+   *  failed tasks written before this field existed. */
+  failureReason?: 'qa-attempts-exhausted' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed';
   subtaskProgress?: { completed: number; total: number } | null;  // computed at load time from plan.json
   autoProcessed?: boolean;      // set to true when auto mode marks the task as done (PR auto-merged)
   autoReviewed?: boolean;       // set to true when user marks the auto-done task as manually reviewed

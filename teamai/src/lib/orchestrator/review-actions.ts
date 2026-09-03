@@ -29,7 +29,7 @@ export interface ReviewActionsDeps {
   advancePhase: (pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
   savePipelineState: (pipeline: TaskPipeline) => void;
-  writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason) => void;
+  writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────
