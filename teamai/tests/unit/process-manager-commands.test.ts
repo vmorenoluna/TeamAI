@@ -162,6 +162,17 @@ describe('ProcessManager — killSession', () => {
     expect(session?.status).toBe('done');
   });
 
+  it('sets wasExplicitlyKilled unconditionally, even without a reason (needed to detect a Docker exec kill whose signal never reaches Node)', () => {
+    const proc = mockProcess({ kill: vi.fn() });
+    addMockSession(pm, 'sess-plain-kill', { process: proc, status: 'running' });
+
+    pm.killSession('sess-plain-kill');
+
+    const session = pm.getSession('sess-plain-kill');
+    expect(session?.wasExplicitlyKilled).toBe(true);
+    expect(session?.killReason).toBeUndefined();
+  });
+
   it('does nothing when session does not exist', () => {
     expect(() => pm.killSession('nonexistent')).not.toThrow();
   });
