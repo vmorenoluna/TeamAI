@@ -1229,6 +1229,31 @@ export async function integrateGroup(
         logToOutput(pipeline.specPath, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' (scope violation)\n');
         continue;
       }
+
+      // Pre-cherry-pick: auto-commit any uncommitted changes in THIS
+      // subtask's isolated worktree — mirrors the main-worktree safety net
+      // above, which this one lacked. Cherry-pick only ever moves what's
+      // already COMMITTED on the subtask's branch; an edit the coder made
+      // but never committed before its session ended was invisible to it,
+      // and the worktree cleanup below (`git worktree remove --force`)
+      // then destroyed it silently. Found on task 585a32e0 via QA's own
+      // forensic trace: a verbatim Scaladoc edit subtask 2's session made
+      // and reported as done was lost this way — the auto-save commit that
+      // ran afterward only touched the MAIN worktree, never this one.
+      const stWorktreePath = subtaskWorktrees.get(subtasks[i].id)!;
+      try {
+        const stStatusOut = deps.execGitCapture(['status', '--porcelain'], stWorktreePath).trim();
+        if (stStatusOut) {
+          logToOutput(pipeline.specPath, '\n[WORKTREE] Subtask ' + subtasks[i].id + ' worktree has uncommitted changes — auto-committing before cherry-pick:\n' + stStatusOut + '\n');
+          deps.execGit(['add', '-A', '--', '.', ':!.teamai'], stWorktreePath);
+          deps.execGit(['commit', '-m', 'chore: auto-save subtask ' + subtasks[i].id + ' state before cherry-pick'], stWorktreePath);
+          logToOutput(pipeline.specPath, '[WORKTREE] Auto-committed uncommitted changes for subtask ' + subtasks[i].id + '\n');
+        }
+      } catch (stStatusErr) {
+        const stErrMsg = stStatusErr instanceof Error ? stStatusErr.message : String(stStatusErr);
+        logToOutput(pipeline.specPath, '\n[WORKTREE] Could not check/commit subtask ' + subtasks[i].id + ' worktree status (git failed: ' + stErrMsg + '), proceeding with cherry-pick\n');
+      }
+
       const stBranch = pipeline.branch + '-st' + subtasks[i].id;
       const cherrySuccess = await tryCherryPickWithRecovery(
         pipeline, deps, logFile, stBranch, subtasks[i].id,
