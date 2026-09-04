@@ -19,7 +19,7 @@ import { NO_STOP_PHASES, RESTARTABLE_PHASES } from '@/constants/phases';
 import { removeStaleWorktreeRegistration } from '@/lib/orchestrator/worktree-utils';
 import { isFeedbackTarget, type FeedbackTarget } from '@/lib/orchestrator/feedback-target';
 import { error as logError } from '@/lib/logger';
-import { preRestoreFailedTask } from '@/lib/task-retry';
+import { preRestoreFailedTask, taskHasSpecConcerns } from '@/lib/task-retry';
 
 async function getStores() {
   const projectPath = await getActiveProjectPath();
@@ -75,7 +75,7 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
   let resumePhase = 'qa-review'; // default for failed tasks (most common failure point)
   try {
     const events = taskStore.getEvents(taskId);
-    resumePhase = getResumePhaseForFailedTask(events, task.failureReason);
+    resumePhase = getResumePhaseForFailedTask(events, task.failureReason, taskHasSpecConcerns(taskStore, taskId));
   } catch { /* fall back to default */ }
 
   preRestoreFailedTask(taskStore, taskId);

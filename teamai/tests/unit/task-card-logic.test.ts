@@ -196,4 +196,36 @@ describe('getResumePhaseForFailedTask', () => {
     expect(getResumePhaseForFailedTask(events, 'qa-attempts-exhausted')).toBe('qa-review');
     expect(getResumePhaseForFailedTask(events, undefined)).toBe('qa-review');
   });
+
+  // Regression coverage: the QA-attempt budget check (qa-review.ts) runs
+  // before spec-concern routing, so a report that flagged spec_concerns can
+  // still land as 'qa-attempts-exhausted' rather than 'spec-revision-
+  // exhausted'. Without this, a retry fell back to the last real phase
+  // (qa-review) and re-ran QA against unchanged code — reproducing the same
+  // spec-based failure every time.
+  it("resumes at 'spec' for qa-attempts-exhausted when the caller reports spec concerns", () => {
+    const events = [
+      { phase: 'implement', timestamp: '2025-01-01T00:00:00Z' },
+      { phase: 'qa-review', timestamp: '2025-01-01T01:00:00Z' },
+      { phase: 'failed', timestamp: '2025-01-01T02:00:00Z' },
+    ];
+    expect(getResumePhaseForFailedTask(events, 'qa-attempts-exhausted', true)).toBe('spec');
+  });
+
+  it('does not resume at spec for qa-attempts-exhausted without spec concerns', () => {
+    const events = [
+      { phase: 'implement', timestamp: '2025-01-01T00:00:00Z' },
+      { phase: 'qa-review', timestamp: '2025-01-01T01:00:00Z' },
+      { phase: 'failed', timestamp: '2025-01-01T02:00:00Z' },
+    ];
+    expect(getResumePhaseForFailedTask(events, 'qa-attempts-exhausted', false)).toBe('qa-review');
+  });
+
+  it('does not resume at spec for a non-exhaustion failureReason even with spec concerns true', () => {
+    const events = [
+      { phase: 'implement', timestamp: '2025-01-01T00:00:00Z' },
+      { phase: 'failed', timestamp: '2025-01-01T01:00:00Z' },
+    ];
+    expect(getResumePhaseForFailedTask(events, 'implement-failure', true)).toBe('implement');
+  });
 });

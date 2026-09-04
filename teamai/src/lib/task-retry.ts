@@ -12,6 +12,25 @@ import { getOrchestrator } from './orchestrator';
 import { error as logError } from './logger';
 
 /**
+ * Whether the task's current qa_report.json (the report that caused this
+ * failure, still on disk at this point — preRestoreFailedTask only
+ * snapshots it, never deletes it) flagged a spec concern. Read BEFORE
+ * preRestoreFailedTask/moveTaskToPhase so it reflects the report from the
+ * failing round, not whatever the resumed pipeline writes next.
+ */
+export function taskHasSpecConcerns(taskStore: TaskStore, taskId: string): boolean {
+  try {
+    const dir = taskStore.getDirById(taskId);
+    const reportPath = join(dir, 'qa_report.json');
+    if (!existsSync(reportPath)) return false;
+    const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+    return Array.isArray(report.spec_concerns) && report.spec_concerns.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Pre-restore work for a failed task before re-running it.
  *
  * Restores qa_report.json and human_feedback.md from snapshots if deleted,
@@ -81,7 +100,7 @@ export function retryFailedTask(projectRoot: string, taskId: string): void {
   // Determine the phase the task was in when it failed — read from events.
   let resumePhase = 'qa-review'; // default for failed tasks (most common failure point)
   try {
-    resumePhase = getResumePhaseForFailedTask(taskStore.getEvents(taskId), task.failureReason);
+    resumePhase = getResumePhaseForFailedTask(taskStore.getEvents(taskId), task.failureReason, taskHasSpecConcerns(taskStore, taskId));
   } catch { /* fall back to default */ }
 
   preRestoreFailedTask(taskStore, taskId);
