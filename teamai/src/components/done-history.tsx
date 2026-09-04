@@ -10,6 +10,10 @@ import type { DoneTicketFromHistory } from '@/lib/history-scanner';
  * completion (§3f) — reconstructed from commit trailers / merged-PR
  * bodies by the HistoryScanner. Read-only by design: the durable record
  * lives in git, so there is nothing to drag, edit, or retry here.
+ *
+ * A ticket in the DONE column has already passed QA — no separate QA badge.
+ * The only secondary indicator is the PR link (for PR-strategy tickets);
+ * local-merge tickets have no link.
  */
 
 function relativeTime(date: Date): string {
@@ -22,14 +26,6 @@ function relativeTime(date: Date): string {
   const d = Math.floor(h / 24);
   if (d < 30) return `${d}d ago`;
   return `${Math.floor(d / 30)}mo ago`;
-}
-
-/** QA trailer → compact badge (PASS green / FAIL red / unknown neutral). */
-function qaBadgeClass(qaResult?: string): string {
-  if (!qaResult) return 'bg-slate-800 text-slate-400';
-  if (/^PASS/i.test(qaResult)) return 'bg-green-900/40 text-green-300';
-  if (/^FAIL/i.test(qaResult)) return 'bg-red-900/40 text-red-300';
-  return 'bg-slate-800 text-slate-400';
 }
 
 interface CardProps {
@@ -50,20 +46,27 @@ export function DoneHistoryCard({ ticket, onSelect }: CardProps) {
     >
       <div className="flex items-start justify-between gap-2">
         <span className="text-xs font-medium text-slate-200 line-clamp-2">{ticket.title}</span>
-        <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${qaBadgeClass(ticket.qaResult)}`}>
-          {ticket.qaResult ? ticket.qaResult.split('(')[0].trim() : 'QA ?'}
+        <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-900/40 text-green-300">
+          DONE
         </span>
       </div>
       {ticket.summary && (
         <p className="mt-1 text-[11px] text-slate-500 line-clamp-2">{ticket.summary}</p>
       )}
-      <div className="mt-1.5 flex items-center gap-2 text-[10px] text-slate-600">
+      <div className="mt-1.5 flex items-center gap-2 text-[10px]">
         <span>{relativeTime(ticket.completedAt)}</span>
         {ticket.prUrl ? (
-          <span className="text-sky-700">PR</span>
-        ) : (
-          <span>local merge</span>
-        )}
+          <a
+            href={ticket.prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            title={`Open PR: ${ticket.prUrl}`}
+            className="text-sky-700 hover:text-sky-500 transition-colors no-underline"
+          >
+            PR
+          </a>
+        ) : null}
       </div>
     </div>
   );
