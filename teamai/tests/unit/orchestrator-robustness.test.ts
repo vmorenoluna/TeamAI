@@ -4653,6 +4653,138 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Post-session scope check — files_to_create must count as in-scope
+// ═══════════════════════════════════════════════════════════════════════
+// Regression coverage for a real production failure (task 5a2b5b50): the
+// scope check compared changed files only against `subtask.files`, never
+// `subtask.files_to_create` — a distinct, first-class field that deliverable
+// verification already treats as the subtask's assigned deliverable. Any
+// subtask whose ENTIRE deliverable was new files (files: [] +
+// files_to_create-only — the shape used for "capture this evidence into a
+// new file" subtasks) was guaranteed to be flagged as "outside its assigned
+// scope" for creating exactly the file it was told to create, discarding
+// real, correct work every retry.
+
+describe('runImplement — scope check honors files_to_create', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    project.clean();
+  });
+
+  it('does not flag a subtask that only creates its declared files_to_create deliverable', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 2,
+        title: 'Capture evidence',
+        description: 'Capture evidence into a new file',
+        files: [],
+        files_to_create: ['scripts/sweep_logs/evidence.txt'],
+        acceptance_criteria: ['Evidence captured'],
+      }],
+    }));
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'diff') return 'scripts/sweep_logs/evidence.txt\n';
+      }
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-scope-ok');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      // The deliverable is actually produced before the session ends.
+      mkdirSync(join(worktreePath, 'scripts/sweep_logs'), { recursive: true });
+      writeFileSync(join(worktreePath, 'scripts/sweep_logs/evidence.txt'), 'evidence');
+
+      fireEvent('event', { sessionId: 'sess-scope-ok', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(log).not.toContain('[SCOPE]');
+      expect(log).not.toContain('modified files outside its assigned scope');
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('still flags a subtask that modifies a file outside both files and files_to_create', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 3,
+        title: 'Capture evidence',
+        description: 'Capture evidence into a new file',
+        files: [],
+        files_to_create: ['scripts/sweep_logs/evidence.txt'],
+        acceptance_criteria: ['Evidence captured'],
+      }],
+    }));
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'diff') return 'scripts/sweep_logs/evidence.txt\nsrc/UnrelatedFile.scala\n';
+      }
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-scope-violated');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      mkdirSync(join(worktreePath, 'scripts/sweep_logs'), { recursive: true });
+      writeFileSync(join(worktreePath, 'scripts/sweep_logs/evidence.txt'), 'evidence');
+
+      fireEvent('event', { sessionId: 'sess-scope-violated', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(log).toContain('[SCOPE] Subtask 3 modified files outside its assigned scope');
+      expect(log).toContain('src/UnrelatedFile.scala');
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 //  depends_on runtime enforcement across groups
 // ═══════════════════════════════════════════════════════════════════════
 // Regression coverage for a real production failure (task 585a32e0):
