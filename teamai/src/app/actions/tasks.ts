@@ -11,7 +11,7 @@ import type { PlanData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { getResumePhaseForFailedTask } from '@/lib/task-utils';
-import { getRoleRefinementConfig, getSuggestion, type RoleRefinementMode, type RoleRefinementSuggestion } from '@/lib/role-refinement';
+import { getRoleRefinementConfig, getSuggestion, buildFailureSignature, type RoleRefinementMode, type RoleRefinementSuggestion } from '@/lib/role-refinement';
 import { join, resolve } from 'path';
 import { readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
@@ -429,6 +429,22 @@ export async function getTaskFull(taskId: string) {
   let refinementSuggestion: RoleRefinementSuggestion | null = null;
   if (task.refinementSuggestionId) {
     refinementSuggestion = getSuggestion(projectPath, task.refinementSuggestionId);
+  }
+  // A suggestion's signature is a snapshot of the FAIL criteria that
+  // triggered it. If the task has since failed again for a different reason
+  // (a new qa_report.json with different FAIL criteria, or an implement-phase
+  // failure with no report at all), that suggestion describes a failure that
+  // no longer exists — most commonly a stale 'no-gap' verdict that would
+  // otherwise permanently hide the "Analyze failure" button behind an
+  // unrelated old diagnosis, since RoleRefinementCard only shows the idle
+  // prompt when no suggestion is present at all. Drop it here (display-time
+  // only — task.json's stored refinementSuggestionId is left untouched) so a
+  // genuinely new failure always gets a fresh "Analyze failure" prompt.
+  if (refinementSuggestion && task.phase === 'failed') {
+    const currentSignature = buildFailureSignature(dir, taskId);
+    if (!refinementSuggestion.signature || refinementSuggestion.signature !== currentSignature) {
+      refinementSuggestion = null;
+    }
   }
   let refinementMode: RoleRefinementMode = 'manual';
   try { refinementMode = getRoleRefinementConfig(projectPath).mode; } catch { /* default */ }
