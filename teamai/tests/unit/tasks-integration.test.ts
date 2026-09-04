@@ -456,6 +456,110 @@ describe('getTaskArtifacts — includes humanFeedback from human_feedback.md', (
   });
 });
 
+describe('getTaskFull — role-refinement suggestion staleness', () => {
+  // A suggestion's signature snapshots the FAIL criteria that triggered it.
+  // If the task later fails again for a different reason, that suggestion
+  // (most commonly a 'no-gap' verdict) describes a failure that no longer
+  // exists — RoleRefinementCard only offers the idle "Analyze failure"
+  // prompt when no suggestion is present, so a stale one left in place
+  // would hide it behind an unrelated old diagnosis forever.
+  let taskId: string;
+  let taskDir: string;
+
+  function makeSuggestion(overrides: Partial<{ signature: string; status: string }> = {}) {
+    return {
+      id: 'sug-1',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      status: overrides.status ?? 'no-gap',
+      trigger: 'manual',
+      model: null,
+      sourceTaskIds: [taskId],
+      signature: overrides.signature ?? 'sha256:old-signature',
+      isRolePromptGap: false,
+      contractGap: false,
+      contractFile: null,
+      rootCause: 'old diagnosis',
+      confidence: 'high',
+      diagnosis: 'This was not a role-prompt gap.',
+      edits: [],
+      appliedAt: null,
+      appliedBy: null,
+      backups: [],
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockProjectPath = TEST_DIR;
+    taskId = 'task-refinement-staleness-test';
+    taskDir = join(TEST_DIR, '.teamai', 'refinement-staleness-slug');
+    mkdirSync(taskDir, { recursive: true });
+
+    const task = {
+      id: taskId,
+      title: 'Test Refinement Staleness Task',
+      description: 'test task for stale refinement suggestions',
+      phase: 'failed',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      refinementSuggestionId: 'sug-1',
+      refinementStatus: 'no-gap',
+    };
+    writeFileSync(join(taskDir, 'task.json'), JSON.stringify(task, null, 2));
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it('drops a suggestion whose signature no longer matches the current qa_report.json', async () => {
+    writeFileSync(join(taskDir, 'qa_report.json'), JSON.stringify({
+      overall: 'FAIL',
+      criteria: [{ name: 'AC-T1', status: 'FAIL' }],
+    }));
+    const refinementsDir = join(TEST_DIR, '.teamai', 'role-refinements');
+    mkdirSync(refinementsDir, { recursive: true });
+    writeFileSync(join(refinementsDir, 'sug-1.json'), JSON.stringify(makeSuggestion()));
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull(taskId);
+
+    expect(result.refinementSuggestion).toBeNull();
+  });
+
+  it('keeps a suggestion whose signature still matches the current qa_report.json', async () => {
+    writeFileSync(join(taskDir, 'qa_report.json'), JSON.stringify({
+      overall: 'FAIL',
+      criteria: [{ name: 'AC-T1', status: 'FAIL' }],
+    }));
+    const { buildFailureSignature } = await import('@/lib/role-refinement');
+    const currentSignature = buildFailureSignature(taskDir, taskId);
+    const refinementsDir = join(TEST_DIR, '.teamai', 'role-refinements');
+    mkdirSync(refinementsDir, { recursive: true });
+    writeFileSync(join(refinementsDir, 'sug-1.json'), JSON.stringify(makeSuggestion({ signature: currentSignature })));
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull(taskId);
+
+    expect(result.refinementSuggestion?.id).toBe('sug-1');
+  });
+
+  it('drops a suggestion with no signature at all (legacy record)', async () => {
+    const refinementsDir = join(TEST_DIR, '.teamai', 'role-refinements');
+    mkdirSync(refinementsDir, { recursive: true });
+    const legacy = makeSuggestion({ signature: '' });
+    writeFileSync(join(refinementsDir, 'sug-1.json'), JSON.stringify(legacy));
+
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const result = await getTaskFull(taskId);
+
+    expect(result.refinementSuggestion).toBeNull();
+  });
+});
+
 describe('getTaskFull — returns specPath', () => {
   let taskId: string;
 
