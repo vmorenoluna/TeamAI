@@ -80,5 +80,28 @@ test.describe.serial('Retry Button on Failed Tasks', () => {
     await expect(detailRetryButton).toHaveText(/Retry/);
   });
 
+  // Regression coverage: the detail page's Retry button used to call
+  // retryTask directly, bypassing the phase-selector dialog the kanban
+  // card's Retry button opens — a user retrying from the detail page had no
+  // way to pick which phase to resume from. Both entry points must now
+  // offer the same choice.
+  test('detail panel Retry button opens the same phase-selector dialog as the card', async ({ page }) => {
+    const taskId = requireSeedTaskId(SEARCH_CRASH_SLUG);
+    await page.goto(`/task/${taskId}`);
+
+    const detailRetryButton = page.locator('[data-component="detail-retry-button"]');
+    await expect(detailRetryButton).toBeVisible({ timeout: 15_000 });
+    await detailRetryButton.click();
+
+    await expect(page.locator('text=Choose Resume Phase')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('label', { hasText: 'Resume from Spec' })).toBeVisible();
+    await expect(page.locator('label', { hasText: 'Resume from Plan' })).toBeVisible();
+    await expect(page.locator('label', { hasText: 'Resume from Implement' })).toBeVisible();
+
+    // Cancel — must not fire the retry.
+    await page.locator('button', { hasText: 'Cancel' }).click();
+    await expect(page.locator('text=Choose Resume Phase')).toHaveCount(0);
+  });
+
 
 });

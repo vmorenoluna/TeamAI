@@ -13,7 +13,7 @@ import { DepPicker, TaskPill } from './dep-picker';
 import { PlanSubtasks } from './plan-subtasks';
 import { QAReportView } from './qa-report-view';
 import { CopyButton } from './copy-button';
-import { addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, restartCurrentPhase } from '@/app/actions/tasks';
+import { addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTaskWithOptions, restartCurrentPhase } from '@/app/actions/tasks';
 import { markAutoReviewed } from '@/app/actions/auto-mode';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, QAReportData } from '@/lib/stream-types';
@@ -22,6 +22,8 @@ import { PHASE_BADGE, PHASE_LABELS, RESTARTABLE_PHASES } from '@/constants/phase
 import { SpecDiffView } from './spec-diff-view';
 import { RoleRefinementCard } from './role-refinement-card';
 import type { RoleRefinementMode, RoleRefinementSuggestion } from '@/lib/role-refinement';
+import { RetryPhaseDialog } from './retry-phase-dialog';
+import { getPhaseClearDescriptions } from '@/lib/orchestrator/artifacts';
 
 // Re-export sub-components for external consumers
 export { PlanSubtasks } from './plan-subtasks';
@@ -98,6 +100,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   const [compareMode, setCompareMode] = useState(false);
   const [leftVersion, setLeftVersion] = useState<string | null>(null);
   const [rightVersion, setRightVersion] = useState<string | null>(null);
+  const [showRetryDialog, setShowRetryDialog] = useState(false);
 
   const badge = PHASE_BADGE[task.phase] ?? PHASE_BADGE.backlog;
   const isAwaiting = task.phase === 'awaiting-review';
@@ -207,10 +210,15 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   }
 
   function handleInlineRetry() {
+    setShowRetryDialog(true);
+  }
+
+  function handleRetryConfirm(phase: string, resetBudget: boolean) {
+    setShowRetryDialog(false);
     setError(null);
     run(async () => {
       try {
-        const result = await retryTask(task.id);
+        const result = await retryTaskWithOptions(task.id, phase, resetBudget);
         if (!result.success) throw new Error(result.error || 'Unknown error');
       } catch (err) {
         setError(formatActionError('retry task', err));
@@ -223,7 +231,19 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   const dependencyIds = dependencies.map(t => t.id);
   const dependentIds = dependents.map(t => t.id);
 
+  // A retry defaults to 'spec' when the failure needed a spec fix (mirrors
+  // task-utils.ts's getResumePhaseForFailedTask, which the retryTask/
+  // retryFailedTask server paths use for a phase-less retry) — this page has
+  // qaReport already loaded, so it can make that same call client-side
+  // instead of task-card.tsx's fixed 'implement' fallback.
+  const defaultRetryPhase =
+    task.failureReason === 'spec-revision-exhausted' ||
+    (task.failureReason === 'qa-attempts-exhausted' && !!qaReport?.spec_concerns?.length)
+      ? 'spec'
+      : 'implement';
+
   return (
+    <>
     <div id="task-detail-root" className="flex flex-col h-full">
       {!readonly && <PhaseSyncer />}
 
@@ -627,5 +647,18 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
       </div>
       )}
     </div>
+
+    {/* Retry-phase dialog */}
+    {showRetryDialog && (
+      <RetryPhaseDialog
+        taskTitle={task.title}
+        phases={getPhaseClearDescriptions()}
+        defaultPhase={defaultRetryPhase}
+        budgetDefault={false}
+        onCancel={() => setShowRetryDialog(false)}
+        onConfirm={handleRetryConfirm}
+      />
+    )}
+    </>
   );
 }
