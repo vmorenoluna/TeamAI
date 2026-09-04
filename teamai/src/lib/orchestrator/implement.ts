@@ -937,7 +937,13 @@ export async function runSubtaskSession(
     try {
       const changedFiles = deps.execGitCapture(['diff', '--name-only', preSessionHead + '..HEAD'], cwd).trim().split('\n').filter(Boolean);
 
-      const assignedFiles = new Set(subtask.files || []);
+      // A subtask's declared scope is files it edits (`files`) plus files it
+      // creates fresh (`files_to_create`) — deliverable verification already
+      // treats both as in-scope (it fails the subtask if a files_to_create
+      // path is MISSING), so the scope check must accept the same set or it
+      // rejects a subtask for doing exactly what it was told to do whenever
+      // its entire deliverable is new files (files: [] + files_to_create-only).
+      const assignedFiles = new Set([...(subtask.files || []), ...(subtask.files_to_create || [])]);
       const violations = changedFiles.filter(f => !assignedFiles.has(f));
 
       if (violations.length > 0) {
@@ -945,7 +951,7 @@ export async function runSubtaskSession(
         logToOutput(pipeline.specPath,
           '\n[SCOPE] Subtask ' + subtask.id + ' modified files outside its assigned scope:\n' +
           violations.map(f => '  - ' + f).join('\n') + '\n' +
-          '[SCOPE] Assigned files: ' + ((subtask.files || []).join(', ') || '(none)') + '\n'
+          '[SCOPE] Assigned files: ' + ([...assignedFiles].join(', ') || '(none)') + '\n'
         );
       }
     } catch (scopeErr) {
