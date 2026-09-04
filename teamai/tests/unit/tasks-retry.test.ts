@@ -85,7 +85,7 @@ const TEST_DIR = join(
 function seedFailedTask(
   dir: string,
   slug: string,
-  options: { qaReport?: Record<string, unknown> } = {},
+  options: { qaReport?: Record<string, unknown>; failureReason?: string } = {},
 ) {
   const taskDir = join(dir, '.teamai', slug);
   mkdirSync(taskDir, { recursive: true });
@@ -99,6 +99,7 @@ function seedFailedTask(
     branch: `feat/${slug}`,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...(options.failureReason ? { failureReason: options.failureReason } : {}),
   };
   writeFileSync(join(taskDir, 'task.json'), JSON.stringify(task, null, 2));
 
@@ -190,6 +191,49 @@ describe('retryTask — Gap 5: qa_report.json snapshot', () => {
     expect(existsSync(snapshotPath)).toBe(false);
 
     // Should still proceed with retry
+    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'qa-review');
+  });
+
+  // Regression coverage: qa-review.ts checks the QA-attempt budget BEFORE
+  // spec-concern routing, so a report that legitimately flagged spec_concerns
+  // can still land as failureReason 'qa-attempts-exhausted' rather than
+  // 'spec-revision-exhausted'. Without consulting the report itself, a bare
+  // retry fell back to events.jsonl's last real phase ('qa-review') and
+  // re-ran QA against completely unchanged code — reproducing the identical
+  // spec-based failure every time instead of giving the analyst a chance to
+  // fix the spec.
+  it('resumes at spec when qa-attempts-exhausted failure report has spec_concerns', async () => {
+    const slug = 'retry-qa-exhausted-with-spec-concerns';
+    const { taskId } = seedFailedTask(TEST_DIR, slug, {
+      failureReason: 'qa-attempts-exhausted',
+      qaReport: {
+        overall: 'FAIL',
+        criteria: [{ name: 'AC-4', status: 'FAIL' }],
+        spec_concerns: [{ criterion: 'AC-4', concern: 'hardcodes an exit code that does not match this environment' }],
+      },
+    });
+
+    const { retryTask } = await import('@/app/actions/tasks');
+    const result = await retryTask(taskId);
+
+    expect(result.success).toBe(true);
+    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'spec');
+  });
+
+  it('still resumes at qa-review for qa-attempts-exhausted with no spec_concerns', async () => {
+    const slug = 'retry-qa-exhausted-no-spec-concerns';
+    const { taskId } = seedFailedTask(TEST_DIR, slug, {
+      failureReason: 'qa-attempts-exhausted',
+      qaReport: {
+        overall: 'FAIL',
+        criteria: [{ name: 'AC-1', status: 'FAIL' }],
+      },
+    });
+
+    const { retryTask } = await import('@/app/actions/tasks');
+    const result = await retryTask(taskId);
+
+    expect(result.success).toBe(true);
     expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'qa-review');
   });
 
