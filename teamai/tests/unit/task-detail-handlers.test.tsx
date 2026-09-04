@@ -37,7 +37,7 @@ const mockRemoveDependency = vi.fn();
 const mockAddBlock = vi.fn();
 const mockRemoveBlock = vi.fn();
 const mockDeleteTask = vi.fn();
-const mockRetryTask = vi.fn();
+const mockRetryTaskWithOptions = vi.fn();
 const mockRestartCurrentPhase = vi.fn();
 
 vi.mock('@/app/actions/tasks', () => ({
@@ -46,7 +46,7 @@ vi.mock('@/app/actions/tasks', () => ({
   addBlock: (...args: unknown[]) => mockAddBlock(...args),
   removeBlock: (...args: unknown[]) => mockRemoveBlock(...args),
   deleteTask: (...args: unknown[]) => mockDeleteTask(...args),
-  retryTask: (...args: unknown[]) => mockRetryTask(...args),
+  retryTaskWithOptions: (...args: unknown[]) => mockRetryTaskWithOptions(...args),
   restartCurrentPhase: (...args: unknown[]) => mockRestartCurrentPhase(...args),
 }));
 
@@ -101,7 +101,7 @@ describe('TaskDetail mutation handlers', () => {
     mockAddBlock.mockResolvedValue(undefined);
     mockRemoveBlock.mockResolvedValue(undefined);
     mockDeleteTask.mockResolvedValue({ success: true });
-    mockRetryTask.mockResolvedValue({ success: true });
+    mockRetryTaskWithOptions.mockResolvedValue({ success: true });
     mockRestartCurrentPhase.mockResolvedValue({ success: true });
     mockMarkAutoReviewed.mockResolvedValue(undefined);
   });
@@ -110,7 +110,7 @@ describe('TaskDetail mutation handlers', () => {
     window.confirm = originalConfirm;
   });
 
-  function renderDetail(task: Task, extraTasks: Task[] = []) {
+  function renderDetail(task: Task, extraTasks: Task[] = [], qaReport: unknown = null) {
     return render(
       <TaskDetail
         task={task}
@@ -119,7 +119,7 @@ describe('TaskDetail mutation handlers', () => {
         dependents={[]}
         spec={null}
         plan={null}
-        qaReport={null}
+        qaReport={qaReport as never}
         diff={null}
         subtaskTerminals={[]}
         qaLog={null}
@@ -220,8 +220,12 @@ describe('TaskDetail mutation handlers', () => {
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
-    it('handleInlineRetry: role=alert banner surfaces when retryTask throws', async () => {
-      mockRetryTask.mockRejectedValue(new Error('inline retry raw throw: bad pipeline state'));
+    // The Retry button now opens the same RetryPhaseDialog the kanban card
+    // uses (regression: it used to call retryTask directly with no phase
+    // choice, unlike the card's Retry button) — click through it before the
+    // server action fires.
+    it('handleInlineRetry: opens the retry-phase dialog, then role=alert banner surfaces when retryTaskWithOptions throws', async () => {
+      mockRetryTaskWithOptions.mockRejectedValue(new Error('inline retry raw throw: bad pipeline state'));
 
       renderDetail(
         makeTask({
@@ -232,16 +236,63 @@ describe('TaskDetail mutation handlers', () => {
         }),
       );
 
+      fireEvent.click(screen.getByTestId('detail-retry-button'));
+
+      // Dialog is open with the phase selector (no failureReason/qaReport
+      // here, so it defaults to 'implement' per task-detail.tsx's
+      // defaultRetryPhase).
+      expect(screen.getByText('Choose Resume Phase')).toBeInTheDocument();
+
       await act(async () => {
-        fireEvent.click(screen.getByTestId('detail-retry-button'));
+        fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
       });
 
-      expect(mockRetryTask).toHaveBeenCalledWith('retry-1');
+      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('retry-1', 'implement', false);
       await waitFor(() => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('Failed to retry task: inline retry raw throw: bad pipeline state');
       });
       expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    // Regression coverage: the dialog's default phase should follow the
+    // failure's spec-concerns status, same as the server-side
+    // getResumePhaseForFailedTask fallback for a phase-less retry — instead
+    // of always defaulting to 'implement' regardless of why it failed.
+    it('handleInlineRetry: defaults the dialog to spec when the QA report flagged spec concerns', async () => {
+      renderDetail(
+        makeTask({
+          id: 'retry-2',
+          phase: 'failed',
+          failureReason: 'qa-attempts-exhausted',
+          completionSummary: 'QA exceeded max attempts while validating',
+          title: 'Failed task with spec concerns',
+        }),
+        [],
+        { overall: 'FAIL', spec_concerns: [{ criterion: 'AC-4', concern: 'hardcoded value wrong for this env' }] },
+      );
+
+      fireEvent.click(screen.getByTestId('detail-retry-button'));
+
+      expect(screen.getByRole('radio', { name: /Resume from Spec/ })).toBeChecked();
+    });
+
+    it('handleInlineRetry: defaults the dialog to implement when the QA report has no spec concerns', async () => {
+      renderDetail(
+        makeTask({
+          id: 'retry-3',
+          phase: 'failed',
+          failureReason: 'qa-attempts-exhausted',
+          completionSummary: 'QA exceeded max attempts while validating',
+          title: 'Failed task without spec concerns',
+        }),
+        [],
+        { overall: 'FAIL' },
+      );
+
+      fireEvent.click(screen.getByTestId('detail-retry-button'));
+
+      expect(screen.getByRole('radio', { name: /Resume from Implement/ })).toBeChecked();
     });
 
     it('handleDelete: role=alert banner surfaces when deleteTask throws (and router.push is skipped)', async () => {
