@@ -1045,7 +1045,7 @@ describe('KanbanBoard', () => {
       });
     });
 
-    it('does not fetch further pages when doneHistoryHasMore is false', () => {
+    it('re-fetches on scroll-to-bottom even when historyHasMore is false (re-checks for new pages)', () => {
       renderBoard([], [historyTicket], false);
 
       const columns = screen
@@ -1059,7 +1059,9 @@ describe('KanbanBoard', () => {
       Object.defineProperty(doneCol, 'scrollTop', { value: 900, configurable: true });
       fireEvent.scroll(doneCol);
 
-      expect(mockLoadMoreDoneHistory).not.toHaveBeenCalled();
+      // Re-checks for new pages on each scroll-to-bottom, even when the
+      // current hasMore state says there are none.
+      expect(mockLoadMoreDoneHistory).toHaveBeenCalledWith(1);
     });
   });
 });

@@ -135,6 +135,7 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
   const [historyPage, setHistoryPage] = useState(1);
   const [historyPages, setHistoryPages] = useState<DoneTicketFromHistory[][]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyHasMore, setHistoryHasMore] = useState(doneHistoryHasMore);
   const [rescanning, setRescanning] = useState(false);
   const doneColScrollRef = useRef<HTMLDivElement | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
@@ -271,7 +272,7 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
   // column, fetch the next merged-PR page and accumulate it client-side.
   const handleDoneColumnScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
-      if (!doneHistoryHasMore || historyLoading) return;
+      if (historyLoading) return;
       const el = e.currentTarget;
       if (el.scrollTop + el.clientHeight < el.scrollHeight - 120) return;
       setHistoryLoading(true);
@@ -281,13 +282,18 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
             setHistoryPages(prev => [...prev, res.tickets]);
             setHistoryPage(p => p + 1);
           }
+          setHistoryHasMore(res.hasMore);
         })
-        .catch(() => {
-          // Pagination is best-effort; keep the already-loaded pages.
+        .catch(err => {
+          setError(
+            err instanceof Error
+              ? `Failed to load more DONE history: ${err.message}`
+              : 'Failed to load more DONE history',
+          );
         })
         .finally(() => setHistoryLoading(false));
     },
-    [doneHistoryHasMore, historyLoading, historyPage],
+    [historyLoading, historyPage],
   );
 
   // §3f manual rescan escape hatch (force-pushes, manual git surgery).
@@ -651,7 +657,7 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
                     <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">{col.label}</span>
                     {col.phase === 'done' ? (
                       <div className="flex items-center gap-1.5">
-                        {doneHistoryHasMore && (
+                        {doneHistoryHasMore || historyHasMore ? (
                           <button
                             onClick={handleRescanHistory}
                             disabled={rescanning}
@@ -660,7 +666,7 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
                           >
                             {rescanning ? 'Rescanning…' : 'Rescan'}
                           </button>
-                        )}
+                        ) : null}
                         <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full transition-colors ${
                           isDropTarget && !isSameColumn ? 'bg-[#2563eb]/20 text-blue-300' : 'bg-[#1e293b] text-slate-500'
                         }`}>
