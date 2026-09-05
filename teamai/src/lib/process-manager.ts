@@ -482,7 +482,25 @@ export class ProcessManager extends EventEmitter {
     } else {
       warn(`terminal ${id}`, `Role file not found or empty: ${roleFile} — starting without role persona`);
     }
-    const args = roleContent ? ['--append-system-prompt', roleContent] : [];
+
+    // Every terminal session — regardless of role, and regardless of whether
+    // the target project customizes its role files — can file a kanban
+    // ticket. Injected here (not left to each role's own prose) so it
+    // applies uniformly instead of depending on whichever roles happen to
+    // mention ticket creation. create-task-cli.mjs is the same primitive
+    // TaskStore.create() backs for the UI's "Add Task" button: a bare
+    // backlog ticket (title + description only, no spec, no plan) that
+    // goes through the normal pipeline once started.
+    const createTaskCliPath = join(process.cwd(), 'defaults', 'create-task-cli.mjs');
+    const ticketInstruction =
+      '## Creating kanban tickets\n\n' +
+      'To file a new backlog ticket, run:\n' +
+      `  node "${createTaskCliPath}" --project "${opts.projectPath}" --title "<short title>" --description "<one-sentence description>"\n\n` +
+      'This creates a bare ticket (phase: backlog, no spec, no plan) that goes through the normal ' +
+      'spec -> plan -> implement -> QA pipeline once started. Do not hand-write task.json yourself.';
+    const systemPrompt = roleContent ? `${roleContent}\n\n${ticketInstruction}` : ticketInstruction;
+
+    const args = ['--append-system-prompt', systemPrompt];
     if (opts.model) args.push('--model', opts.model);
 
     const claudeBin = getToolPath('claude');
@@ -492,7 +510,11 @@ export class ProcessManager extends EventEmitter {
       cols: 120,
       rows: 40,
       cwd: opts.projectPath,
-      env: process.env as Record<string, string>,
+      // TEAMAI_CREATE_TASK_CLI lets the /create-task slash command (a static
+      // template with no per-session path substitution) shell out to the
+      // same script named in ticketInstruction above, without hard-coding
+      // TeamAI's install location into a file that ships with every project.
+      env: { ...process.env, TEAMAI_CREATE_TASK_CLI: createTaskCliPath } as Record<string, string>,
     });
 
     ptyProcess.onData((data) => {

@@ -675,10 +675,15 @@ describe('ProcessManager — Full Coverage', () => {
 
       const callArgs = mockPtySpawn.mock.calls[0];
       expect(callArgs[1]).toContain('--append-system-prompt');
-      expect(callArgs[1]).toContain('You are a coding expert.');
+      expect(callArgs[1][1]).toContain('You are a coding expert.');
     });
 
-    it('does not add --append-system-prompt when role file is missing', () => {
+    // Regression: every terminal session must be able to file a kanban
+    // ticket via create-task-cli.mjs, regardless of role — this instruction
+    // is injected unconditionally, not left to each role's own prose (only
+    // "analyst" ever mentioned ticket creation, so coder/planner/qa-reviewer/
+    // merger terminal sessions had no way to know how).
+    it('always includes --append-system-prompt with the ticket-creation instruction, even when role file is missing', () => {
       mockExistsSync.mockReturnValue(false);
 
       pm.createTerminalSession({
@@ -687,7 +692,10 @@ describe('ProcessManager — Full Coverage', () => {
       });
 
       const callArgs = mockPtySpawn.mock.calls[0];
-      expect(callArgs[1]).not.toContain('--append-system-prompt');
+      expect(callArgs[1]).toContain('--append-system-prompt');
+      expect(callArgs[1][1]).toContain('create-task-cli.mjs');
+      expect(callArgs[1][1]).toContain('--project "/test/project"');
+      expect(callArgs[1][1]).toContain('phase: backlog, no spec, no plan');
     });
 
     it('passes model option to PTY', () => {
@@ -795,12 +803,15 @@ describe('ProcessManager — Full Coverage', () => {
 
       it('routes the bare "claude" command through cmd.exe', () => {
         process.env.ComSpec = 'C:\\Windows\\System32\\cmd.exe';
+        mockExistsSync.mockReturnValue(false);
 
         pm.createTerminalSession({ projectPath: '/test/project', role: 'coder.md' });
 
         const callArgs = mockPtySpawn.mock.calls[0];
         expect(callArgs[0]).toBe('C:\\Windows\\System32\\cmd.exe');
-        expect(callArgs[1]).toEqual(['/d', '/s', '/c', 'claude']);
+        expect(callArgs[1].slice(0, 4)).toEqual(['/d', '/s', '/c', 'claude']);
+        expect(callArgs[1][4]).toBe('--append-system-prompt');
+        expect(callArgs[1][5]).toContain('create-task-cli.mjs');
       });
 
       it('preserves --append-system-prompt and --model after the cmd.exe wrapper', () => {
@@ -814,11 +825,11 @@ describe('ProcessManager — Full Coverage', () => {
         });
 
         const callArgs = mockPtySpawn.mock.calls[0];
-        expect(callArgs[1]).toEqual([
-          '/d', '/s', '/c', 'claude',
-          '--append-system-prompt', 'You are a coding expert.',
-          '--model', 'claude-sonnet-4',
-        ]);
+        expect(callArgs[1].slice(0, 4)).toEqual(['/d', '/s', '/c', 'claude']);
+        expect(callArgs[1][4]).toBe('--append-system-prompt');
+        expect(callArgs[1][5]).toContain('You are a coding expert.');
+        expect(callArgs[1][5]).toContain('create-task-cli.mjs');
+        expect(callArgs[1].slice(6)).toEqual(['--model', 'claude-sonnet-4']);
       });
 
       it('falls back to cmd.exe when ComSpec is unset', () => {
