@@ -17,6 +17,29 @@ export interface TerminalSession {
 }
 
 /**
+ * node-pty's Windows backend (ConPTY) calls CreateProcess directly on `file`
+ * with no PATH/PATHEXT resolution and no ability to launch .cmd/.bat scripts
+ * at all. getToolPath('claude') normally returns the bare string "claude"
+ * (it only returns a resolved path when the user has configured a custom
+ * tool path in Settings), and npm's global install of the Claude CLI on
+ * Windows is a .cmd shim — so pty.spawn(claudeBin, ...) fails with "File not
+ * found" either way. child_process.spawn (used elsewhere in this file for
+ * pipeline sessions) has its own Windows PATHEXT resolution built in; pty.spawn
+ * does not, so terminal sessions need the same resolution done explicitly by
+ * routing through cmd.exe, the same way an interactive Windows terminal would
+ * resolve and run "claude". macOS/Linux installs are real executables or
+ * shebang scripts the OS loader resolves directly, so this is a no-op there.
+ */
+function resolvePtyTarget(file: string, args: string[]): { file: string; args: string[] } {
+  if (process.platform !== 'win32') {
+    return { file, args };
+  }
+  // /d skips AutoRun scripts, /s preserves a quoted path containing spaces —
+  // the same flags Node's own child_process uses for this exact rerouting.
+  return { file: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', file, ...args] };
+}
+
+/**
  * True if a parsed stdout event is an assistant message dispatching at
  * least one tool call. The CLI's stream-json protocol emits this event the
  * moment a tool is invoked, then nothing further until that tool's result
@@ -463,7 +486,8 @@ export class ProcessManager extends EventEmitter {
     if (opts.model) args.push('--model', opts.model);
 
     const claudeBin = getToolPath('claude');
-    const ptyProcess = pty.spawn(claudeBin, args, {
+    const { file: ptyFile, args: ptyArgs } = resolvePtyTarget(claudeBin, args);
+    const ptyProcess = pty.spawn(ptyFile, ptyArgs, {
       name: 'xterm-color',
       cols: 120,
       rows: 40,

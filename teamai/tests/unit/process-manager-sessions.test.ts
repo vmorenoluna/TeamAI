@@ -7,7 +7,7 @@
  *   - createTerminalSession (node-pty, role file, findExecutable)
  *   - Global singleton pattern
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Module-level mocks (must be before any imports from the file under test) ──
 
@@ -609,6 +609,8 @@ describe('ProcessManager — Full Coverage', () => {
   // ── createTerminalSession ─────────────────────────────────────────────────
 
   describe('createTerminalSession', () => {
+    const originalPlatform = process.platform;
+
     beforeEach(() => {
       // Default: findExecutable returns 'claude'
       mockExecFileSync.mockReturnValue('claude');
@@ -622,6 +624,15 @@ describe('ProcessManager — Full Coverage', () => {
         resize: vi.fn(),
         kill: vi.fn(),
       });
+      // Most tests in this block assert the resolved claude command flows
+      // straight through to pty.spawn — true on macOS/Linux. The Windows
+      // cmd.exe-rerouting behavior (this test suite may itself run on a
+      // Windows dev machine) has its own dedicated describe block below.
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
     });
 
     it('creates a PTY session and returns an ID', () => {
@@ -763,6 +774,60 @@ describe('ProcessManager — Full Coverage', () => {
       });
 
       expect(mockPtySpawn.mock.calls[0][0]).toBe('claude');
+    });
+
+    // Regression: node-pty's ConPTY backend calls CreateProcess directly and
+    // cannot resolve a bare "claude" (no PATHEXT search) or launch a .cmd
+    // shim at all — both are what getToolPath('claude') returns on Windows
+    // (bare name by default, or a .cmd path with a custom tools.json entry).
+    // Fixes "Error: File not found" when opening a terminal session.
+    describe('on Windows', () => {
+      const originalPlatform = process.platform;
+
+      beforeEach(() => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+      });
+
+      afterEach(() => {
+        Object.defineProperty(process, 'platform', { value: originalPlatform });
+        delete process.env.ComSpec;
+      });
+
+      it('routes the bare "claude" command through cmd.exe', () => {
+        process.env.ComSpec = 'C:\\Windows\\System32\\cmd.exe';
+
+        pm.createTerminalSession({ projectPath: '/test/project', role: 'coder.md' });
+
+        const callArgs = mockPtySpawn.mock.calls[0];
+        expect(callArgs[0]).toBe('C:\\Windows\\System32\\cmd.exe');
+        expect(callArgs[1]).toEqual(['/d', '/s', '/c', 'claude']);
+      });
+
+      it('preserves --append-system-prompt and --model after the cmd.exe wrapper', () => {
+        mockExistsSync.mockReturnValue(true);
+        mockReadFileSync.mockReturnValue('You are a coding expert.');
+
+        pm.createTerminalSession({
+          projectPath: '/test/project',
+          role: 'coder.md',
+          model: 'claude-sonnet-4',
+        });
+
+        const callArgs = mockPtySpawn.mock.calls[0];
+        expect(callArgs[1]).toEqual([
+          '/d', '/s', '/c', 'claude',
+          '--append-system-prompt', 'You are a coding expert.',
+          '--model', 'claude-sonnet-4',
+        ]);
+      });
+
+      it('falls back to cmd.exe when ComSpec is unset', () => {
+        delete process.env.ComSpec;
+
+        pm.createTerminalSession({ projectPath: '/test/project', role: 'coder.md' });
+
+        expect(mockPtySpawn.mock.calls[0][0]).toBe('cmd.exe');
+      });
     });
   });
 
