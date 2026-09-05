@@ -16,12 +16,11 @@ Run:
 node "$TEAMAI_CREATE_TASK_CLI" --project "<project root>" --title "<short, imperative title>" --description "<one-sentence description>"
 ```
 
-- `$TEAMAI_CREATE_TASK_CLI` is set in your environment — use it as-is, do not guess the path.
+- `$TEAMAI_CREATE_TASK_CLI` is already set in your environment — use it as-is.
 - `<project root>` is your current working directory unless you were told otherwise.
-- Do NOT hand-write `task.json` yourself, and do NOT write `spec.md` or `plan.json`. The script
-  creates a bare ticket — title, description, `phase: "backlog"` — nothing else. It goes through
-  the normal spec → plan → implement → QA pipeline once someone starts it, exactly like a ticket
-  created from the UI's "Add Task" button.
+- The script creates a bare ticket — title, description, `phase: "backlog"` — nothing else, exactly
+  like a ticket created from the UI's "Add Task" button. It goes through the normal spec → plan →
+  implement → QA pipeline once someone starts it.
 
 ## Step 3: Confirm
 
@@ -31,5 +30,4 @@ The script prints the ticket's slug and id on success. Report both to the user, 
 - 📁 `.teamai/{slug}/task.json`
 - 🔄 Refresh the kanban board to see it in the Backlog column.
 
-If the script exits with an error, show the exact error message — do not fall back to
-hand-writing the file.
+If the script exits with an error, show the exact error message.
