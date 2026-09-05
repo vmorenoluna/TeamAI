@@ -55,6 +55,25 @@ export function TerminalPanel({ sessionId, role, model, onClose }: Props) {
       fitAddon.fit();
       termRef.current = { terminal, fitAddon };
 
+      // xterm.js core doesn't wire up paste on its own: Ctrl+V/Cmd+V is
+      // otherwise swallowed by its keydown handling before the browser's
+      // native paste ever fires. Tell xterm to leave that combo alone (so
+      // the browser dispatches a real 'paste' event on its hidden textarea),
+      // then forward the pasted text into the PTY via terminal.paste().
+      terminal.attachCustomKeyEventHandler((event) => {
+        const isPasteShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v';
+        return !(event.type === 'keydown' && isPasteShortcut);
+      });
+      const textarea = container.querySelector('textarea');
+      const handlePaste = (event: ClipboardEvent) => {
+        const text = event.clipboardData?.getData('text/plain');
+        if (text) {
+          event.preventDefault();
+          terminal.paste(text);
+        }
+      };
+      textarea?.addEventListener('paste', handlePaste);
+
       const safeSend = (msg: object) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify(msg));
