@@ -55,6 +55,25 @@ export function TerminalPanel({ sessionId, role, model, onClose }: Props) {
       fitAddon.fit();
       termRef.current = { terminal, fitAddon };
 
+      // xterm.js core doesn't wire up paste on its own: Ctrl+V/Cmd+V is
+      // otherwise swallowed by its keydown handling before the browser's
+      // native paste ever fires. Tell xterm to leave that combo alone (so
+      // the browser dispatches a real 'paste' event on its hidden textarea),
+      // then forward the pasted text into the PTY via terminal.paste().
+      terminal.attachCustomKeyEventHandler((event) => {
+        const isPasteShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v';
+        return !(event.type === 'keydown' && isPasteShortcut);
+      });
+      const textarea = container.querySelector('textarea');
+      const handlePaste = (event: ClipboardEvent) => {
+        const text = event.clipboardData?.getData('text/plain');
+        if (text) {
+          event.preventDefault();
+          terminal.paste(text);
+        }
+      };
+      textarea?.addEventListener('paste', handlePaste);
+
       const safeSend = (msg: object) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify(msg));
@@ -76,7 +95,20 @@ export function TerminalPanel({ sessionId, role, model, onClose }: Props) {
       // WebSocket for PTY output
       const ws = new WebSocket(`ws://${window.location.host}/ws`);
       wsRef.current = ws;
-      ws.onopen = () => setConnected(true);
+      ws.onopen = () => {
+        setConnected(true);
+        // The PTY is spawned server-side with a fixed placeholder size
+        // (see ProcessManager.createTerminalSession) before this socket
+        // exists, so any ResizeObserver firing during that window has its
+        // resize message silently dropped by safeSend's readyState check —
+        // the server-side PTY is then permanently out of sync with the
+        // panel's real, fitted dimensions, and full-screen CLI UIs (status
+        // bars, input boxes) misrender against the wrong height. Push the
+        // already-fitted size the moment the socket opens so the PTY is
+        // corrected immediately, not just on the next incidental resize.
+        const { cols, rows } = terminal;
+        safeSend({ type: 'terminal-resize', sessionId, cols, rows });
+      };
       ws.onmessage = (msg) => {
         try {
           const data = JSON.parse(msg.data);
