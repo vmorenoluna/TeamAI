@@ -12,7 +12,7 @@
  * resulting browser 'paste' event into the PTY via terminal.paste().
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render, waitFor, act } from '@testing-library/react';
 
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
 
@@ -58,12 +58,32 @@ class MockResizeObserver {
 vi.stubGlobal('ResizeObserver', MockResizeObserver);
 
 class MockWebSocket {
-  readyState = 0;
+  static instances: MockWebSocket[] = [];
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+
+  readyState = MockWebSocket.CONNECTING;
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onmessage: ((e: { data: string }) => void) | null = null;
-  constructor(public url: string) {}
+  sent: object[] = [];
+
+  constructor(public url: string) {
+    MockWebSocket.instances.push(this);
+  }
+
+  send(data: string) {
+    this.sent.push(JSON.parse(data));
+  }
+
   close() {}
+
+  simulateOpen() {
+    this.readyState = MockWebSocket.OPEN;
+    this.onopen?.();
+  }
 }
 vi.stubGlobal('WebSocket', MockWebSocket);
 
@@ -74,6 +94,7 @@ import { TerminalPanel } from '@/components/terminal-panel';
 describe('TerminalPanel paste handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    MockWebSocket.instances = [];
   });
 
   it('opts xterm out of handling Ctrl+V/Cmd+V so the browser can paste natively', async () => {
@@ -126,5 +147,32 @@ describe('TerminalPanel paste handling', () => {
     textarea.dispatchEvent(pasteEvent);
 
     expect(mockTerminalPaste).not.toHaveBeenCalled();
+  });
+});
+
+describe('TerminalPanel resize sync on connect', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    MockWebSocket.instances = [];
+  });
+
+  it('pushes the already-fitted terminal size the moment the socket opens', async () => {
+    render(<TerminalPanel sessionId="s1" role="coder.md" model="claude" onClose={() => {}} />);
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0];
+
+    // Before the socket opens, the server-side PTY still has the placeholder
+    // size it was spawned with — no resize should have gone out yet.
+    expect(ws.sent).toHaveLength(0);
+
+    act(() => ws.simulateOpen());
+
+    expect(ws.sent).toContainEqual({
+      type: 'terminal-resize',
+      sessionId: 's1',
+      cols: mockTerminalInstance.cols,
+      rows: mockTerminalInstance.rows,
+    });
   });
 });
