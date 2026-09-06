@@ -11,7 +11,7 @@ import { updateSessionMap, logToOutput } from './helpers';
 import { humanDirectiveFor, consumeFeedbackIfDue } from './human-feedback';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
-import { resolveBaseBranch } from '../git-platform';
+import { syncPhaseBaseline } from './phase-runners';
 import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
 import { warn } from '../logger';
@@ -99,6 +99,7 @@ export interface QaReviewDeps {
   sessionOpts: (role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) => SessionOptsResult;
   waitForCompletion: (sessionId: string) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
+  execGit: (args: string[], hostCwd: string) => void;
   writeQaFeedback: (pipeline: TaskPipeline, report: QaReport) => void;
   writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
@@ -379,11 +380,12 @@ export async function runQaReview(
     return;
   }
 
-  // Fetch latest origin/default-branch
-  try {
-    const baseBranch = resolveBaseBranch(deps.projectRoot);
-    execFileSync('git', ['fetch', 'origin', baseBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
-  } catch { /* offline — proceed with cached refs */ }
+  // Keep the worktree current with the latest default branch before QA
+  // judges it. This used to only fetch origin/<base> here, never rebase onto
+  // it — a retry (or any resume) landing directly on qa-review without
+  // passing through implement first would then judge code that could be
+  // missing an upstream fix its own prior failure depended on.
+  await syncPhaseBaseline(pipeline, deps);
 
   const sessionId = await processManager.createSession(
     deps.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId, qaLogFile),

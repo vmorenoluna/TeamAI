@@ -42,6 +42,15 @@ vi.mock('../../src/lib/logger', () => ({
   info: vi.fn(),
 }));
 
+// runSpecPhase now calls syncPhaseBaseline, which resolves the base branch
+// via git-platform — this fixture's temp dir isn't a real git repo, so
+// without this mock every test would shell out for real, fail, and log an
+// unrelated "Failed to detect default branch" warn that has nothing to do
+// with what this file is testing (spec version snapshotting).
+vi.mock('../../src/lib/git-platform', () => ({
+  resolveBaseBranch: () => 'main',
+}));
+
 vi.mock('../../src/lib/process-manager', () => ({
   processManager: {
     on: vi.fn(),
@@ -107,6 +116,8 @@ function makeCtx() {
     savePipelineState: vi.fn(),
     toAgentPath: (p: string) => p,
     executePhase: vi.fn(async () => undefined),
+    gitPush: vi.fn(),
+    execGit: vi.fn(),
   };
 
   return { root, specPath, pipeline, deps };

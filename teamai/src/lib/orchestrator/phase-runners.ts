@@ -119,6 +119,64 @@ interface CascadePhaseDeps extends BasePhaseDeps {
   savePipelineState: (pipeline: TaskPipeline) => void;
   toAgentPath: (hostPath: string) => string;
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
+  gitPush: (pushArgs: string[], logFile: string) => void;
+  execGit: (args: string[], hostCwd: string) => void;
+}
+
+// ── Shared pre-phase freshness sync ─────────────────────────────────────────
+
+/**
+ * Freshen the code an about-to-run phase's agent will look at, regardless of
+ * which phase this is or how we got here — a brand-new task's very first
+ * spec run, a retry, a QA bounce-back, a spec revision loop. Two independent
+ * staleness gaps this closes:
+ *
+ *  1. spec/plan sessions run in `projectRoot`, not the worktree — nothing
+ *     else kept that checkout's base branch current, so an analyst
+ *     re-examining a previously-failed task could reason from pre-fix
+ *     source, and a brand-new task's worktree (branched from projectRoot's
+ *     HEAD in runPlan) could be cut from a stale base.
+ *  2. an existing feature-branch worktree previously only got rebased onto
+ *     the latest base branch when a run happened to pass through
+ *     `implement` (ensureWorktree). A retry landing straight on
+ *     `qa-review` — the default resume phase for most failed tasks per
+ *     getResumePhaseForFailedTask — skipped that rebase entirely, letting
+ *     QA judge code that could be missing an upstream fix its own failure
+ *     depended on.
+ *
+ * Call this AFTER persistAndEmitPhase, not before — moveTaskToPhase's
+ * synchronous-persist invariant (see its doc comment) means the UI is
+ * expected to see a phase's status update promptly; putting a network fetch
+ * or a merger-agent conflict-resolution session ahead of that persist would
+ * silently reintroduce the I/O-bound delay that invariant exists to avoid.
+ *
+ * Both steps are best-effort and non-fatal: a fast-forward pull can't
+ * conflict, and an unresolvable worktree rebase just proceeds with a
+ * warning — merge/create-pr still run their own authoritative rebase
+ * (rebaseOntoLatestDefault again — a no-op if this already did the work)
+ * and fail loudly there if a real conflict is still unresolved by the time
+ * it actually matters.
+ */
+export async function syncPhaseBaseline(
+  pipeline: Pick<TaskPipeline, 'taskId' | 'specPath' | 'worktreePath' | 'phase'>,
+  deps: RebaseDeps & { gitPush: (pushArgs: string[], logFile: string) => void },
+): Promise<void> {
+  const baseBranch = resolveBaseBranch(deps.projectRoot);
+  const logFile = path.join(pipeline.specPath, 'output.log');
+
+  try {
+    deps.gitPush(['pull', '--ff-only', 'origin', baseBranch], logFile);
+  } catch { /* non-fast-forward or offline — best-effort */ }
+
+  if (!existsSync(pipeline.worktreePath)) return;
+
+  const ok = await rebaseOntoLatestDefault(
+    pipeline.worktreePath, pipeline.taskId, logFile, { ...deps, baseBranch },
+  );
+  if (!ok) {
+    logToOutput(pipeline.specPath,
+      `\n[WARN] Could not rebase worktree onto latest ${baseBranch} before '${pipeline.phase}' — proceeding with the worktree's current state.\n`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -134,6 +192,7 @@ export async function runSpecPhase(
   deps.rotateOutputLog(logFile);
   deps.phaseHeader(logFile, 'spec');
   deps.persistAndEmitPhase(pipeline);
+  await syncPhaseBaseline(pipeline, deps);
   const sessionId = await processManager.createSession(
     deps.sessionOpts('analyst', deps.projectRoot, pipeline.taskId, specLogFile),
   );
@@ -266,6 +325,7 @@ export async function runPlanPhase(
   deps.rotateOutputLog(logFile);
   deps.phaseHeader(logFile, 'plan');
   deps.persistAndEmitPhase(pipeline);
+  await syncPhaseBaseline(pipeline, deps);
   const sessionId = await processManager.createSession(
     deps.sessionOpts('planner', deps.projectRoot, pipeline.taskId, planLogFile),
   );
