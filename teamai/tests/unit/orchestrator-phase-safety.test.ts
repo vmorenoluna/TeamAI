@@ -535,7 +535,7 @@ describe('triggerEarlyWakeup — end a pending wakeup wait immediately', () => {
 //  rebaseOntoLatestDefault — skip when base hasn't advanced
 // ═══════════════════════════════════════════════════════════════════════
 
-import { rebaseOntoLatestDefault, runPlanPhase } from '../../src/lib/orchestrator/phase-runners';
+import { rebaseOntoLatestDefault, runPlanPhase, syncPhaseBaseline } from '../../src/lib/orchestrator/phase-runners';
 
 describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
   let project: ReturnType<typeof setupProject>;
@@ -609,6 +609,100 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     expect(rebaseCalls.length).toBeGreaterThan(0);
     const logContent = readFileSync(logFile, 'utf-8');
     expect(logContent).not.toContain('skipping rebase');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  syncPhaseBaseline — keep code fresh before every phase, every entry point
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('syncPhaseBaseline — pre-phase freshness sync', () => {
+  let project: ReturnType<typeof setupProject>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+
+    // resolveBaseBranch → detectDefaultBranch reads refs/remotes/origin/HEAD;
+    // rebaseOntoLatestDefault's own skip-check reads rev-list --count.
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'symbolic-ref') return 'refs/remotes/origin/master\n';
+      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n'; // base has advanced
+      return '';
+    });
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  it('pulls the base branch and rebases an existing worktree before any agent looks at it', async () => {
+    const worktreePath = join(project.root, 'worktrees', 'existing-task');
+    mkdirSync(worktreePath, { recursive: true });
+    const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'implement' };
+
+    const gitPush = vi.fn();
+    const execGit = vi.fn();
+    const deps = { projectRoot: project.root, gitPush, execGit, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
+
+    await syncPhaseBaseline(pipeline, deps);
+
+    expect(gitPush).toHaveBeenCalledWith(['pull', '--ff-only', 'origin', 'master'], expect.any(String));
+    const rebaseCalls = execGit.mock.calls.filter((c: any[]) => c[0]?.includes('rebase'));
+    expect(rebaseCalls.length).toBeGreaterThan(0);
+  });
+
+  it("does not attempt a worktree rebase when no worktree exists yet (a brand-new task's first spec run)", async () => {
+    const worktreePath = join(project.root, 'worktrees', 'not-created-yet');
+    const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'spec' };
+
+    const gitPush = vi.fn();
+    const execGit = vi.fn();
+    const deps = { projectRoot: project.root, gitPush, execGit, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
+
+    await syncPhaseBaseline(pipeline, deps);
+
+    // The main checkout is still freshened even though there's no worktree yet.
+    expect(gitPush).toHaveBeenCalledWith(['pull', '--ff-only', 'origin', 'master'], expect.any(String));
+    expect(execGit).not.toHaveBeenCalled();
+  });
+
+  it('does not throw when the base-branch pull fails (offline / non-fast-forward)', async () => {
+    const pipeline = {
+      taskId: project.taskId, specPath: project.taskDir,
+      worktreePath: join(project.root, 'worktrees', 'absent'), phase: 'spec',
+    };
+    const deps = {
+      projectRoot: project.root,
+      gitPush: vi.fn(() => { throw new Error('offline'); }),
+      execGit: vi.fn(), sessionOpts: vi.fn(), waitForCompletion: vi.fn(),
+    };
+
+    await expect(syncPhaseBaseline(pipeline, deps)).resolves.toBeUndefined();
+  });
+
+  it('warns but does not throw when the worktree rebase conflict cannot be resolved', async () => {
+    const worktreePath = join(project.root, 'worktrees', 'conflicted-task');
+    mkdirSync(worktreePath, { recursive: true });
+    const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'qa-review' };
+
+    const deps = {
+      projectRoot: project.root,
+      gitPush: vi.fn(),
+      execGit: vi.fn((args: string[]) => {
+        if (args.includes('rebase') && !args.includes('--abort')) throw new Error('CONFLICT');
+        // tolerate the --abort call
+      }),
+      sessionOpts: vi.fn(),
+      // Merger-fallback session never resolves the conflict.
+      waitForCompletion: vi.fn().mockRejectedValue(new Error('merger failed')),
+    };
+
+    await expect(syncPhaseBaseline(pipeline, deps)).resolves.toBeUndefined();
+
+    const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+    expect(logContent).toContain("Could not rebase worktree onto latest master before 'qa-review'");
   });
 });
 
