@@ -205,7 +205,7 @@ export async function playTask(taskId: string): Promise<{ success: boolean; erro
 }
 
 export async function restartCurrentPhase(taskId: string): Promise<{ success: boolean; error?: string }> {
-  const { taskStore, orchestrator } = await getStores();
+  const { taskStore, orchestrator, projectPath } = await getStores();
   const task = taskStore.getById(taskId);
   if (!task) return { success: false, error: 'Task not found' };
 
@@ -218,6 +218,9 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
     // moveTaskToPhase would set startPhase='implement' (since plan exists),
     // but the user asked to restart _this_ phase from scratch — not the pipeline.
     taskStore.clearArtifacts(taskId, 'qa');
+    // Optimistically update phase before runTask so the UI refreshes immediately.
+    taskStore.updatePhase(taskId, 'qa-review');
+    processManager.emit('phase-change', { taskId, phase: 'qa-review', projectRoot: projectPath });
     orchestrator.runTask(taskId, task.description, 'qa-review').catch(err => logError('tasks', `restartCurrentPhase ${taskId} failed`, err));
   } else if (task.phase === 'implement') {
     // For implement: reset subtask completions in plan.json so the UI shows a fresh
@@ -234,7 +237,10 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
         writeFileSync(planPath, JSON.stringify(plan, null, 2));
       } catch { /* best-effort */ }
     }
-    orchestrator.moveTaskToPhase(taskId, task.phase).catch(err => logError('tasks', `restartPhase ${taskId} failed`, err));
+    // Optimistically update phase before runTask so the UI refreshes immediately.
+    taskStore.updatePhase(taskId, 'implement');
+    processManager.emit('phase-change', { taskId, phase: 'implement', projectRoot: projectPath });
+    orchestrator.runTask(taskId, task.description, 'implement').catch(err => logError('tasks', `restartPhase ${taskId} failed`, err));
   } else {
     // spec / plan: moveTaskToPhase handles clearing stale artifacts
     // and setting the correct startPhase (e.g. spec redoes everything,
@@ -248,10 +254,14 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
 }
 
 export async function runTask(taskId: string) {
-  const { taskStore, orchestrator } = await getStores();
+  const { taskStore, orchestrator, projectPath } = await getStores();
   const task = taskStore.getById(taskId);
   if (!task) throw new Error(`Task ${taskId} not found`);
-  // Fire and forget — pipeline runs asynchronously, phase changes broadcast via WebSocket
+  // Optimistically update phase to 'spec' before runTask starts — the server
+  // action's revalidatePath('/') re-fetches getTasks() which reads the task
+  // store, so the UI sees the new phase immediately.
+  taskStore.updatePhase(taskId, 'spec');
+  processManager.emit('phase-change', { taskId, phase: 'spec', projectRoot: projectPath });
   orchestrator.runTask(taskId, task.description).catch(err => logError('tasks', `restartFromSpec ${taskId} failed`, err));
   revalidatePath('/');
 }
