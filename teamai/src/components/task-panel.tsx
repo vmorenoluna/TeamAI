@@ -42,12 +42,14 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
-  // Re-fetch silently on phase-change/subtask-progress/refinement-update so
-  // tabs update without close+reopen. subtask-progress matters because phase
-  // stays "implement" for the whole implement run — without it the panel
-  // shows stale subtask/plan state until the next phase-change. Guarded by
-  // readonly at the message-handler level so the hook is always called at
-  // top level.
+  // Re-fetch silently on phase-change/subtask-progress/refinement-update/
+  // task-updated so tabs update without close+reopen. subtask-progress
+  // matters because phase stays "implement" for the whole implement run —
+  // without it the panel shows stale subtask/plan state until the next
+  // phase-change. task-updated covers orchestrator-driven mutations that
+  // don't change phase at all (human feedback routed, artifacts cleared,
+  // title/dependency edits, pause/resume). Guarded by readonly at the
+  // message-handler level so the hook is always called at top level.
   const onMessageRef = useRef<(data: Record<string, unknown>) => void>(undefined);
   // eslint-disable-next-line react-hooks/refs
   onMessageRef.current = (msg) => {
@@ -55,6 +57,7 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
       (msg.type === 'phase-change' && msg.taskId === taskId)
       || (msg.type === 'subtask-progress' && msg.taskId === taskId)
       || (msg.type === 'refinement-update' && msg.taskId === taskId)
+      || (msg.type === 'task-updated' && msg.taskId === taskId)
       || msg.type === 'container-log'
     )) {
       refresh(true);

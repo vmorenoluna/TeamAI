@@ -205,7 +205,7 @@ export async function playTask(taskId: string): Promise<{ success: boolean; erro
 }
 
 export async function restartCurrentPhase(taskId: string): Promise<{ success: boolean; error?: string }> {
-  const { taskStore, orchestrator, projectPath } = await getStores();
+  const { taskStore, orchestrator } = await getStores();
   const task = taskStore.getById(taskId);
   if (!task) return { success: false, error: 'Task not found' };
 
@@ -217,15 +217,23 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
     // For qa-review: just re-run QA without re-implementing.
     // moveTaskToPhase would set startPhase='implement' (since plan exists),
     // but the user asked to restart _this_ phase from scratch — not the pipeline.
+    //
+    // cancelPipeline first: a genuinely still-running qa-review session would
+    // otherwise race clearArtifacts below (deleting qa_report.json etc. out
+    // from under a live agent) and then runTask would just throw
+    // TaskAlreadyRunningError, leaving that live session to finish against
+    // now-mutated artifacts. Mirrors moveTaskToPhase, which always cancels
+    // any in-flight pipeline before touching artifacts.
+    orchestrator.cancelPipeline(taskId);
     taskStore.clearArtifacts(taskId, 'qa');
-    // Optimistically update phase before runTask so the UI refreshes immediately.
-    taskStore.updatePhase(taskId, 'qa-review');
-    processManager.emit('phase-change', { taskId, phase: 'qa-review', projectRoot: projectPath });
     orchestrator.runTask(taskId, task.description, 'qa-review').catch(err => logError('tasks', `restartCurrentPhase ${taskId} failed`, err));
   } else if (task.phase === 'implement') {
     // For implement: reset subtask completions in plan.json so the UI shows a fresh
     // slate. moveTaskToPhase clears QA artifacts but doesn't touch plan.json subtask
     // flags — unlike stopTask which does via cleanupTaskArtifacts.
+    //
+    // cancelPipeline first — see the qa-review branch above for why.
+    orchestrator.cancelPipeline(taskId);
     const dir = taskStore.getDirById(taskId);
     const planPath = join(dir, 'plan.json');
     if (existsSync(planPath)) {
@@ -237,9 +245,6 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
         writeFileSync(planPath, JSON.stringify(plan, null, 2));
       } catch { /* best-effort */ }
     }
-    // Optimistically update phase before runTask so the UI refreshes immediately.
-    taskStore.updatePhase(taskId, 'implement');
-    processManager.emit('phase-change', { taskId, phase: 'implement', projectRoot: projectPath });
     orchestrator.runTask(taskId, task.description, 'implement').catch(err => logError('tasks', `restartPhase ${taskId} failed`, err));
   } else {
     // spec / plan: moveTaskToPhase handles clearing stale artifacts
@@ -254,14 +259,13 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
 }
 
 export async function runTask(taskId: string) {
-  const { taskStore, orchestrator, projectPath } = await getStores();
+  const { taskStore, orchestrator } = await getStores();
   const task = taskStore.getById(taskId);
   if (!task) throw new Error(`Task ${taskId} not found`);
-  // Optimistically update phase to 'spec' before runTask starts — the server
-  // action's revalidatePath('/') re-fetches getTasks() which reads the task
-  // store, so the UI sees the new phase immediately.
-  taskStore.updatePhase(taskId, 'spec');
-  processManager.emit('phase-change', { taskId, phase: 'spec', projectRoot: projectPath });
+  // orchestrator.runTask reaches persistAndEmitPhase (the authoritative
+  // phase-change write) synchronously before any I/O-bound await, so the UI
+  // sees the new phase promptly without this action persisting it up front —
+  // see the crash-safety comments on moveTaskToPhase/resumeTask.
   orchestrator.runTask(taskId, task.description).catch(err => logError('tasks', `restartFromSpec ${taskId} failed`, err));
   revalidatePath('/');
 }

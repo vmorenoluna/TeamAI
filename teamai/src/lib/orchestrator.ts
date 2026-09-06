@@ -210,17 +210,15 @@ export class Orchestrator {
       startPhase = targetPhase as PipelinePhase;
     }
 
-    // Optimistically update the task store and emit a phase-change event
-    // immediately, before the pipeline starts async. The server action's
-    // revalidatePath('/') re-fetches getTasks() which reads from the task
-    // store, so the UI sees the new phase right away instead of showing the
-    // old phase until persistAndEmitPhase fires later. Use the resolved
-    // startPhase (not targetPhase) — moveTaskToPhase('plan') can actually
-    // resume at 'spec' when spec.md is missing, and the UI must reflect
-    // where the pipeline is really about to run, not the requested target.
-    this.taskStore.updatePhase(taskId, startPhase);
-    processManager.emit('phase-change', { taskId, phase: startPhase, projectRoot: this.projectRoot });
-
+    // Do NOT persist startPhase here — persistAndEmitPhase (called from deep
+    // inside the phase runner once work actually starts, via runTask below)
+    // is the sole authoritative writer of a task's in-progress phase. Writing
+    // it here first would let a crash between this line and the real work
+    // starting leave the task "stuck" at a phase with no session evidence,
+    // undetectable by findInterruptedTasks/sweepStalledTasks (see
+    // pipeline-state.ts's persistAndEmitPhase doc comment). runTask reaches
+    // that authoritative write synchronously (no I/O-bound await precedes
+    // it), so the UI sees the correct resolved startPhase just as promptly.
     await this.runTask(taskId, task.description, startPhase);
   }
 
@@ -911,13 +909,10 @@ export class Orchestrator {
     // resumeTask skips directly to implement on a previously-failed task.
     this._ctx.restoreQaReportFromSnapshot(dir);
 
-    // Optimistically update the task store phase and emit phase-change BEFORE
-    // runTask starts — so the UI refreshes to the new phase immediately via
-    // the server action's revalidatePath('/'). Otherwise the task shows in its
-    // old phase (e.g. 'backlog') until persistAndEmitPhase fires later.
-    this.taskStore.updatePhase(taskId, startPhase);
-    processManager.emit('phase-change', { taskId, phase: startPhase, projectRoot: this.projectRoot });
-
+    // Do NOT persist startPhase here — see the matching comment in
+    // moveTaskToPhase. persistAndEmitPhase (reached synchronously via
+    // runTask below, before any I/O-bound await) is the sole authoritative
+    // writer of a task's in-progress phase.
     await this.runTask(taskId, task.description, startPhase);
   }
 

@@ -708,7 +708,11 @@ describe('Orchestrator', () => {
         expect(pipeline.phase).toBe(phase);
       }
 
-      expect(mockEmit).toHaveBeenCalledTimes(phases.length);
+      // Each advancePhase call fires one 'phase-change' plus one 'task-updated'
+      // (TaskStore's generic "this task changed" signal, emitted from every
+      // write so any UI surface refreshes on any orchestrator-driven mutation).
+      const phaseChangeCalls = mockEmit.mock.calls.filter((c: unknown[]) => c[0] === 'phase-change');
+      expect(phaseChangeCalls).toHaveLength(phases.length);
     });
   });
 
@@ -2872,8 +2876,12 @@ describe('Orchestrator', () => {
       mockEmit.mockClear();
       await orch.markTaskDone(testData.taskId);
 
-      // phase-change was emitted exactly once
-      expect(mockEmit).toHaveBeenCalledTimes(1);
+      // phase-change was emitted exactly once (TaskStore's own 'task-updated'
+      // — a generic refresh signal every write emits — also fires from the
+      // updatePhase call inside markTaskDone; that's expected and harmless,
+      // so this only asserts on the authoritative phase-change event).
+      const phaseChangeCalls = mockEmit.mock.calls.filter((c: unknown[]) => c[0] === 'phase-change');
+      expect(phaseChangeCalls).toHaveLength(1);
       expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId: testData.taskId,
         phase: 'done',
@@ -3006,7 +3014,11 @@ describe('Orchestrator', () => {
         mockEmit.mockClear();
         await orch.markTaskDone(testData.taskId);
 
-        expect(mockEmit).toHaveBeenCalledTimes(1);
+        // TaskStore's own 'task-updated' also fires from the updatePhase call
+        // inside markTaskDone — expected and harmless, so assert on the
+        // authoritative phase-change event specifically.
+        const phaseChangeCalls = mockEmit.mock.calls.filter((c: unknown[]) => c[0] === 'phase-change');
+        expect(phaseChangeCalls).toHaveLength(1);
         expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
           taskId: testData.taskId,
           phase: 'done',
@@ -3028,7 +3040,11 @@ describe('Orchestrator', () => {
         mockEmit.mockClear();
         await orch.markTaskDone(testData.taskId);
 
-        expect(mockEmit).toHaveBeenCalledTimes(1);
+        // TaskStore's own 'task-updated' also fires from the updatePhase call
+        // inside markTaskDone — expected and harmless, so assert on the
+        // authoritative phase-change event specifically.
+        const phaseChangeCalls = mockEmit.mock.calls.filter((c: unknown[]) => c[0] === 'phase-change');
+        expect(phaseChangeCalls).toHaveLength(1);
         expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
           taskId: testData.taskId,
           phase: 'done',
