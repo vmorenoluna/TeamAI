@@ -78,7 +78,6 @@ See the `eslint-disable-next-line` comments in `agent-panel.tsx`, `github-import
 |--------------------|----------------------|-------------------------------------------|
 | `AutoModeButton`   | `initialEnabled`     | `getAutoModeState(activeProject.path)`    |
 | `DefaultsUpdater`  | `initialReport`      | `getDefaultsSyncReport()`                 |
-| `RecoveryBanner`   | `tasks`              | `getInterruptedTasks()`                   |
 | `Sidebar`          | `projects`, `path`   | `getProjects()` / `getActiveProject()`    |
 | `ProjectSelector`  | `projects`, `path`   | `getProjects()` / `getActiveProject()`    |
 

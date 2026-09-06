@@ -138,18 +138,3 @@ jobs:
           name: coverage-report
           path: teamai/coverage/
           retention-days: 7
-
-  # Enable auto-merge when all checks pass (including AI review and test-all)
-  auto-merge:
-    needs: [test-all, ai-review]
-    if: success() && github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: write
-    steps:
-      - name: Enable auto-merge
-        run: |
-          gh pr merge --auto --squash "${{ github.event.pull_request.html_url }}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
