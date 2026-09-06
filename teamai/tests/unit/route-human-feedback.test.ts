@@ -12,6 +12,7 @@ import {
   trimArtifactsForTarget,
 } from '../../src/lib/orchestrator/review-actions';
 import type { FeedbackTarget } from '../../src/lib/orchestrator/human-feedback';
+import { processManager } from '../../src/lib/process-manager';
 
 const QA_ARTIFACTS = [
   'qa_report.json',
@@ -49,9 +50,11 @@ function makeCtx() {
   };
 
   const deps = {
+    projectRoot: root,
     taskStore: {
       getById: () => ({ id: 'task-1', description: 'd', phase: 'awaiting-review' }),
       update: vi.fn(),
+      updatePhase: vi.fn(),
       clearArtifacts: vi.fn(),
     },
     pipelines: new Map([['task-1', pipeline]]),
@@ -60,8 +63,12 @@ function makeCtx() {
     executePhase: vi.fn(async () => undefined),
     savePipelineState: vi.fn(),
   };
+  // Silence the phase-change emit during tests — we only care about the
+  // in-memory pipeline state and on-disk artifacts, not the event bus.
+  const originalEmit = processManager.emit;
+  processManager.emit = vi.fn() as typeof processManager.emit;
 
-  return { root, specPath, pipeline, deps };
+  return { root, specPath, pipeline, deps, originalEmit };
 }
 
 function seedArtifacts(specPath: string) {
@@ -84,6 +91,7 @@ describe('trimArtifactsForTarget', () => {
 
   afterEach(() => {
     try { rmSync(ctx.root, { recursive: true, force: true }); } catch { /* best-effort */ }
+    processManager.emit = ctx.originalEmit;
   });
 
   it('deletes nothing for a coder target', () => {
@@ -112,6 +120,7 @@ describe('routeHumanFeedback', () => {
 
   afterEach(() => {
     try { rmSync(ctx.root, { recursive: true, force: true }); } catch { /* best-effort */ }
+    processManager.emit = ctx.originalEmit;
   });
 
   const cases: [FeedbackTarget, string][] = [
@@ -244,6 +253,7 @@ describe('rejectTask — Request Changes → Planner with subtask scoping from p
 
   afterEach(() => {
     try { rmSync(ctx.root, { recursive: true, force: true }); } catch { /* best-effort */ }
+    processManager.emit = ctx.originalEmit;
   });
 
   it('writes the planner Subtasks: directive and resumes at plan (same code path as awaiting-review)', async () => {
@@ -285,6 +295,7 @@ describe('rejectTask from a failed task', () => {
 
   afterEach(() => {
     try { rmSync(ctx.root, { recursive: true, force: true }); } catch { /* best-effort */ }
+    processManager.emit = ctx.originalEmit;
   });
 
   it('routes feedback to the analyst from a failed task, same as from awaiting-review', async () => {

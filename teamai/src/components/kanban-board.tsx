@@ -138,6 +138,7 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
   const [historyHasMore, setHistoryHasMore] = useState(doneHistoryHasMore);
   const [rescanning, setRescanning] = useState(false);
   const doneColScrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollFetchRef = useRef(false); // gate: only one fetch in flight per scroll event
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [dragOverPhase, setDragOverPhase] = useState<string | null>(null);
 
@@ -272,9 +273,11 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
   // column, fetch the next merged-PR page and accumulate it client-side.
   const handleDoneColumnScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
-      if (historyLoading) return;
+      if (scrollFetchRef.current) return; // one fetch per scroll-at-bottom
       const el = e.currentTarget;
       if (el.scrollTop + el.clientHeight < el.scrollHeight - 120) return;
+      if (historyLoading) return;
+      scrollFetchRef.current = true;
       setHistoryLoading(true);
       loadMoreDoneHistory(historyPage)
         .then(res => {
@@ -291,7 +294,7 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
               : 'Failed to load more DONE history',
           );
         })
-        .finally(() => setHistoryLoading(false));
+        .finally(() => { setHistoryLoading(false); scrollFetchRef.current = false; });
     },
     [historyLoading, historyPage],
   );
