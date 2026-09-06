@@ -25,6 +25,7 @@ vi.mock('@/lib/process-manager', () => ({
     sendMessage: (...args: unknown[]) => mockSendMessage(...args),
     getSession: (...args: unknown[]) => mockGetSession(...args),
     killSession: (...args: unknown[]) => mockKillSession(...args),
+    emit: vi.fn(),
   },
   containerSessionOpts: (projectRoot: string) => ({ projectRoot, permissionMode: 'bypassPermissions' as const }),
 }));

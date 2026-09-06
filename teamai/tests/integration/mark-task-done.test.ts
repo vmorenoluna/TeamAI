@@ -193,8 +193,13 @@ describe('markTaskDone Integration', () => {
       // and (for PR tasks) the PR body, not the local folder (§3d/§3j).
       expect(existsSync(taskDir)).toBe(false);
 
-      // phase-change emitted exactly once, after the folder is settled
-      expect(mockEmit).toHaveBeenCalledTimes(1);
+      // phase-change emitted exactly once, after the folder is settled.
+      // (TaskStore's own 'task-updated' — a generic refresh signal every
+      // write emits — also fires from the updatePhase call inside
+      // markTaskDone; expected and harmless, so this asserts on the
+      // authoritative phase-change event specifically.)
+      const phaseChangeCalls = mockEmit.mock.calls.filter((c: unknown[]) => c[0] === 'phase-change');
+      expect(phaseChangeCalls).toHaveLength(1);
       expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId,
         phase: 'done',
@@ -215,7 +220,7 @@ describe('markTaskDone Integration', () => {
       await orch.markTaskDone(taskId);
 
       expect(existsSync(taskDir)).toBe(false);
-      expect(mockEmit).toHaveBeenCalledTimes(1);
+      expect(mockEmit.mock.calls.filter((c: unknown[]) => c[0] === 'phase-change')).toHaveLength(1);
     });
 
     it('deletes the folder regardless of recordHistoryInGit (§3j — no keep-folder safety net)', async () => {
@@ -229,7 +234,7 @@ describe('markTaskDone Integration', () => {
       await orch.markTaskDone(taskId);
 
       expect(existsSync(taskDir)).toBe(false);
-      expect(mockEmit).toHaveBeenCalledTimes(1);
+      expect(mockEmit.mock.calls.filter((c: unknown[]) => c[0] === 'phase-change')).toHaveLength(1);
     });
 
     it('removes every artifact file with the folder — including transient logs', async () => {
@@ -293,7 +298,8 @@ describe('markTaskDone Integration', () => {
       await orch.markTaskDone(taskId);
 
       expect(existsSync(taskDir)).toBe(false);
-      expect(mockEmit).toHaveBeenCalledTimes(1);
+      const phaseChangeCalls = mockEmit.mock.calls.filter((c: unknown[]) => c[0] === 'phase-change');
+      expect(phaseChangeCalls).toHaveLength(1);
       expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({
         taskId,
         phase: 'done',
@@ -313,7 +319,7 @@ describe('markTaskDone Integration', () => {
       await orch.markTaskDone(taskId);
 
       expect(existsSync(taskDir)).toBe(false);
-      expect(mockEmit).toHaveBeenCalledTimes(1);
+      expect(mockEmit.mock.calls.filter((c: unknown[]) => c[0] === 'phase-change')).toHaveLength(1);
     });
   });
 

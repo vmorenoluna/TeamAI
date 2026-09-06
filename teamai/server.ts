@@ -105,6 +105,16 @@ app.prepare().then(async () => {
     broadcastToProject(data, msg);
   });
 
+  // Broadcast generic task mutations from TaskStore (title/description edits,
+  // dependency changes, artifact clearing, human-feedback routing, pause
+  // state, etc.) so every UI surface refreshes on any orchestrator-driven
+  // state change — not only the phase transitions that happen when an agent
+  // session starts. Carries no data beyond the taskId; consumers just re-fetch.
+  processManager.on('task-updated', (data: { taskId: string; projectRoot?: string }) => {
+    const msg = JSON.stringify({ type: 'task-updated', taskId: data.taskId });
+    broadcastToProject(data, msg);
+  });
+
   // Broadcast subtask-progress events so the kanban counter updates live during implement
   processManager.on('subtask-progress', (data: { taskId: string; completed: number; total: number; projectRoot?: string }) => {
     const msg = JSON.stringify({ type: 'subtask-progress', taskId: data.taskId, completed: data.completed, total: data.total });

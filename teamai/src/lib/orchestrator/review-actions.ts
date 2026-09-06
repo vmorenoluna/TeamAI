@@ -7,7 +7,6 @@
  */
 import { readFileSync, writeFileSync, existsSync, unlinkSync, renameSync } from 'fs';
 import path from 'path';
-import { processManager } from '../process-manager';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy, QaReport } from './types';
 import type { FailureReason } from './qa-feedback';
@@ -297,23 +296,18 @@ export async function rejectTask(
  * Writes the feedback (with target), records the change request, trims only
  * what the target must regenerate, then resumes at the target's phase.
  *
- * Optimistically updates the task store phase and emits phase-change BEFORE
- * doing any file I/O or async work, so the UI refreshes immediately via the
- * server action's revalidatePath('/') — matching the pattern used by
- * moveTaskToPhase / resumeTask / runTask / restartCurrentPhase.
- * The later advancePhase call emits again with the same phase (harmless dup).
+ * Does NOT persist the resolved phase up front — deps.advancePhase below
+ * (reached synchronously, no I/O-bound await precedes it in the common
+ * path) is the sole authoritative writer of the task's in-progress phase,
+ * so a crash mid-function leaves the task at its true last-known phase
+ * instead of one with no session evidence behind it (see pipeline-state.ts's
+ * persistAndEmitPhase doc comment).
  */
 export async function routeHumanFeedback(
   pipeline: TaskPipeline,
   deps: ReviewActionsDeps,
   feedback: { target: FeedbackTarget; message: string; subtaskIds?: number[] },
 ): Promise<void> {
-  // Optimistic phase update — resolve the target's resume phase and push it
-  // to the task store + event bus immediately, before the I/O-heavy work below.
-  const nextPhase = targetToResumePhase(feedback.target);
-  deps.taskStore.updatePhase(pipeline.taskId, nextPhase);
-  processManager.emit('phase-change', { taskId: pipeline.taskId, phase: nextPhase, projectRoot: deps.projectRoot });
-
   writeHumanFeedback(pipeline.specPath, feedback.target, feedback.message, feedback.subtaskIds);
   snapshotHumanFeedback(pipeline.specPath, pipeline.taskId);
   // The "Change Request" audit entry lives in qa_report.json. That file is

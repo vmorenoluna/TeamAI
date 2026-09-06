@@ -180,7 +180,13 @@ describe('Orchestrator Pipeline Integration', () => {
         expect(pipeline.phase).toBe(phase);
       }
 
-      expect(mockEmit).toHaveBeenCalledTimes(phases.length);
+      // Each advancePhase call fires one 'phase-change' (from
+      // pipelineAdvancePhase) and one 'task-updated' (from TaskStore's
+      // updatePhase — a generic "this task changed" signal every TaskStore
+      // write emits, so any UI surface refreshes on any orchestrator-driven
+      // mutation, not only phase transitions).
+      const phaseChangeCalls = mockEmit.mock.calls.filter(c => c[0] === 'phase-change');
+      expect(phaseChangeCalls).toHaveLength(phases.length);
     });
 
     it('should persist phase update to taskStore via advancePhase', () => {
@@ -227,9 +233,12 @@ describe('Orchestrator Pipeline Integration', () => {
       expect(mockKillSession).toHaveBeenCalledWith('sess-1');
     });
 
-    it('should optimistically emit the resolved start phase, not the raw target, when required artifacts are missing', () => {
+    it('should persist and emit the resolved start phase, not the raw target, when required artifacts are missing', () => {
       // No spec.md exists on disk, so moveTaskToPhase(taskId, 'plan') actually
-      // resumes at 'spec' — the optimistic update must reflect that, not 'plan'.
+      // resumes at 'spec'. runTask reaches the authoritative persistAndEmitPhase
+      // synchronously (no I/O-bound await precedes it here), so this is
+      // observable without awaiting the returned promise — it must reflect
+      // the resolved startPhase, not the raw 'plan' target.
       const result = (orch as AnyOrch).moveTaskToPhase(taskId, 'plan');
       result.catch(() => { /* best-effort: runTask may reject in this minimal mock setup */ });
 
