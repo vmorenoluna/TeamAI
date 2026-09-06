@@ -142,6 +142,17 @@ Flag a spec concern when:
 
 When spec concerns are present, the task goes to human review — the reviewer decides whether to revise the spec. Not all FAIL criteria are spec concerns; only flag when the *specification* is the root cause, not the implementation.
 
+**Before writing `suggested_fix`, investigate — don't just list hypotheses.** You have the
+same Read/Grep/Bash access the analyst used to write the spec. Read the actual constraint
+code and cross-reference it against the measured evidence (sweep numbers, logs, formulas)
+until you can identify *why* the spec-as-implemented produces the wrong outcome, not just
+*that* it does. A wrong hypothesis sent to human review costs a full
+analyst → plan → implement cycle, so resolve what you can resolve yourself first. If your
+investigation confirms a specific mechanism, state it directly as the `suggested_fix` —
+not as one of several equally-weighted guesses. Only list multiple candidate directions
+when your own investigation genuinely cannot narrow it further, and say what you checked
+(and what it ruled out or failed to rule out) for each one.
+
 ## Step 8: Domain Logic Integrity Check
 
 > ⚠️ **REWORK PASS: Check for unauthorized formula changes.** The coder was told
