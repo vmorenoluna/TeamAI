@@ -49,7 +49,7 @@ export class Orchestrator {
     const taskStore = this.taskStore;
 
     return {
-      projectRoot,
+      projectRoot: this.projectRoot,
       taskStore,
       pipelines: this.pipelines,
       activeTasks: this.activeTasks,
@@ -173,6 +173,14 @@ export class Orchestrator {
       processManager.emit('phase-change', { taskId, phase: targetPhase, projectRoot: this.projectRoot });
       return;
     }
+
+    // Active phase — optimistically update the task store and emit a
+    // phase-change event immediately, before the pipeline starts async.
+    // The server action's revalidatePath('/') re-fetches getTasks() which
+    // reads from the task store, so the UI sees the new phase right away
+    // instead of showing the old phase until persistAndEmitPhase fires later.
+    this.taskStore.updatePhase(taskId, targetPhase);
+    processManager.emit('phase-change', { taskId, phase: targetPhase, projectRoot: this.projectRoot });
 
     const hasSpec = existsSync(path.join(dir, 'spec.md'));
     const hasPlan = existsSync(path.join(dir, 'plan.json'));
@@ -899,6 +907,13 @@ export class Orchestrator {
     // starts, not just when runImplement is reached. Covers scenarios where
     // resumeTask skips directly to implement on a previously-failed task.
     this._ctx.restoreQaReportFromSnapshot(dir);
+
+    // Optimistically update the task store phase and emit phase-change BEFORE
+    // runTask starts — so the UI refreshes to the new phase immediately via
+    // the server action's revalidatePath('/'). Otherwise the task shows in its
+    // old phase (e.g. 'backlog') until persistAndEmitPhase fires later.
+    this.taskStore.updatePhase(taskId, startPhase);
+    processManager.emit('phase-change', { taskId, phase: startPhase, projectRoot: this.projectRoot });
 
     await this.runTask(taskId, task.description, startPhase);
   }

@@ -198,7 +198,7 @@ describe('restartCurrentPhase — implement (uses moveTaskToPhase + resets subta
     vi.resetModules();
   });
 
-  it('succeeds for implement, calls moveTaskToPhase, and resets subtask completions in plan.json', async () => {
+  it('succeeds for implement, resets subtask completions in plan.json, and calls runTask', async () => {
     const slug = 'restart-implement';
     seedTask(TEST_DIR, slug, { phase: 'implement', id: slug });
 
@@ -218,9 +218,11 @@ describe('restartCurrentPhase — implement (uses moveTaskToPhase + resets subta
     expect(result.success).toBe(true);
     expect(result.error).toBeUndefined();
 
-    // implement uses moveTaskToPhase
-    expect(mockMoveTaskToPhase).toHaveBeenCalledTimes(1);
-    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(slug, 'implement');
+    // implement resets subtask completions then calls runTask directly
+    // (not moveTaskToPhase) so the plan reset happens before the pipeline starts
+    expect(mockMoveTaskToPhase).not.toHaveBeenCalled();
+    expect(mockRunTask).toHaveBeenCalledTimes(1);
+    expect(mockRunTask).toHaveBeenCalledWith(slug, expect.any(String), 'implement');
 
     // Verify all subtask completions were reset to false
     const updatedPlan = JSON.parse(readFileSync(planPath, 'utf-8'));
@@ -243,8 +245,9 @@ describe('restartCurrentPhase — implement (uses moveTaskToPhase + resets subta
 
     expect(result.success).toBe(true);
     expect(result.error).toBeUndefined();
-    expect(mockMoveTaskToPhase).toHaveBeenCalledTimes(1);
-    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(slug, 'implement');
+    expect(mockMoveTaskToPhase).not.toHaveBeenCalled();
+    expect(mockRunTask).toHaveBeenCalledTimes(1);
+    expect(mockRunTask).toHaveBeenCalledWith(slug, expect.any(String), 'implement');
   });
 });
 
@@ -329,10 +332,10 @@ describe('restartCurrentPhase — edge cases', () => {
 
     const { restartCurrentPhase } = await import('@/app/actions/tasks');
 
-    // Restart task A (implement) — uses moveTaskToPhase + subtask reset
+    // Restart task A (implement) — resets subtasks then calls runTask directly
     await restartCurrentPhase('id-a');
-    expect(mockMoveTaskToPhase).toHaveBeenLastCalledWith('id-a', 'implement');
-    expect(mockRunTask).not.toHaveBeenCalled();
+    expect(mockMoveTaskToPhase).not.toHaveBeenCalled();
+    expect(mockRunTask).toHaveBeenLastCalledWith('id-a', expect.any(String), 'implement');
     // Verify subtasks were reset
     const plan = JSON.parse(readFileSync(join(TEST_DIR, '.teamai', 'task-a', 'plan.json'), 'utf-8'));
     expect(plan.subtasks[0].completed).toBe(false);

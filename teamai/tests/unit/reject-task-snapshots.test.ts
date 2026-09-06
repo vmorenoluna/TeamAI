@@ -60,9 +60,11 @@ function makeDeps() {
   };
 
   const deps = {
+    projectRoot: root,
     taskStore: {
       getById: () => ({ id: 'task-1', description: 'd', phase: 'awaiting-review' }),
       update: vi.fn(),
+      updatePhase: vi.fn(),
       clearArtifacts: vi.fn(),
     },
     pipelines: new Map([['task-1', pipeline]]),

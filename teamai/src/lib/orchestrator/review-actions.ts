@@ -7,6 +7,7 @@
  */
 import { readFileSync, writeFileSync, existsSync, unlinkSync, renameSync } from 'fs';
 import path from 'path';
+import { processManager } from '../process-manager';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy, QaReport } from './types';
 import type { FailureReason } from './qa-feedback';
@@ -19,9 +20,11 @@ import { warn } from '../logger';
 // ── Dependencies ──────────────────────────────────────────────────────────
 
 export interface ReviewActionsDeps {
+  projectRoot: string;
   taskStore: {
     getById(taskId: string): { id: string; description: string; phase: string; branch?: string; mergeStrategy?: string } | null | undefined;
     update(taskId: string, fields: Record<string, unknown>): void;
+    updatePhase(taskId: string, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void;
     clearArtifacts(taskId: string, phase: string): void;
   };
   pipelines: Map<string, TaskPipeline>;
@@ -293,12 +296,24 @@ export async function rejectTask(
  * Route a reviewer's comment to a specific agent. Shared by every reject path.
  * Writes the feedback (with target), records the change request, trims only
  * what the target must regenerate, then resumes at the target's phase.
+ *
+ * Optimistically updates the task store phase and emits phase-change BEFORE
+ * doing any file I/O or async work, so the UI refreshes immediately via the
+ * server action's revalidatePath('/') — matching the pattern used by
+ * moveTaskToPhase / resumeTask / runTask / restartCurrentPhase.
+ * The later advancePhase call emits again with the same phase (harmless dup).
  */
 export async function routeHumanFeedback(
   pipeline: TaskPipeline,
   deps: ReviewActionsDeps,
   feedback: { target: FeedbackTarget; message: string; subtaskIds?: number[] },
 ): Promise<void> {
+  // Optimistic phase update — resolve the target's resume phase and push it
+  // to the task store + event bus immediately, before the I/O-heavy work below.
+  const nextPhase = targetToResumePhase(feedback.target);
+  deps.taskStore.updatePhase(pipeline.taskId, nextPhase);
+  processManager.emit('phase-change', { taskId: pipeline.taskId, phase: nextPhase, projectRoot: deps.projectRoot });
+
   writeHumanFeedback(pipeline.specPath, feedback.target, feedback.message, feedback.subtaskIds);
   snapshotHumanFeedback(pipeline.specPath, pipeline.taskId);
   // The "Change Request" audit entry lives in qa_report.json. That file is
