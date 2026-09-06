@@ -174,14 +174,6 @@ export class Orchestrator {
       return;
     }
 
-    // Active phase — optimistically update the task store and emit a
-    // phase-change event immediately, before the pipeline starts async.
-    // The server action's revalidatePath('/') re-fetches getTasks() which
-    // reads from the task store, so the UI sees the new phase right away
-    // instead of showing the old phase until persistAndEmitPhase fires later.
-    this.taskStore.updatePhase(taskId, targetPhase);
-    processManager.emit('phase-change', { taskId, phase: targetPhase, projectRoot: this.projectRoot });
-
     const hasSpec = existsSync(path.join(dir, 'spec.md'));
     const hasPlan = existsSync(path.join(dir, 'plan.json'));
 
@@ -217,6 +209,17 @@ export class Orchestrator {
     } else {
       startPhase = targetPhase as PipelinePhase;
     }
+
+    // Optimistically update the task store and emit a phase-change event
+    // immediately, before the pipeline starts async. The server action's
+    // revalidatePath('/') re-fetches getTasks() which reads from the task
+    // store, so the UI sees the new phase right away instead of showing the
+    // old phase until persistAndEmitPhase fires later. Use the resolved
+    // startPhase (not targetPhase) — moveTaskToPhase('plan') can actually
+    // resume at 'spec' when spec.md is missing, and the UI must reflect
+    // where the pipeline is really about to run, not the requested target.
+    this.taskStore.updatePhase(taskId, startPhase);
+    processManager.emit('phase-change', { taskId, phase: startPhase, projectRoot: this.projectRoot });
 
     await this.runTask(taskId, task.description, startPhase);
   }

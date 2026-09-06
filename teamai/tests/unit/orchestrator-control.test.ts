@@ -226,6 +226,20 @@ describe('Orchestrator Pipeline Integration', () => {
 
       expect(mockKillSession).toHaveBeenCalledWith('sess-1');
     });
+
+    it('should optimistically emit the resolved start phase, not the raw target, when required artifacts are missing', () => {
+      // No spec.md exists on disk, so moveTaskToPhase(taskId, 'plan') actually
+      // resumes at 'spec' — the optimistic update must reflect that, not 'plan'.
+      const result = (orch as AnyOrch).moveTaskToPhase(taskId, 'plan');
+      result.catch(() => { /* best-effort: runTask may reject in this minimal mock setup */ });
+
+      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({ taskId, phase: 'spec' }));
+      expect(mockEmit).not.toHaveBeenCalledWith('phase-change', expect.objectContaining({ taskId, phase: 'plan' }));
+
+      const taskPath = join(testDir, '.teamai', taskId, 'task.json');
+      const data = JSON.parse(readFileSync(taskPath, 'utf-8'));
+      expect(data.phase).toBe('spec');
+    });
   });
 
   // ── Pipeline Cancel ────────────────────────────────────────────────
