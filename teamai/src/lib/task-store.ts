@@ -8,6 +8,7 @@ import { join } from 'path';
 import { slugify } from './utils';
 import { warn as logWarn } from './logger';
 import { PHASE_ARTIFACTS } from './orchestrator/artifacts';
+import { processManager } from './process-manager';
 
 type MergeStrategy = 'local-merge' | 'pull-request';
 
@@ -108,6 +109,7 @@ export interface Task {
  */
 export class TaskStore {
   private specsDir: string;
+  private projectRoot: string;
 
   /**
    * In-memory id → directory index (BUG-16). Built lazily on first lookup;
@@ -119,8 +121,22 @@ export class TaskStore {
   private _dirIndexMtimeMs = -1;
 
   constructor(projectPath: string) {
+    this.projectRoot = projectPath;
     this.specsDir = join(projectPath, '.teamai');
     mkdirSync(this.specsDir, { recursive: true });
+  }
+
+  /**
+   * Notify listeners (the WebSocket layer, via server.ts) that a task
+   * mutated, regardless of which field changed or which code path wrote
+   * it. Emitted from every write method so every UI surface refreshes on
+   * any orchestrator-driven state change — not only agent-work phase
+   * transitions (those already broadcast their own richer 'phase-change'
+   * event). Purely a "go re-fetch" signal: unlike phase-change, it carries
+   * no data and is never treated as recovery-authoritative.
+   */
+  private _emitUpdated(taskId: string): void {
+    processManager.emit('task-updated', { taskId, projectRoot: this.projectRoot });
   }
 
   private _invalidateIndex(): void {
@@ -186,6 +202,7 @@ export class TaskStore {
 
     atomicWriteJson(join(dir, 'task.json'), task);
     this._invalidateIndex();
+    this._emitUpdated(id);
     return task;
   }
 
@@ -195,6 +212,7 @@ export class TaskStore {
     const updated = { ...task, ...fields, updatedAt: new Date().toISOString() };
     const dir = this.getDirById(id);
     atomicWriteJson(join(dir, 'task.json'), updated);
+    this._emitUpdated(id);
   }
 
   updatePhase(id: string, phase: string, eventExtra?: Record<string, unknown>): void {
@@ -217,6 +235,7 @@ export class TaskStore {
       // (used by analytics and retry resume) is now incomplete.
       logWarn('task-store', `Failed to append phase event for ${id}`, err);
     }
+    this._emitUpdated(id);
   }
 
   getAll(): Task[] {
@@ -263,6 +282,7 @@ export class TaskStore {
     try { const tmpPath = join(dir, 'task.json.tmp'); if (existsSync(tmpPath)) unlinkSync(tmpPath); } catch { /* best-effort */ }
     rmSync(dir, { recursive: true, force: true });
     this._invalidateIndex();
+    this._emitUpdated(id);
   }
 
   // Remove pipeline artifacts at or after a given level so the pipeline can re-run from there.
@@ -274,6 +294,7 @@ export class TaskStore {
       const p = join(dir, f);
       if (existsSync(p)) unlinkSync(p);
     }
+    this._emitUpdated(id);
   }
 
   getDirBySlug(slug: string): string {
