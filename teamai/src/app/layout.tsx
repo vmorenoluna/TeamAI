@@ -5,13 +5,11 @@ import { getProjects, getActiveProject, getDefaultsSyncReport, getGitattributesR
 import { Sidebar } from '@/components/sidebar';
 import { ProjectSelector } from '@/components/project-selector';
 import { DefaultsUpdater } from '@/components/defaults-updater';
-import { RecoveryBanner } from '@/components/recovery-banner';
 import { UpdateBanner } from '@/components/update-banner';
 import { MissingToolsBanner } from '@/components/missing-tools-banner';
 import { GitattributesRenormalizeBanner } from '@/components/gitattributes-renormalize-banner';
 import { AutoModeButton } from '@/components/auto-mode-button';
 import { ContainerDockerMissingDialog } from '@/components/container-docker-missing-dialog';
-import { getInterruptedTasks } from '@/app/actions/recovery';
 import { getAutoModeState } from '@/lib/auto-mode-state';
 import { getOnboardingState } from '@/lib/onboarding';
 import { OnboardingGate } from '@/components/onboarding-gate';
@@ -30,7 +28,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const projects = await getProjects();
   const activeProject = await getActiveProject();
   const defaultsSyncReport = await getDefaultsSyncReport();
-  const interruptedTasks = await getInterruptedTasks();
   const autoModeState = activeProject ? getAutoModeState(activeProject.path) : { enabled: false };
   const toolStatuses = await checkTools();
   const gitattributesRenormalizePath = await getGitattributesRenormalizeSuggestion();
@@ -69,8 +66,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <DefaultsUpdater initialReport={defaultsSyncReport} />
           {/* Update banner — shows when an auto-update is downloaded and ready to install */}
           <UpdateBanner />
-          {/* Recovery banner — shows when interrupted tasks are detected from previous session */}
-          <RecoveryBanner tasks={interruptedTasks} />
           {/* Missing tools banner — shows when required CLI tools are not found */}
           <MissingToolsBanner tools={toolStatuses} />
           {/* Gitattributes renormalize suggestion — one-time prompt after .gitattributes is first added */}
