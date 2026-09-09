@@ -563,12 +563,13 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const deps = {
       projectRoot: project.root,
       execGit: vi.fn(),
+      gitPush: vi.fn(),
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
       baseBranch: 'master',
     };
 
-    const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, logFile, deps);
+    const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
 
     expect(result).toBe(true);
     // deps.execGit should NOT have been called with 'rebase'
@@ -576,13 +577,15 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       (c: any[]) => c[0] && c[0].includes('rebase'),
     );
     expect(rebaseCalls.length).toBe(0);
+    // No-op skip means nothing to push either.
+    expect(deps.gitPush).not.toHaveBeenCalled();
     // Log should indicate skip
     const logContent = readFileSync(logFile, 'utf-8');
     expect(logContent).toContain('has not advanced past HEAD');
     expect(logContent).toContain('skipping rebase');
   });
 
-  it('proceeds with rebase when origin/base has advanced (rev-list count > 0)', async () => {
+  it('proceeds with rebase when origin/base has advanced (rev-list count > 0), then pushes the result', async () => {
     const logFile = join(project.taskDir, 'output.log');
     const worktreePath = join(project.root, 'worktrees', 'test-task');
 
@@ -592,23 +595,86 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     });
 
     const execGit = vi.fn();
+    const gitPush = vi.fn();
     const deps = {
       projectRoot: project.root,
       execGit,
+      gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
       baseBranch: 'master',
     };
 
-    await rebaseOntoLatestDefault(worktreePath, project.taskId, logFile, deps);
+    const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
 
+    expect(result).toBe(true);
     // execGit should have been called with rebase
     const rebaseCalls = execGit.mock.calls.filter(
       (c: any[]) => c[0] && c[0].includes('rebase'),
     );
     expect(rebaseCalls.length).toBeGreaterThan(0);
+    // The rebase rewrote history — push it ourselves (force-with-lease),
+    // host-side, rather than trust an agent session to push it.
+    expect(gitPush).toHaveBeenCalledWith(['push', '--force-with-lease', 'origin', 'feat/test'], logFile);
     const logContent = readFileSync(logFile, 'utf-8');
     expect(logContent).not.toContain('skipping rebase');
+    expect(logContent).toContain('Pushed feat/test after rebasing onto master');
+  });
+
+  it('returns false when the rebase succeeds but the push afterward fails', async () => {
+    const logFile = join(project.taskDir, 'output.log');
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
+      return '';
+    });
+
+    const deps = {
+      projectRoot: project.root,
+      execGit: vi.fn(),
+      gitPush: vi.fn((args: string[]) => {
+        if (args[0] === 'push') throw new Error('offline');
+      }),
+      sessionOpts: vi.fn(),
+      waitForCompletion: vi.fn(),
+      baseBranch: 'master',
+    };
+
+    const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
+
+    expect(result).toBe(false);
+    const logContent = readFileSync(logFile, 'utf-8');
+    expect(logContent).toContain('Rebase succeeded locally but push failed');
+  });
+
+  it('pushes the merger\'s result (not just the clean-rebase path) once a conflict is resolved', async () => {
+    const logFile = join(project.taskDir, 'output.log');
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
+      return '';
+    });
+
+    const gitPush = vi.fn();
+    const deps = {
+      projectRoot: project.root,
+      execGit: vi.fn((args: string[]) => {
+        if (args[0] === 'rebase' && args[1] !== '--abort') throw new Error('CONFLICT');
+      }),
+      gitPush,
+      sessionOpts: vi.fn(),
+      waitForCompletion: vi.fn(async () => undefined),
+      baseBranch: 'master',
+    };
+
+    const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
+
+    expect(result).toBe(true);
+    expect(gitPush).toHaveBeenCalledWith(['push', '--force-with-lease', 'origin', 'feat/test'], logFile);
+    const logContent = readFileSync(logFile, 'utf-8');
+    expect(logContent).toContain('Merger resolved rebase conflicts — pushing its result');
   });
 });
 
@@ -640,7 +706,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
   it('pulls the base branch and rebases an existing worktree before any agent looks at it', async () => {
     const worktreePath = join(project.root, 'worktrees', 'existing-task');
     mkdirSync(worktreePath, { recursive: true });
-    const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'implement' };
+    const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'implement', branch: 'feat/test' };
 
     const gitPush = vi.fn();
     const execGit = vi.fn();
@@ -651,11 +717,14 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     expect(gitPush).toHaveBeenCalledWith(['pull', '--ff-only', 'origin', 'master'], expect.any(String));
     const rebaseCalls = execGit.mock.calls.filter((c: any[]) => c[0]?.includes('rebase'));
     expect(rebaseCalls.length).toBeGreaterThan(0);
+    // The rebase rewrote history — syncPhaseBaseline's underlying
+    // rebaseOntoLatestDefault call pushes it itself.
+    expect(gitPush).toHaveBeenCalledWith(['push', '--force-with-lease', 'origin', 'feat/test'], expect.any(String));
   });
 
   it("does not attempt a worktree rebase when no worktree exists yet (a brand-new task's first spec run)", async () => {
     const worktreePath = join(project.root, 'worktrees', 'not-created-yet');
-    const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'spec' };
+    const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'spec', branch: 'feat/test' };
 
     const gitPush = vi.fn();
     const execGit = vi.fn();
@@ -671,7 +740,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
   it('does not throw when the base-branch pull fails (offline / non-fast-forward)', async () => {
     const pipeline = {
       taskId: project.taskId, specPath: project.taskDir,
-      worktreePath: join(project.root, 'worktrees', 'absent'), phase: 'spec',
+      worktreePath: join(project.root, 'worktrees', 'absent'), phase: 'spec', branch: 'feat/test',
     };
     const deps = {
       projectRoot: project.root,
@@ -685,7 +754,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
   it('warns but does not throw when the worktree rebase conflict cannot be resolved', async () => {
     const worktreePath = join(project.root, 'worktrees', 'conflicted-task');
     mkdirSync(worktreePath, { recursive: true });
-    const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'qa-review' };
+    const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'qa-review', branch: 'feat/test' };
 
     const deps = {
       projectRoot: project.root,
