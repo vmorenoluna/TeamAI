@@ -142,9 +142,18 @@ export function phaseHeader(logFile: string, phase: string): void {
 // ── Snapshot restoration ──────────────────────────────────────────────────
 
 /**
- * Restore qa_report.json from a snapshot if the report was deleted (Gap 4b).
+ * Restore qa_report.json from a snapshot if the report is missing (Gap 4b).
  * Checks qa_report_before_failed.json and qa_report_before_bounce.json.
  * Best-effort — never blocks the pipeline.
+ *
+ * Called unconditionally at the start of every implement phase, so the
+ * common case here is routine, not a crash: a spec/plan revision or a
+ * reject-bounce always deletes qa_report.json as part of clearing QA-level
+ * artifacts (see trimArtifactsForTarget), and this restores a working copy
+ * from the snapshot preserved just before that cleanup so the report stays
+ * visible in the UI and as an audit trail until the next QA round overwrites
+ * it. A true crash-recovery restore (the file vanishing outside that flow)
+ * looks identical in the log — the message can't tell them apart.
  */
 export function restoreQaReportFromSnapshot(specPath: string): void {
   const reportPath = path.join(specPath, 'qa_report.json');
@@ -155,7 +164,8 @@ export function restoreQaReportFromSnapshot(specPath: string): void {
       try {
         const snapshot = readFileSync(snapshotPath, 'utf-8');
         writeFileSync(reportPath, snapshot);
-        logToOutput(specPath, `\n[GUARD] Restored qa_report.json from ${snapName} — file was deleted\n`);
+        logToOutput(specPath,
+          `\n[GUARD] qa_report.json is missing (expected after a spec/plan revision or reject-bounce clears QA artifacts) — restored a working copy from ${snapName} so QA history stays visible until the next QA round\n`);
         break; // use the first available snapshot
       } catch { /* best-effort */ }
     }
@@ -163,8 +173,13 @@ export function restoreQaReportFromSnapshot(specPath: string): void {
 }
 
 /**
- * Restore human_feedback.md from snapshot if the file was deleted (Gap 4b).
+ * Restore human_feedback.md from snapshot if the file is missing (Gap 4b).
  * Checks human_feedback_before_bounce.md. Best-effort.
+ *
+ * Same routine-not-crash caveat as restoreQaReportFromSnapshot: the
+ * implement-phase cleanup that follows a rework cycle normally removes
+ * human_feedback.md once its directive has been applied, and this restores
+ * a working copy so the feedback stays visible in the UI/audit trail.
  */
 export function restoreHumanFeedbackFromSnapshot(specPath: string): void {
   const feedbackPath = path.join(specPath, 'human_feedback.md');
@@ -174,7 +189,8 @@ export function restoreHumanFeedbackFromSnapshot(specPath: string): void {
     try {
       const snapshot = readFileSync(snapshotPath, 'utf-8');
       writeFileSync(feedbackPath, snapshot);
-      logToOutput(specPath, `\n[GUARD] Restored human_feedback.md from human_feedback_before_bounce.md — file was deleted\n`);
+      logToOutput(specPath,
+        '\n[GUARD] human_feedback.md is missing (expected after implement-phase cleanup consumes it) — restored a working copy from human_feedback_before_bounce.md so it stays visible\n');
     } catch { /* best-effort */ }
   }
 }
