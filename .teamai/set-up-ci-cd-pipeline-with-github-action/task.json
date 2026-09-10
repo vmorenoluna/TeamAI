@@ -1,9 +1,0 @@
-{
-  "id": "216fb52b-408a-4193-b55c-d6fa4169f690",
-  "title": "Set up CI/CD pipeline with GitHub Actions",
-  "description": "Create GitHub Actions workflow that runs lint → typecheck → unit tests → E2E tests on every PR and push to main. Block merges on failures. Add automated Docker image build.",
-  "phase": "backlog",
-  "source": "ideation",
-  "createdAt": "2026-05-18T14:57:46.748Z",
-  "updatedAt": "2026-05-18T14:57:46.748Z"
-}

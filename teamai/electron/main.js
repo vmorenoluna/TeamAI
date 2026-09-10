@@ -254,6 +254,11 @@ function setupAutoUpdater() {
 
   let updateDownloaded = false;
 
+  // Releases are published as GitHub prereleases while on 0.x (see release.yml).
+  // electron-updater's allowPrerelease defaults to false for non-prerelease running
+  // versions (e.g. 0.1.0), which would silently hide every 0.x update from users.
+  autoUpdater.allowPrerelease = true;
+
   // Re-register the handler so it captures the real updateDownloaded variable
   ipcMain.removeHandler('get-update-status');
   ipcMain.handle('get-update-status', () => ({ updateDownloaded }));

@@ -33,7 +33,7 @@ Multi-agent [Claude Code](https://docs.anthropic.com/en/docs/claude-code) orches
 ## Quick Start
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/vmorenoluna/TeamAI.git
 cd TeamAI
 
 # Set up git hooks

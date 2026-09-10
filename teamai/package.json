@@ -148,7 +148,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "CHANGE_ME",
+      "owner": "vmorenoluna",
       "repo": "TeamAI"
     },
     "npmRebuild": false,

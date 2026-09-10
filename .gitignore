@@ -30,3 +30,7 @@ worktrees/
 
 # OS
 .DS_Store
+
+# Editor / local tooling state
+.idea/
+.mcp.json
