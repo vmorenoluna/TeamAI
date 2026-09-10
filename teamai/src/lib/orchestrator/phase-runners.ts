@@ -30,23 +30,42 @@ export interface RebaseDeps {
   execGit: (args: string[], hostCwd: string) => void;
   sessionOpts: SessionOptsFn;
   waitForCompletion: (sessionId: string) => Promise<void>;
+  gitPush: (pushArgs: string[], logFile: string) => void;
 }
 
 /**
- * Rebase the feature branch onto the latest origin/master before merge/PR.
+ * Rebase the feature branch onto the latest origin/master before merge/PR,
+ * then push the result ourselves.
  *
  * Skips the rebase entirely when origin/<baseBranch> has not advanced
  * past the worktree's HEAD — saves a redundant merger spawn and test
  * suite run for a no-op (#3).
  *
- * If the rebase has conflicts, spawns a merger agent to resolve them.
- * Returns true on success. On failure, the caller decides whether to throw
- * (merge path, where unresolved conflicts would corrupt the repo) or warn
- * (create-pr path, where the PR can still be reviewed and resolved manually).
+ * If the rebase has conflicts, spawns a merger agent to resolve them —
+ * that agent's job is only to resolve the conflict and commit locally; it
+ * does not push. Agent sessions run their own git INSIDE the container
+ * (container mode auto-enables whenever Docker is available), and have no
+ * GitHub credentials to push with — devcontainer.json mounts the host's
+ * `.gitconfig`/`.ssh`, but a Windows host's `.gitconfig` names a credential
+ * helper binary that doesn't exist in a Linux container, and `.ssh` only
+ * helps an SSH remote when this codebase authenticates over HTTPS via `gh`.
+ * `fetch`/`pull` from a public repo need no auth at all, which is why only
+ * a push ever surfaced this. The commit the merger produces (or the plain
+ * rebase produces) lands in the same shared object store and branch ref
+ * this checkout also sees — worktrees share `.git/objects` and
+ * `refs/heads/*` with the repo they're linked from — so pushing it from
+ * here, host-side, via the same gh-authenticated `gitPush` every other push
+ * in this codebase uses, needs no container involvement at all.
+ *
+ * Returns true on success (rebased/merged AND pushed). On failure, the
+ * caller decides whether to throw (merge path, where unresolved conflicts
+ * or an unpushed rebase would corrupt the repo) or warn (create-pr path,
+ * where the PR can still be reviewed and resolved manually).
  */
 export async function rebaseOntoLatestDefault(
   worktreePath: string,
   taskId: string,
+  branch: string,
   logFile: string,
   deps: RebaseDeps & { baseBranch: string },
 ): Promise<boolean> {
@@ -72,10 +91,30 @@ export async function rebaseOntoLatestDefault(
     // Can't determine — proceed with rebase to be safe
   }
 
+  // Push whatever the rebase (clean or merger-resolved) produced. Both
+  // paths rewrite/advance the branch's history, so this always needs
+  // --force-with-lease; refreshing the remote-tracking ref immediately
+  // before the push keeps the lease check honest instead of comparing
+  // against a possibly-stale cached ref.
+  const pushRebased = (): boolean => {
+    try {
+      deps.gitPush(['fetch', 'origin', branch], logFile);
+    } catch { /* best-effort — the lease check below still runs */ }
+    try {
+      deps.gitPush(['push', '--force-with-lease', 'origin', branch], logFile);
+      logToOutput(path.dirname(logFile), `\n[INFO] Pushed ${branch} after rebasing onto ${deps.baseBranch}\n`);
+      return true;
+    } catch (pushErr) {
+      const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+      logToOutput(path.dirname(logFile), `\n[WARN] Rebase succeeded locally but push failed: ${pushMsg}\n`);
+      return false;
+    }
+  };
+
   try {
     deps.execGit(['rebase', `origin/${deps.baseBranch}`], worktreePath);
     logToOutput(path.dirname(logFile), `\n[INFO] Feature branch rebased onto latest ${deps.baseBranch}\n`);
-    return true;
+    return pushRebased();
   } catch {
     try { deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* ignore */ }
     logToOutput(path.dirname(logFile), '\n[INFO] Rebase had conflicts — spawning merger to resolve via git merge\n');
@@ -88,8 +127,8 @@ export async function rebaseOntoLatestDefault(
       processManager.sendMessage(mergeSessionId, `/merge origin/${deps.baseBranch}`);
       await deps.waitForCompletion(mergeSessionId);
       processManager.killSession(mergeSessionId);
-      logToOutput(path.dirname(logFile), '\n[INFO] Merger resolved rebase conflicts\n');
-      return true;
+      logToOutput(path.dirname(logFile), '\n[INFO] Merger resolved rebase conflicts — pushing its result\n');
+      return pushRebased();
     } catch (mergeErr) {
       const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
       logToOutput(path.dirname(logFile), `\n[WARN] Merger could not resolve rebase conflicts: ${mergeMsg}\n`);
@@ -158,8 +197,8 @@ interface CascadePhaseDeps extends BasePhaseDeps {
  * it actually matters.
  */
 export async function syncPhaseBaseline(
-  pipeline: Pick<TaskPipeline, 'taskId' | 'specPath' | 'worktreePath' | 'phase'>,
-  deps: RebaseDeps & { gitPush: (pushArgs: string[], logFile: string) => void },
+  pipeline: Pick<TaskPipeline, 'taskId' | 'specPath' | 'worktreePath' | 'phase' | 'branch'>,
+  deps: RebaseDeps,
 ): Promise<void> {
   const baseBranch = resolveBaseBranch(deps.projectRoot);
   const logFile = path.join(pipeline.specPath, 'output.log');
@@ -171,7 +210,7 @@ export async function syncPhaseBaseline(
   if (!existsSync(pipeline.worktreePath)) return;
 
   const ok = await rebaseOntoLatestDefault(
-    pipeline.worktreePath, pipeline.taskId, logFile, { ...deps, baseBranch },
+    pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile, { ...deps, baseBranch },
   );
   if (!ok) {
     logToOutput(pipeline.specPath,
@@ -445,6 +484,7 @@ export async function runPlanPhase(
 
 interface MergePhaseDeps extends BasePhaseDeps {
   execGit: (args: string[], hostCwd: string) => void;
+  gitPush: (pushArgs: string[], logFile: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
   getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig };
   removeWorktree: (taskId: string) => void;
@@ -464,8 +504,8 @@ export async function runMergePhase(
   // ticket's actual changes, not drift from an old worktree snapshot.
   const baseBranch = resolveBaseBranch(deps.projectRoot);
   const rebaseOk = await rebaseOntoLatestDefault(
-    pipeline.worktreePath, pipeline.taskId, logFile,
-    { projectRoot: deps.projectRoot, execGit: deps.execGit, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
+    pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile,
+    { projectRoot: deps.projectRoot, execGit: deps.execGit, gitPush: deps.gitPush, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
   );
   if (!rebaseOk) {
     throw new PipelineConfigError(
@@ -563,8 +603,8 @@ export async function runCreatePRPhase(
   // Rebase onto latest default branch so the PR diff only contains the ticket's actual changes.
   const baseBranch = resolveBaseBranch(deps.projectRoot);
   const rebaseOk = await rebaseOntoLatestDefault(
-    pipeline.worktreePath, pipeline.taskId, logFile,
-    { projectRoot: deps.projectRoot, execGit: deps.execGit, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
+    pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile,
+    { projectRoot: deps.projectRoot, execGit: deps.execGit, gitPush: deps.gitPush, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
   );
   if (rebaseOk) {
     logToOutput(pipeline.specPath, '\n[INFO] PR will be conflict-free\n');

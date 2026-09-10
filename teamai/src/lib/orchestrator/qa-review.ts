@@ -160,49 +160,6 @@ async function reconcileDivergedBranch(
   }
 }
 
-/**
- * Re-check whether the branch still has commits its remote counterpart
- * doesn't have — the same relationship the top-level precheck computes,
- * exposed as a helper so it can be re-run after a reconciliation attempt
- * to see the actual resulting state instead of assuming one.
- */
-function hasUnpushedCommits(pipeline: TaskPipeline, deps: QaReviewDeps): boolean {
-  try {
-    execFileSync('git', ['fetch', 'origin', pipeline.branch], { cwd: deps.projectRoot, stdio: 'pipe' });
-  } catch { /* offline — proceed with cached refs */ }
-  try {
-    const unpushed = execFileSync('git', ['log', `origin/${pipeline.branch}..${pipeline.branch}`, '--oneline'], {
-      cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
-    }).trim();
-    return unpushed.length > 0;
-  } catch {
-    return false; // branch doesn't exist on remote — nothing to compare
-  }
-}
-
-const MERGED_RECHECK_POLL_MS = 500;
-const MERGED_RECHECK_MAX_ATTEMPTS = 2;
-
-/**
- * Small safety net for the 'merged' path only: the merger's own push
- * (.claude/commands/merge.md step 6) should mean the branch is already up
- * to date by the time its session reports completion, but
- * waitForCompletion resolving is a session/turn-ended signal, not a
- * git-durability guarantee — retry the cheap read-only check a couple of
- * times before concluding the push didn't happen. This is deliberately
- * much smaller than the old blind pre-push poll: it's verifying an action
- * that (per the skill) already happened, not guessing when to attempt one.
- */
-async function waitForMergerPushToSettle(pipeline: TaskPipeline, deps: QaReviewDeps): Promise<boolean> {
-  for (let attempt = 0; attempt < MERGED_RECHECK_MAX_ATTEMPTS; attempt++) {
-    if (!hasUnpushedCommits(pipeline, deps)) return true;
-    if (attempt < MERGED_RECHECK_MAX_ATTEMPTS - 1) {
-      await new Promise(resolve => setTimeout(resolve, MERGED_RECHECK_POLL_MS));
-    }
-  }
-  return false;
-}
-
 // ── Main function ─────────────────────────────────────────────────────────
 
 /**
@@ -333,16 +290,17 @@ export async function runQaReview(
               logToOutput(pipeline.specPath, `[QA-PRECHECK] Push still failing after reconciliation: ${retryMsg}\n`);
             }
           } else if (reconcileOutcome === 'merged') {
-            // The merger's /merge skill pushes the resolved branch as its
-            // own final step (.claude/commands/merge.md step 6) — don't
-            // retry blind against a ref that may or may not have caught
-            // up yet, just verify the actual resulting state.
-            const pushed = await waitForMergerPushToSettle(pipeline, deps);
-            if (pushed) {
-              logToOutput(pipeline.specPath, '[QA-PRECHECK] Merger pushed the reconciled branch — remote matches worktree\n');
+            // The merger only resolves the conflict and commits locally —
+            // it doesn't push (agent sessions run their own git inside the
+            // container and have no GitHub credentials to push with). Push
+            // its result ourselves, same as the 'rebased' branch above.
+            try {
+              deps.gitPush(['push', 'origin', pipeline.branch], logFile);
+              logToOutput(pipeline.specPath, '[QA-PRECHECK] Pushed the reconciled branch after merger resolution — remote matches worktree\n');
               hasUnpushed = false;
-            } else {
-              logToOutput(pipeline.specPath, `[QA-PRECHECK] Branch still diverged from origin/${pipeline.branch} after the merger's push — giving up\n`);
+            } catch (pushErr) {
+              const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+              logToOutput(pipeline.specPath, `[QA-PRECHECK] Push failed after merger resolution: ${pushMsg}\n`);
             }
           }
         }

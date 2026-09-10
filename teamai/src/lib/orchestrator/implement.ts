@@ -353,10 +353,11 @@ export async function ensureWorktree(
   // Rebase feature branch onto latest default so coders see the current upstream
   const implementLog = path.join(pipeline.specPath, 'output.log');
   await rebaseOntoLatestDefault(
-    pipeline.worktreePath, pipeline.taskId, implementLog,
+    pipeline.worktreePath, pipeline.taskId, pipeline.branch, implementLog,
     {
       projectRoot: deps.projectRoot,
       execGit: deps.execGit,
+      gitPush: deps.gitPush,
       sessionOpts: deps.sessionOpts,
       waitForCompletion: deps.waitForCompletion,
       baseBranch: resolveBaseBranch(deps.projectRoot),

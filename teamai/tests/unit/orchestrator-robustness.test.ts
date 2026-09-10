@@ -544,24 +544,26 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     expect(logContent).toContain('Pushed after reconciling with origin');
   });
 
-  it('reconciles via a merger when the rebase conflicts, verifies the merger pushed, then proceeds to normal QA', async () => {
-    // The merger's own /merge skill pushes the resolved branch as its final
-    // step (.claude/commands/merge.md step 6) — the orchestrator never
-    // retries the push itself for this path, it just re-checks. Simulate
-    // that by having `git log origin/branch..branch` return commits before
-    // the merger runs and empty afterward.
-    let logCalls = 0;
+  it('reconciles via a merger when the rebase conflicts, then pushes its result itself before proceeding to QA', async () => {
+    // The merger only resolves the conflict and commits locally — it does
+    // NOT push (agent sessions run their own git inside the container and
+    // have no GitHub credentials to push with). The orchestrator pushes
+    // the merger's result itself, host-side, same as the clean-rebase path.
+    let pushCalls = 0;
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (args && args[0] === 'fetch') return '';
-      if (args && args[0] === 'log') {
-        logCalls++;
-        return logCalls === 1 ? 'abc123 Unpushed commit\n' : '';
-      }
+      if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
       if (args && args[0] === 'rebase') {
         if (args[1] === '--abort') return '';
         throw new Error('CONFLICT (content): Merge conflict');
       }
-      if (args && args[0] === 'push') throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
+      if (args && args[0] === 'push') {
+        pushCalls++;
+        // 1st push: the initial precheck, rejected (non-fast-forward) — triggers reconciliation.
+        // 2nd push: the orchestrator's own push after the merger resolves, succeeds.
+        if (pushCalls === 1) throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
+        return '';
+      }
       return '';
     });
 
@@ -580,7 +582,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', expect.stringContaining('/merge origin/feat/robustness-test'));
     fireEvent('event', { sessionId: 'sess-merge', event: { type: 'result' } });
 
-    // Then the QA session, once the merger's own push is verified
+    // Then the QA session, once the orchestrator has pushed the merger's result
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(2);
     });
@@ -592,13 +594,11 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     }));
     await promise;
 
-    // Only 2 log calls: the initial precheck, and one verification check
-    // after the merger — no polling needed since it settled immediately.
-    expect(logCalls).toBe(2);
+    expect(pushCalls).toBe(2);
     const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
     expect(logContent).toContain('spawning merger to resolve via git merge');
     expect(logContent).toContain('Merger resolved divergence from origin/feat/robustness-test');
-    expect(logContent).toContain('Merger pushed the reconciled branch — remote matches worktree');
+    expect(logContent).toContain('Pushed the reconciled branch after merger resolution — remote matches worktree');
   });
 
   it('falls through to the FAIL report when reconciliation cannot resolve the divergence', async () => {
@@ -634,78 +634,28 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     expect(logContent).toContain('Merger could not resolve divergence');
   });
 
-  // ── Post-merger push verification ──
+  // ── Post-merger push failure ──
   //
-  // The merger's own /merge skill pushes the resolved branch as its final
-  // step, so the orchestrator doesn't retry the push itself — it just
-  // re-checks whether the branch is actually up to date. waitForCompletion
-  // resolving is a session/turn-ended signal, not a git-durability
-  // guarantee, so this re-check gets a couple of cheap retries (not an
-  // arbitrary blind wait) before concluding the push didn't land.
+  // The merger only resolves the conflict and commits locally; the
+  // orchestrator pushes its result itself (see above). If that push also
+  // fails, there's nothing left to retry — fall through to the FAIL report
+  // the same way the initial precheck's push failure does elsewhere.
 
-  it('retries the re-check a couple of times before confirming the merger settled', async () => {
-    let logCalls = 0;
+  it('falls through to the FAIL report when the push after merger resolution fails', async () => {
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (args && args[0] === 'fetch') return '';
-      if (args && args[0] === 'log') {
-        logCalls++;
-        // Initial precheck (call 1) and the first re-check (call 2) both
-        // still show the old, unpushed state; the second re-check (call 3)
-        // reflects the merger's push having landed.
-        return logCalls < 3 ? 'abc123 Unpushed commit\n' : '';
-      }
+      if (args && args[0] === 'log') return 'abc123 Unpushed commit\n';
       if (args && args[0] === 'rebase') {
         if (args[1] === '--abort') return '';
         throw new Error('CONFLICT (content): Merge conflict');
       }
+      // Every push attempt fails — both the initial precheck push and the
+      // orchestrator's own push after the merger resolves the conflict.
       if (args && args[0] === 'push') throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
       return '';
     });
 
-    mockCreateSession
-      .mockResolvedValueOnce('sess-merge-retry')
-      .mockResolvedValueOnce('sess-qa-after-retry');
-
-    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 1 });
-
-    const promise = (orch as AnyOrch).runQaReview(pipeline);
-
-    await vi.waitFor(() => {
-      expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    });
-    fireEvent('event', { sessionId: 'sess-merge-retry', event: { type: 'result' } });
-
-    // One re-check comes back still-unpushed before the second settles —
-    // advance past the single 500ms delay between them.
-    await vi.advanceTimersByTimeAsync(500);
-
-    await vi.waitFor(() => {
-      expect(mockSendMessage).toHaveBeenCalledTimes(2);
-    });
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-qa-after-retry', expect.stringContaining('/qa-review'));
-
-    fireEvent('event', { sessionId: 'sess-qa-after-retry', event: { type: 'result' } });
-    writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
-      overall: 'PASS', criteria: [],
-    }));
-    await promise;
-
-    expect(logCalls).toBe(3);
-  });
-
-  it('gives up and falls through to the FAIL report when the merger push never settles within the recheck cap', async () => {
-    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-      if (args && args[0] === 'fetch') return '';
-      if (args && args[0] === 'log') return 'abc123 Unpushed commit\n'; // never settles
-      if (args && args[0] === 'rebase') {
-        if (args[1] === '--abort') return '';
-        throw new Error('CONFLICT (content): Merge conflict');
-      }
-      if (args && args[0] === 'push') throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
-      return '';
-    });
-
-    mockCreateSession.mockResolvedValueOnce('sess-merge-never-settles');
+    mockCreateSession.mockResolvedValueOnce('sess-merge-push-fails');
 
     // qaAttempt starts at 2, runQaReview increments to 3 which equals maxQaAttempts (3),
     // so it goes directly to 'failed' without bouncing back to implement.
@@ -716,15 +666,12 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(1);
     });
-    fireEvent('event', { sessionId: 'sess-merge-never-settles', event: { type: 'result' } });
-
-    // Exhaust the recheck cap (MERGED_RECHECK_MAX_ATTEMPTS = 2, 500ms apart).
-    await vi.advanceTimersByTimeAsync(1000);
+    fireEvent('event', { sessionId: 'sess-merge-push-fails', event: { type: 'result' } });
 
     await promise;
 
     // Only the merger session ran — QA never gets a chance to run since the
-    // push was never confirmed.
+    // push after merger resolution failed.
     expect(mockCreateSession).toHaveBeenCalledTimes(1);
 
     const reportPath = join(project.taskDir, 'qa_report.json');
@@ -734,7 +681,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     expect(pipeline.phase).toBe('failed');
 
     const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-    expect(logContent).toContain("Branch still diverged from origin/feat/robustness-test after the merger's push — giving up");
+    expect(logContent).toContain('Push failed after merger resolution');
   });
 });
 
@@ -2050,6 +1997,10 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
       if (Array.isArray(args)) {
         if (args[0] === 'rev-parse') return localHead + '\n';
         if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        // Base branch hasn't advanced — ensureWorktree's own rebase-then-push
+        // (unrelated to what this test is verifying) is a no-op, so the only
+        // push this test sees is pushAndVerify's.
+        if (args[0] === 'rev-list') return '0\n';
       }
       return '';
     });
@@ -4924,6 +4875,10 @@ describe('runImplement — implement completeness gate', () => {
       if (Array.isArray(args)) {
         if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
         if (args[0] === 'rev-parse') return 'abc123\\n';
+        // Base branch hasn't advanced — ensureWorktree's own rebase-then-push
+        // is a no-op, so these tests' "no push happened at all" assertions
+        // aren't contaminated by a push unrelated to what they're testing.
+        if (args[0] === 'rev-list') return '0\n';
       }
       return '';
     });
