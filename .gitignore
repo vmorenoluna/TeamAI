@@ -34,3 +34,4 @@ worktrees/
 # Editor / local tooling state
 .idea/
 .mcp.json
+.claude/settings.local.json

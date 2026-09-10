@@ -12,7 +12,7 @@ npx tsx seed-demo.ts --yes
 cd teamai && npm run electron:dev
 
 # 3. Register the demo project in the app UI
-#    Path: C:\Users\dev\IdeaProjects\TeamAI\demo
+#    Path: <path-to-your-clone>/demo
 #    Name: ShopForge
 ```
 
