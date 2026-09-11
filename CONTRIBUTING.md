@@ -26,9 +26,6 @@ See the [Quick Start](README.md#quick-start) section in the root README.
 5. Update `teamai/CHANGELOG.md`'s `[Unreleased]` section if the change is user-facing.
 6. Open a pull request against `main` with a clear description of what changed and why.
 
-## Commit messages
-
-This project follows [Conventional Commits](https://www.conventionalcommits.org/) (`feat(scope): ...`, `fix(scope): ...`, `chore: ...`, `docs: ...`).
 
 ## Reporting bugs / requesting features
 
