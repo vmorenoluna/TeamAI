@@ -287,6 +287,10 @@ Features temporarily hidden from the sidebar (routes still exist and can be re-e
 - [ ] **Insights** (`/insights`) — pipeline analytics (completion rate, phase distribution) and project chat
 - [ ] **Ideation** (`/ideation`) — scan the codebase for improvements, vulnerabilities, and tech debt
 
+Not yet built:
+
+- [ ] **Remote access & notifications** — Tailscale for remote access to the app; Web Push or a Telegram webhook for review-ready notifications
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). See `teamai/CLAUDE.md` for AI coding guidance and `teamai/AGENTS.md` for dev shortcuts.
