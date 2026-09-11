@@ -412,12 +412,20 @@ export async function autoReviseSpec(
     return;
   }
 
+  // Log the decision BEFORE beginSpecRevision, not after: beginSpecRevision
+  // ends with `await deps.executePhase(pipeline)`, and each phase runner in
+  // turn ends by awaiting the next one — so this call doesn't return until
+  // the entire spec→plan→implement→qa-review cycle it kicks off has already
+  // run to completion. Logging after the await would print this line only
+  // once that whole cycle (and possibly the *next* QA round's own log lines)
+  // has already landed in output.log, making it look like a stale/duplicate
+  // event instead of the decision that triggered everything after it.
+  try {
+    logToOutput(specPath, `\n[REFINE] Spec concerns detected — auto-revising spec with analyst (revision ${pipeline.specRevision - 1}/3)\n`);
+  } catch { /* best-effort */ }
+
   // Write spec_revision_feedback.md from QA report's spec_concerns, snapshot the
   // pre-revision spec, trim QA artifacts + stale human feedback, reset counters,
   // and restart from the spec phase.
   await beginSpecRevision(pipeline, deps, buildSpecRevisionFeedback(specPath), { clearStaleFeedback: true });
-
-  try {
-    logToOutput(specPath, `\n[REFINE] Spec concerns detected — auto-revising spec with analyst (revision ${pipeline.specRevision - 1}/3)\n`);
-  } catch { /* best-effort */ }
 }

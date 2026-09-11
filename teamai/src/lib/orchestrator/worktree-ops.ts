@@ -8,6 +8,7 @@ import { execFileSync } from 'child_process';
 import { existsSync, readdirSync, rmSync, appendFileSync } from 'fs';
 import path from 'path';
 import { TaskStore } from '../task-store';
+import { warn as logWarn } from '../logger';
 import { getWorktreeBase, resolveWorktreeDirName } from './helpers';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
 import type { TaskPipeline } from './types';
@@ -140,9 +141,19 @@ export function removeWorktree(
             `[${timestamp}] [WORKTREE] These commits will become unreachable once the worktree is removed.\n` +
             `[${timestamp}] [WORKTREE] To recover: git branch recover-${taskId} ${task.branch} && git push origin recover-${taskId}\n`
           );
-        } catch { /* best-effort — logging must not block worktree removal */ }
+        } catch (err) {
+          // Non-blocking — must not stop worktree removal — but not silent:
+          // this is the actual data-loss warning, so it must reach the operator
+          // somewhere even if it couldn't be appended to the task's own log.
+          logWarn('orchestrator', `Failed to log unpushed-commit warning to ${outputLog} for task ${taskId} (branch ${task.branch})`, err);
+        }
       }
-    } catch { /* best-effort — unpushed check must not block worktree removal */ }
+    } catch (err) {
+      // Non-blocking — must not stop worktree removal — but not silent: if the
+      // check itself fails, the worktree is removed with no safety-net having
+      // actually run, which is exactly the silent-data-loss case it exists to catch.
+      logWarn('orchestrator', `Unpushed-commit check failed before removing worktree for task ${taskId} (branch ${task.branch}) — proceeding without it`, err);
+    }
   }
 
   try {
