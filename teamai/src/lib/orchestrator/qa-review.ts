@@ -123,11 +123,12 @@ type ReconcileOutcome = 'rebased' | 'merged' | 'failed';
  * pattern already proven for base-branch rebases (phase-runners.ts,
  * rebaseOntoLatestDefault), just targeting the branch's own origin ref.
  *
- * Returns which path succeeded, since the caller needs to push itself only
- * for 'rebased' — a merger session pushes the resolved branch as its own
- * final step (see .claude/commands/merge.md step 6), so 'merged' means the
- * push has already been attempted and the caller should just verify the
- * result rather than push again.
+ * Returns which path succeeded. Neither path pushes on its own — a plain
+ * rebase never does, and the merger agent only resolves the conflict and
+ * commits locally (see .claude/commands/merge.md step 6: agent sessions run
+ * their own git inside the container and have no GitHub credentials to push
+ * with). The caller must push the result itself for BOTH 'rebased' and
+ * 'merged'.
  */
 async function reconcileDivergedBranch(
   pipeline: TaskPipeline,
