@@ -144,7 +144,9 @@ export function phaseHeader(logFile: string, phase: string): void {
 /**
  * Restore qa_report.json from a snapshot if the report is missing (Gap 4b).
  * Checks qa_report_before_failed.json and qa_report_before_bounce.json.
- * Best-effort — never blocks the pipeline.
+ * Non-blocking — a restore failure must never stop the pipeline — but not
+ * silent: it's logged, since a failed restore permanently loses the QA
+ * audit trail with no other record of it.
  *
  * Called unconditionally at the start of every implement phase, so the
  * common case here is routine, not a crash: a spec/plan revision or a
@@ -165,16 +167,20 @@ export function restoreQaReportFromSnapshot(specPath: string): void {
         const snapshot = readFileSync(snapshotPath, 'utf-8');
         writeFileSync(reportPath, snapshot);
         logToOutput(specPath,
-          `\n[GUARD] qa_report.json is missing (expected after a spec/plan revision or reject-bounce clears QA artifacts) — restored a working copy from ${snapName} so QA history stays visible until the next QA round\n`);
+          `\n[GUARD] qa_report.json restored\n`);
         break; // use the first available snapshot
-      } catch { /* best-effort */ }
+      } catch (err) {
+        logWarn('orchestrator', `Failed to restore qa_report.json from ${snapName} at ${specPath}`, err);
+      }
     }
   }
 }
 
 /**
  * Restore human_feedback.md from snapshot if the file is missing (Gap 4b).
- * Checks human_feedback_before_bounce.md. Best-effort.
+ * Checks human_feedback_before_bounce.md. Non-blocking — a restore failure
+ * must never stop the pipeline — but not silent: it's logged, since a
+ * failed restore permanently loses that feedback with no other record of it.
  *
  * Same routine-not-crash caveat as restoreQaReportFromSnapshot: the
  * implement-phase cleanup that follows a rework cycle normally removes
@@ -191,7 +197,9 @@ export function restoreHumanFeedbackFromSnapshot(specPath: string): void {
       writeFileSync(feedbackPath, snapshot);
       logToOutput(specPath,
         '\n[GUARD] human_feedback.md is missing (expected after implement-phase cleanup consumes it) — restored a working copy from human_feedback_before_bounce.md so it stays visible\n');
-    } catch { /* best-effort */ }
+    } catch (err) {
+      logWarn('orchestrator', `Failed to restore human_feedback.md from human_feedback_before_bounce.md at ${specPath}`, err);
+    }
   }
 }
 
