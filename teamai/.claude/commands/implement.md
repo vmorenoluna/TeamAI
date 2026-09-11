@@ -119,8 +119,16 @@ re-read a file to verify an `Edit` that returned success.
    `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 5. If tests fail, fix the issues before proceeding.
 6. Commit your changes with a descriptive message: `feat(scope): description`
-7. **Do NOT push.** The orchestrator pushes all commits at the end of the implement phase. Pushing from the agent sandbox will fail for lack of credentials and wastes calls. Commit your changes — the orchestrator handles the rest.
-8. Print a summary of what was changed and the test results.
+7. **Verify nothing in your scope is left uncommitted.** Run `git status --porcelain --
+   <path1> <path2> ...` restricted to exactly the paths in this subtask's `files`
+   and `files_to_create` arrays. Any non-empty output is a blocking failure — stage
+   and commit it before ending the session. This step exists because a `parallel_group`
+   containing exactly one subtask edits the feature branch directly (see plan.md) and
+   gets no orchestrator auto-commit safety net the way multi-member groups do at
+   cherry-pick time — if you forget to commit here, nothing downstream will catch it,
+   and QA will fail the criteria for that uncommitted diff.
+8. **Do NOT push.** The orchestrator pushes all commits at the end of the implement phase. Pushing from the agent sandbox will fail for lack of credentials and wastes calls. Commit your changes — the orchestrator handles the rest.
+9. Print a summary of what was changed and the test results.
 
 ## Rules
 - **You may ONLY modify files explicitly listed in the subtask's `files` array.** This is a hard limit. If a change strictly requires touching unlisted files (e.g. implicitly affected tests), STOP and report the missing dependency rather than expanding your scope. The subtask must be replanned to include those files.
