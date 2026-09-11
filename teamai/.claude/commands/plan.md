@@ -40,7 +40,15 @@ Rules:
   creation is the analyst's responsibility (the analyst uses a more capable model with
   broader project context). If the spec says to file follow-up tickets for findings,
   document those findings in the final documentation subtask instead — the analyst will
-  create the follow-up tickets after reviewing the completed work.
+  create the follow-up tickets after reviewing the completed work. **Wire the deferral to
+  QA's auto-PASS marker**: whenever a subtask's description defers `.teamai/`-touching
+  work this way, that subtask's description MUST explicitly instruct the coder to
+  include the literal string `[SKIPPED] Ticket creation is the analyst's responsibility`
+  in its summary — verbatim, matching qa-review.md's auto-PASS trigger for
+  ticket-creation subtasks. A correctly-deferred subtask whose description omits this
+  instruction is planned correctly but invisible to QA: QA has no way to distinguish it
+  from a subtask that simply skipped required work, and will FAIL the criterion instead
+  of auto-passing it.
 - **Plan coverage**: Every spec acceptance criterion must map to at least one subtask —
   no orphaned criteria. After writing the plan, verify that each criterion from the
   spec appears in a subtask's `acceptance_criteria` array. If a criterion has no
