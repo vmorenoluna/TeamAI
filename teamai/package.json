@@ -2,6 +2,7 @@
   "name": "teamai",
   "version": "0.1.0",
   "description": "Multi-agent Claude Code CLI orchestration with a browser UI",
+  "license": "MIT",
   "author": "TeamAI",
   "private": true,
   "main": "electron/main.js",
