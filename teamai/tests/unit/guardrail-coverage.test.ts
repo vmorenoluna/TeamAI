@@ -140,6 +140,20 @@ const GUARDRAILS: GuardrailCheck[] = [
     file: 'defaults/commands/plan.md',
     signatures: ['Shared files across', 'auto-serializes', 'cherry-pick', 'documentation only'],
   },
+  {
+    id: 17,
+    name: 'Uncommitted Scope Verification',
+    description: 'implement.md Instructions — final-step git status check restricted to the subtask\'s own files/files_to_create; a single-subtask parallel_group edits the feature branch directly and gets no cherry-pick auto-commit safety net',
+    file: 'defaults/commands/implement.md',
+    signatures: ['Verify nothing in your scope is left uncommitted', 'auto-commit safety net'],
+  },
+  {
+    id: 18,
+    name: 'Ticket-Deferral Marker Wiring',
+    description: 'plan.md ticket-deferral rule — a subtask deferring .teamai/-touching ticket creation must instruct the coder to emit the literal marker qa-review.md auto-PASSes on',
+    file: 'defaults/commands/plan.md',
+    signatures: ["Wire the deferral to", "QA's auto-PASS marker"],
+  },
 ];
 
 // ---------------------------------------------------------------------------
