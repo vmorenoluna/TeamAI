@@ -20,6 +20,7 @@ const isDev = process.env.ELECTRON_DEV === 'true';
 const PORT = 3000;
 const HOST = '127.0.0.1';
 const URL = `http://${HOST}:${PORT}`;
+const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 // Auto-updater (only in production packaged app)
 const { autoUpdater } = isDev ? {} : require('electron-updater');
@@ -290,6 +291,10 @@ function setupAutoUpdater() {
 
   // Check for updates 10 seconds after startup (let the server settle)
   setTimeout(() => autoUpdater.checkForUpdates(), 10_000);
+
+  // Long-running sessions won't restart often enough to hit the startup
+  // check again, so also poll periodically.
+  setInterval(() => autoUpdater.checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
 }
 
 // Dev-only helper: simulate the update flow (download → ready)
@@ -346,6 +351,9 @@ app.on('activate', () => {
     // Server is already running (it outlives the window)
     createWindow();
   }
+  // The app can sit backgrounded in the dock for a long time between
+  // activations — treat this as another opportunity to check for updates.
+  if (autoUpdater) autoUpdater.checkForUpdates();
 });
 
 app.on('window-all-closed', () => {

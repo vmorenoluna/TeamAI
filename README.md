@@ -63,6 +63,22 @@ npm run start -- -- --with-demo
 
 `npm run electron:dev` already passes `--with-demo` internally, so the demo is visible when developing in Electron. For production builds (`npm run electron:start`), the demo is hidden unless you explicitly add it via the "+" button in the project selector.
 
+## Auto-Updates
+
+Packaged builds from [Releases](https://github.com/vmorenoluna/TeamAI/releases) check for updates automatically and prompt in-app when one is ready to install. Auto-update coverage differs by platform/format:
+
+| Platform | Format | Auto-updates? |
+|---|---|---|
+| Windows | NSIS installer (`.exe`) | ✅ |
+| Windows | Portable zip | ❌ — re-download manually |
+| macOS | `.dmg` / `.zip` | ✅ |
+| Linux | AppImage | ✅ |
+| Linux | `.deb` | ❌ — re-download manually |
+
+Builds are currently unsigned, so first launch may show a warning:
+- **Windows**: SmartScreen — click "More info" → "Run anyway"
+- **macOS**: Gatekeeper — right-click the app → "Open" (instead of double-clicking)
+
 ## Commands
 
 All commands run from `teamai/`.
