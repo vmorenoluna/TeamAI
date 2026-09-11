@@ -2,6 +2,8 @@
 
 Multi-agent [Claude Code](https://docs.anthropic.com/en/docs/claude-code) orchestrator — an Electron desktop app that runs parallel Claude CLI agents through automated software development pipelines.
 
+![TeamAI kanban board](docs/images/board.jpg)
+
 ## Features
 
 ### Sidebar sections (currently visible)
@@ -23,12 +25,32 @@ Multi-agent [Claude Code](https://docs.anthropic.com/en/docs/claude-code) orches
 - **Multi-project support** — manage multiple target codebases, each with its own `.teamai/` state and `.claude/` config
 - **Crash recovery** — interrupted tasks and rate-limited sessions auto-resume on restart
 
+## Install
+
+Download the latest build for your platform from [Releases](https://github.com/vmorenoluna/TeamAI/releases) — Windows (`.exe` installer), macOS (`.dmg`), or Linux (`.AppImage` / `.deb`). Installed builds check for updates automatically; see [Auto-Updates](#auto-updates) below for per-platform coverage and the unsigned-binary warnings you'll see on first launch.
+
+Either way you install it — packaged build or from source below — TeamAI needs the Claude Code CLI and a Claude account to actually run anything; see Prerequisites.
+
+To build and run from source instead, see [Quick Start](#quick-start).
+
 ## Prerequisites
 
-- **Node.js** ≥ 20
+Required regardless of install method:
+
+- **A Claude account** (or Claude API key) — TeamAI spawns `claude` CLI subprocesses to run agents; without one, nothing runs.
 - **Claude Code CLI** — `npm install -g @anthropic-ai/claude-code`
+
+Only needed if building/running from source (not for a packaged download):
+
+- **Node.js** ≥ 20
 - **Git**
 - **Docker** (optional — for container-isolated agent sessions)
+
+## Safety & Privacy
+
+TeamAI's agents execute shell commands with the same filesystem access as the user running the app — this is inherent to how it works (an autonomous coding-agent orchestrator), not a bug. Everything runs **locally**; nothing is sent anywhere except your own configured LLM provider.
+
+If you're pointing TeamAI at an untrusted repository (code you didn't write and haven't reviewed), enable the optional Docker devcontainer sandboxing (`container.json` — see [Configuration](#configuration)) so agent sessions run isolated from your host filesystem instead of directly on it.
 
 ## Quick Start
 
@@ -267,9 +289,4 @@ Features temporarily hidden from the sidebar (routes still exist and can be re-e
 
 ## Contributing
 
-1. Fork and create a feature branch
-2. Make changes following existing conventions
-3. Run `npm run lint && npm run typecheck && npm test`
-4. Submit a Pull Request
-
-See `teamai/CLAUDE.md` for AI coding guidance. See `teamai/AGENTS.md` for dev shortcuts.
+See [CONTRIBUTING.md](CONTRIBUTING.md). See `teamai/CLAUDE.md` for AI coding guidance and `teamai/AGENTS.md` for dev shortcuts.

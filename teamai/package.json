@@ -4,6 +4,14 @@
   "description": "Multi-agent Claude Code CLI orchestration with a browser UI",
   "license": "MIT",
   "author": "TeamAI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vmorenoluna/TeamAI.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vmorenoluna/TeamAI/issues"
+  },
+  "homepage": "https://github.com/vmorenoluna/TeamAI#readme",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -25,6 +33,7 @@
     "test:changelog": "bash tests/unit/changelog-parsing.test.sh",
     "test:all": "npm run typecheck && npm run lint && npm run test && npm run test:e2e && npm run test:changelog",
     "test:all:coverage": "npm run typecheck && npm run lint && vitest run --coverage && npm run test:e2e && npm run test:changelog && node -e \"console.log('\\n=== Combined Coverage ==='); console.log('  Vitest HTML: coverage/index.html'); console.log('  Vitest summary + Playwright results: see above.')\"",
+    "test:pr:coverage": "npm run typecheck && npm run lint && vitest run --coverage && npm run test:e2e:smoke && npm run test:changelog && node -e \"console.log('\\n=== Combined Coverage ==='); console.log('  Vitest HTML: coverage/index.html'); console.log('  Vitest summary + Playwright results: see above.')\"",
     "precommit": "node -e \"console.log('Running full test suite before commit...')\" && npm run test:all",
     "prepare": "node -e \"var e=require('child_process').execSync;try{e('git config core.hooksPath .husky',{cwd:'..'})}catch(_){};if(process.platform!=='win32')try{e('chmod +x .husky/pre-commit',{cwd:'..'})}catch(_){};process.exit(0)\"",
     "electron:dev": "cross-env ELECTRON_DEV=true electron .",

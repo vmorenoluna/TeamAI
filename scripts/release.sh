@@ -29,9 +29,34 @@ node -e "
   console.log('  package.json: ' + old + ' → ' + pkg.version);
 "
 
+# Fold CHANGELOG.md's [Unreleased] section into a new [$VERSION] section,
+# leaving [Unreleased] empty and ready for the next cycle. release.yml's
+# release-notes step reads the "## [$VERSION]" heading this produces.
+node -e "
+  const fs = require('fs');
+  const path = 'CHANGELOG.md';
+  const version = '$VERSION';
+  let content = fs.readFileSync(path, 'utf-8');
+  const match = content.match(/## \[Unreleased\]\n([\s\S]*?)(?=\n## \[|$)/);
+  if (!match) {
+    console.log('  ⚠️  No [Unreleased] section found in CHANGELOG.md — skipping changelog fold');
+  } else {
+    const body = match[1].replace(/\n+$/, '');
+    if (!body.trim()) {
+      console.log('  ⚠️  [Unreleased] section is empty — skipping changelog fold (add entries before releasing)');
+    } else {
+      const today = new Date().toISOString().slice(0, 10);
+      const replacement = '## [Unreleased]\n\n## [' + version + '] — ' + today + '\n' + body + '\n';
+      content = content.replace(/## \[Unreleased\]\n[\s\S]*?(?=\n## \[|$)/, replacement);
+      fs.writeFileSync(path, content);
+      console.log('  CHANGELOG.md: [Unreleased] folded into [' + version + ']');
+    }
+  }
+"
+
 # Stage and commit
 cd "$(dirname "$0")/.."
-git add teamai/package.json
+git add teamai/package.json teamai/CHANGELOG.md
 git commit -m "chore: bump version to $VERSION" || echo "  (no changes to commit — version may already be $VERSION)"
 
 # Create tag

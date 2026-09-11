@@ -35,6 +35,41 @@ jobs:
           fi
           echo "✅ Versions match"
 
+  # ── Full test suite ────────────────────────────────────────────────────
+  # CI's PR gate only runs the E2E smoke subset (~2 min) for fast feedback;
+  # the full E2E suite (~30 min) runs here instead, gating the GitHub
+  # Release itself so a broken full suite blocks publishing without slowing
+  # down every PR.
+
+  full-test-suite:
+    needs: version-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: teamai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: teamai/package-lock.json
+      - run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+      - name: Kill stale servers on port 3000
+        run: |
+          sudo lsof -ti:3000 | xargs -r sudo kill -9 2>/dev/null || true
+          echo "Port 3000 cleared for E2E tests"
+      - name: Kill stale servers on port 3001
+        run: |
+          sudo lsof -ti:3001 | xargs -r sudo kill -9 2>/dev/null || true
+          echo "Port 3001 cleared for E2E tests"
+      - name: Run full test suite
+        run: npm run test:all:coverage
+        env:
+          CI: 'true'
+
   # ── Windows build ──────────────────────────────────────────────────────
 
   build-windows:
@@ -168,7 +203,7 @@ jobs:
   # ── GitHub Release ─────────────────────────────────────────────────────
 
   create-release:
-    needs: [build-windows, build-macos, build-linux]
+    needs: [full-test-suite, build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
