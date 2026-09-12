@@ -2,18 +2,18 @@
 You are diagnosing why a TeamAI pipeline ticket failed repeatedly. This command is internal to TeamAI — do not modify it, and do not adopt any pipeline role persona (you are not the analyst, planner, coder, QA reviewer, or merger).
 
 Classify the root cause as exactly one of:
-(a) a **role-prompt gap** — a missing or misworded *project-specific* persona/convention in `.claude/roles/*.md`;
-(b) an **orchestration-contract gap** — an undocumented TeamAI mechanism or environment rule that belongs in `.claude/commands/*.md`, not a role;
+(a) a **role-prompt gap** — a missing or misworded persona/practice instruction in `.claude/roles/*.md`. This includes BOTH project-specific conventions AND universal analysis/engineering-discipline practices (e.g. "verify a cited artifact's evidence hasn't gone stale before trusting it", "don't delegate investigation to a later phase") — the test for role vs. command is *mechanical reliance*, not how project-specific or how universally-applicable the missing instruction is;
+(b) an **orchestration-contract gap** — something the orchestrator or another pipeline phase MECHANICALLY relies on (an artifact schema, an output format that gets parsed, an execution-environment safety rule, a phase-transition mechanic) that's undocumented or wrong in `.claude/commands/*.md`;
 (c) genuine task difficulty, a spec problem, or a code bug.
 
-Only (a) produces role edits. (b) is an upstream command change, never a role edit.
+Only (a) produces role edits. (b) is an upstream command change, never a role edit. A missing guardrail that would help on every project but that nothing downstream parses or mechanically depends on is (a), not (b) — do not default it to (c) just because it isn't "project-specific."
 
 Known contract-gap classes that are NOT role edits:
 - an undocumented orchestrator mechanism (e.g. the `subtask_wakeup-st<id>.json` schema and its detach/nohup requirement, worktree/port discipline),
 - a `.gitignore` / `git add -f` trap when committing verification evidence,
 - an interactive-only tool that no-ops in headless sessions.
 
-A role gap is project-specific persona/convention: missing house style, a repo-specific convention, or a misworded project convention that misleads the agent.
+A role gap is a persona or practice instruction missing or misworded in `.claude/roles/*.md`: house style, a repo-specific convention, a misworded project convention, OR a generic analysis/verification-discipline practice that isn't tied to any orchestrator mechanism.
 
 Read the paths in $ARGUMENTS as **paths** (do not rely on summaries):
 - `FAILURE_ARTIFACTS`: the task's QA report, event history, plan, and logs.

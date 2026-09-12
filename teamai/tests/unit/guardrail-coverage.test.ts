@@ -61,22 +61,22 @@ const GUARDRAILS: GuardrailCheck[] = [
   {
     id: 4,
     name: 'No Mathematical Substitution',
-    description: 'implement.md Rules — empirical criteria need script output, not math',
-    file: 'defaults/commands/implement.md',
-    signatures: ['No mathematical substitution', 'mathematical or theoretical justification does NOT satisfy'],
+    description: 'coder.md Guardrails — empirical criteria need script output, not math. Moved from implement.md: engineering discipline, not orchestration mechanics.',
+    file: 'defaults/roles/coder.md',
+    signatures: ['No mathematical substitution', 'does not satisfy an empirical criterion'],
   },
   {
     id: 5,
     name: 'Word-Gaming Prevention',
-    description: 'implement.md Rules — changing claim wording is not a fix',
-    file: 'defaults/commands/implement.md',
+    description: 'coder.md Guardrails — changing claim wording is not a fix. Moved from implement.md.',
+    file: 'defaults/roles/coder.md',
     signatures: ['wording of a claim', 'acknowledgement of failure'],
   },
   {
     id: 6,
     name: 'Session Budget Awareness',
-    description: 'implement.md Rules — report blocker if script takes too long',
-    file: 'defaults/commands/implement.md',
+    description: 'coder.md Guardrails — report blocker if script takes too long. Moved from implement.md.',
+    file: 'defaults/roles/coder.md',
     signatures: ['session budget', 'report the blocker'],
   },
   {
@@ -103,9 +103,9 @@ const GUARDRAILS: GuardrailCheck[] = [
   {
     id: 10,
     name: 'Empirical Evidence Enforcement',
-    description: 'qa-review.md Step 5 — mathematical claims don\'t satisfy empirical criteria',
-    file: 'defaults/commands/qa-review.md',
-    signatures: ['mathematically verified', 'does NOT satisfy an empirical criterion'],
+    description: 'qa-reviewer.md Standards — mathematical claims don\'t satisfy empirical criteria. Moved from qa-review.md: review-side judgment, not orchestration mechanics.',
+    file: 'defaults/roles/qa-reviewer.md',
+    signatures: ['mathematically verified', 'No mathematical substitution'],
   },
   {
     id: 11,
@@ -131,8 +131,8 @@ const GUARDRAILS: GuardrailCheck[] = [
   {
     id: 14,
     name: 'Spec Authority in Normal Mode',
-    description: 'implement.md Rules — don\'t silently change spec formulas/values, flag concerns instead',
-    file: 'defaults/commands/implement.md',
+    description: 'coder.md Guardrails — don\'t silently change spec formulas/values, flag concerns instead. Moved from implement.md.',
+    file: 'defaults/roles/coder.md',
     signatures: ['Spec authority', 'do NOT silently change'],
   },
   {

@@ -293,11 +293,11 @@ The command templates in `defaults/commands/` enforce cross-cutting guardrails t
 
 #### Implement Phase (coder)
 
-4. **No Mathematical Substitution** (`implement.md` Rules): If an acceptance criterion requires empirical evidence from a script run (benchmark, integration test, data pipeline, verification report), the coder MUST run the script and commit the output. Mathematical or theoretical justification does NOT satisfy an empirical criterion. A claim of "mathematically verified" for a criterion that says "post-fix script exits with < 20 failures" is a FAIL.
+4. **No Mathematical Substitution** (`coder.md` Guardrails): If an acceptance criterion requires empirical evidence from a script run (benchmark, integration test, data pipeline, verification report), the coder MUST run the script and commit the output. Mathematical or theoretical justification does NOT satisfy an empirical criterion. A claim of "mathematically verified" for a criterion that says "post-fix script exits with < 20 failures" is a FAIL.
 
-5. **Word-Gaming Prevention** (`implement.md` Rules): Changing the wording of a claim from "verified" to "expected" or "mathematically estimated" is not a fix — it is an acknowledgement of failure.
+5. **Word-Gaming Prevention** (`coder.md` Guardrails): Changing the wording of a claim from "verified" to "expected" or "mathematically estimated" is not a fix — it is an acknowledgement of failure.
 
-6. **Session Budget Awareness** (`implement.md` Rules): If a required script takes too long for the session budget, stop and report the blocker explicitly rather than substituting a theoretical claim.
+6. **Session Budget Awareness** (`coder.md` Guardrails): If a required script takes too long for the session budget, stop and report the blocker explicitly rather than substituting a theoretical claim.
 
 7. **Cleanup-Only Rework Mode** (`implement.md` QA Rework): When `fail_type` is `"cleanup"`, the coder enters cleanup-only mode: no spec re-read, no test suite, execute only mechanical `fix_needed` operations. This covers both git/file-system fixes (git rm, git add) and artifact fixes (run a script, verify output, git add, commit, push).
 
@@ -305,10 +305,10 @@ The command templates in `defaults/commands/` enforce cross-cutting guardrails t
 
 9. **Background Output Unreadable** (`implement.md` Long-Running Scripts): If a long-running background script does not deliver readable output after its completion notification, re-run it synchronously (without `run_in_background`). Do NOT substitute a partial or reduced run for the full required invocation, and do NOT change acceptance-criterion wording to work around missing evidence.
 
-14. **Spec Authority** (`implement.md` Rules): If the coder believes a formula, algorithm, threshold, or design decision in the spec is wrong, they must flag it in their summary — NOT silently change it. The spec is the contract between analyst and engineer; changing it without revision is a spec bypass. This applies to normal implement mode, not just QA rework. Implement what the spec says, then escalate concerns through the proper pipeline.
+14. **Spec Authority** (`coder.md` Guardrails): If the coder believes a formula, algorithm, threshold, or design decision in the spec is wrong, they must flag it in their summary — NOT silently change it. The spec is the contract between analyst and engineer; changing it without revision is a spec bypass. This applies to normal implement mode, not just QA rework. Implement what the spec says, then escalate concerns through the proper pipeline.
 
 #### QA Review Phase (qa-reviewer)
 
-10. **Empirical Evidence Enforcement** (`qa-review.md` Step 5): For acceptance criteria requiring empirical evidence from a script run, the QA agent must read the committed output and confirm the results meet the criterion's thresholds. A coder claim of "mathematically verified" or theoretical justification does NOT satisfy an empirical criterion — mark it FAIL.
+10. **Empirical Evidence Enforcement** (`qa-reviewer.md` Standards): For acceptance criteria requiring empirical evidence from a script run, the QA agent must read the committed output and confirm the results meet the criterion's thresholds. A coder claim of "mathematically verified" or theoretical justification does NOT satisfy an empirical criterion — mark it FAIL.
 
 11. **Extended Cleanup fail_type** (`qa-review.md` Output, `orchestrator.ts`): `fail_type: "cleanup"` covers ALL mechanical fixes with zero source code changes — both git/file-system operations AND script-run-and-commit operations (e.g., the coder substituted math for benchmark output; the fix is to run the script and commit results). The orchestrator routes cleanup failures to implement with cleanup-only rework mode, and writes `fail_type` into `qa_feedback.md` so the coder detects cleanup mode without needing to locate `qa_report.json`.
