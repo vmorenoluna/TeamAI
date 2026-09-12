@@ -2,8 +2,9 @@
  * Guardrail Coverage Test
  *
  * Validates that every pipeline workflow guardrail documented in CLAUDE.md
- * is actually present in the command templates (defaults/commands/*.md) or
- * orchestrator code (src/lib/orchestrator.ts) that agents receive at runtime.
+ * is actually present in the command templates (defaults/commands/*.md), the
+ * default role personas (defaults/roles/*.md), or orchestrator code
+ * (src/lib/orchestrator.ts) that agents receive at runtime.
  *
  * If a guardrail is only documented in CLAUDE.md but missing from the agent-
  * facing files, downstream projects using TeamAI won't see it — because they
@@ -11,8 +12,16 @@
  *
  * This test prevents that drift: every time a guardrail is added, removed, or
  * reworded in CLAUDE.md, this test must be updated to match. Conversely, if
- * this test fails, it means a guardrail was accidentally removed from a command
- * template during an edit.
+ * this test fails, it means a guardrail was accidentally removed from a
+ * command or role template during an edit.
+ *
+ * Coverage caveat for role-hosted guardrails: unlike commands, roles are
+ * force-synced only once, at project scaffold time — an EXISTING project's
+ * `.claude/roles/*.md` never picks up a later change here. This test only
+ * proves the guardrail ships in TeamAI's own shipped defaults for brand-new
+ * projects; propagating a role-hosted guardrail into an already-scaffolded
+ * downstream project (e.g. one with a heavily customized persona) requires a
+ * separate, manual edit to that project's own role file.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -38,16 +47,9 @@ const GUARDRAILS: GuardrailCheck[] = [
   {
     id: 1,
     name: 'No Delegated Analysis',
-    description: 'spec.md Step 1 — analyst must complete investigation now, not delegate to engineer',
-    file: 'defaults/commands/spec.md',
-    signatures: ['No Delegated Analysis', 'NEVER delegate analysis'],
-  },
-  {
-    id: 2,
-    name: 'Self-Critique Check',
-    description: 'spec.md Step 4 — analyst must check for delegated-analysis anti-patterns',
-    file: 'defaults/commands/spec.md',
-    signatures: ['Self-Critique', 'Delegated analysis'],
+    description: 'analyst.md Standards — analyst must complete investigation now, not delegate to engineer, and self-check own drafts for this anti-pattern. Moved from spec.md: this is analysis discipline, not orchestration mechanics, so it belongs in the role, not the command.',
+    file: 'defaults/roles/analyst.md',
+    signatures: ['No delegated analysis', 'NEVER delegate analysis'],
   },
   {
     id: 3,
@@ -115,8 +117,8 @@ const GUARDRAILS: GuardrailCheck[] = [
   {
     id: 12,
     name: 'Spec Executability',
-    description: 'spec.md Step 4 — no unquantified requirements, reference implementations, or tribal-knowledge assumptions',
-    file: 'defaults/commands/spec.md',
+    description: 'analyst.md Standards — no unquantified requirements, reference implementations, or tribal-knowledge assumptions. Moved from spec.md: analysis discipline, not orchestration mechanics.',
+    file: 'defaults/roles/analyst.md',
     signatures: ['Spec executability', 'unquantified', 'reference implementation'],
   },
   {
@@ -153,6 +155,13 @@ const GUARDRAILS: GuardrailCheck[] = [
     description: 'plan.md ticket-deferral rule — a subtask deferring .teamai/-touching ticket creation must instruct the coder to emit the literal marker qa-review.md auto-PASSes on',
     file: 'defaults/commands/plan.md',
     signatures: ["Wire the deferral to", "QA's auto-PASS marker"],
+  },
+  {
+    id: 19,
+    name: 'Evidence Currency',
+    description: 'analyst.md Standards — before citing a prior artifact\'s numbers as ground truth, check whether the code that produced them has changed since; re-run rather than embed stale figures',
+    file: 'defaults/roles/analyst.md',
+    signatures: ['Evidence currency', 'git log'],
   },
 ];
 
