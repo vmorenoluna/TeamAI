@@ -13,7 +13,7 @@ questions before proceeding — do not guess what they want.
 Run:
 
 ```
-node "$TEAMAI_CREATE_TASK_CLI" --project "<project root>" --title "<short, imperative title>" --description "<one-sentence description>"
+node "$TEAMAI_CREATE_TASK_CLI" --project "<project root>" --title "<short, imperative title>" --description "<one-sentence description>" [--depends-on "<id1>,<id2>,..."]
 ```
 
 - `$TEAMAI_CREATE_TASK_CLI` is already set in your environment — use it as-is.
@@ -21,6 +21,16 @@ node "$TEAMAI_CREATE_TASK_CLI" --project "<project root>" --title "<short, imper
 - The script creates a bare ticket — title, description, `phase: "backlog"` — nothing else, exactly
   like a ticket created from the UI's "Add Task" button. It goes through the normal spec → plan →
   implement → QA pipeline once someone starts it.
+- `--depends-on` is optional: a comma-separated list of other tasks' `id`s (printed by this same
+  CLI when they were created, or found via `grep '"id"' .teamai/*/task.json`). Auto-mode will not
+  auto-start this ticket until every listed dependency reaches `phase: "done"`.
+
+**When filing several related tickets in one request**, check whether any of them logically
+blocks another before running the CLI — not just "must happen first for correctness" (e.g. a
+finding that needs a fresh measurement before it can be trusted) but also "touches the same
+reward/constant/function another ticket also changes," where running both in parallel worktrees
+is likely to produce conflicting PRs. Pass `--depends-on` for those; leave truly independent
+tickets unlinked. If unsure whether two tickets conflict, ask rather than guessing either way.
 
 ## Step 3: Confirm
 
