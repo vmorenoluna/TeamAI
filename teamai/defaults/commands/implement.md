@@ -57,22 +57,7 @@ If `fail_type` is `"code"` or absent, proceed with the standard QA rework steps 
    exactly how many times each criterion has failed unchanged. Do NOT
    deprioritize a persisted failure in favor of another issue.
 
-3. **Per-criterion checklist — MANDATORY before considering a FAIL criterion resolved**:
-   For EVERY FAIL criterion (especially those with numeric/count requirements
-   like "must have at least N cases of X" or "Y occurrences remain"):
-
-   a) **Enumerate**: List every existing case/candidate/occurrence explicitly.
-   b) **Classify assertion direction**: For each case that involves a test
-      assertion, read the actual assertion logic — NOT the comment, label, or
-      variable name. A test case that is commented as "positive case 2" but
-      asserts a zero/no-op result does NOT count as a positive case.
-   c) **Confirm the count**: After classification, verify that the count of
-      cases with the correct assertion direction matches the requirement.
-   d) **Summary report**: Print a line-per-case breakdown before marking
-      the criterion resolved.
-
-   Never trust comments, labels, or variable names as proof of satisfaction.
-   Comments lie; assertions don't.
+3. **Apply your role's per-criterion verification checklist** to every FAIL criterion before considering it resolved — especially ones with numeric/count requirements ("at least N cases of X", "Y occurrences remain"). Do not skip straight to step 4 on the strength of a label or comment alone.
 
 4. Address ONLY the QA issues listed. The acceptance criteria below are limited
    to items marked [QA CORRECTION] or [QA ISSUE] — fix those and nothing else.
@@ -91,12 +76,7 @@ If `fail_type` is `"code"` or absent, proceed with the standard QA rework steps 
    on already-passed subtasks that shouldn't be affected by your changes. Follow the
    test-running guidance in the Instructions section below (run once, wait, capture
    only the pass/fail summary line).
-10. **CRITICAL: Do NOT change formulas, algorithms, or domain logic.** QA fixes
-   are surgical corrections of implementation defects — they are NOT opportunities
-   to redesign the solution. If an issue seems to require changing a formula or
-   algorithm, STOP: this is a spec concern that must be escalated, not fixed in place.
-   A fix that invents a new formula is not a fix — it's a design change that
-   bypasses the spec.
+10. **QA fixes are surgical corrections, not a redesign opportunity** — apply your role's spec-authority discipline here: if a QA issue seems to require changing a formula, algorithm, or domain logic, STOP and escalate it as a spec concern instead of fixing it in place.
 
 ## Instructions
 
@@ -142,27 +122,8 @@ re-read a file to verify an `Edit` that returned success.
   The orchestrator parses these lines and files the ticket in the project's `.teamai/`
   directory. This lets the team triage the bug properly rather than silently shipping an
   unplanned change.
-- If the spec or plan documents rejected alternatives, failed approaches, or explains
-  why a specific value or formula was chosen, treat that as authoritative. Do not
-  re-derive, re-test, or re-explore alternatives the spec explicitly marks as rejected
-  or superseded.
-- **Spec authority**: If you believe a formula, algorithm, threshold, or design
-  decision in the spec is wrong, flag it in your summary — do NOT silently change it.
-  The spec is the contract between the analyst and the engineer; changing it without
-  revision is a spec bypass. Implement what the spec says, then escalate concerns so
-  the spec can be revised through the proper pipeline (spec → plan → implement),
-  not patched ad-hoc during implementation. This applies to NORMAL implement mode,
-  not just QA rework.
-- **A labeled hypothesis that verification disproves is the same case, not a different one.** If a spec criterion is explicitly marked as an unverified hypothesis (e.g. "Expected to resolve X — unverified; must be confirmed by re-running the verification step"), implement it exactly as specified and run the required verification. If the result contradicts the hypothesis, that is a spec-authority issue per the rule above — do NOT invent, adjust, or retune a value to compensate, even if you're confident your replacement is correct. State in your summary that this is a spec-level gap with the verbatim verification evidence, so it routes to spec revision instead of looping you on a fix that was never yours to make.
-- **No mathematical substitution:** If an acceptance criterion requires empirical evidence
-  from a script run (benchmark, integration test, data pipeline, verification report),
-  you MUST run the script and commit the output. Mathematical or theoretical justification
-  does NOT satisfy an empirical criterion. A claim of "mathematically verified" for a
-  criterion that says "post-fix script exits with < 20 failures" is a FAIL. Changing the
-  wording of a claim from "verified" to "expected" or "mathematically estimated" is not
-  a fix — it is an acknowledgement of failure. If the script takes too long for the
-  session budget, stop and report the blocker explicitly rather than substituting a
-  theoretical claim.
+- Apply your role's spec-authority and evidence discipline here too — it governs normal
+  implement mode exactly as it governs QA rework (see the QA Rework Mode section above).
 
 ## Running Verification Scripts & Servers
 

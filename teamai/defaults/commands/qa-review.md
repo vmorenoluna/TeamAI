@@ -49,7 +49,7 @@ This means on a rework pass where only one criterion failed and its file was cha
 5. For each acceptance criterion, determine PASS or FAIL with evidence from the actual file content:
    - If a criterion says "no occurrences of X remain": grep the relevant files and paste the result.
    - If a criterion says "Y is used instead of Z": read the file and confirm.
-   - If a criterion requires empirical evidence from a script run (benchmark, integration test, etc.): read the committed output and confirm the results meet the criterion's thresholds. A coder claim of "mathematically verified" or theoretical justification does NOT satisfy an empirical criterion — mark it FAIL.
+   - If a criterion requires empirical evidence from a script run (benchmark, integration test, etc.): read the committed output and confirm the results meet the criterion's thresholds — apply your role's evidence-substitution discipline when deciding whether a claim actually satisfies this.
    - **Unverifiable criterion detection**: If a criterion demands evidence that structurally cannot exist in any committed artifact (e.g., it asks for detail from an uncommitted log, a transient server response, or the coder's self-reported observation), do NOT mark it as a standard FAIL. Instead, add a `spec_concerns` entry: the spec/plan failed to provide a producing artifact for this criterion. The issue is that the criterion itself is unverifiable — the coder cannot fix this by changing code. Flagging it as a standard FAIL would guarantee a useless cleanup bounce.
    - Never infer a criterion is satisfied from the diff alone — verify against current code.
      - **After evaluating each criterion**: write the partial QA report to disk immediately
@@ -63,26 +63,18 @@ This means on a rework pass where only one criterion failed and its file was cha
 **Active whenever a criterion involves a numeric/count requirement** (e.g.,
 "at least 3 positive cases", "no occurrences of X remain", "Y occurrences exist").
 
-For count-based criteria, do NOT trust comments, labels, or variable names as
-proof that a specific case counts toward the requirement. Comments lie;
-assertions don't.
+Apply your role's assertion-verification discipline to each candidate item, then:
 
-1. For each candidate item that could satisfy the count requirement:
-   - Read the item's actual assertion logic, not its comment or label.
-   - Classify what the assertion actually proves (positive, negative, zero, no-op).
-2. If any candidate has a label/comment that says one thing but an assertion
+1. If any candidate has a label/comment that says one thing but an assertion
    that proves something different (e.g., a test case commented as "// Positive
    case 2" but asserting `result shouldBe 0`), flag it as an
    `additional_issues` entry:
    - **description**: "Test case at [file:line] is labeled as '[label]' but asserts [what it actually asserts] — this inflates the count for criterion '[criterion text]'"
    - **file**: exact file path and line number
    - **fix_needed**: "Fix the assertion to match the label, or relabel/remove the case"
-3. The FAIL criterion itself should remain FAIL until the actual count of
+2. The FAIL criterion itself should remain FAIL until the actual count of
    correctly-asserted cases meets the requirement. The label/assertion mismatch
    is a separate issue that the coder must also fix.
-4. Apply the same rigor to negative counts ("no occurrences of X") — grep
-   results alone are not sufficient; verify that each occurrence actually
-   does what the grep keyword suggests.
 
 ## Running Verification Scripts & Servers
 
@@ -142,16 +134,9 @@ Flag a spec concern when:
 
 When spec concerns are present, the task goes to human review — the reviewer decides whether to revise the spec. Not all FAIL criteria are spec concerns; only flag when the *specification* is the root cause, not the implementation.
 
-**Before writing `suggested_fix`, investigate — don't just list hypotheses.** You have the
-same Read/Grep/Bash access the analyst used to write the spec. Read the actual constraint
-code and cross-reference it against the measured evidence (sweep numbers, logs, formulas)
-until you can identify *why* the spec-as-implemented produces the wrong outcome, not just
-*that* it does. A wrong hypothesis sent to human review costs a full
-analyst → plan → implement cycle, so resolve what you can resolve yourself first. If your
-investigation confirms a specific mechanism, state it directly as the `suggested_fix` —
-not as one of several equally-weighted guesses. Only list multiple candidate directions
-when your own investigation genuinely cannot narrow it further, and say what you checked
-(and what it ruled out or failed to rule out) for each one.
+**Before writing `suggested_fix`, apply your role's investigation discipline** — a wrong
+hypothesis sent to human review costs a full analyst → plan → implement cycle, so resolve
+what you can resolve yourself first rather than listing hypotheses.
 
 ## Step 8: Domain Logic Integrity Check
 

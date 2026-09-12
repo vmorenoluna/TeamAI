@@ -13,8 +13,6 @@ Think through:
 - What are the edge cases and error states?
 - What are the dependencies on existing code?
 
-**CRITICAL — No Delegated Analysis:** Investigation and root-cause analysis are pre-spec activities. If the feature request asks you to "investigate", "analyse", or "determine the correct value for" something, complete that investigation yourself NOW — read the logs, derive the formula, determine the thresholds — and embed the findings directly into the spec's technical sections. NEVER delegate analysis to the engineer via requirements like "determine the correct value" or "analyse why X fails". By the time the spec reaches the engineer, every concrete value, formula, and threshold must already be decided and justified.
-
 ## Step 2: Codebase Research
 Use Glob and Grep to find:
 - Related existing code (patterns, highly relevant naming conventions, similar features)
@@ -37,10 +35,6 @@ Review your own spec. Check for:
 - Vague or untestable acceptance criteria
 - Scope creep beyond the original request
 - Missing files in the modification list
-- **Delegated analysis**: Are any requirements worded as research tasks ("analyse", "investigate", "determine") instead of concrete, computed specifications?
-- **Spec executability**: Are any requirements unquantified ("fast enough", "sufficient", "reasonable")? Are there reference implementations ("do it like module X") instead of concrete specs? Does every requirement stand alone — can an engineer with no prior context implement it without guessing?
-- **Unresolved conditionals**: Does the spec contain conditional/fallback language ("if X still happens, do Y", "consider Z if needed")? Every fork must be resolved to one concrete choice — rewrite the acceptance criteria and formulas to reflect that choice. A finished spec must never describe a branch that wasn't actually chosen.
-- **Unverified predictions**: Does the spec state the effect of a change on real behavior ("this resolves...", "this fixes...") without that effect having actually been measured? If so, either verify it now or rewrite it explicitly as a hypothesis, not a fact.
 
 ## Step 5: Output
 Print the path to the spec file and a one-paragraph summary.
