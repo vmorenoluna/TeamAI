@@ -31,6 +31,7 @@ Write a single JSON object to the path given as `OUTPUT_FILE` in $ARGUMENTS, wit
 }
 
 Rules:
+- `roleFile` must be the bare filename only (e.g. `"coder.md"`), never a path — even though `ROLE_FILES` above lists full paths so you can read the files, echo back only the final path segment.
 - Prefer mode:"append" for additive fixes (a short block appended to the role file).
 - If it is NOT a role-prompt gap, set isRolePromptGap:false, leave edits empty, and explain the real cause in diagnosis.
 - If it IS a contract gap, also set contractGap:true and contractFile to the affected file under defaults/commands/ (e.g. "implement.md"), say so explicitly in diagnosis, and name the file that needs the upstream fix — never emit a role edit for it.
