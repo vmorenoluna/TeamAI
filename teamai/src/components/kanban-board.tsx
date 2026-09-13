@@ -502,7 +502,7 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
   }
 
   /** Called when the user confirms the retry-phase dialog for a drop. */
-  async function handleDropDialogConfirm(phase: string, resetBudget: boolean) {
+  async function handleDropDialogConfirm(phase: string) {
     if (!pendingDrop) return;
     const { taskId, task, colPhase } = pendingDrop;
     setPendingDrop(null);
@@ -530,7 +530,7 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
 
     run(async () => {
       try {
-        await retryTaskWithOptions(taskId, phase, resetBudget);
+        await retryTaskWithOptions(taskId, phase);
       } catch (err) {
         clearOptimistic(taskId);
         undoStackRef.current = undoStackRef.current.filter(a => a.taskId !== taskId);
@@ -551,12 +551,6 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
   const dropDialogPhases = pendingDrop
     ? getPhaseOptionsForColumn(pendingDrop.colPhase)
     : null;
-
-  // Budget default: checked for spec/plan (already cleared in moveTaskToPhase),
-  // unchecked for implement/qa-review (preserve circuit-breaker semantics).
-  const dropBudgetDefault = pendingDrop
-    ? (pendingDrop.targetPhase === 'spec' || pendingDrop.targetPhase === 'plan')
-    : false;
 
   return (
     <div className="flex flex-col h-full bg-[#11131b]" data-component="kanban-board">
@@ -781,7 +775,6 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
           taskTitle={pendingDrop.task.title}
           phases={dropDialogPhases}
           defaultPhase={pendingDrop.targetPhase}
-          budgetDefault={dropBudgetDefault}
           onCancel={() => setPendingDrop(null)}
           onConfirm={handleDropDialogConfirm}
         />

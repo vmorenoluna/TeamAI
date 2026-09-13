@@ -213,12 +213,12 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
     setShowRetryDialog(true);
   }
 
-  function handleRetryConfirm(phase: string, resetBudget: boolean) {
+  function handleRetryConfirm(phase: string) {
     setShowRetryDialog(false);
     setError(null);
     run(async () => {
       try {
-        const result = await retryTaskWithOptions(task.id, phase, resetBudget);
+        const result = await retryTaskWithOptions(task.id, phase);
         if (!result.success) throw new Error(result.error || 'Unknown error');
       } catch (err) {
         setError(formatActionError('retry task', err));
@@ -654,7 +654,6 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
         taskTitle={task.title}
         phases={getPhaseClearDescriptions()}
         defaultPhase={defaultRetryPhase}
-        budgetDefault={false}
         onCancel={() => setShowRetryDialog(false)}
         onConfirm={handleRetryConfirm}
       />

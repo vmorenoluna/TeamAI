@@ -95,8 +95,8 @@ describe('TaskCard mutation handlers', () => {
       expect(screen.getByText('Choose Resume Phase')).toBeInTheDocument();
       // Dialog shows the task title in the subtitle
       expect(screen.getByText(/"Failed Task" — pick which phase to resume from/)).toBeInTheDocument();
-      // Budget toggle should be present
-      expect(screen.getByText('Reset QA-attempt budget')).toBeInTheDocument();
+      // Budget-reset explanation should be present
+      expect(screen.getByText(/fresh QA\/wakeup-attempt budget/)).toBeInTheDocument();
     });
 
     it('calls retryTaskWithOptions and refreshes router on dialog confirm', async () => {
@@ -112,7 +112,7 @@ describe('TaskCard mutation handlers', () => {
         fireEvent.click(screen.getByText('Resume'));
       });
 
-      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('failed-1', 'implement', false);
+      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('failed-1', 'implement');
       expect(mockRouterRefresh).toHaveBeenCalled();
       expect(window.alert).not.toHaveBeenCalled();
     });
@@ -636,7 +636,7 @@ describe('TaskCard mutation handlers', () => {
         fireEvent.click(screen.getByText('Resume'));
       });
 
-      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('failed-r', 'implement', false);
+      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('failed-r', 'implement');
       expect(window.alert).toHaveBeenCalledWith('Failed to retry task: network dropped');
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });

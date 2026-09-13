@@ -13,10 +13,8 @@ export interface RetryPhaseDialogProps {
   phases: DialogPhaseOption[];
   /** Pre-selected phase (should be one of `phases`). */
   defaultPhase: string;
-  /** Default for the budget-reset toggle. */
-  budgetDefault: boolean;
   onCancel: () => void;
-  onConfirm: (phase: string, resetBudget: boolean) => void;
+  onConfirm: (phase: string) => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -25,7 +23,6 @@ export function RetryPhaseDialog({
   taskTitle,
   phases,
   defaultPhase,
-  budgetDefault,
   onCancel,
   onConfirm,
 }: RetryPhaseDialogProps) {
@@ -35,7 +32,6 @@ export function RetryPhaseDialog({
   }));
 
   const [selected, setSelected] = useState(defaultPhase);
-  const [resetBudget, setResetBudget] = useState(budgetDefault);
   const singlePhase = options.length === 1;
 
   return (
@@ -108,25 +104,13 @@ export function RetryPhaseDialog({
           </div>
         )}
 
-        {/* Budget reset toggle */}
-        <label className="flex items-center gap-3 p-3 rounded-lg border border-[#334155] cursor-pointer hover:border-[#475569] transition-colors">
-          <input
-            type="checkbox"
-            checked={resetBudget}
-            onChange={e => setResetBudget(e.target.checked)}
-            className="shrink-0 accent-[#2563eb]"
-          />
-          <div>
-            <span className="text-sm font-medium text-white block">
-              Reset QA-attempt budget
-            </span>
-            <span className="text-xs text-slate-400">
-              {resetBudget
-                ? 'The QA-attempt counter will be reset — the task gets a fresh budget for this round.'
-                : 'The QA-attempt counter will be preserved — previous attempts still count toward the circuit breaker.'}
-            </span>
-          </div>
-        </label>
+        {/* Budget reset is no longer a choice — a retry always clears
+             qaAttempt/wakeupAttemptCount/deliverableFailCounts so a counter
+             carried over from the failed run can't trip a cap almost
+             instantly on the very next attempt. */}
+        <p className="mb-4 text-xs text-slate-400">
+          This gives the task a fresh QA/wakeup-attempt budget for this round.
+        </p>
 
         {/* Actions */}
         <div className="flex justify-end gap-3 pt-4">
@@ -139,7 +123,7 @@ export function RetryPhaseDialog({
           </button>
           <button
             type="button"
-            onClick={() => onConfirm(selected, resetBudget)}
+            onClick={() => onConfirm(selected)}
             className="px-4 py-2 text-sm font-medium bg-[#2563eb] text-white rounded-lg hover:bg-[#1d4ed8] transition-colors"
           >
             {singlePhase ? 'Move & Resume' : 'Resume'}
