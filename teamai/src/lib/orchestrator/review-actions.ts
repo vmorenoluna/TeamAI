@@ -41,6 +41,8 @@ export interface ReviewActionsDeps {
 function resetAllCounters(pipeline: TaskPipeline, preserveQaHistory = false): void {
   pipeline.qaAttempt = 0;
   pipeline.deliverableFailCounts = {};
+  pipeline.stallRecoveryCounts = {};
+  pipeline.incompleteImplementPassCount = 0;
   if (!preserveQaHistory) {
     pipeline.persistedCriterionFailCounts = {};
     pipeline.persistedAdditionalIssueCounts = {};

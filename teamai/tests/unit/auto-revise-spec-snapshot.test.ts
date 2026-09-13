@@ -63,6 +63,13 @@ function makeCtx() {
     maxQaAttempts: 3,
     deliverableFailCounts: {},
     persistedCriterionFailCounts: {},
+    // Simulate a task that already burned implement-pass/stall-recovery
+    // budget in a prior failed cycle — a spec revision must clear these too
+    // (regression: only deliverableFailCounts/wakeup* were reset, so a task
+    // whose new implement attempt started already at/near the pass cap
+    // could fail again on its very first post-revision pass).
+    incompleteImplementPassCount: 2,
+    stallRecoveryCounts: { 6: 1 },
     wakeupAttemptCount: 0,
     wakeupUntil: undefined,
     wakeupSubtaskId: undefined,
@@ -117,6 +124,15 @@ describe('autoReviseSpec — rename-at-revision baseline', () => {
     // The in-flight revision has NOT created spec_v2.md — the analyst writes
     // the revised spec to spec.md, which the versions UI surfaces live.
     expect(existsSync(join(ctx.specPath, 'spec_v2.md'))).toBe(false);
+  });
+
+  it('resets incompleteImplementPassCount and stallRecoveryCounts on spec revision', async () => {
+    realWriteFileSync.current!(join(ctx.specPath, 'spec.md'), '# original spec');
+
+    await autoReviseSpec(ctx.pipeline as never, ctx.deps as never);
+
+    expect(ctx.pipeline.incompleteImplementPassCount).toBe(0);
+    expect(ctx.pipeline.stallRecoveryCounts).toEqual({});
   });
 
   it('warns (does not throw) when the pre-revision rename fails', async () => {
