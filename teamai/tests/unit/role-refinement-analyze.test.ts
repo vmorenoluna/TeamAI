@@ -274,6 +274,21 @@ describe('parseAnalysisOutput', () => {
     expect(out.edits[1].riskClass).toBe('additive');
   });
 
+  it('normalizes a path-prefixed roleFile to its bare filename', () => {
+    const out = parseAnalysisOutput(JSON.stringify({
+      isRolePromptGap: true,
+      contractGap: false,
+      contractFile: null,
+      rootCause: 'rc',
+      confidence: 'high',
+      diagnosis: 'd',
+      edits: [
+        { roleFile: '.claude/roles/coder.md', mode: 'append', rationale: 'r', proposedContent: 'p', riskClass: 'additive' },
+      ],
+    }));
+    expect(out.edits[0].roleFile).toBe('coder.md');
+  });
+
   it('returns a safe no-gap fallback for invalid JSON', () => {
     const out = parseAnalysisOutput('not json');
     expect(out.isRolePromptGap).toBe(false);

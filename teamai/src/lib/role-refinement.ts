@@ -21,7 +21,7 @@
  */
 import { randomUUID, createHash } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync } from 'fs';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { TaskStore } from './task-store';
 import { writeRoleFile } from './role-files';
 import { resolveProvider, providerToSessionOpts } from './providers';
@@ -491,7 +491,10 @@ export function parseAnalysisOutput(raw: string): {
       ? o.edits
           .filter((e: RoleRefinementEdit) => e && typeof e.roleFile === 'string' && typeof e.proposedContent === 'string')
           .map((e: RoleRefinementEdit) => ({
-            roleFile: e.roleFile,
+            // Normalize away any path prefix the model echoed from the ROLE_FILES
+            // listing (which shows full paths so the model can read them) — the
+            // stored suggestion must hold the bare filename writeRoleFile expects.
+            roleFile: basename(e.roleFile),
             mode: e.mode === 'replace' ? 'replace' : 'append',
             rationale: typeof e.rationale === 'string' ? e.rationale : '',
             proposedContent: e.proposedContent,

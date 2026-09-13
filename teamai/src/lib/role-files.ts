@@ -5,12 +5,20 @@
  * in the project's .claude/roles/).
  */
 import { readdirSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { basename, join } from 'path';
 
+/**
+ * Writes a role file, tolerating a caller-supplied `filename` that carries a
+ * path prefix (e.g. `.claude/roles/coder.md` instead of `coder.md`) by
+ * normalizing to its basename first — this is the single point where a
+ * role-file name resolves to a concrete path, so it must be deterministic
+ * regardless of what upstream callers pass in.
+ */
 export function writeRoleFile(rolesDir: string, filename: string, content: string): void {
+  const normalized = basename(filename);
   const allowedFiles = readdirSync(rolesDir).filter(f => f.endsWith('.md'));
-  if (!allowedFiles.includes(filename)) {
+  if (!allowedFiles.includes(normalized)) {
     throw new Error(`Unknown role file: ${filename}`);
   }
-  writeFileSync(join(rolesDir, filename), content, 'utf-8');
+  writeFileSync(join(rolesDir, normalized), content, 'utf-8');
 }

@@ -304,6 +304,16 @@ describe('applyRefinement', () => {
     expect(() => applyRefinement(root, 'sug-1')).toThrow(/Unknown role file/);
   });
 
+  it('normalizes a path-prefixed roleFile from a pre-fix suggestion record', () => {
+    writeSuggestion(root, makeRecord({
+      edits: [{ roleFile: '.claude/roles/planner.md', mode: 'append', rationale: 'x', proposedContent: 'NEW RULE', riskClass: 'additive' }],
+    }));
+    applyRefinement(root, 'sug-1');
+
+    const content = readFileSync(join(root, '.claude', 'roles', 'planner.md'), 'utf-8');
+    expect(content).toContain('NEW RULE');
+  });
+
   it('appends an additive edit, backs up the original, and marks applied', () => {
     writeSuggestion(root, makeRecord());
     applyRefinement(root, 'sug-1');
