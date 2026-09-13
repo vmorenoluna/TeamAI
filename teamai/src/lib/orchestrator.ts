@@ -236,14 +236,20 @@ export class Orchestrator {
    * restorePipelineState call silently carries the OLD, already-exhausted
    * qaAttempt count into the new plan, so a task that failed QA 3/3 times
    * under a bad plan gets effectively 0 fresh attempts to prove a
-   * genuinely improved plan actually works. Only called for 'spec'/'plan'
-   * targets — moving back to 'implement'/'qa-review' with the SAME plan is
-   * a manual retry, not a new plan, and should keep counting against the
-   * same budget so the circuit breaker (ADR 005) still means something.
-   *
-   * Public so the retry-phase dialog can request an explicit budget reset
-   * regardless of target phase (e.g. resume at implement with a fresh QA
-   * budget after the plan was found to be sound).
+   * genuinely improved plan actually works. This method itself is only
+   * invoked directly, unconditionally, for 'spec'/'plan' targets below —
+   * but every retry entry point (`retryTask`, `retryTaskWithOptions`,
+   * `retryFailedTask`) also calls it unconditionally before resuming
+   * 'implement'/'qa-review', for the same reason: a retry must never
+   * inherit a near-exhausted qaAttempt/wakeupAttemptCount/
+   * deliverableFailCounts from the run that just failed, or a subtask can
+   * get killed almost instantly on the very next wakeup/QA pass even
+   * though the underlying work (e.g. a long-running sweep) is legitimately
+   * healthy. This used to be an opt-in choice (the retry-phase dialog's
+   * "Reset QA-attempt budget" toggle, ADR 005's circuit breaker preserved
+   * across manual retries) but a carried-over counter proved unsafe often
+   * enough that a fresh budget is no longer optional — the choice was
+   * removed and this is now always called.
    */
   clearPipelineStateFile(dir: string): void {
     try {

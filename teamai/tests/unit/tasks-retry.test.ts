@@ -194,6 +194,25 @@ describe('retryTask — Gap 5: qa_report.json snapshot', () => {
     expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'qa-review');
   });
 
+  // Regression: a task that failed on 'Wakeup attempt limit exceeded' (or any
+  // other counter carried in .pipeline_state.json) used to retry with that
+  // counter intact, so the very next wakeup/deliverable check could trip the
+  // same cap almost instantly — even when the retry's underlying work (e.g.
+  // a long-running sweep) was legitimately healthy and about to finish.
+  // retryTask must always clear the pipeline-state budget before resuming.
+  it('always clears the pipeline-state budget before resuming', async () => {
+    const slug = 'retry-clears-budget';
+    const { taskId } = seedFailedTask(TEST_DIR, slug);
+
+    const { retryTask } = await import('@/app/actions/tasks');
+    const result = await retryTask(taskId);
+
+    expect(result.success).toBe(true);
+    expect(mockClearPipelineStateFile).toHaveBeenCalledWith(
+      expect.stringContaining('.teamai'),
+    );
+  });
+
   // Regression coverage: qa-review.ts checks the QA-attempt budget BEFORE
   // spec-concern routing, so a report that legitimately flagged spec_concerns
   // can still land as failureReason 'qa-attempts-exhausted' rather than
@@ -479,11 +498,10 @@ describe('retryTaskWithOptions', () => {
     });
 
     const { retryTaskWithOptions } = await import('@/app/actions/tasks');
-    const result = await retryTaskWithOptions(taskId, 'implement', false);
+    const result = await retryTaskWithOptions(taskId, 'implement');
 
     expect(result.success).toBe(true);
     expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'implement');
-    expect(mockClearPipelineStateFile).not.toHaveBeenCalled();
     expect(mockRevalidatePath).toHaveBeenCalledWith('/');
   });
 
@@ -492,34 +510,27 @@ describe('retryTaskWithOptions', () => {
     const { taskId } = seedTask(slug, 'failed');
 
     const { retryTaskWithOptions } = await import('@/app/actions/tasks');
-    const result = await retryTaskWithOptions(taskId, 'plan', true);
+    const result = await retryTaskWithOptions(taskId, 'plan');
 
     expect(result.success).toBe(true);
     expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'plan');
   });
 
-  it('calls clearPipelineStateFile when resetBudget=true', async () => {
+  // Budget reset used to be an opt-in `resetBudget` flag — it is now always
+  // applied, regardless of target phase or whether the task was 'failed',
+  // so a counter carried over from a failed run can never trip a
+  // wakeup/deliverable-fail cap again almost instantly on the very next retry.
+  it('always calls clearPipelineStateFile for a failed task', async () => {
     const slug = 'rto-reset-budget';
     const { taskId } = seedTask(slug, 'failed');
 
     const { retryTaskWithOptions } = await import('@/app/actions/tasks');
-    const result = await retryTaskWithOptions(taskId, 'implement', true);
+    const result = await retryTaskWithOptions(taskId, 'implement');
 
     expect(result.success).toBe(true);
     expect(mockClearPipelineStateFile).toHaveBeenCalledWith(
       expect.stringContaining('.teamai'),
     );
-  });
-
-  it('does NOT call clearPipelineStateFile when resetBudget=false', async () => {
-    const slug = 'rto-no-reset';
-    const { taskId } = seedTask(slug, 'failed');
-
-    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
-    const result = await retryTaskWithOptions(taskId, 'implement', false);
-
-    expect(result.success).toBe(true);
-    expect(mockClearPipelineStateFile).not.toHaveBeenCalled();
   });
 
   it('runs pre-restore logic for failed tasks (snapshots qa_report)', async () => {
@@ -529,7 +540,7 @@ describe('retryTaskWithOptions', () => {
     });
 
     const { retryTaskWithOptions } = await import('@/app/actions/tasks');
-    const result = await retryTaskWithOptions(taskId, 'implement', false);
+    const result = await retryTaskWithOptions(taskId, 'implement');
 
     expect(result.success).toBe(true);
 
@@ -563,7 +574,7 @@ describe('retryTaskWithOptions', () => {
     );
 
     const { retryTaskWithOptions } = await import('@/app/actions/tasks');
-    const result = await retryTaskWithOptions(taskId, 'implement', false);
+    const result = await retryTaskWithOptions(taskId, 'implement');
     expect(result.success).toBe(true);
 
     const updatedTask = JSON.parse(readFileSync(join(taskDir, 'task.json'), 'utf-8'));
@@ -577,7 +588,7 @@ describe('retryTaskWithOptions', () => {
     });
 
     const { retryTaskWithOptions } = await import('@/app/actions/tasks');
-    const result = await retryTaskWithOptions(taskId, 'implement', false);
+    const result = await retryTaskWithOptions(taskId, 'implement');
 
     expect(result.success).toBe(true);
 
@@ -588,12 +599,12 @@ describe('retryTaskWithOptions', () => {
     expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'implement');
   });
 
-  it('moves non-failed task with resetBudget=true', async () => {
+  it('still resets budget for a non-failed task move', async () => {
     const slug = 'rto-backlog-reset';
     const { taskId } = seedTask(slug, 'backlog');
 
     const { retryTaskWithOptions } = await import('@/app/actions/tasks');
-    const result = await retryTaskWithOptions(taskId, 'plan', true);
+    const result = await retryTaskWithOptions(taskId, 'plan');
 
     expect(result.success).toBe(true);
     expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'plan');
@@ -602,7 +613,7 @@ describe('retryTaskWithOptions', () => {
 
   it('returns error for nonexistent task', async () => {
     const { retryTaskWithOptions } = await import('@/app/actions/tasks');
-    const result = await retryTaskWithOptions('nonexistent', 'implement', false);
+    const result = await retryTaskWithOptions('nonexistent', 'implement');
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('Task not found');
@@ -621,7 +632,7 @@ describe('retryTaskWithOptions', () => {
     writeFileSync(join(taskDir, 'qa_report_before_failed.json'), snapshotContent);
 
     const { retryTaskWithOptions } = await import('@/app/actions/tasks');
-    const result = await retryTaskWithOptions(taskId, 'implement', false);
+    const result = await retryTaskWithOptions(taskId, 'implement');
 
     expect(result.success).toBe(true);
 
@@ -630,17 +641,5 @@ describe('retryTaskWithOptions', () => {
     expect(existsSync(reportPath)).toBe(true);
     const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
     expect(report.criteria[0].name).toBe('Auth check');
-  });
-
-  it('resets budget on implement target with resetBudget=true', async () => {
-    const slug = 'rto-implement-budget';
-    const { taskId } = seedTask(slug, 'failed');
-
-    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
-    const result = await retryTaskWithOptions(taskId, 'implement', true);
-
-    expect(result.success).toBe(true);
-    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'implement');
-    expect(mockClearPipelineStateFile).toHaveBeenCalled();
   });
 });

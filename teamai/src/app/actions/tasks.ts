@@ -80,6 +80,14 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
 
   preRestoreFailedTask(taskStore, taskId);
 
+  // A retry always gets a fresh pipeline-state budget (qaAttempt,
+  // wakeupAttemptCount, deliverableFailCounts, ...) — see clearPipelineStateFile's
+  // doc comment. Carrying a near-exhausted counter into a retry means a
+  // subtask that already burned its wakeup budget on the failed run gets
+  // killed almost instantly on the very next wakeup, even if the underlying
+  // work (e.g. a long-running sweep) is legitimately healthy and about to finish.
+  orchestrator.clearPipelineStateFile(taskStore.getDirById(taskId));
+
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
   orchestrator.moveTaskToPhase(taskId, resumePhase).catch(err => logError('tasks', `retryTask ${taskId} failed`, err));
   revalidatePath('/');
@@ -87,19 +95,21 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
 }
 
 /**
- * Retry a task with explicit phase and optional budget reset.
+ * Retry a task with an explicit phase chosen by the user through the
+ * retry-phase dialog (unlike `retryTask`, which picks the resume phase
+ * automatically from events.jsonl).
  *
- * Unlike `retryTask` which picks the resume phase automatically from
- * events.jsonl, this accepts an explicit phase chosen by the user through
- * the retry-phase dialog.  It also accepts an optional `resetBudget` flag
- * that clears `.pipeline_state.json` (resetting qaAttempt and the other
- * failure counters) regardless of target phase — decoupling the "which
- * artifacts to clear" decision from the "fresh QA-attempt budget" decision.
+ * Always clears `.pipeline_state.json` (qaAttempt, wakeupAttemptCount,
+ * deliverableFailCounts, ...) before resuming — this used to be a
+ * user-chosen `resetBudget` flag, but a carried-over counter from the
+ * failed run can trip a wakeup/deliverable-fail cap almost immediately on
+ * the retry regardless of target phase, so a fresh budget is no longer
+ * optional. See `clearPipelineStateFile`'s doc comment for the full
+ * rationale.
  */
 export async function retryTaskWithOptions(
   taskId: string,
   phase: string,
-  resetBudget: boolean,
 ): Promise<{ success: boolean; error?: string }> {
   const { taskStore, orchestrator } = await getStores();
   const task = taskStore.getById(taskId);
@@ -110,11 +120,8 @@ export async function retryTaskWithOptions(
     preRestoreFailedTask(taskStore, taskId);
   }
 
-  // ── Budget reset (independent of phase choice) ──
-  if (resetBudget) {
-    const dir = taskStore.getDirById(taskId);
-    orchestrator.clearPipelineStateFile(dir);
-  }
+  // ── Budget reset (always, independent of phase choice) ──
+  orchestrator.clearPipelineStateFile(taskStore.getDirById(taskId));
 
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
   orchestrator.moveTaskToPhase(taskId, phase).catch(err => logError('tasks', `stopTask ${taskId} failed`, err));

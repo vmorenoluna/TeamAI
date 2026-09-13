@@ -247,7 +247,7 @@ describe('TaskDetail mutation handlers', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
       });
 
-      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('retry-1', 'implement', false);
+      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('retry-1', 'implement');
       await waitFor(() => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('Failed to retry task: inline retry raw throw: bad pipeline state');
