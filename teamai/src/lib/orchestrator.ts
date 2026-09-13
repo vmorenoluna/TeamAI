@@ -25,7 +25,7 @@ import { detectGitPlatform, isPrMerged } from './git-platform';
 import { warn as logWarn, log, error as logError } from './logger';
 import type { PhaseContext } from './orchestrator/phase-context';
 import type { PipelinePhase } from '@/constants/phases';
-import type { TaskPipeline, MergeStrategy } from './orchestrator/types';
+import type { TaskPipeline, MergeStrategy, QaReport } from './orchestrator/types';
 import type { FeedbackTarget } from './orchestrator/feedback-target';
 
 export class Orchestrator {
@@ -177,6 +177,21 @@ export class Orchestrator {
     const hasSpec = existsSync(path.join(dir, 'spec.md'));
     const hasPlan = existsSync(path.join(dir, 'plan.json'));
 
+    // A retry to spec/plan/implement/qa-review clears qa_report.json AND
+    // qa_feedback.md below (see PHASE_ARTIFACTS) — silently dropping the last
+    // QA verdict unless a human happens to re-type it via reject/feedback.
+    // Read it before the clear so it can be re-derived into a fresh
+    // qa_feedback.md afterward: the existing hasQaFeedback rework path in
+    // implement.ts (criterion matching + fallback synthesis for unmatched
+    // additional_issues) then picks it up exactly as it would after an
+    // automatic QA-fail bounce, with no change needed there.
+    const clearsQaArtifacts = targetPhase === 'spec' || targetPhase === 'plan'
+      || targetPhase === 'implement' || targetPhase === 'qa-review';
+    let priorQaReport: QaReport | undefined;
+    if (clearsQaArtifacts) {
+      try { priorQaReport = JSON.parse(readFileSync(path.join(dir, 'qa_report.json'), 'utf-8')); } catch { /* no report to carry forward */ }
+    }
+
     // Determine actual start phase and clear stale artifacts
     let startPhase: PipelinePhase = 'spec';
     if (targetPhase === 'spec') {
@@ -208,6 +223,10 @@ export class Orchestrator {
       }
     } else {
       startPhase = targetPhase as PipelinePhase;
+    }
+
+    if (clearsQaArtifacts && priorQaReport?.overall === 'FAIL') {
+      writeQaFeedback(dir, priorQaReport);
     }
 
     // Do NOT persist startPhase here — persistAndEmitPhase (called from deep

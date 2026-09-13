@@ -180,6 +180,34 @@ export function writeFailReport(pipeline: TaskPipeline, failReport: QaReport, la
 }
 
 /**
+ * Terminal routing for a FAIL report whose QA budget is exhausted — always
+ * write qa_feedback.md first (so there's a record of what was flagged, and
+ * moveTaskToPhase's retry-preservation logic has something to re-derive from
+ * even without a human re-typing it) before failing the task.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export function failBudgetExhausted(pipeline: TaskPipeline, deps: QaReviewDeps, report: QaReport): void {
+  deps.writeQaFeedback(pipeline, report);
+  deps.writeCompletionSummary(pipeline, 'qa-attempts-exhausted');
+  deps.advancePhase(pipeline, 'failed');
+}
+
+/**
+ * Bounce a FAIL report back to implement — the shared tail of every
+ * non-exhausted FAIL path (unpushed-commits precheck, unreadable-report
+ * precheck, and the main QA-report FAIL router).
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export async function bounceToImplement(pipeline: TaskPipeline, deps: QaReviewDeps, report: QaReport): Promise<void> {
+  deps.writeQaFeedback(pipeline, report);
+  deps.advancePhase(pipeline, 'implement');
+  deps.savePipelineState(pipeline);
+  await deps.executePhase(pipeline);
+}
+
+/**
  * Snapshot qa_report.json to qa_report_before_bounce.json so the next QA
  * cycle can compare FAIL criteria against the previous cycle.
  *
@@ -328,13 +356,9 @@ export async function runQaReview(
     logToOutput(pipeline.specPath, '[QA-PRECHECK] FAIL — unpushed commits detected, engineer must push first\n');
 
     if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts) {
-      deps.writeCompletionSummary(pipeline, 'qa-attempts-exhausted');
-      deps.advancePhase(pipeline, 'failed');
+      failBudgetExhausted(pipeline, deps, failReport);
     } else {
-      deps.writeQaFeedback(pipeline, failReport);
-      deps.advancePhase(pipeline, 'implement');
-      deps.savePipelineState(pipeline);
-      await deps.executePhase(pipeline);
+      await bounceToImplement(pipeline, deps, failReport);
     }
     return;
   }
@@ -386,13 +410,9 @@ export async function runQaReview(
     };
     writeFailReport(pipeline, failReport, 'unreadable-report');
     if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts) {
-      deps.writeCompletionSummary(pipeline, 'qa-attempts-exhausted');
-      deps.advancePhase(pipeline, 'failed');
+      failBudgetExhausted(pipeline, deps, failReport);
     } else {
-      deps.writeQaFeedback(pipeline, failReport);
-      deps.advancePhase(pipeline, 'implement');
-      deps.savePipelineState(pipeline);
-      await deps.executePhase(pipeline);
+      await bounceToImplement(pipeline, deps, failReport);
     }
     return;
   }
@@ -431,12 +451,14 @@ export async function runQaReview(
   // spec-concern routing so a task cannot loop through unlimited real
   // implement→QA rounds merely because every report also has spec_concerns.
   if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts && report.overall !== 'PASS') {
-    deps.writeQaFeedback(pipeline, report);
-    deps.writeCompletionSummary(pipeline, 'qa-attempts-exhausted');
-    deps.advancePhase(pipeline, 'failed');
+    failBudgetExhausted(pipeline, deps, report);
     return;
   }
 
+  // Budget is confirmed NOT exhausted past this point (the check above
+  // already returned otherwise, and qaAttempt <= Math.max(qaRoundCount,
+  // qaAttempt) means qaAttempt < maxQaAttempts here too) — every branch
+  // below bounces back to implement rather than failing.
   if (hasSpecConcerns) {
     // Keep the coder's QA feedback alongside the analyst's spec revision
     // feedback; spec concerns must not discard concrete code defects.
@@ -445,9 +467,6 @@ export async function runQaReview(
     return;
   } else if (report.overall === 'PASS') {
     deps.advancePhase(pipeline, 'awaiting-review');
-  } else if (pipeline.qaAttempt >= pipeline.maxQaAttempts) {
-    deps.writeCompletionSummary(pipeline, 'qa-attempts-exhausted');
-    deps.advancePhase(pipeline, 'failed');
   } else {
     // FAIL-type router
     if (report.fail_type === 'cleanup') {
@@ -459,9 +478,6 @@ export async function runQaReview(
       logToOutput(pipeline.specPath, '[QA-ROUTER] Cleanup fix is automated — executing via implement cleanup-only rework mode\n');
     }
 
-    deps.writeQaFeedback(pipeline, report);
-    deps.advancePhase(pipeline, 'implement');
-    deps.savePipelineState(pipeline);
-    await deps.executePhase(pipeline);
+    await bounceToImplement(pipeline, deps, report);
   }
 }

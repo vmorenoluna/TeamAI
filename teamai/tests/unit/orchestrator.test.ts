@@ -1737,6 +1737,90 @@ describe('Orchestrator', () => {
     });
   });
 
+  // Regression: moveTaskToPhase clears qa_report.json (and any existing
+  // qa_feedback.md) for spec/plan/implement/qa-review targets, so a plain
+  // retry — via the phase-select dialog, not "Send Feedback" — used to drop
+  // the last QA verdict on the floor. The coder then saw no qa_feedback.md
+  // at all and could only rework whatever subtask plan.json still marked
+  // incomplete, silently skipping any QA finding that lived outside that
+  // subtask's file scope.
+  describe('moveTaskToPhase — re-derives qa_feedback.md from the pre-clear QA report', () => {
+    it('writes a fresh qa_feedback.md from a FAIL report when retrying to implement', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'x', description: 'x', files: [], acceptance_criteria: [] }],
+      }));
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [{ criterion: 'Docstring matches constant', status: 'FAIL', notes: 'Stale +0.15 text' }],
+        additional_issues: [{ description: 'Stale docstring', file: 'scripts/analyze.py:9', fix_needed: 'Update to +0.14' }],
+      }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'implement');
+      } finally {
+        executeSpy.mockRestore();
+      }
+
+      // clearArtifacts still ran as before — the stale report itself is gone.
+      expect(existsSync(join(testData.taskDir, 'qa_report.json'))).toBe(false);
+      const feedback = readFileSync(join(testData.taskDir, 'qa_feedback.md'), 'utf-8');
+      expect(feedback).toContain('Docstring matches constant');
+      expect(feedback).toContain('Stale docstring');
+    });
+
+    it('also survives a retry to spec, so it is still there once implement is reached', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        additional_issues: [{ description: 'Stale docstring', file: 'scripts/analyze.py:9' }],
+      }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'spec');
+      } finally {
+        executeSpy.mockRestore();
+      }
+
+      const feedback = readFileSync(join(testData.taskDir, 'qa_feedback.md'), 'utf-8');
+      expect(feedback).toContain('Stale docstring');
+    });
+
+    it('does not write qa_feedback.md when there is no qa_report.json to carry forward', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'implement');
+      } finally {
+        executeSpy.mockRestore();
+      }
+
+      expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
+    });
+
+    it('does not write qa_feedback.md when the last QA report already passed', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({ overall: 'PASS', criteria: [] }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'implement');
+      } finally {
+        executeSpy.mockRestore();
+      }
+
+      expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
+    });
+  });
+
   // ── _writeQaFeedback ──────────────────────────────────────────────
 
   describe('_writeQaFeedback', () => {
