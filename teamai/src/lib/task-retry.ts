@@ -105,7 +105,16 @@ export function retryFailedTask(projectRoot: string, taskId: string): void {
 
   preRestoreFailedTask(taskStore, taskId);
 
+  // Always give the resumed run a fresh pipeline-state budget (qaAttempt,
+  // wakeupAttemptCount, deliverableFailCounts, ...) — matches retryTask /
+  // retryTaskWithOptions. Otherwise a subtask that already burned its wakeup
+  // budget on the failed run gets killed almost instantly on the very next
+  // wakeup, even when the role-refinement fix this auto-retry follows was
+  // exactly right and the underlying work is legitimately healthy.
+  const orchestrator = getOrchestrator(projectRoot);
+  orchestrator.clearPipelineStateFile(taskStore.getDirById(taskId));
+
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket.
-  getOrchestrator(projectRoot).moveTaskToPhase(taskId, resumePhase)
+  orchestrator.moveTaskToPhase(taskId, resumePhase)
     .catch(err => logError('task-retry', `retryFailedTask ${taskId} failed`, err));
 }

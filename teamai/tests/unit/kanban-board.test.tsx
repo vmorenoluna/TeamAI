@@ -576,7 +576,7 @@ describe('KanbanBoard', () => {
 
       // retryTaskWithOptions should have been called
       await waitFor(() => {
-        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement', false);
+        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement');
       });
 
       // Toast with Undo button appears
@@ -626,8 +626,8 @@ describe('KanbanBoard', () => {
       await waitFor(() => {
         expect(screen.getByText('Move Task')).toBeInTheDocument();
       });
-      // Since there's only one phase (implement), no radio buttons — just explanation + budget toggle
-      expect(screen.getByText('Reset QA-attempt budget')).toBeInTheDocument();
+      // Since there's only one phase (implement), no radio buttons — just the explanation.
+      expect(screen.getByText(/fresh QA\/wakeup-attempt budget/)).toBeInTheDocument();
     });
 
     it('calls retryTaskWithOptions when dialog is confirmed for implement drop', async () => {
@@ -643,7 +643,7 @@ describe('KanbanBoard', () => {
       fireEvent.click(screen.getByText('Move & Resume'));
 
       await waitFor(() => {
-        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement', false);
+        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement');
       });
     });
 
@@ -720,7 +720,7 @@ describe('KanbanBoard', () => {
       expect(screen.getByText('Resume from Plan')).toBeInTheDocument();
     });
 
-    it('defaults Analysis drop to plan and budget checked', async () => {
+    it('defaults Analysis drop to plan', async () => {
       renderBoard([task({ id: '1', title: 'Draggable', phase: 'failed' })]);
 
       dropCardOnColumn('Analysis');
@@ -729,11 +729,11 @@ describe('KanbanBoard', () => {
         expect(screen.getByText('Choose Resume Phase')).toBeInTheDocument();
       });
 
-      // Confirm with defaults (plan, budget=true for spec/plan targets)
+      // Confirm with the default phase (plan)
       fireEvent.click(screen.getByText('Resume'));
 
       await waitFor(() => {
-        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'plan', true);
+        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'plan');
       });
     });
 
@@ -799,7 +799,7 @@ describe('KanbanBoard', () => {
       fireEvent.click(screen.getByText('Move & Resume'));
 
       await waitFor(() => {
-        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement', false);
+        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement');
       });
 
       // (a) Error banner surfaces the thrown message

@@ -113,11 +113,11 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
     setShowRetryDialog(true);
   }
 
-  async function handleRetryConfirm(phase: string, resetBudget: boolean) {
+  async function handleRetryConfirm(phase: string) {
     setShowRetryDialog(false);
     runRetry(async () => {
       try {
-        const result = await retryTaskWithOptions(task.id, phase, resetBudget);
+        const result = await retryTaskWithOptions(task.id, phase);
         if (!result.success) throw new Error(result.error || 'Unknown error');
       } catch (err) {
         alert(formatActionError('retry task', err));
@@ -415,7 +415,6 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
         taskTitle={task.title}
         phases={RETRY_PHASE_OPTIONS}
         defaultPhase="implement"
-        budgetDefault={false}
         onCancel={() => setShowRetryDialog(false)}
         onConfirm={handleRetryConfirm}
       />
