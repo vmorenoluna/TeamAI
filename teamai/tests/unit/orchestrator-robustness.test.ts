@@ -438,6 +438,12 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
     expect(report.overall).toBe('FAIL');
     expect(report.criteria[0].name).toBe('Unpushed commits');
+
+    // Regression: qa_feedback.md must be written even when the budget is
+    // exhausted — a retry's clearArtifacts wipes qa_report.json too, so this
+    // is the only in-repo record of why the task failed if nothing else
+    // re-derives it before the coder's next implement pass.
+    expect(existsSync(join(project.taskDir, 'qa_feedback.md'))).toBe(true);
   });
 
   it('proceeds normally when no unpushed commits exist', async () => {
@@ -682,6 +688,83 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
 
     const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
     expect(logContent).toContain('Push failed after merger resolution');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Unreadable QA report precheck — always writes qa_feedback.md, whether
+//  bouncing back to implement or failing outright once the budget is spent
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('runQaReview — unreadable QA report precheck', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+    // No unpushed commits — reach the QA session and fail there instead.
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (args && args[0] === 'log') return '';
+      return '';
+    });
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  it('bounces back to implement and writes qa_feedback.md when the QA report is unreadable, budget not exhausted', async () => {
+    mockCreateSession.mockResolvedValueOnce('sess-qa-unreadable');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    try {
+      // maxQaAttempts is 3 (setupProject's pipeline.json) — a single failed
+      // round must bounce, not fail outright.
+      const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 1 });
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      // No qa_report.json written by the (simulated) QA agent — session
+      // completes but leaves nothing readable behind.
+      fireEvent('event', { sessionId: 'sess-qa-unreadable', event: { type: 'result' } });
+      await promise;
+
+      expect(pipeline.phase).toBe('implement');
+
+      const report = JSON.parse(readFileSync(join(project.taskDir, 'qa_report.json'), 'utf-8'));
+      expect(report.overall).toBe('FAIL');
+      expect(report.criteria[0].name).toBe('QA report unreadable');
+
+      expect(existsSync(join(project.taskDir, 'qa_feedback.md'))).toBe(true);
+      expect(executeSpy).toHaveBeenCalled();
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('advances to failed and still writes qa_feedback.md when the QA report is unreadable, max QA attempts reached', async () => {
+    mockCreateSession.mockResolvedValueOnce('sess-qa-unreadable-exhausted');
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 3, maxQaAttempts: 3 });
+
+    const promise = (orch as AnyOrch).runQaReview(pipeline);
+    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+    fireEvent('event', { sessionId: 'sess-qa-unreadable-exhausted', event: { type: 'result' } });
+    await promise;
+
+    expect(pipeline.phase).toBe('failed');
+
+    const report = JSON.parse(readFileSync(join(project.taskDir, 'qa_report.json'), 'utf-8'));
+    expect(report.overall).toBe('FAIL');
+    expect(report.criteria[0].name).toBe('QA report unreadable');
+
+    // Regression: previously only the non-exhausted branch called
+    // writeQaFeedback here — the exhausted branch skipped it, leaving no
+    // record of why the task failed for a subsequent retry to recover.
+    expect(existsSync(join(project.taskDir, 'qa_feedback.md'))).toBe(true);
   });
 });
 
