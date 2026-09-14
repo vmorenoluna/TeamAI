@@ -1,9 +1,0 @@
-{
-  "id": "ba5886ce-93ed-45ba-af5f-a68b6d0dc88b",
-  "title": "Unify frontend styling to Tailwind-only",
-  "description": "The codebase mixes inline styles, CSS modules, and Tailwind classes. Standardize all components to Tailwind CSS v4 utility classes to reduce bundle size and improve consistency. The Tailwind v4 setup is already in place (postcss.config.mjs, tailwind v4) but not universally adopted.",
-  "phase": "backlog",
-  "source": "ideation",
-  "createdAt": "2026-06-24T20:49:24.162Z",
-  "updatedAt": "2026-06-24T20:49:24.162Z"
-}

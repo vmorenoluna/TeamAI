@@ -1,9 +1,0 @@
-{
-  "id": "1cd16ac3-ea4c-4402-835c-87335271a1aa",
-  "title": "Comprehensive WebSocket integration tests",
-  "description": "The test suite covers unit and E2E tests well but lacks dedicated WebSocket streaming integration tests. Add tests that verify real-time event delivery, reconnection behavior, and error handling for the `/ws` endpoint. The streaming path is critical and currently tested only indirectly through E2E tests.",
-  "phase": "qa-review",
-  "source": "ideation",
-  "createdAt": "2026-06-24T20:51:04.059Z",
-  "updatedAt": "2026-06-24T20:51:04.059Z"
-}
