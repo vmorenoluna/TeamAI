@@ -12,6 +12,7 @@ import { TERMINAL_PHASES, PAUSED_PHASES } from '@/constants/phases';
 import { computePipelineConfig } from './orchestrator/helpers';
 import { buildTicketMessageForPipeline } from './orchestrator/artifact-commit';
 import { isAutoModeEnabled, getAutoModeState } from './auto-mode-state';
+import { recordAutoProcessed } from './auto-review-store';
 import { ContainerDockerMissingError } from './orchestrator/errors';
 
 // Async (non-blocking) execFile — see the comment on _startCIPolling for why
@@ -570,20 +571,35 @@ function buildTicketMessageForTask(
 }
 
 function _finishTask(taskId: string, projectRoot: string, _state: AutoProjectState): void {
+  // Persist this before markTaskDone deletes the per-task workspace. The
+  // completed ticket is reconstructed from git history afterwards, so
+  // autoProcessed/autoReviewed cannot live in task.json anymore.
+  try {
+    const taskStore = new TaskStore(projectRoot);
+    const task = taskStore.getById(taskId);
+    if (task) {
+      const dir = taskStore.getDirById(taskId);
+      recordAutoProcessed(projectRoot, taskId, task.slug ?? dir.split(/[\\/]/).pop() ?? taskId);
+    }
+  } catch (err) {
+    logWarn('auto-mode', `Failed to persist auto-review metadata for task ${taskId}`, err);
+  }
+
   const orchestrator = getOrchestrator(projectRoot);
   orchestrator.markTaskDone(taskId).then(() => {
     log('auto-mode', `Task ${taskId} marked as done (auto-processed)`);
   }).catch(err => {
     logError('auto-mode', `Failed to mark task ${taskId} as done`, err);
   }).finally(() => {
-    // Stamp autoProcessed AFTER markTaskDone runs (success or failure).
-    // Stamping before would be overwritten when markTaskDone restores the
-    // committed artifact snapshot (which does not carry the flag — it's set
-    // here, not in _autoApprove, to avoid leaking onto human-approved tasks).
-    // Using .finally() instead of .then() ensures the flag survives even if
-    // markTaskDone itself rejects (the PR was auto-merged regardless).
+    // Keep the legacy task.json stamp when a task record still exists (for
+    // compatibility with in-flight/non-history consumers). Normal completion
+    // has already deleted the task workspace, and the durable record above is
+    // the source used by history-reconstructed cards.
     try {
-      new TaskStore(projectRoot).update(taskId, { autoProcessed: true });
+      const taskStore = new TaskStore(projectRoot);
+      if (taskStore.getById(taskId)) {
+        taskStore.update(taskId, { autoProcessed: true });
+      }
     } catch (err) {
       logWarn('auto-mode', `Failed to stamp autoProcessed on task ${taskId} after markTaskDone`, err);
     }
