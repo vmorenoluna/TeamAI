@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, act, fireEvent, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, QAReportData } from '@/lib/stream-types';
@@ -1555,6 +1555,57 @@ describe('TaskDetail', () => {
 
       expect(screen.queryByText(/This task was auto-processed/)).not.toBeInTheDocument();
       expect(screen.queryByText('✓ Mark Reviewed')).not.toBeInTheDocument();
+    });
+
+    it('shows only failed acceptance criteria and QA recommendations in the failure overview', () => {
+      renderDetail({
+        task: { phase: 'failed', completionSummary: '{"criteria":[...all QA JSON...]}' },
+        qaReport: {
+          overall: 'FAIL',
+          criteria: [
+            { criterion: 'Empty input is handled', status: 'PASS', notes: 'Verified' },
+            { criterion: 'Helpful error is shown', status: 'FAIL', notes: 'No message appears', fix_needed: 'Display an inline validation message.' },
+          ],
+          additional_issues: [
+            { description: 'Whitespace input is accepted', fix_needed: 'Trim input before validating.' },
+          ],
+        },
+      });
+
+      expect(screen.getByTestId('failed-qa-criteria')).toBeInTheDocument();
+      expect(within(screen.getByTestId('failed-qa-criteria')).getByText('Helpful error is shown')).toBeInTheDocument();
+      expect(screen.getByText('No message appears')).toBeInTheDocument();
+      expect(screen.getByTestId('qa-recommendations')).toBeInTheDocument();
+      expect(screen.getByText('Display an inline validation message.')).toBeInTheDocument();
+      expect(screen.getByText('Trim input before validating.')).toBeInTheDocument();
+
+      // The overview should not duplicate the QA tab's passing criterion or
+      // expose the raw completion-summary/QA JSON.
+      expect(screen.queryByText('Empty input is handled')).not.toBeInTheDocument();
+      expect(screen.queryByText('{"criteria":[...all QA JSON...]}')).not.toBeInTheDocument();
+    });
+
+    it('shows a concise fallback when a failed task has no QA report', () => {
+      renderDetail({
+        task: { phase: 'failed', completionSummary: 'Failure details that belong in the terminal.' },
+        qaReport: null,
+      });
+
+      expect(screen.getByText('No QA report is available for this failure. See the terminal output for details.')).toBeInTheDocument();
+      expect(screen.queryByText('Failure details that belong in the terminal.')).not.toBeInTheDocument();
+    });
+
+    it('uses the criterion name when the QA report uses the legacy name field', () => {
+      renderDetail({
+        task: { phase: 'failed', completionSummary: 'Failure details that belong in the terminal.' },
+        qaReport: {
+          overall: 'FAIL',
+          criteria: [{ name: 'Legacy acceptance criterion', status: 'FAIL', fix_needed: 'Implement the missing behavior.' }],
+        },
+      });
+
+      expect(within(screen.getByTestId('failed-qa-criteria')).getByText('Legacy acceptance criterion')).toBeInTheDocument();
+      expect(screen.getByText('Implement the missing behavior.')).toBeInTheDocument();
     });
   });
 });
