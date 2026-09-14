@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -505,7 +505,7 @@ describe('Recovery Integration', () => {
   describe('autoResumeInterruptedTasks', () => {
     beforeEach(async () => {
       vi.clearAllMocks();
-      mockGetOrchestrator.mockReturnValue({ resumeTask: mockOrchResumeTask });
+      mockGetOrchestrator.mockReturnValue({ resumeTask: mockOrchResumeTask, isTaskActive: () => false });
       mockOrchResumeTask.mockResolvedValue(undefined);
     });
 
@@ -602,5 +602,38 @@ describe('Recovery Integration', () => {
 
       expect(mockOrchResumeTask).toHaveBeenCalledWith('real-task-uuid-123');
     });
+
+    it('re-schedules a future rate-limit deadline after startup instead of dropping it', async () => {
+      vi.useFakeTimers();
+      try {
+        const projectPath = registerProject('future-rate-limit');
+        const taskDir = createTask(projectPath, 't-future', { phase: 'implement', title: 'Future Rate Limit' });
+        const resetAt = new Date(Date.now() + 60_000).toISOString();
+        const taskFile = join(taskDir, 'task.json');
+        const task = JSON.parse(readFileSync(taskFile, 'utf-8'));
+        task.rateLimitedUntil = resetAt;
+        writeFileSync(taskFile, JSON.stringify(task, null, 2));
+
+        const { autoResumeInterruptedTasks } = await import('../../src/lib/recovery');
+        const count = await autoResumeInterruptedTasks();
+
+        // The deadline is future-dated, so startup must arm a timer but must
+        // not resume the task early.
+        expect(count).toBe(0);
+        expect(mockOrchResumeTask).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(1);
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        await Promise.resolve();
+
+        expect(mockOrchResumeTask).toHaveBeenCalledWith('t-future');
+        const resumedTask = JSON.parse(readFileSync(taskFile, 'utf-8'));
+        expect(resumedTask.rateLimitedUntil).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+
   });
 });
