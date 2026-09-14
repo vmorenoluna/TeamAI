@@ -1591,8 +1591,21 @@ describe('TaskDetail', () => {
         qaReport: null,
       });
 
-      expect(screen.getByText('No QA report is available for this failure. See the terminal output for details.')).toBeInTheDocument();
+      expect(screen.getByText('No QA report is available because this task failed before completing a QA review. See the terminal output for details.')).toBeInTheDocument();
       expect(screen.queryByText('Failure details that belong in the terminal.')).not.toBeInTheDocument();
+    });
+
+    it('shows the pre-QA fallback for a coder session crash without a QA report', () => {
+      renderDetail({
+        task: {
+          phase: 'failed',
+          failureReason: 'session-crashed',
+          completionSummary: 'The coder session exited unexpectedly.',
+        },
+        qaReport: null,
+      });
+
+      expect(screen.getByText('No QA report is available because this task failed before completing a QA review. See the terminal output for details.')).toBeInTheDocument();
     });
 
     it('uses the criterion name when the QA report uses the legacy name field', () => {

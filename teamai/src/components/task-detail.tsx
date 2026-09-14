@@ -478,7 +478,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
 
                   {!qaReport && (
                     <p className="text-xs text-slate-400">
-                      No QA report is available for this failure. See the terminal output for details.
+                      No QA report is available because this task failed before completing a QA review. See the terminal output for details.
                     </p>
                   )}
 
