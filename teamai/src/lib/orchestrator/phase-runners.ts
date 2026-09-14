@@ -616,6 +616,20 @@ export async function runCreatePRPhase(
   deps.persistAndEmitPhase(pipeline);
   const logFile = path.join(pipeline.specPath, 'output.log');
 
+  // spec_summary.md is required, not best-effort — runSpecPhase already
+  // guarantees it exists for every task going forward (parks in
+  // awaiting-review otherwise), so this should never fire for a task that
+  // went through the spec phase under current code. It exists only to catch
+  // a legacy task whose spec phase ran before that gate did: fail loudly
+  // here rather than silently shipping a PR body with no Specification
+  // Summary section.
+  const specSummary = readSpecSummary(pipeline.specPath);
+  if (!specSummary) {
+    const msg = `Missing spec_summary.md for task ${pipeline.taskId} — cannot build the PR body without it.`;
+    warn('create-pr', msg);
+    throw new Error(msg);
+  }
+
   // Rebase onto latest default branch so the PR diff only contains the ticket's actual changes.
   const baseBranch = resolveBaseBranch(deps.projectRoot);
   const rebaseOk = await rebaseOntoLatestDefault(
@@ -650,12 +664,13 @@ export async function runCreatePRPhase(
     logToOutput(pipeline.specPath, `[PR] Open PR already exists for branch ${pipeline.branch}: ${prUrl}\n`);
   } else {
     // Create PR directly via CLI (gh) instead of spawning a merger agent.
-    // implementation_summary.md / spec_summary.md are independent of
-    // recordHistoryInGit (they're prose, not a trailer) — read them directly
-    // rather than through ticketMessage, which is null when that toggle is off.
+    // implementation_summary.md is independent of recordHistoryInGit (it's
+    // prose, not a trailer) — read it directly rather than through
+    // ticketMessage, which is null when that toggle is off. specSummary was
+    // already read (and required-checked) above.
     const body = buildPRBody(
       pipeline.description,
-      readSpecSummary(pipeline.specPath),
+      specSummary,
       ticketMessage?.trailerLines ?? [],
       readImplementationSummary(pipeline.specPath),
     );

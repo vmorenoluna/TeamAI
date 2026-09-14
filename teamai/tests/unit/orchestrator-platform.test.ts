@@ -307,21 +307,18 @@ describe('buildPRBody', () => {
   });
 
   it('includes QA testing section', () => {
-    const result = buildPRBody('Fix bug');
+    const result = buildPRBody('Fix bug', 'Spec summary text.');
     expect(result).toContain('## Testing');
     expect(result).toContain('QA review passed.');
   });
 
-  it('omits the Specification Summary section when no spec summary is given', () => {
-    const result = buildPRBody('Empty spec');
-    expect(result).toContain('## Summary');
-    expect(result).toContain('Empty spec');
-    expect(result).not.toContain('## Specification Summary');
-  });
-
-  it('omits the Specification Summary section for a null or empty spec summary', () => {
-    expect(buildPRBody('Add login feature', null)).not.toContain('## Specification Summary');
-    expect(buildPRBody('Add login feature', '')).not.toContain('## Specification Summary');
+  it('always includes the Specification Summary section — required, not best-effort', () => {
+    // buildPRBody trusts the caller to have already confirmed spec_summary.md
+    // exists (runCreatePRPhase throws before calling this otherwise) — it
+    // does not itself special-case a missing/empty summary.
+    const result = buildPRBody('Some feature', 'Chose X because of Y.');
+    expect(result).toContain('## Specification Summary');
+    expect(result).toContain('Chose X because of Y.');
   });
 
   it('includes a "What Was Implemented" section when an implementation summary is given', () => {

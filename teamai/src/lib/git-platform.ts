@@ -67,12 +67,12 @@ export function resolveBaseBranch(projectRoot: string, invalidate?: boolean): st
  * server-side (independent of any local argv limit), so a large spec broke
  * PR creation outright. A short, decision-focused summary is bounded by
  * construction (same shape as implementationSummary below) and is what
- * actually survives as the durable record now. runSpecPhase treats writing
- * this file as mandatory (parks the task in awaiting-review otherwise), so
- * for any task that went through the spec phase after this fix it will
- * exist. Still omitted from the PR body entirely when absent — a legacy
- * task whose spec phase ran before this fix existed — rather than falling
- * back to the raw spec, which would reintroduce the same unbounded-size
+ * actually survives as the durable record now. Required, not optional:
+ * runSpecPhase treats writing this file as mandatory for every task (parks
+ * the task in awaiting-review otherwise), so the caller (runCreatePRPhase)
+ * is expected to have already confirmed spec_summary.md exists — reading it
+ * is not this function's job. There is no silent fallback to the raw spec
+ * for a missing summary; that would reintroduce the exact unbounded-size
  * problem this fix exists to close.
  *
  * `trailerLines` — optional trailer block lines (Task/Task-ID/QA/Phases/
@@ -90,7 +90,7 @@ export function resolveBaseBranch(projectRoot: string, invalidate?: boolean): st
  */
 export function buildPRBody(
   description: string,
-  specSummary?: string | null,
+  specSummary: string,
   trailerLines: string[] = [],
   implementationSummary?: string | null,
 ): string {
@@ -107,17 +107,13 @@ export function buildPRBody(
     '## Testing',
     '',
     'QA review passed.',
+    '',
+    '---',
+    '',
+    '## Specification Summary',
+    '',
+    specSummary,
   );
-  if (specSummary) {
-    parts.push(
-      '',
-      '---',
-      '',
-      '## Specification Summary',
-      '',
-      specSummary,
-    );
-  }
   if (trailerLines.length) {
     parts.push('', '---', '', ...trailerLines);
   }
