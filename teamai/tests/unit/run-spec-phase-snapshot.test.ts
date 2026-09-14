@@ -141,6 +141,7 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
   it('does NOT copy the initial spec to spec_v1.md on a first (non-revision) run', async () => {
     const { writeFileSync, existsSync } = await import('fs');
     writeFileSync(join(ctx.specPath, 'spec.md'), '# brand new spec');
+    writeFileSync(join(ctx.specPath, 'spec_summary.md'), 'Summary of the brand new spec.');
 
     await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
 
@@ -155,6 +156,7 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
   it('still advances to plan when a legacy spec_v1.md snapshot already exists (no rewrite)', async () => {
     const { writeFileSync, readFileSync } = await import('fs');
     writeFileSync(join(ctx.specPath, 'spec.md'), '# live spec');
+    writeFileSync(join(ctx.specPath, 'spec_summary.md'), 'Summary of the live spec.');
     writeFileSync(join(ctx.specPath, 'spec_v1.md'), '# legacy v1 snapshot');
 
     await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
@@ -172,6 +174,7 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
     // this session ran; the analyst then wrote the revised content to spec.md.
     writeFileSync(join(ctx.specPath, 'spec_v1.md'), '# original spec\n\nold formula');
     writeFileSync(join(ctx.specPath, 'spec.md'), '# original spec\n\nrevised formula');
+    writeFileSync(join(ctx.specPath, 'spec_summary.md'), 'Summary of the revised formula.');
     writeFileSync(join(ctx.specPath, 'spec_revision_feedback.md'), 'revise the formula');
     ctx.pipeline.specRevision = 2;
 
@@ -255,7 +258,42 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
   it('does not warn from the spec phase on success paths (no snapshot writes happen here)', async () => {
     const { writeFileSync } = await import('fs');
     writeFileSync(join(ctx.specPath, 'spec.md'), '# original spec');
+    writeFileSync(join(ctx.specPath, 'spec_summary.md'), 'Summary of the original spec.');
     await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
     expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  // ── spec_summary.md is required, exactly like spec.md ──────────────
+
+  it('parks in awaiting-review when the analyst produces spec.md but no spec_summary.md (first run)', async () => {
+    const { writeFileSync } = await import('fs');
+    writeFileSync(join(ctx.specPath, 'spec.md'), '# brand new spec');
+
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    expect(ctx.pipeline.phase).toBe('awaiting-review');
+    expect(ctx.deps.executePhase).not.toHaveBeenCalled();
+    expect(ctx.deps.savePipelineState).toHaveBeenCalled();
+    expect(mockWarn).toHaveBeenCalledWith(
+      'spec',
+      expect.stringContaining('Spec phase produced no spec_summary.md'),
+    );
+  });
+
+  it('parks in awaiting-review when a revision produces spec.md but no spec_summary.md', async () => {
+    const { writeFileSync } = await import('fs');
+    writeFileSync(join(ctx.specPath, 'spec_v1.md'), '# original spec\n\nold formula');
+    writeFileSync(join(ctx.specPath, 'spec.md'), '# original spec\n\nrevised formula');
+    writeFileSync(join(ctx.specPath, 'spec_revision_feedback.md'), 'revise the formula');
+    ctx.pipeline.specRevision = 2;
+
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    expect(ctx.pipeline.phase).toBe('awaiting-review');
+    expect(ctx.deps.executePhase).not.toHaveBeenCalled();
+    expect(mockWarn).toHaveBeenCalledWith(
+      'spec',
+      expect.stringContaining('Spec phase produced no spec_summary.md'),
+    );
   });
 });

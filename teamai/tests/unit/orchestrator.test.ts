@@ -2290,9 +2290,11 @@ describe('Orchestrator', () => {
       // Should have sent the /spec command
       expect(mockSendMessage).toHaveBeenCalledWith('spec-sess-1', expect.stringContaining('/spec'));
 
-      // Simulate the analyst writing spec.md — without it the spec phase now
-      // parks in awaiting-review instead of advancing to plan.
+      // Simulate the analyst writing spec.md and spec_summary.md — without
+      // either, the spec phase now parks in awaiting-review instead of
+      // advancing to plan.
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Original Spec');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the original spec.');
 
       // Fire result event to resolve waitForCompletion
       fireEvent('event', { sessionId: 'spec-sess-1', event: { type: 'result' } });

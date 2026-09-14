@@ -342,6 +342,22 @@ export async function runSpecPhase(
     }
   }
 
+  // spec_summary.md is required exactly like spec.md, not best-effort: it's
+  // the only durable record of the spec's reasoning once spec.md is deleted
+  // at task completion (spec.md is never committed to git), and buildPRBody
+  // has nowhere else to source it from. Enforced here — the single point
+  // where the analyst is expected to have just written it — rather than
+  // re-checked at create-PR time, mirroring exactly how spec.md itself is
+  // validated once at the end of the spec phase and trusted downstream.
+  if (!existsSync(path.join(pipeline.specPath, 'spec_summary.md'))) {
+    logToOutput(pipeline.specPath,
+      `\n[SPEC] Spec phase produced no spec_summary.md — parking in awaiting-review for human review.\n`);
+    warn('spec', `Spec phase produced no spec_summary.md for ${pipeline.taskId} — parking for human review`);
+    deps.savePipelineState(pipeline);
+    deps.advancePhase(pipeline, 'awaiting-review');
+    return;
+  }
+
   deps.advancePhase(pipeline, 'plan');
   await deps.executePhase(pipeline);
 }
