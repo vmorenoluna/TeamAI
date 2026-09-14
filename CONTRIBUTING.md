@@ -22,7 +22,7 @@ See the [Quick Start](README.md#quick-start) section in the root README.
    npm run typecheck
    npm test
    ```
-   For UI changes, also run the relevant E2E spec (see `teamai/README.md`'s Testing section).
+   For UI changes, also run the relevant E2E spec (see the root README's [Testing](README.md#testing) section).
 5. Update `teamai/CHANGELOG.md`'s `[Unreleased]` section if the change is user-facing.
 6. Open a pull request against `main` with a clear description of what changed and why.
 

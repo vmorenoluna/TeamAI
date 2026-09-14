@@ -1,6 +1,6 @@
 # TeamAI
 
-Multi-agent [Claude Code](https://docs.anthropic.com/en/docs/claude-code) orchestrator — an Electron desktop app that runs parallel Claude CLI agents through automated software development pipelines.
+TeamAI is a desktop app that runs several [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agents at once, each handling one step of building software: writing a spec, planning the work, writing the code, reviewing it, and merging it. It's built with Electron, so it runs as a regular desktop app on Windows, macOS, and Linux.
 
 ![TeamAI kanban board](docs/images/board.jpg)
 
@@ -12,45 +12,45 @@ Multi-agent [Claude Code](https://docs.anthropic.com/en/docs/claude-code) orches
 |---|---|---|
 | **Kanban** | `/` | Drag-and-drop task board spanning all pipeline phases (`backlog` → `done`) with task detail, review, and retry actions |
 | **Workflow** | `/workflow` | Pipeline orchestration view showing how tasks advance through spec → plan → implement → QA review → merge |
-| **Terminals** | `/terminals` | Unified terminal UI (xterm.js) streaming live agent session output |
+| **Terminals** | `/terminals` | Unified terminal UI streaming live output from every agent session |
 | **Roadmap** | `/roadmap` | Long-horizon roadmap planning view |
 | **Settings** | `/settings` | Project configuration: LLM providers, pipeline phases, auto mode, and the Role Refinement Assistant |
 
 ### Core platform features
 
-- **Multi-agent pipeline** — role-specialized Claude agents (analyst, planner, coder, qa-reviewer, merger) drive each task through spec → plan → implement → QA review → merge
-- **Auto Mode** — automatically advances tasks: picks backlog tasks, auto-approves reviews, creates PRs, polls CI, and auto-merges. State persists across restarts
-- **Role Refinement Assistant** — analyzes failed tasks and suggests role-prompt improvements (with auto-apply + auto-retry as opt-in)
-- **Git worktree isolation** — parallel agents run in isolated git worktrees, preventing file conflicts
-- **Multi-project support** — manage multiple target codebases, each with its own `.teamai/` state and `.claude/` config
-- **Crash recovery** — interrupted tasks and rate-limited sessions auto-resume on restart
+- **Multi-agent pipeline**: specialized Claude agents (analyst, planner, coder, qa-reviewer, merger) move each task through spec, plan, implement, QA review, and merge.
+- **Auto Mode**: automatically advances tasks. It picks up backlog tasks, approves reviews for you, opens pull requests, checks CI status, and merges once everything passes. This setting survives restarts.
+- **Role Refinement Assistant**: when a task fails, this looks at what went wrong and suggests fixes to the agents' instructions (you can turn on auto-apply and auto-retry if you want it fully hands-off).
+- **Git worktree isolation**: each agent works in its own copy of your repo (a "git worktree"), so parallel agents never step on each other's files.
+- **Multi-project support**: manage more than one codebase at a time. Each project keeps its own settings in a `.teamai/` folder and its own agent config in `.claude/`.
+- **Crash recovery**: if a task gets interrupted, or an agent session hits a rate limit, it picks back up automatically after a restart.
 
 ## Install
 
-Download the latest build for your platform from [Releases](https://github.com/vmorenoluna/TeamAI/releases) — Windows (`.exe` installer), macOS (`.dmg`), or Linux (`.AppImage` / `.deb`). Installed builds check for updates automatically; see [Auto-Updates](#auto-updates) below for per-platform coverage and the unsigned-binary warnings you'll see on first launch.
+Download the latest build for your platform from [Releases](https://github.com/vmorenoluna/TeamAI/releases): Windows (`.exe` installer), macOS (`.dmg`), or Linux (`.AppImage` / `.deb`). Installed builds check for updates automatically; see [Auto-Updates](#auto-updates) below for which platforms support that, plus the unsigned-binary warnings you'll see the first time you open the app.
 
-Either way you install it — packaged build or from source below — TeamAI needs the Claude Code CLI and a Claude account to actually run anything; see Prerequisites.
+Either way you install it (packaged build, or from source below), TeamAI needs the Claude Code CLI and a Claude account to actually run anything. See Prerequisites.
 
 To build and run from source instead, see [Quick Start](#quick-start).
 
 ## Prerequisites
 
-Required regardless of install method:
+Required no matter how you install:
 
-- **A Claude account** (or Claude API key) — TeamAI spawns `claude` CLI subprocesses to run agents; without one, nothing runs.
-- **Claude Code CLI** — `npm install -g @anthropic-ai/claude-code`
+- **A Claude account** (or a Claude API key). TeamAI runs the `claude` command-line tool behind the scenes to power its agents; without an account, nothing runs.
+- **Claude Code CLI**: install it with `npm install -g @anthropic-ai/claude-code`
 
-Only needed if building/running from source (not for a packaged download):
+Only needed if you're building and running from source (not needed for a packaged download):
 
-- **Node.js** ≥ 20
+- **Node.js** version 20 or newer
 - **Git**
-- **Docker** (optional — for container-isolated agent sessions)
+- **Docker** (optional, only needed if you want agent sessions to run inside a sandboxed container)
 
 ## Safety & Privacy
 
-TeamAI's agents execute shell commands with the same filesystem access as the user running the app — this is inherent to how it works (an autonomous coding-agent orchestrator), not a bug. Everything runs **locally**; nothing is sent anywhere except your own configured LLM provider.
+TeamAI's agents run shell commands with the same file access as whichever user account is running the app. That's not a bug: an autonomous coding agent needs that access to edit files, run tests, and use git. Everything happens locally on your machine; nothing is sent anywhere except to the LLM provider you've configured.
 
-If you're pointing TeamAI at an untrusted repository (code you didn't write and haven't reviewed), enable the optional Docker devcontainer sandboxing (`container.json` — see [Configuration](#configuration)) so agent sessions run isolated from your host filesystem instead of directly on it.
+If you're pointing TeamAI at a repository you don't fully trust (code you didn't write and haven't reviewed), turn on the optional Docker sandbox (`container.json`, see [Configuration](#configuration)) so agent sessions run isolated from your normal file system instead of directly on it.
 
 ## Quick Start
 
@@ -68,11 +68,11 @@ npm run dev          # start dev server (React HMR on :3002)
 npm run electron:dev  # launch Electron app (separate terminal)
 ```
 
-Open `http://localhost:3002` in a browser, or run `npm run electron:dev` to open the Electron app (both connect to the dev server on :3002).
+Open `http://localhost:3002` in a browser, or run `npm run electron:dev` to open the Electron app (both connect to the same dev server on port 3002).
 
 ### Demo Project
 
-TeamAI ships with a demo project (`demo/`) that includes pre-seeded tasks across all pipeline phases. The demo is **not shown by default** in production — it only appears when the server is started with the `--with-demo` flag:
+TeamAI ships with a demo project (`demo/`) that already has tasks seeded across every pipeline phase, handy for exploring the UI without setting up a real project. The demo is hidden by default in production. It only shows up when the server is started with the `--with-demo` flag:
 
 ```bash
 # Start the dev server with the demo project
@@ -83,23 +83,23 @@ npm run dev -- -- --with-demo
 npm run start -- -- --with-demo
 ```
 
-`npm run electron:dev` already passes `--with-demo` internally, so the demo is visible when developing in Electron. For production builds (`npm run electron:start`), the demo is hidden unless you explicitly add it via the "+" button in the project selector.
+`npm run electron:dev` already passes `--with-demo` for you, so the demo appears automatically while developing in Electron. In production builds (`npm run electron:start`), the demo stays hidden unless you add it yourself using the "+" button in the project selector.
 
 ## Auto-Updates
 
-Packaged builds from [Releases](https://github.com/vmorenoluna/TeamAI/releases) check for updates automatically and prompt in-app when one is ready to install. Auto-update coverage differs by platform/format:
+Packaged builds from [Releases](https://github.com/vmorenoluna/TeamAI/releases) check for updates automatically and show an in-app prompt when one is ready to install. Not every platform and format supports this:
 
 | Platform | Format | Auto-updates? |
 |---|---|---|
 | Windows | NSIS installer (`.exe`) | ✅ |
-| Windows | Portable zip | ❌ — re-download manually |
+| Windows | Portable zip | ❌ (re-download manually) |
 | macOS | `.dmg` / `.zip` | ✅ |
 | Linux | AppImage | ✅ |
-| Linux | `.deb` | ❌ — re-download manually |
+| Linux | `.deb` | ❌ (re-download manually) |
 
-Builds are currently unsigned, so first launch may show a warning:
-- **Windows**: SmartScreen — click "More info" → "Run anyway"
-- **macOS**: Gatekeeper — right-click the app → "Open" (instead of double-clicking)
+Builds aren't code-signed yet, so the first time you open one you may see a warning:
+- **Windows**: SmartScreen. Click "More info", then "Run anyway".
+- **macOS**: Gatekeeper. Right-click the app and choose "Open" instead of double-clicking.
 
 ## Commands
 
@@ -135,11 +135,11 @@ All commands run from `teamai/`.
 |---|---|---|---|---|
 | **Unit** | Vitest + jsdom/happy-dom | `tests/unit/` | No | No |
 | **Integration** | Vitest | `tests/integration/` | No (mocked) | No |
-| **E2E** | Playwright | `tests/e2e/` | No — uses seeded fixture data | No |
+| **E2E** | Playwright | `tests/e2e/` | No (uses seeded fixture data) | No |
 
 #### E2E test strategy
 
-The E2E tests cover ~270 UI interactions across 33 spec files. They **do not** invoke the real Claude Code CLI or Docker — instead they run against a Next.js server with pre-seeded static fixture data.
+The end-to-end (E2E) tests cover roughly 270 user interactions across 33 spec files. They don't call the real Claude Code CLI or Docker. Instead, they run against a Next.js server loaded with fixed sample data, so they're fast and don't need real agents or API keys.
 
 **Seed data** (`tests/e2e/seed.ts`) creates a fake project with 16 tasks spanning all pipeline phases (`backlog` → `done`). Each task includes pre-written artifacts that simulate real pipeline output:
 
@@ -153,22 +153,22 @@ The E2E tests cover ~270 UI interactions across 33 spec files. They **do not** i
 | `events.jsonl` | Phase-change event history |
 | `session_map.json` | Active pipeline session marker |
 
-**Route mocking** — `page.route()` intercepts server action POSTs in error-path tests (e.g., forcing `InsightsChat` to show error banners when session creation fails).
+**Route mocking**: some error-path tests use `page.route()` to intercept the app's server-action requests and force an error response (for example, making `InsightsChat` show its error banner when starting a session fails).
 
-**What E2E tests cover** — everything the user sees: kanban board, task detail panel, settings, workflow view, roadmap, insights dashboard, terminal UI, error banners, sidebar navigation, responsive viewport, drag-and-drop, search/filter, and more.
+**What E2E tests cover**: everything the user sees, including the kanban board, task detail panel, settings, workflow view, roadmap, insights dashboard, terminal UI, error banners, sidebar navigation, responsive layout, drag-and-drop, and search/filter.
 
-**What E2E tests don't cover** — anything requiring the real CLI: pipeline execution, live terminal output, WebSocket streaming from agents, Docker container management, GitHub PR creation, auto-mode processing.
+**What E2E tests don't cover**: anything that needs the real CLI, such as actually running the pipeline, live terminal output, WebSocket streaming from agents, Docker container management, GitHub PR creation, or auto-mode processing.
 
-**Port isolation** — the E2E server runs on port **3001**, separate from the dev server (**3002**) and production server (**3000**), so `npm run dev` and `npm run test:e2e` can run side by side.
+**Port isolation**: the E2E server runs on port **3001**, separate from the dev server (**3002**) and the production server (**3000**), so `npm run dev` and `npm run test:e2e` can run side by side without conflicts.
 
-**UI selectors** — components use `data-component="..."` attributes for stable test selectors instead of `data-testid`. Playwright and Testing Library are both configured to use `data-component` via `testIdAttribute`.
+**UI selectors**: components use `data-component="..."` attributes instead of `data-testid` for stable test selectors. Playwright and Testing Library are both configured to look for `data-component`.
 
-**Parallel isolation** — the seed data is cloned per Playwright worker to prevent mutation races between parallel test files.
+**Parallel isolation**: the seed data is copied separately for each Playwright worker, so parallel test files can't corrupt each other's data.
 
 #### Running E2E tests locally
 
 ```bash
-# Run a single spec (always run E2E by file — never all at once, they take too long)
+# Run a single spec (always run E2E by file, never all at once: they take too long)
 npx playwright test tests/e2e/kanban-behaviors.spec.ts
 
 # Run with visible browser for debugging
@@ -203,6 +203,12 @@ npm run test:all
 | `npm run electron:build:linux` | Build Linux packages (AppImage + deb) |
 | `npm run electron:build:all` | Build all three platforms |
 
+Build each platform on that platform: native dependencies (`sharp`, `esbuild`, `node-pty`) are platform-specific, and electron-builder can't cross-compile them from a different OS. `npm run electron:build:all` runs all three build targets on the current host, but only produces a working build for the host's own platform (the native modules for the other platforms aren't available); use separate per-platform CI jobs for real multi-platform releases. Outputs land in `dist-electron/`.
+
+**How the packaged app runs Node:** the packaged app doesn't bundle a separate Node runtime. Production Electron runs its custom server (`dist-server/server.cjs`) by spawning its own Electron binary with `ELECTRON_RUN_AS_NODE=1` (see `electron/main.js`), which makes Electron behave like a plain Node process. The build also disables asar packing (`"asar": false` in `package.json`'s `build` config) so the packaged app's files sit directly on the real filesystem, where normal Node module resolution works.
+
+One consequence of that: Next's build marks the native-addon dependency (`node-pty`) as a server external via a symlink with an absolute path, which doesn't survive being copied into the package. `npm run build:electron` runs `scripts/fix-external-symlinks.mjs` after `next build` to replace that symlink with a portable proxy under `external-shims/` (a generated folder, not checked into git); see that script's comments for the full explanation.
+
 ### Release
 
 ```bash
@@ -210,17 +216,17 @@ npm run test:all
 # 2. Run the release script
 ./scripts/release.sh 0.2.0
 
-# 3. Push — the tag triggers CI to build installers + create a GitHub Release
+# 3. Push (the tag triggers CI to build installers and create a GitHub Release)
 git push origin main && git push origin v0.2.0
 ```
 
 The CI workflow (`.github/workflows/release.yml`):
 
-- Validates the tag matches `package.json` version
+- Validates the tag matches `package.json`'s version
 - Builds Windows, macOS, and Linux installers in parallel
-- Creates a GitHub Release with the changelog section + auto-generated PR notes
+- Creates a GitHub Release with the changelog section and auto-generated PR notes
 - Marks `0.x` versions as prereleases automatically
-- Uploads `latest.yml` metadata for [electron-updater](https://www.electron.build/auto-update) auto-update support
+- Uploads `latest.yml` metadata for [electron-updater](https://www.electron.build/auto-update)'s auto-update support
 
 See `scripts/release.sh` for the version-bump-and-tag helper.
 
@@ -252,19 +258,19 @@ teamai/
 
 ## Architecture
 
-**Pipeline:** Each task flows through configurable phases — spec → plan → implement → QA review → merge. Role-specialized Claude agents (analyst, planner, coder, qa-reviewer, merger) handle each phase.
+**Pipeline:** each task moves through a configurable series of phases: spec, plan, implement, QA review, and merge. Specialized Claude agents (analyst, planner, coder, qa-reviewer, merger) handle each phase.
 
-**Commands vs. roles:** Agent prompts ship in two forms under `defaults/` and are scaffolded into each project's `.claude/` directory. **Commands** (`commands/*.md`) are the orchestration contract — the artifact schemas, output formats, and environment rules the pipeline depends on; they're force-synced across projects at startup (overwriting any customization) and the changes are surfaced as an informational banner. **Roles** (`roles/*.md`) are agent personas and project conventions, scaffolded once and left for you to customize. Rewriting a role never breaks the pipeline — the load-bearing rules all live in the commands.
+**Commands vs. roles:** agent instructions live in two places under `defaults/`, both copied into each project's `.claude/` directory. **Commands** (`commands/*.md`) are the parts the pipeline depends on to actually work: file formats, output formats, and environment rules. These are re-synced into every project automatically (overwriting any local edits), with a banner shown when that happens. **Roles** (`roles/*.md`) are each agent's persona and your project's own conventions. These are set up once and then left for you to customize. You can rewrite a role however you like; the pipeline logic itself lives in the commands, so it won't break.
 
-**ProcessManager:** Spawns `claude -p --input-format stream-json --output-format stream-json` subprocesses. NDJSON output is parsed and streamed to the UI via WebSocket.
+**ProcessManager:** runs `claude -p --input-format stream-json --output-format stream-json` as a subprocess for each agent. Its output is parsed and streamed to the UI over a WebSocket connection.
 
-**Git worktree isolation:** Parallel agents run in isolated git worktrees at `worktrees/<task-slug>/`, preventing file conflicts.
+**Git worktree isolation:** parallel agents each get their own git worktree (an isolated working copy of the repo) at `worktrees/<task-slug>/`, so they can't step on each other's files.
 
-**Auto mode:** Optionally auto-advances tasks through the pipeline — picks backlog tasks, auto-approves reviews, creates PRs, polls CI, and auto-merges. State persists across restarts.
+**Auto mode:** optionally moves tasks through the pipeline automatically: picks up backlog tasks, approves reviews, opens pull requests, checks CI, and merges. This setting survives restarts.
 
-**Recovery:** On startup, detects interrupted tasks and stale sessions. Rate-limited sessions auto-resume with a countdown timer.
+**Recovery:** on startup, TeamAI checks for tasks that were interrupted or sessions that went stale. Sessions that hit a rate limit resume automatically, with a countdown shown in the UI.
 
-**Electron:** In dev mode, `Ctrl+Shift+U` simulates the update download → ready flow for testing the update banner.
+**Electron:** in dev mode, press `Ctrl+Shift+U` to simulate an update download, so you can test the update banner without waiting for a real release.
 
 ## Configuration
 
@@ -282,14 +288,14 @@ Default configs live in `defaults/` and are synced to projects on startup.
 
 Features temporarily hidden from the sidebar (routes still exist and can be re-enabled by adding them back to the nav list in `src/components/sidebar.tsx`):
 
-- [ ] **GitHub** (`/github`) — import tasks from GitHub issues
-- [ ] **Analytics** (`/analytics`) — agent performance, pipeline bottlenecks, and QA trends dashboard
-- [ ] **Insights** (`/insights`) — pipeline analytics (completion rate, phase distribution) and project chat
-- [ ] **Ideation** (`/ideation`) — scan the codebase for improvements, vulnerabilities, and tech debt
+- [ ] **GitHub** (`/github`): import tasks from GitHub issues
+- [ ] **Analytics** (`/analytics`): dashboard for agent performance, pipeline bottlenecks, and QA trends
+- [ ] **Insights** (`/insights`): pipeline analytics (completion rate, phase distribution) plus a project chat
+- [ ] **Ideation** (`/ideation`): scans the codebase for improvements, vulnerabilities, and tech debt
 
 Not yet built:
 
-- [ ] **Remote access & notifications** — Tailscale for remote access to the app; Web Push or a Telegram webhook for review-ready notifications
+- [ ] **Remote access & notifications**: Tailscale for remote access to the app; Web Push or a Telegram webhook for review-ready notifications
 
 ## Contributing
 
