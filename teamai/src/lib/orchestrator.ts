@@ -528,8 +528,8 @@ export class Orchestrator {
     //   1. flip the task record to 'done' (task.json + events.jsonl),
     //   2. delete the local .teamai/<slug>/ folder — unconditionally, for
     //      both merge strategies and regardless of recordHistoryInGit
-    //      (§3j). The PR body (spec embedded by buildPRBody) and the
-    //      trailer-bearing merge commit are the durable record now.
+    //      (§3j). The PR body (spec summary embedded by buildPRBody) and
+    //      the trailer-bearing merge commit are the durable record now.
     const dir = this.taskStore.getDirById(taskId);
 
     // §3f incremental append: synthesize the fresh DONE card from data the

@@ -9,7 +9,7 @@ import path from 'path';
 import { processManager } from '../process-manager';
 import { TaskStore } from '../task-store';
 import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody } from '../git-platform';
-import { squashWithMessage, readImplementationSummary } from './artifact-commit';
+import { squashWithMessage, readImplementationSummary, readSpecSummary } from './artifact-commit';
 import { restoreWorktreeGitFileToHostPaths, worktreeGitEnv } from './worktree-utils';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
@@ -626,7 +626,6 @@ export async function runCreatePRPhase(
   }
   deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
 
-  const specContent = readFileSync(path.join(pipeline.specPath, 'spec.md'), 'utf-8');
   const platform = detectGitPlatform(deps.projectRoot);
 
   // Check for existing open PR first — avoid creating duplicates
@@ -635,12 +634,12 @@ export async function runCreatePRPhase(
     logToOutput(pipeline.specPath, `[PR] Open PR already exists for branch ${pipeline.branch}: ${prUrl}\n`);
   } else {
     // Create PR directly via CLI (gh) instead of spawning a merger agent.
-    // implementation_summary.md is independent of recordHistoryInGit (it's
-    // prose, not a trailer) — read it directly rather than through
-    // ticketMessage, which is null when that toggle is off.
+    // implementation_summary.md / spec_summary.md are independent of
+    // recordHistoryInGit (they're prose, not a trailer) — read them directly
+    // rather than through ticketMessage, which is null when that toggle is off.
     const body = buildPRBody(
       pipeline.description,
-      specContent,
+      readSpecSummary(pipeline.specPath),
       ticketMessage?.trailerLines ?? [],
       readImplementationSummary(pipeline.specPath),
     );

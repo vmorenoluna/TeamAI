@@ -298,46 +298,50 @@ describe('Orchestrator \u2014 remaining edge cases', () => {
 });
 
 describe('buildPRBody', () => {
-  it('includes description and spec content in output', () => {
-    const result = buildPRBody('Add login feature', '# Feature: Login\n\nImplement login.');
+  it('includes description and spec summary in output', () => {
+    const result = buildPRBody('Add login feature', 'Chose signed tokens over sessions for statelessness.');
     expect(result).toContain('## Summary');
     expect(result).toContain('Add login feature');
-    expect(result).toContain('## Specification');
-    expect(result).toContain('# Feature: Login');
-    expect(result).toContain('Implement login.');
+    expect(result).toContain('## Specification Summary');
+    expect(result).toContain('Chose signed tokens over sessions for statelessness.');
   });
 
   it('includes QA testing section', () => {
-    const result = buildPRBody('Fix bug', '# Bug Fix');
+    const result = buildPRBody('Fix bug');
     expect(result).toContain('## Testing');
     expect(result).toContain('QA review passed.');
   });
 
-  it('handles empty spec content', () => {
-    const result = buildPRBody('Empty spec', '');
+  it('omits the Specification Summary section when no spec summary is given', () => {
+    const result = buildPRBody('Empty spec');
     expect(result).toContain('## Summary');
     expect(result).toContain('Empty spec');
-    expect(result).toContain('## Specification');
+    expect(result).not.toContain('## Specification Summary');
+  });
+
+  it('omits the Specification Summary section for a null or empty spec summary', () => {
+    expect(buildPRBody('Add login feature', null)).not.toContain('## Specification Summary');
+    expect(buildPRBody('Add login feature', '')).not.toContain('## Specification Summary');
   });
 
   it('includes a "What Was Implemented" section when an implementation summary is given', () => {
-    const result = buildPRBody('Add login feature', '# Spec', [], 'Added login via signed tokens.');
+    const result = buildPRBody('Add login feature', 'Spec summary text.', [], 'Added login via signed tokens.');
     expect(result).toContain('## What Was Implemented');
     expect(result).toContain('Added login via signed tokens.');
-    // Both the ask and the outcome are present — the PR body is a superset
-    // of the commit message, not just a copy of the description.
+    // Ask, outcome, and reasoning are all present — the PR body is a
+    // superset of the commit message, not just a copy of the description.
     expect(result.indexOf('## Summary')).toBeLessThan(result.indexOf('## What Was Implemented'));
-    expect(result.indexOf('## What Was Implemented')).toBeLessThan(result.indexOf('## Specification'));
+    expect(result.indexOf('## What Was Implemented')).toBeLessThan(result.indexOf('## Specification Summary'));
   });
 
   it('omits the "What Was Implemented" section when no implementation summary is given', () => {
-    const result = buildPRBody('Add login feature', '# Spec');
+    const result = buildPRBody('Add login feature', 'Spec summary text.');
     expect(result).not.toContain('## What Was Implemented');
   });
 
   it('omits the "What Was Implemented" section for an empty/null implementation summary', () => {
-    expect(buildPRBody('Add login feature', '# Spec', [], null)).not.toContain('## What Was Implemented');
-    expect(buildPRBody('Add login feature', '# Spec', [], '')).not.toContain('## What Was Implemented');
+    expect(buildPRBody('Add login feature', 'Spec summary text.', [], null)).not.toContain('## What Was Implemented');
+    expect(buildPRBody('Add login feature', 'Spec summary text.', [], '')).not.toContain('## What Was Implemented');
   });
 });
 

@@ -141,6 +141,25 @@ export function readImplementationSummary(specPath: string): string | null {
 }
 
 /**
+ * Read spec_summary.md if the analyst wrote one (the spec command's final
+ * step) — a short, decision-focused account of the spec's intent, as
+ * opposed to the full spec.md, which is unbounded in size and never
+ * committed to git. Returns null when missing/empty/unreadable so callers
+ * (buildPRBody) omit the Specification Summary section entirely rather than
+ * falling back to the raw spec content.
+ */
+export function readSpecSummary(specPath: string): string | null {
+  const summaryPath = path.join(specPath, 'spec_summary.md');
+  if (!existsSync(summaryPath)) return null;
+  try {
+    const content = readFileSync(summaryPath, 'utf-8').trim();
+    return content || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Build the trailer-bearing commit message for a task, loading
  * qa_report.json / events.jsonl / implementation_summary.md from specPath.
  * Returns null when recordHistoryInGit is off — no message, no squash, no
