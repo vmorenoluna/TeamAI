@@ -70,7 +70,9 @@ export interface DoneTicketFromHistory {
   /** Durable Auto-mode review metadata, when available. */
   autoProcessed?: boolean;
   autoReviewed?: boolean;
-  /** On-demand from PR body, cached after first fetch. */
+  /** On-demand from PR body, cached after first fetch. Holds the short spec
+   *  summary for PRs created after buildPRBody stopped embedding the full
+   *  spec.md (see extractSpecification); the full spec for older PRs. */
   specContent?: string;
 }
 
@@ -93,15 +95,30 @@ function parseTrailers(body: string): Partial<Record<'Task' | 'Task-ID' | 'QA' |
   return out;
 }
 
-/** Extract the `## Specification` section from a PR body (on-demand spec fetch). */
+/**
+ * Extract the spec section from a PR body (on-demand spec fetch).
+ *
+ * Tries the current heading first — `## Specification Summary`, holding
+ * spec_summary.md's short, decision-focused text (buildPRBody no longer
+ * embeds the full, unbounded spec.md, which broke PR creation once a spec
+ * exceeded GitHub's 65,536-character body cap). Falls back to the older
+ * `## Specification` heading for PRs created before that change, which
+ * still holds the full spec verbatim. Checked in this order deliberately:
+ * `## Specification Summary` also contains `## Specification` as a prefix,
+ * so matching the longer heading first (and only falling back when it's
+ * absent) is what keeps the two cases from colliding.
+ */
 export function extractSpecification(prBody: string): string | null {
-  const idx = prBody.indexOf('## Specification');
-  if (idx < 0) return null;
-  const rest = prBody.slice(idx + '## Specification'.length);
-  // Section ends at the next '---' separator or the trailer block.
-  const endIdx = rest.search(/\n---\n|\nTask:\s/i);
-  const spec = (endIdx >= 0 ? rest.slice(0, endIdx) : rest).trim();
-  return spec || null;
+  for (const heading of ['## Specification Summary', '## Specification']) {
+    const idx = prBody.indexOf(heading);
+    if (idx < 0) continue;
+    const rest = prBody.slice(idx + heading.length);
+    // Section ends at the next '---' separator or the trailer block.
+    const endIdx = rest.search(/\n---\n|\nTask:\s/i);
+    const spec = (endIdx >= 0 ? rest.slice(0, endIdx) : rest).trim();
+    return spec || null;
+  }
+  return null;
 }
 
 export interface HistoryScannerDeps {
@@ -300,11 +317,12 @@ export class HistoryScanner {
   }
 
   /**
-   * Ticket detail — full spec, fetched on open (never preloaded).
-   * For PR-strategy tickets: fetch the PR body and extract
-   * `## Specification`. Cached after first fetch per slug.
+   * Ticket detail — spec summary (or full spec, for older PRs), fetched on
+   * open (never preloaded). For PR-strategy tickets: fetch the PR body and
+   * extract its spec section via extractSpecification. Cached after first
+   * fetch per slug.
    * For 'local-merge' tickets (no prUrl): falls back to the commit body's
-   * short summary — there is no PR to fetch a full spec from.
+   * short summary — there is no PR to fetch a spec section from.
    */
   async getSpecContent(slug: string): Promise<string | null> {
     const ticket = this._cache.get(slug);

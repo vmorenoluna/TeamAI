@@ -9,7 +9,7 @@ import path from 'path';
 import { processManager } from '../process-manager';
 import { TaskStore } from '../task-store';
 import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody } from '../git-platform';
-import { squashWithMessage, readImplementationSummary } from './artifact-commit';
+import { squashWithMessage, readImplementationSummary, readSpecSummary } from './artifact-commit';
 import { restoreWorktreeGitFileToHostPaths, worktreeGitEnv } from './worktree-utils';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
@@ -342,6 +342,22 @@ export async function runSpecPhase(
     }
   }
 
+  // spec_summary.md is required exactly like spec.md, not best-effort: it's
+  // the only durable record of the spec's reasoning once spec.md is deleted
+  // at task completion (spec.md is never committed to git), and buildPRBody
+  // has nowhere else to source it from. Enforced here — the single point
+  // where the analyst is expected to have just written it — rather than
+  // re-checked at create-PR time, mirroring exactly how spec.md itself is
+  // validated once at the end of the spec phase and trusted downstream.
+  if (!existsSync(path.join(pipeline.specPath, 'spec_summary.md'))) {
+    logToOutput(pipeline.specPath,
+      `\n[SPEC] Spec phase produced no spec_summary.md — parking in awaiting-review for human review.\n`);
+    warn('spec', `Spec phase produced no spec_summary.md for ${pipeline.taskId} — parking for human review`);
+    deps.savePipelineState(pipeline);
+    deps.advancePhase(pipeline, 'awaiting-review');
+    return;
+  }
+
   deps.advancePhase(pipeline, 'plan');
   await deps.executePhase(pipeline);
 }
@@ -600,6 +616,20 @@ export async function runCreatePRPhase(
   deps.persistAndEmitPhase(pipeline);
   const logFile = path.join(pipeline.specPath, 'output.log');
 
+  // spec_summary.md is required, not best-effort — runSpecPhase already
+  // guarantees it exists for every task going forward (parks in
+  // awaiting-review otherwise), so this should never fire for a task that
+  // went through the spec phase under current code. It exists only to catch
+  // a legacy task whose spec phase ran before that gate did: fail loudly
+  // here rather than silently shipping a PR body with no Specification
+  // Summary section.
+  const specSummary = readSpecSummary(pipeline.specPath);
+  if (!specSummary) {
+    const msg = `Missing spec_summary.md for task ${pipeline.taskId} — cannot build the PR body without it.`;
+    warn('create-pr', msg);
+    throw new Error(msg);
+  }
+
   // Rebase onto latest default branch so the PR diff only contains the ticket's actual changes.
   const baseBranch = resolveBaseBranch(deps.projectRoot);
   const rebaseOk = await rebaseOntoLatestDefault(
@@ -626,7 +656,6 @@ export async function runCreatePRPhase(
   }
   deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
 
-  const specContent = readFileSync(path.join(pipeline.specPath, 'spec.md'), 'utf-8');
   const platform = detectGitPlatform(deps.projectRoot);
 
   // Check for existing open PR first — avoid creating duplicates
@@ -637,10 +666,11 @@ export async function runCreatePRPhase(
     // Create PR directly via CLI (gh) instead of spawning a merger agent.
     // implementation_summary.md is independent of recordHistoryInGit (it's
     // prose, not a trailer) — read it directly rather than through
-    // ticketMessage, which is null when that toggle is off.
+    // ticketMessage, which is null when that toggle is off. specSummary was
+    // already read (and required-checked) above.
     const body = buildPRBody(
       pipeline.description,
-      specContent,
+      specSummary,
       ticketMessage?.trailerLines ?? [],
       readImplementationSummary(pipeline.specPath),
     );

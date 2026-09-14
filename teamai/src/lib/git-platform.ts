@@ -55,8 +55,25 @@ export function resolveBaseBranch(projectRoot: string, invalidate?: boolean): st
 }
 
 /**
- * Build a PR/MR body from the task description and spec content.
+ * Build a PR/MR body from the task description and spec summary.
  * Used for direct CLI PR creation (no AI agent needed).
+ *
+ * `specSummary` — the analyst's own account of the spec's intent and key
+ * decisions (spec_summary.md, written as the spec command's final step),
+ * NOT the full spec.md. spec.md itself is never committed to git and is
+ * deleted once the task reaches done, so embedding it verbatim used to be
+ * the PR body's only way to preserve a durable record of it — but specs are
+ * unbounded in size while GitHub hard-caps a PR body at 65,536 characters
+ * server-side (independent of any local argv limit), so a large spec broke
+ * PR creation outright. A short, decision-focused summary is bounded by
+ * construction (same shape as implementationSummary below) and is what
+ * actually survives as the durable record now. Required, not optional:
+ * runSpecPhase treats writing this file as mandatory for every task (parks
+ * the task in awaiting-review otherwise), so the caller (runCreatePRPhase)
+ * is expected to have already confirmed spec_summary.md exists — reading it
+ * is not this function's job. There is no silent fallback to the raw spec
+ * for a missing summary; that would reintroduce the exact unbounded-size
+ * problem this fix exists to close.
  *
  * `trailerLines` — optional trailer block lines (Task/Task-ID/QA/Phases/
  * Reviewed-by), built via buildTrailerBlock() and shared with the commit
@@ -68,12 +85,12 @@ export function resolveBaseBranch(projectRoot: string, invalidate?: boolean): st
  * falling back to the description — repeating the description under a new
  * heading would just be noise, not additional coverage. This is what makes
  * the PR body the fuller of the two: description (the ask) + this section
- * (the outcome) + the full spec (the requirements) + trailers, vs. the
+ * (the outcome) + the spec summary (the reasoning) + trailers, vs. the
  * commit's message + trailers alone.
  */
 export function buildPRBody(
   description: string,
-  specContent: string,
+  specSummary: string,
   trailerLines: string[] = [],
   implementationSummary?: string | null,
 ): string {
@@ -93,9 +110,9 @@ export function buildPRBody(
     '',
     '---',
     '',
-    '## Specification',
+    '## Specification Summary',
     '',
-    specContent,
+    specSummary,
   );
   if (trailerLines.length) {
     parts.push('', '---', '', ...trailerLines);
@@ -185,9 +202,13 @@ export function createPRViaCLI(
   if (platform === 'github') {
     // gh's --body flag puts the entire body on the command line. On Windows,
     // CreateProcess caps the total command line at ~32,767 characters, so a
-    // large spec.md embedded verbatim in the body (via buildPRBody) trips
+    // long body (implementation summary, trailers, etc.) could trip
     // ENAMETOOLONG before gh even starts. --body-file sidesteps argv entirely
-    // by reading the body from a temp file on disk.
+    // by reading the body from a temp file on disk. This is independent of
+    // GitHub's own server-side 65,536-character cap on the body content
+    // itself (GraphQL createPullRequest) — buildPRBody keeps the body under
+    // that by construction (see its docstring), so no length check is needed
+    // here.
     const bodyFile = path.join(specPath, `pr-body-${randomUUID().slice(0, 8)}.md`);
     writeFileSync(bodyFile, body, 'utf-8');
     try {

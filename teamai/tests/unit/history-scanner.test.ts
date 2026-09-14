@@ -186,12 +186,17 @@ describe('history-scanner', () => {
   });
 
   describe('extractSpecification', () => {
-    it('extracts the ## Specification section and stops at the trailer block', () => {
+    it('extracts the ## Specification Summary section and stops at the trailer block', () => {
+      const body = '## Summary\n\nDid things.\n\n---\n\n## Specification Summary\n\nChose X over Y for Z reason.\n\n---\n\nTask: t\nQA: PASS';
+      expect(extractSpecification(body)).toBe('Chose X over Y for Z reason.');
+    });
+
+    it('falls back to the legacy ## Specification section (PRs created before spec_summary.md existed)', () => {
       const body = '## Summary\n\nDid things.\n\n---\n\n## Specification\n\nThe system shall do X.\n\n---\n\nTask: t\nQA: PASS';
       expect(extractSpecification(body)).toBe('The system shall do X.');
     });
 
-    it('returns null when the section is absent', () => {
+    it('returns null when neither section is present', () => {
       expect(extractSpecification('No spec here.')).toBeNull();
     });
   });

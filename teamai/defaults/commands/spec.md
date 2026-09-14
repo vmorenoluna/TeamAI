@@ -36,7 +36,13 @@ Review your own spec. Check for:
 - Scope creep beyond the original request
 - Missing files in the modification list
 
-## Step 5: Output
+## Step 5: Write the Spec Summary
+Write `spec_summary.md` next to `spec.md` (same directory) as your final action before printing output:
+
+- **Roughly 3–8 lines of plain prose**, capturing the feature's intent and the key decisions made in this spec — the "why" behind non-obvious choices (the approach picked over alternatives, notable formulas/thresholds and why, how tricky edge cases are handled). Do not restate the requirements list or acceptance criteria verbatim; summarize the reasoning, not the checklist.
+- Write it for another agent or a human reviewer to understand the spec's reasoning without reading the full document — `spec.md` itself is not committed to git and is deleted once the task completes, so this summary becomes the durable record of the spec, embedded in the pull request's description.
+
+## Step 6: Output
 Print the path to the spec file and a one-paragraph summary.
 
 ---
@@ -62,6 +68,7 @@ If the prompt begins with `REVISION:` you are revising an existing spec, not wri
 7. **Resolve every conditional you introduce.** If your fix involves a fork ("if the measured effect still shows the problem, do Y instead"), do not write the fork into the spec — pick one branch now and write only that branch's acceptance criteria and formulas. A spec with an unresolved fallback clause will fail review again.
 8. Write the revised spec to `spec.md` (the path given in the prompt) — the versioned baseline file you read in step 1 (e.g. `spec_v1.md`) is the archived previous version; do NOT write to it.
 9. **Verify you actually changed something.** Diff what you just wrote against the spec content you read in step 1. For each concern in `spec_revision_feedback.md`, find the specific line(s) that changed to address it. If any concern has no corresponding change, you have not addressed it — go back and fix the spec before proceeding to output.
+10. Update `spec_summary.md` (same directory) so it reflects the revised spec's current reasoning — same guidelines as Step 5 of the original workflow.
 
 ### Revision Output
 After writing the revised spec, print:

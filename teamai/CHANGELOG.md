@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Fix PR creation failing on large specs ("Body is too long") by embedding a short spec summary in the PR body instead of the full spec.md, which is unbounded in size and could exceed GitHub's 65,536-character PR body limit
 - Surface QA `spec_concerns` and `additional_issues` on the QA report tab, so a "PASS" report that still flags spec-level gaps or extra hard blockers is no longer visually misleading
 
 ## [0.1.0] — Initial Release

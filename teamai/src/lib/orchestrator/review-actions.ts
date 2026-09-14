@@ -194,6 +194,15 @@ async function beginSpecRevision(
     }
   }
 
+  // spec_summary.md is not versioned like spec.md (no spec_summary_v{N}.md
+  // history) — it's just regenerated in place by the revision-mode analyst
+  // as its final step. Delete the pre-revision copy now rather than leaving
+  // it for the analyst to overwrite: if that session fails before reaching
+  // its final step, buildPRBody must see the summary as absent (and omit
+  // the section) rather than serve a summary describing the now-archived,
+  // no-longer-current spec.
+  try { unlinkSync(path.join(specPath, 'spec_summary.md')); } catch { /* best-effort */ }
+
   // Preserve plan.json and all code commits (no blind cleanup): the planner
   // re-plans in place, keeping completed subtasks still valid under the
   // revised spec. Only QA artifacts (and, for the QA path, stale human

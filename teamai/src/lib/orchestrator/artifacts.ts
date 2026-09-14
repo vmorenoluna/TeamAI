@@ -58,6 +58,7 @@ export const MAX_REVISION_SNAPSHOTS = 20;
 export const PHASE_ARTIFACTS: Record<string, string[]> = {
   spec: [
     'spec.md',
+    'spec_summary.md',
     'plan.json',
     'qa_report.json',
     'qa_feedback.md',
@@ -94,7 +95,7 @@ export const PHASE_ARTIFACTS: Record<string, string[]> = {
 // pipeline order.
 
 export const CLEANUP_ARTIFACTS: Record<string, string[]> = {
-  spec: ['spec.md', 'plan.json'],
+  spec: ['spec.md', 'spec_summary.md', 'plan.json'],
   plan: ['plan.json'],
   implement: [],
   'qa-review': [

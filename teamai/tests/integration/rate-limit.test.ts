@@ -199,8 +199,10 @@ describe('Rate Limit Integration', () => {
     onHandlers.clear();
     setupTestProject();
 
-    // Write a spec.md so runSpec doesn't trip on a missing file when sending /spec
+    // Write spec.md and spec_summary.md so runSpec doesn't trip on either
+    // missing file when sending /spec
     writeFileSync(join(taskDir, 'spec.md'), '# Spec for rate limit test\n');
+    writeFileSync(join(taskDir, 'spec_summary.md'), 'Summary of the spec for rate limit test.\n');
 
     const mod = await import('@/lib/orchestrator');
     orch = mod.getOrchestrator(testDir);

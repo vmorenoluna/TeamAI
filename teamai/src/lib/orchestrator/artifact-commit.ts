@@ -141,6 +141,26 @@ export function readImplementationSummary(specPath: string): string | null {
 }
 
 /**
+ * Read spec_summary.md — a short, decision-focused account of the spec's
+ * intent, as opposed to the full spec.md, which is unbounded in size and
+ * never committed to git. runSpecPhase treats writing this file as
+ * mandatory (parks the task in awaiting-review otherwise), so callers should
+ * treat a null return as a hard failure, not something to fall back around
+ * — see runCreatePRPhase, which throws rather than building a PR body with
+ * no Specification Summary section.
+ */
+export function readSpecSummary(specPath: string): string | null {
+  const summaryPath = path.join(specPath, 'spec_summary.md');
+  if (!existsSync(summaryPath)) return null;
+  try {
+    const content = readFileSync(summaryPath, 'utf-8').trim();
+    return content || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Build the trailer-bearing commit message for a task, loading
  * qa_report.json / events.jsonl / implementation_summary.md from specPath.
  * Returns null when recordHistoryInGit is off — no message, no squash, no

@@ -68,6 +68,18 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
     inRevisionCleanup: false,
   },
   {
+    file: 'spec_summary.md',
+    usedIn: [
+      'artifact-commit.ts (readSpecSummary)',
+      'phase-runners.ts (runCreatePR — embedded in the PR body via buildPRBody)',
+      'review-actions.ts (beginSpecRevision — deleted unconditionally alongside the spec.md rename, so a revision never serves a stale summary describing the archived spec)',
+    ],
+    inPhaseArtifacts: true,
+    inCleanupArtifacts: true,
+    inRequiredArtifacts: false,
+    inRevisionCleanup: false,
+  },
+  {
     file: 'plan.json',
     usedIn: [
       'orchestrator.ts (hasPlan check, cleanupTaskArtifacts subtask reset)',

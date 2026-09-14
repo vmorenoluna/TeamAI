@@ -390,6 +390,7 @@ describe('TaskStore', () => {
 
       // Create some artifact files
       writeFileSync(join(dir, 'spec.md'), '# spec');
+      writeFileSync(join(dir, 'spec_summary.md'), '# spec summary');
       writeFileSync(join(dir, 'plan.json'), '{}');
       writeFileSync(join(dir, 'qa_report.json'), '{}');
       writeFileSync(join(dir, 'qa_feedback.md'), '# feedback');
@@ -407,6 +408,7 @@ describe('TaskStore', () => {
 
       // Spec-level: cleared
       expect(existsSync(join(dir, 'spec.md'))).toBe(false);
+      expect(existsSync(join(dir, 'spec_summary.md'))).toBe(false);
       expect(existsSync(join(dir, 'spec_revision_feedback.md'))).toBe(false);
       expect(existsSync(join(dir, 'spec_v1.md'))).toBe(false);
       // Plan-level: cleared
@@ -450,6 +452,7 @@ describe('TaskStore', () => {
       expect(existsSync(join(dir, 'qa_report_before_failed.json'))).toBe(false);
       // Spec-level: should remain (plan is downstream of spec)
       expect(existsSync(join(dir, 'spec.md'))).toBe(true);
+      expect(existsSync(join(dir, 'spec_summary.md'))).toBe(true);
       expect(existsSync(join(dir, 'spec_revision_feedback.md'))).toBe(true);
       expect(existsSync(join(dir, 'spec_v1.md'))).toBe(true);
       // Control: not in registry — should survive
@@ -467,6 +470,7 @@ describe('TaskStore', () => {
       expect(existsSync(join(dir, 'qa_report_before_failed.json'))).toBe(false);
       // Spec + plan-level: should remain (upstream of qa)
       expect(existsSync(join(dir, 'spec.md'))).toBe(true);
+      expect(existsSync(join(dir, 'spec_summary.md'))).toBe(true);
       expect(existsSync(join(dir, 'spec_revision_feedback.md'))).toBe(true);
       expect(existsSync(join(dir, 'spec_v1.md'))).toBe(true);
       expect(existsSync(join(dir, 'plan.json'))).toBe(true);
