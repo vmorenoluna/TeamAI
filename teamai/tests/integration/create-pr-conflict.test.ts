@@ -144,6 +144,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
       }),
     );
     writeFileSync(join(specPath, 'spec.md'), '# Test Feature\n\nImplement this feature.\n');
+    writeFileSync(join(specPath, 'spec_summary.md'), 'Summary of the test feature.\n');
   }
 
   /** Create the feature branch worktree and return its path */

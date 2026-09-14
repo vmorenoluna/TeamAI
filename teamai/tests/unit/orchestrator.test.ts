@@ -2290,9 +2290,11 @@ describe('Orchestrator', () => {
       // Should have sent the /spec command
       expect(mockSendMessage).toHaveBeenCalledWith('spec-sess-1', expect.stringContaining('/spec'));
 
-      // Simulate the analyst writing spec.md — without it the spec phase now
-      // parks in awaiting-review instead of advancing to plan.
+      // Simulate the analyst writing spec.md and spec_summary.md — without
+      // either, the spec phase now parks in awaiting-review instead of
+      // advancing to plan.
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Original Spec');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the original spec.');
 
       // Fire result event to resolve waitForCompletion
       fireEvent('event', { sessionId: 'spec-sess-1', event: { type: 'result' } });
@@ -2656,6 +2658,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature\n\nImplement this feature.');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
 
       const slug = testData.slug;
       const pipeline = makePipeline({
@@ -2699,6 +2702,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
 
       const slug = testData.slug;
       const pipeline = makePipeline({
@@ -2739,6 +2743,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
 
       const slug = testData.slug;
       const pipeline = makePipeline({
@@ -2767,6 +2772,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
 
       const slug = testData.slug;
       const pipeline = makePipeline({
@@ -2798,6 +2804,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
 
       const slug = testData.slug;
       const pipeline = makePipeline({
@@ -2863,6 +2870,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
 
       const slug = testData.slug;
       const pipeline = makePipeline({
@@ -2915,6 +2923,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
 
       const slug = testData.slug;
       const pipeline = makePipeline({
@@ -2945,6 +2954,35 @@ describe('Orchestrator', () => {
         expect.any(Object),
       );
       expect(pipeline.phase).toBe('pr-open');
+    });
+
+    it('throws and never attempts PR creation when spec_summary.md is missing', async () => {
+      // Legacy task whose spec phase ran before the spec_summary.md gate
+      // existed — spec.md is present, spec_summary.md is not. No best-effort
+      // fallback: this must fail loudly rather than build a PR body with no
+      // Specification Summary section.
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      await expect((orch as AnyOrch).runCreatePR(pipeline)).rejects.toThrow(/spec_summary\.md/);
+
+      // No git/gh work should have happened at all — the check runs before
+      // the rebase/squash/push sequence.
+      expect(mockExecFileSync).not.toHaveBeenCalledWith(
+        'gh',
+        expect.arrayContaining(['pr', 'create']),
+        expect.any(Object),
+      );
+      expect(pipeline.phase).not.toBe('pr-open');
     });
   });
 
@@ -3158,6 +3196,7 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         const argStr = Array.isArray(args) ? args.join(' ') : '';
         if (cmd === 'gh' && argStr.includes('pr list')) return '';
@@ -3199,6 +3238,7 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         const argStr = Array.isArray(args) ? args.join(' ') : '';
         if (cmd === 'gh' && argStr.includes('pr list')) return '';
@@ -3244,6 +3284,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
       writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [] }));
 
       const taskStore = (orch as AnyOrch).taskStore;

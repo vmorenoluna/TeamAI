@@ -19,6 +19,7 @@ import {
   buildTrailerBlock,
   buildTicketMessageForPipeline,
   readImplementationSummary,
+  readSpecSummary,
 } from '../../src/lib/orchestrator/artifact-commit';
 
 // ── Helpers ──
@@ -193,6 +194,29 @@ describe('buildTicketMessageForPipeline', () => {
     it('returns null when the file is empty/whitespace-only', () => {
       writeFileSync(join(dir, 'implementation_summary.md'), '   \n', 'utf-8');
       expect(readImplementationSummary(dir)).toBeNull();
+    });
+  });
+
+  describe('readSpecSummary', () => {
+    it('returns the trimmed file content when present', () => {
+      writeFileSync(join(dir, 'spec_summary.md'), '  Chose signed tokens over sessions.  \n', 'utf-8');
+      expect(readSpecSummary(dir)).toBe('Chose signed tokens over sessions.');
+    });
+
+    it('returns null when the file is missing', () => {
+      expect(readSpecSummary(dir)).toBeNull();
+    });
+
+    it('returns null when the file is empty/whitespace-only', () => {
+      writeFileSync(join(dir, 'spec_summary.md'), '   \n', 'utf-8');
+      expect(readSpecSummary(dir)).toBeNull();
+    });
+
+    it('does not read spec.md itself, even when spec_summary.md is absent', () => {
+      // Guards against a regression that falls back to the raw, unbounded
+      // spec — the whole point of this file is to stay small by construction.
+      writeFileSync(join(dir, 'spec.md'), '# Full Spec\n\nLots of unbounded content here.', 'utf-8');
+      expect(readSpecSummary(dir)).toBeNull();
     });
   });
 
