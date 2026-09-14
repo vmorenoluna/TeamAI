@@ -361,6 +361,90 @@ export function reconcileTaskArtifacts(): ArtifactInconsistency[] {
 let _lastAutoResumeTime = 0;
 const AUTO_RESUME_DEBOUNCE_MS = 15_000; // 15 seconds
 
+/** Maximum delay accepted by a single Node.js timer (signed 32-bit integer). */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/** Timers recreated from persisted rate-limit deadlines after a restart. */
+const rateLimitResumeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Recreate the timer that was lost when the server process stopped.
+ * The callback re-reads task.json so a user pause, terminal transition, or a
+ * changed deadline wins over stale startup state. Long waits are chained in
+ * MAX_TIMER_DELAY_MS-sized chunks because Node clamps larger setTimeout values.
+ */
+function schedulePersistedRateLimitResume(task: InterruptedTask): void {
+  const key = `${task.projectPath}:${task.taskId}`;
+  const previous = rateLimitResumeTimers.get(key);
+  if (previous) clearTimeout(previous);
+
+  const findTaskFile = (): string | null => {
+    const teamaiDir = join(task.projectPath, '.teamai');
+    try {
+      for (const entry of readdirSync(teamaiDir).sort()) {
+        const taskFile = join(teamaiDir, entry, 'task.json');
+        if (!existsSync(taskFile)) continue;
+        try {
+          const current = JSON.parse(readFileSync(taskFile, 'utf-8'));
+          if (current?.id === task.taskId) return taskFile;
+        } catch { /* ignore malformed/unrelated task files */ }
+      }
+    } catch { /* project may have been removed during shutdown */ }
+    return null;
+  };
+
+  const arm = async (): Promise<void> => {
+    const taskFile = findTaskFile();
+    if (!taskFile) {
+      rateLimitResumeTimers.delete(key);
+      return;
+    }
+
+    let current: { id?: string; phase?: string; isPaused?: boolean; rateLimitedUntil?: string };
+    try {
+      current = JSON.parse(readFileSync(taskFile, 'utf-8'));
+    } catch {
+      rateLimitResumeTimers.delete(key);
+      return;
+    }
+
+    if (!current || !IN_PROGRESS_PHASES.has(current.phase ?? '') || current.isPaused || !current.rateLimitedUntil) {
+      rateLimitResumeTimers.delete(key);
+      return;
+    }
+
+    const expiresAt = new Date(current.rateLimitedUntil).getTime();
+    if (!Number.isFinite(expiresAt)) {
+      rateLimitResumeTimers.delete(key);
+      return;
+    }
+    if (expiresAt > Date.now()) {
+      const delay = Math.min(expiresAt - Date.now(), MAX_TIMER_DELAY_MS);
+      const timer = setTimeout(() => {
+        rateLimitResumeTimers.delete(key);
+        void arm();
+      }, delay);
+      rateLimitResumeTimers.set(key, timer);
+      return;
+    }
+
+    try {
+      writeFileSync(taskFile, JSON.stringify({ ...current, rateLimitedUntil: undefined }, null, 2));
+      const { getOrchestrator } = await import('./orchestrator');
+      const orchestrator = getOrchestrator(task.projectPath);
+      if (orchestrator.isTaskActive(task.taskId)) return;
+      log('auto-resume', `Persisted rate limit expired for task ${task.taskId} "${task.title}" — resuming`);
+      orchestrator.resumeTask(task.taskId).catch(err => {
+        logWarn('auto-resume', `Task ${task.taskId} "${task.title}" failed to resume after rate limit:`, err);
+      });
+    } catch (err) {
+      logWarn('auto-resume', `Failed to resume task ${task.taskId} after rate limit:`, err);
+    }
+  };
+
+  void arm();
+}
+
 /** Threshold for detecting stalled tasks — tasks inactive for longer than this
  *  are considered stuck and eligible for auto-resume. */
 const STALLED_TASK_THRESHOLD_MS = 30 * 60_000; // 30 minutes
@@ -451,7 +535,8 @@ export async function autoResumeInterruptedTasks(): Promise<number> {
       if (task.rateLimitedUntil) {
         const expiresAt = new Date(task.rateLimitedUntil).getTime();
         if (expiresAt > Date.now()) {
-          log('auto-resume', `Task ${task.taskId} "${task.title}" is still rate-limited until ${task.rateLimitedUntil} — skipping (will retry on expiry)`);
+          log('auto-resume', `Task ${task.taskId} "${task.title}" is still rate-limited until ${task.rateLimitedUntil} — scheduling persisted resume`);
+          schedulePersistedRateLimitResume(task);
           continue;
         }
         log('auto-resume', `Task ${task.taskId} "${task.title}" rate limit expired (was ${task.rateLimitedUntil}) — resuming`);
