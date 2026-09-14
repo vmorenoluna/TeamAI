@@ -242,6 +242,20 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
       ? 'spec'
       : 'implement';
 
+  const failedCriteria = qaReport?.criteria?.filter(c => c.status === 'FAIL') ?? [];
+  const qaRecommendations = [
+    ...failedCriteria
+      .filter(c => c.fix_needed)
+      .map(c => ({
+        title: c.criterion || c.name || 'Failed acceptance criterion',
+        text: c.fix_needed!,
+      })),
+    ...(qaReport?.additional_issues ?? []).map(issue => ({
+      title: issue.description || issue.message || 'Additional QA issue',
+      text: issue.fix_needed || issue.description || issue.message || 'Review and resolve this issue.',
+    })),
+  ];
+
   return (
     <>
     <div id="task-detail-root" className="flex flex-col h-full">
@@ -423,9 +437,57 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                     </span>
                   </div>
                 </div>
-                <pre className="text-xs text-slate-400 whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-y-auto">
-                  {task.completionSummary}
-                </pre>
+                <div className="space-y-4">
+                  {qaReport && failedCriteria.length > 0 && (
+                    <section data-component="failed-qa-criteria">
+                      <h4 className="text-xs font-semibold uppercase tracking-wider text-red-300 mb-2">
+                        Failed acceptance criteria
+                      </h4>
+                      <div className="space-y-2">
+                        {failedCriteria.map((criterion, index) => (
+                          <div key={index} className="rounded-md border border-red-900/30 bg-red-950/10 px-3 py-2">
+                            <p className="text-sm font-medium text-slate-200">
+                              {criterion.criterion || criterion.name || 'Unnamed acceptance criterion'}
+                            </p>
+                            {(criterion.notes || criterion.evidence) && (
+                              <p className="mt-0.5 text-xs text-slate-400">
+                                {criterion.notes || criterion.evidence}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {qaReport && qaRecommendations.length > 0 && (
+                    <section data-component="qa-recommendations">
+                      <h4 className="text-xs font-semibold uppercase tracking-wider text-amber-300 mb-2">
+                        QA recommendations
+                      </h4>
+                      <div className="space-y-2">
+                        {qaRecommendations.map((recommendation, index) => (
+                          <div key={index} className="rounded-md border border-amber-900/30 bg-amber-950/10 px-3 py-2">
+                            <p className="text-xs font-medium text-slate-300">{recommendation.title}</p>
+                            <p className="mt-0.5 text-sm text-amber-200/90">{recommendation.text}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {!qaReport && (
+                    <p className="text-xs text-slate-400">
+                      No QA report is available because this task failed before completing a QA review. See the terminal output for details.
+                    </p>
+                  )}
+
+                  {qaReport && failedCriteria.length === 0 && qaRecommendations.length === 0 && (
+                    <p className="text-xs text-slate-400">
+                      No specific QA findings were recorded. See the QA tab and terminal output for details.
+                    </p>
+                  )}
+                </div>
                 {!readonly && (
                   <div className="mt-3 pt-3 border-t border-red-900/30">
                     <RejectFeedbackPanel

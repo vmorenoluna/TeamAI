@@ -491,7 +491,42 @@ describe('_writeCompletionSummary', () => {
     expect(content).toContain('3 QA attempts');
   });
 
-  it("writes the qa-attempts-exhausted header and stores that failureReason", () => {
+  it('warns when a budget-based failure has no QA report', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      (orch as AnyOrch)._ctx.writeCompletionSummary(
+        pipeline(project.taskId, project.taskDir),
+        'qa-attempts-exhausted',
+      );
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Expected qa_report.json for qa-attempts-exhausted failure'),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('does not warn about a missing QA report for a pre-QA session crash', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      (orch as AnyOrch)._ctx.writeCompletionSummary(
+        pipeline(project.taskId, project.taskDir),
+        'session-crashed',
+        'session exited unexpectedly',
+      );
+
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('Expected qa_report.json'),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('writes the qa-attempts-exhausted header and stores that failureReason', () => {
     (orch as AnyOrch)._ctx.writeCompletionSummary(
       pipeline(project.taskId, project.taskDir),
       'qa-attempts-exhausted',

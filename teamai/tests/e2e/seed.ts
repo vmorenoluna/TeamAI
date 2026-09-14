@@ -51,8 +51,9 @@ interface SeedTask {
   }> };
   qaReport?: {
     overall: 'PASS' | 'FAIL';
-    criteria: Array<{ name: string; status: string; notes: string }>;
+    criteria: Array<{ name: string; status: string; notes: string; fix_needed?: string }>;
     spec_concerns?: Array<{ issue: string; reasoning: string; suggested_fix?: string }>;
+    additional_issues?: Array<{ description?: string; message?: string; fix_needed?: string; severity?: string }>;
     issues?: Array<{ severity: string; message: string }>;
   };
   completionSummary?: string;
@@ -171,12 +172,12 @@ const SAMPLE_TASKS: SeedTask[] = [
       overall: 'FAIL',
       criteria: [
         { name: 'Empty input handled without crash', status: 'PASS', notes: '' },
-        { name: 'Shows helpful error message to user', status: 'FAIL', notes: 'No user-facing message shown — just silently ignores' },
-        { name: 'Edge cases covered (whitespace, special chars)', status: 'FAIL', notes: 'Only basic empty string is handled' },
+        { name: 'Shows helpful error message to user', status: 'FAIL', notes: 'No user-facing message shown — just silently ignores', fix_needed: 'Display a user-facing validation message.' },
+        { name: 'Edge cases covered (whitespace, special chars)', status: 'FAIL', notes: 'Only basic empty string is handled', fix_needed: 'Handle whitespace-only and special-character input.' },
       ],
-      issues: [
-        { severity: 'warning', message: 'No toast/notification shown on empty submit' },
-        { severity: 'warning', message: 'Whitespace-only input not handled' },
+      additional_issues: [
+        { description: 'No toast/notification shown on empty submit', fix_needed: 'Show a validation notification when empty input is submitted.' },
+        { description: 'Whitespace-only input not handled', fix_needed: 'Trim input before checking whether it is empty.' },
       ],
     },
     completionSummary: '# Completion Summary\n\nTask failed after reaching max QA attempts (3/3).\n\n## Plan Subtasks\n\n- [x] **Add empty guard clause** — COMPLETED\n- [ ] **Add validation test** — NOT COMPLETED\n\n## Last QA Report\n\nOverall: **FAIL**\n\n| Criterion | Status | Notes |\n|-----------|--------|-------|\n| Empty input handled without crash | PASS | |\n| Shows helpful error message to user | FAIL | No user-facing message shown |\n| Edge cases covered (whitespace, special chars) | FAIL | Only basic empty string handled |\n\n## Issues\n\n- [warning] No toast/notification shown on empty submit\n- [warning] Whitespace-only input not handled',

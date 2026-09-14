@@ -214,9 +214,11 @@ export function writeCompletionSummary(
   }
 
   const reportPath = path.join(specPath, 'qa_report.json');
+  let qaReportAvailable = false;
   if (existsSync(reportPath)) {
     try {
       const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+      qaReportAvailable = true;
       content += `\n## Last QA Report\n\n`;
       content += `Overall: **${report.overall}**\n\n`;
       if (report.criteria) {
@@ -243,6 +245,10 @@ export function writeCompletionSummary(
         }
       }
     } catch { /* skip */ }
+  }
+
+  if (reason && reason !== 'session-crashed' && !qaReportAvailable) {
+    warn('qa-feedback', `Expected qa_report.json for ${reason} failure but it was missing or invalid at ${reportPath}`);
   }
 
   content += `\n---\n*Generated automatically on ${new Date().toISOString()}*\n`;
