@@ -67,6 +67,9 @@ export interface DoneTicketFromHistory {
   prUrl?: string;
   /** Which index source(s) matched. */
   source: 'commit' | 'pr-body' | 'both';
+  /** Durable Auto-mode review metadata, when available. */
+  autoProcessed?: boolean;
+  autoReviewed?: boolean;
   /** On-demand from PR body, cached after first fetch. */
   specContent?: string;
 }

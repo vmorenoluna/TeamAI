@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { getDoneTicketSpec } from '@/app/actions/history';
+import { useServerMutation } from '@/hooks/use-server-mutation';
+import { markAutoReviewed } from '@/app/actions/auto-mode';
 import { formatActionError } from '@/lib/error-format';
 import type { DoneTicketFromHistory } from '@/lib/history-scanner';
 
@@ -34,21 +36,44 @@ interface CardProps {
 }
 
 export function DoneHistoryCard({ ticket, onSelect }: CardProps) {
+  const { run, isPending } = useServerMutation();
+
+  function handleMarkReviewed(e: React.MouseEvent) {
+    e.stopPropagation();
+    run(async () => {
+      await markAutoReviewed(ticket.taskId ?? ticket.slug);
+    });
+  }
+
   return (
     <div
       data-component="done-history-card"
       data-slug={ticket.slug}
       onClick={() => onSelect(ticket.slug)}
-      className="rounded-lg border border-[#1e293b] bg-[#141824] p-2.5 cursor-pointer hover:border-[#334155] transition-colors"
+      className={`rounded-lg border p-2.5 cursor-pointer transition-colors ${
+        ticket.autoProcessed && !ticket.autoReviewed
+          ? 'border-amber-500/50 bg-amber-950/10 shadow-[0_0_8px_rgba(245,158,11,0.08)]'
+          : 'border-[#1e293b] bg-[#141824] hover:border-[#334155]'
+      }`}
       role="button"
       tabIndex={0}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') onSelect(ticket.slug); }}
     >
       <div className="flex items-start justify-between gap-2">
         <span className="text-xs font-medium text-slate-200 line-clamp-2">{ticket.title}</span>
-        <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-900/40 text-green-300">
-          DONE
-        </span>
+        <div className="flex items-center gap-1.5">
+          {ticket.autoProcessed && !ticket.autoReviewed && (
+            <span
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-400 border border-amber-700/40"
+              title="Auto-processed — not yet manually reviewed"
+            >
+              Auto
+            </span>
+          )}
+          <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-900/40 text-green-300">
+            DONE
+          </span>
+        </div>
       </div>
       {ticket.summary && (
         <p className="mt-1 text-[11px] text-slate-500 line-clamp-2">{ticket.summary}</p>
@@ -67,6 +92,15 @@ export function DoneHistoryCard({ ticket, onSelect }: CardProps) {
             PR
           </a>
         ) : null}
+        {ticket.autoProcessed && !ticket.autoReviewed && (
+          <button
+            onClick={handleMarkReviewed}
+            disabled={isPending}
+            className="ml-auto text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-700/40 text-amber-200 hover:bg-amber-600/50 transition-colors disabled:opacity-50"
+          >
+            {isPending ? 'Saving…' : '✓ Mark Reviewed'}
+          </button>
+        )}
       </div>
     </div>
   );

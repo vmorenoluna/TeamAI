@@ -10,6 +10,7 @@ import {
   mergedDoneTickets,
   clearSessionTickets,
 } from '@/lib/history-session';
+import { withAutoReviewStatus } from '@/lib/auto-review-store';
 
 export interface DoneHistoryPayload {
   /** Whether reconstruction is active (recordHistoryInGit on). */
@@ -74,7 +75,7 @@ export async function getDoneHistory(): Promise<DoneHistoryPayload> {
   if (!scanner.isEnabled) return { enabled: false, tickets: [], hasMore: false };
   return {
     enabled: true,
-    tickets: mergedDoneTickets(projectPath, tickets),
+    tickets: mergedDoneTickets(projectPath, tickets).map(ticket => withAutoReviewStatus(projectPath, ticket)),
     hasMore: true,
   };
 }
@@ -102,7 +103,7 @@ export async function loadMoreDoneHistory(
   const pageTickets = await scanner.scanMergedPrBodies(page * pageSize);
   return {
     enabled: true,
-    tickets: mergedDoneTickets(projectPath, [...pageTickets.values()]),
+    tickets: mergedDoneTickets(projectPath, [...pageTickets.values()]).map(ticket => withAutoReviewStatus(projectPath, ticket)),
     hasMore: scanner.lastPrPageCount >= pageSize,
   };
 }
