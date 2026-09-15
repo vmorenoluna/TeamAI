@@ -72,6 +72,26 @@ export function findInterruptedTasks(): InterruptedTask[] {
       try {
         const task = JSON.parse(readFileSync(taskFile, 'utf-8'));
         if (IN_PROGRESS_PHASES.has(task.phase)) {
+          // A task legitimately paused mid-implement waiting for a scheduled
+          // wakeup (ADR 002) is not "interrupted" — it's exactly where it
+          // should be. autoResumeInterruptedTasks calls orchestrator.resumeTask
+          // unconditionally for everything this function returns, and
+          // resumeTask has no wakeup-aware guard of its own (unlike
+          // sweepStalledTasks's Check 0), so including such a task here
+          // re-invokes its wakeup-isolated subtask session immediately —
+          // ignoring however much of the scheduled wait (routinely 1-2h for a
+          // verification sweep) remains. Every server restart during that
+          // window (dev-server reload, crash, redeploy) then burns another
+          // premature re-entry, and because the re-entered subtask's
+          // deliverable genuinely isn't ready yet, each one counts toward
+          // deliverableFailCounts — exhausting the 3-attempt cap in minutes
+          // instead of over the intended window and failing a task whose
+          // background job was healthy the whole time. Leave it for
+          // sweepStalledTasks's periodic sweep, which already checks
+          // wakeupUntil (plus the progress-log staleness early-wake
+          // exception) before ever resuming a wakeup-pending task.
+          if (task.wakeupUntil && new Date(task.wakeupUntil).getTime() > Date.now()) continue;
+
           // Only consider a task "interrupted" if there is evidence it was
           // actually running — session_map.json (written when a session
           // starts) or output.log (written during pipeline execution).

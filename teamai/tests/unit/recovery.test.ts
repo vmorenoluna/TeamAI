@@ -148,6 +148,85 @@ describe('findInterruptedTasks', () => {
     });
   });
 
+  // Regression: a task legitimately paused mid-implement waiting on a
+  // scheduled wakeup (ADR 002 — e.g. a ~100min verification sweep) is not
+  // "interrupted". autoResumeInterruptedTasks calls orchestrator.resumeTask
+  // unconditionally for everything this function returns, and resumeTask has
+  // no wakeup-aware guard of its own — so including such a task here re-runs
+  // its wakeup-isolated subtask session on every server restart during the
+  // wait window, regardless of how much of the schedule remains.
+  it('skips a task whose wakeupUntil is still in the future', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'my-task', 'task.json');
+    const sessionMap = join(teamaiDir, 'my-task', 'session_map.json');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      if (path === sessionMap) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === taskFile)
+        return JSON.stringify({
+          id: 'task-123',
+          title: 'My Task',
+          phase: 'implement',
+          wakeupUntil: new Date(Date.now() + 60 * 60_000).toISOString(), // 1h out
+        });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['my-task'];
+      return [];
+    });
+
+    expect(findInterruptedTasks()).toEqual([]);
+  });
+
+  it('includes a task whose wakeupUntil has already elapsed', () => {
+    const projectPath = '/test/project';
+    const teamaiDir = join(projectPath, '.teamai');
+    const taskFile = join(teamaiDir, 'my-task', 'task.json');
+    const sessionMap = join(teamaiDir, 'my-task', 'session_map.json');
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json')) return true;
+      if (path === teamaiDir) return true;
+      if (path === taskFile) return true;
+      if (path === sessionMap) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === join('/mock/home', '.teamai', 'projects.json'))
+        return JSON.stringify([{ name: 'test', path: projectPath }]);
+      if (path === taskFile)
+        return JSON.stringify({
+          id: 'task-123',
+          title: 'My Task',
+          phase: 'implement',
+          wakeupUntil: new Date(Date.now() - 1000).toISOString(), // already due
+        });
+      return '';
+    });
+    mockReaddir((p) => {
+      if (String(p) === teamaiDir) return ['my-task'];
+      return [];
+    });
+
+    const result = findInterruptedTasks();
+    expect(result).toHaveLength(1);
+    expect(result[0].taskId).toBe('task-123');
+  });
+
   it('returns interrupted tasks in deterministic (sorted) directory order', () => {
     const projectPath = '/test/project';
     const teamaiDir = join(projectPath, '.teamai');

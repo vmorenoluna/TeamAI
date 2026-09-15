@@ -94,7 +94,7 @@ function registerProject(name: string, path?: string): string {
 function createTask(
   projectPath: string,
   taskId: string,
-  overrides: Partial<{ title: string; phase: string }> = {},
+  overrides: Partial<{ title: string; phase: string; wakeupUntil: string }> = {},
 ) {
   const slug = `task-${taskId}`;
   const dir = join(projectPath, '.teamai', slug);
@@ -106,6 +106,7 @@ function createTask(
     phase: overrides.phase ?? 'backlog',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...(overrides.wakeupUntil ? { wakeupUntil: overrides.wakeupUntil } : {}),
   };
   writeFileSync(join(dir, 'task.json'), JSON.stringify(task, null, 2));
   // Evidence the task was actually running — findInterruptedTasks requires
@@ -523,6 +524,40 @@ describe('Recovery Integration', () => {
       expect(mockOrchResumeTask).toHaveBeenCalledTimes(2);
       expect(mockOrchResumeTask).toHaveBeenCalledWith('t-spec');
       expect(mockOrchResumeTask).toHaveBeenCalledWith('t-impl');
+    });
+
+    // Regression: a server restart while a task is mid-implement waiting on a
+    // scheduled wakeup (ADR 002) must not immediately re-invoke resumeTask —
+    // that ignores however much of the wait window remains and burns a
+    // premature re-entry against the wakeup-isolated subtask.
+    it('does not resume a task whose wakeupUntil is still in the future', async () => {
+      const projectPath = registerProject('wakeup-pending');
+      createTask(projectPath, 't-waking', {
+        phase: 'implement',
+        title: 'Waiting on sweep',
+        wakeupUntil: new Date(Date.now() + 60 * 60_000).toISOString(),
+      });
+
+      const { autoResumeInterruptedTasks } = await import('../../src/lib/recovery');
+      const count = await autoResumeInterruptedTasks();
+
+      expect(count).toBe(0);
+      expect(mockOrchResumeTask).not.toHaveBeenCalled();
+    });
+
+    it('resumes a task whose wakeupUntil has already elapsed', async () => {
+      const projectPath = registerProject('wakeup-elapsed');
+      createTask(projectPath, 't-woken', {
+        phase: 'implement',
+        title: 'Sweep finished',
+        wakeupUntil: new Date(Date.now() - 1000).toISOString(),
+      });
+
+      const { autoResumeInterruptedTasks } = await import('../../src/lib/recovery');
+      const count = await autoResumeInterruptedTasks();
+
+      expect(count).toBe(1);
+      expect(mockOrchResumeTask).toHaveBeenCalledWith('t-woken');
     });
 
     it('returns 0 when no interrupted tasks on disk', async () => {
