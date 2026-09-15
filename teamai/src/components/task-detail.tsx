@@ -71,6 +71,7 @@ interface Props {
    *  current role-file contents (props-over-async-fetch, so the diff renders
    *  without a client fetch). */
   refinementSuggestion?: RoleRefinementSuggestion | null;
+  refinementSuggestions?: RoleRefinementSuggestion[];
   refinementMode?: RoleRefinementMode;
   roleFiles?: Record<string, string>;
   /** Client-managed data consumers (TaskPanel) re-fetch after apply/dismiss. */
@@ -79,7 +80,7 @@ interface Props {
 
 const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, approvalError, project, onClose, readonly = false, refinementSuggestion, refinementMode = 'manual', roleFiles = {}, onRefinementChanged }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, approvalError, project, onClose, readonly = false, refinementSuggestion, refinementSuggestions = [], refinementMode = 'manual', roleFiles = {}, onRefinementChanged }: Props) {
   const router = useRouter();
   const { run, isPending } = useServerMutation();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -507,6 +508,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
               <RoleRefinementCard
                 task={task}
                 suggestion={refinementSuggestion ?? null}
+                suggestions={refinementSuggestions}
                 roleFiles={roleFiles}
                 mode={refinementMode}
                 onRefinementChanged={onRefinementChanged}

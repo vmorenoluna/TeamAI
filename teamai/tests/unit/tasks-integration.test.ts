@@ -456,13 +456,9 @@ describe('getTaskArtifacts — includes humanFeedback from human_feedback.md', (
   });
 });
 
-describe('getTaskFull — role-refinement suggestion staleness', () => {
-  // A suggestion's signature snapshots the FAIL criteria that triggered it.
-  // If the task later fails again for a different reason, that suggestion
-  // (most commonly a 'no-gap' verdict) describes a failure that no longer
-  // exists — RoleRefinementCard only offers the idle "Analyze failure"
-  // prompt when no suggestion is present, so a stale one left in place
-  // would hide it behind an unrelated old diagnosis forever.
+describe('getTaskFull — role-refinement suggestion history', () => {
+  // Analysis outcomes are historical records. A later failure with a different
+  // signature must not hide an earlier outcome or prevent another analysis.
   let taskId: string;
   let taskDir: string;
 
@@ -515,7 +511,7 @@ describe('getTaskFull — role-refinement suggestion staleness', () => {
     vi.resetModules();
   });
 
-  it('drops a suggestion whose signature no longer matches the current qa_report.json', async () => {
+  it('keeps a suggestion whose signature differs from the current qa_report.json', async () => {
     writeFileSync(join(taskDir, 'qa_report.json'), JSON.stringify({
       overall: 'FAIL',
       criteria: [{ name: 'AC-T1', status: 'FAIL' }],
@@ -527,7 +523,7 @@ describe('getTaskFull — role-refinement suggestion staleness', () => {
     const { getTaskFull } = await import('@/app/actions/tasks');
     const result = await getTaskFull(taskId);
 
-    expect(result.refinementSuggestion).toBeNull();
+    expect(result.refinementSuggestion?.id).toBe('sug-1');
   });
 
   it('keeps a suggestion whose signature still matches the current qa_report.json', async () => {
@@ -547,7 +543,7 @@ describe('getTaskFull — role-refinement suggestion staleness', () => {
     expect(result.refinementSuggestion?.id).toBe('sug-1');
   });
 
-  it('drops a suggestion with no signature at all (legacy record)', async () => {
+  it('keeps a legacy suggestion with no signature so its outcome remains visible', async () => {
     const refinementsDir = join(TEST_DIR, '.teamai', 'role-refinements');
     mkdirSync(refinementsDir, { recursive: true });
     const legacy = makeSuggestion({ signature: '' });
@@ -556,7 +552,7 @@ describe('getTaskFull — role-refinement suggestion staleness', () => {
     const { getTaskFull } = await import('@/app/actions/tasks');
     const result = await getTaskFull(taskId);
 
-    expect(result.refinementSuggestion).toBeNull();
+    expect(result.refinementSuggestion?.id).toBe('sug-1');
   });
 });
 

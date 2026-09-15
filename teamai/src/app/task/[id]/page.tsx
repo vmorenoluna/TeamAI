@@ -37,6 +37,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
       specPath={full.specPath}
       approvalError={full.approvalError}
       refinementSuggestion={full.refinementSuggestion}
+      refinementSuggestions={full.refinementSuggestions}
       refinementMode={full.refinementMode}
       roleFiles={full.roleFiles}
     />

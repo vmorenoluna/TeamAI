@@ -252,15 +252,20 @@ export function suggestionsForTask(projectRoot: string, taskId: string): RoleRef
 }
 
 /**
- * Write a suggestion record, superseding any pending/analyzing/suggested record
- * with the same signature (never stack duplicates — the anti-churn guardrail).
- * The record being written is excluded by id.
+ * Write a suggestion record. Manual analyses are retained even when they have
+ * the same signature; auto-triggered analyses dedupe pending records to avoid
+ * recurrence-driven churn. The record being written is excluded by id.
  */
 export function writeSuggestion(projectRoot: string, record: RoleRefinementSuggestion): void {
   const existing = listSuggestions(projectRoot);
   for (const s of existing) {
     if (s.id === record.id) continue;
-    if (s.signature && s.signature === record.signature && (s.status === 'pending' || s.status === 'analyzing' || s.status === 'suggested')) {
+    // Manual analyses are explicitly repeatable: preserve every prior outcome
+    // so the user can compare repeated failures and dismiss each one
+    // independently. Auto-triggered analyses retain the anti-churn dedupe
+    // guard, since recurrence detection may fire repeatedly for the same
+    // cluster while a task is still failing.
+    if (record.trigger === 'auto' && s.trigger === 'auto' && s.signature && s.signature === record.signature && (s.status === 'pending' || s.status === 'analyzing' || s.status === 'suggested')) {
       updateSuggestion(projectRoot, s.id, { status: 'superseded' });
     }
   }
