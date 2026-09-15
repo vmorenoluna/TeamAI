@@ -320,6 +320,27 @@ describe('Auto Mode Integration', () => {
       expect(mockOrch.resumeTask).not.toHaveBeenCalledWith(taskC);
     });
 
+    it('reconciles newly imported backlog tasks when enable is called again', async () => {
+      autoMode.setAutoModeState(testDir, true, 1);
+      await vi.waitFor(() => expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskA));
+
+      const { TaskStore } = await import('@/lib/task-store');
+      const store = new TaskStore(testDir);
+      const importedDir = join(testDir, '.teamai', 'imported-task');
+      mkdirSync(importedDir, { recursive: true });
+      const importedId = createTaskFile(importedDir, {
+        title: 'Imported task',
+        description: 'imported-task',
+        createdAt: '2023-12-01T00:00:00.000Z',
+      });
+      // Free the slot to isolate the explicit reconciliation behavior.
+      store.updatePhase(taskA, 'done');
+      mockOrch.resumeTask.mockClear();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+      await vi.waitFor(() => expect(mockOrch.resumeTask).toHaveBeenCalledWith(importedId));
+    });
+
     it('picks tasks with identical createdAt in deterministic id order', async () => {
       // Self-contained: fresh project with two backlog tasks sharing the same
       // createdAt. The pick must tie-break on id, not on readdirSync order.
@@ -495,6 +516,24 @@ describe('Auto Mode Integration', () => {
       });
 
       expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskC);
+    });
+
+    it('unblocks dependents after a completed prerequisite directory is deleted', async () => {
+      const { TaskStore } = await import('@/lib/task-store');
+      const store = new TaskStore(testDir);
+      store.updatePhase(taskA, 'done');
+      store.markCompletedTask(taskA);
+      store.delete(taskA);
+
+      mockOrch.resumeTask.mockClear();
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledTimes(1);
+      });
+
+      expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskB);
+      expect(mockOrch.resumeTask).not.toHaveBeenCalledWith(taskC);
     });
 
     it('does not pick task when dep is in progress (not done)', async () => {

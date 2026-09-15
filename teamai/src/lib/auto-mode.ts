@@ -122,6 +122,13 @@ export function setAutoModeState(projectRoot: string, enabled: boolean, maxParal
     } else {
       _stop(state);
     }
+  } else if (enabled) {
+    // An explicit enable can happen after startup restoration or after tasks
+    // were imported while auto mode was already on. In both cases the state
+    // is unchanged, but the scheduler still needs an immediate reconciliation
+    // rather than waiting for the next interval tick.
+    _adoptStalledTasks(projectRoot, state);
+    _tick(projectRoot, state);
   }
 
   // Always persist, even when in-memory state already matches — an explicit
@@ -316,7 +323,9 @@ function _tick(projectRoot: string, state: AutoProjectState): void {
     if (!t.dependencies || t.dependencies.length === 0) return true;
     return t.dependencies.every(depId => {
       const dep = allTasks.find(dt => dt.id === depId);
-      return dep && dep.phase === 'done';
+      // Completed task directories are deleted during finalization, so a
+      // missing dependency can still be a valid completed prerequisite.
+      return (dep && dep.phase === 'done') || taskStore.isTaskCompleted(depId);
     });
   });
 
