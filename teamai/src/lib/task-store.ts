@@ -276,6 +276,35 @@ export class TaskStore {
     throw new Error(`Task directory not found for id ${id}`);
   }
 
+  /**
+   * Record that a task reached done before its task directory is removed.
+   * Dependencies reference task IDs, while completed task directories are
+   * intentionally deleted after finalization; this small durable index keeps
+   * dependency checks correct across that cleanup and server restarts.
+   */
+  markCompletedTask(id: string): void {
+    const path = join(this.specsDir, 'completed-task-ids.json');
+    let ids: string[] = [];
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf-8'));
+      if (Array.isArray(parsed)) ids = parsed.filter((value): value is string => typeof value === 'string');
+    } catch { /* missing or malformed index — rebuild from this completion */ }
+    if (!ids.includes(id)) {
+      ids.push(id);
+      atomicWriteJson(path, ids);
+    }
+  }
+
+  /** Whether a task that may no longer have a local directory was completed. */
+  isTaskCompleted(id: string): boolean {
+    try {
+      const parsed = JSON.parse(readFileSync(join(this.specsDir, 'completed-task-ids.json'), 'utf-8'));
+      return Array.isArray(parsed) && parsed.includes(id);
+    } catch {
+      return false;
+    }
+  }
+
   delete(id: string): void {
     const dir = this.getDirById(id);
     // Clean up any stale .tmp file that might remain from a failed atomic write

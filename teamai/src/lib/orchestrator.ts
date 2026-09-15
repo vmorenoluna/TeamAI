@@ -576,6 +576,9 @@ export class Orchestrator {
     }
 
     this.taskStore.updatePhase(taskId, 'done');
+    // The task directory is removed below, but dependency chains still need a
+    // durable answer when they ask whether this task completed.
+    this.taskStore.markCompletedTask(taskId);
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch (err) {
