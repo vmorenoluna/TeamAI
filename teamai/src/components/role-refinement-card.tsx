@@ -18,7 +18,6 @@ interface Props {
   /** Optional — TaskPanel wires this to re-fetch getTaskFull so the card
    *  reflects apply/dismiss immediately (client-managed data). */
   onRefinementChanged?: () => void;
-  onAnalyze?: () => void;
 }
 
 const CONFIDENCE_STYLES: Record<string, string> = {
@@ -27,7 +26,7 @@ const CONFIDENCE_STYLES: Record<string, string> = {
   low: 'bg-slate-800/40 text-slate-400 border-slate-700/40',
 };
 
-function RoleRefinementSuggestionCard({ task, suggestion, roleFiles, mode, onRefinementChanged, onAnalyze }: Props) {
+function RoleRefinementSuggestionCard({ task, suggestion, roleFiles, mode, onRefinementChanged }: Props) {
   const [localAnalyzing, setLocalAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -125,12 +124,6 @@ function RoleRefinementSuggestionCard({ task, suggestion, roleFiles, mode, onRef
           <span className="ml-auto flex items-center gap-2">
             <CopyButton text={suggestion.diagnosis} label="diagnosis" />
             <button
-              onClick={onAnalyze}
-              className="text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
-            >
-              Analyze again
-            </button>
-            <button
               onClick={handleDismiss}
               disabled={isPending}
               className="text-[11px] text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-50"
@@ -156,12 +149,6 @@ function RoleRefinementSuggestionCard({ task, suggestion, roleFiles, mode, onRef
             {suggestion.confidence}
           </span>
           <span className="ml-auto flex items-center gap-2">
-            <button
-              onClick={onAnalyze}
-              className="text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
-            >
-              Analyze again
-            </button>
             <button
               onClick={handleDismiss}
               disabled={isPending}
@@ -257,8 +244,8 @@ export function RoleRefinementCard({ task, suggestion, suggestions = [], roleFil
   const allRecords = suggestions.length > 0
     ? suggestions.filter(s => s.status !== 'dismissed' && s.status !== 'superseded')
     : suggestion ? [suggestion] : [];
-  const analysisInFlight = localAnalyzing || allRecords.some(s => s.status === 'analyzing') ||
-    (allRecords.length === 0 && task.refinementStatus === 'analyzing');
+  const analysisInFlight = allRecords.some(s => s.status === 'analyzing') ||
+    (allRecords.length === 0 && (task.refinementStatus === 'analyzing' || localAnalyzing));
   // The in-progress record is represented by the shared trigger status above;
   // only completed outcomes are rendered as history cards.
   const records = allRecords.filter(s => s.status !== 'analyzing');
@@ -325,7 +312,6 @@ export function RoleRefinementCard({ task, suggestion, suggestions = [], roleFil
           roleFiles={roleFiles}
           mode={mode}
           onRefinementChanged={onRefinementChanged}
-          onAnalyze={handleAnalyze}
         />
       ))}
     </div>
