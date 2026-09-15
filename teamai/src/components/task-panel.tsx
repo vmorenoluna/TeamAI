@@ -119,6 +119,7 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
             onClose={onClose}
             readonly={readonly}
             refinementSuggestion={data.refinementSuggestion}
+            refinementSuggestions={data.refinementSuggestions}
             refinementMode={data.refinementMode}
             roleFiles={data.roleFiles}
             onRefinementChanged={() => refresh(true)}

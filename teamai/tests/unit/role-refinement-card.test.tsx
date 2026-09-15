@@ -80,11 +80,12 @@ function makeSuggestion(overrides: Partial<RoleRefinementSuggestion> = {}): Role
   };
 }
 
-function renderCard(task: Task, suggestion: RoleRefinementSuggestion | null, mode: 'off' | 'manual' = 'manual') {
+function renderCard(task: Task, suggestion: RoleRefinementSuggestion | null, mode: 'off' | 'manual' = 'manual', suggestions?: RoleRefinementSuggestion[]) {
   return render(
     <RoleRefinementCard
       task={task}
       suggestion={suggestion}
+      suggestions={suggestions}
       roleFiles={{ 'planner.md': '# Role: Planner\n\nold body\n' }}
       mode={mode}
     />,
@@ -177,11 +178,21 @@ describe('RoleRefinementCard', () => {
     await vi.waitFor(() => expect(mockApplyRetry).toHaveBeenCalledWith('s-1', undefined));
   });
 
-  it('collapses the card for applied/dismissed/superseded records', () => {
-    for (const status of ['applied', 'dismissed', 'superseded'] as const) {
-      const { container } = renderCard(makeTask(), makeSuggestion({ status }));
-      expect(container).toBeEmptyDOMElement();
-    }
+  it('keeps the analyze button and applied outcome visible', () => {
+    renderCard(makeTask(), makeSuggestion({ status: 'applied' }));
+    expect(screen.getByRole('button', { name: /Analyze failure/i })).toBeInTheDocument();
+    expect(screen.getByText('Role-prompt refinement applied.')).toBeInTheDocument();
+  });
+
+  it('renders multiple non-dismissed outcomes and omits dismissed history', () => {
+    const first = makeSuggestion({ id: 's-1', status: 'no-gap', isRolePromptGap: false, edits: [], diagnosis: 'First outcome' });
+    const second = makeSuggestion({ id: 's-2', status: 'suggested', rootCause: 'Second outcome' });
+    const dismissed = makeSuggestion({ id: 's-3', status: 'dismissed', rootCause: 'Hidden outcome' });
+    renderCard(makeTask(), second, 'manual', [first, second, dismissed]);
+    expect(screen.getByText('First outcome')).toBeInTheDocument();
+    expect(screen.getByText('Second outcome')).toBeInTheDocument();
+    expect(screen.queryByText('Hidden outcome')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Analyze failure/i })).toBeInTheDocument();
   });
 
   it('switches the diff to an editable textarea via Edit', () => {
@@ -191,11 +202,10 @@ describe('RoleRefinementCard', () => {
     expect(textarea).not.toBeNull();
   });
 
-  it('shows the retry-loop escalation banner when the watcher stamped the task', () => {
+  it('shows the retry-loop escalation banner while retaining the analyze button', () => {
     renderCard(makeTask({ refinementEscalated: true }), null);
     expect(screen.getByText(/A role refinement was applied but the task failed the same way/)).toBeInTheDocument();
-    // The escalation banner replaces the idle prompt / suggestion card.
-    expect(screen.queryByText(/Keeps failing the same way\?/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Analyze failure/i })).toBeInTheDocument();
   });
 
   it('does not show the escalation banner for a clean task', () => {

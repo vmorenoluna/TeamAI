@@ -130,15 +130,18 @@ describe('suggestion store', () => {
     expect({ ...read, model: 'claude-sonnet-4-6' }).toEqual(record);
   });
 
-  it('supersedes a pending/suggested record with the same signature', () => {
+  it('preserves repeated manual outcomes with the same signature', () => {
     writeSuggestion(root, makeRecord({ id: 'first', signature: 'sha256:same', status: 'suggested' }));
     writeSuggestion(root, makeRecord({ id: 'second', signature: 'sha256:same' }));
-    expect(getSuggestion(root, 'first')?.status).toBe('superseded');
+    expect(getSuggestion(root, 'first')?.status).toBe('suggested');
     expect(getSuggestion(root, 'second')?.status).toBe('suggested');
-    // A different signature is not touched.
-    writeSuggestion(root, makeRecord({ id: 'third', signature: 'sha256:other' }));
-    expect(getSuggestion(root, 'second')?.status).toBe('suggested');
-    expect(getSuggestion(root, 'third')?.status).toBe('suggested');
+  });
+
+  it('deduplicates repeated auto outcomes with the same signature', () => {
+    writeSuggestion(root, makeRecord({ id: 'first-auto', trigger: 'auto', signature: 'sha256:same', status: 'suggested' }));
+    writeSuggestion(root, makeRecord({ id: 'second-auto', trigger: 'auto', signature: 'sha256:same' }));
+    expect(getSuggestion(root, 'first-auto')?.status).toBe('superseded');
+    expect(getSuggestion(root, 'second-auto')?.status).toBe('suggested');
   });
 
   it('updateSuggestion merges fields and bumps updatedAt', () => {
