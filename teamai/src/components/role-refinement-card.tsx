@@ -11,11 +11,14 @@ import { formatActionError } from '@/lib/error-format';
 interface Props {
   task: Task;
   suggestion: RoleRefinementSuggestion | null;
+  /** All non-dismissed outcomes, newest first. */
+  suggestions?: RoleRefinementSuggestion[];
   roleFiles: Record<string, string>;
   mode: RoleRefinementMode;
   /** Optional — TaskPanel wires this to re-fetch getTaskFull so the card
    *  reflects apply/dismiss immediately (client-managed data). */
   onRefinementChanged?: () => void;
+  onAnalyze?: () => void;
 }
 
 const CONFIDENCE_STYLES: Record<string, string> = {
@@ -24,7 +27,7 @@ const CONFIDENCE_STYLES: Record<string, string> = {
   low: 'bg-slate-800/40 text-slate-400 border-slate-700/40',
 };
 
-export function RoleRefinementCard({ task, suggestion, roleFiles, mode, onRefinementChanged }: Props) {
+function RoleRefinementSuggestionCard({ task, suggestion, roleFiles, mode, onRefinementChanged, onAnalyze }: Props) {
   const [localAnalyzing, setLocalAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -45,50 +48,21 @@ export function RoleRefinementCard({ task, suggestion, roleFiles, mode, onRefine
 
   if (mode === 'off' || task.phase !== 'failed') return null;
 
-  // ── Retry-loop escalation (Phase 3) ─────────────────────────────────────
-  // The watcher stamped this when auto-analysis hit the loop guard: a
-  // refinement was applied but the task failed the same way (or the retry cap
-  // was reached). Human review is the only remaining step.
-  if (task.refinementEscalated) {
+  // Applied outcomes stay visible as history. Dismissed and superseded records
+  // are filtered by the parent surface and are never rendered here.
+  if (suggestion?.status === 'applied') {
     return (
-      <div
-        className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-3 flex items-center gap-3 flex-wrap"
-        data-component="role-refinement-escalated"
-      >
-        <span className="text-sm">⚠️</span>
-        <p className="text-xs text-amber-300 flex-1 min-w-[200px]">
-          A role refinement was applied but the task failed the same way — human review needed.
-        </p>
+      <div className="rounded-lg border border-emerald-800/40 bg-[#11131b] p-3 flex items-center gap-2" data-component="role-refinement-applied">
+        <span className="text-sm">✅</span>
+        <p className="text-xs text-emerald-300 flex-1">Role-prompt refinement applied.</p>
+        <span className="text-[10px] text-slate-500">Analysis retained</span>
       </div>
     );
   }
 
-  // ── State machine ────────────────────────────────────────────────────────
-  // suggestion present → terminal states (suggested / no-gap); applied /
-  // dismissed / superseded records collapse the card entirely.
-  const terminal = suggestion && (suggestion.status === 'applied' || suggestion.status === 'dismissed' || suggestion.status === 'superseded');
-  if (terminal) return null;
-
   const suggested = suggestion?.status === 'suggested';
   const noGap = suggestion?.status === 'no-gap';
   const analyzing = localAnalyzing || task.refinementStatus === 'analyzing' || suggestion?.status === 'analyzing';
-
-  function handleAnalyze() {
-    setError(null);
-    setLocalAnalyzing(true);
-    startTransition(async () => {
-      try {
-        const result = await analyzeFailedTask(task.id);
-        if (!result.success) {
-          setLocalAnalyzing(false);
-          setError(result.error || 'Failed to start analysis');
-        }
-      } catch (err) {
-        setLocalAnalyzing(false);
-        setError(formatActionError('analyze failure', err));
-      }
-    });
-  }
 
   function runAction(action: () => Promise<{ success: boolean; error?: string }>) {
     setError(null);
@@ -121,27 +95,6 @@ export function RoleRefinementCard({ task, suggestion, roleFiles, mode, onRefine
     runAction(() => dismissRefinementAction(suggestion.id));
   }
 
-  // ── Idle: prompt the user to run a post-mortem ──────────────────────────
-  if (!suggestion && !analyzing) {
-    return (
-      <div className="rounded-lg border border-[#334155]/60 bg-[#11131b] p-3 flex items-center gap-3 flex-wrap">
-        <span className="text-sm">🔍</span>
-        <p className="text-xs text-slate-400 flex-1 min-w-[200px]">
-          Keeps failing the same way? Analyze whether a role prompt has a gap.
-        </p>
-        <button
-          onClick={handleAnalyze}
-          disabled={isPending}
-          data-component="analyze-failure-button"
-          className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-[#2563eb]/20 text-blue-300 hover:bg-[#2563eb]/30 transition-colors disabled:opacity-50"
-        >
-          🔍 Analyze failure
-        </button>
-        {error && <p className="w-full text-[11px] text-red-400">{error}</p>}
-      </div>
-    );
-  }
-
   // ── Analyzing ────────────────────────────────────────────────────────────
   // Show the spinner both before the record exists (click → server stamp) and
   // once it does (`analyzeFailure` writes the record synchronously with status
@@ -172,6 +125,12 @@ export function RoleRefinementCard({ task, suggestion, roleFiles, mode, onRefine
           <span className="ml-auto flex items-center gap-2">
             <CopyButton text={suggestion.diagnosis} label="diagnosis" />
             <button
+              onClick={onAnalyze}
+              className="text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              Analyze again
+            </button>
+            <button
               onClick={handleDismiss}
               disabled={isPending}
               className="text-[11px] text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-50"
@@ -197,6 +156,12 @@ export function RoleRefinementCard({ task, suggestion, roleFiles, mode, onRefine
             {suggestion.confidence}
           </span>
           <span className="ml-auto flex items-center gap-2">
+            <button
+              onClick={onAnalyze}
+              className="text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              Analyze again
+            </button>
             <button
               onClick={handleDismiss}
               disabled={isPending}
@@ -275,4 +240,94 @@ export function RoleRefinementCard({ task, suggestion, roleFiles, mode, onRefine
   }
 
   return null;
+}
+
+/**
+ * Failed-task analysis surface. The trigger is intentionally independent of
+ * the outcome cards: every failed task keeps an Analyze failure button, while
+ * every non-dismissed analysis result remains visible beneath it.
+ */
+export function RoleRefinementCard({ task, suggestion, suggestions = [], roleFiles, mode, onRefinementChanged }: Props) {
+  const [localAnalyzing, setLocalAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  if (mode === 'off' || task.phase !== 'failed') return null;
+
+  const allRecords = suggestions.length > 0
+    ? suggestions.filter(s => s.status !== 'dismissed' && s.status !== 'superseded')
+    : suggestion ? [suggestion] : [];
+  const analysisInFlight = localAnalyzing || allRecords.some(s => s.status === 'analyzing') ||
+    (allRecords.length === 0 && task.refinementStatus === 'analyzing');
+  // The in-progress record is represented by the shared trigger status above;
+  // only completed outcomes are rendered as history cards.
+  const records = allRecords.filter(s => s.status !== 'analyzing');
+  const analyzing = analysisInFlight;
+
+  function handleAnalyze() {
+    setError(null);
+    setLocalAnalyzing(true);
+    startTransition(async () => {
+      try {
+        const result = await analyzeFailedTask(task.id);
+        if (!result.success) {
+          setLocalAnalyzing(false);
+          setError(result.error || 'Failed to start analysis');
+        }
+      } catch (err) {
+        setLocalAnalyzing(false);
+        setError(formatActionError('analyze failure', err));
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-3" data-component="role-refinement-surface">
+      <div className="rounded-lg border border-[#334155]/60 bg-[#11131b] p-3 flex items-center gap-3 flex-wrap">
+        <span className="text-sm">🔍</span>
+        <p className="text-xs text-slate-400 flex-1 min-w-[200px]">
+          Keeps failing the same way? Analyze whether a role prompt has a gap.
+        </p>
+        <button
+          onClick={handleAnalyze}
+          disabled={isPending || analyzing}
+          data-component="analyze-failure-button"
+          className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-[#2563eb]/20 text-blue-300 hover:bg-[#2563eb]/30 transition-colors disabled:opacity-50"
+        >
+          🔍 Analyze failure
+        </button>
+        {analyzing && (
+          <p className="w-full text-[11px] text-slate-500">
+            <span className="inline-block w-3 h-3 mr-1 rounded-full border border-blue-400 border-t-transparent animate-spin align-[-2px]" />
+            Reading QA reports and agent logs to diagnose the failure…
+          </p>
+        )}
+        {error && <p className="w-full text-[11px] text-red-400">{error}</p>}
+      </div>
+
+      {task.refinementEscalated && (
+        <div
+          className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-3 flex items-center gap-3 flex-wrap"
+          data-component="role-refinement-escalated"
+        >
+          <span className="text-sm">⚠️</span>
+          <p className="text-xs text-amber-300 flex-1 min-w-[200px]">
+            A role refinement was applied but the task failed the same way — human review needed.
+          </p>
+        </div>
+      )}
+
+      {records.map(record => (
+        <RoleRefinementSuggestionCard
+          key={record.id}
+          task={task}
+          suggestion={record}
+          roleFiles={roleFiles}
+          mode={mode}
+          onRefinementChanged={onRefinementChanged}
+          onAnalyze={handleAnalyze}
+        />
+      ))}
+    </div>
+  );
 }

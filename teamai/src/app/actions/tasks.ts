@@ -11,7 +11,7 @@ import type { PlanData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { getResumePhaseForFailedTask } from '@/lib/task-utils';
-import { getRoleRefinementConfig, getSuggestion, buildFailureSignature, type RoleRefinementMode, type RoleRefinementSuggestion } from '@/lib/role-refinement';
+import { getRoleRefinementConfig, suggestionsForTask, type RoleRefinementMode, type RoleRefinementSuggestion } from '@/lib/role-refinement';
 import { join, resolve } from 'path';
 import { readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
@@ -447,26 +447,15 @@ export async function getTaskFull(taskId: string) {
   // The inline card is driven by the task's refinementStatus, with the
   // suggestion record + current role file contents passed as props (the
   // props-over-async-fetch rule) so the diff renders without a client fetch.
-  let refinementSuggestion: RoleRefinementSuggestion | null = null;
-  if (task.refinementSuggestionId) {
-    refinementSuggestion = getSuggestion(projectPath, task.refinementSuggestionId);
-  }
-  // A suggestion's signature is a snapshot of the FAIL criteria that
-  // triggered it. If the task has since failed again for a different reason
-  // (a new qa_report.json with different FAIL criteria, or an implement-phase
-  // failure with no report at all), that suggestion describes a failure that
-  // no longer exists — most commonly a stale 'no-gap' verdict that would
-  // otherwise permanently hide the "Analyze failure" button behind an
-  // unrelated old diagnosis, since RoleRefinementCard only shows the idle
-  // prompt when no suggestion is present at all. Drop it here (display-time
-  // only — task.json's stored refinementSuggestionId is left untouched) so a
-  // genuinely new failure always gets a fresh "Analyze failure" prompt.
-  if (refinementSuggestion && task.phase === 'failed') {
-    const currentSignature = buildFailureSignature(dir, taskId);
-    if (!refinementSuggestion.signature || refinementSuggestion.signature !== currentSignature) {
-      refinementSuggestion = null;
-    }
-  }
+  // Keep every non-dismissed outcome for this task visible. The task record
+  // still stores the newest ID for compatibility, but the suggestion directory
+  // is the source of truth for repeat analyses and their history.
+  const refinementSuggestions = suggestionsForTask(projectPath, taskId)
+    .filter(s => s.status !== 'dismissed' && s.status !== 'superseded');
+  const refinementSuggestion: RoleRefinementSuggestion | null =
+    refinementSuggestions.find(s => s.id === task.refinementSuggestionId)
+    ?? refinementSuggestions[0]
+    ?? null;
   let refinementMode: RoleRefinementMode = 'manual';
   try { refinementMode = getRoleRefinementConfig(projectPath).mode; } catch { /* default */ }
   const roleFiles: Record<string, string> = {};
@@ -477,7 +466,7 @@ export async function getTaskFull(taskId: string) {
     }
   } catch { /* roles dir missing — empty map is fine */ }
 
-  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, approvalError, refinementSuggestion, refinementMode, roleFiles };
+  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, approvalError, refinementSuggestion, refinementSuggestions, refinementMode, roleFiles };
 }
 
 export async function addDependency(taskId: string, depId: string): Promise<void> {
