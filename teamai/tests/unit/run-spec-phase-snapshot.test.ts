@@ -304,6 +304,9 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
 
     await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
 
+    // A second session is given one focused shot at writing just the
+    // summary before the pipeline gives up and parks.
+    expect(mockCreateSession).toHaveBeenCalledTimes(2);
     expect(ctx.pipeline.phase).toBe('awaiting-review');
     expect(ctx.deps.executePhase).not.toHaveBeenCalled();
     expect(ctx.deps.savePipelineState).toHaveBeenCalled();
@@ -313,8 +316,31 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
     );
     const rollback = ctx.advancePhaseCalls[ctx.advancePhaseCalls.length - 1];
     expect(rollback.eventExtra?.awaitingReviewReason).toEqual(
-      expect.stringContaining('spec_summary.md'),
+      expect.stringContaining('automatic retry'),
     );
+  });
+
+  it('self-heals via a focused retry session when the analyst produces spec.md but no spec_summary.md (first run)', async () => {
+    const { writeFileSync } = await import('fs');
+    writeFileSync(join(ctx.specPath, 'spec.md'), '# brand new spec');
+
+    // Simulate the retry session's own analyst turn writing the summary —
+    // the second waitForCompletion call is the retry's.
+    let waits = 0;
+    ctx.deps.waitForCompletion = vi.fn(async () => {
+      waits++;
+      if (waits === 2) {
+        writeFileSync(join(ctx.specPath, 'spec_summary.md'), 'Summary written by the retry.');
+      }
+      return undefined;
+    });
+
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    expect(waits).toBe(2);
+    expect(mockCreateSession).toHaveBeenCalledTimes(2);
+    expect(ctx.pipeline.phase).toBe('plan');
+    expect(ctx.deps.executePhase).toHaveBeenCalledTimes(1);
   });
 
   it('parks in awaiting-review when a revision produces spec.md but no spec_summary.md', async () => {
@@ -326,6 +352,9 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
 
     await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
 
+    // A second session is given one focused shot at writing just the
+    // summary before the pipeline gives up and parks.
+    expect(mockCreateSession).toHaveBeenCalledTimes(2);
     expect(ctx.pipeline.phase).toBe('awaiting-review');
     expect(ctx.deps.executePhase).not.toHaveBeenCalled();
     expect(mockWarn).toHaveBeenCalledWith(
@@ -334,13 +363,37 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
     );
     // This is the production scenario: a revision-mode analyst session wrote
     // spec.md but skipped spec_summary.md, and the pipeline auto-parks here
-    // instead of advancing to plan. Without a distinguishing reason on the
-    // 'awaiting-review' event, this looks identical to a real QA pass and an
-    // approver can wave it straight into create-pr, which then fails trying
-    // to build the PR body.
+    // (after the retry above also fails to produce it) instead of advancing
+    // to plan. Without a distinguishing reason on the 'awaiting-review'
+    // event, this looks identical to a real QA pass and an approver can wave
+    // it straight into create-pr, which then fails trying to build the PR
+    // body.
     const rollback = ctx.advancePhaseCalls[ctx.advancePhaseCalls.length - 1];
     expect(rollback.eventExtra?.awaitingReviewReason).toEqual(
-      expect.stringContaining('spec_summary.md'),
+      expect.stringContaining('automatic retry'),
     );
+  });
+
+  it('self-heals via a focused retry session when a revision produces spec.md but no spec_summary.md', async () => {
+    const { writeFileSync } = await import('fs');
+    writeFileSync(join(ctx.specPath, 'spec_v1.md'), '# original spec\n\nold formula');
+    writeFileSync(join(ctx.specPath, 'spec.md'), '# original spec\n\nrevised formula');
+    writeFileSync(join(ctx.specPath, 'spec_revision_feedback.md'), 'revise the formula');
+    ctx.pipeline.specRevision = 2;
+
+    let waits = 0;
+    ctx.deps.waitForCompletion = vi.fn(async () => {
+      waits++;
+      if (waits === 2) {
+        writeFileSync(join(ctx.specPath, 'spec_summary.md'), 'Summary written by the retry.');
+      }
+      return undefined;
+    });
+
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    expect(waits).toBe(2);
+    expect(mockCreateSession).toHaveBeenCalledTimes(2);
+    expect(ctx.pipeline.phase).toBe('plan');
   });
 });

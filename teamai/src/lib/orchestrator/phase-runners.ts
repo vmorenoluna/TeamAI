@@ -256,11 +256,13 @@ export async function runSpecPhase(
       `Read the spec revision feedback at: \`${agentSpecPath}/spec_revision_feedback.md\`\n` +
       `Revise the spec to address ALL concerns in the feedback.\n` +
       `Preserve parts of the spec that are still valid — only change what the feedback asks for.\n` +
-      `IMPORTANT: Write the revised spec to \`${agentSpecPath}/spec.md\` (overwrite the existing file).`);
+      `IMPORTANT: Write the revised spec to \`${agentSpecPath}/spec.md\` (overwrite the existing file).\n` +
+      `IMPORTANT: Also update \`${agentSpecPath}/spec_summary.md\` to reflect the revised spec — this is a required step, not optional. Do not end the session without it.`);
   } else {
     processManager.sendMessage(sessionId,
       humanDirective +
-      `/spec ${pipeline.description}\n\nIMPORTANT: Write the spec file to \`${agentSpecPath}/spec.md\` (use this exact path, not a new subdirectory).`);
+      `/spec ${pipeline.description}\n\nIMPORTANT: Write the spec file to \`${agentSpecPath}/spec.md\` (use this exact path, not a new subdirectory).\n` +
+      `IMPORTANT: Also write \`${agentSpecPath}/spec_summary.md\` next to it — this is a required step, not optional. Do not end the session without it.`);
   }
   await deps.waitForCompletion(sessionId);
   processManager.killSession(sessionId);
@@ -355,15 +357,46 @@ export async function runSpecPhase(
   // where the analyst is expected to have just written it — rather than
   // re-checked at create-PR time, mirroring exactly how spec.md itself is
   // validated once at the end of the spec phase and trusted downstream.
+  //
+  // In practice this step gets skipped by an analyst session that stops
+  // right after verifying its own spec.md diff (revision Step 9) without
+  // reaching the summary step after it — an agent-compliance gap the prompt
+  // reminders above narrow but can't close entirely. Rather than park
+  // immediately (stalling a correct spec on a human for one missed file),
+  // give one focused follow-up session a chance to self-heal it: it only has
+  // to read the now-final spec.md and write the summary, so it's cheap
+  // relative to a full human round-trip.
   if (!existsSync(path.join(pipeline.specPath, 'spec_summary.md'))) {
     logToOutput(pipeline.specPath,
-      `\n[SPEC] Spec phase produced no spec_summary.md — parking in awaiting-review for human review.\n`);
-    warn('spec', `Spec phase produced no spec_summary.md for ${pipeline.taskId} — parking for human review`);
+      `\n[SPEC] Spec phase produced no spec_summary.md — retrying with a focused follow-up session.\n`);
+    warn('spec', `Spec phase produced no spec_summary.md for ${pipeline.taskId} — retrying once before parking`);
+
+    const retrySessionId = await processManager.createSession(
+      deps.sessionOpts('analyst', deps.projectRoot, pipeline.taskId, specLogFile),
+    );
+    pipeline.sessionId = retrySessionId;
     deps.savePipelineState(pipeline);
-    deps.advancePhase(pipeline, 'awaiting-review', {
-      awaitingReviewReason: 'Spec phase produced no spec_summary.md — spec.md was written but the summary needed to build the PR body is missing. This is not a QA pass; reject back to the analyst to regenerate it.',
-    });
-    return;
+    updateSessionMap(pipeline.specPath, 'spec', retrySessionId);
+    processManager.sendMessage(retrySessionId,
+      `Read the spec at \`${agentSpecPath}/spec.md\`. It has no \`spec_summary.md\` alongside it — ` +
+      `write \`${agentSpecPath}/spec_summary.md\` now: roughly 3-8 lines of plain prose capturing ` +
+      `the spec's intent and the key decisions made (the "why" behind non-obvious choices, notable ` +
+      `formulas/thresholds and why, how tricky edge cases are handled) — not a restated requirements ` +
+      `list. Do not modify spec.md.`);
+    await deps.waitForCompletion(retrySessionId);
+    processManager.killSession(retrySessionId);
+
+    if (!existsSync(path.join(pipeline.specPath, 'spec_summary.md'))) {
+      logToOutput(pipeline.specPath,
+        `\n[SPEC] Retry also produced no spec_summary.md — parking in awaiting-review for human review.\n`);
+      warn('spec', `Spec phase produced no spec_summary.md for ${pipeline.taskId} even after a retry — parking for human review`);
+      deps.savePipelineState(pipeline);
+      deps.advancePhase(pipeline, 'awaiting-review', {
+        awaitingReviewReason: 'Spec phase produced no spec_summary.md — spec.md was written but the summary needed to build the PR body is missing, even after an automatic retry. This is not a QA pass; reject back to the analyst to regenerate it.',
+      });
+      return;
+    }
+    logToOutput(pipeline.specPath, `\n[SPEC] Retry produced spec_summary.md — continuing to plan.\n`);
   }
 
   deps.advancePhase(pipeline, 'plan');
