@@ -575,10 +575,10 @@ export class Orchestrator {
       logWarn('orchestrator', `markTaskDone: failed to append session DONE ticket for ${taskId}`, err);
     }
 
+    // updatePhase records completion (markCompletedTask) itself when phase
+    // is 'done' — dependency chains still need a durable answer once the
+    // task directory below is removed.
     this.taskStore.updatePhase(taskId, 'done');
-    // The task directory is removed below, but dependency chains still need a
-    // durable answer when they ask whether this task completed.
-    this.taskStore.markCompletedTask(taskId);
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch (err) {
