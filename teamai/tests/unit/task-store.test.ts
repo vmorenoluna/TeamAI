@@ -346,6 +346,35 @@ describe('TaskStore', () => {
     it('throws when the task is not found', () => {
       expect(() => store.updatePhase('nonexistent', 'done')).toThrow('Task nonexistent not found');
     });
+
+    it('records the task as completed when transitioning to done, regardless of which caller does it', () => {
+      // Guards against the gap where only orchestrator.markTaskDone() called
+      // markCompletedTask() explicitly — any other finalization path (e.g.
+      // runMergePhase's direct-merge flow, which only ever calls
+      // updatePhase/advancePhase) reached 'done' without ever being recorded,
+      // permanently blocking dependency resolution for tasks depending on it
+      // once its directory was deleted or never locally restored.
+      const task = createTask('Direct-merge finish', 'desc');
+      store.updatePhase(task.id, 'done');
+
+      expect(store.isTaskCompleted(task.id)).toBe(true);
+    });
+
+    it('does not record completion for non-done phase transitions', () => {
+      const task = createTask('Not done yet', 'desc');
+      store.updatePhase(task.id, 'awaiting-review');
+
+      expect(store.isTaskCompleted(task.id)).toBe(false);
+    });
+
+    it('keeps a dependency resolvable via isTaskCompleted after its directory is deleted', () => {
+      const dep = createTask('Dependency task', 'desc');
+      store.updatePhase(dep.id, 'done');
+      store.delete(dep.id);
+
+      expect(store.getById(dep.id)).toBeNull();
+      expect(store.isTaskCompleted(dep.id)).toBe(true);
+    });
   });
 
   // ── delete ───────────────────────────────────────────────────────────
