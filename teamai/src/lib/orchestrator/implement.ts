@@ -672,6 +672,82 @@ export function cleanQaFlaggedMarkers(pipeline: ImplementPipeline): void {
 }
 
 /**
+ * Reconcile stale `completed: false` flags against what's actually on disk,
+ * right before the implement-completeness gate reads them.
+ *
+ * The QA-fallback synthetic subtask (id 9999, see selectSubtasks) is scoped
+ * to "fix everything qa_feedback.md names," not to any one original
+ * subtask's declared `files_to_create` — so when its fix happens to satisfy
+ * a REAL subtask's own deliverables (e.g. it wrote the exact files subtask 5
+ * was supposed to produce), subtask 5 itself never ran this pass and its
+ * `completed` flag never gets set by the normal runSubtaskSession path. Left
+ * unreconciled, the completeness gate checks subtask 5's stale
+ * `completed: false` forever — no number of correct 9999 rework attempts can
+ * ever flip it, so the task fails deterministically regardless of how many
+ * times the coder fixes the actual problem. Found on task
+ * detect-mechanical-periodic-melodic-loops: 9999 restored subtask 5's three
+ * missing sweep-evidence files across two further (correctly-idle) rework
+ * attempts, yet the task still failed with "Subtask(s) 5, 6 remained
+ * incomplete."
+ *
+ * Any real subtask whose `files_to_create` are all present on disk is marked
+ * completed here regardless of which subtask's session actually produced
+ * them — mirrors the same existsSync check runSubtaskSession's own
+ * deliverable verification already applies to the subtask that ran.
+ *
+ * Also flags (`qa_flagged: true`) any not-yet-complete real subtask whose
+ * `depends_on` are now all satisfied by this reconciliation pass, so a
+ * dependent like subtask 6 above — never itself named in qa_feedback.md, and
+ * so never selected by the qa_flagged-only bounce filter — gets picked up on
+ * the next implement pass instead of staying permanently unreachable.
+ *
+ * Mutates `subtasks` in place (including 9999, harmlessly — it has no
+ * files_to_create and is filtered out of `realSubtasks` before this array is
+ * ever built) and returns whether anything changed.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export function reconcileSubtaskCompletionFromDeliverables(
+  subtasks: PlanSubtask[],
+  cwd: string,
+  specPath: string,
+): boolean {
+  let changed = false;
+  const newlyCompletedIds: number[] = [];
+
+  for (const s of subtasks) {
+    if (s.completed || s.id === 9999 || !s.files_to_create?.length) continue;
+    const allPresent = s.files_to_create.every(f => existsSync(path.join(cwd, f)));
+    if (allPresent) {
+      s.completed = true;
+      changed = true;
+      newlyCompletedIds.push(s.id);
+      logToOutput(specPath,
+        '\n[RECONCILE] Subtask ' + s.id + ' marked completed — its declared files_to_create ' +
+        'now all exist on disk (produced by another subtask, e.g. a QA-rework fix)\n');
+    }
+  }
+
+  if (newlyCompletedIds.length) {
+    for (const s of subtasks) {
+      if (s.completed || s.id === 9999 || s.qa_flagged || !s.depends_on?.length) continue;
+      const touchesNewCompletion = s.depends_on.some(id => newlyCompletedIds.includes(id));
+      if (!touchesNewCompletion) continue;
+      const allDepsComplete = s.depends_on.every(depId => subtasks.find(t => t.id === depId)?.completed);
+      if (allDepsComplete) {
+        s.qa_flagged = true;
+        changed = true;
+        logToOutput(specPath,
+          '\n[RECONCILE] Subtask ' + s.id + ' flagged for the next implement pass — its dependency (' +
+          s.depends_on.join(', ') + ') just completed via reconciliation\n');
+      }
+    }
+  }
+
+  return changed;
+}
+
+/**
  * Run a single subtask's agent session: pre-sensors → create session → build
  * prompt (QA/wakeup/deliverable headers) → wait → post-session checks (scope,
  * wakeup detect, deliverable verification) → post-sensors → checkpoint.
@@ -934,7 +1010,23 @@ export async function runSubtaskSession(
   }
 
   // Post-session scope check: verify agent only modified assigned files.
-  if (preSessionHead) {
+  // Exempt the QA-fallback synthetic subtask (id 9999, see selectSubtasks) —
+  // its `files` array is only a best-effort union seeded from the real
+  // subtasks' own declared files, not an authoritative scope, because
+  // criterion-matching already found nothing to target it against. Its real
+  // scope is whatever qa_feedback.md names (implement.md's QA Rework Mode:
+  // "Fix every listed issue. That's the entire scope."), which routinely
+  // includes paths no real subtask's `files`/`files_to_create` ever listed —
+  // e.g. deliverables owned by a subtask QA's criterion-matcher didn't flag.
+  // Rejecting 9999 for touching exactly those paths defeats the fallback
+  // synthesis's entire purpose: it fires precisely when nothing else can be
+  // targeted, so its coder session must be free to fix what QA actually
+  // named. Found on task detect-mechanical-periodic-melodic-loops: 9999
+  // correctly produced the three missing sweep-evidence files subtask 5 was
+  // supposed to create, and got rejected for it — the commit itself was
+  // never reverted (this check only marks the subtask incomplete), but the
+  // attempt was burned regardless.
+  if (preSessionHead && subtask.id !== 9999) {
     try {
       const changedFiles = deps.execGitCapture(['diff', '--name-only', preSessionHead + '..HEAD'], cwd).trim().split('\n').filter(Boolean);
 
@@ -1729,10 +1821,24 @@ export async function runImplement(
   // targeted for rework) but that never completed either is just as real
   // a blocker for anything depending on it.
   await deps.planWriteLock.current;
+  const finalPlanPath = path.join(pipeline.specPath, 'plan.json');
   const finalPlanResult = readJsonFile<{ subtasks: PlanSubtask[] }>(
-    path.join(pipeline.specPath, 'plan.json'), { required: true },
+    finalPlanPath, { required: true },
   );
-  const incompleteSubtasks = (finalPlanResult.data?.subtasks ?? []).filter(s => !s.completed);
+  const finalSubtasks = finalPlanResult.data?.subtasks ?? [];
+  // Reconcile before checking — see reconcileSubtaskCompletionFromDeliverables's
+  // doc comment for why a real subtask's `completed` flag can go stale when a
+  // QA-fallback synthetic subtask (id 9999) fixes its deliverables instead.
+  if (reconcileSubtaskCompletionFromDeliverables(finalSubtasks, pipeline.worktreePath, pipeline.specPath)) {
+    try {
+      const tmpPath = finalPlanPath + '.tmp';
+      writeFileSync(tmpPath, JSON.stringify(finalPlanResult.data, null, 2));
+      renameSync(tmpPath, finalPlanPath);
+    } catch (err) {
+      warn('implement', `Failed to persist reconciled subtask completions to plan.json for ${pipeline.taskId}`, err);
+    }
+  }
+  const incompleteSubtasks = finalSubtasks.filter(s => !s.completed);
   if (incompleteSubtasks.length > 0) {
     const attemptCount = (pipeline.incompleteImplementPassCount || 0) + 1;
     pipeline.incompleteImplementPassCount = attemptCount;
