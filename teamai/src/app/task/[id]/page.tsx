@@ -35,7 +35,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
       mergeLog={full.mergeLog}
       sessionMap={full.sessionMap}
       specPath={full.specPath}
-      approvalError={full.approvalError}
+      awaitingReviewReason={full.awaitingReviewReason}
       refinementSuggestion={full.refinementSuggestion}
       refinementSuggestions={full.refinementSuggestions}
       refinementMode={full.refinementMode}

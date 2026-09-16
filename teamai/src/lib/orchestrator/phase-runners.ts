@@ -293,7 +293,9 @@ export async function runSpecPhase(
         `\n[SPEC] Revision produced no spec.md — parking in awaiting-review for human review.\n`);
       warn('spec', `Spec revision produced no spec.md for ${pipeline.taskId} — parking for human review`);
       deps.savePipelineState(pipeline);
-      deps.advancePhase(pipeline, 'awaiting-review');
+      deps.advancePhase(pipeline, 'awaiting-review', {
+        awaitingReviewReason: 'Spec revision produced no spec.md — the analyst session ended without writing a revised spec. This is not a QA pass; reject back to the analyst to retry.',
+      });
       return;
     }
     try {
@@ -305,7 +307,9 @@ export async function runSpecPhase(
           `spec_concerns from this round. Pausing in awaiting-review instead of advancing to plan.\n`);
         warn('spec', `No-op spec revision detected for ${pipeline.taskId} — spec.md unchanged from the pre-revision baseline`);
         deps.savePipelineState(pipeline);
-        deps.advancePhase(pipeline, 'awaiting-review');
+        deps.advancePhase(pipeline, 'awaiting-review', {
+          awaitingReviewReason: `No-op spec revision — the analyst session completed without changing spec.md (still identical to ${path.basename(baselinePath)}). This round's feedback was not addressed. This is not a QA pass; reject back to the analyst to retry.`,
+        });
         // Leave spec.md in place even though it duplicates the baseline: the
         // versions UI already dedupes a live spec that's byte-identical to
         // its highest snapshot (getTaskFull in tasks.ts), and spec.md must
@@ -337,7 +341,9 @@ export async function runSpecPhase(
         `\n[SPEC] Spec phase produced no spec.md — parking in awaiting-review for human review.\n`);
       warn('spec', `Spec phase produced no spec.md for ${pipeline.taskId} — parking for human review`);
       deps.savePipelineState(pipeline);
-      deps.advancePhase(pipeline, 'awaiting-review');
+      deps.advancePhase(pipeline, 'awaiting-review', {
+        awaitingReviewReason: 'Spec phase produced no spec.md — the analyst session ended without writing a spec. This is not a QA pass; retry the task to run the analyst again.',
+      });
       return;
     }
   }
@@ -354,7 +360,9 @@ export async function runSpecPhase(
       `\n[SPEC] Spec phase produced no spec_summary.md — parking in awaiting-review for human review.\n`);
     warn('spec', `Spec phase produced no spec_summary.md for ${pipeline.taskId} — parking for human review`);
     deps.savePipelineState(pipeline);
-    deps.advancePhase(pipeline, 'awaiting-review');
+    deps.advancePhase(pipeline, 'awaiting-review', {
+      awaitingReviewReason: 'Spec phase produced no spec_summary.md — spec.md was written but the summary needed to build the PR body is missing. This is not a QA pass; reject back to the analyst to regenerate it.',
+    });
     return;
   }
 

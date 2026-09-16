@@ -255,7 +255,7 @@ export async function approveTask(
     // Capture error details for the audit trail and rollback event.
     const errMsg = err instanceof Error ? err.message : String(err);
     const eventExtra: Record<string, unknown> = {
-      approvalError: errMsg,
+      awaitingReviewReason: errMsg,
       fromPhase: next,
     };
     // Preserve structured error code if present (e.g. AUTH, PUSH, CONFLICT).
