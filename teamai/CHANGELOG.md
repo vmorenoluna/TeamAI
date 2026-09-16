@@ -5,6 +5,7 @@
 - Fix PR creation failing on large specs ("Body is too long") by embedding a short spec summary in the PR body instead of the full spec.md, which is unbounded in size and could exceed GitHub's 65,536-character PR body limit
 - Fix a wakeup-pending subtask (ADR 002 — e.g. a long verification sweep) being resumed immediately on server restart instead of waiting out its scheduled `wakeup_at`, which could burn through the deliverable-verification retry cap in minutes and fail the task despite a healthy background job
 - Surface QA `spec_concerns` and `additional_issues` on the QA report tab, so a "PASS" report that still flags spec-level gaps or extra hard blockers is no longer visually misleading
+- Fix a task getting stuck failing forever after a correct QA-fallback rework fix: the synthetic QA-rework subtask (id 9999) is no longer scope-rejected for fixing exactly what `qa_feedback.md` named, and completing it now reconciles the `completed` flag of any real subtask whose declared deliverables it happened to satisfy — unblocking that subtask's own dependents instead of leaving the implement-completeness gate checking a bookkeeping field nothing ever updates
 
 ## [0.1.0] — Initial Release
 

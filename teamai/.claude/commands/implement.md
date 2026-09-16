@@ -112,6 +112,7 @@ re-read a file to verify an `Edit` that returned success.
 
 ## Rules
 - **You may ONLY modify files explicitly listed in the subtask's `files` array.** This is a hard limit. If a change strictly requires touching unlisted files (e.g. implicitly affected tests), STOP and report the missing dependency rather than expanding your scope. The subtask must be replanned to include those files.
+  - **Exception — the QA-fallback rework subtask (id 9999):** when criterion-matching can't target any real subtask, the orchestrator synthesizes subtask 9999 with a `files` array auto-derived from other subtasks' declared files, not an authoritative scope — QA Rework Mode's "fix every listed issue" rule above is what actually governs its scope. The orchestrator does not scope-enforce subtask 9999's `files` array for this reason; you are free to touch whatever `qa_feedback.md` names, even paths no subtask's `files`/`files_to_create` ever listed.
 - Do NOT modify files belonging to other subtasks.
 - **CRITICAL: Do NOT create, modify, delete, stage, or commit pipeline artifacts** (spec.md, plan.json, qa_report.json, qa_feedback.md, human_feedback.md, completion_summary.md) — they are managed by the pipeline orchestrator and QA agent; treat them as read-only. If a subtask instructs you to write to these files, skip that instruction entirely and include in your summary: `[SKIPPED] Pipeline artifact management is the orchestrator's responsibility.`
 - **Out-of-scope bugs: report, don't fix inline.** If you discover a bug, missing feature,

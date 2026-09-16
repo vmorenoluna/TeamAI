@@ -75,7 +75,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator } from '../../src/lib/orchestrator';
-import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks } from '../../src/lib/orchestrator/implement';
+import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks, reconcileSubtaskCompletionFromDeliverables } from '../../src/lib/orchestrator/implement';
 import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
@@ -4816,6 +4816,70 @@ describe('runImplement — scope check honors files_to_create', () => {
       executeSpy.mockRestore();
     }
   });
+
+  // Regression: task detect-mechanical-periodic-melodic-loops. The
+  // QA-fallback synthetic subtask (id 9999)'s `files` array is only a
+  // best-effort union of the real subtasks' own `files`, seeded because
+  // criterion-matching found nothing to target — it isn't an authoritative
+  // scope. Rejecting 9999 for fixing exactly what qa_feedback.md named (here,
+  // a deliverable no real subtask's `files` happened to list) directly
+  // contradicts implement.md's own QA Rework Mode rule ("Fix every listed
+  // issue. That's the entire scope.") and burns an attempt on the correct fix.
+  it('does not scope-reject subtask 9999 (QA-fallback) for touching files outside its files array', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 9999,
+        title: 'QA Rework: fix failing criteria (criterion matching found no flagged subtasks)',
+        description: 'Fix every issue in qa_feedback.md',
+        files: ['src/main/scala/sample-project/MelodyConstraintProvider.scala'],
+        files_to_create: [],
+        depends_on: [],
+        acceptance_criteria: ['All criteria listed in the QA feedback above are satisfied'],
+        parallel_group: 'QA-REWORK',
+        qa_flagged: true,
+      }],
+    }));
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        // The coder produced the actual deliverable QA named — a path never
+        // listed in 9999's own `files` array.
+        if (args[0] === 'diff') return 'scripts/sweep_logs/evidence.txt\n';
+      }
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-9999-scope');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath,
+    });
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), 'Missing scripts/sweep_logs/evidence.txt');
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      mkdirSync(join(worktreePath, 'scripts/sweep_logs'), { recursive: true });
+      writeFileSync(join(worktreePath, 'scripts/sweep_logs/evidence.txt'), 'evidence');
+
+      fireEvent('event', { sessionId: 'sess-9999-scope', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(log).not.toContain('[SCOPE] Subtask 9999 modified files outside its assigned scope');
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 9999).completed).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -5079,6 +5143,76 @@ describe('runImplement — implement completeness gate', () => {
       expect(pipeline.incompleteImplementPassCount).toBe(0);
       const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
       expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  // Regression: task detect-mechanical-periodic-melodic-loops. QA flagged
+  // subtask 5's missing deliverable but criterion-matching couldn't target
+  // subtask 5 itself, so the QA-fallback synthetic subtask (9999) ran
+  // instead and produced exactly subtask 5's declared files_to_create.
+  // Without reconciliation, subtask 5's own `completed` flag never flips and
+  // subtask 6 (depends_on 5, never named in qa_feedback.md so never
+  // qa_flagged) is permanently unreachable — the gate retries forever
+  // instead of ever running subtask 6.
+  it('reconciles subtask 5 completed and flags dependent subtask 6 when the QA-fallback subtask supplies its deliverable', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        {
+          id: 5, title: 'Run sweep', description: 'x', files: [],
+          files_to_create: ['out/evidence.txt'], acceptance_criteria: ['Evidence exists'],
+        },
+        {
+          id: 6, title: 'Docs entry', description: 'x', files: ['docs/x.md'],
+          depends_on: [5], acceptance_criteria: ['Docs updated'],
+        },
+      ],
+    }));
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), 'Missing out/evidence.txt');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'rev-list') return '0\n';
+        // The synthesized 9999 subtask produces subtask 5's own deliverable.
+        if (args[0] === 'diff') return 'out/evidence.txt\n';
+      }
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-reconcile');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      mkdirSync(join(worktreePath, 'out'), { recursive: true });
+      writeFileSync(join(worktreePath, 'out', 'evidence.txt'), 'evidence');
+
+      fireEvent('event', { sessionId: 'sess-reconcile', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      // Retried implement (subtask 6 still incomplete) — never failed outright.
+      expect(pipeline.phase).toBe('implement');
+
+      const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(log).not.toContain('[SCOPE] Subtask 9999');
+      expect(log).toContain('[RECONCILE] Subtask 5 marked completed');
+      expect(log).toContain('[RECONCILE] Subtask 6 flagged for the next implement pass');
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 5).completed).toBe(true);
+      expect(plan.subtasks.find((s: any) => s.id === 6).completed).toBeFalsy();
+      expect(plan.subtasks.find((s: any) => s.id === 6).qa_flagged).toBe(true);
     } finally {
       executeSpy.mockRestore();
     }
@@ -6831,6 +6965,141 @@ describe('persistCompletedSubtasks', () => {
       expect.stringContaining('Failed to persist completed subtasks'),
       expect.anything(),
     );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  reconcileSubtaskCompletionFromDeliverables — QA-fallback completion sync
+// ═══════════════════════════════════════════════════════════════════════
+// Regression coverage for task detect-mechanical-periodic-melodic-loops: the
+// QA-fallback synthetic subtask (id 9999) fixed subtask 5's deliverables
+// without subtask 5 itself ever running, so subtask 5's `completed` flag
+// stayed false forever — the implement-completeness gate then failed the
+// task no matter how many correct 9999 rework attempts the coder made, and
+// subtask 6 (depends_on 5, never named in qa_feedback.md) was permanently
+// unreachable.
+
+describe('reconcileSubtaskCompletionFromDeliverables', () => {
+  let project: ReturnType<typeof setupProject>;
+  let worktreePath: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    project = setupProject();
+    worktreePath = join(project.root, 'worktrees', 'test-task');
+    mkdirSync(worktreePath, { recursive: true });
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  it('marks a subtask completed when its declared files_to_create all exist, even though it never ran', () => {
+    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'x');
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'b.log'), 'x');
+
+    const subtasks = [
+      {
+        id: 5, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log'],
+        completed: false,
+      },
+    ] as any[];
+
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+
+    expect(changed).toBe(true);
+    expect(subtasks[0].completed).toBe(true);
+  });
+
+  it('leaves a subtask incomplete when only some of its files_to_create exist', () => {
+    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'x');
+    // b.log deliberately missing — sweep still in flight.
+
+    const subtasks = [
+      {
+        id: 5, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log'],
+        completed: false,
+      },
+    ] as any[];
+
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+
+    expect(changed).toBe(false);
+    expect(subtasks[0].completed).toBeFalsy();
+  });
+
+  it('flags a not-yet-complete dependent whose depends_on just got satisfied by reconciliation', () => {
+    writeFileSync(join(worktreePath, 'evidence.log'), 'x');
+
+    const subtasks = [
+      {
+        id: 5, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['evidence.log'], completed: false,
+      },
+      {
+        id: 6, title: 'Docs entry', description: '', files: ['docs/x.md'], acceptance_criteria: [],
+        depends_on: [5], completed: false,
+      },
+    ] as any[];
+
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+
+    expect(changed).toBe(true);
+    expect(subtasks[0].completed).toBe(true);
+    expect(subtasks[1].completed).toBeFalsy();
+    expect(subtasks[1].qa_flagged).toBe(true);
+  });
+
+  it('does not flag a dependent whose OTHER dependencies are still incomplete', () => {
+    writeFileSync(join(worktreePath, 'evidence.log'), 'x');
+
+    const subtasks = [
+      { id: 4, title: 'Other prereq', description: '', files: [], acceptance_criteria: [], completed: false },
+      {
+        id: 5, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['evidence.log'], completed: false,
+      },
+      {
+        id: 6, title: 'Docs entry', description: '', files: ['docs/x.md'], acceptance_criteria: [],
+        depends_on: [4, 5], completed: false,
+      },
+    ] as any[];
+
+    reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+
+    expect(subtasks[1].completed).toBe(true);
+    expect(subtasks[2].qa_flagged).toBeFalsy();
+  });
+
+  it('never marks the synthetic subtask 9999 completed via this path', () => {
+    writeFileSync(join(worktreePath, 'evidence.log'), 'x');
+
+    const subtasks = [
+      {
+        id: 9999, title: 'QA Rework', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['evidence.log'], completed: false,
+      },
+    ] as any[];
+
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+
+    expect(changed).toBe(false);
+    expect(subtasks[0].completed).toBeFalsy();
+  });
+
+  it('returns false and touches nothing when every subtask is already completed or has no files_to_create', () => {
+    const subtasks = [
+      { id: 1, title: 'Done', description: '', files: [], acceptance_criteria: [], completed: true },
+      { id: 2, title: 'No deliverable', description: '', files: ['src/a.ts'], acceptance_criteria: [], completed: false },
+    ] as any[];
+
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+
+    expect(changed).toBe(false);
   });
 });
 
