@@ -70,7 +70,7 @@ describe('approveTask failure logging', () => {
     rmSync(ctx.root, { recursive: true, force: true });
   });
 
-  it('logs the error to output.log and includes approvalError in the rollback eventExtra for local-merge', async () => {
+  it('logs the error to output.log and includes awaitingReviewReason in the rollback eventExtra for local-merge', async () => {
     const execErr = new Error('push rejected: branch is behind');
     ctx.deps.executePhase.mockRejectedValueOnce(execErr);
 
@@ -85,7 +85,7 @@ describe('approveTask failure logging', () => {
     const rollback = ctx.advancePhaseCalls[1];
     expect(rollback.phase).toBe('awaiting-review');
     expect(rollback.eventExtra).toBeDefined();
-    expect(rollback.eventExtra!.approvalError).toBe('push rejected: branch is behind');
+    expect(rollback.eventExtra!.awaitingReviewReason).toBe('push rejected: branch is behind');
     expect(rollback.eventExtra!.fromPhase).toBe('merge');
 
     // Verify output.log contains the error.
@@ -95,7 +95,7 @@ describe('approveTask failure logging', () => {
     expect(logContent).toContain('[ERROR] Approval failed (merge): push rejected: branch is behind');
   });
 
-  it('logs the error to output.log and includes approvalError in the rollback eventExtra for pull-request', async () => {
+  it('logs the error to output.log and includes awaitingReviewReason in the rollback eventExtra for pull-request', async () => {
     const execErr = new Error('gh auth token expired');
     ctx.deps.executePhase.mockRejectedValueOnce(execErr);
 
@@ -108,7 +108,7 @@ describe('approveTask failure logging', () => {
 
     const rollback = ctx.advancePhaseCalls[1];
     expect(rollback.phase).toBe('awaiting-review');
-    expect(rollback.eventExtra!.approvalError).toBe('gh auth token expired');
+    expect(rollback.eventExtra!.awaitingReviewReason).toBe('gh auth token expired');
     expect(rollback.eventExtra!.fromPhase).toBe('create-pr');
 
     const logContent = readFileSync(join(ctx.specPath, 'output.log'), 'utf-8');
@@ -125,7 +125,7 @@ describe('approveTask failure logging', () => {
     ).rejects.toThrow('rate limit exceeded');
 
     const rollback = ctx.advancePhaseCalls[1];
-    expect(rollback.eventExtra!.approvalError).toBe('rate limit exceeded');
+    expect(rollback.eventExtra!.awaitingReviewReason).toBe('rate limit exceeded');
     expect(rollback.eventExtra!.errorCode).toBe('RATE_LIMIT');
   });
 
@@ -137,7 +137,7 @@ describe('approveTask failure logging', () => {
     ).rejects.toBe('plain string rejection');
 
     const rollback = ctx.advancePhaseCalls[1];
-    expect(rollback.eventExtra!.approvalError).toBe('plain string rejection');
+    expect(rollback.eventExtra!.awaitingReviewReason).toBe('plain string rejection');
     // No errorCode for non-Error — the check is `'code' in err`.
 
     const logContent = readFileSync(join(ctx.specPath, 'output.log'), 'utf-8');

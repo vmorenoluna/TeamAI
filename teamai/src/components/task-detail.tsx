@@ -60,10 +60,12 @@ interface Props {
   mergeLog?: string | null;
   sessionMap?: Record<string, string>;
   specPath?: string;
-  /** Populated when the last approval attempt failed and the task bounced
-   *  back to awaiting-review — surfaced in the review panel as a persistent
-   *  banner so the reason is visible even after a page refresh. */
-  approvalError?: string | null;
+  /** Populated when the task landed in awaiting-review WITHOUT a genuine QA
+   *  pass — an approval attempt that failed and bounced back, or the spec
+   *  phase auto-parking (no-op revision, missing spec.md/spec_summary.md).
+   *  Surfaced in the review panel as a persistent banner so the reason is
+   *  visible even after a page refresh. */
+  awaitingReviewReason?: string | null;
   project?: string;
   onClose?: () => void;
   readonly?: boolean;
@@ -80,7 +82,7 @@ interface Props {
 
 const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, approvalError, project, onClose, readonly = false, refinementSuggestion, refinementSuggestions = [], refinementMode = 'manual', roleFiles = {}, onRefinementChanged }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, awaitingReviewReason, project, onClose, readonly = false, refinementSuggestion, refinementSuggestions = [], refinementMode = 'manual', roleFiles = {}, onRefinementChanged }: Props) {
   const router = useRouter();
   const { run, isPending } = useServerMutation();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -527,7 +529,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                 phase={task.phase}
                 specRevision={specRevision}
                 specPath={specPath}
-                approvalError={approvalError}
+                awaitingReviewReason={awaitingReviewReason}
                 subtasks={plan?.subtasks?.map(s => ({ id: Number(s.id), title: s.title, files: s.files }))}
               />
             )}

@@ -35,10 +35,12 @@ interface Props {
   specPath?: string;
   /** Plan subtasks — shown as a checklist to scope coder- or planner-targeted feedback. */
   subtasks?: { id: number; title: string; files?: string[] }[];
-  /** Populated from the latest events.jsonl entry when an approval attempt
-   *  failed and the task bounced back to awaiting-review. Persisted so the
-   *  reason survives a page refresh. */
-  approvalError?: string | null;
+  /** Populated from the latest events.jsonl entry when the task landed in
+   *  awaiting-review WITHOUT a genuine QA pass — an approval attempt that
+   *  failed and bounced back, or the spec phase auto-parking (no-op
+   *  revision, missing spec.md/spec_summary.md). Persisted so the reason
+   *  survives a page refresh. */
+  awaitingReviewReason?: string | null;
 }
 
 function DiffLine({ line }: { line: string }) {
@@ -72,7 +74,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 type PendingAction = 'approve-local' | 'approve-pr' | 'mark-done' | null;
 
-export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase, specRevision, specPath, subtasks, approvalError }: Props) {
+export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl, phase, specRevision, specPath, subtasks, awaitingReviewReason }: Props) {
   const { run } = useServerMutation();
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [error, setError] = useState<string | null>(null);
@@ -229,16 +231,19 @@ export function ReviewPanel({ taskId, spec, qaReport, humanFeedback, diff, prUrl
         </Section>
       )}
 
-      {/* Approval error banner — persisted from events.jsonl so a reviewer
-          sees "approval failed: <reason>" even after a page refresh. */}
-      {approvalError && (
+      {/* Awaiting-review reason banner — persisted from events.jsonl so a
+          reviewer can tell a genuine QA pass apart from an approval attempt
+          that failed and bounced back, or the spec phase auto-parking
+          (no-op revision, missing spec.md/spec_summary.md), even after a
+          page refresh. */}
+      {awaitingReviewReason && (
         <div className="rounded-md border border-red-800/40 bg-red-950/30 p-3">
           <div className="flex items-center gap-1.5 mb-1">
             <span className="text-red-400 text-xs">⚠</span>
-            <span className="text-xs font-semibold text-red-300">Approval failed</span>
+            <span className="text-xs font-semibold text-red-300">Needs attention</span>
           </div>
           <p className="text-xs text-red-200/90 whitespace-pre-wrap leading-relaxed">
-            {approvalError}
+            {awaitingReviewReason}
           </p>
         </div>
       )}

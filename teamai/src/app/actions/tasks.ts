@@ -433,13 +433,17 @@ export async function getTaskFull(taskId: string) {
 
   const specPath = join(dir, 'spec.md');
 
-  // Read events to surface approval-failure info in the review panel.
-  let approvalError: string | null = null;
+  // Read events to surface why the task is sitting in awaiting-review — either
+  // an approval attempt that failed and bounced back, or the spec phase
+  // auto-parking (no-op revision, missing spec.md/spec_summary.md) instead of
+  // a genuine QA pass. Both cases advance to 'awaiting-review' the same way a
+  // real pass does, so without this the review panel can't tell them apart.
+  let awaitingReviewReason: string | null = null;
   try {
     const events = taskStore.getEvents(taskId);
     const lastEvent = events[events.length - 1];
-    if (lastEvent && typeof lastEvent.approvalError === 'string' && lastEvent.phase === 'awaiting-review') {
-      approvalError = lastEvent.approvalError;
+    if (lastEvent && typeof lastEvent.awaitingReviewReason === 'string' && lastEvent.phase === 'awaiting-review') {
+      awaitingReviewReason = lastEvent.awaitingReviewReason;
     }
   } catch { /* best-effort */ }
 
@@ -466,7 +470,7 @@ export async function getTaskFull(taskId: string) {
     }
   } catch { /* roles dir missing — empty map is fine */ }
 
-  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, approvalError, refinementSuggestion, refinementSuggestions, refinementMode, roleFiles };
+  return { task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, awaitingReviewReason, refinementSuggestion, refinementSuggestions, refinementMode, roleFiles };
 }
 
 export async function addDependency(taskId: string, depId: string): Promise<void> {
