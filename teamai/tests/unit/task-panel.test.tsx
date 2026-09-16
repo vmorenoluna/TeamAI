@@ -154,7 +154,7 @@ function makeFullData(overrides: Partial<{
     mergeLog: null,
     sessionMap: {},
     specPath: overrides.specPath ?? '/test/spec.md',
-    approvalError: null,
+    awaitingReviewReason: null,
     refinementSuggestion: null as unknown as FullData['refinementSuggestion'],
     refinementSuggestions: [],
     refinementMode: 'manual',

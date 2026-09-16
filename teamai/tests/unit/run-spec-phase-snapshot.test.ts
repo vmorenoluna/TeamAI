@@ -105,12 +105,17 @@ function makeCtx() {
     sessionId: undefined as string | undefined,
   };
 
+  const advancePhaseCalls: Array<{ phase: string; eventExtra?: Record<string, unknown> }> = [];
+
   const deps = {
     projectRoot: root,
     persistAndEmitPhase: vi.fn(),
     sessionOpts: () => ({ role: 'analyst', cwd: root, taskId: 'task-1' }),
     waitForCompletion: vi.fn(async () => undefined),
-    advancePhase: (p: typeof pipeline, phase: string) => { (p as { phase: string }).phase = phase; },
+    advancePhase: (p: typeof pipeline, phase: string, eventExtra?: Record<string, unknown>) => {
+      advancePhaseCalls.push({ phase, eventExtra });
+      (p as { phase: string }).phase = phase;
+    },
     rotateOutputLog: vi.fn(),
     phaseHeader: vi.fn(),
     savePipelineState: vi.fn(),
@@ -120,7 +125,7 @@ function makeCtx() {
     execGit: vi.fn(),
   };
 
-  return { root, specPath, pipeline, deps };
+  return { root, specPath, pipeline, deps, advancePhaseCalls };
 }
 
 describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
@@ -137,6 +142,23 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
   });
 
   // ── First (non-revision) run: the live spec IS v1 — no copy ────────
+
+  it('parks in awaiting-review with a reason when the first (non-revision) run produces no spec.md', async () => {
+    // No spec.md is ever written — simulates a crashed or interrupted first
+    // analyst session.
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    expect(ctx.pipeline.phase).toBe('awaiting-review');
+    expect(ctx.deps.executePhase).not.toHaveBeenCalled();
+    expect(mockWarn).toHaveBeenCalledWith(
+      'spec',
+      expect.stringContaining('Spec phase produced no spec.md'),
+    );
+    const rollback = ctx.advancePhaseCalls[ctx.advancePhaseCalls.length - 1];
+    expect(rollback.eventExtra?.awaitingReviewReason).toEqual(
+      expect.stringContaining('Spec phase produced no spec.md'),
+    );
+  });
 
   it('does NOT copy the initial spec to spec_v1.md on a first (non-revision) run', async () => {
     const { writeFileSync, existsSync } = await import('fs');
@@ -210,6 +232,13 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
       'spec',
       expect.stringContaining('No-op spec revision detected'),
     );
+    // The park must be distinguishable from a genuine QA pass — both land on
+    // 'awaiting-review', so a missing reason would look identical to a real
+    // pass and invite premature approval (the bug this guards against).
+    const rollback = ctx.advancePhaseCalls[ctx.advancePhaseCalls.length - 1];
+    expect(rollback.eventExtra?.awaitingReviewReason).toEqual(
+      expect.stringContaining('No-op spec revision'),
+    );
     // spec.md is left in place (duplicating v1) — the versions UI dedupes it
     // (getTaskFull in tasks.ts), and a follow-up "Request Changes → Analyst"
     // requires spec.md to exist to enter revision mode instead of silently
@@ -233,6 +262,10 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
     expect(ctx.pipeline.phase).toBe('awaiting-review');
     expect(ctx.deps.executePhase).not.toHaveBeenCalled();
     expect(existsSync(join(ctx.specPath, 'spec_v1.md'))).toBe(true);
+    const rollback = ctx.advancePhaseCalls[ctx.advancePhaseCalls.length - 1];
+    expect(rollback.eventExtra?.awaitingReviewReason).toEqual(
+      expect.stringContaining('Spec revision produced no spec.md'),
+    );
   });
 
   it('the REVISION prompt points the analyst at the renamed baseline for reading', async () => {
@@ -271,6 +304,9 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
 
     await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
 
+    // A second session is given one focused shot at writing just the
+    // summary before the pipeline gives up and parks.
+    expect(mockCreateSession).toHaveBeenCalledTimes(2);
     expect(ctx.pipeline.phase).toBe('awaiting-review');
     expect(ctx.deps.executePhase).not.toHaveBeenCalled();
     expect(ctx.deps.savePipelineState).toHaveBeenCalled();
@@ -278,6 +314,33 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
       'spec',
       expect.stringContaining('Spec phase produced no spec_summary.md'),
     );
+    const rollback = ctx.advancePhaseCalls[ctx.advancePhaseCalls.length - 1];
+    expect(rollback.eventExtra?.awaitingReviewReason).toEqual(
+      expect.stringContaining('automatic retry'),
+    );
+  });
+
+  it('self-heals via a focused retry session when the analyst produces spec.md but no spec_summary.md (first run)', async () => {
+    const { writeFileSync } = await import('fs');
+    writeFileSync(join(ctx.specPath, 'spec.md'), '# brand new spec');
+
+    // Simulate the retry session's own analyst turn writing the summary —
+    // the second waitForCompletion call is the retry's.
+    let waits = 0;
+    ctx.deps.waitForCompletion = vi.fn(async () => {
+      waits++;
+      if (waits === 2) {
+        writeFileSync(join(ctx.specPath, 'spec_summary.md'), 'Summary written by the retry.');
+      }
+      return undefined;
+    });
+
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    expect(waits).toBe(2);
+    expect(mockCreateSession).toHaveBeenCalledTimes(2);
+    expect(ctx.pipeline.phase).toBe('plan');
+    expect(ctx.deps.executePhase).toHaveBeenCalledTimes(1);
   });
 
   it('parks in awaiting-review when a revision produces spec.md but no spec_summary.md', async () => {
@@ -289,11 +352,48 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
 
     await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
 
+    // A second session is given one focused shot at writing just the
+    // summary before the pipeline gives up and parks.
+    expect(mockCreateSession).toHaveBeenCalledTimes(2);
     expect(ctx.pipeline.phase).toBe('awaiting-review');
     expect(ctx.deps.executePhase).not.toHaveBeenCalled();
     expect(mockWarn).toHaveBeenCalledWith(
       'spec',
       expect.stringContaining('Spec phase produced no spec_summary.md'),
     );
+    // This is the production scenario: a revision-mode analyst session wrote
+    // spec.md but skipped spec_summary.md, and the pipeline auto-parks here
+    // (after the retry above also fails to produce it) instead of advancing
+    // to plan. Without a distinguishing reason on the 'awaiting-review'
+    // event, this looks identical to a real QA pass and an approver can wave
+    // it straight into create-pr, which then fails trying to build the PR
+    // body.
+    const rollback = ctx.advancePhaseCalls[ctx.advancePhaseCalls.length - 1];
+    expect(rollback.eventExtra?.awaitingReviewReason).toEqual(
+      expect.stringContaining('automatic retry'),
+    );
+  });
+
+  it('self-heals via a focused retry session when a revision produces spec.md but no spec_summary.md', async () => {
+    const { writeFileSync } = await import('fs');
+    writeFileSync(join(ctx.specPath, 'spec_v1.md'), '# original spec\n\nold formula');
+    writeFileSync(join(ctx.specPath, 'spec.md'), '# original spec\n\nrevised formula');
+    writeFileSync(join(ctx.specPath, 'spec_revision_feedback.md'), 'revise the formula');
+    ctx.pipeline.specRevision = 2;
+
+    let waits = 0;
+    ctx.deps.waitForCompletion = vi.fn(async () => {
+      waits++;
+      if (waits === 2) {
+        writeFileSync(join(ctx.specPath, 'spec_summary.md'), 'Summary written by the retry.');
+      }
+      return undefined;
+    });
+
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    expect(waits).toBe(2);
+    expect(mockCreateSession).toHaveBeenCalledTimes(2);
+    expect(ctx.pipeline.phase).toBe('plan');
   });
 });
