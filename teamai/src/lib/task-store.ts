@@ -235,6 +235,15 @@ export class TaskStore {
       // (used by analytics and retry resume) is now incomplete.
       logWarn('task-store', `Failed to append phase event for ${id}`, err);
     }
+
+    // Every finalization path (markTaskDone's PR-merge flow, runMergePhase's
+    // direct-merge flow, and any future one) transitions phase through here —
+    // recording completion at this single chokepoint, instead of leaving each
+    // caller to remember it, guarantees dependency resolution (isTaskCompleted)
+    // survives the task directory being deleted or never restored locally,
+    // regardless of which flow got the task to 'done'.
+    if (phase === 'done') this.markCompletedTask(id);
+
     this._emitUpdated(id);
   }
 
