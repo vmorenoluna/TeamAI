@@ -40,3 +40,30 @@ export function getResumePhaseForFailedTask(
     .pop();
   return lastRealPhase ?? 'qa-review';
 }
+
+/**
+ * Given a task's phase-change events, return the reason it landed in
+ * 'awaiting-review' if that landing was NOT a genuine QA pass.
+ *
+ * Several phase runners park a task at 'awaiting-review' after a failure a
+ * human needs to look at — the spec phase producing no spec.md/spec_summary.md,
+ * a no-op spec revision, or a rolled-back approval attempt — attaching a
+ * free-text `awaitingReviewReason` to the event. They land on the exact same
+ * phase a genuine "QA passed, pick a merge strategy" checkpoint does, which
+ * carries no reason. Callers that would otherwise treat every arrival at
+ * 'awaiting-review' as ready-to-approve (e.g. auto mode) must check this
+ * first — approving a reason-carrying park pushes a task with no spec/plan
+ * into create-pr or merge, which then fails there instead, for a reason that
+ * looks unrelated to the actual root cause.
+ *
+ * Returns null when the task is genuinely ready for review/approval.
+ */
+export function getAwaitingReviewReason(
+  events: Array<{ phase: string; timestamp: string; awaitingReviewReason?: unknown }>,
+): string | null {
+  const lastEvent = events[events.length - 1];
+  if (lastEvent && lastEvent.phase === 'awaiting-review' && typeof lastEvent.awaitingReviewReason === 'string') {
+    return lastEvent.awaitingReviewReason;
+  }
+  return null;
+}
