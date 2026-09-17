@@ -375,6 +375,32 @@ describe('TaskStore', () => {
       expect(store.getById(dep.id)).toBeNull();
       expect(store.isTaskCompleted(dep.id)).toBe(true);
     });
+
+    it('persists awaitingReviewReason on the task when parking on awaiting-review with a reason', () => {
+      const task = createTask('Failure park', 'desc');
+      store.updatePhase(task.id, 'awaiting-review', {
+        awaitingReviewReason: 'Spec phase produced no spec.md.',
+      });
+
+      expect(store.getById(task.id)!.awaitingReviewReason).toBe('Spec phase produced no spec.md.');
+    });
+
+    it('does not set awaitingReviewReason when awaiting-review has no reason (genuine QA pass)', () => {
+      const task = createTask('QA pass', 'desc');
+      store.updatePhase(task.id, 'awaiting-review');
+
+      expect(store.getById(task.id)!.awaitingReviewReason).toBeUndefined();
+    });
+
+    it('clears a stale awaitingReviewReason once the task leaves awaiting-review', () => {
+      const task = createTask('Rejected back to implement', 'desc');
+      store.updatePhase(task.id, 'awaiting-review', {
+        awaitingReviewReason: 'Spec phase produced no spec.md.',
+      });
+      store.updatePhase(task.id, 'implement');
+
+      expect(store.getById(task.id)!.awaitingReviewReason).toBeUndefined();
+    });
   });
 
   // ── delete ───────────────────────────────────────────────────────────
