@@ -14,6 +14,7 @@ import { buildTicketMessageForPipeline } from './orchestrator/artifact-commit';
 import { isAutoModeEnabled, getAutoModeState } from './auto-mode-state';
 import { recordAutoProcessed } from './auto-review-store';
 import { ContainerDockerMissingError } from './orchestrator/errors';
+import { getAwaitingReviewReason } from './task-utils';
 
 // Async (non-blocking) execFile — see the comment on _startCIPolling for why
 // this matters: the *Sync variant blocks Node's entire single-threaded event
@@ -202,6 +203,17 @@ function _start(projectRoot: string, state: AutoProjectState): void {
  * Auto-approve a task sitting in awaiting-review. Shared by the phase-change
  * listener and _adoptStalledTasks.
  *
+ * Several phase runners also park a task at 'awaiting-review' after a
+ * failure a human needs to look at (spec phase producing no spec.md/
+ * spec_summary.md, a no-op spec revision, a rolled-back approval attempt) —
+ * landing on the exact same phase a genuine "QA passed, pick a merge
+ * strategy" checkpoint does. approveTask() itself has no way to tell these
+ * apart (it only checks `phase === 'awaiting-review'`), so blindly approving
+ * here pushed failed-spec tasks straight into create-pr/merge, which then
+ * failed there too — for a reason (e.g. "missing spec_summary.md") that
+ * looks unrelated to the actual root cause and masks it. Skip auto-approval
+ * whenever the park carries a reason; leave it for a human to reject/retry.
+ *
  * Does NOT stamp autoProcessed here — the stamp is applied only after the
  * task is fully auto-processed (CI passes → auto-merge → markTaskDone).
  * Stamping at this point would leak the flag onto tasks that a human
@@ -210,15 +222,33 @@ function _start(projectRoot: string, state: AutoProjectState): void {
  *
  * The autoApprovedIds guard prevents double-approval while one is in flight;
  * on failure the id is removed (one-shot, no retry loop).
+ *
+ * @returns true if approval was attempted, false if skipped (already in
+ * flight, or parked with a reason) — callers use this to keep their own
+ * "how many did I actually act on" counts honest.
  */
-function _autoApprove(taskId: string, projectRoot: string, state: AutoProjectState): void {
-  if (state.autoApprovedIds.has(taskId)) return;
+function _autoApprove(taskId: string, projectRoot: string, state: AutoProjectState): boolean {
+  if (state.autoApprovedIds.has(taskId)) return false;
+
+  try {
+    const reason = getAwaitingReviewReason(new TaskStore(projectRoot).getEvents(taskId));
+    if (reason) {
+      log('auto-mode', `Task ${taskId} parked in awaiting-review, not approving — ${reason}`);
+      return false;
+    }
+  } catch (err) {
+    // Best-effort: if the reason can't be determined, fall through to the
+    // existing behavior rather than silently stalling a genuinely-ready task.
+    logWarn('auto-mode', `Failed to check awaiting-review reason for task ${taskId}`, err);
+  }
+
   state.autoApprovedIds.add(taskId);
   getOrchestrator(projectRoot).approveTask(taskId, 'pull-request')
     .catch(err => {
       logError('auto-mode', `Failed to auto-approve task ${taskId}`, err);
       state.autoApprovedIds.delete(taskId);
     });
+  return true;
 }
 
 /**
@@ -253,9 +283,10 @@ function _adoptStalledTasks(projectRoot: string, state: AutoProjectState): void 
 
     if (task.phase === 'awaiting-review') {
       // Approve immediately — the phase-change event won't fire because the
-      // task is already in this phase.
-      adopted++;
-      _autoApprove(task.id, projectRoot, state);
+      // task is already in this phase. _autoApprove itself skips (and
+      // returns false) a park carrying an awaitingReviewReason, so this only
+      // counts tasks actually pushed forward, not ones left for a human.
+      if (_autoApprove(task.id, projectRoot, state)) adopted++;
     } else if (task.phase === 'pr-open') {
       // Restart CI polling — the pr-open phase-change event was missed while
       // auto mode was off.

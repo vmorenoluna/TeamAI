@@ -829,6 +829,48 @@ describe('Auto Mode Integration', () => {
       expect(mockOrch.approveTask).not.toHaveBeenCalled();
     });
 
+    it('does NOT auto-approve a task parked in awaiting-review with a failure reason', async () => {
+      // Guards against auto-mode blindly approving a task that landed on
+      // awaiting-review via a failure park (e.g. the spec phase producing no
+      // spec.md/spec_summary.md) rather than a genuine QA pass — both land on
+      // the same phase, but only the reason-carrying one must NOT be pushed
+      // into create-pr/merge.
+      const { TaskStore } = await import('@/lib/task-store');
+      const store = new TaskStore(testDir);
+      store.updatePhase(taskId, 'awaiting-review', {
+        awaitingReviewReason: 'Spec phase produced no spec_summary.md — spec.md was written but the summary needed to build the PR body is missing, even after an automatic retry. This is not a QA pass; reject back to the analyst to regenerate it.',
+      });
+
+      autoMode.setAutoModeState(testDir, true, 1);
+      mockOrch.approveTask.mockClear();
+
+      fireEvent('phase-change', { taskId, phase: 'awaiting-review', projectRoot: testDir });
+
+      await new Promise(r => setTimeout(r, 50));
+      expect(mockOrch.approveTask).not.toHaveBeenCalled();
+      expect(mockLog).toHaveBeenCalledWith(
+        'auto-mode',
+        expect.stringContaining('parked in awaiting-review, not approving'),
+      );
+    });
+
+    it('does NOT auto-approve a stalled task in awaiting-review with a failure reason on adoption', async () => {
+      // Same guard via the _adoptStalledTasks path (task already sitting in
+      // awaiting-review when auto mode is enabled, e.g. after a restart) —
+      // the phase-change listener never fires for it, so _autoApprove must
+      // reach the same reason check when scanned directly.
+      const { TaskStore } = await import('@/lib/task-store');
+      const store = new TaskStore(testDir);
+      store.updatePhase(taskId, 'awaiting-review', {
+        awaitingReviewReason: 'Spec phase produced no spec.md — the analyst session ended without writing a spec. This is not a QA pass; retry the task to run the analyst again.',
+      });
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await new Promise(r => setTimeout(r, 50));
+      expect(mockOrch.approveTask).not.toHaveBeenCalled();
+    });
+
     it('ignores phase-change events for different project roots', async () => {
       autoMode.setAutoModeState(testDir, true, 1);
 
