@@ -215,12 +215,18 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
       {/* Needs-attention indicator — awaiting-review parked by a failure
           (not a genuine QA pass), e.g. the spec phase producing no
           spec.md/spec_summary.md. Auto mode also refuses to auto-approve
-          this state — see auto-mode.ts's _autoApprove. */}
+          this state — see auto-mode.ts's _autoApprove. Icon-only (like the
+          spinner/hourglass indicators it shares this corner with) with the
+          full reason in the title tooltip — a text label here ("Needs
+          attention") is wider than the pr-8 gutter reserved for this
+          corner and overlaps the title/description below it. */}
       {needsAttention && !isMoving && (
-        <div className="absolute top-2 right-2" title={task.awaitingReviewReason} data-component="needs-attention-badge">
-          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-950/40 text-red-400 border border-red-700/40">
-            ⚠ Needs attention
-          </span>
+        <div
+          className="absolute top-2 right-2 w-4 h-4 rounded-full bg-red-950/60 border border-red-700/50 flex items-center justify-center"
+          title={`Needs attention — ${task.awaitingReviewReason}`}
+          data-component="needs-attention-badge"
+        >
+          <span className="text-[10px] leading-none text-red-400">⚠</span>
         </div>
       )}
       {/* Spinning circle indicator — shows for active phases */}

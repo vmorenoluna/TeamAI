@@ -77,10 +77,21 @@ vi.mock('@/components/unified-terminal', () => ({
   ),
 }));
 
-// ReviewPanel mock
+// ReviewPanel mock — captures the props TaskPanel/TaskDetail thread through,
+// so a regression like task-panel.tsx silently dropping humanFeedback/
+// specPath/awaitingReviewReason on its TaskDetail call (they reached
+// getTaskFull's return value but never made it past this component) shows
+// up as a rendering difference instead of passing unnoticed.
 vi.mock('@/components/review-panel', () => ({
-  ReviewPanel: ({ taskId }: { taskId: string }) => (
-    <div data-component="review-panel" data-task-id={taskId}>ReviewPanel</div>
+  ReviewPanel: ({ taskId, humanFeedback, specPath, awaitingReviewReason }: {
+    taskId: string; humanFeedback?: string | null; specPath?: string; awaitingReviewReason?: string | null;
+  }) => (
+    <div data-component="review-panel" data-task-id={taskId}>
+      ReviewPanel
+      {humanFeedback && <span data-component="review-panel-human-feedback">{humanFeedback}</span>}
+      {specPath && <span data-component="review-panel-spec-path">{specPath}</span>}
+      {awaitingReviewReason && <span data-component="review-panel-awaiting-reason">{awaitingReviewReason}</span>}
+    </div>
   ),
 }));
 
@@ -133,6 +144,7 @@ function makeFullData(overrides: Partial<{
   agentOutput: string | null;
   specVersions: Record<string, string>;
   specPath: string;
+  awaitingReviewReason: string | null;
 }> = {}): FullData {
   const task = makeTask(overrides.task ?? {});
   return {
@@ -154,7 +166,7 @@ function makeFullData(overrides: Partial<{
     mergeLog: null,
     sessionMap: {},
     specPath: overrides.specPath ?? '/test/spec.md',
-    awaitingReviewReason: null,
+    awaitingReviewReason: overrides.awaitingReviewReason ?? null,
     refinementSuggestion: null as unknown as FullData['refinementSuggestion'],
     refinementSuggestions: [],
     refinementMode: 'manual',
@@ -328,6 +340,33 @@ describe('TaskPanel', () => {
         const titles = screen.getAllByText('Cached Title');
         expect(titles.length).toBeGreaterThanOrEqual(1);
       });
+    });
+  });
+
+  // ── Prop threading to TaskDetail/ReviewPanel ─────────────────────────
+
+  describe('prop threading', () => {
+    it('threads humanFeedback, specPath, and awaitingReviewReason from getTaskFull through to ReviewPanel', async () => {
+      // Regression guard for the actual bug: task-panel.tsx's <TaskDetail>
+      // call omitted these three fields entirely even though getTaskFull's
+      // resolved data included them — so the "Needs attention" banner and
+      // human-feedback banner never appeared in the modal (the primary way
+      // tickets are opened from the kanban board), only on the standalone
+      // /task/[id] route which built its props correctly.
+      mockGetTaskFull.mockResolvedValue(makeFullData({
+        task: { phase: 'awaiting-review' },
+        humanFeedback: 'Please redo the auth flow.',
+        specPath: '/repo/.teamai/my-task/spec.md',
+        awaitingReviewReason: 'Spec phase produced no spec.md.',
+      }));
+
+      renderPanel();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('review-panel-human-feedback')).toHaveTextContent('Please redo the auth flow.');
+      });
+      expect(screen.getByTestId('review-panel-spec-path')).toHaveTextContent('/repo/.teamai/my-task/spec.md');
+      expect(screen.getByTestId('review-panel-awaiting-reason')).toHaveTextContent('Spec phase produced no spec.md.');
     });
   });
 
@@ -724,6 +763,8 @@ describe('TaskDetail', () => {
     diff: string | null;
     agentOutput: string | null;
     specVersions: Record<string, string>;
+    specPath: string;
+    awaitingReviewReason: string | null;
     readonly: boolean;
     onClose: () => void;
   }> = {}) {
@@ -744,6 +785,8 @@ describe('TaskDetail', () => {
         subtaskTerminals={[]}
         qaLog={null}
         sessionMap={{}}
+        specPath={overrides.specPath}
+        awaitingReviewReason={overrides.awaitingReviewReason ?? null}
         readonly={overrides.readonly ?? false}
         onClose={overrides.onClose}
       />
@@ -1454,6 +1497,25 @@ describe('TaskDetail', () => {
     it('does not show ReviewPanel for non-review phases', () => {
       renderDetail({ task: { phase: 'implement' } });
       expect(screen.queryByTestId('review-panel')).not.toBeInTheDocument();
+    });
+
+    it('threads humanFeedback, specPath, and awaitingReviewReason through to ReviewPanel', () => {
+      // Regression guard: task-panel.tsx's <TaskDetail> call previously
+      // omitted these three props entirely, so ReviewPanel never received
+      // them even though getTaskFull computed them correctly — the "Needs
+      // attention" / human-feedback banners silently never rendered in the
+      // modal (the primary way tickets are opened), only on the standalone
+      // /task/[id] route.
+      renderDetail({
+        task: { phase: 'awaiting-review' },
+        humanFeedback: 'Please redo the auth flow.',
+        specPath: '/repo/.teamai/my-task/spec.md',
+        awaitingReviewReason: 'Spec phase produced no spec.md.',
+      });
+
+      expect(screen.getByTestId('review-panel-human-feedback')).toHaveTextContent('Please redo the auth flow.');
+      expect(screen.getByTestId('review-panel-spec-path')).toHaveTextContent('/repo/.teamai/my-task/spec.md');
+      expect(screen.getByTestId('review-panel-awaiting-reason')).toHaveTextContent('Spec phase produced no spec.md.');
     });
   });
 
