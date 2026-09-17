@@ -10,7 +10,7 @@ import { revalidatePath } from 'next/cache';
 import type { PlanData } from '@/lib/stream-types';
 import { randomUUID } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
-import { getResumePhaseForFailedTask } from '@/lib/task-utils';
+import { getResumePhaseForFailedTask, getAwaitingReviewReason } from '@/lib/task-utils';
 import { getRoleRefinementConfig, suggestionsForTask, type RoleRefinementMode, type RoleRefinementSuggestion } from '@/lib/role-refinement';
 import { join, resolve } from 'path';
 import { readdirSync } from 'fs';
@@ -440,11 +440,7 @@ export async function getTaskFull(taskId: string) {
   // real pass does, so without this the review panel can't tell them apart.
   let awaitingReviewReason: string | null = null;
   try {
-    const events = taskStore.getEvents(taskId);
-    const lastEvent = events[events.length - 1];
-    if (lastEvent && typeof lastEvent.awaitingReviewReason === 'string' && lastEvent.phase === 'awaiting-review') {
-      awaitingReviewReason = lastEvent.awaitingReviewReason;
-    }
+    awaitingReviewReason = getAwaitingReviewReason(taskStore.getEvents(taskId));
   } catch { /* best-effort */ }
 
   // ── Role Refinement Assistant ──
