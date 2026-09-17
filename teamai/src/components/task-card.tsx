@@ -101,7 +101,13 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
     });
   }
 
-  const showSpinner = !EXCLUDED_SPINNER_PHASES.has(task.phase) && !task.isPaused && !task.rateLimitedUntil;
+  // A task can land on 'awaiting-review' either via a genuine QA pass (ready
+  // to pick a merge strategy) or a failure park (spec phase produced no
+  // spec.md/spec_summary.md, a no-op revision, a rolled-back approval) — see
+  // task-utils.ts's getAwaitingReviewReason. Only the latter carries a
+  // reason, so it's the signal for the "needs attention" indicator.
+  const needsAttention = task.phase === 'awaiting-review' && !!task.awaitingReviewReason;
+  const showSpinner = !EXCLUDED_SPINNER_PHASES.has(task.phase) && !task.isPaused && !task.rateLimitedUntil && !needsAttention;
   const isRateLimited = !!task.rateLimitedUntil;
   const longDesc = task.description && task.description.length > DESCRIPTION_LIMIT;
   const displayDesc = task.description
@@ -203,6 +209,17 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
         <div className="absolute top-2 right-2" title="Auto-processed — not yet manually reviewed">
           <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-400 border border-amber-700/40">
             Auto
+          </span>
+        </div>
+      )}
+      {/* Needs-attention indicator — awaiting-review parked by a failure
+          (not a genuine QA pass), e.g. the spec phase producing no
+          spec.md/spec_summary.md. Auto mode also refuses to auto-approve
+          this state — see auto-mode.ts's _autoApprove. */}
+      {needsAttention && !isMoving && (
+        <div className="absolute top-2 right-2" title={task.awaitingReviewReason} data-component="needs-attention-badge">
+          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-950/40 text-red-400 border border-red-700/40">
+            ⚠ Needs attention
           </span>
         </div>
       )}

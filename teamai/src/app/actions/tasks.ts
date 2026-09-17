@@ -433,15 +433,21 @@ export async function getTaskFull(taskId: string) {
 
   const specPath = join(dir, 'spec.md');
 
-  // Read events to surface why the task is sitting in awaiting-review — either
-  // an approval attempt that failed and bounced back, or the spec phase
-  // auto-parking (no-op revision, missing spec.md/spec_summary.md) instead of
-  // a genuine QA pass. Both cases advance to 'awaiting-review' the same way a
-  // real pass does, so without this the review panel can't tell them apart.
-  let awaitingReviewReason: string | null = null;
-  try {
-    awaitingReviewReason = getAwaitingReviewReason(taskStore.getEvents(taskId));
-  } catch { /* best-effort */ }
+  // Surface why the task is sitting in awaiting-review — either an approval
+  // attempt that failed and bounced back, or the spec phase auto-parking
+  // (no-op revision, missing spec.md/spec_summary.md) instead of a genuine
+  // QA pass. Both cases advance to 'awaiting-review' the same way a real
+  // pass does, so without this the review panel can't tell them apart.
+  // task.awaitingReviewReason (updatePhase persists it there directly) is
+  // the source of truth going forward; the events.jsonl derivation is kept
+  // as a fallback for a task that was already parked before that field
+  // existed.
+  let awaitingReviewReason: string | null = task.awaitingReviewReason ?? null;
+  if (!awaitingReviewReason) {
+    try {
+      awaitingReviewReason = getAwaitingReviewReason(taskStore.getEvents(taskId));
+    } catch { /* best-effort */ }
+  }
 
   // ── Role Refinement Assistant ──
   // The inline card is driven by the task's refinementStatus, with the

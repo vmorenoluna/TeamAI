@@ -83,6 +83,15 @@ export interface Task {
    *  outside any of those caps (e.g. an app restart)". Undefined for legacy
    *  failed tasks written before this field existed. */
   failureReason?: 'qa-attempts-exhausted' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed';
+  /** Why a task landed on `awaiting-review` when that was NOT a genuine QA
+   *  pass — spec phase producing no spec.md/spec_summary.md, a no-op spec
+   *  revision, a rolled-back approval attempt. Mirrors `failureReason`'s
+   *  role for `failed`: a cheap, persisted signal the kanban card can show
+   *  without reading events.jsonl per task. Set/cleared by updatePhase()
+   *  from the `awaitingReviewReason` passed in `eventExtra`. Undefined for
+   *  a genuine "QA passed, pick a merge strategy" landing, or once the task
+   *  leaves `awaiting-review`. */
+  awaitingReviewReason?: string;
   subtaskProgress?: { completed: number; total: number } | null;  // computed at load time from plan.json
   autoProcessed?: boolean;      // set to true when auto mode marks the task as done (PR auto-merged)
   autoReviewed?: boolean;       // set to true when user marks the auto-done task as manually reviewed
@@ -221,6 +230,14 @@ export class TaskStore {
 
     task.phase = phase;
     task.updatedAt = new Date().toISOString();
+
+    // Mirror failureReason's pattern for a failure-parked awaiting-review:
+    // persist it on the task record itself (not just the event) so the
+    // kanban card can show a "needs attention" indicator without reading
+    // events.jsonl per task. A landing with no reason (genuine QA pass) or
+    // any transition away from awaiting-review clears a stale value.
+    const reason = eventExtra?.awaitingReviewReason;
+    task.awaitingReviewReason = phase === 'awaiting-review' && typeof reason === 'string' ? reason : undefined;
 
     const dir = this.getDirById(id);
     atomicWriteJson(join(dir, 'task.json'), task);

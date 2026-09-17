@@ -217,3 +217,55 @@ describe('TaskCard Auto badge', () => {
     expect(screen.queryByText('Auto')).not.toBeInTheDocument();
   });
 });
+
+// ── Needs-attention badge ─────────────────────────────────────────────
+
+describe('TaskCard needs-attention badge', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows "Needs attention" when phase is awaiting-review with a reason (failure park)', () => {
+    const task = makeTask({
+      phase: 'awaiting-review',
+      awaitingReviewReason: 'Spec phase produced no spec.md — the analyst session ended without writing a spec.',
+    });
+    render(<TaskCard task={task} onSelect={vi.fn()} />);
+
+    const badge = screen.getByTestId('needs-attention-badge');
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveAttribute('title', task.awaitingReviewReason);
+    expect(screen.getByText(/Needs attention/)).toBeInTheDocument();
+  });
+
+  it('hides the badge when awaiting-review has no reason (genuine QA pass)', () => {
+    const task = makeTask({ phase: 'awaiting-review' });
+    render(<TaskCard task={task} onSelect={vi.fn()} />);
+
+    expect(screen.queryByTestId('needs-attention-badge')).not.toBeInTheDocument();
+  });
+
+  it('hides the badge when a reason is present but phase is not awaiting-review', () => {
+    // A stale reason should never surface outside the phase it belongs to —
+    // updatePhase() clears it on any other transition, but the card itself
+    // also gates on phase defensively.
+    const task = makeTask({
+      phase: 'implement',
+      awaitingReviewReason: 'Spec phase produced no spec.md.',
+    });
+    render(<TaskCard task={task} onSelect={vi.fn()} />);
+
+    expect(screen.queryByTestId('needs-attention-badge')).not.toBeInTheDocument();
+  });
+
+  it('suppresses the in-progress spinner when the needs-attention badge is shown', () => {
+    const task = makeTask({
+      phase: 'awaiting-review',
+      awaitingReviewReason: 'Spec phase produced no spec.md.',
+    });
+    render(<TaskCard task={task} onSelect={vi.fn()} />);
+
+    expect(screen.getByTestId('needs-attention-badge')).toBeInTheDocument();
+    expect(screen.queryByTestId('spinner-icon')).not.toBeInTheDocument();
+  });
+});
