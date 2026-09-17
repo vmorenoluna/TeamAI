@@ -225,7 +225,11 @@ describe('TaskCard needs-attention badge', () => {
     vi.clearAllMocks();
   });
 
-  it('shows "Needs attention" when phase is awaiting-review with a reason (failure park)', () => {
+  it('shows the icon-only badge when phase is awaiting-review with a reason (failure park)', () => {
+    // Icon-only (not a text label) — the corner reserves only pr-8 of
+    // clearance on the title, too narrow for a "Needs attention" text pill
+    // without overlapping the title/description. The full reason surfaces
+    // via the title tooltip instead.
     const task = makeTask({
       phase: 'awaiting-review',
       awaitingReviewReason: 'Spec phase produced no spec.md — the analyst session ended without writing a spec.',
@@ -234,8 +238,8 @@ describe('TaskCard needs-attention badge', () => {
 
     const badge = screen.getByTestId('needs-attention-badge');
     expect(badge).toBeInTheDocument();
-    expect(badge).toHaveAttribute('title', task.awaitingReviewReason);
-    expect(screen.getByText(/Needs attention/)).toBeInTheDocument();
+    expect(badge).toHaveAttribute('title', `Needs attention — ${task.awaitingReviewReason}`);
+    expect(badge).toHaveTextContent('⚠');
   });
 
   it('hides the badge when awaiting-review has no reason (genuine QA pass)', () => {
