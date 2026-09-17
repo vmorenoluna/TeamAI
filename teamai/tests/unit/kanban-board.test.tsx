@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { Task } from '@/lib/task-store';
 
@@ -93,6 +93,7 @@ vi.mock('react', async (importOriginal) => {
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import { KanbanBoard } from '@/components/kanban-board';
+import { usePhaseSync } from '@/hooks/use-phase-sync';
 import type { DoneTicketFromHistory } from '@/lib/history-scanner';
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
@@ -826,6 +827,57 @@ describe('KanbanBoard', () => {
       await waitFor(() => {
         expect(mockRetryTaskWithOptions).toHaveBeenCalledTimes(1);
       });
+    });
+
+    // ── Regression: confirming phase-change event shouldn't flicker ─────
+    // The real 'phase-change' WebSocket event confirming the move arrives
+    // well before the debounced router.refresh() that would deliver fresh
+    // `task.phase` data. The old code cleared the optimistic override
+    // immediately on that event, so the card fell through to the still-stale
+    // `task.phase` prop for the rest of the debounce window — visibly
+    // flickering back to its previous column before the refresh caught up
+    // and moved it forward again.
+
+    it('keeps showing the target column (no flicker) when the confirming phase-change event arrives before refresh', async () => {
+      renderBoard([task({ id: '1', title: 'Draggable', phase: 'backlog' })]);
+
+      dropCardOnColumn('In Progress');
+
+      await waitFor(() => {
+        expect(screen.getByText('Move Task')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText('Move & Resume'));
+
+      await waitFor(() => {
+        expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement');
+      });
+
+      // Optimistically already under "In Progress"
+      expect(screen.getByTestId('is-moving')).toBeInTheDocument();
+
+      // Simulate the server's real phase-change event confirming the move —
+      // arrives before the underlying `task.phase` prop has actually been
+      // refreshed (the mocked `tasks` prop passed to renderBoard is still
+      // `phase: 'backlog'`).
+      const latestOnPhaseChange = vi.mocked(usePhaseSync).mock.calls.at(-1)![0]?.onPhaseChange;
+      act(() => { latestOnPhaseChange?.('1', 'implement'); });
+
+      // Still optimistic (updated, not cleared) — the card stays under "In
+      // Progress" instead of falling back to the stale backlog phase.
+      expect(screen.getByTestId('is-moving')).toBeInTheDocument();
+      const implementHeader = screen.getByText('In Progress');
+      const implementColumn = implementHeader.closest('.flex.flex-col')!;
+      expect(implementColumn.querySelector('[data-task-id="1"]')).toBeInTheDocument();
+    });
+
+    it('ignores a phase-change event for a task with no optimistic entry (not user-dragged)', () => {
+      renderBoard([task({ id: '1', title: 'Untouched', phase: 'implement' })]);
+
+      const latestOnPhaseChange = vi.mocked(usePhaseSync).mock.calls.at(-1)![0]?.onPhaseChange;
+      expect(() => act(() => { latestOnPhaseChange?.('1', 'qa-review'); })).not.toThrow();
+
+      // No optimistic entry existed, so nothing should mark it as moving.
+      expect(screen.queryByTestId('is-moving')).not.toBeInTheDocument();
     });
   });
 
