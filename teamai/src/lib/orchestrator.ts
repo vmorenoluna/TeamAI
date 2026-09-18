@@ -20,7 +20,7 @@ import { NO_RESUME_PHASES } from '@/constants/phases';
 import { runImplement, _recoverStBranchCommits } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
 import { CLEANUP_ARTIFACTS, MAX_REVISION_SNAPSHOTS } from './orchestrator/artifacts';
-import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec } from './orchestrator/review-actions';
+import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec, prepareSpecRevisionArtifacts, buildSpecRevisionFeedback } from './orchestrator/review-actions';
 import { detectGitPlatform, isPrMerged } from './git-platform';
 import { warn as logWarn, log, error as logError } from './logger';
 import type { PhaseContext } from './orchestrator/phase-context';
@@ -194,8 +194,29 @@ export class Orchestrator {
 
     // Determine actual start phase and clear stale artifacts
     let startPhase: PipelinePhase = 'spec';
+    // A retry to spec should behave exactly like a QA-driven bounce to the
+    // analyst when the QA budget isn't exhausted (autoReviseSpec/qa-review.ts):
+    // preserve spec.md as a version snapshot and put the analyst in REVISION
+    // mode with the QA report's own spec_concerns, rather than wiping the
+    // spec and starting the analyst over with no memory of what QA found.
+    // Only applies when there's something to revise from — a task that never
+    // produced a spec, or whose last report carried no spec_concerns, falls
+    // through to the plain wipe-and-restart below exactly as before.
+    const hasSpecConcerns = !!priorQaReport?.spec_concerns
+      && Array.isArray(priorQaReport.spec_concerns) && priorQaReport.spec_concerns.length > 0;
+    let enteredSpecRevisionMode = false;
     if (targetPhase === 'spec') {
-      this.taskStore.clearArtifacts(taskId, 'spec');
+      if (hasSpecConcerns && hasSpec) {
+        // _restoreSpecRevision returns the CURRENT live spec's version number
+        // (e.g. 1 for a never-revised spec) — the archive target is one past
+        // that, matching autoReviseSpec's `pipeline.specRevision++` before
+        // beginSpecRevision (spec.md v1 archives onto spec_v1.md, becoming v2).
+        const newSpecRevision = this._restoreSpecRevision(taskId) + 1;
+        prepareSpecRevisionArtifacts(dir, newSpecRevision, buildSpecRevisionFeedback(dir), { clearStaleFeedback: true });
+        enteredSpecRevisionMode = true;
+      } else {
+        this.taskStore.clearArtifacts(taskId, 'spec');
+      }
       this.clearPipelineStateFile(dir);
       startPhase = 'spec';
     } else if (targetPhase === 'plan') {
@@ -225,7 +246,12 @@ export class Orchestrator {
       startPhase = targetPhase as PipelinePhase;
     }
 
-    if (clearsQaArtifacts && priorQaReport?.overall === 'FAIL') {
+    // Skip when spec-revision mode already ran: it trims qa_feedback.md as
+    // part of prepareSpecRevisionArtifacts, and the analyst never reads that
+    // file anyway (only spec_revision_feedback.md) — writing it back here
+    // would leave stale QA artifacts on disk a genuine QA-driven bounce to
+    // the analyst would never produce.
+    if (clearsQaArtifacts && priorQaReport?.overall === 'FAIL' && !enteredSpecRevisionMode) {
       writeQaFeedback(dir, priorQaReport);
     }
 
