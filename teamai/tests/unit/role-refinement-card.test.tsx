@@ -178,6 +178,38 @@ describe('RoleRefinementCard', () => {
     await vi.waitFor(() => expect(mockApplyRetry).toHaveBeenCalledWith('s-1', undefined));
   });
 
+  // Regression: an 'append' edit's proposedContent is only the new block, not
+  // the resulting file. Diffing it directly against the full current file
+  // (instead of the merged result applyRefinement — role-refinement.ts —
+  // actually writes) showed the whole existing role file as removed, making
+  // an additive suggestion look destructive.
+  it('diffs an append-mode edit against the merged result, not the raw snippet, so nothing existing looks removed', () => {
+    const { container } = renderCard(makeTask({ refinementStatus: 'suggested' }), makeSuggestion());
+    const diff = container.querySelector('[data-component="unified-diff"]');
+    // The existing "# Role: Planner" / "old body" content must never appear
+    // inside a removed (red) row — it's unchanged, not deleted. Only the new
+    // block is added.
+    const redRows = Array.from(diff?.querySelectorAll('.bg-red-950\\/20') ?? []);
+    const redText = redRows.map(r => r.textContent).join('\n');
+    expect(redText).not.toContain('Role: Planner');
+    expect(redText).not.toContain('old body');
+    expect(diff?.textContent).toContain('old body');
+    expect(diff?.textContent).toContain('Use git add -f.');
+  });
+
+  it('diffs a replace-mode edit against the full proposedContent unchanged (no merge)', () => {
+    const replaceSuggestion = makeSuggestion({
+      edits: [{ roleFile: 'planner.md', mode: 'replace', rationale: 'full rewrite', proposedContent: '# Role: Planner\n\nnew body\n', riskClass: 'modifying' }],
+    });
+    const { container } = renderCard(makeTask({ refinementStatus: 'suggested' }), replaceSuggestion);
+    const diff = container.querySelector('[data-component="unified-diff"]');
+    // "old body" is genuinely gone under a real replace — that removal is
+    // correct and expected, unlike the append case above.
+    expect(diff?.querySelector('.bg-red-950\\/20')).not.toBeNull();
+    expect(diff?.textContent).toContain('old body');
+    expect(diff?.textContent).toContain('new body');
+  });
+
   it('keeps the analyze button and applied outcome visible', () => {
     renderCard(makeTask(), makeSuggestion({ status: 'applied' }));
     expect(screen.getByRole('button', { name: /Analyze failure/i })).toBeInTheDocument();
