@@ -166,6 +166,14 @@ function RoleRefinementSuggestionCard({ task, suggestion, roleFiles, mode, onRef
             const edited = (edits ?? {})[edit.roleFile] ?? edit.proposedContent;
             const editing = editMode[edit.roleFile] ?? false;
             const current = roleFiles[edit.roleFile] ?? '';
+            // For 'append' mode, `edited` is only the new block being added —
+            // diffing it directly against the full `current` file would show
+            // the entire existing file as removed. Mirror applyRefinement's
+            // (role-refinement.ts) exact merge so the preview matches what
+            // Apply actually writes: the new block appended, not swapped in.
+            const proposed = edit.mode === 'append'
+              ? (current.trim() ? `${current.trim()}\n\n${edited.trim()}\n` : `${edited.trim()}\n`)
+              : edited;
             return (
               <div key={`${edit.roleFile}-${i}`} className="space-y-1.5">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -196,7 +204,7 @@ function RoleRefinementSuggestionCard({ task, suggestion, roleFiles, mode, onRef
                     className="w-full px-3 py-2 text-xs font-mono border border-[#334155] rounded-lg bg-[#1e2333] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] resize-y"
                   />
                 ) : (
-                  <UnifiedDiff current={current} proposed={edited} />
+                  <UnifiedDiff current={current} proposed={proposed} />
                 )}
               </div>
             );
