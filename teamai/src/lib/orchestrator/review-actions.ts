@@ -63,9 +63,12 @@ function resetAllCounters(pipeline: TaskPipeline, preserveQaHistory = false): vo
 /**
  * Build spec_revision_feedback.md content from qa_report.json's spec_concerns.
  * Used by both the normal auto-revision path and the bail-out path
- * (when the revision limit is reached and the human restarts from spec).
+ * (when the revision limit is reached and the human restarts from spec),
+ * and by moveTaskToPhase's retry-to-spec path (orchestrator.ts) so a manual
+ * retry with spec_concerns on record gets the exact same feedback content
+ * a QA-driven bounce would have produced.
  */
-function buildSpecRevisionFeedback(specPath: string): string {
+export function buildSpecRevisionFeedback(specPath: string): string {
   const reportPath = path.join(specPath, 'qa_report.json');
   let feedbackContent = '# Spec Revision Feedback\n\n';
   feedbackContent += 'The QA reviewer identified issues with the specification itself ';
@@ -153,26 +156,27 @@ export function trimArtifactsForTarget(
 }
 
 /**
- * Begin a spec revision: write the feedback that flips runSpecPhase into
- * REVISION mode, snapshot the pre-revision spec, trim only what the analyst
- * must regenerate, reset counters, and restart from the spec phase.
+ * Prepare spec.md for a revision on disk: write the feedback that flips
+ * runSpecPhase into REVISION mode, snapshot the pre-revision spec, delete
+ * the stale summary, and trim only what the analyst must regenerate.
  *
- * The caller is responsible for incrementing `pipeline.specRevision` first so
- * the no-op guard and version archive use the new number.
+ * Pure filesystem side effects — no pipeline/session state — so it can run
+ * both against a live in-memory pipeline (beginSpecRevision below) and
+ * against a task with no pipeline currently running (moveTaskToPhase's
+ * retry-to-spec path in orchestrator.ts, which builds a fresh pipeline via
+ * runTask only after these artifacts are already in place).
  *
- * Shared by autoReviseSpec (QA-driven) and routeHumanFeedback's analyst target
- * (human-driven), which differ only in the feedback content and whether stale
- * human-feedback files are cleared (the human path keeps human_feedback.md so
- * the analyst sees the directive).
+ * `newSpecRevision` is the revision number this call is producing (the spec
+ * is archived as `spec_v{newSpecRevision - 1}.md`) — callers pass either
+ * `pipeline.specRevision` after incrementing it, or the equivalent value
+ * recovered from disk (Orchestrator._restoreSpecRevision).
  */
-async function beginSpecRevision(
-  pipeline: TaskPipeline,
-  deps: ReviewActionsDeps,
+export function prepareSpecRevisionArtifacts(
+  specPath: string,
+  newSpecRevision: number,
   feedbackContent: string,
   opts: { clearStaleFeedback: boolean },
-): Promise<void> {
-  const specPath = pipeline.specPath;
-
+): void {
   // Feedback first (flips runSpecPhase into REVISION mode), then the spec
   // rename — order matters for the baseline-failure warn contract.
   writeFileSync(path.join(specPath, 'spec_revision_feedback.md'), feedbackContent);
@@ -186,11 +190,11 @@ async function beginSpecRevision(
   const specMdPath = path.join(specPath, 'spec.md');
   if (existsSync(specMdPath)) {
     try {
-      renameSync(specMdPath, path.join(specPath, `spec_v${pipeline.specRevision - 1}.md`));
+      renameSync(specMdPath, path.join(specPath, `spec_v${newSpecRevision - 1}.md`));
     } catch (err) {
       // Losing the baseline would make the no-op guard silently pass on every
       // future attempt — surface it, but don't block the pipeline.
-      warn('review', `Failed to snapshot pre-revision spec for ${pipeline.taskId}`, err);
+      warn('review', `Failed to snapshot pre-revision spec at ${specPath}`, err);
     }
   }
 
@@ -216,6 +220,27 @@ async function beginSpecRevision(
       try { const p = path.join(specPath, f); if (existsSync(p)) unlinkSync(p); } catch { /* best-effort */ }
     }
   }
+}
+
+/**
+ * Begin a spec revision on a live pipeline: prepare the on-disk artifacts,
+ * reset counters, and restart from the spec phase.
+ *
+ * The caller is responsible for incrementing `pipeline.specRevision` first so
+ * the no-op guard and version archive use the new number.
+ *
+ * Shared by autoReviseSpec (QA-driven) and routeHumanFeedback's analyst target
+ * (human-driven), which differ only in the feedback content and whether stale
+ * human-feedback files are cleared (the human path keeps human_feedback.md so
+ * the analyst sees the directive).
+ */
+async function beginSpecRevision(
+  pipeline: TaskPipeline,
+  deps: ReviewActionsDeps,
+  feedbackContent: string,
+  opts: { clearStaleFeedback: boolean },
+): Promise<void> {
+  prepareSpecRevisionArtifacts(pipeline.specPath, pipeline.specRevision, feedbackContent, opts);
 
   // A spec revision restarts the per-revision attempt counter, but QA
   // history must survive so repeated code defects remain visible/escalated
