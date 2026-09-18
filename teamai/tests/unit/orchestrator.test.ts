@@ -1821,6 +1821,124 @@ describe('Orchestrator', () => {
     });
   });
 
+  // Regression: a retry to spec used to always wipe spec.md and restart the
+  // analyst from scratch, even when the last QA report already identified
+  // spec_concerns — the exact information a QA-driven bounce (autoReviseSpec)
+  // would have handed the analyst automatically. moveTaskToPhase must now
+  // put the analyst in the same REVISION mode a live QA bounce would, when
+  // there's a spec to revise and spec_concerns on record.
+  describe('moveTaskToPhase — retry to spec with spec_concerns enters REVISION mode', () => {
+    it('preserves spec.md as a version snapshot and writes spec_revision_feedback.md from spec_concerns', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Original spec');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        spec_concerns: [{
+          issue: 'C1 weights conflict with the oscillation guard',
+          reasoning: 'The locked weight triple blows through AC3/AC4.',
+          suggested_fix: 'Raise the oscillation guard weights alongside C1-C3.',
+        }],
+      }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'spec');
+      } finally {
+        executeSpy.mockRestore();
+      }
+
+      // spec.md renamed (not deleted) onto the archived version, exactly as
+      // beginSpecRevision would do for a live QA bounce.
+      expect(existsSync(join(testData.taskDir, 'spec.md'))).toBe(false);
+      expect(readFileSync(join(testData.taskDir, 'spec_v1.md'), 'utf-8')).toBe('# Original spec');
+
+      const revisionFeedback = readFileSync(join(testData.taskDir, 'spec_revision_feedback.md'), 'utf-8');
+      expect(revisionFeedback).toContain('C1 weights conflict with the oscillation guard');
+      expect(revisionFeedback).toContain('Raise the oscillation guard weights alongside C1-C3.');
+    });
+
+    it('does not also write qa_feedback.md — the analyst never reads it, only a genuine QA-driven revision does not produce it', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Original spec');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        spec_concerns: [{ issue: 'Spec design flaw', reasoning: 'See analysis.' }],
+      }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'spec');
+      } finally {
+        executeSpy.mockRestore();
+      }
+
+      expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
+    });
+
+    it('falls back to the plain wipe-and-restart when the last QA report has no spec_concerns', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Original spec');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [{ criterion: 'AC10', status: 'FAIL', notes: 'Missing test case' }],
+      }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'spec');
+      } finally {
+        executeSpy.mockRestore();
+      }
+
+      expect(existsSync(join(testData.taskDir, 'spec.md'))).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'spec_v1.md'))).toBe(false);
+      expect(existsSync(join(testData.taskDir, 'spec_revision_feedback.md'))).toBe(false);
+    });
+
+    it('falls back to the plain wipe-and-restart when there is no existing spec.md to revise', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        spec_concerns: [{ issue: 'Spec design flaw', reasoning: 'See analysis.' }],
+      }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'spec');
+      } finally {
+        executeSpy.mockRestore();
+      }
+
+      expect(existsSync(join(testData.taskDir, 'spec_revision_feedback.md'))).toBe(false);
+    });
+
+    it('uses on-disk spec_v*.md history to number the new revision, not a hardcoded v1', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Current spec (v2)');
+      writeFileSync(join(testData.taskDir, 'spec_v1.md'), '# The true original (v1)');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        spec_concerns: [{ issue: 'Still broken', reasoning: 'Second revision needed.' }],
+      }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'spec');
+      } finally {
+        executeSpy.mockRestore();
+      }
+
+      // The v2 spec archives onto spec_v2.md, not clobbering spec_v1.md.
+      expect(readFileSync(join(testData.taskDir, 'spec_v1.md'), 'utf-8')).toBe('# The true original (v1)');
+      expect(readFileSync(join(testData.taskDir, 'spec_v2.md'), 'utf-8')).toBe('# Current spec (v2)');
+    });
+  });
+
   // ── _writeQaFeedback ──────────────────────────────────────────────
 
   describe('_writeQaFeedback', () => {
