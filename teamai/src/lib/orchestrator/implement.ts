@@ -996,6 +996,38 @@ export async function runSubtaskSession(
 
   processManager.killSession(sessionId);
 
+  // Commit guard: a coder session can legitimately finish its edits, run
+  // tests, and report success without ever running `git add`/`git commit` —
+  // nothing in its prompt is verified, only suggested (teamai-workflow.md's
+  // "commit after every change" is a convention, not an enforcement point).
+  // Left uncommitted, this working-tree-only diff is invisible to two things
+  // downstream: the scope check just below only diffs COMMITTED history
+  // (preSessionHead..HEAD), so out-of-scope uncommitted edits sail through
+  // unchecked; and squashWithMessage's `git reset --soft <merge-base>` only
+  // restages the tree of the previous commit, so anything never staged is
+  // silently dropped from the PR entirely — no error, no warning, the code
+  // just never reaches the branch. Found on task
+  // guard-standalone-melody-endpoint-chord-s: subtask 1 implemented the fix
+  // and its tests, verified all green, and ended the session having never
+  // committed either file; QA (which runs directly against the worktree, not
+  // its git history) reviewed the working tree and passed it; the eventual PR
+  // shipped with only the unrelated evidence-log commit from a later subtask.
+  // Auto-commit here, before the scope check reads git history, so both gaps
+  // close at the same point: real work is never silently lost, and the scope
+  // check can now see (and reject) uncommitted out-of-scope edits too.
+  try {
+    const status = deps.execGitCapture(['status', '--porcelain'], cwd);
+    if (status.trim()) {
+      deps.execGit(['add', '-A', '--', '.', ':!.teamai'], cwd);
+      deps.execGit(['commit', '-m', `WIP: auto-commit subtask ${subtask.id} changes (coder session ended without committing)`], cwd);
+      logToOutput(pipeline.specPath,
+        '\n[COMMIT-GUARD] Subtask ' + subtask.id + ' left uncommitted changes — auto-committed before scope/QA handoff\n');
+    }
+  } catch (commitErr) {
+    const commitMsg = commitErr instanceof Error ? commitErr.message : String(commitErr);
+    logToOutput(pipeline.specPath, '\n[COMMIT-GUARD] Failed to auto-commit subtask ' + subtask.id + ' changes: ' + commitMsg + '\n');
+  }
+
   // Out-of-scope bug tickets (#3b): the coder reports `[BUG] Fix: ...` lines
   // in its summary instead of hand-writing task.json files; the orchestrator
   // parses the session log and creates deterministic tickets. Best-effort.

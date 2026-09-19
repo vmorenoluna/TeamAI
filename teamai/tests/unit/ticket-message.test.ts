@@ -5,21 +5,23 @@
  *   - buildTrailerBlock (shared commit/PR-body trailer lines)
  *   - buildTicketMessageForPipeline (loads artifacts from specPath, builds
  *     the full commit message; null when recordHistoryInGit is off)
- *
- * squashWithMessage is exercised by the integration suites
- * (create-pr-conflict, mark-task-done) against real git repos.
+ *   - squashWithMessage (collapses a feature branch to a single
+ *     trailer-bearing commit) — also exercised at the phase-runner level by
+ *     the integration suites (create-pr-conflict, mark-task-done).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
+import { execFileSync } from 'child_process';
 
 import {
   buildTrailerBlock,
   buildTicketMessageForPipeline,
   readImplementationSummary,
   readSpecSummary,
+  squashWithMessage,
 } from '../../src/lib/orchestrator/artifact-commit';
 
 // ── Helpers ──
@@ -258,5 +260,88 @@ describe('buildTicketMessageForPipeline', () => {
     const subject = long.message.split('\n')[0];
     expect(subject.startsWith('feat: ')).toBe(true);
     expect(subject.length).toBeLessThanOrEqual('feat: '.length + 72);
+  });
+});
+
+// ── squashWithMessage ──
+//
+// Regression coverage for a real production failure (task
+// guard-standalone-melody-endpoint-chord-s): a coder session edited a file
+// and ended its turn without ever running `git add`/`git commit`. squashing
+// via `git reset --soft <merge-base>` only restages the tree of the commit
+// it resets to — it never touches the working directory — so that
+// never-staged edit was left behind as a permanently uncommitted diff, and
+// the branch that got pushed for the PR contained none of it. The fix adds a
+// last-resort `git status --porcelain` check (mirroring the same auto-commit
+// pattern already used elsewhere in this codebase, e.g. integrateGroup's
+// pre-cherry-pick safety net) immediately before the reset, so a dirty
+// worktree can never reach it.
+
+describe('squashWithMessage', () => {
+  let originDir: string;
+  let worktreePath: string;
+  let specPath: string;
+  const noopDeps = {
+    restoreWorktreeGitFileToHostPaths: () => {},
+    worktreeGitEnv: () => ({}),
+  };
+
+  function git(args: string[], cwd: string): string {
+    return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: 'pipe' });
+  }
+
+  beforeEach(() => {
+    originDir = join(tmpdir(), `teamai-squash-origin-${randomUUID().slice(0, 8)}`);
+    worktreePath = join(tmpdir(), `teamai-squash-work-${randomUUID().slice(0, 8)}`);
+    specPath = join(tmpdir(), `teamai-squash-spec-${randomUUID().slice(0, 8)}`);
+    mkdirSync(specPath, { recursive: true });
+
+    mkdirSync(originDir, { recursive: true });
+    git(['init', '--bare', '-b', 'master'], originDir);
+
+    git(['clone', originDir, worktreePath], tmpdir());
+    git(['config', 'user.email', 'test@teamai.dev'], worktreePath);
+    git(['config', 'user.name', 'TeamAI Test'], worktreePath);
+    writeFileSync(join(worktreePath, 'base.txt'), 'base\n');
+    git(['add', '.'], worktreePath);
+    git(['commit', '-m', 'initial commit'], worktreePath);
+    git(['push', 'origin', 'master'], worktreePath);
+
+    git(['checkout', '-b', 'feat/test'], worktreePath);
+  });
+
+  afterEach(() => {
+    try { rmSync(originDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { rmSync(specPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+
+  it('does not silently drop an uncommitted edit when squashing', () => {
+    // A committed change on the feature branch.
+    writeFileSync(join(worktreePath, 'feature.txt'), 'feature work\n');
+    git(['add', '.'], worktreePath);
+    git(['commit', '-m', 'feature work'], worktreePath);
+
+    // An edit left behind uncommitted — the coder session that produced it
+    // never ran git add/commit before ending.
+    writeFileSync(join(worktreePath, 'feature.txt'), 'feature work + the actual fix\n');
+
+    const result = squashWithMessage(worktreePath, 'feat: test squash\n\nTask-ID: t\n', 'master', specPath, noopDeps);
+
+    expect(result).toBe(true);
+    // Nothing left uncommitted afterward.
+    expect(git(['status', '--porcelain'], worktreePath).trim()).toBe('');
+    // Exactly one commit ahead of the base — the squash collapsed both the
+    // committed change and the auto-committed edit into one.
+    const log = git(['log', '--oneline', 'master..HEAD'], worktreePath).trim().split('\n');
+    expect(log.length).toBe(1);
+    // The edit itself survived into the squashed commit's tree.
+    const committedContent = readFileSync(join(worktreePath, 'feature.txt'), 'utf-8');
+    expect(committedContent).toBe('feature work + the actual fix\n');
+  });
+
+  it('returns false and leaves history untouched when there is nothing beyond the base', () => {
+    const result = squashWithMessage(worktreePath, 'feat: test squash\n', 'master', specPath, noopDeps);
+    expect(result).toBe(false);
   });
 });

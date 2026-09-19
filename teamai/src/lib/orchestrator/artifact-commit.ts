@@ -244,6 +244,26 @@ export function squashWithMessage(
     ? { cwd: worktreePath, env: { ...process.env, ...gitEnv }, stdio: 'pipe' as const }
     : { cwd: worktreePath, stdio: 'pipe' as const };
 
+  // Last-resort safety net: `git reset --soft` below only restages the tree
+  // of the commit it resets to — it does not touch the working directory, so
+  // any change that was never staged/committed in the first place is left
+  // behind as an uncommitted diff, untouched by the squash commit that
+  // follows and therefore never pushed. runSubtaskSession's own commit guard
+  // is meant to catch this per-subtask, but a dirty worktree can still reach
+  // here through other paths (a merger-agent session, a manual edit) — check
+  // again immediately before the reset so nothing is ever silently dropped
+  // at the one point in the pipeline that would otherwise do exactly that.
+  try {
+    const status = execFileSync('git', ['status', '--porcelain'], gitOpts).toString();
+    if (status.trim()) {
+      execFileSync('git', ['add', '-A', '--', '.', ':!.teamai'], gitOpts);
+      execFileSync('git', ['commit', '-m', 'WIP: auto-commit uncommitted changes before squash'], gitOpts);
+      warn('artifacts', `squashWithMessage: worktree ${worktreePath} had uncommitted changes — auto-committed before squashing`);
+    }
+  } catch (err) {
+    warn('artifacts', `squashWithMessage: could not check/commit worktree status in ${worktreePath}`, err);
+  }
+
   // Find the merge-base with the base branch — the point the branch diverged.
   let mergeBase: string;
   try {

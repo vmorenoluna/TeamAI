@@ -4883,6 +4883,105 @@ describe('runImplement — scope check honors files_to_create', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Commit guard — sequential subtasks that never git-commit their own work
+// ═══════════════════════════════════════════════════════════════════════
+// Regression coverage for a real production failure (task
+// guard-standalone-melody-endpoint-chord-s): a coder session edited its
+// assigned file, ran tests, verified them green, and ended the session
+// having never run `git add`/`git commit`. integrateGroup already had a
+// safety-net auto-commit, but ONLY for the parallel per-subtask-worktree
+// path (subtaskWorktrees.size > 0) — a lone/sequential subtask running
+// directly in the main worktree hit no such check anywhere. The uncommitted
+// edit sat in the worktree, invisible to the scope check (diffs committed
+// history only) and to QA (which reviews the worktree, not git), then was
+// silently dropped when create-PR's squash did `git reset --soft` — which
+// only restages an already-committed tree — leaving the PR with none of the
+// actual code change.
+
+describe('runImplement — commit guard for sequential subtasks', () => {
+  let project: ReturnType<typeof setupProject>;
+  let orch: Orchestrator;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date());
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+    orch = new Orchestrator(project.root);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    project.clean();
+  });
+
+  it('auto-commits a coder session\'s uncommitted edit before the scope check runs', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 1,
+        title: 'Fix chord-span guard',
+        description: 'Add the missing floor guard',
+        files: ['src/main/scala/sample-project/api/util/MelodyContextBuilder.scala'],
+        acceptance_criteria: ['Guard prevents zero-width spans'],
+      }],
+    }));
+
+    const addCalls: string[][] = [];
+    const commitCalls: string[][] = [];
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'status' && args.includes('--porcelain')) {
+          return ' M src/main/scala/sample-project/api/util/MelodyContextBuilder.scala\n';
+        }
+        if (args[0] === 'add') { addCalls.push(args); return ''; }
+        if (args[0] === 'commit') { commitCalls.push(args); return ''; }
+        // The subtask never actually committed, so a real `git diff` between
+        // preSessionHead and HEAD would see nothing — the auto-commit above
+        // is what has to make the edit visible at all.
+        if (args[0] === 'diff') return '';
+      }
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-commit-guard');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      fireEvent('event', { sessionId: 'sess-commit-guard', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      // The uncommitted edit was auto-committed, excluding .teamai/ like
+      // every other safety-net commit in this codebase.
+      expect(addCalls.length).toBeGreaterThan(0);
+      expect(addCalls[0]).toContain(':!.teamai');
+      expect(commitCalls.some(c => c.join(' ').includes('auto-commit subtask 1'))).toBe(true);
+
+      const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(log).toContain('[COMMIT-GUARD] Subtask 1 left uncommitted changes');
+      // No scope violation — the only changed file was already the assigned one.
+      expect(log).not.toContain('[SCOPE] Subtask 1 modified files outside its assigned scope');
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 //  depends_on runtime enforcement across groups
 // ═══════════════════════════════════════════════════════════════════════
 // Regression coverage for a real production failure (task 585a32e0):
