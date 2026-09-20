@@ -15,6 +15,8 @@ import { getOnboardingState } from '@/lib/onboarding';
 import { OnboardingGate } from '@/components/onboarding-gate';
 import { checkTools } from '@/app/actions/tools';
 import { getRefinementSuggestions } from '@/app/actions/role-refinement';
+import { getActiveTerminals } from '@/app/actions/terminals';
+import { TerminalSessionsProvider } from '@/components/terminal-sessions-provider';
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
@@ -33,6 +35,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const gitattributesRenormalizePath = await getGitattributesRenormalizeSuggestion();
   const onboardingState = getOnboardingState();
   const needsOnboarding = !onboardingState.completed && projects.length === 0;
+  const activeTerminals = activeProject ? await getActiveTerminals() : [];
 
   // Role Refinement Assistant — pending-suggestion count for the sidebar badge.
   // Only fetched when a project is active (getActiveProjectPath throws otherwise).
@@ -71,7 +74,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           {/* Gitattributes renormalize suggestion — one-time prompt after .gitattributes is first added */}
           <GitattributesRenormalizeBanner projectPath={gitattributesRenormalizePath ?? ''} />
           <div className="flex-1 min-h-0 flex flex-col">
-            <OnboardingGate show={needsOnboarding}>{children}</OnboardingGate>
+            <TerminalSessionsProvider initialTerminals={activeTerminals}>
+              <OnboardingGate show={needsOnboarding}>{children}</OnboardingGate>
+            </TerminalSessionsProvider>
           </div>
         </div>
         {/* Global dialog: shown when container mode is enabled but Docker is not running */}

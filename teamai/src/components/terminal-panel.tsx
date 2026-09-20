@@ -97,6 +97,9 @@ export function TerminalPanel({ sessionId, role, model, onClose }: Props) {
       wsRef.current = ws;
       ws.onopen = () => {
         setConnected(true);
+        // Ask the server to replay output produced while this panel was
+        // unmounted because the user navigated to another route.
+        safeSend({ type: 'terminal-attach', sessionId });
         // The PTY is spawned server-side with a fixed placeholder size
         // (see ProcessManager.createTerminalSession) before this socket
         // exists, so any ResizeObserver firing during that window has its

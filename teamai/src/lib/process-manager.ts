@@ -13,8 +13,14 @@ export interface TerminalSession {
   id: string;
   ptyProcess: pty.IPty;
   role: string;
+  model?: string;
   projectPath: string;
+  /** Recent PTY output replayed when the terminal page reconnects. */
+  outputBuffer: string;
 }
+
+/** Keep enough output to restore a long conversation after route navigation. */
+export const TERMINAL_OUTPUT_BUFFER_LIMIT = 200_000;
 
 /**
  * node-pty's Windows backend (ConPTY) calls CreateProcess directly on `file`
@@ -517,7 +523,23 @@ export class ProcessManager extends EventEmitter {
       env: { ...process.env, TEAMAI_CREATE_TASK_CLI: createTaskCliPath } as Record<string, string>,
     });
 
+    this.terminalSessions.set(id, {
+      id,
+      ptyProcess,
+      role: opts.role,
+      model: opts.model,
+      projectPath: opts.projectPath,
+      outputBuffer: '',
+    });
+
     ptyProcess.onData((data) => {
+      const session = this.terminalSessions.get(id);
+      if (session) {
+        session.outputBuffer += data;
+        if (session.outputBuffer.length > TERMINAL_OUTPUT_BUFFER_LIMIT) {
+          session.outputBuffer = session.outputBuffer.slice(-TERMINAL_OUTPUT_BUFFER_LIMIT);
+        }
+      }
       this.emit('terminal-data', { sessionId: id, data });
     });
 
@@ -525,9 +547,11 @@ export class ProcessManager extends EventEmitter {
       this.terminalSessions.delete(id);
       this.emit('terminal-exit', { sessionId: id });
     });
-
-    this.terminalSessions.set(id, { id, ptyProcess, role: opts.role, projectPath: opts.projectPath });
     return id;
+  }
+
+  getTerminalOutput(sessionId: string): string {
+    return this.terminalSessions.get(sessionId)?.outputBuffer ?? '';
   }
 
   writeToTerminal(sessionId: string, data: string): void {

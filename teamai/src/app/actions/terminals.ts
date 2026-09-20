@@ -17,6 +17,13 @@ export async function closeTerminalSession(sessionId: string): Promise<void> {
   processManager.killTerminalSession(sessionId);
 }
 
-export async function getActiveTerminals(): Promise<{ id: string; role: string }[]> {
-  return processManager.getTerminalSessions().map(s => ({ id: s.id, role: s.role }));
+export async function getActiveTerminals(): Promise<{ sessionId: string; role: string; model: string }[]> {
+  const projectPath = await getActiveProjectPath();
+  return processManager.getTerminalSessions()
+    .filter(s => s.projectPath === projectPath)
+    .map(s => ({
+      sessionId: s.id,
+      role: s.role,
+      model: s.model ?? 'unknown',
+    }));
 }

@@ -563,14 +563,28 @@ describe('ProcessManager — getTerminalSessions with data', () => {
     const pm = new ProcessManager();
     (pm as unknown as AnySession).terminalSessions.clear();
 
-    const t1 = { id: 't1', ptyProcess: { write: vi.fn(), kill: vi.fn(), resize: vi.fn() }, role: 'coder', projectPath: '/a' };
-    const t2 = { id: 't2', ptyProcess: { write: vi.fn(), kill: vi.fn(), resize: vi.fn() }, role: 'planner', projectPath: '/b' };
+    const t1 = { id: 't1', ptyProcess: { write: vi.fn(), kill: vi.fn(), resize: vi.fn() }, role: 'coder', projectPath: '/a', outputBuffer: '' };
+    const t2 = { id: 't2', ptyProcess: { write: vi.fn(), kill: vi.fn(), resize: vi.fn() }, role: 'planner', projectPath: '/b', outputBuffer: '' };
 
     (pm as unknown as AnySession).terminalSessions.set('t1', t1);
     (pm as unknown as AnySession).terminalSessions.set('t2', t2);
 
     const terminals = pm.getTerminalSessions();
     expect(terminals).toHaveLength(2);
+  });
+
+  it('returns buffered output for an existing session', () => {
+    const pm = new ProcessManager();
+    (pm as unknown as AnySession).terminalSessions.set('t-buffered', {
+      id: 't-buffered',
+      ptyProcess: { write: vi.fn(), kill: vi.fn(), resize: vi.fn() },
+      role: 'coder',
+      projectPath: '/a',
+      outputBuffer: 'conversation history',
+    });
+
+    expect(pm.getTerminalOutput('t-buffered')).toBe('conversation history');
+    expect(pm.getTerminalOutput('missing')).toBe('');
   });
 });
 
