@@ -192,9 +192,32 @@ export function KanbanBoard({ tasks, projectPath, doneHistory = [], doneHistoryH
     });
   }, []);
 
+  // A real phase-change event for a task we're still showing optimistically
+  // (drag-and-drop just moved it) arrives well before the debounced
+  // router.refresh() that would deliver fresh `task.phase` data — up to
+  // `refreshDebounceMs` later. Clearing the optimistic override immediately
+  // on this event (the old behavior) left the card falling through to the
+  // still-stale `task.phase` for that whole window, flickering back to its
+  // previous column before the refresh landed and moved it forward again.
+  // Update the override to the now-confirmed column instead of deleting it —
+  // the card keeps showing the right place continuously, and the existing
+  // 10s optimisticTimeoutRef safety net (set when the drag started) clears
+  // the entry once the refresh has long since caught up. Tasks with no
+  // existing optimistic entry (not user-dragged — an unrelated task
+  // progressing on its own) are untouched, so they keep relying on
+  // `task.phase` from refreshed data as before.
+  const onRealtimePhaseChange = useCallback((taskId: string, phase: string) => {
+    setOptimisticPhases(prev => {
+      if (!prev.has(taskId)) return prev;
+      const next = new Map(prev);
+      next.set(taskId, normalizePhase(phase));
+      return next;
+    });
+  }, []);
+
   usePhaseSync({
     project: projectPath,
-    onPhaseChange: (taskId) => clearOptimistic(taskId),
+    onPhaseChange: onRealtimePhaseChange,
     onSubtaskProgress: (taskId, completed, total) => {
       setLocalSubtaskProgress(prev => {
         const next = new Map(prev);
