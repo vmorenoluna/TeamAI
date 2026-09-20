@@ -73,11 +73,19 @@ app.prepare().then(async () => {
     };
     processManager.on('terminal-data', terminalHandler);
 
-    // Messages from browser → PTY input / resize
+    // Messages from browser → PTY input / resize, plus replay when a terminal
+    // panel reconnects after route navigation. The PTY remains alive while
+    // the page is unmounted, so replay the buffered conversation before new
+    // output is streamed to the returning panel.
     ws.on('message', (msg: Buffer) => {
       try {
         const parsed = JSON.parse(msg.toString());
-        if (parsed.type === 'terminal-input') {
+        if (parsed.type === 'terminal-attach') {
+          const output = processManager.getTerminalOutput(parsed.sessionId);
+          if (output && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'terminal', sessionId: parsed.sessionId, data: output }));
+          }
+        } else if (parsed.type === 'terminal-input') {
           processManager.writeToTerminal(parsed.sessionId, parsed.data);
         } else if (parsed.type === 'terminal-resize') {
           processManager.resizeTerminal(parsed.sessionId, parsed.cols, parsed.rows);

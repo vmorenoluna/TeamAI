@@ -65,7 +65,12 @@ function makeRoles(): RoleDefinition[] {
 /** Renders TerminalsView with fresh module imports */
 async function renderView(roles?: RoleDefinition[]) {
   const mod = await import('@/components/terminals-view');
-  render(<mod.TerminalsView roles={roles ?? makeRoles()} />);
+  const provider = await import('@/components/terminal-sessions-provider');
+  render(
+    <provider.TerminalSessionsProvider initialTerminals={[]}>
+      <mod.TerminalsView roles={roles ?? makeRoles()} />
+    </provider.TerminalSessionsProvider>,
+  );
   await act(async () => { await new Promise(r => setTimeout(r, 100)); });
 }
 

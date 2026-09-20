@@ -13,6 +13,10 @@ export interface RetryPhaseDialogProps {
   phases: DialogPhaseOption[];
   /** Pre-selected phase (should be one of `phases`). */
   defaultPhase: string;
+  /** Whether the latest QA report enables surgical spec revision. */
+  hasSpecConcerns?: boolean;
+  /** Whether the task has an existing spec to revise. */
+  hasSpec?: boolean;
   onCancel: () => void;
   onConfirm: (phase: string) => void;
 }
@@ -23,12 +27,14 @@ export function RetryPhaseDialog({
   taskTitle,
   phases,
   defaultPhase,
+  hasSpecConcerns = false,
+  hasSpec = false,
   onCancel,
   onConfirm,
 }: RetryPhaseDialogProps) {
   const options = phases.map(p => ({
     ...p,
-    description: getPhaseClearDescription(p.phase),
+    description: getPhaseClearDescription(p.phase, { hasSpecConcerns, hasSpec }),
   }));
 
   const [selected, setSelected] = useState(defaultPhase);
@@ -54,8 +60,8 @@ export function RetryPhaseDialog({
         </h2>
         <p className="text-xs text-slate-400 mb-4">
           {singlePhase
-            ? `Moving "${taskTitle}" — this will clear artifacts.`
-            : `"${taskTitle}" — pick which phase to resume from.`}
+            ? `Moving "${taskTitle}". This will clear artifacts.`
+            : `"${taskTitle}". Pick which phase to resume from.`}
         </p>
 
         {/* Phase options (hidden when only one) */}
@@ -104,7 +110,7 @@ export function RetryPhaseDialog({
           </div>
         )}
 
-        {/* Budget reset is no longer a choice — a retry always clears
+        {/* Budget reset is no longer a choice. A retry always clears
              qaAttempt/wakeupAttemptCount/deliverableFailCounts so a counter
              carried over from the failed run can't trip a cap almost
              instantly on the very next attempt. */}

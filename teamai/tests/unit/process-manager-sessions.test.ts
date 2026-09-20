@@ -744,6 +744,7 @@ describe('ProcessManager — Full Coverage', () => {
       expect(ptyDataHandler).toBeDefined();
       ptyDataHandler!('Hello from PTY');
       expect(dataSpy).toHaveBeenCalledWith({ sessionId: expect.any(String), data: 'Hello from PTY' });
+      expect(pm.getTerminalOutput(pm.getTerminalSessions()[0].id)).toBe('Hello from PTY');
     });
 
     it('emits terminal-exit on PTY exit and removes session', () => {

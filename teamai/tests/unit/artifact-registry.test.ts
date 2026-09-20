@@ -11,6 +11,7 @@ import {
   CLEANUP_ARTIFACTS,
   REQUIRED_ARTIFACTS,
   REVISION_CLEANUP_EXTRA,
+  getPhaseClearDescription,
 } from '@/lib/orchestrator/artifacts';
 
 // Flatten helpers for easy lookup
@@ -262,6 +263,36 @@ const INFRASTRUCTURE_EXCLUSIONS = new Set([
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 describe('Artifact registry coverage (T18 AC)', () => {
+  it('describes each retry phase according to current clearing behavior', () => {
+    const specRevision = getPhaseClearDescription('spec', { hasSpecConcerns: true, hasSpec: true });
+    expect(specRevision).toContain('saved as a version');
+    expect(specRevision).toContain('implementation plan and existing code will be preserved');
+    expect(specRevision).toContain('QA artifacts are regenerated');
+    expect(specRevision).not.toContain('—');
+
+    const specRegeneration = getPhaseClearDescription('spec', { hasSpecConcerns: false, hasSpec: false });
+    expect(specRegeneration).toContain('Regenerate the spec from scratch');
+    expect(specRegeneration).toContain('implementation plan, QA history, and all downstream artifacts');
+    expect(specRegeneration).not.toContain('—');
+
+    const specUnknown = getPhaseClearDescription('spec');
+    expect(specUnknown).toContain('If QA identified spec concerns');
+    expect(specUnknown).toContain('Otherwise, the spec and downstream artifacts will be regenerated');
+    expect(specUnknown).not.toContain('—');
+
+    const plan = getPhaseClearDescription('plan');
+    expect(plan).toContain('Keep the existing spec');
+    expect(plan).toContain('regenerate the implementation plan from scratch');
+    expect(plan).toContain('QA history will be discarded');
+    expect(plan).not.toContain('—');
+
+    const implement = getPhaseClearDescription('implement');
+    expect(implement).toContain('Keep the existing spec and plan');
+    expect(implement).toContain('Only QA history is cleared');
+    expect(implement).toContain('Re-runs implementation followed by QA review');
+    expect(implement).not.toContain('—');
+  });
+
   const phaseFiles = allFilesIn(PHASE_ARTIFACTS);
   const cleanupFiles = allFilesIn(CLEANUP_ARTIFACTS);
   const requiredFiles = allFilesIn(REQUIRED_ARTIFACTS);

@@ -1,45 +1,19 @@
 'use client';
 
-import { useState, useTransition, useEffect, useRef } from 'react';
-import { createTerminalSession, closeTerminalSession } from '@/app/actions/terminals';
+import { useState } from 'react';
 import { TerminalPanel } from './terminal-panel';
+import { useTerminalSessions } from './terminal-sessions-provider';
 import type { RoleDefinition } from '@/app/actions/roles';
 
-interface ActiveTerminal {
-  sessionId: string;
-  role: string;
-  model: string;
-}
-
 export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
-  const [terminals, setTerminals] = useState<ActiveTerminal[]>([]);
+  const { terminals, isPending, openTerminal, closeTerminal } = useTerminalSessions();
   const [showDialog, setShowDialog] = useState(false);
   const [selectedRole, setSelectedRole] = useState(roles[0]?.filename ?? '');
-  const [isPending, startTransition] = useTransition();
 
   function handleOpen() {
-    startTransition(async () => {
-      const { sessionId, role, model } = await createTerminalSession(selectedRole);
-      setTerminals(prev => [...prev, { sessionId, role, model }]);
-      setShowDialog(false);
-    });
+    openTerminal(selectedRole);
+    setShowDialog(false);
   }
-
-  function handleClose(sessionId: string) {
-    closeTerminalSession(sessionId).catch(err => console.warn('[terminals-view] Failed to close session:', err));
-    setTerminals(prev => prev.filter(t => t.sessionId !== sessionId));
-  }
-
-  const terminalsRef = useRef(terminals);
-  useEffect(() => {
-    terminalsRef.current = terminals;
-    return () => {
-      for (const t of terminalsRef.current) {
-        closeTerminalSession(t.sessionId).catch(err => console.warn('[terminals-view] Failed to close session (cleanup):', err));
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -75,7 +49,7 @@ export function TerminalsView({ roles }: { roles: RoleDefinition[] }) {
             sessionId={t.sessionId}
             role={t.role}
             model={t.model}
-            onClose={() => handleClose(t.sessionId)}
+            onClose={() => closeTerminal(t.sessionId)}
           />
         ))}
       </div>

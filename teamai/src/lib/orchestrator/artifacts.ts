@@ -160,13 +160,28 @@ export function getPhaseClearDescriptions(): PhaseClearDescription[] {
  * Get a human-readable description of what gets cleared when resuming
  * at a particular phase level.
  *
- * The descriptions mirror PHASE_ARTIFACTS semantics so the copy won't
- * drift from the actual behaviour: spec clears everything downstream,
- * plan clears plan-level + QA files, implement clears only QA files.
+ * A retry to spec has a surgical revision path when the latest QA report
+ * contains spec concerns. Keep that context here so the dialog describes the
+ * actual operation instead of implying that every spec retry is destructive.
  */
-export function getPhaseClearDescription(phase: string): string {
+export function getPhaseClearDescription(
+  phase: string,
+  options: { hasSpecConcerns?: boolean; hasSpec?: boolean } = {},
+): string {
   switch (phase) {
     case 'spec':
+      if (options.hasSpecConcerns && options.hasSpec) {
+        return (
+          'Revise the existing spec using QA\'s concerns. The current spec will be saved as a version; ' +
+          'the implementation plan and existing code will be preserved, while QA artifacts are regenerated.'
+        );
+      }
+      if (options.hasSpecConcerns === undefined && options.hasSpec === undefined) {
+        return (
+          'Re-run the spec phase. If QA identified spec concerns and an existing spec is present, ' +
+          'it will be saved as a version and revised. Otherwise, the spec and downstream artifacts will be regenerated.'
+        );
+      }
       return (
         'Regenerate the spec from scratch. The implementation plan, QA history, ' +
         'and all downstream artifacts will be discarded.'
@@ -178,7 +193,7 @@ export function getPhaseClearDescription(phase: string): string {
       );
     case 'implement':
       return (
-        'Keep the existing spec and plan — only QA history is cleared. ' +
+        'Keep the existing spec and plan. Only QA history is cleared. ' +
         'Re-runs implementation followed by QA review.'
       );
     default:
