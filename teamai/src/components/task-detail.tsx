@@ -720,6 +720,8 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
         taskTitle={task.title}
         phases={getPhaseClearDescriptions()}
         defaultPhase={defaultRetryPhase}
+        hasSpecConcerns={!!qaReport?.spec_concerns?.length}
+        hasSpec={!!spec}
         onCancel={() => setShowRetryDialog(false)}
         onConfirm={handleRetryConfirm}
       />

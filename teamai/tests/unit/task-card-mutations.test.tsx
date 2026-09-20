@@ -94,7 +94,7 @@ describe('TaskCard mutation handlers', () => {
       // Dialog title is "Choose Resume Phase" since there are multiple options
       expect(screen.getByText('Choose Resume Phase')).toBeInTheDocument();
       // Dialog shows the task title in the subtitle
-      expect(screen.getByText(/"Failed Task" — pick which phase to resume from/)).toBeInTheDocument();
+      expect(screen.getByText(/"Failed Task"\. Pick which phase to resume from/)).toBeInTheDocument();
       // Budget-reset explanation should be present
       expect(screen.getByText(/fresh QA\/wakeup-attempt budget/)).toBeInTheDocument();
     });

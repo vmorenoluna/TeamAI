@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { TerminalsView } from '@/components/terminals-view';
+import { TerminalSessionsProvider } from '@/components/terminal-sessions-provider';
 import type { RoleDefinition } from '@/app/actions/roles';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
@@ -16,6 +17,12 @@ vi.mock('@/app/actions/terminals', () => ({
 }));
 
 // ── Fixtures ───────────────────────────────────────────────────────────
+
+vi.mock('@/components/terminal-panel', () => ({
+  TerminalPanel: ({ sessionId, role, model }: { sessionId: string; role: string; model: string }) => (
+    <div data-component="terminal-panel" data-session-id={sessionId} data-role={role} data-model={model} />
+  ),
+}));
 
 const MOCK_ROLES: RoleDefinition[] = [
   { filename: 'analyst.md', name: 'Analyst', content: '# Role: Analyst\n\nAnalyze requirements.' },
@@ -34,7 +41,11 @@ describe('TerminalsView', () => {
 
   it('opens the New Terminal dialog when + New Terminal is clicked', async () => {
     act(() => {
-      render(<TerminalsView roles={MOCK_ROLES} />);
+      render(
+        <TerminalSessionsProvider initialTerminals={[]}>
+          <TerminalsView roles={MOCK_ROLES} />
+        </TerminalSessionsProvider>,
+      );
     });
 
     const newBtn = screen.getByText('+ New Terminal');
@@ -49,7 +60,11 @@ describe('TerminalsView', () => {
 
   it('closes the dialog when Cancel is clicked', async () => {
     act(() => {
-      render(<TerminalsView roles={MOCK_ROLES} />);
+      render(
+        <TerminalSessionsProvider initialTerminals={[]}>
+          <TerminalsView roles={MOCK_ROLES} />
+        </TerminalSessionsProvider>,
+      );
     });
 
     // Open dialog
@@ -69,7 +84,11 @@ describe('TerminalsView', () => {
 
   it('renders role options from the provided roles', async () => {
     act(() => {
-      render(<TerminalsView roles={MOCK_ROLES} />);
+      render(
+        <TerminalSessionsProvider initialTerminals={[]}>
+          <TerminalsView roles={MOCK_ROLES} />
+        </TerminalSessionsProvider>,
+      );
     });
 
     await act(async () => {
@@ -88,7 +107,11 @@ describe('TerminalsView', () => {
 
   it('has Open button enabled when a role is auto-selected', async () => {
     act(() => {
-      render(<TerminalsView roles={MOCK_ROLES} />);
+      render(
+        <TerminalSessionsProvider initialTerminals={[]}>
+          <TerminalsView roles={MOCK_ROLES} />
+        </TerminalSessionsProvider>,
+      );
     });
 
     await act(async () => {
@@ -104,7 +127,11 @@ describe('TerminalsView', () => {
   it('creates a terminal session with the selected role', async () => {
     mockCreateTerminalSession.mockResolvedValue({ sessionId: 'session-1', role: 'analyst.md', model: 'claude-sonnet-4-6' });
     act(() => {
-      render(<TerminalsView roles={MOCK_ROLES} />);
+      render(
+        <TerminalSessionsProvider initialTerminals={[]}>
+          <TerminalsView roles={MOCK_ROLES} />
+        </TerminalSessionsProvider>,
+      );
     });
 
     await act(async () => {
@@ -115,5 +142,45 @@ describe('TerminalsView', () => {
     });
 
     expect(mockCreateTerminalSession).toHaveBeenCalledWith('analyst.md');
+  });
+
+  it('keeps terminal sessions when the terminals view is unmounted and remounted', async () => {
+    mockCreateTerminalSession.mockResolvedValue({ sessionId: 'session-persisted', role: 'analyst.md', model: 'claude-sonnet-4-6' });
+    function Route({ showTerminals }: { showTerminals: boolean }) {
+      return showTerminals ? <TerminalsView roles={MOCK_ROLES} /> : <div>Kanban page</div>;
+    }
+
+    const { rerender } = render(
+      <TerminalSessionsProvider initialTerminals={[]}>
+        <Route showTerminals />
+      </TerminalSessionsProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('+ New Terminal'));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Open'));
+    });
+
+    await act(async () => {
+      rerender(
+        <TerminalSessionsProvider initialTerminals={[]}>
+          <Route showTerminals={false} />
+        </TerminalSessionsProvider>,
+      );
+    });
+    expect(screen.getByText('Kanban page')).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(
+        <TerminalSessionsProvider initialTerminals={[]}>
+          <Route showTerminals />
+        </TerminalSessionsProvider>,
+      );
+    });
+
+    expect(screen.getByTestId('terminal-panel')).toHaveAttribute('data-session-id', 'session-persisted');
+    expect(mockCreateTerminalSession).toHaveBeenCalledTimes(1);
   });
 });

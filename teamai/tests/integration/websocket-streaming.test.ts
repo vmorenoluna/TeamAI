@@ -63,6 +63,7 @@ describe('WebSocket Streaming Integration', () => {
   let processManagerOffCalls: Array<{ event: string; handler: unknown }>;
   let writtenToTerminal: Array<{ sessionId: string; data: string }>;
   let resizedTerminal: Array<{ sessionId: string; cols: number; rows: number }>;
+  let terminalOutput: Map<string, string>;
   let getSessionResults: Map<string, { taskId: string } | undefined>;
 
   beforeEach(async () => {
@@ -70,6 +71,7 @@ describe('WebSocket Streaming Integration', () => {
     processManagerOffCalls = [];
     writtenToTerminal = [];
     resizedTerminal = [];
+    terminalOutput = new Map();
     getSessionResults = new Map();
 
     const mockProcessManager = {
@@ -99,6 +101,9 @@ describe('WebSocket Streaming Integration', () => {
       },
       resizeTerminal(sessionId: string, cols: number, rows: number) {
         resizedTerminal.push({ sessionId, cols, rows });
+      },
+      getTerminalOutput(sessionId: string) {
+        return terminalOutput.get(sessionId) ?? '';
       },
     };
 
@@ -141,7 +146,12 @@ describe('WebSocket Streaming Integration', () => {
       ws.on('message', (msg: Buffer) => {
         try {
           const parsed = JSON.parse(msg.toString()) as Record<string, unknown>;
-          if (parsed.type === 'terminal-input') {
+          if (parsed.type === 'terminal-attach') {
+            const output = mockProcessManager.getTerminalOutput(parsed.sessionId as string);
+            if (output) {
+              ws.send(JSON.stringify({ type: 'terminal', sessionId: parsed.sessionId, data: output }));
+            }
+          } else if (parsed.type === 'terminal-input') {
             mockProcessManager.writeToTerminal(
               parsed.sessionId as string,
               parsed.data as string,
@@ -296,6 +306,21 @@ describe('WebSocket Streaming Integration', () => {
   // ═══════════════════════════════════════════════════════════════════════
 
   describe('terminal data streaming (AC3)', () => {
+    it('replays buffered terminal output when a panel attaches after navigation', async () => {
+      terminalOutput.set('term-reconnect', 'conversation before navigation\\r\\n');
+      const client = await connectClient(`ws://localhost:${port}/ws`);
+
+      client.ws.send(JSON.stringify({ type: 'terminal-attach', sessionId: 'term-reconnect' }));
+      await new Promise((r) => setTimeout(r, 200));
+
+      expect(client.messages).toEqual([{
+        type: 'terminal',
+        sessionId: 'term-reconnect',
+        data: 'conversation before navigation\\r\\n',
+      }]);
+      client.ws.close();
+    });
+
     it('delivers terminal data with type, sessionId, and data', async () => {
       const client = await connectClient(`ws://localhost:${port}/ws`);
 
