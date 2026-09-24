@@ -72,11 +72,18 @@ If `fail_type` is `"code"` or absent, proceed with the standard QA rework steps 
    - EVERY issue listed in the QA feedback MUST be fixed. There are no optional or skippable items.
    - Failed criteria, additional issues — all of them are requirements. Fix them all.
 8. Focus on the specific issues listed — don't refactor unrelated code.
-9. **Run the full test suite** after all fixes are committed to catch regressions
-   on already-passed subtasks that shouldn't be affected by your changes. Follow the
-   test-running guidance in the Instructions section below (run once, wait, capture
-   only the pass/fail summary line).
-10. **QA fixes are surgical corrections, not a redesign opportunity** — apply your role's spec-authority discipline here: if a QA issue seems to require changing a formula, algorithm, or domain logic, STOP and escalate it as a spec concern instead of fixing it in place.
+9. **Commit your changes** with a descriptive message (do NOT push — see Instructions
+   step 8 below). Then verify nothing is left uncommitted: run
+   `git status --porcelain -- <path1> <path2> ...` restricted to this subtask's `files`
+   array. Any non-empty output is a blocking failure — stage and commit it now, before
+   running the test suite. QA rework edits the feature branch directly with no
+   downstream commit safety net; skipping this step ships a QA-approved fix that never
+   actually lands.
+10. **Run the full test suite** after all fixes are committed to catch regressions
+    on already-passed subtasks that shouldn't be affected by your changes. Follow the
+    test-running guidance in the Instructions section below (run once, wait, capture
+    only the pass/fail summary line).
+11. **QA fixes are surgical corrections, not a redesign opportunity** — apply your role's spec-authority discipline here: if a QA issue seems to require changing a formula, algorithm, or domain logic, STOP and escalate it as a spec concern instead of fixing it in place.
 
 ## Instructions
 
