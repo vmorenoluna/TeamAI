@@ -178,12 +178,26 @@ export async function prewarmModelsCache(
 
 // ── Config read/write ──────────────────────────────────────────────────
 
+/**
+ * Every role resolves the same way (see resolveTerminalModel): an explicit
+ * override in the project's own config wins; otherwise, fall back to
+ * `default.model`. TeamAI's recommended per-role models (analyst -> Opus,
+ * etc.) are written into a project's own .teamai/providers.json once, at
+ * registration time (see ProjectStore.scaffold) — so a `roles` object
+ * present in the saved config is used exactly as saved here, with no
+ * code-level fallback tier reinjecting a role it doesn't list.
+ */
 export async function getProvidersConfig(): Promise<ProvidersConfig> {
   const projectPath = await getActiveProjectPath();
   const cfgPath = join(projectPath, '.teamai', 'providers.json');
   if (!existsSync(cfgPath)) return DEFAULT;
   try {
-    return { ...DEFAULT, ...JSON.parse(readFileSync(cfgPath, 'utf-8')) };
+    const parsed = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Partial<ProvidersConfig>;
+    return {
+      default: { ...DEFAULT.default, ...parsed.default },
+      roles: parsed.roles ?? DEFAULT.roles,
+      exploration: { ...DEFAULT.exploration, ...parsed.exploration },
+    };
   } catch {
     return DEFAULT;
   }

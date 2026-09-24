@@ -25,21 +25,29 @@ function readDefaultProviders(): ProvidersFile | null {
 }
 
 export function resolveProvider(projectRoot: string, role: string): ProviderConfig {
+  // Every role resolves the same way: an explicit override in the project's
+  // own config wins; otherwise, fall back to the project's generic default.
+  // TeamAI's recommended per-role models (analyst -> Opus, planner/merger ->
+  // Haiku) are written into a project's own .teamai/providers.json once, at
+  // registration time (see ProjectStore.scaffold), so "settings" and
+  // "resolved behavior" stay identical here — there is no separate
+  // code-level per-role fallback tier that can drift out of sync with what's
+  // actually on disk.
+  const defaults = readDefaultProviders();
+  const shippedDefault = defaults?.default ?? {};
+
   const cfgPath = join(projectRoot, '.teamai', 'providers.json');
   if (!existsSync(cfgPath)) {
-    // Fall back to TeamAI defaults when no project-level config exists,
-    // so the orchestrator uses intended role-specific models (analyst → Opus, etc.)
-    const defaults = readDefaultProviders();
-    if (defaults) {
-      const roleOverride = defaults.roles?.[role] ?? {};
-      return { ...(defaults.default ?? {}), ...roleOverride };
-    }
-    return {};
+    // No project config at all (e.g. registered before providers.json
+    // scaffolding existed, or the file was deleted) — use TeamAI's shipped
+    // recommendation as a last-resort baseline.
+    const shippedRoleOverride = defaults?.roles?.[role] ?? {};
+    return { ...shippedDefault, ...shippedRoleOverride };
   }
   try {
     const cfg: ProvidersFile = JSON.parse(readFileSync(cfgPath, 'utf-8'));
     const roleOverride = cfg.roles?.[role] ?? {};
-    return { ...cfg.default, ...roleOverride };
+    return { ...shippedDefault, ...cfg.default, ...roleOverride };
   } catch {
     return {};
   }
