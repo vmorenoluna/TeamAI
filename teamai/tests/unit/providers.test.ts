@@ -145,32 +145,33 @@ describe('resolveProvider', () => {
   });
 
   describe('role missing from an existing project providers.json', () => {
-    // Regression: a project's own .teamai/providers.json exists (e.g. the
-    // user changed the "default" model via Settings) but its `roles` object
-    // doesn't mention `analyst` at all. `analyst` must still get TeamAI's
-    // shipped Opus default, not silently collapse to the project's generic
-    // default model.
-    it('analyst still resolves to the shipped Opus default when roles omits it entirely', () => {
+    // Every role behaves like `coder`: an explicit override in the
+    // project's own config wins; a role the config doesn't mention at all
+    // falls back to the project's generic default, not to a hidden
+    // shipped per-role recommendation. TeamAI's recommended per-role
+    // models are seeded into the project's providers.json once, at
+    // registration time (ProjectStore.scaffold) — not re-applied here.
+    it('analyst falls back to the project default (not the shipped Opus recommendation) when roles omits it', () => {
       const { dir, clean } = setupProvidersTest({
         default: { model: 'claude-sonnet-5', provider: 'anthropic' },
         roles: {},
       });
       _cleanDir = clean;
       const result = resolveProvider(dir, 'analyst');
-      expect(result.model).toBe('claude-opus-5');
+      expect(result.model).toBe('claude-sonnet-5');
       expect(result.provider).toBe('anthropic');
     });
 
-    it('analyst still resolves to the shipped Opus default when the project config has no roles key at all', () => {
+    it('analyst falls back to the project default when the project config has no roles key at all', () => {
       const { dir, clean } = setupProvidersTest({
         default: { model: 'claude-sonnet-5', provider: 'anthropic' },
       });
       _cleanDir = clean;
       const result = resolveProvider(dir, 'analyst');
-      expect(result.model).toBe('claude-opus-5');
+      expect(result.model).toBe('claude-sonnet-5');
     });
 
-    it('an explicit (even partial) project override for analyst still wins over the shipped default', () => {
+    it('an explicit (even partial) project override for analyst still wins over the project default', () => {
       const { dir, clean } = setupProvidersTest({
         default: { model: 'claude-sonnet-5', provider: 'anthropic' },
         roles: { analyst: { provider: 'bedrock' } },

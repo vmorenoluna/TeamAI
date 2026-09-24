@@ -179,25 +179,14 @@ export async function prewarmModelsCache(
 // ── Config read/write ──────────────────────────────────────────────────
 
 /**
- * Merge a project's saved role overrides over the shipped role defaults.
- * A role missing entirely from `overrides` keeps its shipped default
- * (analyst -> Opus, etc.); a role present in `overrides` is used exactly as
- * saved, with no field-level merge against the shipped entry — so a partial
- * override (e.g. `{ provider: 'bedrock' }` with no `model`) round-trips
- * as-is and falls back to `default.model` at resolution time
- * (see resolveTerminalModel), not to the shipped role-specific model.
+ * Every role resolves the same way (see resolveTerminalModel): an explicit
+ * override in the project's own config wins; otherwise, fall back to
+ * `default.model`. TeamAI's recommended per-role models (analyst -> Opus,
+ * etc.) are written into a project's own .teamai/providers.json once, at
+ * registration time (see ProjectStore.scaffold) — so a `roles` object
+ * present in the saved config is used exactly as saved here, with no
+ * code-level fallback tier reinjecting a role it doesn't list.
  */
-function mergeRoles(
-  defaults: ProvidersConfig['roles'],
-  overrides: ProvidersConfig['roles'] | undefined,
-): ProvidersConfig['roles'] {
-  const merged = { ...defaults };
-  for (const role of Object.keys(overrides ?? {})) {
-    merged[role] = overrides![role];
-  }
-  return merged;
-}
-
 export async function getProvidersConfig(): Promise<ProvidersConfig> {
   const projectPath = await getActiveProjectPath();
   const cfgPath = join(projectPath, '.teamai', 'providers.json');
@@ -206,7 +195,7 @@ export async function getProvidersConfig(): Promise<ProvidersConfig> {
     const parsed = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Partial<ProvidersConfig>;
     return {
       default: { ...DEFAULT.default, ...parsed.default },
-      roles: mergeRoles(DEFAULT.roles, parsed.roles),
+      roles: parsed.roles ?? DEFAULT.roles,
       exploration: { ...DEFAULT.exploration, ...parsed.exploration },
     };
   } catch {

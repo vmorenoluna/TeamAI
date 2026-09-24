@@ -25,31 +25,30 @@ function readDefaultProviders(): ProvidersFile | null {
 }
 
 export function resolveProvider(projectRoot: string, role: string): ProviderConfig {
+  // Every role resolves the same way: an explicit override in the project's
+  // own config wins; otherwise, fall back to the project's generic default.
+  // TeamAI's recommended per-role models (analyst -> Opus, planner/merger ->
+  // Haiku) are written into a project's own .teamai/providers.json once, at
+  // registration time (see ProjectStore.scaffold), so "settings" and
+  // "resolved behavior" stay identical here — there is no separate
+  // code-level per-role fallback tier that can drift out of sync with what's
+  // actually on disk.
   const defaults = readDefaultProviders();
   const shippedDefault = defaults?.default ?? {};
-  // TeamAI's shipped per-role default (analyst -> Opus, planner/merger -> Haiku).
-  // Used both when the project has no config at all, and — below — as a
-  // fallback layer for a role the project's own config doesn't mention.
-  const shippedRoleOverride = defaults?.roles?.[role] ?? {};
 
   const cfgPath = join(projectRoot, '.teamai', 'providers.json');
   if (!existsSync(cfgPath)) {
+    // No project config at all (e.g. registered before providers.json
+    // scaffolding existed, or the file was deleted) — use TeamAI's shipped
+    // recommendation as a last-resort baseline.
+    const shippedRoleOverride = defaults?.roles?.[role] ?? {};
     return { ...shippedDefault, ...shippedRoleOverride };
   }
   try {
     const cfg: ProvidersFile = JSON.parse(readFileSync(cfgPath, 'utf-8'));
-    // A role absent from the project's own `roles` object still gets
-    // TeamAI's shipped per-role default layered in ahead of the project's
-    // generic default — otherwise, once a project has ANY providers.json,
-    // any role it doesn't explicitly list silently collapses to
-    // cfg.default instead of its intended model. A role the project DOES
-    // list is honored exactly as saved (merged only with cfg.default for
-    // fields it leaves unset), matching the existing override semantics.
-    const roleOverride = cfg.roles?.[role] ?? shippedRoleOverride;
+    const roleOverride = cfg.roles?.[role] ?? {};
     return { ...shippedDefault, ...cfg.default, ...roleOverride };
   } catch {
-    // Malformed project config — return nothing rather than guessing;
-    // unchanged from prior behavior (unrelated to the missing-role gap above).
     return {};
   }
 }
