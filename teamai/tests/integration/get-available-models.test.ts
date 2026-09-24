@@ -164,6 +164,37 @@ describe('getAvailableModels Integration', () => {
       expect(config.exploration?.model).toBe('claude-sonnet-5');
     });
 
+    it('every role behaves like coder: a saved roles object is used exactly as saved, with no shipped fallback re-injected', async () => {
+      // TeamAI's recommended per-role models are seeded into a project's own
+      // providers.json once, at registration time (ProjectStore.scaffold).
+      // getProvidersConfig() does not re-apply them here — a saved `roles`
+      // object that omits a role means that role falls back to
+      // `default.model` at resolution time, not to a hidden recommendation.
+      writeProvidersConfig({ default: { model: 'claude-sonnet-5', provider: 'anthropic' }, roles: {} });
+      const { getProvidersConfig } = await import('@/app/actions/providers');
+
+      const config = await getProvidersConfig();
+
+      expect(config.default.model).toBe('claude-sonnet-5');
+      expect(config.roles.analyst?.model).toBeUndefined();
+    });
+
+    it('honors an explicit role override exactly as saved, without injecting a shipped model for other roles', async () => {
+      writeProvidersConfig({
+        default: { model: 'claude-sonnet-5', provider: 'anthropic' },
+        roles: { planner: { provider: 'bedrock' } },
+      });
+      const { getProvidersConfig } = await import('@/app/actions/providers');
+
+      const config = await getProvidersConfig();
+
+      expect(config.roles.planner?.provider).toBe('bedrock');
+      expect(config.roles.planner?.model).toBeUndefined();
+      // `analyst` isn't in the saved roles object at all, so it's simply
+      // absent here — same as `coder`/`qa-reviewer` today.
+      expect(config.roles.analyst).toBeUndefined();
+    });
+
     it('persists the config to the actual filesystem', async () => {
       const { saveProvidersConfig } = await import('@/app/actions/providers');
 

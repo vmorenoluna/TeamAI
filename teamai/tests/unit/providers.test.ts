@@ -143,6 +143,48 @@ describe('resolveProvider', () => {
       expect(result.model).toBe('claude-sonnet-4-6');
     });
   });
+
+  describe('role missing from an existing project providers.json', () => {
+    // Every role behaves like `coder`: an explicit override in the
+    // project's own config wins; a role the config doesn't mention at all
+    // falls back to the project's generic default, not to a hidden
+    // shipped per-role recommendation. TeamAI's recommended per-role
+    // models are seeded into the project's providers.json once, at
+    // registration time (ProjectStore.scaffold) — not re-applied here.
+    it('analyst falls back to the project default (not the shipped Opus recommendation) when roles omits it', () => {
+      const { dir, clean } = setupProvidersTest({
+        default: { model: 'claude-sonnet-5', provider: 'anthropic' },
+        roles: {},
+      });
+      _cleanDir = clean;
+      const result = resolveProvider(dir, 'analyst');
+      expect(result.model).toBe('claude-sonnet-5');
+      expect(result.provider).toBe('anthropic');
+    });
+
+    it('analyst falls back to the project default when the project config has no roles key at all', () => {
+      const { dir, clean } = setupProvidersTest({
+        default: { model: 'claude-sonnet-5', provider: 'anthropic' },
+      });
+      _cleanDir = clean;
+      const result = resolveProvider(dir, 'analyst');
+      expect(result.model).toBe('claude-sonnet-5');
+    });
+
+    it('an explicit (even partial) project override for analyst still wins over the project default', () => {
+      const { dir, clean } = setupProvidersTest({
+        default: { model: 'claude-sonnet-5', provider: 'anthropic' },
+        roles: { analyst: { provider: 'bedrock' } },
+      });
+      _cleanDir = clean;
+      const result = resolveProvider(dir, 'analyst');
+      // model field left unset by the explicit override falls back to
+      // cfg.default, per existing merge semantics — only the *entirely
+      // absent* role case should reach for the shipped role default.
+      expect(result.provider).toBe('bedrock');
+      expect(result.model).toBe('claude-sonnet-5');
+    });
+  });
 });
 
 describe('providerToSessionOpts', () => {
