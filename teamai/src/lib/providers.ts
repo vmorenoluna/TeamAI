@@ -25,22 +25,31 @@ function readDefaultProviders(): ProvidersFile | null {
 }
 
 export function resolveProvider(projectRoot: string, role: string): ProviderConfig {
+  const defaults = readDefaultProviders();
+  const shippedDefault = defaults?.default ?? {};
+  // TeamAI's shipped per-role default (analyst -> Opus, planner/merger -> Haiku).
+  // Used both when the project has no config at all, and — below — as a
+  // fallback layer for a role the project's own config doesn't mention.
+  const shippedRoleOverride = defaults?.roles?.[role] ?? {};
+
   const cfgPath = join(projectRoot, '.teamai', 'providers.json');
   if (!existsSync(cfgPath)) {
-    // Fall back to TeamAI defaults when no project-level config exists,
-    // so the orchestrator uses intended role-specific models (analyst → Opus, etc.)
-    const defaults = readDefaultProviders();
-    if (defaults) {
-      const roleOverride = defaults.roles?.[role] ?? {};
-      return { ...(defaults.default ?? {}), ...roleOverride };
-    }
-    return {};
+    return { ...shippedDefault, ...shippedRoleOverride };
   }
   try {
     const cfg: ProvidersFile = JSON.parse(readFileSync(cfgPath, 'utf-8'));
-    const roleOverride = cfg.roles?.[role] ?? {};
-    return { ...cfg.default, ...roleOverride };
+    // A role absent from the project's own `roles` object still gets
+    // TeamAI's shipped per-role default layered in ahead of the project's
+    // generic default — otherwise, once a project has ANY providers.json,
+    // any role it doesn't explicitly list silently collapses to
+    // cfg.default instead of its intended model. A role the project DOES
+    // list is honored exactly as saved (merged only with cfg.default for
+    // fields it leaves unset), matching the existing override semantics.
+    const roleOverride = cfg.roles?.[role] ?? shippedRoleOverride;
+    return { ...shippedDefault, ...cfg.default, ...roleOverride };
   } catch {
+    // Malformed project config — return nothing rather than guessing;
+    // unchanged from prior behavior (unrelated to the missing-role gap above).
     return {};
   }
 }

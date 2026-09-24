@@ -178,12 +178,37 @@ export async function prewarmModelsCache(
 
 // ── Config read/write ──────────────────────────────────────────────────
 
+/**
+ * Merge a project's saved role overrides over the shipped role defaults.
+ * A role missing entirely from `overrides` keeps its shipped default
+ * (analyst -> Opus, etc.); a role present in `overrides` is used exactly as
+ * saved, with no field-level merge against the shipped entry — so a partial
+ * override (e.g. `{ provider: 'bedrock' }` with no `model`) round-trips
+ * as-is and falls back to `default.model` at resolution time
+ * (see resolveTerminalModel), not to the shipped role-specific model.
+ */
+function mergeRoles(
+  defaults: ProvidersConfig['roles'],
+  overrides: ProvidersConfig['roles'] | undefined,
+): ProvidersConfig['roles'] {
+  const merged = { ...defaults };
+  for (const role of Object.keys(overrides ?? {})) {
+    merged[role] = overrides![role];
+  }
+  return merged;
+}
+
 export async function getProvidersConfig(): Promise<ProvidersConfig> {
   const projectPath = await getActiveProjectPath();
   const cfgPath = join(projectPath, '.teamai', 'providers.json');
   if (!existsSync(cfgPath)) return DEFAULT;
   try {
-    return { ...DEFAULT, ...JSON.parse(readFileSync(cfgPath, 'utf-8')) };
+    const parsed = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Partial<ProvidersConfig>;
+    return {
+      default: { ...DEFAULT.default, ...parsed.default },
+      roles: mergeRoles(DEFAULT.roles, parsed.roles),
+      exploration: { ...DEFAULT.exploration, ...parsed.exploration },
+    };
   } catch {
     return DEFAULT;
   }

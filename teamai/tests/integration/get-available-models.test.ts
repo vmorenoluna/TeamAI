@@ -164,6 +164,33 @@ describe('getAvailableModels Integration', () => {
       expect(config.exploration?.model).toBe('claude-sonnet-5');
     });
 
+    it('keeps the shipped analyst (Opus) default when a saved config changes only the default model', async () => {
+      // Regression: changing "default" (e.g. via Settings) must not blank out
+      // role-specific defaults for roles the saved config never mentions.
+      writeProvidersConfig({ default: { model: 'claude-sonnet-5', provider: 'anthropic' }, roles: {} });
+      const { getProvidersConfig } = await import('@/app/actions/providers');
+
+      const config = await getProvidersConfig();
+
+      expect(config.default.model).toBe('claude-sonnet-5');
+      expect(config.roles.analyst?.model).toBe('claude-opus-5');
+    });
+
+    it('honors an explicit role override exactly as saved, without injecting the shipped model', async () => {
+      writeProvidersConfig({
+        default: { model: 'claude-sonnet-5', provider: 'anthropic' },
+        roles: { planner: { provider: 'bedrock' } },
+      });
+      const { getProvidersConfig } = await import('@/app/actions/providers');
+
+      const config = await getProvidersConfig();
+
+      expect(config.roles.planner?.provider).toBe('bedrock');
+      expect(config.roles.planner?.model).toBeUndefined();
+      // Untouched roles still keep their shipped defaults.
+      expect(config.roles.analyst?.model).toBe('claude-opus-5');
+    });
+
     it('persists the config to the actual filesystem', async () => {
       const { saveProvidersConfig } = await import('@/app/actions/providers');
 

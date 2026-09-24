@@ -143,6 +143,47 @@ describe('resolveProvider', () => {
       expect(result.model).toBe('claude-sonnet-4-6');
     });
   });
+
+  describe('role missing from an existing project providers.json', () => {
+    // Regression: a project's own .teamai/providers.json exists (e.g. the
+    // user changed the "default" model via Settings) but its `roles` object
+    // doesn't mention `analyst` at all. `analyst` must still get TeamAI's
+    // shipped Opus default, not silently collapse to the project's generic
+    // default model.
+    it('analyst still resolves to the shipped Opus default when roles omits it entirely', () => {
+      const { dir, clean } = setupProvidersTest({
+        default: { model: 'claude-sonnet-5', provider: 'anthropic' },
+        roles: {},
+      });
+      _cleanDir = clean;
+      const result = resolveProvider(dir, 'analyst');
+      expect(result.model).toBe('claude-opus-5');
+      expect(result.provider).toBe('anthropic');
+    });
+
+    it('analyst still resolves to the shipped Opus default when the project config has no roles key at all', () => {
+      const { dir, clean } = setupProvidersTest({
+        default: { model: 'claude-sonnet-5', provider: 'anthropic' },
+      });
+      _cleanDir = clean;
+      const result = resolveProvider(dir, 'analyst');
+      expect(result.model).toBe('claude-opus-5');
+    });
+
+    it('an explicit (even partial) project override for analyst still wins over the shipped default', () => {
+      const { dir, clean } = setupProvidersTest({
+        default: { model: 'claude-sonnet-5', provider: 'anthropic' },
+        roles: { analyst: { provider: 'bedrock' } },
+      });
+      _cleanDir = clean;
+      const result = resolveProvider(dir, 'analyst');
+      // model field left unset by the explicit override falls back to
+      // cfg.default, per existing merge semantics — only the *entirely
+      // absent* role case should reach for the shipped role default.
+      expect(result.provider).toBe('bedrock');
+      expect(result.model).toBe('claude-sonnet-5');
+    });
+  });
 });
 
 describe('providerToSessionOpts', () => {
