@@ -275,6 +275,7 @@ export class ContainerManager extends EventEmitter {
       record.state = 'running';
       record.startPromise = null;
       log('container', `Started — id=${containerId} workspace=${remoteWorkspaceFolder}`);
+      this._logContainerClaudeVersion(containerId, record.projectRoot, logFile);
       this._emit(record, 'running');
       this._watchEvents(record);
     } catch (err) {
@@ -284,6 +285,38 @@ export class ContainerManager extends EventEmitter {
       record.startPromise = null;
       this._emit(record, 'stopped');
       throw err;
+    }
+  }
+
+  /**
+   * Log the container's actual claude-code version once it comes up.
+   *
+   * Container-mode sessions hardcode `"claude"` for `docker exec` (see
+   * createSession's container branch in process-manager.ts) rather than
+   * resolving through getToolPath()/tools.json — the host's tool-path config
+   * has no bearing on what's inside the container at all. claude-code there
+   * is whatever the project's own postCreateCommand installed once, at
+   * container creation (see .devcontainer/postCreate.sh), and can silently
+   * go stale as new models ship, later surfacing only as a confusing
+   * "does not support this model" failure deep in a task's session log (see
+   * the matching detection in ProcessManager._appendToLog). Surfacing the
+   * version here, at container start, gives a chance to notice it's stale
+   * before a task fails on it.
+   *
+   * Best-effort: never throws, never blocks/fails container startup.
+   */
+  private _logContainerClaudeVersion(containerId: string, projectRoot: string, logFile?: string): void {
+    try {
+      const version = execFileSync(getToolPath('docker'), [
+        'exec', containerId, 'claude', '--version',
+      ], { encoding: 'utf-8', timeout: 5000 }).trim();
+      const message = `◆ Container claude-code: ${version}\n`;
+      if (logFile) logToOutput(path.dirname(logFile), message);
+      this.emit('container-log', { projectRoot, message: message.trim() });
+    } catch (err) {
+      const message = '⚠ Could not determine the container\'s claude-code version (docker exec failed)\n';
+      if (logFile) logToOutput(path.dirname(logFile), message);
+      logWarn('container', `Failed to check claude-code version in container ${containerId}`, err);
     }
   }
 
