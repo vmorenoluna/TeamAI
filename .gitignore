@@ -25,6 +25,12 @@ full_coverage2.txt
 .teamai-e2e-seed-diag
 .teamai/
 
+# Demo project: generated source tree and its own throwaway git repo, both
+# recreated by seed-demo.ts (the repo exists so the DONE column has real git
+# history to reconstruct tickets from)
+/demo/src/
+/demo/.git/
+
 # Git worktrees (generated at runtime)
 worktrees/
 

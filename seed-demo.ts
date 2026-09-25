@@ -6,6 +6,7 @@
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, cpSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
+import { execFileSync } from 'child_process';
 
 const DEMO_DIR = join(process.cwd(), 'demo');
 const DEFAULTS_DIR = join(process.cwd(), 'teamai', 'defaults');
@@ -69,11 +70,32 @@ interface SeedTask {
   plan?: object;
   qaReport?: object;
   completionSummary?: string;
+  /** Written to output.log — the terminal tab's 'Orchestrator' role. */
   outputLog?: string;
   diff?: string;
   events: string[];  // phase names in order
   source?: string;
   competitiveContext?: string;
+  /** Fake PR link — renders as the green 'PR' link on the task card and in
+   *  the review panel. Nothing in the demo resolves it. */
+  prUrl?: string;
+  mergeStrategy?: string;
+  /** Non-null only when the task was parked on awaiting-review by a FAILURE
+   *  (spec phase producing no spec.md/spec_summary.md, a no-op revision, a
+   *  rolled-back approval) rather than by a genuine QA pass. Drives the
+   *  'Needs attention' card badge and the review-panel banner. */
+  awaitingReviewReason?: string;
+  failureReason?: string;
+  /** Extra per-role log files written next to output.log. Keys are file
+   *  names, and each maps to one terminal-tab role:
+   *    output-spec.log  → Spec (Analyst)
+   *    output-plan.log  → Plan (Planner)
+   *    output-st<N>.log → Coder (one per plan.json subtask id)
+   *    output-qa.log    → QA Review
+   *    output-merge.log → Merge (Merger)
+   *  Lines should start with '[YYYY-MM-DDTHH:MM:SS] ' so the terminal renders
+   *  a timestamp per line (undated lines fall back to 00:00:00). */
+  roleLogs?: Record<string, string>;
 }
 
 const TASKS: SeedTask[] = [
@@ -762,6 +784,229 @@ new file mode 100644
     events: ['backlog', 'spec', 'plan', 'implement', 'qa-review', 'awaiting-review'],
   },
 
+  // ═══ PR OPEN (1) — the review-column showcase ticket ═══
+  // phase 'pr-open' normalises into the Review column and renders as the
+  // 'PR Open' status badge. It carries one fake log per agent role plus the
+  // orchestrator log, so the task's Terminal tab shows every role filter:
+  //   output.log       → Orchestrator   output-qa.log    → QA Review
+  //   output-spec.log  → Spec (Analyst) output-merge.log → Merge (Merger)
+  //   output-plan.log  → Plan (Planner) output-st{1,2}.log → Coder
+  {
+    id: 'PR-OPEN-001',
+    title: 'Promo Code Stacking Rules',
+    description: 'Define and enforce how multiple promo codes combine: at most one percentage code plus one fixed-amount code per order, and never two codes that both discount shipping.',
+    phase: 'pr-open',
+    prUrl: 'https://github.com/shopforge/shopforge/pull/137',
+    mergeStrategy: 'pull-request',
+    spec: '# Promo Code Stacking Rules\n\n## Overview\nCustomers can currently apply unlimited promo codes, and the discounts compound without limit. Define a stacking policy, enforce it at cart validation time, and surface a clear reason when a code is rejected.\n\n## Acceptance Criteria\n1. At most one percentage code and one fixed-amount code may apply to an order\n2. Two shipping-discount codes cannot stack\n3. Applying a code that breaks the policy is rejected with a reason naming the conflict\n4. Discount order is fixed: percentage first, then fixed amount, then shipping\n5. Total discount never exceeds the order subtotal\n',
+    plan: {
+      subtasks: [
+        { id: 1, title: 'Implement the stacking policy in cart validation', acceptance_criteria: ['One percentage + one fixed-amount code maximum', 'Reject a second shipping-discount code', 'Rejection carries a reason naming the conflicting code'], depends_on: [], qa_flagged: false, completed: true },
+        { id: 2, title: 'Apply discounts in a fixed order and clamp to subtotal', acceptance_criteria: ['Percentage applies before fixed amount', 'Shipping discounts apply last', 'Total discount never exceeds the subtotal'], depends_on: [1], qa_flagged: false, completed: true },
+      ],
+    },
+    qaReport: {
+      overall: 'PASS',
+      criteria: [
+        { name: 'One percentage + one fixed-amount code', status: 'PASS', notes: 'A third code is rejected with the conflicting code named in the response.' },
+        { name: 'Shipping discounts cannot stack', status: 'PASS', notes: 'Second shipping code rejected; verified with two free-shipping codes.' },
+        { name: 'Rejection names the conflict', status: 'PASS', notes: 'Error payload includes the conflicting code and the policy rule.' },
+        { name: 'Fixed discount order', status: 'PASS', notes: 'Percentage, then fixed amount, then shipping — asserted in 14 tests.' },
+        { name: 'Discount clamped to subtotal', status: 'PASS', notes: 'Total discount caps at the subtotal; total never goes negative.' },
+      ],
+      additional_issues: [],
+    },
+    outputLog: `[2026-09-23T09:12:00] [ORCHESTRATOR] Promo Code Stacking Rules
+
+[2026-09-23T09:12:04] Task started from backlog — start phase: spec
+[2026-09-23T09:12:05] Session created: analyst (spec) — worktree .worktrees/promo-code-stacking-rules
+[2026-09-23T09:19:41] Phase 'spec' complete — spec.md + spec_summary.md written
+[2026-09-23T09:19:42] Advanced to 'plan'
+[2026-09-23T09:24:10] Phase 'plan' complete — plan.json with 2 subtasks
+[2026-09-23T09:24:11] Advanced to 'implement'
+[2026-09-23T09:52:33] Subtask 1 completed (34m 22s)
+[2026-09-23T10:19:08] Subtask 2 completed (26m 35s)
+[2026-09-23T10:19:09] All subtasks complete — advancing to 'qa-review'
+[2026-09-23T10:31:55] QA PASS — 5/5 criteria, no additional issues
+[2026-09-23T10:31:56] Advanced to 'awaiting-review'
+[2026-09-23T10:44:02] Merge strategy selected: pull-request
+[2026-09-23T10:44:31] Phase 'create-pr' complete — PR #137 opened
+[2026-09-23T10:44:31] CI checks queued: lint, typecheck, unit-tests, integration-tests
+[2026-09-23T11:16:20] CI checks: 3 passed, integration-tests still running
+[2026-09-23T11:16:20] Phase 'pr-open' — paused for human review
+`,
+    roleLogs: {
+      'output-spec.log': `[2026-09-23T09:12:08] Session started — role: analyst
+[2026-09-23T09:12:09] > Reading the request...
+[2026-09-23T09:12:11]   "Define how multiple promo codes combine"
+[2026-09-23T09:12:12] > Scanning src/cart/* and src/promotions/* for the current discount model
+[2026-09-23T09:12:31]   src/promotions/apply.ts — applies every code in insertion order
+[2026-09-23T09:12:31]   No policy module exists. Discounts compound with no ceiling.
+[2026-09-23T09:13:02] > Checking how shipping discounts are represented
+[2026-09-23T09:13:14]   DiscountKind = 'percentage' | 'fixed' | 'shipping'
+[2026-09-23T09:13:40] > Decision: the policy lives in one module — src/promotions/policy.ts
+[2026-09-23T09:14:02] - - Discarding two designs before settling:
+[2026-09-23T09:14:02] - - a) per-code eligibility flags → the caller still has to know the rules
+[2026-09-23T09:14:03] - - b) reject every code after the first → breaks the fixed+percentage case
+[2026-09-23T09:14:03] - - Accepted: category counting (percentage | fixed | shipping) with fixed application order
+[2026-09-23T09:15:20] > Writing acceptance criteria with concrete values
+[2026-09-23T09:16:44]   Ordering: percentage → fixed → shipping (decision, not deferred to the engineer)
+[2026-09-23T09:16:45]   Clamp: total discount <= subtotal, never negative
+[2026-09-23T09:17:30] > Writing spec.md
+[2026-09-23T09:19:38] > Writing spec_summary.md (spec decisions only, unbounded spec kept out of the PR body)
+[2026-09-23T09:19:41] Spec complete — 5 acceptance criteria, all with concrete values
+`,
+      'output-plan.log': `[2026-09-23T09:19:45] Session started — role: planner
+[2026-09-23T09:19:46] > Reading spec.md (5 acceptance criteria)
+[2026-09-23T09:19:52] > Reading src/promotions/apply.ts to size the change
+[2026-09-23T09:20:30]   apply.ts: 84 lines, no tests. src/cart/validate.ts calls it in one place.
+[2026-09-23T09:20:45] > Deciding subtask boundaries
+[2026-09-23T09:21:02]   Subtask 1: policy + rejection reasons (ACs 1-3)
+[2026-09-23T09:21:02]   Subtask 2: deterministic ordering + clamping (ACs 4-5)
+[2026-09-23T09:22:18]   Both touch src/promotions/apply.ts — serialised with depends_on: [1]
+[2026-09-23T09:23:40] > Writing plan.json
+[2026-09-23T09:24:08]   2 subtasks, 6 acceptance criteria mapped, no orphaned spec criteria
+[2026-09-23T09:24:10] Plan complete
+`,
+      'output-st1.log': `[2026-09-23T09:24:14] Session started — role: coder (subtask 1/2)
+[2026-09-23T09:24:15] > Reading plan.json for subtask 1 scope
+[2026-09-23T09:24:20] > Creating src/promotions/policy.ts
+[2026-09-23T09:24:21]   export type DiscountKind = 'percentage' | 'fixed' | 'shipping';
+[2026-09-23T09:24:21] + MAX_PER_KIND: Record<DiscountKind, number> = { percentage: 1, fixed: 1, shipping: 1 }
+[2026-09-23T09:24:22] + export function conflictFor(codes, next): string | null
+[2026-09-23T09:24:22] + export function validateStack(codes): { ok: true } | { ok: false; conflict: string }
+[2026-09-23T09:25:47] > Editing src/cart/validate.ts
+[2026-09-23T09:25:49] + calls validateStack() before pricing and returns the conflict reason
+[2026-09-23T09:26:01] > Writing src/promotions/policy.test.ts
+[2026-09-23T09:33:12]   ✓ allows one percentage + one fixed code (4ms)
+[2026-09-23T09:33:12]   ✓ rejects a second percentage code (2ms)
+[2026-09-23T09:33:12]   ✓ rejects two shipping codes (2ms)
+[2026-09-23T09:33:13]   ✓ names the conflicting code in the rejection (3ms)
+[2026-09-23T09:34:02] > Running typecheck: npx tsc --noEmit
+[2026-09-23T09:34:20]   No type errors
+[2026-09-23T09:35:44] > Running the cart suite: npx vitest run src/cart
+[2026-09-23T09:36:31]   41 passed
+[2026-09-23T09:36:52] > Committing subtask 1
+[2026-09-23T09:52:33] Subtask 1 complete — drift check: only src/promotions/* and src/cart/validate.ts touched
+`,
+      'output-st2.log': `[2026-09-23T09:52:36] Session started — role: coder (subtask 2/2)
+[2026-09-23T09:52:37] > Reading plan.json for subtask 2 scope
+[2026-09-23T09:52:41] > Editing src/promotions/apply.ts
+[2026-09-23T09:52:43] + APPLY_ORDER: DiscountKind[] = ['percentage', 'fixed', 'shipping']
+[2026-09-23T09:52:43] + discounts are now summed per kind, then applied in APPLY_ORDER
+[2026-09-23T09:53:20] + clamp: totalDiscount = Math.min(totalDiscount, subtotal)
+[2026-09-23T09:53:21]   - removed the insertion-order loop that let discounts compound
+[2026-09-23T09:54:08] > Extending src/promotions/apply.test.ts
+[2026-09-23T10:01:55]   ✓ percentage applies before fixed amount (3ms)
+[2026-09-23T10:01:55]   ✓ shipping discount applies last (2ms)
+[2026-09-23T10:01:56]   ✓ total discount clamps to subtotal (2ms)
+[2026-09-23T10:01:56]   ✓ 100% discount yields a zero total, never negative (2ms)
+[2026-09-23T10:02:40] > Running typecheck: npx tsc --noEmit
+[2026-09-23T10:02:58]   No type errors
+[2026-09-23T10:03:21] > Running the full suite: npx vitest run
+[2026-09-23T10:05:47]   612 passed
+[2026-09-23T10:06:12] > Writing implementation_summary.md
+[2026-09-23T10:06:40] > Committing subtask 2
+[2026-09-23T10:19:08] Subtask 2 complete — 2 files changed, no out-of-scope edits
+`,
+      'output-qa.log': `[2026-09-23T10:19:12] Session started — role: qa-reviewer
+[2026-09-23T10:19:13] > Reading spec.md (5 acceptance criteria)
+[2026-09-23T10:19:31] > Reading plan.json — 2/2 subtasks reported complete
+[2026-09-23T10:19:48] > Checking committed history against the plan
+[2026-09-23T10:19:50]   Only src/promotions/* and src/cart/validate.ts changed — matches both subtask scopes
+[2026-09-23T10:20:31] > AC1 — one percentage + one fixed-amount code maximum
+[2026-09-23T10:20:44]   POST /api/cart/promo with SAVE20 + 5OFF   → 200, both applied
+[2026-09-23T10:20:52]   POST /api/cart/promo with SAVE20 + EXTRA10 → 409, conflict: EXTRA10
+[2026-09-23T10:20:52]   PASS
+[2026-09-23T10:21:19] > AC2 — two shipping-discount codes cannot stack
+[2026-09-23T10:21:31]   FREESHIP + SHIPFREE → 409, conflict: SHIPFREE
+[2026-09-23T10:21:31]   PASS
+[2026-09-23T10:22:05] > AC3 — rejection names the conflict
+[2026-09-23T10:22:18]   Error payload: { code: 'PROMO_STACK_CONFLICT', conflict: 'EXTRA10', rule: 'one-percent-per-order' }
+[2026-09-23T10:22:18]   PASS
+[2026-09-23T10:22:44] > AC4 — fixed discount order
+[2026-09-23T10:23:02]   Subtotal 100.00, SAVE20 then 5OFF → 75.00 (20% first, then 5.00)
+[2026-09-23T10:23:19]   Reversed input order gives the same 75.00  →  order-independent
+[2026-09-23T10:23:19]   PASS
+[2026-09-23T10:23:40] > AC5 — discount never exceeds the subtotal
+[2026-09-23T10:23:58]   Subtotal 5.00 with 50OFF + 100PERCENT → total 0.00, never negative
+[2026-09-23T10:23:58]   PASS
+[2026-09-23T10:24:30] > Additional checks
+[2026-09-23T10:24:41]   Existing cart suite: 41 passed, no regressions
+[2026-09-23T10:25:02]   No skipped or focused tests in the new files
+[2026-09-23T10:26:15] > Writing qa_report.json
+[2026-09-23T10:31:53]   5/5 criteria PASS — no additional issues
+[2026-09-23T10:31:55] QA PASS
+`,
+      'output-merge.log': `[2026-09-23T10:44:05] Session started — role: merger
+[2026-09-23T10:44:06] > Merge strategy: pull-request
+[2026-09-23T10:44:08] > Checking out branch: feat/promo-code-stacking-rules
+[2026-09-23T10:44:11] > Syncing with origin/main
+[2026-09-23T10:44:14]   Already up to date — no conflicts
+[2026-09-23T10:44:17] > Squashing 2 subtask commits into one ticket commit
+[2026-09-23T10:44:22]   feat: Promo Code Stacking Rules
+[2026-09-23T10:44:24] > Pushing branch to origin
+[2026-09-23T10:44:29] > Creating the PR via the GitHub CLI
+[2026-09-23T10:44:31]   PR #137 created — https://github.com/shopforge/shopforge/pull/137
+[2026-09-23T10:44:31]   Body includes the specification summary and the QA result
+[2026-09-23T10:44:33] Handing back to the orchestrator — CI polling starts
+`,
+    },
+    events: ['backlog', 'spec', 'plan', 'implement', 'qa-review', 'awaiting-review', 'pr-open'],
+  },
+
+  // ═══ AWAITING REVIEW — parked by a failure (1) ═══
+  // Not a QA pass: a no-op spec revision landed here. The reason below drives
+  // the 'Needs attention' banner in the review panel and the icon-only badge
+  // on the kanban card, so the Diagnostics section has something to show.
+  {
+    id: 'PARK-001',
+    title: 'Tax Rules for EU Countries',
+    description: 'Apply per-country VAT rates at checkout for EU destinations, with a breakdown line on the receipt.',
+    phase: 'awaiting-review',
+    awaitingReviewReason: 'No-op spec revision — the analyst session completed without changing spec.md (still identical to spec_revision_before.md). This round\'s feedback was not addressed. This is not a QA pass; reject back to the analyst to retry.',
+    spec: '# EU Tax Rules\n\n## Acceptance Criteria\n1. VAT rate is resolved from the destination country\n2. Receipt shows a tax breakdown line per rate\n3. B2B orders with a valid VAT ID are zero-rated\n4. Prices displayed include VAT for EU destinations\n',
+    plan: {
+      subtasks: [
+        { id: 1, title: 'Country → VAT rate table', acceptance_criteria: ['Every EU member state has a rate', 'Unknown destinations fall back to the standard rate'], depends_on: [], qa_flagged: false },
+        { id: 2, title: 'VAT breakdown on the receipt', acceptance_criteria: ['One line per applied rate', 'Rates shown to two decimals'], depends_on: [1], qa_flagged: false },
+        { id: 3, title: 'Zero-rate B2B orders with a valid VAT ID', acceptance_criteria: ['VAT ID is validated against the VIES service', 'Invalid VAT IDs keep the standard rate'], depends_on: [1], qa_flagged: false },
+      ],
+    },
+    outputLog: `[ORCHESTRATOR] Tax Rules for EU Countries
+
+[2026-09-24T14:02:11] Review feedback received — routing to the analyst (spec revision)
+[2026-09-24T14:02:12] spec.md snapshotted to spec_revision_before.md
+[2026-09-24T14:02:13] Restarting from 'spec' — downstream QA artifacts cleared, plan.json preserved
+[2026-09-24T14:02:14] Session created: analyst (spec revision)
+[2026-09-24T14:31:40] Spec revision session ended — spec.md is byte-identical to spec_revision_before.md
+[2026-09-24T14:31:41] Parked at 'awaiting-review' (no-op revision) — human decision required
+`,
+    roleLogs: {
+      'output-spec.log': `[2026-09-24T14:02:18] Session started — role: analyst (revision mode)
+[2026-09-24T14:02:19] > Reading spec_revision_feedback.md
+[2026-09-24T14:02:21]   "The VAT-ID validation is underspecified: name the service, the failure mode
+[2026-09-24T14:02:21]    and what happens to an order whose VAT ID cannot be verified."
+[2026-09-24T14:02:24] > Reading the existing spec.md (4 acceptance criteria)
+[2026-09-24T14:03:02] > Investigating how VAT IDs are validated today
+[2026-09-24T14:03:40]   src/tax/vat.ts — calls the VIES SOAP endpoint, no timeout, no retry
+[2026-09-24T14:04:11]   No test covers an unreachable VIES instance
+[2026-09-24T14:05:48] > Deciding the failure mode
+[2026-09-24T14:05:49]   - - Rejected: treat an unreachable VIES as valid → silently zero-rates bad orders
+[2026-09-24T14:05:50]   - - Rejected: reject the order entirely → loses revenue on a vendor outage
+[2026-09-24T14:05:50]   - - Accepted: 3s timeout, apply the standard rate, flag the order for later re-validation
+[2026-09-24T14:06:31] > Drafting the revised acceptance criteria
+[2026-09-24T14:06:33]   AC3 … validated against VIES with a 3 second timeout
+[2026-09-24T14:06:34]   AC4 … an unverifiable VAT ID is charged the standard rate and flagged for re-validation
+[2026-09-24T14:06:35]   AC5 … the flag surfaces in the finance export
+[2026-09-24T14:07:02] > Session budget reached while verifying the draft diff
+[2026-09-24T14:07:02]   Drafted criteria were never written back to spec.md
+[2026-09-24T14:31:38] Session ended — spec.md unchanged
+`,
+    },
+    events: ['backlog', 'spec', 'plan', 'implement', 'qa-review', 'awaiting-review', 'spec', 'awaiting-review'],
+  },
+
   // ═══ DONE (1) ═══
   {
     id: 'DONE-001',
@@ -867,7 +1112,83 @@ new file mode 100644
         { id: 4, title: 'Push notification integration', acceptance_criteria: ['User receives notification on status change', 'Notification links to tracking page'], depends_on: [3], qa_flagged: false },
       ],
     },
+    prUrl: 'https://github.com/shopforge/shopforge/pull/124',
+    mergeStrategy: 'pull-request',
     completionSummary: 'All 4 subtasks complete. Mapbox integration with live tracking, 5-step timeline, dynamic ETA from carrier API, and push notifications via Web Push API. All tests pass.',
+    events: ['backlog', 'spec', 'plan', 'implement', 'qa-review', 'awaiting-review', 'done'],
+  },
+
+  // ═══ DONE (2 more) ═══
+  // Disk DONE tasks render as ordinary cards with the green 'PR' link, on top
+  // of the history-reconstructed ones the DONE column appends underneath
+  // (see seedGitHistory at the bottom of this script).
+  {
+    id: 'DONE-002',
+    title: 'Guest Checkout Without Account Creation',
+    description: 'Let shoppers complete an order without registering. Collect only the email needed for the receipt and offer account creation afterwards.',
+    phase: 'done',
+    prUrl: 'https://github.com/shopforge/shopforge/pull/131',
+    mergeStrategy: 'pull-request',
+    completionSummary: 'Guest checkout shipped. 6/6 acceptance criteria pass, 12 new integration tests, no regressions in the existing auth flow.',
+    spec: '# Guest Checkout\n\n## Acceptance Criteria\n1. Cart and checkout are reachable without an account\n2. Only email is required at checkout\n3. Receipt is emailed to the address used\n4. Account creation is offered on the confirmation page\n5. An existing account with that email is detected and linked\n6. No customer record is created until the order is placed\n',
+    plan: {
+      subtasks: [
+        { id: 1, title: 'Relax checkout route guards for anonymous sessions', acceptance_criteria: ['Cart and checkout render without a session', 'Order POST accepts an anonymous session'], depends_on: [], qa_flagged: false, completed: true },
+        { id: 2, title: 'Email-only checkout form', acceptance_criteria: ['Only email is required', 'Field is validated and normalised to lowercase'], depends_on: [1], qa_flagged: false, completed: true },
+        { id: 3, title: 'Link an existing account by email at order time', acceptance_criteria: ['Existing account is detected', 'Order is attached to it', 'No duplicate customer record is created'], depends_on: [2], qa_flagged: false, completed: true },
+      ],
+    },
+    qaReport: {
+      overall: 'PASS',
+      criteria: [
+        { name: 'Reachable without an account', status: 'PASS', notes: 'Cart, checkout and confirmation all render for anonymous sessions.' },
+        { name: 'Only email required', status: 'PASS', notes: 'Form submits with email alone; all other fields are optional.' },
+        { name: 'Receipt emailed', status: 'PASS', notes: 'Receipt delivered to the checkout address in the sandbox mailer.' },
+        { name: 'Account offered afterwards', status: 'PASS', notes: 'Confirmation page shows the create-account prompt.' },
+        { name: 'Existing account linked', status: 'PASS', notes: 'Order attaches to the existing customer instead of creating a duplicate.' },
+        { name: 'No premature customer record', status: 'PASS', notes: 'Customer row is only written on successful order placement.' },
+      ],
+      additional_issues: [],
+    },
+    outputLog: `[2026-08-19T09:12:00] [ORCHESTRATOR] Guest Checkout Without Account Creation
+
+[2026-08-19T09:12:04] Phase 'create-pr' complete — PR #131 opened
+[2026-08-19T09:12:04] CI checks queued: lint, typecheck, unit-tests, integration-tests
+[2026-08-19T09:41:37] All 4 checks passed in 29m 33s
+[2026-08-19T09:41:38] Merged PR #131 into main — task marked done
+`,
+    events: ['backlog', 'spec', 'plan', 'implement', 'qa-review', 'awaiting-review', 'done'],
+  },
+  {
+    id: 'DONE-003',
+    title: 'Fix Cart Total Rounding at Checkout',
+    description: 'Line-item totals are summed as floats, so a cart of $19.99 + $0.01 + $0.01 charges $20.009999. Round once, at the end, in minor units.',
+    phase: 'done',
+    prUrl: 'https://github.com/shopforge/shopforge/pull/133',
+    mergeStrategy: 'pull-request',
+    completionSummary: 'Totals are computed in integer cents. Added a 200-case property test asserting the displayed total always equals the charged total.',
+    spec: '# Cart Total Rounding\n\n## Acceptance Criteria\n1. Cart total equals the sum of line items to the cent\n2. No floating-point residue in any displayed or charged amount\n3. Tax is computed on the rounded subtotal\n',
+    plan: {
+      subtasks: [
+        { id: 1, title: 'Move money arithmetic to integer minor units', acceptance_criteria: ['All totals are integer cents internally', 'Displayed values format from minor units'], depends_on: [], qa_flagged: false, completed: true },
+        { id: 2, title: 'Property test: displayed total equals charged total', acceptance_criteria: ['200 generated carts assert display == charge', 'Boundary cases with 0, 1 and 10,000 line items covered'], depends_on: [1], qa_flagged: false, completed: true },
+      ],
+    },
+    qaReport: {
+      overall: 'PASS',
+      criteria: [
+        { name: 'Total equals sum to the cent', status: 'PASS', notes: 'Integer minor units throughout; 0 drift across 200 generated carts.' },
+        { name: 'No float residue', status: 'PASS', notes: 'Grepped for parseFloat in the money path — only the boundary formatter remains.' },
+        { name: 'Tax on rounded subtotal', status: 'PASS', notes: 'Tax is applied after subtotal rounding, matching the spec.' },
+      ],
+      additional_issues: [],
+    },
+    outputLog: `[2026-08-28T15:03:15] [ORCHESTRATOR] Fix Cart Total Rounding at Checkout
+
+[2026-08-28T15:03:19] Phase 'create-pr' complete — PR #133 opened
+[2026-08-28T15:31:52] All 4 checks passed in 28m 33s
+[2026-08-28T15:31:53] Merged PR #133 into main — task marked done
+`,
     events: ['backlog', 'spec', 'plan', 'implement', 'qa-review', 'awaiting-review', 'done'],
   },
 
@@ -950,6 +1271,12 @@ function writeTask(task: SeedTask) {
     phase: task.phase,
     source: task.source,
     competitiveContext: task.competitiveContext,
+    // Optional fields are omitted rather than written as null — the UI treats
+    // an absent prUrl/awaitingReviewReason as "not set".
+    ...(task.prUrl ? { prUrl: task.prUrl } : {}),
+    ...(task.mergeStrategy ? { mergeStrategy: task.mergeStrategy } : {}),
+    ...(task.awaitingReviewReason ? { awaitingReviewReason: task.awaitingReviewReason } : {}),
+    ...(task.failureReason ? { failureReason: task.failureReason } : {}),
     createdAt: '2026-07-06T10:00:00.000Z',
     updatedAt: '2026-07-06T18:00:00.000Z',
   }, null, 2));
@@ -964,7 +1291,236 @@ function writeTask(task: SeedTask) {
   if (task.qaReport) writeFileSync(join(dir, 'qa_report.json'), JSON.stringify(task.qaReport, null, 2));
   if (task.completionSummary) writeFileSync(join(dir, 'completion_summary.md'), task.completionSummary);
   if (task.outputLog) writeFileSync(join(dir, 'output.log'), task.outputLog);
+  if (task.roleLogs) {
+    for (const [fileName, content] of Object.entries(task.roleLogs)) {
+      writeFileSync(join(dir, fileName), content);
+    }
+  }
   if (task.diff) writeFileSync(join(dir, 'diff.txt'), task.diff);
+}
+
+// ── DONE-column history (fake git repo) ─────────────────────────────
+//
+// The app's DONE column reconstructs *completed* tickets from the target
+// repo's own history: `git log --grep '^Task: '` for commit trailers (and
+// merged-PR bodies via `gh`, which the demo has no remote for). A throwaway
+// repo with dated, trailer-bearing commits is therefore what makes the
+// Delivered section show history-reconstructed cards sitting underneath the
+// disk DONE tasks.
+//
+// The parent TeamAI repo ignores demo/.git and demo/src (see .gitignore), so
+// none of this is committed upstream and the nested repo never registers as
+// an embedded repository.
+
+interface HistoryEntry {
+  /** Path under demo/, created by this commit. */
+  file: string;
+  /** Conventional-commit subject — becomes the card title (type prefix stripped). */
+  subject: string;
+  /** Body lines above the trailer block — become the card summary. */
+  summary: string[];
+  /** Trailer block, mirroring the real builder's format exactly. */
+  trailers: { task: string; taskId: string; qa: string; phases: string };
+  /** ISO commit date — drives the card's relative "2mo ago" timestamp. */
+  date: string;
+  content: string;
+}
+
+const HISTORY: HistoryEntry[] = [
+  {
+    file: 'src/checkout/guest.ts',
+    subject: 'feat: Guest checkout without account creation',
+    summary: [
+      'Anonymous sessions can now reach cart and checkout with only an email',
+      'required. An existing account with the same address is linked at order',
+      'time instead of being duplicated.',
+    ],
+    trailers: { task: 'guest-checkout-without-account-creation', taskId: 'DONE-002', qa: 'PASS (6/6 criteria)', phases: 'spec>plan>implement>qa-review>merge' },
+    date: '2026-08-19T09:41:38+01:00',
+    content: `/**
+ * Guest checkout — anonymous sessions, email-only.
+ * Added by ticket: guest-checkout-without-account-creation
+ */
+export interface GuestSession {
+  email: string;
+  cartId: string;
+}
+
+export function isAnonymous(session: { userId?: string }): boolean {
+  return !session.userId;
+}
+
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+`,
+  },
+  {
+    file: 'src/media/lazy-image.tsx',
+    subject: 'feat: Product image lazy loading with CDN srcset',
+    summary: [
+      'Product grids load a 1x1 placeholder and upgrade to the real image once',
+      'in view; srcset picks the right width per breakpoint.',
+      'Median grid render dropped from 1.9s to 640ms.',
+    ],
+    trailers: { task: 'product-image-lazy-loading-cdn-srcset', taskId: 'DONE-101', qa: 'PASS (4/4 criteria)', phases: 'spec>plan>implement>qa-review>merge' },
+    date: '2026-08-11T16:22:05+01:00',
+    content: `/**
+ * Lazy product image with CDN srcset.
+ * Added by ticket: product-image-lazy-loading-cdn-srcset
+ */
+const CDN = process.env.NEXT_PUBLIC_CDN_URL;
+
+export function srcSet(path: string): string {
+  return [400, 800, 1200].map(w => CDN + '/w/' + w + path + ' ' + w + 'w').join(', ');
+}
+
+export function placeholder(): string {
+  return 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+}
+`,
+  },
+  {
+    file: 'src/cart/money.ts',
+    subject: 'fix: Cart total rounding at checkout',
+    summary: [
+      'Line items were summed as floats, so 19.99 + 0.01 + 0.01 charged',
+      '20.009999. All money arithmetic now happens in integer minor units,',
+      'rounding exactly once at the boundary.',
+    ],
+    trailers: { task: 'fix-cart-total-rounding-at-checkout', taskId: 'DONE-003', qa: 'PASS (3/3 criteria)', phases: 'spec>plan>implement>qa-review>merge' },
+    date: '2026-08-28T15:31:53+01:00',
+    content: `/**
+ * Money arithmetic in integer minor units.
+ * Added by ticket: fix-cart-total-rounding-at-checkout
+ */
+export function toMinor(amount: number): number {
+  return Math.round(amount * 100);
+}
+
+export function format(minor: number, currency = 'USD'): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency })
+    .format(minor / 100);
+}
+
+export function sumMinor(amounts: number[]): number {
+  return amounts.reduce((total, n) => total + toMinor(n), 0);
+}
+`,
+  },
+  {
+    file: 'src/consent/banner.tsx',
+    subject: 'feat: GDPR cookie consent banner',
+    summary: [
+      'Consent is captured before any non-essential script runs, stored with a',
+      'timestamp, and re-requested after 12 months.',
+    ],
+    trailers: { task: 'gdpr-cookie-consent-banner', taskId: 'DONE-104', qa: 'PASS (5/5 criteria)', phases: 'spec>plan>implement>qa-review>merge' },
+    date: '2026-09-04T11:07:44+01:00',
+    content: `/**
+ * Cookie consent gate.
+ * Added by ticket: gdpr-cookie-consent-banner
+ */
+export const CONSENT_KEY = 'shopforge.consent.v1';
+export const CONSENT_TTL_MONTHS = 12;
+
+export interface Consent {
+  essential: true;
+  analytics: boolean;
+  marketing: boolean;
+  capturedAt: string;
+}
+
+export function needsRenewal(consent: Consent): boolean {
+  const months = (Date.now() - Date.parse(consent.capturedAt)) / 2.628e9;
+  return months >= CONSENT_TTL_MONTHS;
+}
+`,
+  },
+  {
+    file: 'src/pricing/rules.ts',
+    subject: 'refactor: Extract pricing rules into a shared module',
+    summary: [
+      'Cart, checkout and the receipt each carried their own copy of the discount',
+      'rules; they now share one module so a rule change lands in one place.',
+    ],
+    trailers: { task: 'extract-pricing-rules-into-shared-module', taskId: 'DONE-105', qa: 'PASS (3/3 criteria)', phases: 'spec>plan>implement>qa-review>merge' },
+    date: '2026-09-12T18:45:12+01:00',
+    content: `/**
+ * Shared pricing rules.
+ * Added by ticket: extract-pricing-rules-into-shared-module
+ */
+export type Rule = (subtotalMinor: number, codes: string[]) => number;
+
+export const RULES: Record<string, Rule> = {
+  SAVE20: (subtotal) => Math.round(subtotal * 0.2),
+  FIVEOFF: () => 500,
+};
+
+export function applyRules(subtotalMinor: number, codes: string[]): number {
+  const total = codes.reduce((sum, code) => sum + (RULES[code]?.(subtotalMinor, codes) ?? 0), 0);
+  return Math.min(total, subtotalMinor);
+}
+`,
+  },
+];
+
+/**
+ * Create a throwaway git repo inside demo/ whose commits carry the ticket
+ * trailers the history scanner greps for. Returns the number of commits made.
+ */
+function seedGitHistory(): number {
+  rmDir(join(DEMO_DIR, '.git'));
+  rmDir(join(DEMO_DIR, 'src'));
+  mkdirSync(join(DEMO_DIR, 'src'), { recursive: true });
+
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: DEMO_DIR, stdio: 'pipe', encoding: 'utf-8' });
+
+  // Hide the files the seed itself generates from the nested repo, so its
+  // status stays clean without adding tracked files to demo/ for the parent
+  // repo to pick up.
+  const excludeDir = join(DEMO_DIR, '.git', 'info');
+  mkdirSync(excludeDir, { recursive: true });
+  writeFileSync(
+    join(excludeDir, 'exclude'),
+    ['.teamai/', '.claude/', 'CLAUDE.md', 'README.md', '.gitkeep', 'node_modules/', ''].join('\n'),
+  );
+
+  let count = 0;
+  for (const entry of HISTORY) {
+    const filePath = join(DEMO_DIR, entry.file);
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, entry.content);
+
+    // Same shape the real builder emits: subject, body, blank line, trailers.
+    const message = [
+      entry.subject,
+      '',
+      ...entry.summary,
+      '',
+      `Task: ${entry.trailers.task}`,
+      `Task-ID: ${entry.trailers.taskId}`,
+      `QA: ${entry.trailers.qa}`,
+      `Phases: ${entry.trailers.phases}`,
+      'Reviewed-by: TeamAI QA agent',
+      '',
+    ].join('\n');
+
+    execFileSync('git', ['add', entry.file], { cwd: DEMO_DIR, stdio: 'pipe', encoding: 'utf-8' });
+    execFileSync(
+      'git',
+      ['-c', 'user.name=ShopForge Dev', '-c', 'user.email=dev@shopforge.example', 'commit', '-q', '-m', message],
+      {
+        cwd: DEMO_DIR,
+        stdio: 'pipe',
+        encoding: 'utf-8',
+        env: { ...process.env, GIT_AUTHOR_DATE: entry.date, GIT_COMMITTER_DATE: entry.date },
+      },
+    );
+    count++;
+  }
+
+  return count;
 }
 
 // ── Main ────────────────────────────────────────────────────────────
@@ -975,6 +1531,9 @@ console.log('Re-seeding ShopForge demo project...');
 rmDir(join(DEMO_DIR, '.teamai'));
 rmDir(join(DEMO_DIR, '.claude'));
 if (existsSync(join(DEMO_DIR, '.worktrees'))) rmDir(join(DEMO_DIR, '.worktrees'));
+// Generated source tree + nested repo (recreated by seedGitHistory below)
+rmDir(join(DEMO_DIR, 'src'));
+rmDir(join(DEMO_DIR, '.git'));
 
 mkdirSync(TEAMAI_DIR, { recursive: true });
 
@@ -997,6 +1556,9 @@ writeFileSync(join(roadmapDir, 'roadmap-2026-07-06.json'), JSON.stringify(ROADMA
 // Scaffold .claude/
 scaffoldClaude();
 
+// Fake git history that the DONE column reconstructs cards from
+const historyCount = seedGitHistory();
+
 // Summary
 const phases: Record<string, number> = {};
 for (const t of TASKS) phases[t.phase] = (phases[t.phase] || 0) + 1;
@@ -1005,3 +1567,4 @@ for (const [phase, count] of Object.entries(phases)) {
   console.log(`  ${phase}: ${count}`);
 }
 console.log(`  Roadmap: ${ROADMAP.phases.now.length + ROADMAP.phases.next.length + ROADMAP.phases.later.length + ROADMAP.phases.icebox.length} items`);
+console.log(`  DONE history: ${historyCount} tickets reconstructed from git (demo/src)`);

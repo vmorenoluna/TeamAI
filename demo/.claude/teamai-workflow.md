@@ -1,7 +1,7 @@
 # TeamAI Workflow
 
 This project uses an automated pipeline managed by an external orchestrator.
-When you receive slash commands (/spec, /plan, /implement, /qa-review, /qa-fix, /merge),
+When you receive slash commands (/spec, /plan, /implement, /qa-review, /merge),
 follow their instructions precisely and output structured files as specified.
 
 ## Key Conventions
@@ -38,7 +38,7 @@ Everything else that tells the story of the implementation is included:
 - **`completion_summary.md`** — failure summary with subtask status and last QA report (if the task failed)
 - **`events.jsonl`** — phase transition timeline (spec → plan → implement → QA → merge)
 - **`qa_feedback.md`** — QA feedback sent to the engineer for fixes (if present at commit time)
-- **`human_feedback.md`** — human reviewer feedback from `rejectTask` (if present at commit time)
+- **`human_feedback.md`** — human reviewer feedback from `rejectTask`, carrying a `Target:` header naming the receiving agent (analyst / planner / coder / qa-reviewer) (if present at commit time)
 - **`human_feedback_before_bounce.md`** — feedback snapshot preserved across bounce cycles
 - **`spec_revision_feedback.md`** — QA spec concerns used to auto-revise the spec
 

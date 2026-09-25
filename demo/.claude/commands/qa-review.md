@@ -1,5 +1,7 @@
 <!-- .claude/commands/qa-review.md -->
-Read and adopt the role defined in .claude/roles/qa-reviewer.md before proceeding.
+Adopt the role persona already loaded in your system prompt.
+
+**Human directive override:** if a `human_feedback.md` file exists in the task's `.teamai/` directory, honor it by target: if its `Target:` header names the QA reviewer, its content OVERRIDES the spec and plan wherever they conflict — verify against it; if it names another agent, treat it as authoritative context — verify the change was made and do not flag it as a deviation.
 
 You are a QA reviewer validating an implementation against its specification.
 
@@ -47,7 +49,7 @@ This means on a rework pass where only one criterion failed and its file was cha
 5. For each acceptance criterion, determine PASS or FAIL with evidence from the actual file content:
    - If a criterion says "no occurrences of X remain": grep the relevant files and paste the result.
    - If a criterion says "Y is used instead of Z": read the file and confirm.
-   - If a criterion requires empirical evidence from a script run (benchmark, integration test, etc.): read the committed output and confirm the results meet the criterion's thresholds. A coder claim of "mathematically verified" or theoretical justification does NOT satisfy an empirical criterion — mark it FAIL.
+   - If a criterion requires empirical evidence from a script run (benchmark, integration test, etc.): read the committed output and confirm the results meet the criterion's thresholds — apply your role's evidence-substitution discipline when deciding whether a claim actually satisfies this.
    - **Unverifiable criterion detection**: If a criterion demands evidence that structurally cannot exist in any committed artifact (e.g., it asks for detail from an uncommitted log, a transient server response, or the coder's self-reported observation), do NOT mark it as a standard FAIL. Instead, add a `spec_concerns` entry: the spec/plan failed to provide a producing artifact for this criterion. The issue is that the criterion itself is unverifiable — the coder cannot fix this by changing code. Flagging it as a standard FAIL would guarantee a useless cleanup bounce.
    - Never infer a criterion is satisfied from the diff alone — verify against current code.
      - **After evaluating each criterion**: write the partial QA report to disk immediately
@@ -55,38 +57,34 @@ This means on a rework pass where only one criterion failed and its file was cha
        is interrupted, partial results are preserved and the next pass can continue from
        where it left off rather than restarting entirely. Replace `"IN_PROGRESS"` with the
        final `"PASS"` or `"FAIL"` once all criteria are evaluated.
-5. Check for:
-   - Correctness: Does the code do what the spec says?
-   - Edge cases: Are error states handled?
-   - Tests: Are there tests for the new functionality?
-   - Style: Does it match existing code conventions?
-   - Regressions: Could this break existing functionality?
 
 ### Step 5a: Label/Assertion Mismatch Detection
 
 **Active whenever a criterion involves a numeric/count requirement** (e.g.,
 "at least 3 positive cases", "no occurrences of X remain", "Y occurrences exist").
 
-For count-based criteria, do NOT trust comments, labels, or variable names as
-proof that a specific case counts toward the requirement. Comments lie;
-assertions don't.
+Apply your role's assertion-verification discipline to each candidate item, then:
 
-1. For each candidate item that could satisfy the count requirement:
-   - Read the item's actual assertion logic, not its comment or label.
-   - Classify what the assertion actually proves (positive, negative, zero, no-op).
-2. If any candidate has a label/comment that says one thing but an assertion
+1. If any candidate has a label/comment that says one thing but an assertion
    that proves something different (e.g., a test case commented as "// Positive
    case 2" but asserting `result shouldBe 0`), flag it as an
    `additional_issues` entry:
    - **description**: "Test case at [file:line] is labeled as '[label]' but asserts [what it actually asserts] — this inflates the count for criterion '[criterion text]'"
    - **file**: exact file path and line number
    - **fix_needed**: "Fix the assertion to match the label, or relabel/remove the case"
-3. The FAIL criterion itself should remain FAIL until the actual count of
+2. The FAIL criterion itself should remain FAIL until the actual count of
    correctly-asserted cases meets the requirement. The label/assertion mismatch
    is a separate issue that the coder must also fix.
-4. Apply the same rigor to negative counts ("no occurrences of X") — grep
-   results alone are not sufficient; verify that each occurrence actually
-   does what the grep keyword suggests.
+
+## Running Verification Scripts & Servers
+
+When verification requires running a script, server, or service (including the test
+suite in Step 6):
+
+- **Run from the worktree.** Start everything from the current working directory (the task's git worktree), NOT the base project root. The worktree contains the branch's code — running from the project root would exercise the wrong revision.
+- **Use dynamic ports.** When starting a local server, bind to port 0 (OS-assigned free port). Never hardcode a fixed shared port — another concurrent task may collide.
+- **Never kill what you didn't start.** Do NOT use `kill`, `fuser -k`, `taskkill`, or equivalent against any port or process. Another task's agent may be using it.
+- **Stop your own instances.** When verification is complete, explicitly tear down any server or service you started.
 
 ## Step 6: Run Test Suite
 
@@ -106,10 +104,13 @@ assertions don't.
    - The coder was told to run tests, but they may have introduced regressions
      in areas QA previously passed. Independent verification is mandatory.
    - **Exception — skip the test suite entirely** if `git diff <head_at_review>...HEAD --name-only`
-     shows zero changes under `src/main/scala/` or `src/test/scala/`. In that case,
-     carry forward the previous test evidence ("Tests: succeeded N, failed 0") as PASS.
-     Only non-Scala changes (scripts/, docs/, `.teamai/`, config files) cannot cause
-     Scala test regressions. Do NOT skip tests if any `.scala` file changed.
+     shows zero changes under the project's source or test directories. Identify those
+     directories from the project's own layout (e.g. `src/`, `lib/`, `test/`, `tests/`,
+     `src/main/<lang>/`, `src/test/<lang>/`) via its build config, `package.json`, Makefile,
+     or directory structure. In that case, carry forward the previous test evidence
+     ("Tests: succeeded N, failed 0") as PASS. Only changes outside the source and test
+     trees (scripts/, docs/, `.teamai/`, config files) cannot cause test regressions.
+     Do NOT skip tests if any source or test file changed.
 4. If tests fail:
    - Failures in code the coder was assigned to change → standard FAIL on
      the relevant acceptance criteria.
@@ -129,8 +130,13 @@ Flag a spec concern when:
 - An acceptance criterion is impossible to satisfy as written
 - The spec contradicts itself or makes mutually exclusive requirements
 - The spec's assumptions about external dependencies (APIs, libraries, data formats) proved incorrect
+- The spec explicitly labeled a claim as an unverified hypothesis (e.g. "Expected to resolve X — unverified; must be confirmed by re-running the verification step"), and verification contradicts it. This is the first bullet above by construction: the coder implemented the hypothesis exactly as specified, so the outcome being wrong means the spec's assumption was wrong, not the implementation. Populate `spec_concerns` with the verbatim evidence — do not mark it a standard FAIL and do not let the coder substitute their own value to compensate.
 
 When spec concerns are present, the task goes to human review — the reviewer decides whether to revise the spec. Not all FAIL criteria are spec concerns; only flag when the *specification* is the root cause, not the implementation.
+
+**Before writing `suggested_fix`, apply your role's investigation discipline** — a wrong
+hypothesis sent to human review costs a full analyst → plan → implement cycle, so resolve
+what you can resolve yourself first rather than listing hypotheses.
 
 ## Step 8: Domain Logic Integrity Check
 
@@ -195,3 +201,19 @@ The orchestrator uses this to route cleanup failures directly without spawning a
 **Any `additional_issues` entry means overall FAIL.** There are no severity levels — every issue found beyond the spec's acceptance criteria is a hard blocker. The coder MUST fix all of them.
 
 Only include `spec_concerns` if spec gaps were detected. Omit the field entirely if all FAILs are implementation bugs.
+
+## Final Step: Write the Implementation Summary (PASS verdict only)
+
+When the final verdict is **PASS**, write `implementation_summary.md` next to the QA report (same directory) as your very last action:
+
+- **2–4 lines of plain prose**, present/past tense, describing what was actually implemented — the outcome, not the request. This text becomes the squashed commit's message body, and appears again in the PR body under its own "What Was Implemented" section (alongside the original description and the full spec) — so write it for a human reading the repo history later, not as an internal note to yourself.
+- Describe the outcome, not the process: no session mechanics, no QA-report references, no file-by-file walkthroughs.
+- Never write this file on a FAIL outcome — the task loops back to implement/qa-review, so a "here's what was done" summary would be premature and likely stale by the time the task actually passes.
+
+Example:
+
+```
+Added password reset via signed, time-limited tokens delivered by email.
+The reset flow validates the token, enforces single use, and expires after 30 minutes.
+Covered by 6 new integration tests; the existing suite passes unchanged.
+```

@@ -1,5 +1,7 @@
 <!-- .claude/commands/spec.md -->
-Read and adopt the role defined in .claude/roles/analyst.md before proceeding.
+Adopt the role persona already loaded in your system prompt.
+
+**Human directive override:** if a `human_feedback.md` file exists in the task's `.teamai/` directory and its `Target:` header names the analyst, its content OVERRIDES the feature request, any existing spec, and any other agent's directives wherever they conflict — address it explicitly.
 
 You are creating a complete specification for a feature. Follow these steps exactly:
 
@@ -10,8 +12,6 @@ Think through:
 - What are the acceptance criteria? List at least 5 testable criteria.
 - What are the edge cases and error states?
 - What are the dependencies on existing code?
-
-**CRITICAL — No Delegated Analysis:** Investigation and root-cause analysis are pre-spec activities. If the feature request asks you to "investigate", "analyse", or "determine the correct value for" something, complete that investigation yourself NOW — read the logs, derive the formula, determine the thresholds — and embed the findings directly into the spec's technical sections. NEVER delegate analysis to the engineer via requirements like "determine the correct value" or "analyse why X fails". By the time the spec reaches the engineer, every concrete value, formula, and threshold must already be decided and justified.
 
 ## Step 2: Codebase Research
 Use Glob and Grep to find:
@@ -35,10 +35,14 @@ Review your own spec. Check for:
 - Vague or untestable acceptance criteria
 - Scope creep beyond the original request
 - Missing files in the modification list
-- **Delegated analysis**: Are any requirements worded as research tasks ("analyse", "investigate", "determine") instead of concrete, computed specifications?
-- **Spec executability**: Are any requirements unquantified ("fast enough", "sufficient", "reasonable")? Are there reference implementations ("do it like module X") instead of concrete specs? Does every requirement stand alone — can an engineer with no prior context implement it without guessing?
 
-## Step 5: Output
+## Step 5: Write the Spec Summary
+Write `spec_summary.md` next to `spec.md` (same directory) as your final action before printing output:
+
+- **Roughly 3–8 lines of plain prose**, capturing the feature's intent and the key decisions made in this spec — the "why" behind non-obvious choices (the approach picked over alternatives, notable formulas/thresholds and why, how tricky edge cases are handled). Do not restate the requirements list or acceptance criteria verbatim; summarize the reasoning, not the checklist.
+- Write it for another agent or a human reviewer to understand the spec's reasoning without reading the full document — `spec.md` itself is not committed to git and is deleted once the task completes, so this summary becomes the durable record of the spec, embedded in the pull request's description.
+
+## Step 6: Output
 Print the path to the spec file and a one-paragraph summary.
 
 ---
@@ -49,18 +53,25 @@ If the prompt begins with `REVISION:` you are revising an existing spec, not wri
 
 ### Revision Workflow
 1. Read the existing spec at the path provided in the prompt.
-2. Read the `spec_revision_feedback.md` file at the same path — this contains the QA reviewer's spec concerns that triggered the revision.
+2. Read the `spec_revision_feedback.md` file at the same path — this contains the concerns that triggered the revision (from the QA reviewer's findings or the human reviewer's directive).
 3. Address EVERY concern listed in the feedback:
    - If the concern points to a wrong assumption, correct it in the spec
    - If the concern identifies missing requirements, add them
    - If the concern identifies contradictory criteria, resolve the contradiction
 4. Preserve valid parts of the spec that the feedback doesn't challenge — only change what needs changing.
 5. Validate the revised spec against the original feature description — does the revised spec still satisfy the feature request, corrected for the discovered issues?
-6. Re-run Step 2 (Codebase Research) to ensure the revised spec is grounded in the current codebase reality.
-7. Write the revised spec to the SAME path as the original spec.md (overwrite it).
+6. Re-run Step 2 (Codebase Research) scoped to the feedback's scope. Research only the
+   files, modules, and configuration the concerns actually name (plus their adjacent tests
+   and immediate dependencies) to ensure the revised spec is grounded in current codebase
+   reality. Do NOT re-run a full-codebase Glob/Grep sweep — a revision triggered by a
+   single concern does not need to re-map the whole repository.
+7. **Resolve every conditional you introduce.** If your fix involves a fork ("if the measured effect still shows the problem, do Y instead"), do not write the fork into the spec — pick one branch now and write only that branch's acceptance criteria and formulas. A spec with an unresolved fallback clause will fail review again.
+8. Write the revised spec to `spec.md` (the path given in the prompt) — the versioned baseline file you read in step 1 (e.g. `spec_v1.md`) is the archived previous version; do NOT write to it.
+9. **Verify you actually changed something.** Diff what you just wrote against the spec content you read in step 1. For each concern in `spec_revision_feedback.md`, find the specific line(s) that changed to address it. If any concern has no corresponding change, you have not addressed it — go back and fix the spec before proceeding to output.
+10. Update `spec_summary.md` (same directory) so it reflects the revised spec's current reasoning — same guidelines as Step 5 of the original workflow.
 
 ### Revision Output
 After writing the revised spec, print:
 - The path to the revised spec file
-- A summary of what changed and why
-- Confirmation that all spec concerns from the feedback were addressed
+- For each concern in `spec_revision_feedback.md`: the specific before → after change that addresses it (quote the old and new text/value/formula, not just a paraphrase)
+- Confirmation that all spec concerns from the feedback were addressed, each backed by the diff above
