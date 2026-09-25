@@ -565,6 +565,37 @@ describe('ProcessManager — Full Coverage', () => {
       expect(mockAppendFileSync).not.toHaveBeenCalled();
     });
 
+    it('flags a model/client-version incompatibility instead of logging it as an ordinary reply', () => {
+      // The CLI reports this as normal assistant text (session still exits 0),
+      // which otherwise reads like the agent just didn't do anything useful —
+      // especially opaque in container mode, where claude-code is whatever
+      // postCreateCommand installed once at container creation and can go
+      // stale silently (see ContainerManager._logContainerClaudeVersion).
+      (pm as unknown as AnyPM)._appendToLog('/tmp/test.log', {
+        type: 'assistant',
+        message: {
+          content: [{
+            type: 'text',
+            text: 'API Error: 400 Claude Code 2.1.150 does not support this model; version 2.1.280 or newer is required.',
+          }],
+        },
+      });
+      const [, written] = mockAppendFileSync.mock.calls[0];
+      expect(written).toContain('⚠ MODEL INCOMPATIBLE');
+      expect(written).toContain('API Error: 400 Claude Code 2.1.150 does not support this model');
+      expect(written).toContain('npm install -g @anthropic-ai/claude-code@latest');
+      expect(written).toContain('claude update');
+    });
+
+    it('leaves ordinary assistant text alone when it does not mention model incompatibility', () => {
+      (pm as unknown as AnyPM)._appendToLog('/tmp/test.log', {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'This model does not support that file format.' }] },
+      });
+      const [, written] = mockAppendFileSync.mock.calls[0];
+      expect(written).not.toContain('MODEL INCOMPATIBLE');
+    });
+
     it('does not throw on appendFileSync failure (best-effort)', () => {
       mockAppendFileSync.mockImplementationOnce(() => { throw new Error('Disk full'); });
       expect(() =>
