@@ -160,8 +160,9 @@
     nav .container { display: flex; align-items: center; justify-content: space-between; padding-top: 14px; padding-bottom: 14px; }
     nav .logo { font-weight: 700; font-size: 1.1rem; color: #e2e8f0; }
     nav .logo span { color: #38bdf8; }
-    nav .nav-links { display: flex; align-items: center; gap: 6px; }
-    nav a.nav-link { color: #94a3b8; font-size: 0.85rem; margin-left: 18px; text-decoration: none; }
+    /* Spacing is tuned so all 13 links fit inside the 1100px container. */
+    nav .nav-links { display: flex; align-items: center; gap: 0; }
+    nav a.nav-link { color: #94a3b8; font-size: 0.8rem; margin-left: 12px; text-decoration: none; }
     nav a.nav-link:hover { color: #cbd5e1; }
     /* Mobile hamburger */
     .nav-toggle {
@@ -185,6 +186,30 @@
     .arch-arrow { color: #334155; font-size: 1.5rem; }
 
     /* ========== Responsive ========== */
+    /* The inline nav needs the full 1100px container to hold 13 links, so the
+       hamburger engages below that rather than at the 768px layout breakpoint. */
+    @media (max-width: 1100px) {
+      nav .nav-links {
+        display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+        position: absolute; top: 100%; left: 12px; right: 12px; margin-top: 8px;
+        background: #111827; border: 1px solid #1e293b; border-radius: 12px;
+        box-shadow: 0 16px 32px rgba(0,0,0,0.4);
+        max-height: 0; overflow: hidden; opacity: 0; pointer-events: none;
+        padding: 0 8px;
+        transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+      }
+      nav .nav-links.open {
+        max-height: min(800px, calc(100vh - 80px)); overflow-y: auto;
+        opacity: 1; pointer-events: auto; padding: 8px;
+      }
+      nav .nav-links a.nav-link {
+        margin: 0; padding: 12px 14px; font-size: 1rem;
+        border-bottom: 1px solid #1e293b;
+      }
+      nav .nav-links a.nav-link:last-child { border-bottom: none; }
+      .nav-toggle { display: block; }
+    }
+
     @media (max-width: 768px) {
       section { padding: 64px 0; }
       .two-col { grid-template-columns: 1fr; gap: 24px; }
@@ -194,25 +219,6 @@
       .hero { padding: 110px 0 64px; }
       .hero-cta-secondary { margin-left: 0; }
       .cta-row { flex-direction: column; }
-      /* Mobile nav */
-      nav .nav-links {
-        display: flex; flex-direction: column; align-items: stretch;
-        position: absolute; top: 100%; left: 12px; right: 12px; margin-top: 8px;
-        background: #111827; border: 1px solid #1e293b; border-radius: 12px;
-        box-shadow: 0 16px 32px rgba(0,0,0,0.4);
-        max-height: 0; overflow: hidden; opacity: 0; pointer-events: none;
-        padding: 0 8px;
-        transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
-      }
-      nav .nav-links.open {
-        max-height: 600px; opacity: 1; pointer-events: auto; padding: 8px;
-      }
-      nav .nav-links a.nav-link {
-        margin: 0; padding: 12px 14px; font-size: 1rem;
-        border-bottom: 1px solid #1e293b;
-      }
-      nav .nav-links a.nav-link:last-child { border-bottom: none; }
-      .nav-toggle { display: block; }
       .arch-flow { flex-direction: column; }
       .arch-arrow { transform: rotate(90deg); }
     }
@@ -229,11 +235,14 @@
       <a href="#kanban" class="nav-link" onclick="closeNav()">Kanban</a>
       <a href="#pipeline" class="nav-link" onclick="closeNav()">Pipeline</a>
       <a href="#streaming" class="nav-link" onclick="closeNav()">Streaming</a>
+      <a href="#terminals" class="nav-link" onclick="closeNav()">Terminals</a>
       <a href="#subtasks" class="nav-link" onclick="closeNav()">Subtasks</a>
       <a href="#resume" class="nav-link" onclick="closeNav()">Recovery</a>
       <a href="#review" class="nav-link" onclick="closeNav()">Review</a>
+      <a href="#failures" class="nav-link" onclick="closeNav()">Failures</a>
       <a href="#refine" class="nav-link" onclick="closeNav()">Refinements</a>
       <a href="#auto" class="nav-link" onclick="closeNav()">Auto Mode</a>
+      <a href="#delivered" class="nav-link" onclick="closeNav()">Delivered</a>
       <a href="#extras" class="nav-link" onclick="closeNav()">Roadmap</a>
       <a href="https://github.com/vmorenoluna/TeamAI" class="nav-link" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
@@ -360,6 +369,19 @@
   </div>
 </section>
 
+<!-- ==================== Terminals ==================== -->
+<section id="terminals">
+  <div class="container">
+    <span class="section-label">Terminals</span>
+    <h2>Work hands-on when you want to</h2>
+    <p class="section-desc">Open a live terminal with any of your agents and step in whenever you like, with no task or pipeline required. Sessions keep running while you move around the app, so you can paste, scroll, and use full-screen tools just like a normal terminal. Any session can also file a new ticket for you, straight from the conversation.</p>
+
+    <!-- TODO(screenshot): save the Terminals page screenshot as docs/images/terminals.jpg, then uncomment the line below.
+    <img src="images/terminals.jpg" alt="TeamAI terminals page with live interactive agent sessions" loading="lazy" style="width:100%;border-radius:12px;">
+    -->
+  </div>
+</section>
+
 <!-- ==================== Subtasks ==================== -->
 <section id="subtasks">
   <div class="container">
@@ -413,6 +435,19 @@
   </div>
 </section>
 
+<!-- ==================== Diagnostics ==================== -->
+<section id="failures">
+  <div class="container">
+    <span class="section-label">Diagnostics</span>
+    <h2>Nothing fails silently</h2>
+    <p class="section-desc">A failed task doesn't leave you guessing. The task overview shows exactly which criteria failed and what QA recommends doing about it, and any task that pauses for your attention says plainly what it's waiting for — both on the board and inside the task itself.</p>
+
+    <!-- TODO(screenshot): save the failure report / needs-attention screenshot as docs/images/diagnostics.jpg, then uncomment the line below.
+    <img src="images/diagnostics.jpg" alt="TeamAI failed task overview showing failed criteria and QA recommendations" loading="lazy" style="max-width:900px;width:100%;margin:36px auto 0;display:block;border-radius:12px;">
+    -->
+  </div>
+</section>
+
 <!-- ==================== Role Refinement Assistant ==================== -->
 <section id="refine">
   <div class="container">
@@ -457,6 +492,19 @@
       </div>
         <img src="images/automode.jpg" alt="TeamAI auto mode enabled on the kanban board" loading="lazy" style="max-width:225px;width:100%;border-radius:12px;display:block;margin:0 auto;">
     </div>
+  </div>
+</section>
+
+<!-- ==================== Delivered ==================== -->
+<section id="delivered">
+  <div class="container">
+    <span class="section-label">Delivered</span>
+    <h2>Everything you shipped, in one place</h2>
+    <p class="section-desc">Completed tickets don't disappear. The Delivered column keeps a lasting record of finished work — what was built, which pull request shipped it, and when — so you can look back on the history of your project long after the agents have moved on.</p>
+
+    <!-- TODO(screenshot): save the Delivered column screenshot as docs/images/delivered.jpg, then uncomment the line below.
+    <img src="images/delivered.jpg" alt="TeamAI Delivered column showing completed tickets with pull request links" loading="lazy" style="max-width:1100px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
+    -->
   </div>
 </section>
 
