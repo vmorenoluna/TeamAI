@@ -258,6 +258,62 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
     });
   });
 
+  describe('_logContainerClaudeVersion (via _doStart)', () => {
+    it('checks the container claude-code version after a successful start', async () => {
+      mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+        if (args.includes('--version')) return '2.1.150 (Claude Code)\n';
+        return ''; // dockerAvailable's `docker info`, and the pre-start `docker ps` scan
+      });
+      const mockProc = createMockSpawnProcess();
+      mockCrossSpawn.mockReturnValue(mockProc);
+      mockSpawn.mockReturnValue(createMockSpawnProcess()); // docker events watcher
+
+      const promise = cm.ensureContainer('/test/project-version-check');
+      const ndJsonLine = JSON.stringify({
+        outcome: 'success',
+        containerId: 'devcontainer-version-test',
+        remoteWorkspaceFolder: '/workspaces/project',
+      });
+      mockProc.stdout.emit('data', Buffer.from(ndJsonLine + '\n'));
+      mockProc.emit('exit', 0);
+
+      await promise;
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        expect.any(String),
+        ['exec', 'devcontainer-version-test', 'claude', '--version'],
+        expect.any(Object),
+      );
+    });
+
+    it('does not fail container startup when the version check itself fails', async () => {
+      mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+        if (args.includes('--version')) throw new Error('exec failed: claude not found');
+        return '';
+      });
+      const mockProc = createMockSpawnProcess();
+      mockCrossSpawn.mockReturnValue(mockProc);
+      mockSpawn.mockReturnValue(createMockSpawnProcess());
+
+      const promise = cm.ensureContainer('/test/project-version-check-fail');
+      const ndJsonLine = JSON.stringify({
+        outcome: 'success',
+        containerId: 'devcontainer-version-fail',
+        remoteWorkspaceFolder: '/workspaces/project',
+      });
+      mockProc.stdout.emit('data', Buffer.from(ndJsonLine + '\n'));
+      mockProc.emit('exit', 0);
+
+      const result = await promise;
+      expect(result.containerId).toBe('devcontainer-version-fail');
+      expect(mockLogWarn).toHaveBeenCalledWith(
+        'container',
+        expect.stringContaining('Failed to check claude-code version'),
+        expect.any(Error),
+      );
+    });
+  });
+
   describe('ensureContainer guard — non-running state', () => {
     it('throws when container state is starting with a resolved startPromise', async () => {
       mockExecFileSync.mockReturnValue('');

@@ -341,6 +341,25 @@ export class ProcessManager extends EventEmitter {
           if (b.type === 'text' && b.text) text += b.text;
           else if (b.type === 'tool_use') text += `▶ ${b.name}\n`;
         }
+        // A model/client-version incompatibility (e.g. a model newer than the
+        // installed claude-code) surfaces as ordinary assistant text, not a
+        // process failure — the session still exits 0 with a normal-looking
+        // "result" event, so nothing else flags it and the phase just looks
+        // like the agent silently did nothing. This is especially opaque in
+        // container mode: the container's claude-code is whatever
+        // postCreateCommand installed once at container creation and can go
+        // stale silently — getToolPath()/tools.json give no visibility into
+        // it at all, since container sessions hardcode "claude" for
+        // `docker exec` rather than resolving through the host tool-path
+        // config. Flag it loudly here with the actual fix instead of letting
+        // it read like an ordinary (if unhelpful) reply.
+        if (/does not support this model/i.test(text)) {
+          text = `⚠ MODEL INCOMPATIBLE — the claude CLI here can't use the configured model:\n${text}\n` +
+            'Container-mode session: the container\'s claude-code was installed once at creation ' +
+            'and is likely outdated — exec into the container and run:\n' +
+            '  npm install -g @anthropic-ai/claude-code@latest\n' +
+            'Host session: run `claude update`.\n';
+        }
       } else if (event.type === 'result') {
         const cost = typeof event.total_cost_usd === 'number' ? ` — $${event.total_cost_usd.toFixed(4)}` : '';
         text = event.subtype === 'success'
