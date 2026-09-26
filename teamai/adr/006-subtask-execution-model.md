@@ -30,6 +30,28 @@ Single-subtask groups run directly in the main worktree — no isolation needed.
 
 1. **Subtask grouping**: Subtasks are bucketed by `parallel_group`. Groups execute sequentially.
 
+   > **2026-09-26 addition (group completion barrier):** "Sequentially" used
+   > to mean only "the next `[group, subtasks]` Map entry is visited after
+   > this one, and each subtask's OWN `depends_on` is checked against what's
+   > completed so far" — it did NOT mean "the next group waits for every
+   > subtask in THIS group to actually finish." A subtask that ran, ended
+   > its session, but didn't complete (a deliverable check failed, a scope
+   > violation — anything short of a wakeup, which already blocked
+   > advancement) let the loop move straight on to the next group in the
+   > SAME pass, as long as that later group's own declared `depends_on`
+   > happened to be satisfied. Found on task
+   > `add-per-constraint-soft-score-attributio`: a later group's subtask
+   > didn't name the earlier group's subtasks in `depends_on` at all (its
+   > ordering requirement lived only in its description — see ADR 006's
+   > sibling fix in `defaults/commands/plan.md`), so nothing held it back
+   > when the earlier group silently failed its deliverable check. It was
+   > dispatched anyway and burned its full wakeup budget on work whose real
+   > prerequisite was never done. The group loop now breaks before starting
+   > the next group whenever any subtask in the current group didn't
+   > complete, for any reason — matching what "groups execute sequentially"
+   > was always supposed to mean. See `implement.ts`, search
+   > `[GROUP-BARRIER]`.
+
 2. **Within a group (parallel)**:
    - Per-subtask worktrees are created and branches checked out
    - All subtasks spawn Claude agent sessions simultaneously (`Promise.allSettled`)

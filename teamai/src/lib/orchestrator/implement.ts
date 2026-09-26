@@ -1823,6 +1823,38 @@ export async function runImplement(
     if (pipeline.wakeupUntil) break;
 
     for (const id of completedIds) completedThisRun.add(id);
+
+    // Cross-group barrier: plan.md's own contract for `parallel_group` is
+    // that "one full group's changes land on the feature branch before the
+    // next group starts" — but until now that was only actually enforced
+    // for the wakeup case above. A subtask that ran to completion and ended
+    // its session WITHOUT scheduling a wakeup, but whose declared
+    // files_to_create still don't exist (still under its own
+    // maxImplementRetries cap — a hard cap instead sets pipeline.phase to
+    // 'failed', already caught by this loop's own top-of-iteration guard)
+    // is just as real a reason a later group's assumptions about this
+    // group's output may not hold. Without this, a later group whose
+    // depends_on happens not to name this group's subtasks (an
+    // under-declared ordering requirement, or simply unrelated work) is
+    // dispatched in the SAME pass regardless — wasting a session (or an
+    // entire multi-hour background job) on work whose true prerequisites
+    // were never satisfied. Found on task
+    // add-per-constraint-soft-score-attributio: subtask 15 (group G) was
+    // dispatched and burned its full wakeup budget while its real
+    // prerequisites, subtasks 13/14 (group F), had silently failed
+    // deliverable verification in the very same pass. The existing
+    // "Structural completeness gate" below already catches this and
+    // retries the incomplete subtask — but only after every later group
+    // has already been attempted; breaking here gets there one group
+    // sooner, before the wasted work happens.
+    if (completedIds.length < subtasks.length) {
+      const stillIncomplete = subtasks.filter(s => !completedIds.includes(s.id)).map(s => s.id);
+      logToOutput(pipeline.specPath,
+        '\n[GROUP-BARRIER] ' + stillIncomplete.length + ' subtask(s) in this group did not complete (id' +
+        (stillIncomplete.length > 1 ? 's' : '') + ' ' + stillIncomplete.join(', ') + ') — deferring all ' +
+        'later groups to a future pass instead of dispatching them alongside a still-incomplete group\n');
+      break;
+    }
     } // end of the `const subtasks = readySubtasks` shadow block
   }
 
@@ -1902,6 +1934,41 @@ export async function runImplement(
       warn('implement', `Failed to persist reconciled subtask completions to plan.json for ${pipeline.taskId}`, err);
     }
   }
+  // QA-targeted rework completion: clean up qa_feedback.md / qa_flagged
+  // markers as soon as the subtasks QA actually named (every real subtask
+  // carrying qa_flagged, or the synthetic 9999 fallback — both are marked
+  // qa_flagged the same way) are done, INDEPENDENT of whether other,
+  // unrelated real subtasks in the plan are still incomplete for their own
+  // separate reasons (never yet dispatched, an unmet depends_on, etc.).
+  // Gating this cleanup on the ENTIRE plan being complete (the old
+  // behavior, further down) creates a trap: while qa_feedback.md exists,
+  // selectSubtasks only ever dispatches qa_flagged subtasks — once those
+  // are all fixed, that set is permanently empty, so every subsequent pass
+  // falls into the "criterion matching flagged no subtasks" branch and
+  // re-synthesizes a FRESH 9999 from the same now-stale qa_feedback.md,
+  // forever, with no path back to normal `!completed` dispatch for the
+  // other subtasks — burning the whole incompleteImplementPassCount budget
+  // on a QA rework that already succeeded while a real subtask that was
+  // never QA's business never gets a normal session. Found on task
+  // add-per-constraint-soft-score-attributio: three separate 9999 sessions
+  // each confirmed the QA-flagged artifact was already committed and
+  // correct, found nothing left in their own scope to fix, and ended
+  // cleanly — while subtask 15 (never QA-flagged, just never finished on
+  // its own) sat untouched until the pass cap failed the whole task.
+  if (hasQaFeedback) {
+    const qaTargetedIds = finalSubtasks.filter(s => s.qa_flagged).map(s => s.id);
+    const qaTargetedDone = qaTargetedIds.length > 0
+      && qaTargetedIds.every(id => finalSubtasks.find(s => s.id === id)?.completed === true);
+    if (qaTargetedDone) {
+      logToOutput(pipeline.specPath,
+        '\n[QA-REWORK] Targeted subtask(s) ' + qaTargetedIds.join(', ') + ' complete — clearing QA feedback ' +
+        'now so any other still-incomplete subtasks fall through to normal dispatch on the next pass instead ' +
+        'of re-synthesizing rework from stale feedback\n');
+      if (existsSync(qaFeedbackPath)) unlinkSync(qaFeedbackPath);
+      cleanQaFlaggedMarkers(pipeline);
+    }
+  }
+
   const incompleteSubtasks = finalSubtasks.filter(s => !s.completed);
   if (incompleteSubtasks.length > 0) {
     const attemptCount = (pipeline.incompleteImplementPassCount || 0) + 1;
