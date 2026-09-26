@@ -56,6 +56,17 @@ export interface PipelineConfig {
   /** When true (default), the `Phases:` trailer line is included in the
    *  trailer block. Only meaningful when recordHistoryInGit is true. */
   includePhasesTrailer: boolean;
+  /** Milliseconds to wait between retries when a post-session scan for
+   *  subtask_wakeup-st<ID>.json finds nothing, before concluding none was
+   *  written. In container mode a coder session's writes only reach the
+   *  host once the bind mount syncs — not instantaneous, particularly on
+   *  Windows/Docker Desktop under I/O contention — so a scan taken
+   *  immediately after the session ends can race a wakeup file the coder
+   *  definitely wrote (see implement.ts's scanWakeupFiles retry loop).
+   *  Optional and defaulting to 0 (no retry) so test deps that don't set
+   *  it aren't slowed down; computePipelineConfig gives real pipelines a
+   *  production default. */
+  wakeupScanRetryDelayMs?: number;
 }
 
 // ── Pure: session-limit parsing ───────────────────────────────────────────
@@ -236,6 +247,18 @@ export function resolveWorktreeDirName(task: { slug?: string; description: strin
  * Does NOT cache — the caller (orchestrator) handles caching via a delegate.
  */
 export function computePipelineConfig(projectRoot: string): PipelineConfig {
+  // Vitest sets this itself on every test run (no code here opts in). Real
+  // pipelines never have it set, so this only ever changes the DEFAULT below
+  // — an explicit wakeupScanRetryDelayMs in pipeline.json always wins, test
+  // or not, so a test that wants to exercise the retry loop itself can still
+  // do so by writing one. Without this, every test that drives runImplement
+  // through the real Orchestrator (rather than a lightweight deps mock) gets
+  // the real multi-second retry delay under fake timers that are never
+  // advanced far enough to cover it, and hangs mid-`runSubtaskSession`
+  // instead of completing — not a behavior change worth forcing onto every
+  // such test, since the delay exists purely to absorb container/bind-mount
+  // write latency that doesn't exist in-process.
+  const defaultWakeupScanRetryDelayMs = process.env.VITEST ? 0 : 2000;
   const cfgPath = path.join(projectRoot, '.teamai', 'pipeline.json');
   if (existsSync(cfgPath)) {
     try {
@@ -252,11 +275,12 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
         recordHistoryInGit: typeof raw.recordHistoryInGit === 'boolean' ? raw.recordHistoryInGit : true,
         includePhasesTrailer: typeof raw.includePhasesTrailer === 'boolean' ? raw.includePhasesTrailer : true,
         demo: typeof raw.demo === 'boolean' ? raw.demo : undefined,
+        wakeupScanRetryDelayMs: typeof raw.wakeupScanRetryDelayMs === 'number' ? raw.wakeupScanRetryDelayMs : defaultWakeupScanRetryDelayMs,
         ...(sensors ? { sensors } : {}),
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
   }
-  return { maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true };
+  return { maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true, wakeupScanRetryDelayMs: defaultWakeupScanRetryDelayMs };
 }
 
 // ── Session map ───────────────────────────────────────────────────────────
