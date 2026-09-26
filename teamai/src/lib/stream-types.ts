@@ -82,7 +82,12 @@ export interface PlanData {
 export interface QACriterion {
   criterion?: string;
   name?: string;
-  status: 'PASS' | 'FAIL';
+  /** Documented values are 'PASS' | 'FAIL' (qa-review.md's schema never
+   *  sanctions a third per-criterion state) — typed as `string` because the
+   *  QA agent's output isn't schema-validated, and has been observed
+   *  emitting undocumented values (e.g. "PENDING" for a criterion whose
+   *  verification was still running when the report was written). */
+  status: string;
   notes?: string;
   evidence?: string;
   fix_needed?: string;
@@ -104,7 +109,13 @@ export interface SpecConcern {
 }
 
 export interface QAReportData {
-  overall: 'PASS' | 'FAIL';
+  /** Documented values are 'PASS' | 'FAIL'; qa-review.md Step 5 also
+   *  sanctions 'IN_PROGRESS' as a mid-session crash-recovery placeholder that
+   *  should be replaced before the turn ends — typed as `string` so a report
+   *  left at that placeholder (or an undocumented value) still round-trips
+   *  instead of getting rejected. See qa-review.ts's overall !== PASS &&
+   *  overall !== FAIL routing for how the orchestrator handles this. */
+  overall: string;
   criteria?: QACriterion[];
   additional_issues?: QAIssue[];
   /** Spec-level gaps flagged by QA — the spec itself needs revision, not the

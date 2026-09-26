@@ -25,7 +25,12 @@ export function QAReportView({ qaReport, humanFeedback }: { qaReport: QAReportDa
             <div className={`inline-flex items-center px-2.5 py-1 rounded text-sm font-bold ${
               qaReport.overall === 'PASS'
                 ? 'bg-green-900/40 text-green-300'
-                : 'bg-red-900/40 text-red-300'
+                : qaReport.overall === 'FAIL'
+                ? 'bg-red-900/40 text-red-300'
+                // Neither PASS nor FAIL (e.g. "IN_PROGRESS") — the reviewer
+                // never reached a verdict; amber signals "incomplete", not
+                // "failed", so this isn't misread as a real FAIL.
+                : 'bg-amber-900/40 text-amber-300'
             }`}>
               {qaReport.overall}
             </div>
@@ -73,12 +78,19 @@ export function QAReportView({ qaReport, humanFeedback }: { qaReport: QAReportDa
           )}
           {qaReport.criteria?.map((c: QACriterion, i: number) => (
             <div key={i} className="flex items-start gap-2 text-sm">
-              <span className={`shrink-0 font-bold ${c.status === 'PASS' ? 'text-green-600' : 'text-red-600'}`}>
-                {c.status === 'PASS' ? '✓' : '✗'}
+              <span className={`shrink-0 font-bold ${
+                c.status === 'PASS' ? 'text-green-600' : c.status === 'FAIL' ? 'text-red-600' : 'text-amber-500'
+              }`}>
+                {c.status === 'PASS' ? '✓' : c.status === 'FAIL' ? '✗' : '…'}
               </span>
               <div>
-                <p className="text-slate-300">{c.criterion || c.name}</p>
-                {c.notes && <p className="text-xs text-slate-400 mt-0.5">{c.notes}</p>}
+                <p className="text-slate-300">
+                  {c.criterion || c.name}
+                  {c.status !== 'PASS' && c.status !== 'FAIL' && (
+                    <span className="ml-2 text-[10px] uppercase tracking-wider text-amber-500">{c.status}</span>
+                  )}
+                </p>
+                {(c.notes || c.evidence) && <p className="text-xs text-slate-400 mt-0.5">{c.notes || c.evidence}</p>}
               </div>
             </div>
           ))}

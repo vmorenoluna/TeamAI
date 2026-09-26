@@ -154,18 +154,22 @@ export function writeQaFeedback(
 }
 
 /** Why a `failed` task failed — see Task.failureReason in task-store.ts for
- *  the full distinction between these four. */
+ *  the full distinction between these five. */
 export type FailureReason =
   | 'qa-attempts-exhausted'
+  | 'qa-incomplete'
   | 'spec-revision-exhausted'
   | 'implement-failure'
   | 'session-crashed';
 
 /** Write a completion summary when the task fails — a QA-attempt budget, a
  *  spec-revision budget, or an implement-phase retry/verification cap was
- *  exhausted, or the coder session crashed outside any of those caps.
- *  `detail` carries the raw error for 'session-crashed', which has no
- *  qa_report.json to fall back on (unlike the other three reasons, which
+ *  exhausted, the QA reviewer never reached a PASS/FAIL verdict before its
+ *  own budget ran out ('qa-incomplete' — distinct from 'qa-attempts-exhausted'
+ *  because no actual FAIL was ever found; see qa-review.ts's overall !== PASS
+ *  && overall !== FAIL routing), or the coder session crashed outside any of
+ *  those caps. `detail` carries the raw error for 'session-crashed', which
+ *  has no qa_report.json to fall back on (unlike the other reasons, which
  *  all write one — real or synthetic — before calling this). */
 export function writeCompletionSummary(
   specPath: string,
@@ -195,6 +199,14 @@ export function writeCompletionSummary(
       `. This did NOT go through a normal QA review — the session process ` +
       `exited or was killed (e.g. an app/server restart, an OS-level kill, ` +
       `or a crash) before it could finish its work.\n\n`;
+  } else if (reason === 'qa-incomplete') {
+    const rounds = counters.qaRoundCount ?? counters.qaAttempt;
+    content += `Task failed after ${rounds} QA round(s) in which the reviewer never reached ` +
+      `a PASS/FAIL verdict — the report below is still "IN_PROGRESS" (or otherwise ` +
+      `unresolved) because the QA session ran out of its own attempt budget before ` +
+      `finishing every acceptance criterion. **This is not a report of code defects** — ` +
+      `no criterion actually failed; QA simply didn't finish reviewing. See the QA tab ` +
+      `for whichever criteria it did verify before running out of budget.\n\n`;
   } else {
     content += `Task failed after ${counters.qaAttempt} QA attempts.\n\n`;
   }
