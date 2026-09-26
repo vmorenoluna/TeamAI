@@ -1936,7 +1936,19 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       mockCreateSession.mockReset();
       mockSendMessage.mockReset();
       onHandlers.clear();
-      mockExecFileSync.mockReturnValue('abc123\n');
+      // `diff --name-only` must return no changes outside each subtask's own
+      // assigned file, or the post-session scope check spuriously rejects
+      // every subtask (a blanket 'abc123\n' for every git call — the old
+      // mock here — reads as an out-of-scope file named "abc123"). That
+      // scope rejection used to be harmless (nothing gated cross-group
+      // advancement on a single subtask failing), but the cross-group
+      // completion barrier now correctly stops the pass right there, so
+      // this mock has to reflect a coder session that actually stayed in
+      // scope.
+      mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+        if (Array.isArray(args) && args[0] === 'diff') return '';
+        return 'abc123\n';
+      });
       mockCreateSession
         .mockResolvedValueOnce('sess-e2e-impl-2')
         .mockResolvedValueOnce('sess-e2e-impl-3')
@@ -5052,8 +5064,64 @@ describe('runImplement — depends_on gates dispatch across groups', () => {
       expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBeUndefined();
       expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBeUndefined();
 
+      // The cross-group completion barrier now stops the pass right after
+      // group A (subtask 1 didn't complete), before group B is even
+      // considered — so subtask 2's own depends_on gate never gets a
+      // chance to log its usual deferral message this pass. The
+      // functional guarantee (subtask 2 never dispatched) is unchanged;
+      // only which log line explains why has moved earlier.
       const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-      expect(log).toContain('[DEPENDS-ON] Subtask 2 deferred');
+      expect(log).toContain('[GROUP-BARRIER] 1 subtask(s) in this group did not complete (id 1)');
+      expect(log).not.toContain('[DEPENDS-ON] Subtask 2 deferred');
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  // Regression: task add-per-constraint-soft-score-attributio. Subtask 15
+  // (group G) did NOT declare subtasks 13/14 (group F) in its own
+  // depends_on — its prose said to wait for them, but that's not a field
+  // the scheduler reads. With no depends_on edge at all connecting the two
+  // groups, the readySubtasks filter for group G had nothing to check
+  // against group F's incompleteness — only the group-completion barrier
+  // (not a depends_on relationship) stops this.
+  it('does not dispatch a later group in the same pass when an earlier group is incomplete and no depends_on links them', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        // Group F: never completes (deliverable missing), no wakeup file.
+        { id: 13, title: 'V0 sweep', description: 'x', files: [], files_to_create: ['out/v0.log'], acceptance_criteria: ['V0 exists'], parallel_group: 'F' },
+        // Group G: depends_on is empty — does NOT name 13, matching the
+        // real plan's under-declared dependency exactly.
+        { id: 15, title: 'P1 sweep', description: 'x', files: ['src/p1.ts'], acceptance_criteria: ['P1 exists'], parallel_group: 'G' },
+      ],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-undeclared-dep');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      fireEvent('event', { sessionId: 'sess-undeclared-dep', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      // Only subtask 13 (group F) was ever dispatched this pass — group G
+      // never got a session, despite having no depends_on gate against 13.
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+      expect(mockSendMessage.mock.calls[0][1]).toContain('Subtask 13');
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 13).completed).toBeUndefined();
+      expect(plan.subtasks.find((s: any) => s.id === 15).completed).toBeUndefined();
+
+      const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(log).toContain('[GROUP-BARRIER] 1 subtask(s) in this group did not complete (id 13)');
     } finally {
       executeSpy.mockRestore();
     }
@@ -5312,6 +5380,75 @@ describe('runImplement — implement completeness gate', () => {
       expect(plan.subtasks.find((s: any) => s.id === 5).completed).toBe(true);
       expect(plan.subtasks.find((s: any) => s.id === 6).completed).toBeFalsy();
       expect(plan.subtasks.find((s: any) => s.id === 6).qa_flagged).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  // Regression: task add-per-constraint-soft-score-attributio's third
+  // retry. qa_feedback.md named an issue the synthetic 9999 subtask fully
+  // resolved, but subtask 15 — never named by QA, not a dependent of
+  // anything 9999 touched — remained incomplete for its own unrelated
+  // reason. Cleanup used to be gated on the ENTIRE plan being complete, so
+  // qa_feedback.md never got deleted; every subsequent pass kept finding
+  // zero real qa_flagged subtasks and re-synthesizing a fresh 9999 from the
+  // same stale feedback, forever, while subtask 15 never got a normal
+  // session. The task failed after 3 such passes with "Implement
+  // completeness gate" — burning the whole budget on a QA rework that had
+  // already succeeded on pass 1.
+  it('clears qa_feedback.md once the QA-targeted subtask completes, even though an unrelated subtask remains incomplete', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [
+        {
+          id: 1, title: 'Unrelated sweep', description: 'Never named by QA', files: [],
+          files_to_create: ['out/never-created.txt'], acceptance_criteria: ['Sweep exists'],
+        },
+      ],
+    }));
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), 'Something unrelated to subtask 1 failed');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'rev-list') return '0\n';
+        if (args[0] === 'diff') return ''; // 9999's rework makes no code changes here
+      }
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-qa-target-done');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      // Subtask 1 was never named by qa_feedback.md, so criterion-matching
+      // flags nothing real and synthesizes 9999 instead — the only session
+      // dispatched this pass.
+      expect(mockSendMessage.mock.calls[0][1]).toContain('QA Rework');
+
+      fireEvent('event', { sessionId: 'sess-qa-target-done', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      expect(existsSync(join(project.taskDir, 'qa_feedback.md'))).toBe(false);
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBeFalsy();
+      expect(plan.subtasks.find((s: any) => s.id === 9999)?.qa_flagged).toBeFalsy();
+
+      const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(log).toContain('[QA-REWORK] Targeted subtask(s) 9999 complete — clearing QA feedback');
+
+      // Retried for subtask 1's own normal (non-QA) rework — not failed outright.
+      expect(pipeline.phase).toBe('implement');
+      expect(executeSpy).toHaveBeenCalled();
     } finally {
       executeSpy.mockRestore();
     }
