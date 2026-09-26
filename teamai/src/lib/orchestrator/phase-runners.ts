@@ -16,7 +16,7 @@ import { resolveBaseBranch } from '../git-platform';
 import { updateSessionMap, logToOutput } from './helpers';
 import { humanDirectiveFor, consumeFeedbackIfDue, readHumanFeedback } from './human-feedback';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
-import { applyPlanFileSerialization, snapshotPreservedPlanSubtasks, restorePreservedPlanSubtasks, loadPreservedPlanSubtasks, clearPreservedPlanSubtasks } from './plan-validation';
+import { applyPlanFileSerialization, logUndeclaredSubtaskReferences, snapshotPreservedPlanSubtasks, restorePreservedPlanSubtasks, loadPreservedPlanSubtasks, clearPreservedPlanSubtasks } from './plan-validation';
 import { warn } from '../logger';
 import { WorktreeError, PipelineConfigError } from './errors';
 import type { PipelinePhase } from '@/constants/phases';
@@ -506,6 +506,14 @@ export async function runPlanPhase(
   // cherry-pick conflict at implement time — fixing it here is cheap and
   // deterministic, and cheaper than burning a merger-agent session later.
   applyPlanFileSerialization(pipeline.specPath);
+
+  // Plan-time validation: warn when a subtask's own prose says it must wait
+  // on another subtask (a "confirm N has finished before starting this one"
+  // style sentence) but that subtask's `depends_on` doesn't actually name it.
+  // depends_on is the only field the implement-phase group scheduler reads
+  // for cross-group ordering — see plan-validation.ts's
+  // detectUndeclaredSubtaskReferences for the incident this catches.
+  logUndeclaredSubtaskReferences(pipeline.specPath);
 
   const baseBranch = resolveBaseBranch(deps.projectRoot);
   try {
