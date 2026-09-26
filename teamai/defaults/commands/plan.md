@@ -56,9 +56,10 @@ Rules:
 - **Shared files across `parallel_group`s.** Subtasks in the SAME `parallel_group` run
   concurrently — each in its own isolated worktree branched from the same base, then
   cherry-picked back as one batch — so two subtasks in the same group that touch the
-  same file will conflict at cherry-pick. `depends_on` does NOT prevent this: it is
-  documentation only, and nothing in the runtime orders execution on it — only
-  `parallel_group` placement does. Subtasks in DIFFERENT `parallel_group`s run strictly
+  same file will conflict at cherry-pick. A `depends_on` edge between two subtasks in
+  THE SAME group does NOT prevent this: within a group, only `parallel_group` placement
+  controls the concurrent dispatch set, so same-group siblings run together regardless
+  of any `depends_on` between them. Subtasks in DIFFERENT `parallel_group`s run strictly
   sequentially, one full group's changes landing on the feature branch before the next
   group starts — so a later group's subtask safely builds on an earlier group's already-
   integrated changes to the same file. A `parallel_group` containing exactly one subtask
@@ -68,6 +69,26 @@ Rules:
   (sequential) `parallel_group`s. (The orchestrator auto-serializes same-group subtasks
   that still declare a shared file as a safety net — but place them deliberately, don't
   rely on that.)
+- **`depends_on` IS enforced across groups — always declare real ordering
+  requirements there, never through `parallel_group` placement alone.** Sequential
+  `parallel_group` letters (A before B before C...) are the normal way later work
+  builds on earlier work, but group order alone is not a durable ordering guarantee:
+  a long-running subtask that pauses for a `ScheduleWakeup` (a background sweep,
+  benchmark, or server process — see the coder's implement.md) re-enters through an
+  ISOLATION path that dispatches ONLY that one subtask by id, and that path verifies
+  readiness by checking `depends_on` directly — it does not re-check whether an
+  earlier group actually finished. A subtask whose description says "confirm subtask
+  N has finished" or "must run after subtask N" or "no other subtask running
+  concurrently" but omits N from its own `depends_on` array has a requirement that
+  exists only in prose: the orchestrator has no structural reason to hold it back,
+  and a wakeup re-entry will not verify N's completion at all. **Any subtask
+  description that references another subtask's completion, output, or exclusivity
+  MUST add that subtask's id to `depends_on`, even when `parallel_group` ordering
+  already implies it.** This is especially easy to miss for evidence-gathering
+  subtasks that run one or more long-lived server/sweep processes and must be
+  strictly ordered against sibling evidence subtasks (e.g. "run the production sweep
+  only once the baseline and comparison sweeps are both done and their servers are
+  shut down") — declare that ordering in `depends_on`, not only in the description.
 - **Verification scripts need dedicated subtasks:** When the spec includes an acceptance
   criterion that requires running a script to produce empirical evidence (e.g. a
   benchmark, integration run, or data pipeline), the plan MUST include a dedicated

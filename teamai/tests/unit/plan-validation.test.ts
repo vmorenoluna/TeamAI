@@ -2,7 +2,7 @@
  * Unit tests for plan-time plan.json validation (shared-file serialization).
  */
 import { describe, it, expect } from 'vitest';
-import { serializeSharedFileSubtasks } from '../../src/lib/orchestrator/plan-validation';
+import { serializeSharedFileSubtasks, detectUndeclaredSubtaskReferences } from '../../src/lib/orchestrator/plan-validation';
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 
 function st(id: number, files: string[], parallelGroup?: string, dependsOn?: number[]): PlanSubtask {
@@ -142,5 +142,61 @@ describe('serializeSharedFileSubtasks', () => {
     expect(subtasks[1].parallel_group).toBe('A');
     expect(subtasks[2].parallel_group).toBe('A.2');
     expect(fixes.map(f => f.subtaskId)).toEqual([3]);
+  });
+});
+
+describe('detectUndeclaredSubtaskReferences', () => {
+  it('flags a subtask that references another subtask\'s completion without declaring it', () => {
+    const subtasks = [
+      st(13, ['a.ts'], 'F'),
+      st(14, ['b.ts'], 'F'),
+      { ...st(15, ['c.ts'], 'G'),
+        description: 'Confirm Subtasks 13 (V0) and 14 (V1) have fully finished their sweeps and their servers are shut down before starting this one.' },
+    ];
+    const findings = detectUndeclaredSubtaskReferences(subtasks);
+    expect(findings.map(f => [f.subtaskId, f.referencedId])).toEqual(
+      expect.arrayContaining([[15, 13], [15, 14]]),
+    );
+  });
+
+  it('does not flag a reference already declared in depends_on', () => {
+    const subtasks = [
+      st(1, ['a.ts'], 'A'),
+      { ...st(2, ['b.ts'], 'B', [1]), description: 'Confirm Subtask 1 has finished before starting this one.' },
+    ];
+    expect(detectUndeclaredSubtaskReferences(subtasks)).toEqual([]);
+  });
+
+  it('does not flag a plain mention with no ordering cue word', () => {
+    const subtasks = [
+      st(1, ['a.ts'], 'A'),
+      { ...st(2, ['b.ts'], 'B'), description: 'See Subtask 1 for the file layout used here.' },
+    ];
+    expect(detectUndeclaredSubtaskReferences(subtasks)).toEqual([]);
+  });
+
+  it('does not misread requirement/criterion ids (R3, AC-14, C1) as subtask references', () => {
+    const subtasks = [
+      st(1, ['a.ts'], 'A'),
+      { ...st(2, ['b.ts'], 'B'),
+        description: 'This subtask must confirm R3 and AC-14 pass before finishing; see commit C1 for context.' },
+    ];
+    expect(detectUndeclaredSubtaskReferences(subtasks)).toEqual([]);
+  });
+
+  it('ignores the synthetic QA-rework subtask (id 9999)', () => {
+    const subtasks = [
+      st(1, ['a.ts'], 'A'),
+      { ...st(9999, ['b.ts'], 'QA-REWORK'),
+        description: 'Wakeup attempt limit exceeded: Subtask 1 failed to produce artifact after 3 wakeup attempts, confirm before retrying.' },
+    ];
+    expect(detectUndeclaredSubtaskReferences(subtasks)).toEqual([]);
+  });
+
+  it('ignores a reference to an id that is not a real subtask', () => {
+    const subtasks = [
+      { ...st(1, ['a.ts'], 'A'), description: 'Confirm Subtask 999 has finished before starting this one.' },
+    ];
+    expect(detectUndeclaredSubtaskReferences(subtasks)).toEqual([]);
   });
 });

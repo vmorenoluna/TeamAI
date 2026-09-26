@@ -166,6 +166,126 @@ export function applyPlanFileSerialization(specPath: string): SharedFileFix[] {
   return fixes;
 }
 
+// ── Undeclared cross-subtask ordering references ──────────────────────────
+
+/** A prose reference to another subtask's ordering requirement that isn't
+ *  reflected in `depends_on` — see detectUndeclaredSubtaskReferences. */
+export interface UndeclaredDependencyReference {
+  /** The subtask whose description contains the reference. */
+  subtaskId: number;
+  /** The other subtask id it references without declaring as a dependency. */
+  referencedId: number;
+  /** The sentence the reference was found in (trimmed, for the log line). */
+  sentence: string;
+}
+
+/** Words whose presence near a subtask-id reference signals an ordering
+ *  requirement — "see Subtask 3" is not a dependency, "confirm Subtask 3 has
+ *  finished before starting this one" is. Kept intentionally permissive
+ *  (a false positive is just a log line; a false negative is silent). */
+const ORDERING_CUES = [
+  'after', 'before', 'once', 'until', 'finish', 'complete', 'confirm',
+  'must have', 'no concurrent', 'sequenced', 'depends on', 'requires',
+  'blocked by', 'wait for', 'shut down', 'prerequisite',
+];
+
+/**
+ * Scan every subtask's `description` for a mention of another subtask's id
+ * (e.g. "Subtask 13", "Subtasks 13 and 14") that (a) is not itself, (b) is
+ * not already declared in that subtask's own `depends_on`, and (c) appears
+ * in a sentence containing an ordering cue word (see ORDERING_CUES).
+ *
+ * `depends_on` is the ONLY field the implement-phase group scheduler reads
+ * to gate cross-group sequencing (plan-validation.ts's own module doc above
+ * notes the same is true for parallel_group placement) — prose ordering
+ * language in a description is never enforced at runtime. A planner that
+ * writes an accurate "confirm Subtask 13 has finished before starting this
+ * one" instruction but forgets to add 13 to this subtask's `depends_on`
+ * produces a plan whose two representations of the same requirement have
+ * silently diverged: an engineer reading the description sees the
+ * requirement, but the orchestrator's dependency gate does not, and will
+ * schedule this subtask as soon as its (incomplete) declared depends_on are
+ * satisfied — regardless of whether 13 ever ran.
+ *
+ * Detection only — this does not mutate the plan. Auto-adding a depends_on
+ * edge from a regex match risks introducing an incorrect gate (or a cycle)
+ * from a reference that wasn't actually a dependency; a logged warning lets
+ * a human or the next planning pass make that call instead.
+ */
+export function detectUndeclaredSubtaskReferences(subtasks: PlanSubtask[]): UndeclaredDependencyReference[] {
+  const validIds = new Set(subtasks.map(s => s.id));
+  const found: UndeclaredDependencyReference[] = [];
+
+  for (const s of subtasks) {
+    // The synthetic QA-rework subtask (id 9999, see selectSubtasks) is
+    // regenerated verbatim from qa_feedback.md on every bounce — it isn't
+    // planner-authored prose, has no depends_on an agent could meaningfully
+    // add to, and qa_feedback.md routinely quotes other subtask ids in its
+    // failure notes without those being real ordering requirements.
+    if (!s.description || s.id === 9999) continue;
+    const declared = new Set(s.depends_on ?? []);
+    const sentences = s.description.split(/(?<=[.!?])\s+/);
+
+    for (const sentence of sentences) {
+      const lower = sentence.toLowerCase();
+      if (!ORDERING_CUES.some(cue => lower.includes(cue))) continue;
+
+      // Capture a short window of text following each "subtask(s)" mention
+      // rather than a strict comma/and-separated numeric list — natural
+      // phrasing like "Subtasks 13 (V0) and 14 (V1)" breaks a strict list
+      // pattern at the parenthetical aside, silently dropping the second id.
+      // A 60-character window comfortably covers such asides while staying
+      // well short of the next unrelated number in a normal sentence.
+      const windows = sentence.matchAll(/\bsubtasks?\b([^.!?]{0,60})/gi);
+      for (const m of windows) {
+        // Exclude digits glued to a preceding letter/digit/hyphen — plan
+        // prose is full of requirement/criterion ids in that shape (R3,
+        // AC-14, C1) that would otherwise be misread as subtask ids.
+        const ids = [...m[1].matchAll(/(?<![A-Za-z0-9-])\d+\b/g)].map(n => parseInt(n[0], 10));
+        for (const referencedId of ids) {
+          if (referencedId === s.id) continue;
+          if (!validIds.has(referencedId)) continue;
+          if (declared.has(referencedId)) continue;
+          if (found.some(f => f.subtaskId === s.id && f.referencedId === referencedId)) continue;
+          found.push({ subtaskId: s.id, referencedId, sentence: sentence.trim() });
+        }
+      }
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Read plan.json from `specPath`, run detectUndeclaredSubtaskReferences, and
+ * log a `[PLAN-LINT]` warning per finding to output.log. Never mutates the
+ * plan (see detectUndeclaredSubtaskReferences's doc for why). Returns the
+ * findings (empty when plan.json is missing, malformed, or clean).
+ */
+export function logUndeclaredSubtaskReferences(specPath: string): UndeclaredDependencyReference[] {
+  const planPath = path.join(specPath, 'plan.json');
+  if (!existsSync(planPath)) return [];
+
+  let plan: { subtasks?: PlanSubtask[] };
+  try {
+    plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+  } catch {
+    return [];
+  }
+
+  const subtasks = Array.isArray(plan.subtasks) ? plan.subtasks : [];
+  const findings = detectUndeclaredSubtaskReferences(subtasks);
+  for (const f of findings) {
+    logToOutput(specPath,
+      `\n[PLAN-LINT] Subtask ${f.subtaskId} references Subtask ${f.referencedId}'s completion in its ` +
+      `description ("${f.sentence}") but does not list ${f.referencedId} in its own depends_on — the ` +
+      `implement-phase scheduler only reads depends_on for cross-group ordering, so this requirement is ` +
+      `NOT enforced at runtime. Add ${f.referencedId} to subtask ${f.subtaskId}'s depends_on if this is a ` +
+      `real ordering requirement.\n`);
+  }
+  return findings;
+}
+
 // ── Scoped re-plan preserve-list guardrail ────────────────────────────────
 
 /**
