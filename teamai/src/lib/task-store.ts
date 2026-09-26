@@ -76,13 +76,16 @@ export interface Task {
   mergeStrategy?: MergeStrategy; // chosen merge strategy for awaiting-review tasks
   completionSummary?: string;   // summary of what was completed when task fails
   /** Why a `failed` task failed — distinguishes "ran out of QA-attempt budget
-   *  on a genuine code defect" from "ran out of spec-revision budget without
-   *  QA ever passing" (the latter usually means the approach itself needs a
+   *  on a genuine code defect" ('qa-attempts-exhausted') from "the QA
+   *  reviewer never reached a PASS/FAIL verdict before its own attempt
+   *  budget ran out" ('qa-incomplete' — no defect was ever found, QA simply
+   *  didn't finish) from "ran out of spec-revision budget without QA ever
+   *  passing" (the latter usually means the approach itself needs a
    *  redesign, not another implement pass) from "an implement-phase retry
    *  cap was exceeded before QA ever ran" from "the coder session crashed
    *  outside any of those caps (e.g. an app restart)". Undefined for legacy
    *  failed tasks written before this field existed. */
-  failureReason?: 'qa-attempts-exhausted' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed';
+  failureReason?: 'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed';
   /** Why a task landed on `awaiting-review` when that was NOT a genuine QA
    *  pass — spec phase producing no spec.md/spec_summary.md, a no-op spec
    *  revision, a rolled-back approval attempt. Mirrors `failureReason`'s

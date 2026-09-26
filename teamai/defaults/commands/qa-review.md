@@ -98,7 +98,27 @@ suite in Step 6):
 2. Run it ONCE and wait for completion — do NOT re-run repeatedly. Capture only the
    pass/fail summary line — do not read the full test output into context unless a
    failure requires diagnosis.
-   See `.claude/teamai-workflow.md` for full guidance on long-running scripts.
+   See `.claude/teamai-workflow.md` for general guidance on long-running scripts —
+   **except its `run_in_background` advice, which does NOT apply to this QA-review
+   session.** That guidance assumes a later turn will receive the completion
+   notification; a QA-review session gets exactly one turn and is torn down the
+   moment this turn ends, so a backgrounded test run's notification never arrives —
+   the process is killed mid-run and the report is left with no real verdict for that
+   criterion. Run the test command in the foreground and block on it instead. This
+   role's Bash tool timeouts are raised specifically for this: your default (no
+   `timeout` passed) is 10 minutes, not Claude Code's stock 2 minutes — plenty for
+   most suites (very often minutes, not seconds), so you do not need to think about
+   this for the common case. Only if you know (from history/CI) or discover that this
+   project's full suite runs longer than 10 minutes, pass an explicit `timeout` up to
+   25 minutes, sized to that known duration — do not assume a run is done just
+   because your first check-in is quick. If a full run to completion within this
+   single turn genuinely isn't possible, do NOT write `"overall": "IN_PROGRESS"` as
+   your final report and stop there (Step 5 permits it only as a mid-evaluation
+   checkpoint you then replace, not as a way to end the turn without a verdict) —
+   instead FAIL the affected criterion with a `notes` entry explaining verification
+   could not complete in one session, so the task can bounce back through
+   implement/QA rather than silently exhausting the QA-attempt budget on a report
+   that never reached PASS or FAIL.
 3. **On rework passes** (a previous `qa_report.json` exists in `.teamai/{slug}/`):
    - Run the FULL suite, not just tests targeting changed files.
    - The coder was told to run tests, but they may have introduced regressions

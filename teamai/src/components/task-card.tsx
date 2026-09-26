@@ -22,13 +22,16 @@ const RETRY_PHASE_OPTIONS: DialogPhaseOption[] = [
 const DESCRIPTION_LIMIT = 80;
 
 // Reason-aware tooltip for the failure indicator — distinguishes "ran out of
-// QA-attempt budget on a genuine code defect" from "ran out of spec-revision
-// budget without QA ever passing" (the latter usually means the approach
-// itself needs a redesign) from "an implement-phase retry cap was exceeded
-// before QA ever ran" from "the coder session crashed outside any cap".
+// QA-attempt budget on a genuine code defect" from "QA never reached a
+// PASS/FAIL verdict before its own attempt budget ran out" (no defect found,
+// QA simply didn't finish) from "ran out of spec-revision budget without QA
+// ever passing" (the latter usually means the approach itself needs a
+// redesign) from "an implement-phase retry cap was exceeded before QA ever
+// ran" from "the coder session crashed outside any cap".
 // 'unknown' covers legacy failed tasks written before failureReason existed.
-const FAILURE_REASON_TOOLTIP: Record<'qa-attempts-exhausted' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'unknown', string> = {
+const FAILURE_REASON_TOOLTIP: Record<'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'unknown', string> = {
   'qa-attempts-exhausted': 'Task failed — QA attempt budget exhausted',
+  'qa-incomplete': 'Task failed — QA never finished its review (no defect found)',
   'spec-revision-exhausted': 'Task failed — spec revision budget exhausted (QA never passed)',
   'implement-failure': 'Task failed — implement-phase retry cap exceeded before QA ran',
   'session-crashed': 'Task failed — coder session crashed unexpectedly',

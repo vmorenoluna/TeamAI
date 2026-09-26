@@ -4616,6 +4616,108 @@ describe('Orchestrator', () => {
       expect(pipeline.phase).toBe('failed');
       expect(existsSync(join(testData.taskDir, 'completion_summary.md'))).toBe(true);
     });
+
+    it('re-runs QA (not bounce-to-implement) when overall is left at IN_PROGRESS, and succeeds once the retry reaches a verdict', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        // The incomplete-report branch re-enters executePhase() WITHOUT
+        // calling advancePhase() first (there's no phase to advance to --
+        // it's re-running the same QA review), so it relies on
+        // pipeline.phase already being 'qa-review', exactly as it would be
+        // in production (set by advancePhase before the original
+        // runQaReview call). makePipeline()'s default of 'spec' would make
+        // the retry mis-dispatch to runSpec instead.
+        phase: 'qa-review',
+        qaAttempt: 0,
+        maxQaAttempts: 3,
+      });
+
+      // First QA session ends its turn without finishing verification --
+      // qa-review.md Step 5 only sanctions "IN_PROGRESS" as a mid-session
+      // checkpoint, but the reviewer's own session was torn down before it
+      // replaced the placeholder with a real PASS/FAIL.
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'IN_PROGRESS',
+        criteria: [
+          { criterion: 'AC-1', status: 'PASS', evidence: 'verified' },
+          { criterion: 'AC-2', status: 'PENDING', evidence: 'full suite still running when the turn ended' },
+        ],
+      }));
+
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => {
+        callCount++;
+        return Promise.resolve(callCount === 1 ? 'sess-qa-incomplete' : 'sess-qa-retry');
+      });
+
+      // The incomplete-report branch retries by re-entering executePhase()
+      // on the SAME pipeline object — executePhase's identity guard requires
+      // it to be the tracked pipeline for its taskId (matching how runTask/
+      // moveTaskToPhase register it in production), or the retry is silently
+      // dropped.
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-qa-incomplete', event: { type: 'result' } });
+      // Give the incomplete-report branch's recursive executePhase() call a
+      // tick to spawn the retry session before the retry's report is written.
+      await new Promise(r => setTimeout(r, 10));
+
+      // The retry actually finishes verification this time.
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [
+          { criterion: 'AC-1', status: 'PASS', evidence: 'verified' },
+          { criterion: 'AC-2', status: 'PASS', evidence: 'full suite: 0 failed' },
+        ],
+      }));
+      fireEvent('event', { sessionId: 'sess-qa-retry', event: { type: 'result' } });
+      await promise;
+
+      // Never bounced to implement -- there was no FAIL criterion or
+      // fix_needed entry for the coder to act on, so QA re-ran itself.
+      expect(pipeline.phase).toBe('awaiting-review');
+      expect(callCount).toBe(2);
+      expect(pipeline.qaAttempt).toBe(2);
+    });
+
+    it('fails with failureReason "qa-incomplete" (not "qa-attempts-exhausted") when the QA budget runs out while overall is still IN_PROGRESS', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        qaAttempt: 2,
+        maxQaAttempts: 3,
+      });
+
+      mockCreateSession.mockResolvedValue('sess-qa-incomplete-exhausted');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'IN_PROGRESS',
+        criteria: [
+          { criterion: 'AC-1', status: 'PASS', evidence: 'verified' },
+        ],
+      }));
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline);
+      await new Promise(r => setTimeout(r, 10));
+      fireEvent('event', { sessionId: 'sess-qa-incomplete-exhausted', event: { type: 'result' } });
+      await promise;
+
+      expect(pipeline.phase).toBe('failed');
+      const taskStore = (orch as AnyOrch).taskStore;
+      const task = taskStore.getById(testData.taskId);
+      // Distinct from 'qa-attempts-exhausted': no criterion ever failed here,
+      // QA simply never reached a verdict -- the UI must not report a real
+      // QA failure that never actually happened.
+      expect(task.failureReason).toBe('qa-incomplete');
+    });
   });
 
   // ── Spec revision — runQaReview with spec_concerns ───────────────
