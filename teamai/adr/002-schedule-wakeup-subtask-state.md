@@ -52,6 +52,26 @@ If the file exists:
 
 The wakeup file is deleted when the orchestrator processes it (to prevent stale re-entry).
 
+> **2026-09-26 addition (bind-mount sync race):** in container mode, a coder
+> session's writes only become visible on the host once the bind mount
+> syncs — not instantaneous, particularly on Windows/Docker Desktop, worse
+> under I/O contention. `killSession` only waits for the CLI process itself
+> to exit, not for the mount to catch up, so a scan taken immediately after
+> can race a wakeup file the coder definitely wrote: the scan finds nothing,
+> the subtask is wrongly treated as having failed deliverable verification,
+> and — since this can repeat across every re-entry — the task can fail
+> outright well before the coder's own wakeup budget is exhausted. Found on
+> task `add-per-constraint-soft-score-attributio`'s third failure: subtask
+> 15 wrote `subtask_wakeup-st15.json` (confirmed via its own session log)
+> and ended cleanly, but the scan run immediately after found nothing, twice.
+> The scan now retries (up to 4 times, `wakeupScanRetryDelayMs` apart —
+> default 2000ms in production, 0 under `vitest`) before concluding no
+> wakeup was scheduled, but only when a miss would actually change the
+> outcome: a re-entry session (already mid-wakeup-cycle) or a subtask with a
+> `files_to_create` check about to run. A subtask with neither skips
+> verification anyway, so a slow-to-sync (nonexistent) wakeup file costs it
+> nothing. See `implement.ts`'s `scanWakeupFiles` retry loop.
+
 ### Wakeup timer
 
 The wakeup timer follows the same pattern as `handleRateLimit` in `rate-limit.ts`:

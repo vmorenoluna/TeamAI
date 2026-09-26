@@ -62,7 +62,7 @@ export interface ImplementDeps {
    *  directly (bypassing QA) must call this so the UI reflects the actual
    *  cause instead of a stale summary from a prior QA-driven failure. */
   writeCompletionSummary: (pipeline: ImplementPipeline, reason: FailureReason, detail?: string) => void;
-  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxImplementRetries: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number };
+  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxImplementRetries: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number; wakeupScanRetryDelayMs?: number };
   phaseHeader: (logFile: string, phase: string) => void;
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
@@ -1108,14 +1108,43 @@ export async function runSubtaskSession(
     // got silently marked complete despite explicitly reporting it wasn't.
     // Found on task 585a32e0: Subtask 8 wrote subtask_wakeup-st7.json for
     // its still-running dependency and was marked completed:true anyway.
-    const wakeupPaths: string[] = [];
-    try {
-      for (const f of readdirSync(pipeline.specPath)) {
-        if (/^subtask_wakeup-st\d+\.json$/.test(f)) wakeupPaths.push(path.join(pipeline.specPath, f));
+    const scanWakeupFiles = (): string[] => {
+      const found: string[] = [];
+      try {
+        for (const f of readdirSync(pipeline.specPath)) {
+          if (/^subtask_wakeup-st\d+\.json$/.test(f)) found.push(path.join(pipeline.specPath, f));
+        }
+      } catch { /* best-effort */ }
+      const wakeupPathLegacy = path.join(pipeline.specPath, 'subtask_wakeup.json');
+      if (existsSync(wakeupPathLegacy)) found.push(wakeupPathLegacy);
+      return found;
+    };
+    let wakeupPaths = scanWakeupFiles();
+
+    // Retry before concluding none exists: in container mode a coder
+    // session's writes only reach the host once the bind mount syncs, and
+    // that sync is not instantaneous — particularly on Windows/Docker
+    // Desktop, where it can lag several seconds behind the container's own
+    // (already-flushed) view of the file, worse under I/O contention.
+    // killSession() above only waits for the CLI process itself to exit,
+    // not for the mount to catch up, so a scan taken immediately after can
+    // race a wakeup file the coder definitely wrote. Only worth the delay
+    // when a missed wakeup would actually change the outcome — a re-entry
+    // session (already mid-wakeup-cycle) or a subtask with a deliverable
+    // check that's about to run; a subtask with neither skips verification
+    // anyway, so a slow-to-sync (nonexistent) wakeup file costs it nothing.
+    // Found on task add-per-constraint-soft-score-attributio: subtask 15
+    // wrote subtask_wakeup-st15.json (confirmed via its own session log) and
+    // ended its session, but the scan run right after found nothing — the
+    // subtask was wrongly treated as having failed deliverable verification,
+    // and the task failed outright minutes later, twice.
+    const wakeupScanRetryDelayMs = deps.getPipelineConfig().wakeupScanRetryDelayMs ?? 0;
+    if (wakeupScanRetryDelayMs > 0 && wakeupPaths.length === 0 && (wasWakeupReentry || subtask.files_to_create?.length)) {
+      for (let attempt = 0; attempt < 4 && wakeupPaths.length === 0; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, wakeupScanRetryDelayMs));
+        wakeupPaths = scanWakeupFiles();
       }
-    } catch { /* best-effort */ }
-    const wakeupPathLegacy = path.join(pipeline.specPath, 'subtask_wakeup.json');
-    if (existsSync(wakeupPathLegacy)) wakeupPaths.push(wakeupPathLegacy);
+    }
 
     for (const wakeupPath of wakeupPaths) {
       try {

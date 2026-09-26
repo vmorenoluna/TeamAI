@@ -4265,6 +4265,82 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
     }
   });
 
+  // Regression coverage for task add-per-constraint-soft-score-attributio's
+  // third failure: in container mode, a coder session's write only becomes
+  // visible on the host once the bind mount syncs — not instantaneous,
+  // worse under I/O contention — so a wakeup-file scan taken immediately
+  // after the session ends can race a file the coder definitely wrote. The
+  // subtask was then wrongly treated as having failed deliverable
+  // verification, and the task failed outright minutes later. This test
+  // simulates that race directly: the wakeup file doesn't exist at the
+  // first scan, but lands before the retry loop gives up.
+  it('picks up a wakeup file that lands after the first scan (bind-mount sync race)', async () => {
+    // wakeupScanRetryDelayMs defaults to 0 under vitest (see
+    // computePipelineConfig) so this test opts back in explicitly with a
+    // fast value, rather than relying on the real 2000ms production default.
+    writeFileSync(join(project.root, '.teamai', 'pipeline.json'), JSON.stringify({
+      phases: ['spec', 'plan', 'implement', 'qa-review', 'merge'],
+      maxQaAttempts: 3,
+      parallelSubtasks: true,
+      wakeupScanRetryDelayMs: 50,
+    }));
+
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 9,
+        title: 'Run production sweep',
+        description: 'Launch a long-running sweep',
+        files: [],
+        acceptance_criteria: ['Sweep completes'],
+        files_to_create: ['results/summary.jsonl'],
+      }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-race');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      // Session ends with NO wakeup file present yet — the first scan must
+      // find nothing, same as a genuinely-missed race.
+      fireEvent('event', { sessionId: 'sess-wakeup-race', event: { type: 'result' } });
+      // Flush microtasks up to (but not past) the retry loop's first wait —
+      // short enough that the 50ms retry delay hasn't elapsed yet.
+      await vi.advanceTimersByTimeAsync(1);
+
+      // The file "arrives" late, as it would once the bind mount syncs.
+      writeFileSync(join(project.taskDir, 'subtask_wakeup-st9.json'), JSON.stringify({
+        subtask_id: 9,
+        wakeup_at: '2026-07-04T14:00:00Z',
+        background_command: 'python scripts/optimizer_sweep.py --batch',
+        expected_artifact: 'results/summary.jsonl',
+      }));
+
+      // Let the retry loop's setTimeout fire and re-scan pick it up.
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(existsSync(join(project.taskDir, 'subtask_wakeup-st9.json'))).toBe(false);
+      expect(pipeline.wakeupSubtaskId).toBe(9);
+      expect(pipeline.wakeupUntil).toBe('2026-07-04T14:00:00Z');
+      // Deliverable verification must NOT have run — the wakeup being
+      // detected (even late) should skip it entirely, exactly as an
+      // immediate detection would.
+      expect(pipeline.deliverableFailCounts?.[9]).toBeUndefined();
+
+      await promise;
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   // Regression coverage for a real production failure (task 585a32e0):
   // Subtask 8 discovered its dependency, Subtask 7, was still blocked on a
   // live background job. Rather than silently completing, it scheduled a
