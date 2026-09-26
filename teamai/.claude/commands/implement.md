@@ -212,6 +212,37 @@ If the subtask requires running a script that **produces files you will commit**
    and re-run from the beginning. A committed summary.jsonl with 1,431 of 3,000 expected
    records is harder to diagnose than no file at all.
 
+### When comparing build-SHA-stamped output across multiple servers
+
+Some evidence subtasks require running the SAME script against two or more server
+processes at different commits (a "before" server and an "after" server, or a
+deterministic-mode run alongside a production-mode run) and gating the comparison on
+each server's build being clean (no `-dirty` suffix on its build SHA).
+
+**Never run a server and its sweep/benchmark client from the same checkout.** A
+client that writes its own output files (a sweep log, a results directory) into the
+same working tree the server was started from will taint that checkout's `git
+status` the moment it writes — and a server's dirty-flag is normally computed once
+at startup and frozen for the life of the process, so this makes the build SHA
+**permanently** `-dirty` for that server, failing any acceptance criterion that
+requires a clean SHA. This is not intermittent or timing-dependent: it reproduces
+every time client and server share a directory.
+
+Use a separate, isolated checkout (`git worktree add <scratch-path> <sha>`, or an
+equivalent clean clone) for each server process, and a further separate checkout for
+the client issuing requests against it — never the coder's own feature-branch
+worktree for either role, and never the same scratch checkout for both. Confirm each
+server reports a clean (non-`-dirty`) build SHA immediately after starting it and
+before committing to a long run — cheaper to catch a contaminated checkout in the
+first few seconds than after a multi-hour sweep completes against it.
+
+If your sweep script derives the build SHA by scanning a log directory relative to
+its own working directory (a common shortcut for the common case, where client and
+server share one checkout), that scan will silently fail once you isolate the
+checkouts as above — prefer whatever the server's own API response reports as its
+build SHA over a same-directory file scan, and treat "(unavailable)" in your own
+tooling's output as a bug in the tooling to fix, not a result to accept.
+
 ### When a background script won't finish before your session budget
 
 If a background script (benchmark, verification run, data pipeline) is still
@@ -267,6 +298,14 @@ with a `⚠️ WAKEUP RE-ENTRY` header. On re-entry:
   - **Crashed or exited with error**: do NOT write another wakeup file.
     Report the failure immediately — the orchestrator advances the task to
     failed after 3 consecutive wakeup attempts without progress.
+
+**If you diagnose and fix a real blocker before relaunching** (a compile error, a
+contaminated checkout, a bug in your own tooling), state the new `background_command`
+in your fresh `subtask_wakeup-st<ID>.json` rather than reusing the old one verbatim —
+the orchestrator treats a materially different command on re-entry as evidence of
+genuine progress and resets the wakeup attempt budget instead of charging the fix
+against the same 3-attempt cap as a job that simply needed more time. Reusing the
+exact same command when nothing actually changed still counts as a normal attempt.
 
 Use `$TEAMAI_SPEC_DIR` to resolve the path — your cwd is the worktree, not
 the project root.

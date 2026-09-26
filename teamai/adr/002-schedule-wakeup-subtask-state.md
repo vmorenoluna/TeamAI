@@ -169,7 +169,7 @@ The `task.json` task record also gets `wakeupUntil?: string` and `wakeupSubtaskI
 
 ### Nested wakeups (artifact still not ready)
 
-If the wakeup fires and the sweep still hasn't finished, the engineer checks whether the background process is still running. If it's still running: the engineer writes an updated `subtask_wakeup.json` with a new `wakeup_at`. If the process crashed: the engineer does NOT write a new wakeup file — the task fails immediately. The orchestrator increments `pipeline.wakeupAttemptCount` each time it detects a new wakeup file for the same subtask. The counter resets to 0 when the artifact is successfully committed. After 3 consecutive wakeup attempts with no artifact completion, the task fails.
+If the wakeup fires and the sweep still hasn't finished, the engineer checks whether the background process is still running. If it's still running: the engineer writes an updated `subtask_wakeup.json` with a new `wakeup_at`. If the process crashed: the engineer does NOT write a new wakeup file — the task fails immediately. The orchestrator increments `pipeline.wakeupAttemptCount` each time it detects a new wakeup file for the same subtask — UNLESS the new file's `background_command` differs from the one recorded on the previous wakeup, in which case the counter resets to 1 instead (see ADR 004's 2026-09-26 addition): a materially different command means the engineer fixed a real blocker before relaunching, which is forward progress rather than a stalled retry, and earns a fresh attempt budget. The counter resets to 0 when the artifact is successfully committed. After 3 consecutive wakeup attempts with no artifact completion and no command change, the task fails.
 
 ### Wakeup during QA rework
 
