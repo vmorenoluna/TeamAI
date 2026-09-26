@@ -13,8 +13,15 @@ interface SpecConcern {
 }
 
 interface QaReport {
-  overall: 'PASS' | 'FAIL';
-  criteria?: { criterion?: string; name?: string; status: 'PASS' | 'FAIL'; notes?: string }[];
+  /** Documented values are 'PASS' | 'FAIL'; typed as `string` because the QA
+   *  agent's report isn't schema-validated and can be left at an
+   *  undocumented value (e.g. "IN_PROGRESS") — see stream-types.ts's
+   *  QAReportData for the full rationale. This panel only renders for
+   *  awaiting-review/pr-open tasks, which always carry a genuine PASS, but
+   *  the type must match the same qaReport prop threaded through from
+   *  task-detail.tsx for other phases too. */
+  overall: string;
+  criteria?: { criterion?: string; name?: string; status: string; notes?: string; evidence?: string }[];
   spec_concerns?: SpecConcern[];
   /** The spec version this QA report was produced against (1 = initial spec). */
   spec_revision?: number;

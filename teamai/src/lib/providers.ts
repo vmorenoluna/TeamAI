@@ -4,6 +4,18 @@ import { join } from 'path';
 export interface ProviderConfig {
   model?: string;
   provider?: 'anthropic' | 'bedrock' | 'vertex' | 'openai' | 'gemini' | 'ollama';
+  /** Extra environment variables injected into the spawned Claude CLI process
+   *  (see ProcessManager.createSession) — merged over process.env (or passed
+   *  as `-e` flags in container mode). The shipped `qa-reviewer` role raises
+   *  Claude Code's own `BASH_DEFAULT_TIMEOUT_MS`/`BASH_MAX_TIMEOUT_MS` (from
+   *  their 2min/10min stock defaults) here: a QA-review session gets exactly
+   *  one turn and is torn down the instant it ends (see qa-review.ts), so a
+   *  long verification command (the full test suite) MUST complete inside a
+   *  single foreground Bash call rather than being backgrounded — Claude
+   *  Code's stock 2-minute default timeout would truncate that call well
+   *  before most real suites finish. This makes that work even if the agent
+   *  forgets to pass an explicit `timeout`, instead of relying purely on
+   *  qa-review.md's Step 6 instructions to get it right every time. */
   env?: Record<string, string>;
 }
 

@@ -187,9 +187,14 @@ export function writeFailReport(pipeline: TaskPipeline, failReport: QaReport, la
  *
  * @internal — exported for unit tests only. Not part of the public API.
  */
-export function failBudgetExhausted(pipeline: TaskPipeline, deps: QaReviewDeps, report: QaReport): void {
+export function failBudgetExhausted(
+  pipeline: TaskPipeline,
+  deps: QaReviewDeps,
+  report: QaReport,
+  reason: FailureReason = 'qa-attempts-exhausted',
+): void {
   deps.writeQaFeedback(pipeline, report);
-  deps.writeCompletionSummary(pipeline, 'qa-attempts-exhausted');
+  deps.writeCompletionSummary(pipeline, reason);
   deps.advancePhase(pipeline, 'failed');
 }
 
@@ -447,10 +452,35 @@ export async function runQaReview(
   // Preserve the completed report for the next QA round, regardless of routing.
   snapshotQaReportBeforeBounce(pipeline);
 
+  const budgetExhausted = Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts;
+
+  // An `overall` that's neither PASS nor FAIL (almost always "IN_PROGRESS")
+  // means the reviewer never reached a verdict. Per qa-review.md Step 5,
+  // IN_PROGRESS is only a mid-session crash-recovery placeholder — the
+  // reviewer's own instructions say to replace it with a real PASS/FAIL
+  // before the turn ends. Nothing here is an actual FAIL criterion or
+  // fix_needed entry for the coder to act on, so routing this through the
+  // FAIL-type router below would bounce to implement and waste a round on
+  // nothing. Re-run QA instead — Step 0's rework-pass carry-forward makes
+  // the retry cheap — and use a distinct failure reason on exhaustion so the
+  // UI never reports a QA failure that never actually happened.
+  if (report.overall !== 'PASS' && report.overall !== 'FAIL') {
+    logToOutput(pipeline.specPath,
+      `\n[QA-ROUTER] overall="${report.overall}" — QA review did not reach a verdict; ` +
+      `re-running QA instead of treating this as a FAIL\n`);
+    if (budgetExhausted) {
+      failBudgetExhausted(pipeline, deps, report, 'qa-incomplete');
+      return;
+    }
+    deps.savePipelineState(pipeline);
+    await deps.executePhase(pipeline);
+    return;
+  }
+
   // The QA budget is global across spec revisions. Check it before
   // spec-concern routing so a task cannot loop through unlimited real
   // implement→QA rounds merely because every report also has spec_concerns.
-  if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts && report.overall !== 'PASS') {
+  if (budgetExhausted && report.overall !== 'PASS') {
     failBudgetExhausted(pipeline, deps, report);
     return;
   }

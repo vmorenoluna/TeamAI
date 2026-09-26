@@ -33,8 +33,9 @@ type Tab = 'overview' | 'terminal' | 'spec' | 'plan' | 'qa';
 
 // Reason-aware label for the "Task Failed" banner — see task-card.tsx's
 // FAILURE_REASON_TOOLTIP for the compact-card equivalent.
-const FAILURE_REASON_LABEL: Record<'qa-attempts-exhausted' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'unknown', string> = {
+const FAILURE_REASON_LABEL: Record<'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'unknown', string> = {
   'qa-attempts-exhausted': 'QA attempt budget exhausted',
+  'qa-incomplete': 'QA never finished its review — no defect found',
   'spec-revision-exhausted': 'Spec revision budget exhausted — QA never passed',
   'implement-failure': 'Implement-phase retry cap exceeded — never reached QA',
   'session-crashed': 'Coder session crashed unexpectedly',
@@ -246,6 +247,16 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
       : 'implement';
 
   const failedCriteria = qaReport?.criteria?.filter(c => c.status === 'FAIL') ?? [];
+  // A report whose `overall` is neither PASS nor FAIL (almost always
+  // "IN_PROGRESS") means QA never reached a verdict — it ran out of its own
+  // attempt budget mid-review (see qa-review.ts's overall !== PASS && overall
+  // !== FAIL routing). That is NOT "no QA findings were recorded": a real
+  // report with real per-criterion evidence exists (visible on the QA tab) —
+  // it just never finished. Surface that distinctly instead of falling into
+  // the same "nothing to report" copy a genuine, fully-evaluated PASS-minus-
+  // recommendations report would use.
+  const qaIncomplete = !!qaReport && qaReport.overall !== 'PASS' && qaReport.overall !== 'FAIL';
+  const pendingCriteria = qaReport?.criteria?.filter(c => c.status !== 'PASS' && c.status !== 'FAIL') ?? [];
   const qaRecommendations = [
     ...failedCriteria
       .filter(c => c.fix_needed)
@@ -441,6 +452,37 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                   </div>
                 </div>
                 <div className="space-y-4">
+                  {qaIncomplete && (
+                    <section data-component="qa-incomplete-banner">
+                      <h4 className="text-xs font-semibold uppercase tracking-wider text-amber-300 mb-2">
+                        QA review did not finish
+                      </h4>
+                      <p className="text-xs text-slate-400 mb-2">
+                        The QA reviewer ran out of its own attempt budget before reaching a
+                        PASS/FAIL verdict (overall: <code>{qaReport!.overall}</code>). No
+                        criterion actually failed — this did not find a code defect, it just
+                        did not finish reviewing. See the QA tab for the full report.
+                      </p>
+                      {pendingCriteria.length > 0 && (
+                        <div className="space-y-2">
+                          {pendingCriteria.map((criterion, index) => (
+                            <div key={index} className="rounded-md border border-amber-900/30 bg-amber-950/10 px-3 py-2">
+                              <p className="text-sm font-medium text-slate-200">
+                                {criterion.criterion || criterion.name || 'Unnamed acceptance criterion'}
+                                <span className="ml-2 text-[10px] uppercase tracking-wider text-amber-400">{criterion.status}</span>
+                              </p>
+                              {(criterion.notes || criterion.evidence) && (
+                                <p className="mt-0.5 text-xs text-slate-400">
+                                  {criterion.notes || criterion.evidence}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
+
                   {qaReport && failedCriteria.length > 0 && (
                     <section data-component="failed-qa-criteria">
                       <h4 className="text-xs font-semibold uppercase tracking-wider text-red-300 mb-2">
@@ -485,7 +527,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                     </p>
                   )}
 
-                  {qaReport && failedCriteria.length === 0 && qaRecommendations.length === 0 && (
+                  {qaReport && !qaIncomplete && failedCriteria.length === 0 && qaRecommendations.length === 0 && (
                     <p className="text-xs text-slate-400">
                       No specific QA findings were recorded. See the QA tab and terminal output for details.
                     </p>
