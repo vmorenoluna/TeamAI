@@ -5809,6 +5809,78 @@ describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
     }
   });
 
+  it('resets wakeupAttemptCount to 1 instead of tripping the circuit breaker when the relaunch uses a materially different command', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{ id: 1, title: 'Run benchmark', description: 'Execute benchmark', files: ['src/bench.ts'], acceptance_criteria: ['Benchmark completes'] }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-progress');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    // Same starting point as the circuit-breaker test above (attempt 2, about
+    // to write a 3rd wakeup file) — but this time the engineer diagnosed and
+    // fixed a real blocker (a different background_command), which should
+    // reset the budget instead of tripping the cap.
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+      wakeupSubtaskId: 1, wakeupAttemptCount: 2, wakeupArtifact: 'results/bench.json', wakeupCommand: 'npm run benchmark',
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      // Engineer relaunches under a DIFFERENT command after fixing a blocker.
+      writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), JSON.stringify({
+        subtask_id: 1, wakeup_at: '2026-07-05T00:00:00Z',
+        background_command: 'npm run benchmark -- --isolated-checkout', expected_artifact: 'results/bench.json',
+      }));
+
+      fireEvent('event', { sessionId: 'sess-wakeup-progress', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      // Reset (not tripped) — the task keeps running with a fresh budget.
+      expect(pipeline.wakeupAttemptCount).toBe(1);
+      expect(pipeline.phase).not.toBe('failed');
+      expect(existsSync(join(project.taskDir, 'qa_report.json'))).toBe(false);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('still increments wakeupAttemptCount normally when the relaunch reuses the same command (no progress)', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{ id: 1, title: 'Run benchmark', description: 'Execute benchmark', files: ['src/bench.ts'], acceptance_criteria: ['Benchmark completes'] }],
+    }));
+
+    mockCreateSession.mockResolvedValue('sess-wakeup-same-command');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
+      wakeupSubtaskId: 1, wakeupAttemptCount: 1, wakeupArtifact: 'results/bench.json', wakeupCommand: 'npm run benchmark',
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), JSON.stringify({
+        subtask_id: 1, wakeup_at: '2026-07-05T00:00:00Z',
+        background_command: 'npm run benchmark', expected_artifact: 'results/bench.json',
+      }));
+
+      fireEvent('event', { sessionId: 'sess-wakeup-same-command', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      expect(pipeline.wakeupAttemptCount).toBe(2);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   it('clears wakeup state and bounces back after successful wakeup completion', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{ id: 3, title: 'Generate artifact', description: 'Create the artifact file', files: ['src/gen.ts'], acceptance_criteria: ['Artifact created'] }],

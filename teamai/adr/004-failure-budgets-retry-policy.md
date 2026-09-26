@@ -62,9 +62,26 @@ Quality failures are the core retry loop: the QA reviewer produced a FAIL report
 | QA session completes (PASS) | (no change) | N/A |
 | QA session completes (FAIL) | +1 | N/A |
 | Rate limit hit | **−1** (decremented) | (no change) |
-| Wakeup re-entry, artifact still missing | N/A | +1 |
+| Wakeup re-entry, artifact still missing, same `background_command` | N/A | +1 |
+| Wakeup re-entry, artifact still missing, **different** `background_command` | N/A | **Reset to 1** |
 | Wakeup re-entry, artifact committed | N/A | Reset to 0 |
 | Spec revision | Reset to 0 | Reset to 0 |
+
+> **2026-09-26 addition (progress-aware wakeup reset):** A wakeup re-entry that
+> relaunches its background job under a command string different from the one
+> stored from its previous wakeup is treated as evidence the engineer diagnosed
+> and fixed a real blocker before restarting — not as "no progress, waiting
+> again." Charging that against the same 3-attempt cap as an unchanged retry
+> means a subtask that correctly fixes a bug on wakeups 1 and 2 and relaunches
+> a multi-hour job on wakeup 3 can fail seconds after that final, now-correct
+> relaunch — the fix is indistinguishable from a stalled retry to a bare
+> counter. Found on task `add-per-constraint-soft-score-attributio`: three
+> wakeups each diagnosed and fixed a distinct real bug (a compile-visibility
+> error, a git-dirty checkout-sharing contamination, a build-SHA-scanning
+> script bug) and relaunched the ~2h evidence sweep each time; the counter
+> incremented on every relaunch regardless, and the task failed 2 minutes into
+> the third (correct) relaunch. See `src/lib/orchestrator/implement.ts`'s
+> wakeup-file-detection block (search `isGenuineRelaunch`).
 | Human rejection | Reset to 0 | Reset to 0 |
 
 ### Composition: A Task With Multiple Failure Types

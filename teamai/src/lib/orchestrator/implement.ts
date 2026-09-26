@@ -1121,6 +1121,12 @@ export async function runSubtaskSession(
       try {
         const wd = JSON.parse(readFileSync(wakeupPath, 'utf-8'));
         if (wd.subtask_id != null && wd.wakeup_at) {
+          // Snapshot the previous command for the same subtask BEFORE it's
+          // overwritten below — used to detect a genuine relaunch (see the
+          // counter reset below).
+          const isSameSubtaskReentry = wd.subtask_id === pipeline.wakeupSubtaskId;
+          const previousCommand = isSameSubtaskReentry ? pipeline.wakeupCommand : undefined;
+
           // When parallel subtasks both schedule wakeups, adopt the EARLIEST
           // wakeup_at (ADR 002) — the later sibling must not clobber an
           // already-scheduled earlier wakeup. A re-schedule by the SAME
@@ -1145,7 +1151,33 @@ export async function runSubtaskSession(
               pipeline.wakeupArtifactMtimeAtSchedule = null;
             }
           }
-          pipeline.wakeupAttemptCount = (pipeline.wakeupAttemptCount || 0) + 1;
+
+          // Progress-aware circuit breaker: a wakeup re-entry that relaunches
+          // the background job under a MATERIALLY DIFFERENT command (not just
+          // a later wakeup_at for the same still-running process) means the
+          // engineer diagnosed and fixed a real blocker before restarting —
+          // that's forward progress, not a stalled retry, and should get a
+          // fresh attempt budget rather than consume the old one. Without
+          // this, a subtask that fixes a genuine bug on wakeups 1 and 2 and
+          // correctly relaunches a multi-hour job on wakeup 3 can have the
+          // task fail seconds after that final, now-correct relaunch — the
+          // fix itself is indistinguishable from "made no progress" to a bare
+          // attempt counter. Reset (not merely decrement) so the relaunched
+          // job gets the FULL cap's worth of checks, matching the budget any
+          // fresh background attempt is expected to need.
+          // Guarded on previousCommand being defined (not the subtask's very
+          // first wakeup) and both commands being non-empty strings — a
+          // missing/identical command is treated as "still waiting on the
+          // same job", which keeps incrementing as before.
+          const isGenuineRelaunch = isSameSubtaskReentry
+            && !!previousCommand && !!wd.background_command
+            && wd.background_command !== previousCommand;
+          if (isGenuineRelaunch) {
+            pipeline.wakeupAttemptCount = 1;
+            logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + wd.subtask_id + ' background command changed since the last wakeup — treating as a fresh attempt (progress was made) and resetting the wakeup attempt budget to 1\n');
+          } else {
+            pipeline.wakeupAttemptCount = (pipeline.wakeupAttemptCount || 0) + 1;
+          }
           wakeupDetected = true;
           logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + wd.subtask_id + ' wakeup scheduled for ' + wd.wakeup_at + ' (attempt ' + pipeline.wakeupAttemptCount + ') — background process: ' + (wd.background_command || 'unknown') +
             (wd.progress_log_path ? ' — progress log: ' + wd.progress_log_path : '') + '\n');
