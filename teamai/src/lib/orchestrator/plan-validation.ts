@@ -486,3 +486,52 @@ export function restorePreservedPlanSubtasks(
       `\n[PLAN] Failed to persist preserved subtasks to plan.json: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
+
+// ── Plan-declared file-change detection ────────────────────────────────────
+
+/** A path under `.teamai/` is pipeline-artifact territory (ticket-creation
+ *  subtasks, out of scope for the coder — see qa-review.md's carve-out) and
+ *  never ends up in a committed diff either way; it doesn't count as a real
+ *  file change for this check. */
+function isRealSourcePath(f: string): boolean {
+  return !f.replace(/\\/g, '/').startsWith('.teamai/');
+}
+
+/**
+ * Whether plan.json declares any subtask expected to touch real source/test
+ * files (as opposed to a purely `.teamai/`-scoped ticket-creation subtask, or
+ * a subtask with an empty `files`/`files_to_create` array — a deliberate,
+ * verification-only subtask per implement.md's guidance).
+ *
+ * Used to distinguish a genuinely code-free task (safe to mark `done`
+ * directly when its branch has nothing beyond the base branch — see
+ * hasCommitsBeyondBase in artifact-commit.ts) from one whose plan expected
+ * real changes that never materialized on the branch: the signature of an
+ * implementation that was lost, skipped, or never finished. That case must
+ * NOT be silently marked done — see runCreatePRPhase/runMergePhase, which
+ * throw a loud, actionable error instead when this returns true alongside
+ * an empty branch.
+ *
+ * Returns `true` (the conservative, "treat as suspicious" answer) when
+ * plan.json is missing or malformed — a task this far into the pipeline
+ * should have one, and an absent/unreadable plan tells us nothing about
+ * intent, so it's safer to route to the loud error path than to assume
+ * silence means nothing was expected.
+ */
+export function planDeclaresRealFileChanges(specPath: string): boolean {
+  const planPath = path.join(specPath, 'plan.json');
+  if (!existsSync(planPath)) return true;
+
+  let plan: { subtasks?: PlanSubtask[] };
+  try {
+    plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+  } catch {
+    return true;
+  }
+
+  const subtasks = Array.isArray(plan.subtasks) ? plan.subtasks : [];
+  return subtasks.some(s =>
+    (Array.isArray(s.files) && s.files.some(isRealSourcePath)) ||
+    (Array.isArray(s.files_to_create) && s.files_to_create.some(isRealSourcePath)),
+  );
+}

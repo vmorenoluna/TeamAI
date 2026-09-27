@@ -9,14 +9,14 @@ import path from 'path';
 import { processManager } from '../process-manager';
 import { TaskStore } from '../task-store';
 import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody } from '../git-platform';
-import { squashWithMessage, readImplementationSummary, readSpecSummary } from './artifact-commit';
+import { squashWithMessage, hasCommitsBeyondBase, readImplementationSummary, readSpecSummary } from './artifact-commit';
 import { restoreWorktreeGitFileToHostPaths, worktreeGitEnv } from './worktree-utils';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
 import { updateSessionMap, logToOutput } from './helpers';
 import { humanDirectiveFor, consumeFeedbackIfDue, readHumanFeedback } from './human-feedback';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
-import { applyPlanFileSerialization, logUndeclaredSubtaskReferences, snapshotPreservedPlanSubtasks, restorePreservedPlanSubtasks, loadPreservedPlanSubtasks, clearPreservedPlanSubtasks } from './plan-validation';
+import { applyPlanFileSerialization, logUndeclaredSubtaskReferences, snapshotPreservedPlanSubtasks, restorePreservedPlanSubtasks, loadPreservedPlanSubtasks, clearPreservedPlanSubtasks, planDeclaresRealFileChanges } from './plan-validation';
 import { warn } from '../logger';
 import { WorktreeError, PipelineConfigError } from './errors';
 import type { PipelinePhase } from '@/constants/phases';
@@ -581,17 +581,51 @@ export async function runMergePhase(
     );
   }
 
+  // Nothing to merge: a task whose plan never expected code changes
+  // (empty/absent `files` everywhere, per implement.md's guidance) should
+  // still leave a real — if empty — commit on the branch (squashWithMessage
+  // preserves those now), so this only fires for a branch with truly no
+  // commit at all beyond the base. `git merge` of such a branch would just
+  // no-op ("Already up to date"), but that's easy to misread as "the merge
+  // silently did nothing" — detect it explicitly instead.
+  if (!hasCommitsBeyondBase(pipeline.worktreePath, baseBranch, {
+    restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
+    worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
+  })) {
+    // A branch with no commit at all is only unsuspicious if the plan never
+    // expected one — otherwise this is the signature of an implementation
+    // that was lost, skipped, or never finished, and marking it `done`
+    // would silently ship nothing for a task that was supposed to change
+    // something. Fail loudly instead so it's investigated, not missed.
+    if (planDeclaresRealFileChanges(pipeline.specPath)) {
+      throw new PipelineConfigError(
+        `Plan declared file changes for this task, but its branch has no commits beyond ${baseBranch} ` +
+        `after rebasing — the implementation may have been lost, skipped, or never committed. ` +
+        `Investigate the worktree at ${pipeline.worktreePath} before retrying.`,
+        'NO_CHANGES_BUT_PLAN_EXPECTED_THEM',
+      );
+    }
+    logToOutput(pipeline.specPath,
+      `[MERGE] No commits between ${baseBranch} and ${pipeline.branch} — this task's implementation required ` +
+      `no changes beyond what's already on ${baseBranch}. Nothing to merge; marking done directly.\n`);
+    deps.removeWorktree(pipeline.taskId);
+    deps.advancePhase(pipeline, 'done');
+    return;
+  }
+
   // Pre-merge squash: collapse the feature branch to a single trailer-bearing
   // commit so the trailers survive the merge (merge/rebase keep messages
   // verbatim; squash pre-fills from the sole commit). No-op when
   // recordHistoryInGit is off or the worktree has nothing to commit.
   const ticketMessage = deps.buildTicketMessage(pipeline);
   if (ticketMessage) {
-    squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
+    const squashed = squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
       restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
       worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
     });
-    logToOutput(pipeline.specPath, '[MERGE] Feature branch squashed to a single trailer-bearing commit\n');
+    logToOutput(pipeline.specPath, squashed
+      ? '[MERGE] Feature branch squashed to a single trailer-bearing commit\n'
+      : '[MERGE] Squash skipped (nothing to collapse or a git error) — proceeding with the branch as-is\n');
   }
 
   const pipelineConfig = deps.getPipelineConfig();
@@ -656,6 +690,7 @@ interface CreatePRDeps extends BasePhaseDeps {
   extractPrUrl: (logFile: string) => string | null;
   /** Build the trailer-bearing commit message for this task (null when recordHistoryInGit is off). */
   buildTicketMessage: (pipeline: TaskPipeline) => import('./artifact-commit').TicketMessageResult | null;
+  removeWorktree: (taskId: string) => void;
 }
 
 export async function runCreatePRPhase(
@@ -691,17 +726,51 @@ export async function runCreatePRPhase(
     logToOutput(pipeline.specPath, '\n[WARN] PR may require manual conflict resolution\n');
   }
 
+  // Nothing to PR: a task whose plan never expected code changes (empty/
+  // absent `files` everywhere, per implement.md's guidance) should still
+  // leave a real — if empty — commit on the branch (squashWithMessage
+  // preserves those now), so this only fires for a branch with truly no
+  // commit at all beyond the base. Pushing and calling `gh pr create` on
+  // such a branch fails with a confusing raw GraphQL error ("No commits
+  // between <base> and <branch>") — detect it up front instead.
+  if (!hasCommitsBeyondBase(pipeline.worktreePath, baseBranch, {
+    restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
+    worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
+  })) {
+    // A branch with no commit at all is only unsuspicious if the plan never
+    // expected one — otherwise this is the signature of an implementation
+    // that was lost, skipped, or never finished, and marking it `done`
+    // would silently ship nothing for a task that was supposed to change
+    // something. Fail loudly instead so it's investigated, not missed.
+    if (planDeclaresRealFileChanges(pipeline.specPath)) {
+      throw new PipelineConfigError(
+        `Plan declared file changes for this task, but its branch has no commits beyond ${baseBranch} ` +
+        `after rebasing — the implementation may have been lost, skipped, or never committed. ` +
+        `Investigate the worktree at ${pipeline.worktreePath} before retrying.`,
+        'NO_CHANGES_BUT_PLAN_EXPECTED_THEM',
+      );
+    }
+    logToOutput(pipeline.specPath,
+      `[PR] No commits between ${baseBranch} and ${pipeline.branch} — this task's implementation required ` +
+      `no changes beyond what's already on ${baseBranch}. Nothing to open a PR for; marking done directly.\n`);
+    deps.removeWorktree(pipeline.taskId);
+    deps.advancePhase(pipeline, 'done');
+    return;
+  }
+
   // Pre-push squash: collapse the feature branch to a single trailer-bearing
   // commit so the trailers survive any GitHub merge method (merge/rebase keep
   // messages verbatim; squash pre-fills from the sole commit). No-op when
   // recordHistoryInGit is off or the worktree has nothing to commit.
   const ticketMessage = deps.buildTicketMessage(pipeline);
   if (ticketMessage) {
-    squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
+    const squashed = squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
       restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
       worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
     });
-    logToOutput(pipeline.specPath, '[PR] Feature branch squashed to a single trailer-bearing commit\n');
+    logToOutput(pipeline.specPath, squashed
+      ? '[PR] Feature branch squashed to a single trailer-bearing commit\n'
+      : '[PR] Squash skipped (nothing to collapse or a git error) — proceeding with the branch as-is\n');
   }
   deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
 

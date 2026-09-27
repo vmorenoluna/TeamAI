@@ -1,8 +1,12 @@
 /**
  * Unit tests for plan-time plan.json validation (shared-file serialization).
  */
-import { describe, it, expect } from 'vitest';
-import { serializeSharedFileSubtasks, detectUndeclaredSubtaskReferences } from '../../src/lib/orchestrator/plan-validation';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { randomUUID } from 'crypto';
+import { serializeSharedFileSubtasks, detectUndeclaredSubtaskReferences, planDeclaresRealFileChanges } from '../../src/lib/orchestrator/plan-validation';
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 
 function st(id: number, files: string[], parallelGroup?: string, dependsOn?: number[]): PlanSubtask {
@@ -198,5 +202,53 @@ describe('detectUndeclaredSubtaskReferences', () => {
       { ...st(1, ['a.ts'], 'A'), description: 'Confirm Subtask 999 has finished before starting this one.' },
     ];
     expect(detectUndeclaredSubtaskReferences(subtasks)).toEqual([]);
+  });
+});
+
+describe('planDeclaresRealFileChanges', () => {
+  let specPath: string;
+
+  afterEach(() => {
+    try { rmSync(specPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+
+  function taskDir(planJson: unknown): string {
+    specPath = join(tmpdir(), `teamai-plan-changes-${randomUUID().slice(0, 8)}`);
+    mkdirSync(specPath, { recursive: true });
+    if (planJson !== undefined) {
+      writeFileSync(join(specPath, 'plan.json'), JSON.stringify(planJson));
+    }
+    return specPath;
+  }
+
+  it('returns false when every subtask declares no files (genuine verification-only plan)', () => {
+    const dir = taskDir({ subtasks: [st(1, []), st(2, [])] });
+    expect(planDeclaresRealFileChanges(dir)).toBe(false);
+  });
+
+  it('returns false when a subtask only touches .teamai/ paths (ticket-creation carve-out)', () => {
+    const dir = taskDir({ subtasks: [st(1, ['.teamai/some-new-ticket/task.json'])] });
+    expect(planDeclaresRealFileChanges(dir)).toBe(false);
+  });
+
+  it('returns true when a subtask declares a real source file', () => {
+    const dir = taskDir({ subtasks: [st(1, []), st(2, ['src/app.ts'])] });
+    expect(planDeclaresRealFileChanges(dir)).toBe(true);
+  });
+
+  it('returns true when a subtask declares files_to_create outside .teamai/', () => {
+    const dir = taskDir({ subtasks: [{ ...st(1, []), files_to_create: ['src/new-file.ts'] }] });
+    expect(planDeclaresRealFileChanges(dir)).toBe(true);
+  });
+
+  it('returns true (conservative) when plan.json is missing', () => {
+    const dir = taskDir(undefined);
+    expect(planDeclaresRealFileChanges(dir)).toBe(true);
+  });
+
+  it('returns true (conservative) when plan.json is malformed', () => {
+    const dir = taskDir(undefined);
+    writeFileSync(join(dir, 'plan.json'), 'not valid json {{{');
+    expect(planDeclaresRealFileChanges(dir)).toBe(true);
   });
 });
