@@ -154,13 +154,14 @@ export function writeQaFeedback(
 }
 
 /** Why a `failed` task failed — see Task.failureReason in task-store.ts for
- *  the full distinction between these five. */
+ *  the full distinction between these six. */
 export type FailureReason =
   | 'qa-attempts-exhausted'
   | 'qa-incomplete'
   | 'spec-revision-exhausted'
   | 'implement-failure'
-  | 'session-crashed';
+  | 'session-crashed'
+  | 'wakeup-exhausted';
 
 /** Write a completion summary when the task fails — a QA-attempt budget, a
  *  spec-revision budget, or an implement-phase retry/verification cap was
@@ -199,6 +200,13 @@ export function writeCompletionSummary(
       `. This did NOT go through a normal QA review — the session process ` +
       `exited or was killed (e.g. an app/server restart, an OS-level kill, ` +
       `or a crash) before it could finish its work.\n\n`;
+  } else if (reason === 'wakeup-exhausted') {
+    content += `Task failed because a background process the agent scheduled a wakeup for ` +
+      `never finished producing its expected artifact` +
+      (detail ? `: ${detail}` : '.') +
+      ` This did NOT go through a normal QA review — the phase's wakeup attempt budget was ` +
+      `exhausted before the job's output ever showed up. See the report below for the expected ` +
+      `artifact and background command.\n\n`;
   } else if (reason === 'qa-incomplete') {
     const rounds = counters.qaRoundCount ?? counters.qaAttempt;
     content += `Task failed after ${rounds} QA round(s) in which the reviewer never reached ` +

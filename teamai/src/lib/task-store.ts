@@ -83,9 +83,12 @@ export interface Task {
    *  passing" (the latter usually means the approach itself needs a
    *  redesign, not another implement pass) from "an implement-phase retry
    *  cap was exceeded before QA ever ran" from "the coder session crashed
-   *  outside any of those caps (e.g. an app restart)". Undefined for legacy
-   *  failed tasks written before this field existed. */
-  failureReason?: 'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed';
+   *  outside any of those caps (e.g. an app restart)" from "a spec/plan/
+   *  qa-review session's background wakeup cycle never produced its
+   *  expected artifact within the attempt cap" (ADR 002, generalized beyond
+   *  implement — see orchestrator/wakeup.ts). Undefined for legacy failed
+   *  tasks written before this field existed. */
+  failureReason?: 'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'wakeup-exhausted';
   /** Why a task landed on `awaiting-review` when that was NOT a genuine QA
    *  pass — spec phase producing no spec.md/spec_summary.md, a no-op spec
    *  revision, a rolled-back approval attempt. Mirrors `failureReason`'s

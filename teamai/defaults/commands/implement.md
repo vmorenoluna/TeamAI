@@ -263,7 +263,13 @@ wakeup so the task resumes once the job finishes:
    within your current shell and dies the instant your session exits. Write the
    log and PID file inside the worktree, not a container-local temp path, so
    they survive even if the container is reprovisioned.
-2. Write a `subtask_wakeup-st<ID>.json` file (where `<ID>` is your current
+2. **If you're managing more than one job at once** (e.g. a server plus its
+   client, or several parallel runs), stop or relaunch each one by its own PID
+   (`kill $(cat job.pid)`) — never by a command-line pattern match
+   (`pkill -f <substring>`). A substring broad enough to match every job's
+   command line can also match your own shell's, killing the session that's
+   trying to manage them right when it's about to record what it just did.
+3. Write a `subtask_wakeup-st<ID>.json` file (where `<ID>` is your current
    subtask ID, e.g. `subtask_wakeup-st3.json`) to the spec directory
    (`$TEAMAI_SPEC_DIR`). The per-subtask filename prevents parallel subtasks
    from clobbering each other's wakeup schedules.
@@ -292,7 +298,7 @@ do nothing but write another wakeup file.
 - `background_command`: the command you ran (informational)
 - `expected_artifact`: the file you expect the process to produce
 - `progress_log_path`: the job's own log file, relative to the worktree root.
-  Include it whenever the job writes one — the orchestrator's periodic sweep
+  Include it whenever the job writes one — the orchestrator periodically
   checks this file's freshness while you're asleep and re-enters you early if
   it goes stale, instead of always waiting out the full `wakeup_at` window.
 

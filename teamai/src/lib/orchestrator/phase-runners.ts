@@ -19,9 +19,11 @@ import { removeStaleWorktreeRegistration } from './worktree-utils';
 import { applyPlanFileSerialization, logUndeclaredSubtaskReferences, snapshotPreservedPlanSubtasks, restorePreservedPlanSubtasks, loadPreservedPlanSubtasks, clearPreservedPlanSubtasks, planDeclaresRealFileChanges } from './plan-validation';
 import { warn } from '../logger';
 import { WorktreeError, PipelineConfigError } from './errors';
+import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
 import type { TaskPipeline, SessionOptsResult } from './types';
+import type { FailureReason } from './qa-feedback';
 
 // ── Shared rebase helper ──────────────────────────────────────────────────
 
@@ -160,6 +162,10 @@ interface CascadePhaseDeps extends BasePhaseDeps {
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
   execGit: (args: string[], hostCwd: string) => void;
+  // ── Wakeup (ADR 002, generalized beyond implement — see wakeup.ts) ──
+  getPipelineConfig: () => { wakeupScanRetryDelayMs?: number; maxImplementRetries: number };
+  scheduleWakeup: (pipeline: TaskPipeline) => void;
+  writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
 }
 
 // ── Shared pre-phase freshness sync ─────────────────────────────────────────
@@ -244,13 +250,28 @@ export async function runSpecPhase(
   const isRevision = existsSync(revisionFeedbackPath);
   const humanDirective = humanDirectiveFor(pipeline.specPath, 'analyst');
 
+  // ADR 002 (generalized — see wakeup.ts): a wakeup cycle is in flight for
+  // this phase iff wakeupCommand already carried over from a previous cycle
+  // when this session started — spec/plan/qa-review run exactly one session
+  // at a time, so unlike implement's per-subtask wakeupSubtaskId, there's no
+  // multiplicity to disambiguate.
+  const isWakeupReentry = !!pipeline.wakeupCommand;
+  const wakeupHeader = isWakeupReentry
+    ? buildWakeupReentryHeader({
+        unitLabel: 'the spec phase',
+        wakeupFilename: PHASE_WAKEUP_FILENAME,
+        command: pipeline.wakeupCommand,
+        artifact: pipeline.wakeupArtifact,
+      })
+    : '';
+
   if (isRevision) {
     // beginSpecRevision renamed the pre-revision spec to spec_v{R-1}.md — the
     // analyst reads THAT baseline (spec.md no longer holds the original), and
     // writes the revised spec to spec.md.
     const baselineFile = `spec_v${pipeline.specRevision - 1}.md`;
     processManager.sendMessage(sessionId,
-      humanDirective +
+      wakeupHeader + humanDirective +
       `REVISION: ${pipeline.description}\n\n` +
       `Read the existing spec at: \`${agentSpecPath}/${baselineFile}\`\n` +
       `Read the spec revision feedback at: \`${agentSpecPath}/spec_revision_feedback.md\`\n` +
@@ -260,12 +281,24 @@ export async function runSpecPhase(
       `IMPORTANT: Also update \`${agentSpecPath}/spec_summary.md\` to reflect the revised spec — this is a required step, not optional. Do not end the session without it.`);
   } else {
     processManager.sendMessage(sessionId,
-      humanDirective +
+      wakeupHeader + humanDirective +
       `/spec ${pipeline.description}\n\nIMPORTANT: Write the spec file to \`${agentSpecPath}/spec.md\` (use this exact path, not a new subdirectory).\n` +
       `IMPORTANT: Also write \`${agentSpecPath}/spec_summary.md\` next to it — this is a required step, not optional. Do not end the session without it.`);
   }
   await deps.waitForCompletion(sessionId);
   processManager.killSession(sessionId);
+
+  // ADR 002 (generalized): a pending background job must pause the phase
+  // before any of the "session ended without producing X" checks below run —
+  // otherwise a legitimate multi-hour job in progress gets treated as a
+  // failed/missing spec. See wakeup.ts's module doc for the incident this
+  // closes (an analyst's long-running verification job outlived its session
+  // with no way to signal "still running").
+  if (await resolvePhaseWakeup({
+    pipeline, specDir: pipeline.specPath, cwd: deps.projectRoot, wasReentry: isWakeupReentry,
+    unitLabel: 'The spec phase', deps,
+  }) === 'pending') return;
+
   if (isRevision && existsSync(revisionFeedbackPath)) {
     unlinkSync(revisionFeedbackPath);
   }
@@ -460,10 +493,30 @@ export async function runPlanPhase(
         ?? snapshotPreservedPlanSubtasks(pipeline.specPath, plannerFeedback.subtaskIds))
       : null;
 
+  // ADR 002 (generalized — see wakeup.ts): see runSpecPhase's identical
+  // reasoning for why wakeupCommand alone identifies a re-entry here.
+  const isWakeupReentry = !!pipeline.wakeupCommand;
+  const wakeupHeader = isWakeupReentry
+    ? buildWakeupReentryHeader({
+        unitLabel: 'the plan phase',
+        wakeupFilename: PHASE_WAKEUP_FILENAME,
+        command: pipeline.wakeupCommand,
+        artifact: pipeline.wakeupArtifact,
+      })
+    : '';
+
   processManager.sendMessage(sessionId,
-    humanDirectiveFor(pipeline.specPath, 'planner') + planInstruction);
+    wakeupHeader + humanDirectiveFor(pipeline.specPath, 'planner') + planInstruction);
   await deps.waitForCompletion(sessionId);
   processManager.killSession(sessionId);
+
+  // ADR 002 (generalized): see runSpecPhase's identical wakeup pause — a
+  // planner can just as legitimately kick off a long-running feasibility
+  // check or dry run before committing to a plan built on its results.
+  if (await resolvePhaseWakeup({
+    pipeline, specDir: pipeline.specPath, cwd: deps.projectRoot, wasReentry: isWakeupReentry,
+    unitLabel: 'The plan phase', deps,
+  }) === 'pending') return;
 
   // Enforce the preserve-list unconditionally: whatever the planner wrote for
   // the unselected subtasks is overwritten with the pre-session snapshot.

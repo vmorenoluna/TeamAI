@@ -14,6 +14,7 @@ import { processManager, type AgentSession } from '../process-manager';
 import { syncPhaseBaseline } from './phase-runners';
 import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
+import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
 import { warn } from '../logger';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, QaIssue, SessionOptsResult } from './types';
@@ -107,6 +108,9 @@ export interface QaReviewDeps {
   autoReviseSpec: (pipeline: TaskPipeline) => Promise<void>;
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
+  // ── Wakeup (ADR 002, generalized beyond implement — see wakeup.ts) ──
+  getPipelineConfig: () => { wakeupScanRetryDelayMs?: number; maxImplementRetries: number };
+  scheduleWakeup: (pipeline: TaskPipeline) => void;
 }
 
 // ── Diverged-branch reconciliation ──────────────────────────────────────
@@ -249,8 +253,15 @@ export async function runQaReview(
   deps: QaReviewDeps,
 ): Promise<void> {
   deps.persistAndEmitPhase(pipeline);
-  pipeline.qaAttempt++;
-  pipeline.qaRoundCount = (pipeline.qaRoundCount || 0) + 1;
+  // ADR 002 (generalized — see wakeup.ts): a wakeup re-entry continues THIS
+  // attempt's background check, not a fresh review — incrementing
+  // qaAttempt/qaRoundCount here would burn the QA budget purely on wakeup
+  // cycles before the reviewer ever reaches a new verdict.
+  const isWakeupReentry = !!pipeline.wakeupCommand;
+  if (!isWakeupReentry) {
+    pipeline.qaAttempt++;
+    pipeline.qaRoundCount = (pipeline.qaRoundCount || 0) + 1;
+  }
   deps.savePipelineState(pipeline);
   const logFile = path.join(pipeline.specPath, 'output.log'); // kept for deps.phaseHeader and deps.gitPush
   const qaLogFile = path.join(pipeline.specPath, 'output-qa.log');
@@ -382,8 +393,17 @@ export async function runQaReview(
   // Write QA session mapping for live streaming in the UI
   updateSessionMap(pipeline.specPath, 'qa', sessionId);
   const agentSpecPath = deps.toAgentPath(pipeline.specPath);
+  const wakeupHeader = isWakeupReentry
+    ? buildWakeupReentryHeader({
+        unitLabel: 'the QA review',
+        wakeupFilename: PHASE_WAKEUP_FILENAME,
+        command: pipeline.wakeupCommand,
+        artifact: pipeline.wakeupArtifact,
+        worktreeNote: true,
+      })
+    : '';
   processManager.sendMessage(sessionId,
-    humanDirectiveFor(pipeline.specPath, 'qa-reviewer') +
+    wakeupHeader + humanDirectiveFor(pipeline.specPath, 'qa-reviewer') +
     `/qa-review ${agentSpecPath}/spec.md\n\n` +
     `IMPORTANT: Write the QA report to \`${agentSpecPath}/qa_report.json\` (use this exact absolute path, not a relative path).\n` +
     `The working directory is a git worktree — do NOT write to a .teamai/ subdirectory relative to the current directory.`);
@@ -397,6 +417,17 @@ export async function runQaReview(
     throw err;
   }
   processManager.killSession(sessionId);
+
+  // ADR 002 (generalized — see wakeup.ts): a QA reviewer re-running a
+  // verification job to confirm a fix's evidence can just as legitimately
+  // need to pause for a multi-hour job as a coder subtask can. Must run
+  // before the "no readable report" check below — otherwise a legitimate
+  // in-progress job gets treated as a QA agent that produced nothing.
+  if (await resolvePhaseWakeup({
+    pipeline, specDir: pipeline.specPath, cwd: pipeline.worktreePath, wasReentry: isWakeupReentry,
+    unitLabel: 'The QA review', deps,
+  }) === 'pending') return;
+
   consumeFeedbackIfDue(pipeline.specPath, 'qa-review');
 
   const reportResult = readJsonFile<QaReport>(reportPath, { required: true });
