@@ -9,7 +9,7 @@ import path from 'path';
 import { processManager } from '../process-manager';
 import { TaskStore } from '../task-store';
 import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody } from '../git-platform';
-import { squashWithMessage, readImplementationSummary, readSpecSummary } from './artifact-commit';
+import { squashWithMessage, hasCommitsBeyondBase, readImplementationSummary, readSpecSummary } from './artifact-commit';
 import { restoreWorktreeGitFileToHostPaths, worktreeGitEnv } from './worktree-utils';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
@@ -581,17 +581,37 @@ export async function runMergePhase(
     );
   }
 
+  // Nothing to merge: a pure verification ticket (empty src/ diff by design)
+  // combined with artifacts never being committed into the branch can leave
+  // it identical to the base after rebasing. `git merge` of such a branch
+  // would just no-op ("Already up to date"), but that's easy to misread as
+  // "the merge silently did nothing" — detect it explicitly and skip
+  // straight to done with a clear reason instead.
+  if (!hasCommitsBeyondBase(pipeline.worktreePath, baseBranch, {
+    restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
+    worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
+  })) {
+    logToOutput(pipeline.specPath,
+      `[MERGE] No commits between ${baseBranch} and ${pipeline.branch} — this task's implementation required ` +
+      `no changes beyond what's already on ${baseBranch}. Nothing to merge; marking done directly.\n`);
+    deps.removeWorktree(pipeline.taskId);
+    deps.advancePhase(pipeline, 'done');
+    return;
+  }
+
   // Pre-merge squash: collapse the feature branch to a single trailer-bearing
   // commit so the trailers survive the merge (merge/rebase keep messages
   // verbatim; squash pre-fills from the sole commit). No-op when
   // recordHistoryInGit is off or the worktree has nothing to commit.
   const ticketMessage = deps.buildTicketMessage(pipeline);
   if (ticketMessage) {
-    squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
+    const squashed = squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
       restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
       worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
     });
-    logToOutput(pipeline.specPath, '[MERGE] Feature branch squashed to a single trailer-bearing commit\n');
+    logToOutput(pipeline.specPath, squashed
+      ? '[MERGE] Feature branch squashed to a single trailer-bearing commit\n'
+      : '[MERGE] Squash skipped (nothing to collapse or a git error) — proceeding with the branch as-is\n');
   }
 
   const pipelineConfig = deps.getPipelineConfig();
@@ -656,6 +676,7 @@ interface CreatePRDeps extends BasePhaseDeps {
   extractPrUrl: (logFile: string) => string | null;
   /** Build the trailer-bearing commit message for this task (null when recordHistoryInGit is off). */
   buildTicketMessage: (pipeline: TaskPipeline) => import('./artifact-commit').TicketMessageResult | null;
+  removeWorktree: (taskId: string) => void;
 }
 
 export async function runCreatePRPhase(
@@ -691,17 +712,38 @@ export async function runCreatePRPhase(
     logToOutput(pipeline.specPath, '\n[WARN] PR may require manual conflict resolution\n');
   }
 
+  // Nothing to PR: a pure verification ticket (empty src/ diff by design)
+  // combined with artifacts never being committed into the branch can leave
+  // it identical to the base after rebasing. Pushing and calling `gh pr
+  // create` on such a branch fails with a confusing raw GraphQL error ("No
+  // commits between <base> and <branch>") — detect it up front and skip
+  // straight to done with a clear reason instead of attempting a PR that was
+  // never going to succeed.
+  if (!hasCommitsBeyondBase(pipeline.worktreePath, baseBranch, {
+    restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
+    worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
+  })) {
+    logToOutput(pipeline.specPath,
+      `[PR] No commits between ${baseBranch} and ${pipeline.branch} — this task's implementation required ` +
+      `no changes beyond what's already on ${baseBranch}. Nothing to open a PR for; marking done directly.\n`);
+    deps.removeWorktree(pipeline.taskId);
+    deps.advancePhase(pipeline, 'done');
+    return;
+  }
+
   // Pre-push squash: collapse the feature branch to a single trailer-bearing
   // commit so the trailers survive any GitHub merge method (merge/rebase keep
   // messages verbatim; squash pre-fills from the sole commit). No-op when
   // recordHistoryInGit is off or the worktree has nothing to commit.
   const ticketMessage = deps.buildTicketMessage(pipeline);
   if (ticketMessage) {
-    squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
+    const squashed = squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
       restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
       worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
     });
-    logToOutput(pipeline.specPath, '[PR] Feature branch squashed to a single trailer-bearing commit\n');
+    logToOutput(pipeline.specPath, squashed
+      ? '[PR] Feature branch squashed to a single trailer-bearing commit\n'
+      : '[PR] Squash skipped (nothing to collapse or a git error) — proceeding with the branch as-is\n');
   }
   deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
 

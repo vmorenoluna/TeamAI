@@ -2541,6 +2541,50 @@ describe('Orchestrator', () => {
   // ── runMerge ──────────────────────────────────────────────────────
 
   describe('runMerge', () => {
+    it('marks the task done directly (no merge attempt) when the branch has no commits beyond the base', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
+
+      // A pure verification ticket: rebased onto the base, the branch is
+      // identical to it — merge-base and HEAD resolve to the exact same sha.
+      const SAME_SHA = 'b'.repeat(40);
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        const argStr = Array.isArray(args) ? args.join(' ') : '';
+        if (cmd === 'git' && argStr.includes('merge-base')) return SAME_SHA;
+        if (cmd === 'git' && args[0] === 'rev-parse' && args[1] === 'HEAD') return SAME_SHA;
+        if (cmd === 'git' && args[0] === 'merge' && args[1] === pipeline.branch) {
+          throw new Error('should not be called — nothing to merge');
+        }
+        return '';
+      });
+
+      const promise = (orch as AnyOrch).runMerge(pipeline);
+      await promise;
+
+      expect(mockCreateSession).not.toHaveBeenCalled();
+      // Worktree still removed, task still reaches done — just without ever
+      // attempting the doomed-to-be-a-no-op direct merge.
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git',
+        expect.arrayContaining(['worktree', 'remove']),
+        expect.any(Object),
+      );
+      expect(pipeline.phase).toBe('done');
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+
     it('merges directly via git merge --no-edit, cleans up', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
@@ -2772,6 +2816,53 @@ describe('Orchestrator', () => {
   // ── runCreatePR ───────────────────────────────────────────────────
 
   describe('runCreatePR', () => {
+    it('marks the task done directly (no PR attempt) when the branch has no commits beyond the base', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
+
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+
+      // A pure verification ticket: rebased onto the base, the branch is
+      // identical to it — merge-base and HEAD resolve to the exact same sha.
+      const SAME_SHA = 'a'.repeat(40);
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        const argStr = Array.isArray(args) ? args.join(' ') : '';
+        if (cmd === 'git' && argStr.includes('merge-base')) return SAME_SHA;
+        if (cmd === 'git' && args[0] === 'rev-parse' && args[1] === 'HEAD') return SAME_SHA;
+        if (cmd === 'git' && argStr.includes('symbolic-ref')) return 'refs/remotes/origin/main';
+        if (cmd === 'gh' && argStr.includes('pr create')) throw new Error('should not be called — nothing to PR');
+        return '';
+      });
+
+      const promise = (orch as AnyOrch).runCreatePR(pipeline);
+      await promise;
+
+      // No PR attempt at all — pr list/create skipped, and the PR flow's own
+      // `push -u --force` never runs (the rebase step's own internal
+      // `push --force-with-lease` is separate and expected either way).
+      const prCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'gh' && Array.isArray(call[1]) && call[1].includes('pr'),
+      );
+      expect(prCalls.length).toBe(0);
+      const prPushCalls = mockExecFileSync.mock.calls.filter(
+        (call: any[]) => call[0] === 'git' && Array.isArray(call[1]) &&
+          call[1][0] === 'push' && call[1].includes('-u') && call[1].includes('--force'),
+      );
+      expect(prPushCalls.length).toBe(0);
+      expect(pipeline.phase).toBe('done');
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+
     it('pushes branch, creates PR via gh CLI, advances to pr-open', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
