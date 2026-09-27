@@ -345,7 +345,17 @@ export function squashWithMessage(
   writeFileSync(msgFile, message, 'utf-8');
   try {
     execFileSync('git', ['reset', '--soft', mergeBase], gitOpts);
-    execFileSync('git', ['commit', '-F', msgFile], gitOpts);
+    // --allow-empty: a verification-only task's sole commit can legitimately
+    // have an empty tree (e.g. a deliberate `git commit --allow-empty` the
+    // coder made to carry evidence in its message — see implement.md's
+    // "empty (or absent) `files` array" guidance). Without this flag, `git
+    // commit` refuses ("nothing to commit") whenever the squashed result's
+    // tree matches mergeBase's — but by then the `reset --soft` above has
+    // ALREADY discarded that original commit, and the catch below can only
+    // log the failure, not undo it. That silently destroyed the very commit
+    // a verification-only task depends on to still open a PR instead of
+    // falling back to hasCommitsBeyondBase's done-directly path below.
+    execFileSync('git', ['commit', '--allow-empty', '-F', msgFile], gitOpts);
     return true;
   } catch (err) {
     warn('artifacts', `squashWithMessage failed in ${worktreePath}`, err);

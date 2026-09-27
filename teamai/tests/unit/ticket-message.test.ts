@@ -345,6 +345,32 @@ describe('squashWithMessage', () => {
     const result = squashWithMessage(worktreePath, 'feat: test squash\n', 'master', specPath, noopDeps);
     expect(result).toBe(false);
   });
+
+  it('preserves a deliberately-empty verification commit instead of destroying it (regression: bare `git commit` without --allow-empty)', () => {
+    // A verification-only subtask's marker commit per implement.md's
+    // guidance — no code diff, but a real commit carrying evidence in its
+    // message (e.g. "git commit --allow-empty -m '...' "). Without
+    // --allow-empty on the SQUASH's own commit step, `git reset --soft`
+    // would discard this commit and the follow-up `git commit` would then
+    // fail ("nothing to commit") -- too late to undo the reset, silently
+    // losing the only commit a verification-only task's PR/merge has to
+    // attach to.
+    git(['commit', '--allow-empty', '-m', 'test: verified, no code changes'], worktreePath);
+
+    const result = squashWithMessage(worktreePath, 'feat: test squash\n\nTask-ID: t\n', 'master', specPath, noopDeps);
+
+    expect(result).toBe(true);
+    // Still exactly one commit ahead of the base -- collapsed, not lost.
+    const log = git(['log', '--oneline', 'master..HEAD'], worktreePath).trim().split('\n');
+    expect(log.length).toBe(1);
+    // The squashed commit carries the new trailer-bearing message, not the
+    // original marker message -- it was collapsed, not merely left in place.
+    const finalMessage = git(['log', '-1', '--format=%B'], worktreePath).trim();
+    expect(finalMessage).toBe('feat: test squash\n\nTask-ID: t');
+    // Tree is still empty -- no code change was invented to make room for it.
+    expect(git(['status', '--porcelain'], worktreePath).trim()).toBe('');
+    expect(git(['diff', 'master', 'HEAD'], worktreePath).trim()).toBe('');
+  });
 });
 
 // ── hasCommitsBeyondBase ──

@@ -2541,7 +2541,7 @@ describe('Orchestrator', () => {
   // ── runMerge ──────────────────────────────────────────────────────
 
   describe('runMerge', () => {
-    it('marks the task done directly (no merge attempt) when the branch has no commits beyond the base', async () => {
+    it('marks the task done directly (no merge attempt) when the branch has no commits beyond the base and the plan never expected changes', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       const slug = testData.slug;
@@ -2555,6 +2555,10 @@ describe('Orchestrator', () => {
       mkdirSync(pipeline.worktreePath, { recursive: true });
       const taskStore = (orch as AnyOrch).taskStore;
       taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
+      // A genuine verification-only plan — every subtask declares no files.
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Verify only', description: 'no code changes', files: [], acceptance_criteria: [] }],
+      }));
 
       // A pure verification ticket: rebased onto the base, the branch is
       // identical to it — merge-base and HEAD resolve to the exact same sha.
@@ -2581,6 +2585,44 @@ describe('Orchestrator', () => {
         expect.any(Object),
       );
       expect(pipeline.phase).toBe('done');
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+
+    it('throws instead of marking done when the branch has no commits beyond the base but the plan DID expect file changes', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { description: slug, branch: `feat/${slug}` });
+      // The plan expected a real source file to change.
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Add feature', description: 'do it', files: ['src/app.ts'], acceptance_criteria: [] }],
+      }));
+
+      const SAME_SHA = 'c'.repeat(40);
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        const argStr = Array.isArray(args) ? args.join(' ') : '';
+        if (cmd === 'git' && argStr.includes('merge-base')) return SAME_SHA;
+        if (cmd === 'git' && args[0] === 'rev-parse' && args[1] === 'HEAD') return SAME_SHA;
+        if (cmd === 'git' && args[0] === 'merge' && args[1] === pipeline.branch) {
+          throw new Error('should not be called — nothing to merge');
+        }
+        return '';
+      });
+
+      await expect((orch as AnyOrch).runMerge(pipeline)).rejects.toThrow(
+        /Plan declared file changes.*no commits beyond/,
+      );
+      expect(pipeline.phase).not.toBe('done');
 
       if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
     });
@@ -2816,11 +2858,15 @@ describe('Orchestrator', () => {
   // ── runCreatePR ───────────────────────────────────────────────────
 
   describe('runCreatePR', () => {
-    it('marks the task done directly (no PR attempt) when the branch has no commits beyond the base', async () => {
+    it('marks the task done directly (no PR attempt) when the branch has no commits beyond the base and the plan never expected changes', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
       writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
+      // A genuine verification-only plan — every subtask declares no files.
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Verify only', description: 'no code changes', files: [], acceptance_criteria: [] }],
+      }));
 
       const slug = testData.slug;
       const pipeline = makePipeline({
@@ -2859,6 +2905,43 @@ describe('Orchestrator', () => {
       );
       expect(prPushCalls.length).toBe(0);
       expect(pipeline.phase).toBe('done');
+
+      if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
+    });
+
+    it('throws instead of marking done when the branch has no commits beyond the base but the plan DID expect file changes', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Feature');
+      writeFileSync(join(testData.taskDir, 'spec_summary.md'), 'Summary of the feature.');
+      // The plan expected a real source file to change.
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Add feature', description: 'do it', files: ['src/app.ts'], acceptance_criteria: [] }],
+      }));
+
+      const slug = testData.slug;
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        branch: `feat/${slug}`,
+        worktreePath: join(testData.root, '..', 'worktrees', slug),
+      });
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+
+      const SAME_SHA = 'd'.repeat(40);
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        const argStr = Array.isArray(args) ? args.join(' ') : '';
+        if (cmd === 'git' && argStr.includes('merge-base')) return SAME_SHA;
+        if (cmd === 'git' && args[0] === 'rev-parse' && args[1] === 'HEAD') return SAME_SHA;
+        if (cmd === 'git' && argStr.includes('symbolic-ref')) return 'refs/remotes/origin/main';
+        if (cmd === 'gh' && argStr.includes('pr create')) throw new Error('should not be called — nothing to PR');
+        return '';
+      });
+
+      await expect((orch as AnyOrch).runCreatePR(pipeline)).rejects.toThrow(
+        /Plan declared file changes.*no commits beyond/,
+      );
+      expect(pipeline.phase).not.toBe('done');
 
       if (existsSync(pipeline.worktreePath)) rmSync(pipeline.worktreePath, { recursive: true, force: true });
     });

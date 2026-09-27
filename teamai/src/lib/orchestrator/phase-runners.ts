@@ -16,7 +16,7 @@ import { resolveBaseBranch } from '../git-platform';
 import { updateSessionMap, logToOutput } from './helpers';
 import { humanDirectiveFor, consumeFeedbackIfDue, readHumanFeedback } from './human-feedback';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
-import { applyPlanFileSerialization, logUndeclaredSubtaskReferences, snapshotPreservedPlanSubtasks, restorePreservedPlanSubtasks, loadPreservedPlanSubtasks, clearPreservedPlanSubtasks } from './plan-validation';
+import { applyPlanFileSerialization, logUndeclaredSubtaskReferences, snapshotPreservedPlanSubtasks, restorePreservedPlanSubtasks, loadPreservedPlanSubtasks, clearPreservedPlanSubtasks, planDeclaresRealFileChanges } from './plan-validation';
 import { warn } from '../logger';
 import { WorktreeError, PipelineConfigError } from './errors';
 import type { PipelinePhase } from '@/constants/phases';
@@ -581,16 +581,30 @@ export async function runMergePhase(
     );
   }
 
-  // Nothing to merge: a pure verification ticket (empty src/ diff by design)
-  // combined with artifacts never being committed into the branch can leave
-  // it identical to the base after rebasing. `git merge` of such a branch
-  // would just no-op ("Already up to date"), but that's easy to misread as
-  // "the merge silently did nothing" — detect it explicitly and skip
-  // straight to done with a clear reason instead.
+  // Nothing to merge: a task whose plan never expected code changes
+  // (empty/absent `files` everywhere, per implement.md's guidance) should
+  // still leave a real — if empty — commit on the branch (squashWithMessage
+  // preserves those now), so this only fires for a branch with truly no
+  // commit at all beyond the base. `git merge` of such a branch would just
+  // no-op ("Already up to date"), but that's easy to misread as "the merge
+  // silently did nothing" — detect it explicitly instead.
   if (!hasCommitsBeyondBase(pipeline.worktreePath, baseBranch, {
     restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
     worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
   })) {
+    // A branch with no commit at all is only unsuspicious if the plan never
+    // expected one — otherwise this is the signature of an implementation
+    // that was lost, skipped, or never finished, and marking it `done`
+    // would silently ship nothing for a task that was supposed to change
+    // something. Fail loudly instead so it's investigated, not missed.
+    if (planDeclaresRealFileChanges(pipeline.specPath)) {
+      throw new PipelineConfigError(
+        `Plan declared file changes for this task, but its branch has no commits beyond ${baseBranch} ` +
+        `after rebasing — the implementation may have been lost, skipped, or never committed. ` +
+        `Investigate the worktree at ${pipeline.worktreePath} before retrying.`,
+        'NO_CHANGES_BUT_PLAN_EXPECTED_THEM',
+      );
+    }
     logToOutput(pipeline.specPath,
       `[MERGE] No commits between ${baseBranch} and ${pipeline.branch} — this task's implementation required ` +
       `no changes beyond what's already on ${baseBranch}. Nothing to merge; marking done directly.\n`);
@@ -712,17 +726,30 @@ export async function runCreatePRPhase(
     logToOutput(pipeline.specPath, '\n[WARN] PR may require manual conflict resolution\n');
   }
 
-  // Nothing to PR: a pure verification ticket (empty src/ diff by design)
-  // combined with artifacts never being committed into the branch can leave
-  // it identical to the base after rebasing. Pushing and calling `gh pr
-  // create` on such a branch fails with a confusing raw GraphQL error ("No
-  // commits between <base> and <branch>") — detect it up front and skip
-  // straight to done with a clear reason instead of attempting a PR that was
-  // never going to succeed.
+  // Nothing to PR: a task whose plan never expected code changes (empty/
+  // absent `files` everywhere, per implement.md's guidance) should still
+  // leave a real — if empty — commit on the branch (squashWithMessage
+  // preserves those now), so this only fires for a branch with truly no
+  // commit at all beyond the base. Pushing and calling `gh pr create` on
+  // such a branch fails with a confusing raw GraphQL error ("No commits
+  // between <base> and <branch>") — detect it up front instead.
   if (!hasCommitsBeyondBase(pipeline.worktreePath, baseBranch, {
     restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
     worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
   })) {
+    // A branch with no commit at all is only unsuspicious if the plan never
+    // expected one — otherwise this is the signature of an implementation
+    // that was lost, skipped, or never finished, and marking it `done`
+    // would silently ship nothing for a task that was supposed to change
+    // something. Fail loudly instead so it's investigated, not missed.
+    if (planDeclaresRealFileChanges(pipeline.specPath)) {
+      throw new PipelineConfigError(
+        `Plan declared file changes for this task, but its branch has no commits beyond ${baseBranch} ` +
+        `after rebasing — the implementation may have been lost, skipped, or never committed. ` +
+        `Investigate the worktree at ${pipeline.worktreePath} before retrying.`,
+        'NO_CHANGES_BUT_PLAN_EXPECTED_THEM',
+      );
+    }
     logToOutput(pipeline.specPath,
       `[PR] No commits between ${baseBranch} and ${pipeline.branch} — this task's implementation required ` +
       `no changes beyond what's already on ${baseBranch}. Nothing to open a PR for; marking done directly.\n`);
