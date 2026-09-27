@@ -106,6 +106,15 @@ re-read a file to verify an `Edit` that returned success.
    `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 5. If tests fail, fix the issues before proceeding.
 6. Commit your changes with a descriptive message: `feat(scope): description`
+   - **A subtask with an empty (or absent) `files` array is a verification-only subtask —
+     no code diff is expected.** Still commit: create an empty commit
+     (`git commit --allow-empty -m "..."`) whose message records what you verified
+     (commands run, results, acceptance criteria confirmed). This matters even though
+     there's no diff to carry: without a real commit on the branch, there's nothing
+     for a PR to attach to, and the task can only be marked done directly with no
+     reviewable trail — an empty commit lets a PR still open, showing the verification
+     evidence in its description even with 0 files changed. Never invent a code change
+     just to have something to commit.
 7. **Verify nothing in your scope is left uncommitted.** Run `git status --porcelain --
    <path1> <path2> ...` restricted to exactly the paths in this subtask's `files`
    and `files_to_create` arrays. Any non-empty output is a blocking failure — stage

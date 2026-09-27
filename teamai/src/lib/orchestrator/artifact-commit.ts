@@ -212,6 +212,58 @@ export function buildTicketMessageForPipeline(
   return { message: lines.join('\n') + '\n', trailerLines };
 }
 
+// ── Empty-branch detection ─────────────────────────────────────────────────
+
+/**
+ * Whether `worktreePath`'s HEAD has any commit beyond its merge-base with
+ * `origin/<baseBranch>` — i.e. whether this task actually has anything left
+ * to contribute to the base branch (a PR to open, a merge to perform).
+ *
+ * A task can legitimately reach the merge/create-pr phase with nothing to
+ * merge: a pure verification ticket whose own acceptance criteria mandate an
+ * empty `src/` diff (the code was already correct; the job was only to
+ * confirm it) produces no code changes, and TeamAI's artifact-commit scheme
+ * never commits the `.teamai/{slug}/` folder into the branch either (it's
+ * encoded as commit-message trailers on the squash commit instead, which has
+ * nothing to attach to when there's no commit to squash). After the phase's
+ * pre-merge/pre-PR rebase, such a branch is bit-for-bit identical to the base
+ * — callers should check this BEFORE squashing/pushing/opening a PR and
+ * route straight to `done` instead, rather than attempting a squash/PR/merge
+ * that has nothing to act on (squashWithMessage's own `head === mergeBase`
+ * no-op silently produces a branch with zero commits, which e.g. GitHub's
+ * createPullRequest correctly, but confusingly, rejects with "No commits
+ * between <base> and <branch>").
+ *
+ * Fails open (returns true) on any git error, or if either `rev-parse` or
+ * `merge-base` comes back blank — a real git success never returns an empty
+ * SHA, so a blank result means the caller couldn't actually resolve one
+ * (e.g. an unrelated test double stubbing every `execFileSync` call with
+ * `''`), not a genuine "identical to base" answer. If we can't tell whether
+ * there's anything to merge, don't silently mark the task done; let the
+ * normal squash/PR/merge path run and surface its own error instead.
+ */
+export function hasCommitsBeyondBase(
+  worktreePath: string,
+  baseBranch: string,
+  deps: CommitArtifactsDeps,
+): boolean {
+  if (!existsSync(worktreePath)) return true;
+  deps.restoreWorktreeGitFileToHostPaths(worktreePath);
+  const gitEnv = deps.worktreeGitEnv(worktreePath);
+  const gitOpts = Object.keys(gitEnv).length
+    ? { cwd: worktreePath, env: { ...process.env, ...gitEnv }, stdio: 'pipe' as const }
+    : { cwd: worktreePath, stdio: 'pipe' as const };
+  try {
+    const mergeBase = execFileSync('git', ['merge-base', 'HEAD', `origin/${baseBranch}`], gitOpts).toString().trim();
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], gitOpts).toString().trim();
+    if (!mergeBase || !head) return true;
+    return head !== mergeBase;
+  } catch (err) {
+    warn('artifacts', `hasCommitsBeyondBase: could not resolve HEAD/merge-base in ${worktreePath}`, err);
+    return true;
+  }
+}
+
 // ── Pre-merge squash helper ───────────────────────────────────────────────
 
 /**
@@ -293,7 +345,17 @@ export function squashWithMessage(
   writeFileSync(msgFile, message, 'utf-8');
   try {
     execFileSync('git', ['reset', '--soft', mergeBase], gitOpts);
-    execFileSync('git', ['commit', '-F', msgFile], gitOpts);
+    // --allow-empty: a verification-only task's sole commit can legitimately
+    // have an empty tree (e.g. a deliberate `git commit --allow-empty` the
+    // coder made to carry evidence in its message — see implement.md's
+    // "empty (or absent) `files` array" guidance). Without this flag, `git
+    // commit` refuses ("nothing to commit") whenever the squashed result's
+    // tree matches mergeBase's — but by then the `reset --soft` above has
+    // ALREADY discarded that original commit, and the catch below can only
+    // log the failure, not undo it. That silently destroyed the very commit
+    // a verification-only task depends on to still open a PR instead of
+    // falling back to hasCommitsBeyondBase's done-directly path below.
+    execFileSync('git', ['commit', '--allow-empty', '-F', msgFile], gitOpts);
     return true;
   } catch (err) {
     warn('artifacts', `squashWithMessage failed in ${worktreePath}`, err);

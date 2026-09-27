@@ -22,6 +22,7 @@ import {
   readImplementationSummary,
   readSpecSummary,
   squashWithMessage,
+  hasCommitsBeyondBase,
 } from '../../src/lib/orchestrator/artifact-commit';
 
 // ── Helpers ──
@@ -343,5 +344,98 @@ describe('squashWithMessage', () => {
   it('returns false and leaves history untouched when there is nothing beyond the base', () => {
     const result = squashWithMessage(worktreePath, 'feat: test squash\n', 'master', specPath, noopDeps);
     expect(result).toBe(false);
+  });
+
+  it('preserves a deliberately-empty verification commit instead of destroying it (regression: bare `git commit` without --allow-empty)', () => {
+    // A verification-only subtask's marker commit per implement.md's
+    // guidance — no code diff, but a real commit carrying evidence in its
+    // message (e.g. "git commit --allow-empty -m '...' "). Without
+    // --allow-empty on the SQUASH's own commit step, `git reset --soft`
+    // would discard this commit and the follow-up `git commit` would then
+    // fail ("nothing to commit") -- too late to undo the reset, silently
+    // losing the only commit a verification-only task's PR/merge has to
+    // attach to.
+    git(['commit', '--allow-empty', '-m', 'test: verified, no code changes'], worktreePath);
+
+    const result = squashWithMessage(worktreePath, 'feat: test squash\n\nTask-ID: t\n', 'master', specPath, noopDeps);
+
+    expect(result).toBe(true);
+    // Still exactly one commit ahead of the base -- collapsed, not lost.
+    const log = git(['log', '--oneline', 'master..HEAD'], worktreePath).trim().split('\n');
+    expect(log.length).toBe(1);
+    // The squashed commit carries the new trailer-bearing message, not the
+    // original marker message -- it was collapsed, not merely left in place.
+    const finalMessage = git(['log', '-1', '--format=%B'], worktreePath).trim();
+    expect(finalMessage).toBe('feat: test squash\n\nTask-ID: t');
+    // Tree is still empty -- no code change was invented to make room for it.
+    expect(git(['status', '--porcelain'], worktreePath).trim()).toBe('');
+    expect(git(['diff', 'master', 'HEAD'], worktreePath).trim()).toBe('');
+  });
+});
+
+// ── hasCommitsBeyondBase ──
+//
+// Regression coverage for a real production failure: a pure verification
+// ticket (empty src/ diff by design) reaching create-pr/merge with nothing
+// committed beyond the base branch — squashWithMessage already detects this
+// internally (see above) but its caller in phase-runners.ts ignored the
+// return value and barrelled ahead into `gh pr create`, which GitHub
+// rejects with "No commits between <base> and <branch>". Callers now check
+// this independently, before attempting to squash/push/PR/merge at all.
+
+describe('hasCommitsBeyondBase', () => {
+  let originDir: string;
+  let worktreePath: string;
+  const noopDeps = {
+    restoreWorktreeGitFileToHostPaths: () => {},
+    worktreeGitEnv: () => ({}),
+  };
+
+  function git(args: string[], cwd: string): string {
+    return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: 'pipe' });
+  }
+
+  beforeEach(() => {
+    originDir = join(tmpdir(), `teamai-hcb-origin-${randomUUID().slice(0, 8)}`);
+    worktreePath = join(tmpdir(), `teamai-hcb-work-${randomUUID().slice(0, 8)}`);
+
+    mkdirSync(originDir, { recursive: true });
+    git(['init', '--bare', '-b', 'master'], originDir);
+
+    git(['clone', originDir, worktreePath], tmpdir());
+    git(['config', 'user.email', 'test@teamai.dev'], worktreePath);
+    git(['config', 'user.name', 'TeamAI Test'], worktreePath);
+    writeFileSync(join(worktreePath, 'base.txt'), 'base\n');
+    git(['add', '.'], worktreePath);
+    git(['commit', '-m', 'initial commit'], worktreePath);
+    git(['push', 'origin', 'master'], worktreePath);
+
+    git(['checkout', '-b', 'feat/test'], worktreePath);
+  });
+
+  afterEach(() => {
+    try { rmSync(originDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+
+  it('returns false when the branch is identical to the base (pure verification ticket)', () => {
+    // No commits beyond master at all — exactly what a task whose own
+    // acceptance criteria mandate an empty src/ diff leaves behind.
+    expect(hasCommitsBeyondBase(worktreePath, 'master', noopDeps)).toBe(false);
+  });
+
+  it('returns true when the branch has a real commit beyond the base', () => {
+    writeFileSync(join(worktreePath, 'feature.txt'), 'feature work\n');
+    git(['add', '.'], worktreePath);
+    git(['commit', '-m', 'feature work'], worktreePath);
+    expect(hasCommitsBeyondBase(worktreePath, 'master', noopDeps)).toBe(true);
+  });
+
+  it('fails open (returns true) when the worktree does not exist', () => {
+    expect(hasCommitsBeyondBase(join(tmpdir(), 'does-not-exist'), 'master', noopDeps)).toBe(true);
+  });
+
+  it('fails open (returns true) when merge-base/rev-parse cannot be resolved (e.g. an unrelated base branch)', () => {
+    expect(hasCommitsBeyondBase(worktreePath, 'no-such-branch', noopDeps)).toBe(true);
   });
 });
