@@ -1,5 +1,5 @@
 // Seed script for the ShopForge e-commerce demo project.
-// Creates 15 tasks across all 8 pipeline phases and a roadmap with 14 items.
+// Creates 19 tasks covering every pipeline phase and a roadmap with 14 items.
 // Usage: npx tsx seed-demo.ts [--yes]
 //
 // Put at project root (outside demo/) so re-seeding doesn't wipe this script.
@@ -16,7 +16,7 @@ const args = process.argv.slice(2);
 const skipConfirm = args.includes('--yes') || args.includes('-y');
 
 if (!skipConfirm) {
-  console.log('This will DELETE and re-create demo/.teamai/ and demo/.claude/.');
+  console.log('This will DELETE and re-create demo/.teamai/, demo/.claude/, demo/src/ and demo/.git/.');
   console.log('Run with --yes to skip this prompt.');
   process.exit(0);
 }
@@ -973,7 +973,7 @@ new file mode 100644
         { id: 3, title: 'Zero-rate B2B orders with a valid VAT ID', acceptance_criteria: ['VAT ID is validated against the VIES service', 'Invalid VAT IDs keep the standard rate'], depends_on: [1], qa_flagged: false },
       ],
     },
-    outputLog: `[ORCHESTRATOR] Tax Rules for EU Countries
+    outputLog: `[2026-09-24T14:02:10] [ORCHESTRATOR] Tax Rules for EU Countries
 
 [2026-09-24T14:02:11] Review feedback received — routing to the analyst (spec revision)
 [2026-09-24T14:02:12] spec.md snapshotted to spec_revision_before.md
