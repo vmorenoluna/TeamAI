@@ -2,6 +2,12 @@
 // Creates 19 tasks covering every pipeline phase and a roadmap with 14 items.
 // Usage: npx tsx seed-demo.ts [--yes]
 //
+// Everything here is fabricated: the tasks, the agent logs, the git history, and
+// the pull requests. The PR URLs are placeholder strings shaped like GitHub URLs
+// (e.g. shopforge/shopforge) purely so the UI has something to render as a PR
+// link. They point at no real repo, nothing in the app fetches them, and they are
+// not meant to resolve — don't "fix" them by aiming at a real repository.
+//
 // Put at project root (outside demo/) so re-seeding doesn't wipe this script.
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, cpSync, rmSync } from 'fs';
@@ -96,6 +102,41 @@ interface SeedTask {
    *  Lines should start with '[YYYY-MM-DDTHH:MM:SS] ' so the terminal renders
    *  a timestamp per line (undated lines fall back to 00:00:00). */
   roleLogs?: Record<string, string>;
+}
+
+/**
+ * Add deterministic full timestamps to a scripted terminal transcript. The
+ * UI sorts lines from every role log by this timestamp, so these values also
+ * define the demo's cross-agent chronology. QA→merge transcripts include a
+ * deliberate 20-minute handoff before the merger session starts.
+ */
+function timestampDemoLog(transcript: string, startedAt: string): string {
+  let cursor = Date.parse(`${startedAt}Z`);
+  if (!Number.isFinite(cursor)) throw new Error(`Invalid demo log start time: ${startedAt}`);
+
+  return transcript.split('\n').map((line) => {
+    if (!line.trim()) return line;
+
+    if (line.startsWith('[MERGE]')) cursor += 20 * 60 * 1000;
+    const timestamp = new Date(cursor).toISOString().slice(0, 19);
+
+    // Model a little time passing between events; testing / CI and explicit
+    // waits take longer than a file read or a line of agent commentary.
+    const lower = line.toLowerCase();
+    const delay = line.startsWith('> Running acceptance tests') || line.startsWith('> Running API integration tests')
+      || line.startsWith('> Running visual regression tests') ? 4 * 60 * 1000
+      : lower.includes('ci checks queued') ? 3 * 60 * 1000
+      : lower.includes('passed in ') ? 45 * 1000
+      : lower.startsWith('> writing') || lower.startsWith('> creating pr') || lower.startsWith('> merging pr') ? 30 * 1000
+      : line.startsWith('  ') ? 8 * 1000
+      : 20 * 1000;
+    // The implement samples explicitly say the coder is still within a
+    // six-minute session budget, so keep their simulated elapsed time aligned.
+    const pace = transcript.startsWith('[IMPLEMENT]') ? 0.5 : 1;
+    cursor += Math.round(delay * pace);
+
+    return `[${timestamp}] ${line}`;
+  }).join('\n');
 }
 
 const TASKS: SeedTask[] = [
@@ -210,7 +251,7 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
         { id: 4, title: 'Add integration tests for cart persistence flow', acceptance_criteria: ['Test: quantity change persists across page refresh', 'Test: optimistic update rolls back on network error', 'Test: error toast appears and retry works', 'Test: cart total updates correctly after quantity change'], completed: false },
       ],
     },
-    outputLog: `[IMPLEMENT] Cart Quantity Fix — Subtask 3/4: Optimistic updates with rollback
+    outputLog: timestampDemoLog(`[IMPLEMENT] Cart Quantity Fix — Subtask 3/4: Optimistic updates with rollback
 [SESSION] Claude Code v2.4.1 — coder persona loaded
 
 > Reading plan.json for task context...
@@ -257,8 +298,8 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
   Rollback on error: implemented via useEffect watching error state.
   Next: write integration tests (subtask 4).
 
-[WAITING] Claude session budget: 42% remaining (2.5min of 6min used)
-`,
+[WAITING] Claude session budget: 42% remaining (3.5min of 6min used)
+`, '2026-09-04T10:00:00'),
     events: ['backlog', 'spec', 'plan', 'implement'],
   },
   {
@@ -276,7 +317,7 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
         { id: 5, title: 'Add unit tests for shipping calculator', acceptance_criteria: ['Test: 2kg package to Local zone = $8.00', 'Test: 5kg package to National zone = $17.50', 'Test: orders over $75 get free shipping', 'Test: weight below 0.1kg rounds up to 0.1kg', 'Test: weight above 30kg returns validation error'], completed: false },
       ],
     },
-    outputLog: `[IMPLEMENT] Shipping Rate Calculator — Subtask 3/5: Free shipping threshold
+    outputLog: timestampDemoLog(`[IMPLEMENT] Shipping Rate Calculator — Subtask 3/5: Free shipping threshold
 [SESSION] Claude Code v2.4.1 — coder persona loaded
 
 > Reading plan.json for task context...
@@ -324,8 +365,8 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
   Orders $75+ get free shipping. Progress bar shows "Add $X.XX for free shipping".
   Next: wire rate display into checkout flow (subtask 4).
 
-[WAITING] Claude session budget: 38% remaining (2.3min of 6min used)
-`,
+[WAITING] Claude session budget: 38% remaining (3.7min of 6min used)
+`, '2026-09-05T11:00:00'),
     events: ['backlog', 'spec', 'plan', 'implement'],
   },
 
@@ -357,7 +398,7 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
         { severity: 'warning', description: 'Search index should be rebuilt after product catalog updates', file: 'src/search.ts' },
       ],
     },
-    outputLog: `[QA-REVIEW] Search Partial Match — Attempt 1
+    outputLog: timestampDemoLog(`[QA-REVIEW] Search Partial Match — Attempt 1
 [SESSION] Claude Code v2.4.1 — qa-reviewer persona loaded
 
 > Reading spec.md...
@@ -446,7 +487,7 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
         { severity: 'suggestion', description: 'Consider using a Headless UI Dialog for better a11y', file: 'src/components/MobileNav.tsx' },
       ],
     },
-    outputLog: `[QA-REVIEW] Mobile Nav Auto-Close — Attempt 1
+    outputLog: timestampDemoLog(`[QA-REVIEW] Mobile Nav Auto-Close — Attempt 1
 [SESSION] Claude Code v2.4.1 — qa-reviewer persona loaded
 
 > Reading spec.md...
@@ -533,7 +574,7 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
       ],
       additional_issues: [],
     },
-    outputLog: `[QA-REVIEW] Dark Mode Support — Attempt 1
+    outputLog: timestampDemoLog(`[QA-REVIEW] Dark Mode Support — Attempt 1
 [SESSION] Claude Code v2.4.1 — qa-reviewer persona loaded
 
 > Reading spec.md...
@@ -607,7 +648,7 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
   ⏳ visual-regression (running...)
 
 [AWAITING REVIEW] PR #127 is open. CI checks: 3/4 passed.
-`,
+`, '2026-08-25T09:00:00'),
     diff: `diff --git a/src/styles/tokens.css b/src/styles/tokens.css
 new file mode 100644
 --- /dev/null
@@ -699,7 +740,7 @@ new file mode 100644
     title: 'Wishlist with Shareable Links',
     description: 'Users can create wishlists, add products, and share a public link with friends and family.',
     phase: 'awaiting-review',
-    outputLog: `[QA-REVIEW] Wishlist with Shareable Links — Attempt 1
+    outputLog: timestampDemoLog(`[QA-REVIEW] Wishlist with Shareable Links — Attempt 1
 [SESSION] Claude Code v2.4.1 — qa-reviewer persona loaded
 
 > Reading spec.md...
@@ -773,7 +814,7 @@ new file mode 100644
   ⏳ e2e-tests (running...)
 
 [AWAITING REVIEW] PR #129 is open. CI checks: 3/4 passed.
-`,
+`, '2026-08-26T10:00:00'),
     plan: {
       subtasks: [
         { id: 1, title: 'Wishlist CRUD API', acceptance_criteria: ['Create/read/update/delete wishlists', 'Add/remove products from wishlist'], depends_on: [], qa_flagged: false },
@@ -1013,7 +1054,7 @@ new file mode 100644
     title: 'Order Tracking Dashboard',
     description: 'Real-time order tracking with map view showing the package\'s current location and estimated delivery window.',
     phase: 'done',
-    outputLog: `[QA-REVIEW] Order Tracking Dashboard — Attempt 1
+    outputLog: timestampDemoLog(`[QA-REVIEW] Order Tracking Dashboard — Attempt 1
 [SESSION] Claude Code v2.4.1 — qa-reviewer persona loaded
 
 > Reading spec.md...
@@ -1102,7 +1143,7 @@ new file mode 100644
   ✅ Feature branch cleaned up
 
 [DONE] All 4 subtasks complete. Mapbox integration with live tracking, 5-step timeline, dynamic ETA from carrier API, and push notifications via Web Push API. All tests pass.
-`,
+`, '2026-07-09T14:00:00'),
     spec: '# Order Tracking Dashboard\n\n## Acceptance Criteria\n1. Map shows package location with a pin\n2. Status timeline shows: Order Placed → Processing → Shipped → Out for Delivery → Delivered\n3. Estimated delivery window updates dynamically\n4. Push notification when status changes\n5. Tracking number is clickable and opens carrier\'s tracking page\n',
     plan: {
       subtasks: [

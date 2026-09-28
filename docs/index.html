@@ -14,7 +14,14 @@
   <style>
     /* ========== Reset & Base ========== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html { scroll-behavior: smooth; }
+    /* Anchor jumps park the target at the very top of the viewport, which is
+       underneath the fixed nav. Reserve the nav's height (57px: 14px container
+       padding + 28px logo line + 1px border) plus a small gap, so a section
+       lands below the bar instead of behind it. The nav grows to ~63px once the
+       hamburger button replaces the inline links, which this value still clears.
+       Set on the scrolling element rather than on each section, so any future
+       anchor target is covered without having to remember this. */
+    html { scroll-behavior: smooth; scroll-padding-top: 73px; }
     body {
       font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
       background: #0b0f19;
@@ -324,7 +331,7 @@
     <h2>See every task at a glance</h2>
     <p class="section-desc">Tasks are organized into columns by stage. Drag and drop to move them between stages, or let the pipeline advance them automatically. Click any task to see its full details, specification, plan, and review report.</p>
 
-      <img src="images/board.jpg" alt="TeamAI kanban board with tasks across pipeline stages" loading="lazy" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:0 auto;">
+      <img src="images/board.jpg" alt="TeamAI kanban board with tasks across pipeline stages" width="2812" height="1602" loading="lazy" decoding="async" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:0 auto;">
   </div>
 </section>
 
@@ -353,7 +360,7 @@
       When the coder finds a gap in the spec, the task loops back to the analyst for clarification.
     </p>
 
-    <img src="images/workflow.jpg" alt="TeamAI pipeline view showing task detail with spec, plan, and subtask breakdown" loading="lazy" style="max-width:650px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
+    <img src="images/workflow.jpg" alt="TeamAI pipeline view showing task detail with spec, plan, and subtask breakdown" width="820" height="1186" loading="lazy" decoding="async" style="max-width:650px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
 
   </div>
 </section>
@@ -365,7 +372,7 @@
     <h2>Watch every agent work in real time</h2>
     <p class="section-desc">Each agent's terminal output streams live to the app. Watch the analyst write the spec, the planner break it into subtasks, the coder implement each change, and QA validate the results. Every thought, file edit, and command run, visible as it happens.</p>
 
-      <img src="images/ticket-terminal.jpg" alt="TeamAI terminal view for interactive Claude agent sessions" loading="lazy" style="width:100%;border-radius:12px;">
+      <img src="images/ticket-terminal.jpg" alt="TeamAI terminal view for interactive Claude agent sessions" width="1249" height="1108" loading="lazy" decoding="async" style="width:100%;border-radius:12px;">
   </div>
 </section>
 
@@ -376,9 +383,8 @@
     <h2>Work hands-on when you want to</h2>
     <p class="section-desc">Open a live terminal with any of your agents and step in whenever you like, with no task or pipeline required. Sessions keep running while you move around the app, so you can paste, scroll, and use full-screen tools just like a normal terminal. Any session can also file a new ticket for you, straight from the conversation.</p>
 
-    <!-- TODO(screenshot): save the Terminals page screenshot as docs/images/terminals.jpg, then uncomment the line below.
-    <img src="images/terminals.jpg" alt="TeamAI terminals page with live interactive agent sessions" loading="lazy" style="width:100%;border-radius:12px;">
-    -->
+    <!-- Optional screenshot: drop docs/images/terminals.jpg in and it appears here. While the file is missing this img removes itself on error, so no broken-image icon is shown. -->
+    <img src="images/terminals.jpg" alt="TeamAI terminals page with live interactive agent sessions" width="1249" height="1108" loading="lazy" decoding="async" onerror="this.remove()" style="width:100%;border-radius:12px;">
   </div>
 </section>
 
@@ -388,7 +394,7 @@
     <span class="section-label">Subtasks</span>
     <h2>Every task is broken into subtasks</h2>
     <p class="section-desc">The planner divides complex features into small, independent subtasks. Each subtask runs in its own git worktree so parallel agents never conflict.</p>
-    <img src="images/subtasks.jpg" alt="TeamAI subtask breakdown with git worktree assignment" loading="lazy" style="width:100%;border-radius:12px;">
+    <img src="images/subtasks.jpg" alt="TeamAI subtask breakdown with git worktree assignment" width="1254" height="1114" loading="lazy" decoding="async" style="width:100%;border-radius:12px;">
   </div>
 </section>
 
@@ -403,7 +409,7 @@
       </div>
     </div>
 
-    <img src="images/autoresume.jpg" alt="TeamAI auto-resume showing rate-limited task recovery" loading="lazy" style="max-width:900px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
+    <img src="images/autoresume.jpg" alt="TeamAI auto-resume showing rate-limited task recovery" width="1162" height="108" loading="lazy" decoding="async" style="max-width:900px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
   </div>
 </section>
 
@@ -431,7 +437,7 @@
       </div>
     </div>
 
-    <img src="images/review.jpg" alt="TeamAI review panel showing QA report with pass/fail criteria" loading="lazy" style="max-width:900px;width:100%;margin:36px auto 0;display:block;border-radius:12px;">
+    <img src="images/review.jpg" alt="TeamAI review panel showing QA report with pass/fail criteria" width="1258" height="1107" loading="lazy" decoding="async" style="max-width:900px;width:100%;margin:36px auto 0;display:block;border-radius:12px;">
   </div>
 </section>
 
@@ -442,9 +448,8 @@
     <h2>Nothing fails silently</h2>
     <p class="section-desc">A failed task doesn't leave you guessing. The task overview shows exactly which criteria failed and what QA recommends doing about it, and any task that pauses for your attention says plainly what it's waiting for — both on the board and inside the task itself.</p>
 
-    <!-- TODO(screenshot): save the failure report / needs-attention screenshot as docs/images/diagnostics.jpg, then uncomment the line below.
-    <img src="images/diagnostics.jpg" alt="TeamAI failed task overview showing failed criteria and QA recommendations" loading="lazy" style="max-width:900px;width:100%;margin:36px auto 0;display:block;border-radius:12px;">
-    -->
+    <!-- Optional screenshot: drop docs/images/diagnostics.jpg in and it appears here. While the file is missing this img removes itself on error, so no broken-image icon is shown. -->
+    <img src="images/diagnostics.jpg" alt="TeamAI failed task overview showing failed criteria and QA recommendations" width="1258" height="1107" loading="lazy" decoding="async" onerror="this.remove()" style="max-width:900px;width:100%;margin:36px auto 0;display:block;border-radius:12px;">
   </div>
 </section>
 
@@ -490,7 +495,7 @@
           <li>Highlights automatically merged tasks for later review</li>
         </ul>
       </div>
-        <img src="images/automode.jpg" alt="TeamAI auto mode enabled on the kanban board" loading="lazy" style="max-width:225px;width:100%;border-radius:12px;display:block;margin:0 auto;">
+        <img src="images/automode.jpg" alt="TeamAI auto mode enabled on the kanban board" width="165" height="79" loading="lazy" decoding="async" style="max-width:225px;width:100%;border-radius:12px;display:block;margin:0 auto;">
     </div>
   </div>
 </section>
@@ -502,9 +507,8 @@
     <h2>Everything you shipped, in one place</h2>
     <p class="section-desc">Completed tickets don't disappear. The Delivered column keeps a lasting record of finished work — what was built, which pull request shipped it, and when — so you can look back on the history of your project long after the agents have moved on.</p>
 
-    <!-- TODO(screenshot): save the Delivered column screenshot as docs/images/delivered.jpg, then uncomment the line below.
-    <img src="images/delivered.jpg" alt="TeamAI Delivered column showing completed tickets with pull request links" loading="lazy" style="max-width:1100px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
-    -->
+    <!-- Optional screenshot: drop docs/images/delivered.jpg in and it appears here. While the file is missing this img removes itself on error, so no broken-image icon is shown. -->
+    <img src="images/delivered.jpg" alt="TeamAI Delivered column showing completed tickets with pull request links" width="2812" height="1602" loading="lazy" decoding="async" onerror="this.remove()" style="max-width:1100px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
   </div>
 </section>
 
@@ -532,7 +536,7 @@
       </div>
     </div>
 
-      <img src="images/roadmap.jpg" alt="TeamAI product roadmap with phased items" loading="lazy" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:48px auto 0;">
+      <img src="images/roadmap.jpg" alt="TeamAI product roadmap with phased items" width="2394" height="1732" loading="lazy" decoding="async" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:48px auto 0;">
   </div>
 </section>
 

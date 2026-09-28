@@ -2,6 +2,8 @@
 
 A fake e-commerce demo project for TeamAI screenshots and demonstration. Contains 19 pre-seeded tasks across every pipeline phase, a 14-item roadmap, and a throwaway git history so the DONE column has reconstructable tickets.
 
+Everything in it is fabricated — tasks, agent logs, git history, and pull requests alike. Nothing is fetched or validated against a real service; the demo exists so the UI has something realistic to render.
+
 ## Quick Start
 
 ```bash
@@ -68,6 +70,8 @@ Prefix lines with `[YYYY-MM-DDTHH:MM:SS] ` — that is the format the terminal p
 
 The DONE column shows the three disk tasks (each with a fake `prUrl`, which renders as the green `PR` link) and, underneath them, tickets the app reconstructs from the repo's own git history. That history is a throwaway repo the seed creates at `demo/.git`, with five dated commits carrying the trailers the scanner greps for (`Task:`, `Task-ID:`, `QA:`, `Phases:`).
 
+The PR numbers are invented, and the URLs are only shaped like GitHub ones (`shopforge/shopforge/pull/137`) so the UI has something to render as a link. That repository does not exist, so they 404 if clicked, and nothing in the app tries to open or check them — auto-mode's CI polling is the only code path that would hand a task's `prUrl` to `gh`, and the demo flag halts auto-mode.
+
 `demo/src/` and `demo/.git/` are gitignored by the TeamAI repo — both are generated, so none of the demo's fake history is committed upstream. Because the demo has no GitHub remote, the scanner's PR-body lookup logs `no git remotes found` and falls back to commit trailers alone; those cards therefore have no PR link, which is expected.
 
 ## Roadmap
@@ -88,7 +92,9 @@ This wipes and recreates `demo/.teamai/`, `demo/.claude/`, `demo/src/` and `demo
 
 Capture screenshots from the running app and save them to `docs/images/` — the landing page reads them by relative path from there, so no build step is involved.
 
-The three newest sections on `docs/index.html` have commented `<img>` placeholders awaiting images; each is labelled `TODO(screenshot)`. Drop in the file, then delete the `<!--` / `-->` wrapping the `<img>`:
+All 11 `<img>` tags on the page now carry a `width` and `height`, so lazy loading never shifts the layout.
+
+The three newest sections on `docs/index.html` have live `<img>` tags pointing at screenshots that may not exist yet, so saving the file into `docs/images/` is all that's needed — no HTML edit. Each tag carries a reserved `width`/`height` (taken from the closest matching existing screenshot) to cut layout shift while the image loads, plus an `onerror` that removes the tag while the file is missing, so there's no broken-image icon:
 
 | File | Capture |
 |---|---|
