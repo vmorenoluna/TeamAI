@@ -1,6 +1,6 @@
 // Seed script for the ShopForge e-commerce demo project.
 // Creates 19 tasks covering every pipeline phase and a roadmap with 14 items.
-// Usage: npx tsx seed-demo.ts [--yes]
+// Usage: npx tsx seed-demo.ts [--yes] [--logs-only] (logs-only never reseeds demo data)
 //
 // Everything here is fabricated: the tasks, the agent logs, the git history, and
 // the pull requests. The PR URLs are placeholder strings shaped like GitHub URLs
@@ -10,7 +10,7 @@
 //
 // Put at project root (outside demo/) so re-seeding doesn't wipe this script.
 
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, cpSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, cpSync, rmSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { execFileSync } from 'child_process';
 
@@ -20,8 +20,9 @@ const TEAMAI_DIR = join(DEMO_DIR, '.teamai');
 
 const args = process.argv.slice(2);
 const skipConfirm = args.includes('--yes') || args.includes('-y');
+const logsOnly = args.includes('--logs-only');
 
-if (!skipConfirm) {
+if (!skipConfirm && !logsOnly) {
   console.log('This will DELETE and re-create demo/.teamai/, demo/.claude/, demo/src/ and demo/.git/.');
   console.log('Run with --yes to skip this prompt.');
   process.exit(0);
@@ -455,7 +456,7 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
   Tagged subtask matching src/search.ts with [QA CORRECTION] annotations.
 
 [QA COMPLETE] Report written to qa_report.json. Task bounced back to implement phase.
-`,
+`, '2026-08-13T13:00:00'),
     events: ['backlog', 'spec', 'plan', 'implement', 'qa-review'],
   },
   {
@@ -545,7 +546,7 @@ Automatically detect abandoned carts (items added, no checkout within 4 hours) a
   Tagged MobileNav.tsx subtasks with [QA CORRECTION] annotations.
 
 [QA COMPLETE] Report written to qa_report.json. Task bounced back to implement phase.
-`,
+`, '2026-08-12T11:00:00'),
     events: ['backlog', 'spec', 'plan', 'implement', 'qa-review'],
   },
 
@@ -1300,6 +1301,207 @@ const ROADMAP = {
 
 // ── Write helpers ───────────────────────────────────────────────────
 
+type AgentRole = 'analyst' | 'planner' | 'coder' | 'qa' | 'merge';
+
+const AGENT_ROLE_INDEX: Record<AgentRole, number> = {
+  analyst: 0,
+  planner: 1,
+  coder: 2,
+  qa: 3,
+  merge: 4,
+};
+
+function phaseAgentRoles(task: SeedTask): AgentRole[] {
+  const rolesThroughPhase: Record<string, AgentRole[]> = {
+    backlog: [],
+    spec: ['analyst'],
+    plan: ['analyst', 'planner'],
+    implement: ['analyst', 'planner', 'coder'],
+    'qa-review': ['analyst', 'planner', 'coder', 'qa'],
+    'awaiting-review': ['analyst', 'planner', 'coder', 'qa'],
+    'pr-open': ['analyst', 'planner', 'coder', 'qa', 'merge'],
+    done: ['analyst', 'planner', 'coder', 'qa', 'merge'],
+    // Keep the Merger role visible on failed tickets too: this is demo-only
+    // role coverage, and the generated message explicitly says no merge ran.
+    failed: ['analyst', 'planner', 'coder', 'qa', 'merge'],
+  };
+  const roles = [...(rolesThroughPhase[task.phase] ?? [])];
+  if (task.phase === 'awaiting-review' && (task.prUrl || task.outputLog?.includes('[MERGE]'))) {
+    roles.push('merge');
+  }
+  return roles;
+}
+
+function roleForTranscriptLine(line: string): AgentRole | 'orchestrator' | null {
+  const body = line.replace(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\] /, '');
+  if (body.startsWith('[IMPLEMENT]')) return 'coder';
+  if (body.startsWith('[QA-REVIEW]')) return 'qa';
+  if (body.startsWith('[MERGE]')) return 'merge';
+  if (body.startsWith('[ORCHESTRATOR]')) return 'orchestrator';
+  return null;
+}
+
+function roleLogFile(role: AgentRole, subtaskId = 1): string {
+  if (role === 'analyst') return 'output-spec.log';
+  if (role === 'planner') return 'output-plan.log';
+  if (role === 'coder') return `output-st${subtaskId}.log`;
+  if (role === 'qa') return 'output-qa.log';
+  return 'output-merge.log';
+}
+
+function plannedSubtasks(task: SeedTask): Array<{ id: number; title: string; completed?: boolean }> {
+  const plan = task.plan as { subtasks?: Array<{ id: number; title: string; completed?: boolean }> } | undefined;
+  return plan?.subtasks ?? [];
+}
+
+function coderSubtaskIds(task: SeedTask): number[] {
+  const subtasks = plannedSubtasks(task);
+  if (!subtasks.length) return [1];
+
+  if (task.phase !== 'implement') return subtasks.map((subtask) => subtask.id);
+
+  const completed = subtasks.filter((subtask) => subtask.completed).map((subtask) => subtask.id);
+  const active = subtasks.find((subtask) => !subtask.completed);
+  if (active) completed.push(active.id);
+  return [...new Set(completed.length ? completed : [subtasks[0].id])];
+}
+
+function transcriptRoleLogs(transcript: string | undefined, task: SeedTask): Record<string, string> {
+  if (!transcript) return {};
+  const grouped = new Map<string, string[]>();
+  const coderIds = coderSubtaskIds(task);
+  let currentRole: AgentRole | 'orchestrator' | null = null;
+
+  let currentCoderId = coderIds[0];
+  for (const line of transcript.split('\n')) {
+    const detected = roleForTranscriptLine(line);
+    if (detected) {
+      currentRole = detected;
+      if (detected === 'coder') {
+        const subtaskMatch = line.match(/Subtask\s+(\d+)\s*\//i);
+        const detectedId = subtaskMatch ? Number(subtaskMatch[1]) : undefined;
+        currentCoderId = detectedId && coderIds.includes(detectedId) ? detectedId : coderIds[0];
+      }
+    }
+    if (!currentRole) continue;
+
+    const file = currentRole === 'coder'
+      ? roleLogFile('coder', currentCoderId)
+      : currentRole === 'orchestrator' ? 'output.log' : roleLogFile(currentRole);
+    const lines = grouped.get(file) ?? [];
+    lines.push(line);
+    grouped.set(file, lines);
+  }
+
+  return Object.fromEntries([...grouped.entries()].map(([file, lines]) => [file, lines.join('\n')]));
+}
+
+function explicitRole(roleLogName: string): AgentRole | 'orchestrator' | null {
+  if (roleLogName === 'output-spec.log') return 'analyst';
+  if (roleLogName === 'output-plan.log') return 'planner';
+  if (roleLogName === 'output-qa.log') return 'qa';
+  if (roleLogName === 'output-merge.log') return 'merge';
+  if (/^output-st\d+\.log$/.test(roleLogName)) return 'coder';
+  if (roleLogName === 'output.log') return 'orchestrator';
+  return null;
+}
+
+function firstLogTimestamp(task: SeedTask): number | null {
+  const candidates = [task.outputLog ?? '', ...Object.values(task.roleLogs ?? {})];
+  const stamps = candidates.flatMap((content) =>
+    [...content.matchAll(/^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\] /gm)]
+      .map((match) => Date.parse(`${match[1]}Z`))
+  ).filter(Number.isFinite);
+  return stamps.length ? Math.min(...stamps) : null;
+}
+
+function generatedRoleLog(task: SeedTask, role: AgentRole, startedAt: string, subtaskId = 1): string {
+  const subtask = plannedSubtasks(task).find((item) => item.id === subtaskId);
+  const snippets: Record<AgentRole, string> = {
+    analyst: `[SESSION] Demo session started — role: analyst\n> Reviewing the seeded request for ${task.title}\n> Recording acceptance criteria in spec.md\n> Analyst handoff complete — scripted demo transcript; no CLI session was run.`,
+    planner: `[SESSION] Demo session started — role: planner\n> Reading spec.md for ${task.title}\n> Mapping acceptance criteria to implementation subtasks\n> Planner handoff complete — scripted demo transcript; no CLI session was run.`,
+    coder: `[SESSION] Demo session started — role: coder (subtask ${subtaskId})\n> Working on ${subtask?.title ?? task.title}\n> Checking the implementation against the subtask acceptance criteria\n> Coder checkpoint saved — scripted demo transcript; no source code was changed.`,
+    qa: `[SESSION] Demo session started — role: qa-reviewer\n> Reviewing the implementation and acceptance criteria for ${task.title}\n> Overall seeded QA result: ${task.qaReport && (task.qaReport as { overall?: string }).overall ? (task.qaReport as { overall?: string }).overall : task.phase === 'failed' ? 'FAIL' : 'review pending'}\n> QA handoff recorded — scripted demo transcript; no tests were executed.`,
+    merge: task.phase === 'failed'
+      ? `[SESSION] Demo session started — role: merger\n> Checking merge readiness for ${task.title}\n> Task is failed; merge is intentionally blocked. This log only populates the demo Merger role filter. No PR was created and no merge ran.`
+      : `[SESSION] Demo session started — role: merger\n> Reviewing delivery state for ${task.title}\n> ${task.prUrl ? `Placeholder PR link for display only: ${task.prUrl}` : 'Recording the seeded merge handoff; no real repository or merge operation exists.'}\n> Merger handoff complete — scripted demo transcript; no CLI session was run.`,
+  };
+  return timestampDemoLog(snippets[role], startedAt);
+}
+
+function buildTaskLogs(task: SeedTask): { orchestratorLog: string | null; roleLogs: Record<string, string> } {
+  const splitLogs = transcriptRoleLogs(task.outputLog, task);
+  const roleLogs = { ...splitLogs, ...(task.roleLogs ?? {}) };
+  const rolesFromLogs = Object.entries(roleLogs)
+    .map(([file, content]) => ({ role: explicitRole(file), content }))
+    .filter((item): item is { role: AgentRole | 'orchestrator'; content: string } => !!item.role);
+  const needed = new Set<AgentRole>([
+    ...phaseAgentRoles(task),
+    ...rolesFromLogs.map((item) => item.role).filter((role): role is AgentRole => role !== 'orchestrator'),
+  ]);
+
+  const timestamp = firstLogTimestamp(task);
+  const fallback = Date.parse('2026-07-06T12:00:00Z');
+  const anchor = timestamp ?? fallback;
+  const inferredRole = rolesFromLogs.find((item) => item.role !== 'orchestrator')?.role;
+  const anchorRoleIndex = inferredRole ? AGENT_ROLE_INDEX[inferredRole]
+    : Math.max(-1, ...[...needed].map((role) => AGENT_ROLE_INDEX[role]));
+  const coderIds = coderSubtaskIds(task);
+  const transcriptCoderId = Object.keys(roleLogs)
+    .map((file) => file.match(/^output-st(\d+)\.log$/))
+    .find((match) => !!match)?.[1];
+  const anchorCoderId = transcriptCoderId ? Number(transcriptCoderId)
+    : task.phase === 'implement' ? coderIds[coderIds.length - 1] : coderIds[0];
+
+  for (const role of needed) {
+    const roleFiles = role === 'coder'
+      ? coderIds.map((id) => roleLogFile('coder', id))
+      : [roleLogFile(role)];
+    for (const file of roleFiles) {
+      if (roleLogs[file]) continue;
+      const roleIndex = AGENT_ROLE_INDEX[role];
+      const idMatch = file.match(/^output-st(\d+)\.log$/);
+      const subtaskOffset = role === 'coder' && idMatch
+        ? (Number(idMatch[1]) - anchorCoderId) * 10 * 60 * 1000
+        : 0;
+      const startedAt = new Date(anchor + (roleIndex - anchorRoleIndex) * 60 * 60 * 1000 + subtaskOffset)
+        .toISOString().slice(0, 19);
+      roleLogs[file] = generatedRoleLog(task, role, startedAt, idMatch ? Number(idMatch[1]) : 1);
+    }
+  }
+
+  const existingOrchestrator = roleLogs['output.log'];
+  const earliestRoleStart = Math.min(anchor, ...[...needed].flatMap((role) => {
+    const roleStarts = role === 'coder' ? coderIds.map((id) => {
+      const offset = (id - anchorCoderId) * 10 * 60 * 1000;
+      return anchor + (AGENT_ROLE_INDEX[role] - anchorRoleIndex) * 60 * 60 * 1000 + offset;
+    }) : [anchor + (AGENT_ROLE_INDEX[role] - anchorRoleIndex) * 60 * 60 * 1000];
+    return roleStarts;
+  }));
+  const orchestratorLog = existingOrchestrator ?? (task.phase === 'backlog' ? null : timestampDemoLog(
+    `[ORCHESTRATOR] ${task.title}\nTask is seeded in phase '${task.phase}'.\nDemo transcript only — no agent subprocesses or external services were run.`,
+    new Date(earliestRoleStart - 60 * 1000).toISOString().slice(0, 19),
+  ));
+  delete roleLogs['output.log'];
+  return { orchestratorLog, roleLogs };
+}
+
+function writeTaskLogs(task: SeedTask, dir?: string) {
+  const slug = task.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const taskDir = dir ?? join(TEAMAI_DIR, slug);
+  mkdirSync(taskDir, { recursive: true });
+  const { orchestratorLog, roleLogs } = buildTaskLogs(task);
+  const expected = new Set([...(orchestratorLog ? ['output.log'] : []), ...Object.keys(roleLogs)]);
+
+  // These are generated terminal artifacts. Remove stale role tabs so the UI
+  // reflects work through the ticket's current phase, not a previous seed.
+  for (const filename of readdirSync(taskDir)) {
+    if (/^output.*\.log$/.test(filename) && !expected.has(filename)) unlinkSync(join(taskDir, filename));
+  }
+  if (orchestratorLog) writeFileSync(join(taskDir, 'output.log'), orchestratorLog);
+  for (const [file, content] of Object.entries(roleLogs)) writeFileSync(join(taskDir, file), content);
+}
+
 function writeTask(task: SeedTask) {
   const slug = task.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const dir = join(TEAMAI_DIR, slug);
@@ -1331,12 +1533,7 @@ function writeTask(task: SeedTask) {
   if (task.plan) writeFileSync(join(dir, 'plan.json'), JSON.stringify(task.plan, null, 2));
   if (task.qaReport) writeFileSync(join(dir, 'qa_report.json'), JSON.stringify(task.qaReport, null, 2));
   if (task.completionSummary) writeFileSync(join(dir, 'completion_summary.md'), task.completionSummary);
-  if (task.outputLog) writeFileSync(join(dir, 'output.log'), task.outputLog);
-  if (task.roleLogs) {
-    for (const [fileName, content] of Object.entries(task.roleLogs)) {
-      writeFileSync(join(dir, fileName), content);
-    }
-  }
+  writeTaskLogs(task, dir);
   if (task.diff) writeFileSync(join(dir, 'diff.txt'), task.diff);
 }
 
@@ -1565,6 +1762,92 @@ function seedGitHistory(): number {
 }
 
 // ── Main ────────────────────────────────────────────────────────────
+
+function verifyExistingDemoLogs(task: SeedTask, dir: string): string[] {
+  const filenames = readdirSync(dir).filter((filename) => /^output.*\.log$/.test(filename));
+  const present = new Set(filenames);
+  const required = phaseAgentRoles(task).flatMap((role) => role === 'coder'
+    ? coderSubtaskIds(task).map((id) => roleLogFile('coder', id))
+    : [roleLogFile(role)]);
+  if (task.phase !== 'backlog') required.push('output.log');
+  for (const filename of required) {
+    if (!present.has(filename)) throw new Error(`${task.id}: missing required ${filename}`);
+  }
+
+  for (const filename of filenames) {
+    const content = readFileSync(join(dir, filename), 'utf-8');
+    let previousTimestamp = -Infinity;
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      const match = line.match(/^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\] /);
+      if (!match) throw new Error(`${task.id}: undated line in ${filename}: ${line}`);
+      const timestamp = Date.parse(`${match[1]}Z`);
+      if (!Number.isFinite(timestamp) || timestamp < previousTimestamp) {
+        throw new Error(`${task.id}: invalid or non-monotonic timestamp in ${filename}: ${line}`);
+      }
+      previousTimestamp = timestamp;
+    }
+  }
+  return filenames.sort();
+}
+
+function refreshExistingDemoLogs(): void {
+  if (!existsSync(TEAMAI_DIR)) throw new Error(`Demo task store not found: ${TEAMAI_DIR}`);
+
+  const phases = new Set(['backlog', 'spec', 'plan', 'implement', 'qa-review', 'awaiting-review', 'pr-open', 'done', 'failed']);
+  const targets: Array<{ task: SeedTask; dir: string }> = [];
+  for (const seededTask of TASKS) {
+    const slug = seededTask.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const dir = join(TEAMAI_DIR, slug);
+    const taskPath = join(dir, 'task.json');
+    if (!existsSync(dir) || !existsSync(taskPath)) {
+      throw new Error(`Refusing partial logs-only refresh: missing existing task data for ${seededTask.id}`);
+    }
+
+    const saved = JSON.parse(readFileSync(taskPath, 'utf-8')) as {
+      id?: string; phase?: string; prUrl?: string; mergeStrategy?: string;
+    };
+    if (saved.id !== seededTask.id) {
+      throw new Error(`Refusing logs-only refresh: expected ${seededTask.id} in ${taskPath}, found ${saved.id ?? 'no id'}`);
+    }
+    if (saved.phase && !phases.has(saved.phase)) {
+      throw new Error(`Refusing logs-only refresh: unknown phase '${saved.phase}' for ${seededTask.id}`);
+    }
+
+    const planPath = join(dir, 'plan.json');
+    const plan = existsSync(planPath) ? JSON.parse(readFileSync(planPath, 'utf-8')) as object : seededTask.plan;
+    targets.push({
+      dir,
+      task: {
+        ...seededTask,
+        phase: saved.phase ?? seededTask.phase,
+        plan,
+        prUrl: saved.prUrl ?? seededTask.prUrl,
+        mergeStrategy: saved.mergeStrategy ?? seededTask.mergeStrategy,
+      },
+    });
+  }
+
+  // Validate every target before changing any files. This mode only writes or
+  // prunes output*.log artifacts inside these existing task directories.
+  for (const { task, dir } of targets) {
+    writeTaskLogs(task, dir);
+    const files = verifyExistingDemoLogs(task, dir);
+    console.log(`  ${task.id} (${task.phase}): ${files.map((file) => file
+      .replace('output-spec.log', 'analyst')
+      .replace('output-plan.log', 'planner')
+      .replace(/^output-st(\d+)\.log$/, 'coder(subtask $1)')
+      .replace('output-qa.log', 'QA')
+      .replace('output-merge.log', 'merger')
+      .replace('output.log', 'orchestrator')).join(', ') || 'no agent logs'}`);
+  }
+  console.log(`\n✅ Refreshed terminal logs for ${targets.length} existing demo tasks; task data and demo git state were left untouched.`);
+}
+
+if (logsOnly) {
+  refreshExistingDemoLogs();
+  process.exit(0);
+}
 
 console.log('Re-seeding ShopForge demo project...');
 
