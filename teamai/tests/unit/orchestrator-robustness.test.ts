@@ -1945,8 +1945,13 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       // completion barrier now correctly stops the pass right there, so
       // this mock has to reflect a coder session that actually stayed in
       // scope.
+      // Each subtask's diff must show ITS OWN assigned file changed (an empty
+      // diff now trips the no-op-subtask rejection instead of completing).
+      // Subtasks run sequentially, one diff call each, in order 2, 3, 5.
+      const diffFilesInOrder = ['src/errors.ts', 'src/rate-limit.ts', 'src/upload.ts'];
+      let diffCallIndex = 0;
       mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-        if (Array.isArray(args) && args[0] === 'diff') return '';
+        if (Array.isArray(args) && args[0] === 'diff') return (diffFilesInOrder[diffCallIndex++] || '') + '\n';
         return 'abc123\n';
       });
       mockCreateSession
@@ -2096,6 +2101,9 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
         // (unrelated to what this test is verifying) is a no-op, so the only
         // push this test sees is pushAndVerify's.
         if (args[0] === 'rev-list') return '0\n';
+        // The subtask must show its assigned file changed — an empty diff now
+        // trips the no-op-subtask rejection instead of completing.
+        if (args[0] === 'diff') return 'src/test.ts\n';
       }
       return '';
     });
@@ -2160,6 +2168,10 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
       if (Array.isArray(args)) {
         if (args[0] === 'push') throw new Error('remote: Permission denied');
         if (args[0] === 'pull') return '';
+        // The subtask must show its assigned file changed — an empty diff now
+        // trips the no-op-subtask rejection instead of completing and
+        // reaching the push step this test actually verifies.
+        if (args[0] === 'diff') return 'src/test.ts\n';
       }
       return '';
     });
@@ -2215,6 +2227,10 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
           return localHead + '\n';
         }
         if (args[0] === 'pull') return '';
+        // The subtask must show its assigned file changed — an empty diff now
+        // trips the no-op-subtask rejection instead of completing and
+        // reaching the push-verification step this test actually verifies.
+        if (args[0] === 'diff') return 'src/test.ts\n';
       }
       return '';
     });
@@ -2624,6 +2640,20 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
     // NO qa_feedback.md — first run
     expect(existsSync(join(project.taskDir, 'qa_feedback.md'))).toBe(false);
 
+    // Each subtask must show its own assigned file changed, in dispatch order
+    // (1, 2, 3) — an empty diff now trips the no-op-subtask rejection instead
+    // of completing.
+    const diffFilesInOrder = ['src/login.ts', 'src/auth.ts', 'src/dashboard.ts'];
+    let diffCallIndex = 0;
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'diff') return (diffFilesInOrder[diffCallIndex++] || '') + '\n';
+      }
+      return '';
+    });
+
     mockCreateSession
       .mockResolvedValueOnce('sess-full-1')
       .mockResolvedValueOnce('sess-full-2')
@@ -2922,6 +2952,20 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
 
     writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nFix auth and API');
 
+    // Each flagged subtask must show its own assigned file changed, in
+    // dispatch order (2, 4) — an empty diff now trips the no-op-subtask
+    // rejection instead of completing.
+    const diffFilesInOrder = ['src/auth.ts', 'src/api.ts'];
+    let diffCallIndex = 0;
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'diff') return (diffFilesInOrder[diffCallIndex++] || '') + '\n';
+      }
+      return '';
+    });
+
     mockCreateSession
       .mockResolvedValueOnce('sess-multi-1')
       .mockResolvedValueOnce('sess-multi-2');
@@ -3017,6 +3061,17 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
     }));
 
     writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nFix auth null pointer');
+
+    // The flagged subtask must show its own assigned file changed — an empty
+    // diff now trips the no-op-subtask rejection instead of completing.
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'diff') return 'src/auth.ts\n';
+      }
+      return '';
+    });
 
     mockCreateSession.mockResolvedValue('sess-parallel-group');
 
@@ -3528,6 +3583,10 @@ describe('runImplement — stall-detector-kill recovery', () => {
       if (Array.isArray(args)) {
         if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
         if (args[0] === 'rev-parse') return 'abc123\n';
+        // These tests' subtasks all declare files: ['src/Foo.scala'] — an
+        // empty diff now trips the no-op-subtask rejection instead of
+        // completing on a successful recovery.
+        if (args[0] === 'diff') return 'src/Foo.scala\n';
       }
       return '';
     });
@@ -4726,6 +4785,18 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
     mkdirSync(join(worktreePath, 'scripts/sweep_logs'), { recursive: true });
     writeFileSync(join(worktreePath, 'scripts/sweep_logs/evidence.log'), 'sweep evidence');
 
+    // The re-entry session also touched its assigned script file (e.g. a
+    // small tweak while investigating the evidence) — an empty diff now
+    // trips the no-op-subtask rejection instead of completing.
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'diff') return 'scripts/sweep.py\n';
+      }
+      return '';
+    });
+
     // Resuming after an earlier, legitimate wakeup cycle on the same subtask.
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement', qaAttempt: 0, worktreePath,
@@ -5017,6 +5088,13 @@ describe('runImplement — commit guard for sequential subtasks', () => {
 
     const addCalls: string[][] = [];
     const commitCalls: string[][] = [];
+    // The subtask never actually committed, so a real `git diff` between
+    // preSessionHead and HEAD would see nothing until the orchestrator's own
+    // auto-commit guard runs `git commit` — simulate that ordering: `diff`
+    // returns empty until a `commit` call has actually happened, matching
+    // what real git would show (and what the no-op-subtask check now relies
+    // on to distinguish "auto-committed" from "truly untouched").
+    let autoCommitted = false;
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (Array.isArray(args)) {
         if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
@@ -5025,11 +5103,8 @@ describe('runImplement — commit guard for sequential subtasks', () => {
           return ' M src/main/scala/sample-project/api/util/MelodyContextBuilder.scala\n';
         }
         if (args[0] === 'add') { addCalls.push(args); return ''; }
-        if (args[0] === 'commit') { commitCalls.push(args); return ''; }
-        // The subtask never actually committed, so a real `git diff` between
-        // preSessionHead and HEAD would see nothing — the auto-commit above
-        // is what has to make the edit visible at all.
-        if (args[0] === 'diff') return '';
+        if (args[0] === 'commit') { commitCalls.push(args); autoCommitted = true; return ''; }
+        if (args[0] === 'diff') return autoCommitted ? 'src/main/scala/sample-project/api/util/MelodyContextBuilder.scala\n' : '';
       }
       return '';
     });
@@ -5211,6 +5286,20 @@ describe('runImplement — depends_on gates dispatch across groups', () => {
       ],
     }));
 
+    // Each subtask must show its own assigned file changed, in dispatch order
+    // (1, 2) — an empty diff now trips the no-op-subtask rejection instead of
+    // completing.
+    const diffFilesInOrder = ['src/a.ts', 'src/b.ts'];
+    let diffCallIndex = 0;
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'diff') return (diffFilesInOrder[diffCallIndex++] || '') + '\n';
+      }
+      return '';
+    });
+
     mockCreateSession
       .mockResolvedValueOnce('sess-dep-a')
       .mockResolvedValueOnce('sess-dep-b');
@@ -5366,6 +5455,18 @@ describe('runImplement — implement completeness gate', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{ id: 1, title: 'Do it', description: 'x', files: ['src/a.ts'], acceptance_criteria: ['Done'] }],
     }));
+
+    // The subtask must show its assigned file changed — an empty diff now
+    // trips the no-op-subtask rejection instead of completing.
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'rev-list') return '0\n';
+        if (args[0] === 'diff') return 'src/a.ts\n';
+      }
+      return '';
+    });
 
     mockCreateSession.mockResolvedValue('sess-gate-complete');
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
@@ -5553,7 +5654,7 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
     project = setupProject();
     orch = new Orchestrator(project.root);
 
-    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[], options?: { cwd?: string }) => {
       if (Array.isArray(args)) {
         // Subtask 2 actually finishes and commits — its cherry-pick range is
         // non-empty. (Subtask 1's range is never queried: it's excluded from
@@ -5568,6 +5669,13 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
         if (args[0] === 'branch') return '';
         if (args[0] === 'worktree') return '';
         if (args[0] === 'status') return '';
+        // Subtask 2's isolated worktree session actually edits+commits its
+        // assigned file — an empty diff now trips the no-op-subtask
+        // rejection instead of completing. Subtask 1 schedules a wakeup
+        // instead of committing anything, so its diff staying empty is
+        // correct and doesn't affect completion (wakeupDetected forces
+        // skipCompletion regardless of the scope/no-op check's verdict).
+        if (args[0] === 'diff') return options?.cwd?.includes('st2') ? 'src/fix.ts\n' : '';
       }
       return '';
     });
@@ -5836,7 +5944,7 @@ describe('runImplement — deliverable-verification failure inside a multi-subta
     project = setupProject();
     orch = new Orchestrator(project.root);
 
-    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[], options?: { cwd?: string }) => {
       if (Array.isArray(args)) {
         // Simulate real git: CHERRY_PICK_HEAD doesn't exist when nothing is mid-cherry-pick.
         if (args[0] === 'rev-parse' && args[1] === '--verify' && args[2] === 'CHERRY_PICK_HEAD') {
@@ -5861,6 +5969,13 @@ describe('runImplement — deliverable-verification failure inside a multi-subta
         if (args[0] === 'branch') return '';
         if (args[0] === 'worktree') return '';
         if (args[0] === 'status') return '';
+        // Subtask 1's isolated worktree session actually edits+commits its
+        // assigned file — an empty diff now trips the no-op-subtask
+        // rejection instead of completing. Subtask 2 has no files_to_create
+        // deliverable on disk either way (that's the actual scenario under
+        // test), and its declared files_to_create exempts it from this
+        // no-op check regardless of what diff its own session shows.
+        if (args[0] === 'diff') return options?.cwd?.includes('st1') ? 'scripts/sweep.py\n' : '';
       }
       return '';
     });

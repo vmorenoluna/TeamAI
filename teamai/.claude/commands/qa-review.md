@@ -85,6 +85,59 @@ suite in Step 6):
 - **Use dynamic ports.** When starting a local server, bind to port 0 (OS-assigned free port). Never hardcode a fixed shared port — another concurrent task may collide.
 - **Never kill what you didn't start.** Do NOT use `kill`, `fuser -k`, `taskkill`, or equivalent against any port or process. Another task's agent may be using it.
 - **Stop your own instances.** When verification is complete, explicitly tear down any server or service you started.
+- **If you're managing more than one process you DID start** (e.g. a server plus its
+  client), stop or relaunch each one by its own PID (`kill $(cat job.pid)`, recorded at
+  launch with `echo $! > job.pid`) — never by a command-line pattern match
+  (`pkill -f <substring>`). A substring broad enough to match every process's command
+  line can also match your own shell's, killing the session that's trying to manage them.
+
+### When a verification job won't finish before your session budget
+
+The guidance below is for a genuinely long-running job — re-running a benchmark or
+verification script to independently confirm a criterion's evidence, for example — NOT
+the routine test suite in Step 6, which stays foreground per that step's own guidance (its
+10–25 minute budget is generous enough that this doesn't apply there).
+
+If confirming a criterion's evidence requires a job that won't complete before your
+session ends, schedule an orchestrator wakeup instead of guessing at the verdict from
+an incomplete run:
+
+1. **Detach the job**: `nohup <command> > job.log 2>&1 & disown`. A bare `&` dies the
+   instant your session exits. Write the log inside `$TEAMAI_SPEC_DIR` (use this
+   environment variable — your cwd is the worktree, not the project root, during
+   QA review).
+2. Write `phase_wakeup.json` to `$TEAMAI_SPEC_DIR`:
+
+```json
+{
+  "wakeup_at": "2026-07-03T23:20:00Z",
+  "background_command": "python scripts/verify_evidence.py --output results/",
+  "expected_artifact": "results/summary.jsonl",
+  "progress_log_path": "results/job.log"
+}
+```
+
+- `wakeup_at`: ISO 8601 timestamp when the process should be done — estimate from the
+  job's actual throughput plus a 20% safety margin.
+- `background_command`: the command you ran (informational).
+- `expected_artifact`: the file you expect the process to produce.
+- `progress_log_path`: the job's own log file, relative to the worktree root — include
+  it whenever the job writes one.
+
+**Do NOT call an interactive `ScheduleWakeup`-style tool** — it is a no-op in this
+pipeline. The orchestrator's resume mechanism only understands the file.
+
+Then end your session normally without writing `qa_report.json` — the orchestrator
+pauses instead of treating this as a QA agent that produced nothing. On re-entry
+(headed `⚠️ WAKEUP RE-ENTRY`): check if the artifact exists and is complete. If it is,
+use its results to finish the review from Step 0 (a rework-pass carry-forward makes
+re-gathering the rest of the evidence cheap). If it's missing or incomplete, check
+whether the process is still running — write an updated `phase_wakeup.json` with a new
+`wakeup_at` if so; if it crashed, do NOT write another wakeup file and report the
+failure immediately as a FAIL criterion (the orchestrator fails the task after 3
+consecutive wakeup attempts without progress). A materially different
+`background_command` on relaunch (you fixed a real blocker) resets that 3-attempt
+budget instead of consuming it.
 
 ## Step 6: Run Test Suite
 
@@ -104,7 +157,10 @@ suite in Step 6):
    notification; a QA-review session gets exactly one turn and is torn down the
    moment this turn ends, so a backgrounded test run's notification never arrives —
    the process is killed mid-run and the report is left with no real verdict for that
-   criterion. Run the test command in the foreground and block on it instead. This
+   criterion. Run the test command in the foreground and block on it instead. (A
+   genuinely long-running verification job — not the routine test suite — has a real
+   cross-session mechanism instead: see "When a verification job won't finish before
+   your session budget" above.) This
    role's Bash tool timeouts are raised specifically for this: your default (no
    `timeout` passed) is 10 minutes, not Claude Code's stock 2 minutes — plenty for
    most suites (very often minutes, not seconds), so you do not need to think about

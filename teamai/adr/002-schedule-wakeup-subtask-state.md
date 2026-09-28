@@ -193,7 +193,11 @@ If the wakeup fires and the sweep still hasn't finished, the engineer checks whe
 
 ### Wakeup during QA rework
 
-Wakeup is only relevant for the first-pass implement phase. During QA rework, the subtask filter is `s.qa_flagged`, and QA rework subtasks typically don't involve long-running background processes. If a wakeup file somehow appears during QA rework, the orchestrator logs a warning and ignores it.
+> **Superseded by the 2026-09-27 addition below** — a QA-rework (cleanup) coder session
+> can legitimately need to start a long verification job just like a first-pass session,
+> and the wakeup-file check is NOT gated on `hasQaFeedback`. The original claim here
+> (wakeup only relevant for first-pass implement) predates that fix and was wrong even
+> before wakeup was generalized beyond implement.
 
 ### Wakeup in parallel subtask groups
 
@@ -238,3 +242,58 @@ If the TeamAI process crashes while a wakeup is scheduled, the `autoResumeInterr
 
 ### Phase 4: UI (kanban-board.tsx, task-detail.tsx)
 - Show wakeup countdown in the task card (same pattern as rate-limit countdown)
+
+## 2026-09-27 addition: generalized to spec, plan, and qa-review
+
+**Exhibit:** task `fix-off-by-one-in-melodycontext-accented`. An analyst session (spec
+phase) launched a multi-hour deterministic verification run, correctly said it would
+wait for it to finish, and then its turn simply ended — headless pipeline sessions have
+no interactive `ScheduleWakeup`-style capability to actually wait across turns.
+`runSpecPhase` had no wakeup detection at all (this ADR's Phase 1 only touched
+`implement.ts` and `orchestrator.ts`'s scheduling/timer half, which was already
+phase-agnostic — see below), so the missing `spec.md` was treated as a hard failure and
+the task was parked for human review, discarding a legitimate job that was still
+running.
+
+**What was already generic:** `_scheduleWakeup`/`_fireWakeup` (orchestrator.ts) and the
+`wakeup*` fields on `TaskPipeline` (types.ts) never depended on the phase being
+`implement` — they operate on the generic pipeline and just re-invoke `executePhase`,
+whatever phase that currently is. Same for crash recovery (`autoResumeInterruptedTasks`)
+and the stale-progress-log early-wake sweep in `recovery.ts`. Only the DETECTION half —
+scanning for the file, parsing it, tracking attempt counts, building the re-entry
+prompt — lived exclusively inside `implement.ts`'s per-subtask loop.
+
+**What changed:** the detection primitives were extracted into
+`src/lib/orchestrator/wakeup.ts` (parse/scan/attempt-count/staleness/prompt-building,
+plus a `resolvePhaseWakeup` orchestration function for the single-session phases) and
+wired into `runSpecPhase`, `runPlanPhase`, and `runQaReview` alongside `implement.ts`
+(refactored to call the same primitives instead of its own inline copies — behavior
+unchanged, verified against the full existing wakeup test suite). Single-session phases
+use one fixed filename, `phase_wakeup.json` — no subtask multiplicity to disambiguate,
+so implement's per-subtask `subtask_wakeup-st<ID>.json` convention and "earliest wakeup
+wins across parallel subtasks" logic don't apply. A new `FailureReason` value,
+`wakeup-exhausted`, covers the circuit-breaker failure path for these phases (kept
+distinct from `implement-failure`, which stays implement-specific and unchanged).
+
+**qa-review-specific fix alongside the generalization:** `runQaReview` incremented
+`pipeline.qaAttempt`/`qaRoundCount` unconditionally at the top of every invocation. Left
+unguarded, a wakeup re-entry — which re-invokes `runQaReview` from the top to continue
+the SAME attempt's background check — would burn a QA-attempt-budget increment purely
+on wakeup cycles, before the reviewer ever reached a fresh verdict. The increment is now
+skipped when `wakeupCommand` is already set at entry (i.e., this invocation is a
+re-entry, not a fresh attempt).
+
+**Terminology note:** earlier drafts of this generalization used "sweep" throughout
+(Sample-project's term for a parameter sweep) — genericized to "script"/"job"/"background
+process" in code comments and command templates, since TeamAI itself is
+project-agnostic. `expected_artifact`/`background_command`/`progress_log_path` always
+described an arbitrary command; only the prose calling it a "sweep" was
+Sample-project-specific.
+
+**Also added while touching this area:** the command templates' "detach the job"
+instructions now warn against relaunching or stopping multiple background jobs via a
+command-line pattern match (`pkill -f <substring>`) instead of by recorded PID — a
+substring broad enough to match every job's command line can also match the managing
+session's own shell, killing the session that was trying to record what it just did.
+Observed twice in the same live session (task `give-minor-mode-melodies-a-real-leading-`)
+while this generalization was being scoped.

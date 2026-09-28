@@ -106,6 +106,9 @@ describe('runSpecPhase — human directive injection', () => {
       savePipelineState: vi.fn(),
       toAgentPath: (p: string) => p,
       executePhase: vi.fn(async () => undefined),
+      getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
+      scheduleWakeup: vi.fn(),
+      writeCompletionSummary: vi.fn(),
     };
 
     await runSpecPhase(pipeline as never, deps as never);
@@ -155,6 +158,9 @@ describe('runPlanPhase — human directive injection', () => {
       executePhase: vi.fn(async () => undefined),
       gitPush: vi.fn(),
       execGit: vi.fn(),
+      getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
+      scheduleWakeup: vi.fn(),
+      writeCompletionSummary: vi.fn(),
     };
 
     await runPlanPhase(pipeline as never, deps as never);
@@ -192,6 +198,9 @@ describe('runPlanPhase — human directive injection', () => {
       executePhase: vi.fn(async () => undefined),
       gitPush: vi.fn(),
       execGit: vi.fn(),
+      getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
+      scheduleWakeup: vi.fn(),
+      writeCompletionSummary: vi.fn(),
     };
 
     await runPlanPhase(pipeline as never, deps as never);
@@ -251,6 +260,9 @@ describe('runPlanPhase — human directive injection', () => {
       executePhase: vi.fn(async () => undefined),
       gitPush: vi.fn(),
       execGit: vi.fn(),
+      getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
+      scheduleWakeup: vi.fn(),
+      writeCompletionSummary: vi.fn(),
     };
 
     await runPlanPhase(pipeline as never, deps as never);
@@ -345,6 +357,9 @@ describe('runPlanPhase — human directive injection', () => {
       executePhase: vi.fn(async () => undefined),
       gitPush: vi.fn(),
       execGit: vi.fn(),
+      getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
+      scheduleWakeup: vi.fn(),
+      writeCompletionSummary: vi.fn(),
     };
 
     await runPlanPhase(pipeline as never, deps as never);

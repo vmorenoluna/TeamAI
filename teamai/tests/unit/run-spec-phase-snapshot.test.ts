@@ -123,6 +123,9 @@ function makeCtx() {
     executePhase: vi.fn(async () => undefined),
     gitPush: vi.fn(),
     execGit: vi.fn(),
+    getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
+    scheduleWakeup: vi.fn(),
+    writeCompletionSummary: vi.fn(),
   };
 
   return { root, specPath, pipeline, deps, advancePhaseCalls };
