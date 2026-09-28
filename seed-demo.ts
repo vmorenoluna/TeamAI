@@ -8,6 +8,12 @@
 // link. They point at no real repo, nothing in the app fetches them, and they are
 // not meant to resolve — don't "fix" them by aiming at a real repository.
 //
+// Everything here is fabricated: the tasks, the agent logs, the git history, and
+// the pull requests. The PR URLs are placeholder strings shaped like GitHub URLs
+// (e.g. shopforge/shopforge) purely so the UI has something to render as a PR
+// link. They point at no real repo, nothing in the app fetches them, and they are
+// not meant to resolve — don't "fix" them by aiming at a real repository.
+//
 // Put at project root (outside demo/) so re-seeding doesn't wipe this script.
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, cpSync, rmSync, unlinkSync } from 'fs';
