@@ -5482,10 +5482,11 @@ describe('Orchestrator', () => {
     });
 
     it('emits subtask-progress via processManager after a subtask completes', async () => {
-      // Return empty string for git diff (scope check — no changed files),
-      // and a valid hash for rev-parse and other git commands.
+      // Simulate the subtask having actually edited its assigned file (src/a.ts) —
+      // an empty diff here would now trip the no-op-subtask rejection instead of
+      // completing normally.
       mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-        if (args && args.includes('diff')) return ''; // scope check: no extra changes
+        if (args && args.includes('diff')) return 'src/a.ts\n';
         return 'abc123\n'; // rev-parse HEAD, push, etc.
       });
       mockCreateSession.mockResolvedValue('sess-impl-sp');
@@ -5544,9 +5545,10 @@ describe('Orchestrator', () => {
         ],
       }));
 
-      // Return empty string for git diff (scope check — no changed files).
+      // Simulate the subtask having actually edited its assigned file (src/b.ts —
+      // subtask 1 is already completed and doesn't run this pass).
       mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-        if (args && args.includes('diff')) return '';
+        if (args && args.includes('diff')) return 'src/b.ts\n';
         return 'abc123\n';
       });
       mockCreateSession.mockResolvedValue('sess-impl-sp2');
@@ -5589,9 +5591,9 @@ describe('Orchestrator', () => {
     });
 
     it('includes projectRoot in the emitted event for WebSocket filtering', async () => {
-      // Return empty string for git diff (scope check — no changed files).
+      // Simulate the subtask having actually edited its assigned file (src/a.ts).
       mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-        if (args && args.includes('diff')) return '';
+        if (args && args.includes('diff')) return 'src/a.ts\n';
         return 'abc123\n';
       });
       mockCreateSession.mockResolvedValue('sess-impl-sp3');

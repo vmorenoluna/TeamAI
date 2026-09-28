@@ -9,7 +9,7 @@
  */
 import { execFileSync } from 'child_process';
 import { getToolPath } from '../tool-checker';
-import { readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync, renameSync, rmSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync, renameSync, rmSync } from 'fs';
 import { PipelineConfigError, WorktreeError, PushVerificationError, SessionKilledError } from './errors';
 import { readJsonFile } from '../json-io';
 import path from 'path';
@@ -24,6 +24,10 @@ import { resolveBaseBranch } from '../git-platform';
 import { getUnpushedCommits } from './worktree-ops';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
 import { warn } from '../logger';
+import {
+  scanWakeupFilesWithRetry, parseWakeupFile, computeNextAttemptCount, isGenuineRelaunch,
+  snapshotMtime, checkStaleWakeupReentry, clearWakeupState, wakeupAttemptsExceeded, buildWakeupReentryHeader,
+} from './wakeup';
 import type { TaskStore } from '../task-store';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
@@ -748,6 +752,50 @@ export function reconcileSubtaskCompletionFromDeliverables(
 }
 
 /**
+ * Read and consume a `subtask_blocked-st<ID>.json` file, if the subtask's
+ * session wrote one. This is the deterministic counterpart to the coder
+ * simply narrating "this needs a code fix, not more waiting, route this to
+ * failure" in its summary — the orchestrator must not infer that conclusion
+ * from the ABSENCE of other signals (no wakeup file, no missing
+ * `files_to_create` deliverable), because that's indistinguishable from a
+ * session that simply never got around to doing anything. A coder that has
+ * already root-caused a genuine defect and decided further retries are
+ * pointless writes this file instead of relying on a human (or a later pass)
+ * to read and act on its prose explanation.
+ *
+ * Found on task give-minor-mode-melodies-a-real-leading-: subtask 15's
+ * session correctly diagnosed a defect in an earlier subtask, wrote "this
+ * should go to the pipeline's failure path... no wakeup file written" in its
+ * summary, and ended. Nothing read that sentence — the orchestrator
+ * re-entered the subtask a 4th time, which re-verified the same artifacts
+ * and reached the identical conclusion a second time, before an unrelated
+ * circuit breaker (the `files_to_create` deliverable-verification cap)
+ * finally failed the task anyway, one wasted session later.
+ *
+ * Deletes the file after reading (best-effort), mirroring the wakeup-file
+ * convention. Returns null if the file doesn't exist or is malformed.
+ */
+function readSubtaskBlockedFile(
+  specPath: string,
+  subtaskId: number,
+): { reason: string; blockingSubtaskId?: number } | null {
+  const blockedPath = path.join(specPath, `subtask_blocked-st${subtaskId}.json`);
+  if (!existsSync(blockedPath)) return null;
+  let result: { reason: string; blockingSubtaskId?: number } | null = null;
+  try {
+    const raw = JSON.parse(readFileSync(blockedPath, 'utf-8'));
+    if (raw && typeof raw.reason === 'string' && raw.reason.trim()) {
+      result = {
+        reason: raw.reason.trim(),
+        blockingSubtaskId: typeof raw.blocking_subtask_id === 'number' ? raw.blocking_subtask_id : undefined,
+      };
+    }
+  } catch { /* malformed — treated as missing */ }
+  try { unlinkSync(blockedPath); } catch { /* best-effort */ }
+  return result;
+}
+
+/**
  * Run a single subtask's agent session: pre-sensors → create session → build
  * prompt (QA/wakeup/deliverable headers) → wait → post-session checks (scope,
  * wakeup detect, deliverable verification) → post-sensors → checkpoint.
@@ -812,22 +860,13 @@ export async function runSubtaskSession(
   // legitimately be resuming a background job it scheduled itself.
   let wakeupHeader = '';
   if (pipeline.wakeupSubtaskId === subtask.id) {
-    wakeupHeader = '⚠️ WAKEUP RE-ENTRY\n\n' +
-      'Your previous session was paused to wait for a background process.\n' +
-      'Background command: ' + (pipeline.wakeupCommand || 'unknown') + '\n' +
-      'Expected artifact to verify: ' + (pipeline.wakeupArtifact || 'unknown') + '\n\n' +
-      'CRITICAL: Run ALL verification commands, scripts, and servers from the current\n' +
-      'working directory (this worktree) — NOT from the base project root. The code in\n' +
-      'this worktree is your branch\'s revision; running from the project root would\n' +
-      'exercise the wrong code and produce meaningless results.\n\n' +
-      'Check if the artifact exists and is complete. If it is: verify it, git add, commit,\n' +
-      'and mark the subtask done. If it\'s missing or incomplete, first check whether the\n' +
-      'background process is still running:\n' +
-      '- If the process is still running: estimate remaining time, write an updated\n' +
-      '  subtask_wakeup-st' + subtask.id + '.json with a new wakeup_at, and end.\n' +
-      '- If the process has crashed or exited with an error: do NOT write another wakeup\n' +
-      '  file. Report the failure immediately so the task can advance to failed without\n' +
-      '  wasting the remaining wakeup attempts.\n\n';
+    wakeupHeader = buildWakeupReentryHeader({
+      unitLabel: 'this subtask',
+      wakeupFilename: 'subtask_wakeup-st' + subtask.id + '.json',
+      command: pipeline.wakeupCommand,
+      artifact: pipeline.wakeupArtifact,
+      worktreeNote: true,
+    });
   }
 
   // Deliverable re-verification prompt header
@@ -1028,6 +1067,32 @@ export async function runSubtaskSession(
     logToOutput(pipeline.specPath, '\n[COMMIT-GUARD] Failed to auto-commit subtask ' + subtask.id + ' changes: ' + commitMsg + '\n');
   }
 
+  // Explicit blocked declaration — see readSubtaskBlockedFile's doc for the
+  // incident this closes. Checked before scope/wakeup/deliverable
+  // verification: none of that matters once the coder has already
+  // root-caused a defect that needs a human or a different subtask's fix,
+  // not another retry of this one.
+  const blocked = readSubtaskBlockedFile(pipeline.specPath, subtask.id);
+  if (blocked) {
+    const detail = 'Subtask ' + subtask.id + ' reported it cannot proceed: ' + blocked.reason +
+      (blocked.blockingSubtaskId != null ? ' (points to subtask ' + blocked.blockingSubtaskId + ')' : '');
+    logToOutput(pipeline.specPath, '\n[BLOCKED] ' + detail + ' — advancing to failed without further retries\n');
+    try {
+      writeFileSync(path.join(pipeline.specPath, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [{
+          criterion: 'Subtask reported a blocking defect',
+          name: 'Subtask reported a blocking defect',
+          status: 'FAIL',
+          notes: detail,
+        }],
+      }, null, 2));
+    } catch { /* best-effort — writeCompletionSummary below still records the failure */ }
+    deps.writeCompletionSummary(pipeline, 'subtask-blocked', detail);
+    deps.advancePhase(pipeline, 'failed');
+    return;
+  }
+
   // Out-of-scope bug tickets (#3b): the coder reports `[BUG] Fix: ...` lines
   // in its summary instead of hand-writing task.json files; the orchestrator
   // parses the session log and creates deterministic tickets. Best-effort.
@@ -1078,6 +1143,43 @@ export async function runSubtaskSession(
           violations.map(f => '  - ' + f).join('\n') + '\n' +
           '[SCOPE] Assigned files: ' + ([...assignedFiles].join(', ') || '(none)') + '\n'
         );
+      } else if ((subtask.files || []).length > 0 && !(subtask.files_to_create || []).length && changedFiles.length === 0) {
+        // No-op subtask detection: the coder session ended having committed
+        // NO changes at all, for a subtask whose only declared scope is
+        // EXISTING files to edit. Deterministic and orchestrator-side — does
+        // not rely on the coder self-reporting that nothing happened.
+        // Restricted to `files_to_create`-less subtasks because that field
+        // already has its own existence-based deliverable check (with its
+        // own circuit breaker) — a subtask that declares BOTH `files` and
+        // `files_to_create` is already verified by that check whenever its
+        // new files land, regardless of whether the pre-existing ones in
+        // `files` also changed. (Since `violations.length === 0` here,
+        // `changedFiles` can only contain entries from `files`/
+        // `files_to_create` — so once `files_to_create` is excluded,
+        // "changedFiles is empty" and "none of `files` were touched" are the
+        // same condition.) Exempt a deliberate `[SKIPPED]` deferral (ticket
+        // creation, pipeline-artifact management — see plan.md/implement.md)
+        // since those subtasks can legitimately make no code changes at all.
+        //
+        // Found on task give-minor-mode-melodies-a-real-leading-: subtask 1's
+        // entire session was "read some files, dispatch a research sub-agent,
+        // wait for it" — the turn ended before any Edit/Write call, before
+        // the sub-agent's findings were ever used, and before a single line
+        // of the assigned fix was written. Nothing rejected it: no
+        // files_to_create to fail, no out-of-scope files to flag. It was
+        // marked completed, and the missing fix silently propagated through
+        // 14 further subtasks until a sweep-verification subtask caught the
+        // regression empirically ~12 hours and several dollars of session
+        // cost later.
+        let sessionSummary = '';
+        try { sessionSummary = readFileSync(subtaskLogFile, 'utf-8'); } catch { /* best-effort */ }
+        if (!sessionSummary.includes('[SKIPPED]')) {
+          scopeViolations.add(subtask.id);
+          logToOutput(pipeline.specPath,
+            '\n[VERIFY] Subtask ' + subtask.id + ' ended without touching any of its assigned files — no edit was made:\n' +
+            '[VERIFY] Assigned files: ' + ((subtask.files || []).join(', ') || '(none)') + '\n'
+          );
+        }
       }
     } catch (scopeErr) {
       const scopeMsg = scopeErr instanceof Error ? scopeErr.message : String(scopeErr);
@@ -1108,19 +1210,7 @@ export async function runSubtaskSession(
     // got silently marked complete despite explicitly reporting it wasn't.
     // Found on task 585a32e0: Subtask 8 wrote subtask_wakeup-st7.json for
     // its still-running dependency and was marked completed:true anyway.
-    const scanWakeupFiles = (): string[] => {
-      const found: string[] = [];
-      try {
-        for (const f of readdirSync(pipeline.specPath)) {
-          if (/^subtask_wakeup-st\d+\.json$/.test(f)) found.push(path.join(pipeline.specPath, f));
-        }
-      } catch { /* best-effort */ }
-      const wakeupPathLegacy = path.join(pipeline.specPath, 'subtask_wakeup.json');
-      if (existsSync(wakeupPathLegacy)) found.push(wakeupPathLegacy);
-      return found;
-    };
-    let wakeupPaths = scanWakeupFiles();
-
+    //
     // Retry before concluding none exists: in container mode a coder
     // session's writes only reach the host once the bind mount syncs, and
     // that sync is not instantaneous — particularly on Windows/Docker
@@ -1139,79 +1229,67 @@ export async function runSubtaskSession(
     // subtask was wrongly treated as having failed deliverable verification,
     // and the task failed outright minutes later, twice.
     const wakeupScanRetryDelayMs = deps.getPipelineConfig().wakeupScanRetryDelayMs ?? 0;
-    if (wakeupScanRetryDelayMs > 0 && wakeupPaths.length === 0 && (wasWakeupReentry || subtask.files_to_create?.length)) {
-      for (let attempt = 0; attempt < 4 && wakeupPaths.length === 0; attempt++) {
-        await new Promise(resolve => setTimeout(resolve, wakeupScanRetryDelayMs));
-        wakeupPaths = scanWakeupFiles();
-      }
-    }
+    const wakeupPaths = await scanWakeupFilesWithRetry(
+      pipeline.specPath, /^subtask_wakeup-st\d+\.json$/, 'subtask_wakeup.json',
+      wakeupScanRetryDelayMs, !!(wasWakeupReentry || subtask.files_to_create?.length),
+    );
 
     for (const wakeupPath of wakeupPaths) {
-      try {
-        const wd = JSON.parse(readFileSync(wakeupPath, 'utf-8'));
-        if (wd.subtask_id != null && wd.wakeup_at) {
-          // Snapshot the previous command for the same subtask BEFORE it's
-          // overwritten below — used to detect a genuine relaunch (see the
-          // counter reset below).
-          const isSameSubtaskReentry = wd.subtask_id === pipeline.wakeupSubtaskId;
-          const previousCommand = isSameSubtaskReentry ? pipeline.wakeupCommand : undefined;
+      let rawWakeup = '';
+      try { rawWakeup = readFileSync(wakeupPath, 'utf-8'); } catch { /* treated as malformed below */ }
+      const wd = parseWakeupFile(rawWakeup);
+      if (wd && wd.subtask_id != null) {
+        // Snapshot the previous command for the same subtask BEFORE it's
+        // overwritten below — used to detect a genuine relaunch (see the
+        // counter reset below).
+        const isSameSubtaskReentry = wd.subtask_id === pipeline.wakeupSubtaskId;
+        const previousCommand = isSameSubtaskReentry ? pipeline.wakeupCommand : undefined;
 
-          // When parallel subtasks both schedule wakeups, adopt the EARLIEST
-          // wakeup_at (ADR 002) — the later sibling must not clobber an
-          // already-scheduled earlier wakeup. A re-schedule by the SAME
-          // subtask always wins (its previous wakeup_at is already in the past).
-          const existing = pipeline.wakeupUntil ? Date.parse(pipeline.wakeupUntil) : Infinity;
-          if (pipeline.wakeupSubtaskId == null || wd.subtask_id === pipeline.wakeupSubtaskId
-              || Date.parse(wd.wakeup_at) < existing) {
-            pipeline.wakeupSubtaskId = wd.subtask_id;
-            pipeline.wakeupUntil = wd.wakeup_at;
-            pipeline.wakeupCommand = wd.background_command;
-            pipeline.wakeupArtifact = wd.expected_artifact;
-            pipeline.wakeupProgressPath = wd.progress_log_path;
-            // Snapshot the artifact's current mtime so a FUTURE re-entry that
-            // ends without writing another wakeup file can be verified — see
-            // the freshness check below and the field's doc in types.ts.
-            try {
-              const artifactPath = wd.expected_artifact ? path.join(cwd, wd.expected_artifact) : null;
-              pipeline.wakeupArtifactMtimeAtSchedule = artifactPath && existsSync(artifactPath)
-                ? statSync(artifactPath).mtimeMs
-                : null;
-            } catch {
-              pipeline.wakeupArtifactMtimeAtSchedule = null;
-            }
-          }
-
-          // Progress-aware circuit breaker: a wakeup re-entry that relaunches
-          // the background job under a MATERIALLY DIFFERENT command (not just
-          // a later wakeup_at for the same still-running process) means the
-          // engineer diagnosed and fixed a real blocker before restarting —
-          // that's forward progress, not a stalled retry, and should get a
-          // fresh attempt budget rather than consume the old one. Without
-          // this, a subtask that fixes a genuine bug on wakeups 1 and 2 and
-          // correctly relaunches a multi-hour job on wakeup 3 can have the
-          // task fail seconds after that final, now-correct relaunch — the
-          // fix itself is indistinguishable from "made no progress" to a bare
-          // attempt counter. Reset (not merely decrement) so the relaunched
-          // job gets the FULL cap's worth of checks, matching the budget any
-          // fresh background attempt is expected to need.
-          // Guarded on previousCommand being defined (not the subtask's very
-          // first wakeup) and both commands being non-empty strings — a
-          // missing/identical command is treated as "still waiting on the
-          // same job", which keeps incrementing as before.
-          const isGenuineRelaunch = isSameSubtaskReentry
-            && !!previousCommand && !!wd.background_command
-            && wd.background_command !== previousCommand;
-          if (isGenuineRelaunch) {
-            pipeline.wakeupAttemptCount = 1;
-            logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + wd.subtask_id + ' background command changed since the last wakeup — treating as a fresh attempt (progress was made) and resetting the wakeup attempt budget to 1\n');
-          } else {
-            pipeline.wakeupAttemptCount = (pipeline.wakeupAttemptCount || 0) + 1;
-          }
-          wakeupDetected = true;
-          logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + wd.subtask_id + ' wakeup scheduled for ' + wd.wakeup_at + ' (attempt ' + pipeline.wakeupAttemptCount + ') — background process: ' + (wd.background_command || 'unknown') +
-            (wd.progress_log_path ? ' — progress log: ' + wd.progress_log_path : '') + '\n');
+        // When parallel subtasks both schedule wakeups, adopt the EARLIEST
+        // wakeup_at (ADR 002) — the later sibling must not clobber an
+        // already-scheduled earlier wakeup. A re-schedule by the SAME
+        // subtask always wins (its previous wakeup_at is already in the past).
+        const existing = pipeline.wakeupUntil ? Date.parse(pipeline.wakeupUntil) : Infinity;
+        if (pipeline.wakeupSubtaskId == null || wd.subtask_id === pipeline.wakeupSubtaskId
+            || Date.parse(wd.wakeup_at) < existing) {
+          pipeline.wakeupSubtaskId = wd.subtask_id;
+          pipeline.wakeupUntil = wd.wakeup_at;
+          pipeline.wakeupCommand = wd.background_command;
+          pipeline.wakeupArtifact = wd.expected_artifact;
+          pipeline.wakeupProgressPath = wd.progress_log_path;
+          // Snapshot the artifact's current mtime so a FUTURE re-entry that
+          // ends without writing another wakeup file can be verified — see
+          // the freshness check below and the field's doc in types.ts.
+          pipeline.wakeupArtifactMtimeAtSchedule = wd.expected_artifact
+            ? snapshotMtime(path.join(cwd, wd.expected_artifact))
+            : null;
         }
-      } catch {
+
+        // Progress-aware circuit breaker: a wakeup re-entry that relaunches
+        // the background job under a MATERIALLY DIFFERENT command (not just
+        // a later wakeup_at for the same still-running process) means the
+        // engineer diagnosed and fixed a real blocker before restarting —
+        // that's forward progress, not a stalled retry, and should get a
+        // fresh attempt budget rather than consume the old one. Without
+        // this, a subtask that fixes a genuine bug on wakeups 1 and 2 and
+        // correctly relaunches a multi-hour job on wakeup 3 can have the
+        // task fail seconds after that final, now-correct relaunch — the
+        // fix itself is indistinguishable from "made no progress" to a bare
+        // attempt counter. Reset (not merely decrement) so the relaunched
+        // job gets the FULL cap's worth of checks, matching the budget any
+        // fresh background attempt is expected to need.
+        // Guarded on previousCommand being defined (not the subtask's very
+        // first wakeup, nor a different subtask's file) and both commands
+        // being non-empty strings — a missing/identical command is treated
+        // as "still waiting on the same job", which keeps incrementing.
+        pipeline.wakeupAttemptCount = computeNextAttemptCount(previousCommand, wd, pipeline.wakeupAttemptCount || 0);
+        if (isGenuineRelaunch(previousCommand, wd.background_command)) {
+          logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + wd.subtask_id + ' background command changed since the last wakeup — treating as a fresh attempt (progress was made) and resetting the wakeup attempt budget to 1\n');
+        }
+        wakeupDetected = true;
+        logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + wd.subtask_id + ' wakeup scheduled for ' + wd.wakeup_at + ' (attempt ' + pipeline.wakeupAttemptCount + ') — background process: ' + (wd.background_command || 'unknown') +
+          (wd.progress_log_path ? ' — progress log: ' + wd.progress_log_path : '') + '\n');
+      } else if (!wd) {
         logToOutput(pipeline.specPath, '[WAKEUP] Malformed ' + path.basename(wakeupPath) + ' — treating as missing\n');
       }
       try { unlinkSync(wakeupPath); } catch { /* best-effort */ }
@@ -1238,25 +1316,11 @@ export async function runSubtaskSession(
   // check just below (with its own maxImplementRetries circuit breaker);
   // this mtime check exists for the case that check can't cover, an
   // existing file the subtask overwrites rather than creates.
-  if (wasWakeupReentry && !wakeupDetected && pipeline.wakeupArtifact && !subtask.files_to_create?.length) {
-    let currentMtime: number | null = null;
-    try {
-      const artifactPath = path.join(cwd, pipeline.wakeupArtifact);
-      currentMtime = existsSync(artifactPath) ? statSync(artifactPath).mtimeMs : null;
-    } catch { /* treat as not produced */ }
-    const producedThisCycle = currentMtime != null
-      && (pipeline.wakeupArtifactMtimeAtSchedule == null || currentMtime > pipeline.wakeupArtifactMtimeAtSchedule);
-    if (!producedThisCycle) {
-      const attemptCount = (pipeline.wakeupAttemptCount || 0) + 1;
-      pipeline.wakeupAttemptCount = attemptCount;
-      pipeline.wakeupArtifactMtimeAtSchedule = currentMtime;
-      pipeline.wakeupUntil = new Date(Date.now() + 15 * 60_000).toISOString();
-      wakeupDetected = true;
-      logToOutput(pipeline.specPath,
-        '[WAKEUP] Subtask ' + subtask.id + ' re-entry ended without a fresh wakeup file, but the expected artifact (' +
-        pipeline.wakeupArtifact + ') was not updated since the last check — the background job is likely still ' +
-        'running. Auto-rescheduling a follow-up check in 15 minutes (attempt ' + attemptCount + ')\n');
-    }
+  if (!subtask.files_to_create?.length) {
+    const staleRescheduled = checkStaleWakeupReentry({
+      pipeline, wasReentry: wasWakeupReentry, wakeupDetected, cwd, unitLabel: 'Subtask ' + subtask.id,
+    });
+    if (staleRescheduled) wakeupDetected = true;
   }
 
   // Verify deliverable files exist before marking subtask complete.
@@ -1308,7 +1372,7 @@ export async function runSubtaskSession(
   if (!skipCompletion) {
     if (scopeViolations.has(subtask.id)) {
       skipCompletion = true;
-      logToOutput(pipeline.specPath, '[SCOPE] Subtask ' + subtask.id + ' rejected — will re-run with scope enforcement\n');
+      logToOutput(pipeline.specPath, '[SCOPE] Subtask ' + subtask.id + ' rejected — will re-run (see the specific reason logged above)\n');
     } else {
       if (pipeline.deliverableFailCounts?.[subtask.id] !== undefined) {
         delete pipeline.deliverableFailCounts[subtask.id];
@@ -1331,12 +1395,7 @@ export async function runSubtaskSession(
 
   // ADR 002: After wakeup completes — only on re-entry with no new wakeup file
   if (wasWakeupReentry && !wakeupDetected && !skipCompletion) {
-    pipeline.wakeupUntil = undefined;
-    pipeline.wakeupSubtaskId = undefined;
-    pipeline.wakeupCommand = undefined;
-    pipeline.wakeupArtifact = undefined;
-    pipeline.wakeupProgressPath = undefined;
-    pipeline.wakeupAttemptCount = 0;
+    clearWakeupState(pipeline);
     pipeline._wakeupJustCompleted = true;
     logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + subtask.id + ' completed after wakeup — clearing wakeup state\n');
     return;
@@ -1426,7 +1485,7 @@ export async function integrateGroup(
         continue;
       }
       if (scopeViolations.has(subtasks[i].id)) {
-        logToOutput(pipeline.specPath, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' (scope violation)\n');
+        logToOutput(pipeline.specPath, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' (rejected — see the specific reason logged above)\n');
         continue;
       }
 
@@ -1902,7 +1961,7 @@ export async function runImplement(
 
   // ADR 002: Wakeup timer — pause implement phase until wakeup time
   if (pipeline.wakeupUntil) {
-    if ((pipeline.wakeupAttemptCount || 0) >= deps.getPipelineConfig().maxImplementRetries) {
+    if (wakeupAttemptsExceeded(pipeline, deps.getPipelineConfig().maxImplementRetries)) {
       logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + pipeline.wakeupSubtaskId + ' exceeded wakeup attempt cap (' + deps.getPipelineConfig().maxImplementRetries + ') — advancing to failed\n');
       const reportPath = path.join(pipeline.specPath, 'qa_report.json');
       writeFileSync(reportPath, JSON.stringify({
@@ -1917,12 +1976,7 @@ export async function runImplement(
       // Clear wakeup state before failing: a truthy wakeupUntil with no armed
       // timer would make the caller's cleanup guard skip releasing the
       // pipeline/active-task lock, blocking any later retry of this task.
-      pipeline.wakeupUntil = undefined;
-      pipeline.wakeupSubtaskId = undefined;
-      pipeline.wakeupCommand = undefined;
-      pipeline.wakeupArtifact = undefined;
-      pipeline.wakeupProgressPath = undefined;
-      pipeline.wakeupAttemptCount = 0;
+      clearWakeupState(pipeline);
       deps.writeCompletionSummary(pipeline, 'implement-failure');
       deps.advancePhase(pipeline, 'failed');
       return;

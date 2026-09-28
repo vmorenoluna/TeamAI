@@ -819,6 +819,9 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
       executePhase: vi.fn().mockResolvedValue(undefined),
       gitPush: vi.fn(),
       execGit: vi.fn(),
+      getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
+      scheduleWakeup: vi.fn(),
+      writeCompletionSummary: vi.fn(),
     };
 
     await runPlanPhase(pipeline, deps as any);
@@ -867,6 +870,9 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
       executePhase: vi.fn().mockResolvedValue(undefined),
       gitPush: vi.fn(),
       execGit: vi.fn(),
+      getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
+      scheduleWakeup: vi.fn(),
+      writeCompletionSummary: vi.fn(),
     };
 
     await runPlanPhase(pipeline, deps as any);
@@ -909,6 +915,9 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
       executePhase: vi.fn().mockResolvedValue(undefined),
       gitPush: vi.fn(),
       execGit: vi.fn(),
+      getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
+      scheduleWakeup: vi.fn(),
+      writeCompletionSummary: vi.fn(),
     };
 
     await runPlanPhase(pipeline, deps as any);
@@ -959,6 +968,9 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
       executePhase: vi.fn().mockResolvedValue(undefined),
       gitPush: vi.fn(),
       execGit: vi.fn(),
+      getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
+      scheduleWakeup: vi.fn(),
+      writeCompletionSummary: vi.fn(),
     };
 
     await runPlanPhase(pipeline, deps as any);

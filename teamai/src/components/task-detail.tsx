@@ -33,12 +33,14 @@ type Tab = 'overview' | 'terminal' | 'spec' | 'plan' | 'qa';
 
 // Reason-aware label for the "Task Failed" banner — see task-card.tsx's
 // FAILURE_REASON_TOOLTIP for the compact-card equivalent.
-const FAILURE_REASON_LABEL: Record<'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'unknown', string> = {
+const FAILURE_REASON_LABEL: Record<'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'wakeup-exhausted' | 'subtask-blocked' | 'unknown', string> = {
   'qa-attempts-exhausted': 'QA attempt budget exhausted',
   'qa-incomplete': 'QA never finished its review — no defect found',
   'spec-revision-exhausted': 'Spec revision budget exhausted — QA never passed',
   'implement-failure': 'Implement-phase retry cap exceeded — never reached QA',
   'session-crashed': 'Coder session crashed unexpectedly',
+  'wakeup-exhausted': 'A background job’s wakeup attempt budget was exhausted',
+  'subtask-blocked': 'A subtask reported a blocking defect',
   unknown: 'Max QA attempts reached',
 };
 

@@ -73,7 +73,7 @@ Rules:
   requirements there, never through `parallel_group` placement alone.** Sequential
   `parallel_group` letters (A before B before C...) are the normal way later work
   builds on earlier work, but group order alone is not a durable ordering guarantee:
-  a long-running subtask that pauses for a `ScheduleWakeup` (a background sweep,
+  a long-running subtask that pauses via a wakeup file (a background script,
   benchmark, or server process — see the coder's implement.md) re-enters through an
   ISOLATION path that dispatches ONLY that one subtask by id, and that path verifies
   readiness by checking `depends_on` directly — it does not re-check whether an
@@ -85,10 +85,11 @@ Rules:
   description that references another subtask's completion, output, or exclusivity
   MUST add that subtask's id to `depends_on`, even when `parallel_group` ordering
   already implies it.** This is especially easy to miss for evidence-gathering
-  subtasks that run one or more long-lived server/sweep processes and must be
-  strictly ordered against sibling evidence subtasks (e.g. "run the production sweep
-  only once the baseline and comparison sweeps are both done and their servers are
-  shut down") — declare that ordering in `depends_on`, not only in the description.
+  subtasks that run one or more long-lived server/client processes and must be
+  strictly ordered against sibling evidence subtasks (e.g. "run the production
+  benchmark only once the baseline and comparison runs are both done and their
+  servers are shut down") — declare that ordering in `depends_on`, not only in the
+  description.
 - **Verification scripts need dedicated subtasks:** When the spec includes an acceptance
   criterion that requires running a script to produce empirical evidence (e.g. a
   benchmark, integration run, or data pipeline), the plan MUST include a dedicated
@@ -134,6 +135,52 @@ Rules:
     route the task to human review.
   - A criterion satisfied by code changes alone (new function, type, config) is
     self-evident in the diff — no additional artifact is required.
+
+## When a feasibility check won't finish before your session budget
+
+If sizing a subtask's verification requirements leads you to dry-run a script or
+benchmark against the codebase — checking how long a full run actually takes, or
+whether an approach the spec assumes is even viable — and it won't complete before
+your session ends, schedule an orchestrator wakeup instead of guessing at the plan
+based on an incomplete check.
+
+1. **Detach the job**: `nohup <command> > job.log 2>&1 & disown`. Write the log inside
+   `$TEAMAI_SPEC_DIR` (your cwd is the project root at this phase, not a worktree).
+2. **Record its PID** (`echo $! > job.pid`) if you launch more than one job at once —
+   kill by PID (`kill $(cat job.pid)`) when you need to stop or relaunch one, never by a
+   command-line pattern match (`pkill -f <substring>`). A substring broad enough to
+   match every job's command line can also match your own shell's, killing the session
+   that's trying to manage them.
+3. Write `phase_wakeup.json` to `$TEAMAI_SPEC_DIR`:
+
+```json
+{
+  "wakeup_at": "2026-07-03T23:20:00Z",
+  "background_command": "python scripts/dry_run_check.py --output results/",
+  "expected_artifact": "results/summary.jsonl",
+  "progress_log_path": "results/job.log"
+}
+```
+
+- `wakeup_at`: ISO 8601 timestamp when the process should be done — estimate from the
+  job's actual throughput plus a 20% safety margin.
+- `background_command`: the command you ran (informational).
+- `expected_artifact`: the file you expect the process to produce.
+- `progress_log_path`: the job's own log file, relative to the project root — include it
+  whenever the job writes one.
+
+**Do NOT call an interactive `ScheduleWakeup`-style tool** — it is a no-op in this
+pipeline. The orchestrator's resume mechanism only understands the file.
+
+Then end your session normally without writing `plan.json` — the orchestrator pauses
+instead of treating this as a failed plan. On re-entry (headed
+`⚠️ WAKEUP RE-ENTRY`): check if the artifact exists and is complete. If it is, use its
+results to finish the plan. If it's missing or incomplete, check whether the process is
+still running — write an updated `phase_wakeup.json` with a new `wakeup_at` if so; if it
+crashed, do NOT write another wakeup file and report the failure immediately (the
+orchestrator fails the task after 3 consecutive wakeup attempts without progress). A
+materially different `background_command` on relaunch (you fixed a real blocker) resets
+that 3-attempt budget instead of consuming it.
 
 ## Re-plan Mode
 
