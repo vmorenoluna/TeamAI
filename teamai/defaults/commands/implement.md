@@ -228,8 +228,8 @@ processes at different commits (a "before" server and an "after" server, or a
 deterministic-mode run alongside a production-mode run) and gating the comparison on
 each server's build being clean (no `-dirty` suffix on its build SHA).
 
-**Never run a server and its sweep/benchmark client from the same checkout.** A
-client that writes its own output files (a sweep log, a results directory) into the
+**Never run a server and its benchmark/verification client from the same checkout.**
+A client that writes its own output files (a run log, a results directory) into the
 same working tree the server was started from will taint that checkout's `git
 status` the moment it writes — and a server's dirty-flag is normally computed once
 at startup and frozen for the life of the process, so this makes the build SHA
@@ -243,9 +243,9 @@ the client issuing requests against it — never the coder's own feature-branch
 worktree for either role, and never the same scratch checkout for both. Confirm each
 server reports a clean (non-`-dirty`) build SHA immediately after starting it and
 before committing to a long run — cheaper to catch a contaminated checkout in the
-first few seconds than after a multi-hour sweep completes against it.
+first few seconds than after a multi-hour run completes against it.
 
-If your sweep script derives the build SHA by scanning a log directory relative to
+If your client script derives the build SHA by scanning a log directory relative to
 its own working directory (a common shortcut for the common case, where client and
 server share one checkout), that scan will silently fail once you isolate the
 checkouts as above — prefer whatever the server's own API response reports as its

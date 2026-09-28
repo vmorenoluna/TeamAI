@@ -73,7 +73,7 @@ Rules:
   requirements there, never through `parallel_group` placement alone.** Sequential
   `parallel_group` letters (A before B before C...) are the normal way later work
   builds on earlier work, but group order alone is not a durable ordering guarantee:
-  a long-running subtask that pauses for a `ScheduleWakeup` (a background sweep,
+  a long-running subtask that pauses via a wakeup file (a background script,
   benchmark, or server process — see the coder's implement.md) re-enters through an
   ISOLATION path that dispatches ONLY that one subtask by id, and that path verifies
   readiness by checking `depends_on` directly — it does not re-check whether an
@@ -85,10 +85,11 @@ Rules:
   description that references another subtask's completion, output, or exclusivity
   MUST add that subtask's id to `depends_on`, even when `parallel_group` ordering
   already implies it.** This is especially easy to miss for evidence-gathering
-  subtasks that run one or more long-lived server/sweep processes and must be
-  strictly ordered against sibling evidence subtasks (e.g. "run the production sweep
-  only once the baseline and comparison sweeps are both done and their servers are
-  shut down") — declare that ordering in `depends_on`, not only in the description.
+  subtasks that run one or more long-lived server/client processes and must be
+  strictly ordered against sibling evidence subtasks (e.g. "run the production
+  benchmark only once the baseline and comparison runs are both done and their
+  servers are shut down") — declare that ordering in `depends_on`, not only in the
+  description.
 - **Verification scripts need dedicated subtasks:** When the spec includes an acceptance
   criterion that requires running a script to produce empirical evidence (e.g. a
   benchmark, integration run, or data pipeline), the plan MUST include a dedicated

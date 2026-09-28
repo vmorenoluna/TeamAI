@@ -123,7 +123,7 @@ If the prompt begins with `REVISION:` you are revising an existing spec, not wri
 6. Re-run Step 2 (Codebase Research) scoped to the feedback's scope. Research only the
    files, modules, and configuration the concerns actually name (plus their adjacent tests
    and immediate dependencies) to ensure the revised spec is grounded in current codebase
-   reality. Do NOT re-run a full-codebase Glob/Grep sweep — a revision triggered by a
+   reality. Do NOT re-run a full-codebase Glob/Grep scan — a revision triggered by a
    single concern does not need to re-map the whole repository.
 7. **Resolve every conditional you introduce.** If your fix involves a fork ("if the measured effect still shows the problem, do Y instead"), do not write the fork into the spec — pick one branch now and write only that branch's acceptance criteria and formulas. A spec with an unresolved fallback clause will fail review again.
 8. Write the revised spec to `spec.md` (the path given in the prompt) — the versioned baseline file you read in step 1 (e.g. `spec_v1.md`) is the archived previous version; do NOT write to it.
