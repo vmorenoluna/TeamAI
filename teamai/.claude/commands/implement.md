@@ -311,8 +311,10 @@ with a `⚠️ WAKEUP RE-ENTRY` header. On re-entry:
   - **Still running**: read its latest reported progress, write an updated
     `subtask_wakeup-st<ID>.json` with a new `wakeup_at`, and end again.
   - **Crashed or exited with error**: do NOT write another wakeup file.
-    Report the failure immediately — the orchestrator advances the task to
-    failed after 3 consecutive wakeup attempts without progress.
+    Write a `subtask_blocked-st<ID>.json` (see "When you've root-caused a
+    defect and retrying won't help" below) instead of just narrating the
+    failure — that's what actually fails the task immediately, rather than
+    waiting out the remaining wakeup-attempt budget.
 
 **If you diagnose and fix a real blocker before relaunching** (a compile error, a
 contaminated checkout, a bug in your own tooling), state the new `background_command`
@@ -324,3 +326,34 @@ exact same command when nothing actually changed still counts as a normal attemp
 
 Use `$TEAMAI_SPEC_DIR` to resolve the path — your cwd is the worktree, not
 the project root.
+
+### When you've root-caused a defect and retrying won't help
+
+If your investigation concludes that this subtask cannot succeed as planned —
+an earlier subtask's change was never actually made despite being marked
+`completed: true`, a precondition the spec assumed doesn't hold, or any other
+defect that a code fix (possibly in a *different* subtask) must resolve
+before this one can — do NOT just explain that in your summary and end the
+session. A summary is prose; nothing reads it before the orchestrator decides
+what happens next. Write `subtask_blocked-st<ID>.json` (`<ID>` = your current
+subtask ID) to `$TEAMAI_SPEC_DIR` instead:
+
+```json
+{
+  "reason": "Subtask #1 (CS-1) was never actually implemented despite plan.json marking it completed — Chord.containsPitch is byte-identical to the pre-task baseline. This subtask's own acceptance gate (AC-S3) can't pass until that fix lands.",
+  "blocking_subtask_id": 1
+}
+```
+
+- `reason`: a specific, evidence-backed explanation — what you checked and
+  what you found, not a guess. This becomes the QA report's failure note.
+- `blocking_subtask_id`: optional — the id of the subtask whose defect
+  actually needs fixing, if you traced the root cause to one.
+
+This immediately fails the task (skipping any further retries of this
+subtask) instead of leaving the orchestrator to eventually reach the same
+conclusion on its own via an unrelated cap — burning a session that will only
+re-verify what you already verified. Only use this when you've done the
+investigation and are confident retrying is pointless; if there's a real
+chance a fresh session (or waiting on a background job) could still resolve
+this, use the wakeup mechanism above or just end normally instead.

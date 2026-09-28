@@ -28,15 +28,17 @@ const DESCRIPTION_LIMIT = 80;
 // ever passing" (the latter usually means the approach itself needs a
 // redesign) from "an implement-phase retry cap was exceeded before QA ever
 // ran" from "the coder session crashed outside any cap" from "a spec/plan/
-// qa-review session's background wakeup cycle never produced its artifact".
+// qa-review session's background wakeup cycle never produced its artifact"
+// from "a coder subtask explicitly declared itself blocked on a defect".
 // 'unknown' covers legacy failed tasks written before failureReason existed.
-const FAILURE_REASON_TOOLTIP: Record<'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'wakeup-exhausted' | 'unknown', string> = {
+const FAILURE_REASON_TOOLTIP: Record<'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'wakeup-exhausted' | 'subtask-blocked' | 'unknown', string> = {
   'qa-attempts-exhausted': 'Task failed — QA attempt budget exhausted',
   'qa-incomplete': 'Task failed — QA never finished its review (no defect found)',
   'spec-revision-exhausted': 'Task failed — spec revision budget exhausted (QA never passed)',
   'implement-failure': 'Task failed — implement-phase retry cap exceeded before QA ran',
   'session-crashed': 'Task failed — coder session crashed unexpectedly',
   'wakeup-exhausted': 'Task failed — a background job’s wakeup attempt budget was exhausted',
+  'subtask-blocked': 'Task failed — a subtask reported a blocking defect',
   unknown: 'Task failed',
 };
 

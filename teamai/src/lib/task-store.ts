@@ -86,9 +86,12 @@ export interface Task {
    *  outside any of those caps (e.g. an app restart)" from "a spec/plan/
    *  qa-review session's background wakeup cycle never produced its
    *  expected artifact within the attempt cap" (ADR 002, generalized beyond
-   *  implement — see orchestrator/wakeup.ts). Undefined for legacy failed
-   *  tasks written before this field existed. */
-  failureReason?: 'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'wakeup-exhausted';
+   *  implement — see orchestrator/wakeup.ts) from "a coder subtask explicitly
+   *  declared itself blocked on a defect it had already root-caused, instead
+   *  of being silently retried until an unrelated cap eventually caught it"
+   *  (see implement.ts's subtask_blocked-st<ID>.json handling). Undefined for
+   *  legacy failed tasks written before this field existed. */
+  failureReason?: 'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'wakeup-exhausted' | 'subtask-blocked';
   /** Why a task landed on `awaiting-review` when that was NOT a genuine QA
    *  pass — spec phase producing no spec.md/spec_summary.md, a no-op spec
    *  revision, a rolled-back approval attempt. Mirrors `failureReason`'s

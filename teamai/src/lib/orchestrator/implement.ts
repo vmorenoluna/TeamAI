@@ -752,6 +752,50 @@ export function reconcileSubtaskCompletionFromDeliverables(
 }
 
 /**
+ * Read and consume a `subtask_blocked-st<ID>.json` file, if the subtask's
+ * session wrote one. This is the deterministic counterpart to the coder
+ * simply narrating "this needs a code fix, not more waiting, route this to
+ * failure" in its summary — the orchestrator must not infer that conclusion
+ * from the ABSENCE of other signals (no wakeup file, no missing
+ * `files_to_create` deliverable), because that's indistinguishable from a
+ * session that simply never got around to doing anything. A coder that has
+ * already root-caused a genuine defect and decided further retries are
+ * pointless writes this file instead of relying on a human (or a later pass)
+ * to read and act on its prose explanation.
+ *
+ * Found on task give-minor-mode-melodies-a-real-leading-: subtask 15's
+ * session correctly diagnosed a defect in an earlier subtask, wrote "this
+ * should go to the pipeline's failure path... no wakeup file written" in its
+ * summary, and ended. Nothing read that sentence — the orchestrator
+ * re-entered the subtask a 4th time, which re-verified the same artifacts
+ * and reached the identical conclusion a second time, before an unrelated
+ * circuit breaker (the `files_to_create` deliverable-verification cap)
+ * finally failed the task anyway, one wasted session later.
+ *
+ * Deletes the file after reading (best-effort), mirroring the wakeup-file
+ * convention. Returns null if the file doesn't exist or is malformed.
+ */
+function readSubtaskBlockedFile(
+  specPath: string,
+  subtaskId: number,
+): { reason: string; blockingSubtaskId?: number } | null {
+  const blockedPath = path.join(specPath, `subtask_blocked-st${subtaskId}.json`);
+  if (!existsSync(blockedPath)) return null;
+  let result: { reason: string; blockingSubtaskId?: number } | null = null;
+  try {
+    const raw = JSON.parse(readFileSync(blockedPath, 'utf-8'));
+    if (raw && typeof raw.reason === 'string' && raw.reason.trim()) {
+      result = {
+        reason: raw.reason.trim(),
+        blockingSubtaskId: typeof raw.blocking_subtask_id === 'number' ? raw.blocking_subtask_id : undefined,
+      };
+    }
+  } catch { /* malformed — treated as missing */ }
+  try { unlinkSync(blockedPath); } catch { /* best-effort */ }
+  return result;
+}
+
+/**
  * Run a single subtask's agent session: pre-sensors → create session → build
  * prompt (QA/wakeup/deliverable headers) → wait → post-session checks (scope,
  * wakeup detect, deliverable verification) → post-sensors → checkpoint.
@@ -1023,6 +1067,32 @@ export async function runSubtaskSession(
     logToOutput(pipeline.specPath, '\n[COMMIT-GUARD] Failed to auto-commit subtask ' + subtask.id + ' changes: ' + commitMsg + '\n');
   }
 
+  // Explicit blocked declaration — see readSubtaskBlockedFile's doc for the
+  // incident this closes. Checked before scope/wakeup/deliverable
+  // verification: none of that matters once the coder has already
+  // root-caused a defect that needs a human or a different subtask's fix,
+  // not another retry of this one.
+  const blocked = readSubtaskBlockedFile(pipeline.specPath, subtask.id);
+  if (blocked) {
+    const detail = 'Subtask ' + subtask.id + ' reported it cannot proceed: ' + blocked.reason +
+      (blocked.blockingSubtaskId != null ? ' (points to subtask ' + blocked.blockingSubtaskId + ')' : '');
+    logToOutput(pipeline.specPath, '\n[BLOCKED] ' + detail + ' — advancing to failed without further retries\n');
+    try {
+      writeFileSync(path.join(pipeline.specPath, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        criteria: [{
+          criterion: 'Subtask reported a blocking defect',
+          name: 'Subtask reported a blocking defect',
+          status: 'FAIL',
+          notes: detail,
+        }],
+      }, null, 2));
+    } catch { /* best-effort — writeCompletionSummary below still records the failure */ }
+    deps.writeCompletionSummary(pipeline, 'subtask-blocked', detail);
+    deps.advancePhase(pipeline, 'failed');
+    return;
+  }
+
   // Out-of-scope bug tickets (#3b): the coder reports `[BUG] Fix: ...` lines
   // in its summary instead of hand-writing task.json files; the orchestrator
   // parses the session log and creates deterministic tickets. Best-effort.
@@ -1073,6 +1143,43 @@ export async function runSubtaskSession(
           violations.map(f => '  - ' + f).join('\n') + '\n' +
           '[SCOPE] Assigned files: ' + ([...assignedFiles].join(', ') || '(none)') + '\n'
         );
+      } else if ((subtask.files || []).length > 0 && !(subtask.files_to_create || []).length && changedFiles.length === 0) {
+        // No-op subtask detection: the coder session ended having committed
+        // NO changes at all, for a subtask whose only declared scope is
+        // EXISTING files to edit. Deterministic and orchestrator-side — does
+        // not rely on the coder self-reporting that nothing happened.
+        // Restricted to `files_to_create`-less subtasks because that field
+        // already has its own existence-based deliverable check (with its
+        // own circuit breaker) — a subtask that declares BOTH `files` and
+        // `files_to_create` is already verified by that check whenever its
+        // new files land, regardless of whether the pre-existing ones in
+        // `files` also changed. (Since `violations.length === 0` here,
+        // `changedFiles` can only contain entries from `files`/
+        // `files_to_create` — so once `files_to_create` is excluded,
+        // "changedFiles is empty" and "none of `files` were touched" are the
+        // same condition.) Exempt a deliberate `[SKIPPED]` deferral (ticket
+        // creation, pipeline-artifact management — see plan.md/implement.md)
+        // since those subtasks can legitimately make no code changes at all.
+        //
+        // Found on task give-minor-mode-melodies-a-real-leading-: subtask 1's
+        // entire session was "read some files, dispatch a research sub-agent,
+        // wait for it" — the turn ended before any Edit/Write call, before
+        // the sub-agent's findings were ever used, and before a single line
+        // of the assigned fix was written. Nothing rejected it: no
+        // files_to_create to fail, no out-of-scope files to flag. It was
+        // marked completed, and the missing fix silently propagated through
+        // 14 further subtasks until a sweep-verification subtask caught the
+        // regression empirically ~12 hours and several dollars of session
+        // cost later.
+        let sessionSummary = '';
+        try { sessionSummary = readFileSync(subtaskLogFile, 'utf-8'); } catch { /* best-effort */ }
+        if (!sessionSummary.includes('[SKIPPED]')) {
+          scopeViolations.add(subtask.id);
+          logToOutput(pipeline.specPath,
+            '\n[VERIFY] Subtask ' + subtask.id + ' ended without touching any of its assigned files — no edit was made:\n' +
+            '[VERIFY] Assigned files: ' + ((subtask.files || []).join(', ') || '(none)') + '\n'
+          );
+        }
       }
     } catch (scopeErr) {
       const scopeMsg = scopeErr instanceof Error ? scopeErr.message : String(scopeErr);
@@ -1265,7 +1372,7 @@ export async function runSubtaskSession(
   if (!skipCompletion) {
     if (scopeViolations.has(subtask.id)) {
       skipCompletion = true;
-      logToOutput(pipeline.specPath, '[SCOPE] Subtask ' + subtask.id + ' rejected — will re-run with scope enforcement\n');
+      logToOutput(pipeline.specPath, '[SCOPE] Subtask ' + subtask.id + ' rejected — will re-run (see the specific reason logged above)\n');
     } else {
       if (pipeline.deliverableFailCounts?.[subtask.id] !== undefined) {
         delete pipeline.deliverableFailCounts[subtask.id];
@@ -1378,7 +1485,7 @@ export async function integrateGroup(
         continue;
       }
       if (scopeViolations.has(subtasks[i].id)) {
-        logToOutput(pipeline.specPath, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' (scope violation)\n');
+        logToOutput(pipeline.specPath, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' (rejected — see the specific reason logged above)\n');
         continue;
       }
 
