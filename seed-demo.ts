@@ -1421,7 +1421,7 @@ function generatedRoleLog(task: SeedTask, role: AgentRole, startedAt: string, su
     analyst: `[SESSION] Demo session started — role: analyst\n> Reviewing the seeded request for ${task.title}\n> Recording acceptance criteria in spec.md\n> Analyst handoff complete — scripted demo transcript; no CLI session was run.`,
     planner: `[SESSION] Demo session started — role: planner\n> Reading spec.md for ${task.title}\n> Mapping acceptance criteria to implementation subtasks\n> Planner handoff complete — scripted demo transcript; no CLI session was run.`,
     coder: `[SESSION] Demo session started — role: coder (subtask ${subtaskId})\n> Working on ${subtask?.title ?? task.title}\n> Checking the implementation against the subtask acceptance criteria\n> Coder checkpoint saved — scripted demo transcript; no source code was changed.`,
-    qa: `[SESSION] Demo session started — role: qa-reviewer\n> Reviewing the implementation and acceptance criteria for ${task.title}\n> Overall seeded QA result: ${task.qaReport && (task.qaReport as { overall?: string }).overall ? (task.qaReport as { overall?: string }).overall : task.phase === 'failed' ? 'FAIL' : 'review pending'}\n> QA handoff recorded — scripted demo transcript; no tests were executed.`,
+    qa: `[SESSION] Demo session started — role: qa-reviewer\n> Reviewing the implementation and acceptance criteria for ${task.title}\n> Overall seeded QA result: ${task.qaReport && (task.qaReport as { overall?: string }).overall ? (task.qaReport as { overall?: string }).overall : task.phase === 'failed' ? 'FAIL' : task.awaitingReviewReason ? 'prior QA phase completed before the analyst revision' : 'review pending'}\n> ${task.awaitingReviewReason ? 'This historical QA checkpoint precedes the current analyst revision; the task is now parked for human review.' : 'QA handoff recorded — scripted demo transcript; no tests were executed.'}`,
     merge: task.phase === 'failed'
       ? `[SESSION] Demo session started — role: merger\n> Checking merge readiness for ${task.title}\n> Task is failed; merge is intentionally blocked. This log only populates the demo Merger role filter. No PR was created and no merge ran.`
       : `[SESSION] Demo session started — role: merger\n> Reviewing delivery state for ${task.title}\n> ${task.prUrl ? `Placeholder PR link for display only: ${task.prUrl}` : 'Recording the seeded merge handoff; no real repository or merge operation exists.'}\n> Merger handoff complete — scripted demo transcript; no CLI session was run.`,
@@ -1442,10 +1442,21 @@ function buildTaskLogs(task: SeedTask): { orchestratorLog: string | null; roleLo
 
   const timestamp = firstLogTimestamp(task);
   const fallback = Date.parse('2026-07-06T12:00:00Z');
-  const anchor = timestamp ?? fallback;
+  const revisionPark = task.phase === 'awaiting-review' && !!task.awaitingReviewReason;
+  // A no-op spec revision is a later analyst session after the original
+  // spec→plan→implement→QA work. Place missing historical phase logs before
+  // the dated revision transcript instead of fabricating work after parking.
+  const anchor = (timestamp ?? fallback) - (revisionPark ? 4 * 60 * 60 * 1000 : 0);
   const inferredRole = rolesFromLogs.find((item) => item.role !== 'orchestrator')?.role;
-  const anchorRoleIndex = inferredRole ? AGENT_ROLE_INDEX[inferredRole]
+  const anchorRoleIndex = revisionPark ? 0 : inferredRole ? AGENT_ROLE_INDEX[inferredRole]
     : Math.max(-1, ...[...needed].map((role) => AGENT_ROLE_INDEX[role]));
+  if (revisionPark && roleLogs['output-spec.log']) {
+    const initialSpecLog = timestampDemoLog(
+      `[SESSION] Demo session started — role: analyst (initial spec)\n> Reviewing the seeded request for ${task.title}\n> Recording the original acceptance criteria before planning\n> Initial spec handoff complete — scripted demo transcript; no CLI session was run.`,
+      new Date(anchor).toISOString().slice(0, 19),
+    );
+    roleLogs['output-spec.log'] = `${initialSpecLog}\n\n${roleLogs['output-spec.log']}`;
+  }
   const coderIds = coderSubtaskIds(task);
   const transcriptCoderId = Object.keys(roleLogs)
     .map((file) => file.match(/^output-st(\d+)\.log$/))
