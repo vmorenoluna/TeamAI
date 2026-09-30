@@ -122,6 +122,14 @@ describe('CreatePR Conflict Resolution Integration', () => {
     execFileSync('git', ['add', '.'], { cwd: projectDir, stdio: 'ignore' });
     execFileSync('git', ['commit', '-m', 'initial commit'], { cwd: projectDir, stdio: 'ignore' });
     execFileSync('git', ['push', 'origin', 'master'], { cwd: projectDir, stdio: 'ignore' });
+    // The clone happened against an empty bare repo (no commits yet), so git
+    // never populated refs/remotes/origin/HEAD — resolveBaseBranch's
+    // `git symbolic-ref refs/remotes/origin/HEAD` lookup fails and falls back
+    // to its hardcoded 'main' default, which doesn't match this fixture's
+    // 'master'. A real clone of a non-empty repo sets this automatically; set
+    // it explicitly here now that content exists, so the rebase/merge steps
+    // below target the branch this fixture actually uses.
+    execFileSync('git', ['remote', 'set-head', 'origin', 'master'], { cwd: projectDir, stdio: 'ignore' });
 
     // TeamAI directory structure
     mkdirSync(join(projectDir, '.teamai'), { recursive: true });
@@ -238,7 +246,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     await new Promise(r => setTimeout(r, 100));
 
     // Verify the merger agent was spawned
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', '/merge origin/main');
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', '/merge origin/master');
 
     // Simulate the merger agent resolving the conflict:
     try {
@@ -295,7 +303,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     await new Promise(r => setTimeout(r, 100));
 
     // Verify merger was spawned
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', '/merge origin/main');
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', '/merge origin/master');
 
     // Simulate merger failure — exit with non-zero code
     fireEvent('exit', { sessionId: 'sess-merge', code: 1 });
@@ -340,7 +348,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     // Should NOT have sent /merge origin/master (no rebase conflict)
     const sendCalls = mockSendMessage.mock.calls as any[][];
     const mergeCalls = sendCalls.filter(
-      (c) => c[1] && typeof c[1] === 'string' && c[1].includes('/merge origin/main'),
+      (c) => c[1] && typeof c[1] === 'string' && c[1].includes('/merge origin/master'),
     );
     expect(mergeCalls.length).toBe(0);
 

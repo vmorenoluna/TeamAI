@@ -101,6 +101,7 @@ export interface QaReviewDeps {
   waitForCompletion: (sessionId: string) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
   execGit: (args: string[], hostCwd: string) => void;
+  execGitCapture: (args: string[], hostCwd: string) => string;
   writeQaFeedback: (pipeline: TaskPipeline, report: QaReport) => void;
   writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
@@ -143,8 +144,27 @@ async function reconcileDivergedBranch(
     execFileSync('git', ['rebase', targetRef], { cwd: pipeline.worktreePath, stdio: 'pipe' });
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Rebased onto ${targetRef}\n`);
     return 'rebased';
-  } catch {
+  } catch (rebaseErr) {
+    // Not every failed `git rebase` is a real conflict — check for actual
+    // unmerged paths before aborting (aborting clears that mid-rebase
+    // state). A non-conflict failure (dirty worktree, git lock, ...)
+    // spawning a merger just wastes a session that finds nothing to
+    // resolve and reports "nothing to do" — see phase-runners.ts's
+    // rebaseOntoLatestDefault, which has the same check for the same reason.
+    let unmergedFiles = '';
+    try {
+      unmergedFiles = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath).trim();
+    } catch { /* best-effort — treat as unknown, fall through to the conflict path below */ }
     try { execFileSync('git', ['rebase', '--abort'], { cwd: pipeline.worktreePath, stdio: 'pipe' }); } catch { /* ignore */ }
+
+    if (!unmergedFiles) {
+      const rebaseMsg = rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr);
+      logToOutput(pipeline.specPath,
+        `[QA-PRECHECK] Rebase onto ${targetRef} failed for a non-conflict reason (no unmerged files found) — ` +
+        `not spawning a merger: ${rebaseMsg}\n`);
+      return 'failed';
+    }
+
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Rebase onto ${targetRef} had conflicts — spawning merger to resolve via git merge\n`);
     try {
       const mergeLogFile = path.join(pipeline.specPath, 'output-merge.log');

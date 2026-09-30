@@ -563,6 +563,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const deps = {
       projectRoot: project.root,
       execGit: vi.fn(),
+      execGitCapture: vi.fn(() => ''),
       gitPush: vi.fn(),
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
@@ -599,6 +600,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const deps = {
       projectRoot: project.root,
       execGit,
+      execGitCapture: vi.fn(() => ''),
       gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
@@ -633,6 +635,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const deps = {
       projectRoot: project.root,
       execGit: vi.fn(),
+      execGitCapture: vi.fn(() => ''),
       gitPush: vi.fn((args: string[]) => {
         if (args[0] === 'push') throw new Error('offline');
       }),
@@ -663,6 +666,11 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       execGit: vi.fn((args: string[]) => {
         if (args[0] === 'rebase' && args[1] !== '--abort') throw new Error('CONFLICT');
       }),
+      // Non-empty output confirms a genuine conflict — required for the
+      // merger-spawn path to trigger at all (see rebaseOntoLatestDefault's
+      // unmerged-file check, which skips the merger for a non-conflict
+      // rebase failure).
+      execGitCapture: vi.fn(() => 'src/conflicted-file.ts\n'),
       gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(async () => undefined),
@@ -675,6 +683,51 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     expect(gitPush).toHaveBeenCalledWith(['push', '--force-with-lease', 'origin', 'feat/test'], logFile);
     const logContent = readFileSync(logFile, 'utf-8');
     expect(logContent).toContain('Merger resolved rebase conflicts — pushing its result');
+  });
+
+  // Regression: a failed `git rebase` used to be treated as a conflict
+  // unconditionally, spawning a merger session even when the failure had
+  // nothing to do with conflicting content (a dirty worktree, a git lock, a
+  // permission error, ...). The merger would then find no unmerged files,
+  // report "nothing to do", and the orchestrator's own "had conflicts" log
+  // line read as if it had lied. rebaseOntoLatestDefault now checks for
+  // actual unmerged paths before deciding a merger is warranted.
+  it('does not spawn a merger when the rebase fails for a non-conflict reason', async () => {
+    const logFile = join(project.taskDir, 'output.log');
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
+      return '';
+    });
+
+    const gitPush = vi.fn();
+    const sessionOpts = vi.fn();
+    const deps = {
+      projectRoot: project.root,
+      execGit: vi.fn((args: string[]) => {
+        if (args[0] === 'rebase' && args[1] !== '--abort') throw new Error('fatal: cannot rebase: You have unstaged changes.');
+      }),
+      // No unmerged files — the rebase failed for a reason other than a
+      // real conflict.
+      execGitCapture: vi.fn(() => ''),
+      gitPush,
+      sessionOpts,
+      waitForCompletion: vi.fn(async () => undefined),
+      baseBranch: 'master',
+    };
+
+    const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
+
+    expect(result).toBe(false);
+    // No merger session was spawned.
+    expect(sessionOpts).not.toHaveBeenCalled();
+    // Nothing was pushed either (there's nothing resolved to push).
+    expect(gitPush).not.toHaveBeenCalled();
+    const logContent = readFileSync(logFile, 'utf-8');
+    expect(logContent).toContain('failed for a non-conflict reason (no unmerged files found) — not spawning a merger');
+    expect(logContent).toContain('cannot rebase: You have unstaged changes');
+    expect(logContent).not.toContain('spawning merger to resolve via git merge');
   });
 });
 
@@ -710,7 +763,8 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
 
     const gitPush = vi.fn();
     const execGit = vi.fn();
-    const deps = { projectRoot: project.root, gitPush, execGit, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
+    const execGitCapture = vi.fn(() => '');
+    const deps = { projectRoot: project.root, gitPush, execGit, execGitCapture, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
 
     await syncPhaseBaseline(pipeline, deps);
 
@@ -728,7 +782,8 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
 
     const gitPush = vi.fn();
     const execGit = vi.fn();
-    const deps = { projectRoot: project.root, gitPush, execGit, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
+    const execGitCapture = vi.fn(() => '');
+    const deps = { projectRoot: project.root, gitPush, execGit, execGitCapture, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
 
     await syncPhaseBaseline(pipeline, deps);
 
@@ -745,7 +800,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     const deps = {
       projectRoot: project.root,
       gitPush: vi.fn(() => { throw new Error('offline'); }),
-      execGit: vi.fn(), sessionOpts: vi.fn(), waitForCompletion: vi.fn(),
+      execGit: vi.fn(), execGitCapture: vi.fn(() => ''), sessionOpts: vi.fn(), waitForCompletion: vi.fn(),
     };
 
     await expect(syncPhaseBaseline(pipeline, deps)).resolves.toBeUndefined();
@@ -763,6 +818,10 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
         if (args.includes('rebase') && !args.includes('--abort')) throw new Error('CONFLICT');
         // tolerate the --abort call
       }),
+      // Non-empty output confirms a genuine conflict — required to reach
+      // the merger-spawn path at all (see the non-conflict-failure check
+      // in rebaseOntoLatestDefault).
+      execGitCapture: vi.fn(() => 'src/conflicted-file.ts\n'),
       sessionOpts: vi.fn(),
       // Merger-fallback session never resolves the conflict.
       waitForCompletion: vi.fn().mockRejectedValue(new Error('merger failed')),

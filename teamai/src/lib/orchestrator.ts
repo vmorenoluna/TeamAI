@@ -223,9 +223,20 @@ export class Orchestrator {
       this.taskStore.clearArtifacts(taskId, 'plan');
       this.clearPipelineStateFile(dir);
       startPhase = startPhaseFromArtifacts(false, hasSpec);
-    } else if (targetPhase === 'implement' || targetPhase === 'qa-review') {
+    } else if (targetPhase === 'implement') {
       this.taskStore.clearArtifacts(taskId, 'qa');
       startPhase = startPhaseFromArtifacts(hasPlan, hasSpec);
+    } else if (targetPhase === 'qa-review') {
+      this.taskStore.clearArtifacts(taskId, 'qa');
+      // Only fall back to an earlier phase when qa-review's own prerequisite
+      // (a plan) is missing — startPhaseFromArtifacts(hasPlan=true, ...)
+      // always resolves to 'implement', which used to silently downgrade
+      // every request for 'qa-review' on a task that already has a plan
+      // (i.e. virtually every non-fresh task) into an 'implement' run
+      // instead. That meant dragging a card to the "Review" column never
+      // actually ran QA — it always re-ran the coder. Honor 'qa-review'
+      // directly whenever its prerequisite is satisfied.
+      startPhase = hasPlan ? 'qa-review' : startPhaseFromArtifacts(hasPlan, hasSpec);
     } else if (targetPhase === 'merge' || targetPhase === 'create-pr') {
       // Merge/PR requires the worktree and branch to exist. If missing,
       // restart from the earliest phase needed to recreate them.
