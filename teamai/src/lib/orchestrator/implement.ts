@@ -1454,6 +1454,15 @@ export async function integrateGroup(
   // worktree this round" — true both for a genuine multi-subtask group and
   // for a lone subtask resuming after a wakeup in a now-collapsed group.
   if (subtaskWorktrees.size > 0) {
+    // Repair a cherry-pick an earlier, interrupted session left in progress
+    // on the main worktree before attempting a new one — see
+    // repairStuckCherryPick's own doc comment for the full rationale. Runs
+    // first so the dirty-worktree check right below it (which would
+    // otherwise just auto-commit the stuck cherry-pick's pending edit under
+    // a generic message without actually resolving CHERRY_PICK_HEAD) sees
+    // an already-clean-or-freshly-aborted tree.
+    await repairStuckCherryPick(pipeline, deps);
+
     // Pre-cherry-pick: auto-commit any uncommitted changes in the main worktree.
     // Must go through deps.execGit/execGitCapture, not a raw execFileSync —
     // the main worktree is routinely container-patched (its .git file and
@@ -2284,10 +2293,82 @@ export async function _recoverSubtaskBranchBeforeDelete(
  */
 function checkCherryPickInProgress(worktreePath: string, execGitCapture: ImplementDeps['execGitCapture']): boolean {
   try {
-    execGitCapture(['rev-parse', '--verify', 'CHERRY_PICK_HEAD'], worktreePath);
-    return true;
+    // Require non-empty output, not just "didn't throw": a real `git
+    // rev-parse --verify` either throws (ref doesn't exist) or prints the
+    // resolved SHA — it never succeeds with empty stdout — so this is no
+    // less correct against real git, and it stops a test's catch-all
+    // `execGitCapture: vi.fn(() => '')` default (used throughout this
+    // suite for calls a given test doesn't care about) from being misread
+    // as "a cherry-pick is in progress" for every other execGitCapture
+    // call the test makes too.
+    return execGitCapture(['rev-parse', '--verify', 'CHERRY_PICK_HEAD'], worktreePath).trim().length > 0;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Repair a cherry-pick left in progress on the MAIN worktree by a previous
+ * session that was interrupted before it could finish or abort — called
+ * from integrateGroup right before it attempts a new one. The main
+ * worktree has no writer but this pipeline's own sessions (integrateGroup's
+ * cherry-picks, this repair), so CHERRY_PICK_HEAD still being set here is
+ * never an ambiguous external actor, always the leftover of a session that
+ * died mid-flight (crashed, killed by the stall sweep, etc.) with nothing
+ * to clean it up. Mirrors rebaseOntoLatestDefault's unconditional
+ * rebase/merge reset guard (phase-runners.ts) for the same class of race,
+ * one layer in: implement never calls that guard (it rebases per-subtask
+ * branches via cherry-pick, not the base branch), so a stuck cherry-pick
+ * here had nothing resetting it before a fresh cherry-pick was attempted.
+ *
+ * A clean pending cherry-pick (no unmerged paths — the commit just never
+ * landed) is finished by committing it, preserving whatever work it
+ * contains, since that content may be a real, otherwise-unrecoverable fix
+ * (found via QA: an interrupted session had left a correct test fix
+ * sitting uncommitted this way for three review rounds). A genuinely
+ * conflicted one (unmerged paths left mid resolution) is aborted instead —
+ * a resolution abandoned mid-session can't be trusted — and left to
+ * integrateGroup's own cherry-pick retry/merger-recovery path to re-run
+ * cleanly from the subtask's own branch.
+ */
+export async function repairStuckCherryPick(
+  pipeline: ImplementPipeline,
+  deps: ImplementDeps,
+): Promise<void> {
+  if (!checkCherryPickInProgress(pipeline.worktreePath, deps.execGitCapture)) return;
+
+  let unmergedFiles = '';
+  try {
+    unmergedFiles = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath).trim();
+  } catch { /* best-effort — treat as no conflicts, fall through to the clean-pending path */ }
+
+  if (unmergedFiles) {
+    logToOutput(pipeline.specPath,
+      '\n[WORKTREE] Main worktree has a cherry-pick stuck mid-conflict-resolution ' +
+      '(left by an interrupted session) in ' + unmergedFiles.split('\n').length +
+      ' file(s) — aborting so a fresh cherry-pick can run cleanly\n');
+    try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+    return;
+  }
+
+  try {
+    const statusOut = deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath).trim();
+    if (statusOut) {
+      logToOutput(pipeline.specPath,
+        '\n[WORKTREE] Main worktree has a cherry-pick stuck mid-flight (left by an ' +
+        'interrupted session) with no conflicts — committing its pending changes to ' +
+        'finish it instead of discarding them:\n' + statusOut + '\n');
+      deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
+      deps.execGit(['commit', '-m', 'chore: finish cherry-pick left in progress by an interrupted session'], pipeline.worktreePath);
+      logToOutput(pipeline.specPath, '[WORKTREE] Finished the stuck cherry-pick\n');
+    } else {
+      // CHERRY_PICK_HEAD set but nothing pending (e.g. an already-applied,
+      // empty commit) — abort just clears the leftover state.
+      deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath);
+    }
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logToOutput(pipeline.specPath, '\n[WARN] Could not repair stuck cherry-pick: ' + errMsg + '\n');
   }
 }
 

@@ -75,7 +75,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator } from '../../src/lib/orchestrator';
-import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks, reconcileSubtaskCompletionFromDeliverables } from '../../src/lib/orchestrator/implement';
+import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks, reconcileSubtaskCompletionFromDeliverables, repairStuckCherryPick } from '../../src/lib/orchestrator/implement';
 import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
@@ -6781,6 +6781,131 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
     resolveCompletion!();
     const result = await resultPromise;
     expect(result).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  repairStuckCherryPick — clean up a cherry-pick left in progress on the
+//  main worktree by a previous, interrupted implement session
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('repairStuckCherryPick', () => {
+  let project: ReturnType<typeof setupProject>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onHandlers.clear();
+    project = setupProject();
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  function makeDeps(overrides: Partial<ImplementDeps> = {}): ImplementDeps {
+    return {
+      projectRoot: project.root,
+      taskStore: { update: vi.fn() } as any,
+      execGit: vi.fn(),
+      execGitCapture: vi.fn(() => ''),
+      gitPush: vi.fn(),
+      persistAndEmitPhase: vi.fn(),
+      advancePhase: vi.fn(),
+      savePipelineState: vi.fn(),
+      executePhase: vi.fn(),
+      sessionOpts: vi.fn() as any,
+      waitForCompletion: vi.fn(),
+      patchWorktreeGitFile: vi.fn(),
+      isWorktreeHealthy: vi.fn(() => true),
+      cleanStaleSubtaskWorktrees: vi.fn(),
+      restoreQaReportFromSnapshot: vi.fn(),
+      restoreHumanFeedbackFromSnapshot: vi.fn(),
+      writeQaFeedback: vi.fn(),
+      writeCompletionSummary: vi.fn(),
+      getPipelineConfig: vi.fn(() => ({ maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30 })),
+      phaseHeader: vi.fn(),
+      planWriteLock: { current: Promise.resolve() },
+      scheduleWakeup: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  function makeImplPipeline(overrides: Record<string, any> = {}): ImplementPipeline {
+    return {
+      taskId: project.taskId,
+      title: 'cherry-pick repair test',
+      description: 'cherry-pick repair test',
+      phase: 'implement',
+      specPath: project.taskDir,
+      worktreePath: join(project.root, 'worktrees', 'cherry-pick-repair-test'),
+      branch: 'feat/cherry-pick-repair-test',
+      qaAttempt: 0,
+      maxQaAttempts: 3,
+      specRevision: 1,
+      qaRevision: 0,
+      ...overrides,
+    };
+  }
+
+  it('is a no-op when no cherry-pick is in progress', async () => {
+    const deps = makeDeps({ execGitCapture: vi.fn(() => { throw new Error('not found'); }) });
+    const pipeline = makeImplPipeline();
+
+    await repairStuckCherryPick(pipeline, deps);
+
+    expect(deps.execGit).not.toHaveBeenCalled();
+  });
+
+  it('commits pending changes to finish a clean stuck cherry-pick (no conflicts)', async () => {
+    // rev-parse CHERRY_PICK_HEAD succeeds (in progress); diff --diff-filter=U
+    // returns nothing (no conflicts); status --porcelain shows the pending edit.
+    const execGitCapture = vi.fn()
+      .mockImplementationOnce(() => 'abc123\n')        // rev-parse CHERRY_PICK_HEAD
+      .mockImplementationOnce(() => '')                 // diff --diff-filter=U
+      .mockImplementationOnce(() => ' M src/Foo.scala\n'); // status --porcelain
+    const deps = makeDeps({ execGitCapture });
+    const pipeline = makeImplPipeline();
+
+    await repairStuckCherryPick(pipeline, deps);
+
+    expect(deps.execGit).toHaveBeenCalledWith(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
+    expect(deps.execGit).toHaveBeenCalledWith(
+      ['commit', '-m', 'chore: finish cherry-pick left in progress by an interrupted session'],
+      pipeline.worktreePath,
+    );
+    // Never aborts a clean, preservable cherry-pick — that would discard
+    // the interrupted session's real (otherwise unrecoverable) work.
+    expect(deps.execGit).not.toHaveBeenCalledWith(['cherry-pick', '--abort'], pipeline.worktreePath);
+  });
+
+  it('aborts a stuck cherry-pick left mid unresolved conflict', async () => {
+    const execGitCapture = vi.fn()
+      .mockImplementationOnce(() => 'abc123\n')          // rev-parse CHERRY_PICK_HEAD
+      .mockImplementationOnce(() => 'src/Foo.scala\n');  // diff --diff-filter=U (still conflicted)
+    const deps = makeDeps({ execGitCapture });
+    const pipeline = makeImplPipeline();
+
+    await repairStuckCherryPick(pipeline, deps);
+
+    expect(deps.execGit).toHaveBeenCalledWith(['cherry-pick', '--abort'], pipeline.worktreePath);
+    // Never commits conflict-marker content as if it were resolved.
+    expect(deps.execGit).not.toHaveBeenCalledWith(
+      expect.arrayContaining(['commit']),
+      expect.anything(),
+    );
+  });
+
+  it('aborts to clear leftover state when CHERRY_PICK_HEAD is set but nothing is pending', async () => {
+    const execGitCapture = vi.fn()
+      .mockImplementationOnce(() => 'abc123\n') // rev-parse CHERRY_PICK_HEAD
+      .mockImplementationOnce(() => '')          // diff --diff-filter=U
+      .mockImplementationOnce(() => '');         // status --porcelain (nothing pending)
+    const deps = makeDeps({ execGitCapture });
+    const pipeline = makeImplPipeline();
+
+    await repairStuckCherryPick(pipeline, deps);
+
+    expect(deps.execGit).toHaveBeenCalledWith(['cherry-pick', '--abort'], pipeline.worktreePath);
   });
 });
 
