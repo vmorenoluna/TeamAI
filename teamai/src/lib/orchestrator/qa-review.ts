@@ -140,17 +140,36 @@ async function reconcileDivergedBranch(
   deps: QaReviewDeps,
 ): Promise<ReconcileOutcome> {
   const targetRef = `origin/${pipeline.branch}`;
+
+  // `git rebase` refuses to start against a dirty worktree — not a content
+  // conflict, just an uncommitted leftover. Deterministically fixable
+  // without an agent: auto-commit it first. See rebaseOntoLatestDefault's
+  // matching guard (phase-runners.ts) for the full rationale.
+  try {
+    const status = deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath).trim();
+    if (status) {
+      deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
+      deps.execGit(['commit', '-m', 'WIP: auto-commit uncommitted changes before rebase'], pipeline.worktreePath);
+      logToOutput(pipeline.specPath, `[QA-PRECHECK] Worktree had uncommitted changes — auto-committed before rebasing onto ${targetRef}\n`);
+    }
+  } catch (guardErr) {
+    const guardMsg = guardErr instanceof Error ? guardErr.message : String(guardErr);
+    logToOutput(pipeline.specPath, `[QA-PRECHECK] Could not auto-commit dirty worktree before rebase: ${guardMsg}\n`);
+  }
+
   try {
     execFileSync('git', ['rebase', targetRef], { cwd: pipeline.worktreePath, stdio: 'pipe' });
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Rebased onto ${targetRef}\n`);
     return 'rebased';
   } catch (rebaseErr) {
-    // Not every failed `git rebase` is a real conflict — check for actual
-    // unmerged paths before aborting (aborting clears that mid-rebase
-    // state). A non-conflict failure (dirty worktree, git lock, ...)
-    // spawning a merger just wastes a session that finds nothing to
-    // resolve and reports "nothing to do" — see phase-runners.ts's
-    // rebaseOntoLatestDefault, which has the same check for the same reason.
+    // Not every failed `git rebase` is a real conflict — the dirty-worktree
+    // case is handled deterministically above, but a stale git lock or a
+    // permission error raises the exact same way and has no mechanical fix.
+    // Check for actual unmerged paths before aborting (aborting clears that
+    // mid-rebase state). Spawning a merger for a non-conflict failure just
+    // wastes a session that finds nothing to resolve and reports "nothing
+    // to do" — see phase-runners.ts's rebaseOntoLatestDefault, which has
+    // the same check for the same reason.
     let unmergedFiles = '';
     try {
       unmergedFiles = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath).trim();

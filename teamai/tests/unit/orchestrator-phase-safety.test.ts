@@ -729,6 +729,52 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     expect(logContent).toContain('cannot rebase: You have unstaged changes');
     expect(logContent).not.toContain('spawning merger to resolve via git merge');
   });
+
+  // Deterministic recovery: the most common real cause of a non-conflict
+  // rebase failure is a dirty worktree (a coder session that ended without
+  // committing) — `git rebase` refuses to even start against one. This is
+  // mechanically fixable without an agent: auto-commit it first, then the
+  // rebase proceeds normally.
+  it('auto-commits a dirty worktree before attempting the rebase, then proceeds normally', async () => {
+    const logFile = join(project.taskDir, 'output.log');
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
+      return '';
+    });
+
+    const execGit = vi.fn();
+    const gitPush = vi.fn();
+    const deps = {
+      projectRoot: project.root,
+      execGit,
+      // Dirty on the first check (before the guard's commit), clean after —
+      // mirrors a real `git status --porcelain` going empty once committed.
+      execGitCapture: vi.fn(() => 'M src/feature.ts\n'),
+      gitPush,
+      sessionOpts: vi.fn(),
+      waitForCompletion: vi.fn(),
+      baseBranch: 'master',
+    };
+
+    const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
+
+    expect(result).toBe(true);
+    const commitCalls = execGit.mock.calls.filter((c: any[]) => c[0]?.[0] === 'commit');
+    expect(commitCalls).toHaveLength(1);
+    expect(commitCalls[0][0]).toEqual(['commit', '-m', 'WIP: auto-commit uncommitted changes before rebase']);
+    const addCalls = execGit.mock.calls.filter((c: any[]) => c[0]?.[0] === 'add');
+    expect(addCalls).toHaveLength(1);
+    // The commit happened before the rebase attempt.
+    const rebaseCallIndex = execGit.mock.calls.findIndex((c: any[]) => c[0]?.[0] === 'rebase');
+    const commitCallIndex = execGit.mock.calls.findIndex((c: any[]) => c[0]?.[0] === 'commit');
+    expect(commitCallIndex).toBeGreaterThanOrEqual(0);
+    expect(rebaseCallIndex).toBeGreaterThan(commitCallIndex);
+    expect(gitPush).toHaveBeenCalledWith(['push', '--force-with-lease', 'origin', 'feat/test'], logFile);
+    const logContent = readFileSync(logFile, 'utf-8');
+    expect(logContent).toContain('Worktree had uncommitted changes — auto-committed before rebasing onto master');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -114,19 +114,43 @@ export async function rebaseOntoLatestDefault(
     }
   };
 
+  // `git rebase` refuses to even start against a dirty worktree — not a
+  // content conflict, just an uncommitted leftover (most commonly a coder
+  // session that ended without committing). This is deterministically
+  // fixable without an agent: auto-commit it first, matching the same
+  // WIP-commit safety net used elsewhere (implement.ts's COMMIT-GUARD,
+  // artifact-commit.ts's pre-squash commit) — a session's real work should
+  // never be lost to a failed rebase precheck. `.teamai` is excluded since
+  // pipeline artifacts are the orchestrator's responsibility, not a coder
+  // commit's, mirroring COMMIT-GUARD's own exclusion.
+  try {
+    const status = deps.execGitCapture(['status', '--porcelain'], worktreePath).trim();
+    if (status) {
+      deps.execGit(['add', '-A', '--', '.', ':!.teamai'], worktreePath);
+      deps.execGit(['commit', '-m', 'WIP: auto-commit uncommitted changes before rebase'], worktreePath);
+      logToOutput(path.dirname(logFile), `\n[INFO] Worktree had uncommitted changes — auto-committed before rebasing onto ${deps.baseBranch}\n`);
+    }
+  } catch (guardErr) {
+    const guardMsg = guardErr instanceof Error ? guardErr.message : String(guardErr);
+    logToOutput(path.dirname(logFile), `\n[WARN] Could not auto-commit dirty worktree before rebase: ${guardMsg}\n`);
+  }
+
   try {
     deps.execGit(['rebase', `origin/${deps.baseBranch}`], worktreePath);
     logToOutput(path.dirname(logFile), `\n[INFO] Feature branch rebased onto latest ${deps.baseBranch}\n`);
     return pushRebased();
   } catch (rebaseErr) {
-    // A failed `git rebase` is NOT necessarily a real conflict — a dirty
-    // worktree, a stale git lock, a permission error, or any other git
-    // failure raises the exact same way. Check for actual unmerged paths
-    // (mid-rebase, before aborting — the abort below clears this state)
-    // before deciding a merger session is warranted. Spawning one for a
-    // non-conflict failure wastes a session on an agent that finds nothing
-    // to resolve and reports "nothing to do" — which reads as if the
-    // orchestrator lied about there being a conflict in the first place.
+    // A failed `git rebase` is NOT necessarily a real conflict — the dirty-
+    // worktree case is handled deterministically above, but a stale git
+    // lock, a permission error, or any other git failure raises the exact
+    // same way and has no mechanical fix the orchestrator can apply. Check
+    // for actual unmerged paths (mid-rebase, before aborting — the abort
+    // below clears this state) before deciding a merger session is
+    // warranted. Spawning one for a non-conflict failure wastes a session
+    // on an agent that finds nothing to resolve and reports "nothing to
+    // do" — which reads as if the orchestrator lied about there being a
+    // conflict in the first place; the merger is for resolving conflicting
+    // content, not for causes it has no more ability to fix than we do.
     let unmergedFiles = '';
     try {
       unmergedFiles = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], worktreePath).trim();
