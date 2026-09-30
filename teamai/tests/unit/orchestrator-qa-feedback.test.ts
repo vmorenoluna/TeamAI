@@ -227,6 +227,61 @@ describe('_writeQaFeedback', () => {
     expect(subtaskB.acceptance_criteria.some((ac: string) => ac.includes('Race condition possible'))).toBe(false);
   });
 
+  it('flags a subtask via explicit subtask_ids even when its criterion text has no overlap with the subtask\'s acceptance_criteria', () => {
+    // Regression test: a criterion whose own wording shares no tokens with
+    // subtask 2's acceptance_criteria (so the fuzzy text matcher would find
+    // nothing) must still reach subtask 2 when QA names it explicitly.
+    const report = {
+      overall: 'FAIL',
+      criteria: [
+        {
+          criterion: 'AC-11 (CS-10/CS-11): cadence gating on the true leading tone',
+          status: 'FAIL',
+          fix_needed: 'Use chord.soundsAs instead of ScalePosition.equals',
+          subtask_ids: [2],
+        },
+      ],
+    };
+
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+
+    const planPath = join(project.taskDir, 'plan.json');
+    const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+
+    const subtaskA = plan.subtasks.find((s: any) => s.id === 1);
+    const subtaskB = plan.subtasks.find((s: any) => s.id === 2);
+    expect(subtaskB.acceptance_criteria.some((ac: string) => ac.includes('[QA CORRECTION: Use chord.soundsAs instead of ScalePosition.equals]'))).toBe(true);
+    expect(subtaskB.qa_flagged).toBe(true);
+    // subtask 1 was not named in subtask_ids — must not be flagged by this criterion
+    expect(subtaskA.qa_flagged).toBeFalsy();
+  });
+
+  it('flags a subtask via explicit subtask_ids on an additional_issues entry with no file field', () => {
+    // Regression test: a meta-issue about plan.json itself (e.g. "subtask 2
+    // is incorrectly marked complete") has no source `file` the filename
+    // matcher can key off — subtask_ids is the only signal that can attribute it.
+    const report = {
+      overall: 'FAIL',
+      additional_issues: [
+        {
+          description: 'plan.json marks subtask 2 as "completed": true, but the fix is not implemented',
+          file: '.teamai/my-test/plan.json',
+          fix_needed: 'Do not mark subtask 2 complete until the fix lands',
+          subtask_ids: [2],
+        },
+      ],
+    };
+
+    (orch as AnyOrch)._ctx.writeQaFeedback(pipeline(project.taskId, project.taskDir), report);
+
+    const planPath = join(project.taskDir, 'plan.json');
+    const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+
+    const subtaskB = plan.subtasks.find((s: any) => s.id === 2);
+    expect(subtaskB.acceptance_criteria.some((ac: string) => ac.includes('Do not mark subtask 2 complete'))).toBe(true);
+    expect(subtaskB.qa_flagged).toBe(true);
+  });
+
   it('patches plan.json via basename matching (not substring)', () => {
     const report = {
       overall: 'FAIL',

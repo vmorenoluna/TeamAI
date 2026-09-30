@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import type { TaskStore } from '../task-store';
-import type { QaReport } from './types';
+import type { PlanSubtask, QaReport } from './types';
 import { warn } from '../logger';
 
 /** Write QA feedback for bouncing back to implement */
@@ -87,7 +87,26 @@ export function writeQaFeedback(
           for (const c of report.criteria) {
             if (c.status === 'FAIL' && c.fix_needed) {
               const criterionName = c.criterion || c.name || '';
-              for (const subtask of plan.subtasks) {
+              // Primary: explicit subtask_ids from the QA agent (see
+              // QaCriterion.subtask_ids) — exact id lookup, no guessing.
+              const explicitIds = (c.subtask_ids ?? []).filter(id => typeof id === 'number');
+              const targeted = explicitIds.length > 0
+                ? plan.subtasks.filter((s: PlanSubtask) => explicitIds.includes(s.id))
+                : null;
+              for (const subtask of targeted ?? plan.subtasks) {
+                if (targeted) {
+                  // Explicit id match: flag unconditionally, no text matching needed.
+                  if (!subtask.acceptance_criteria) subtask.acceptance_criteria = [];
+                  subtask.acceptance_criteria.push(`[QA CORRECTION: ${c.fix_needed}]`);
+                  subtask.qa_flagged = true;
+                  modified = true;
+                  continue;
+                }
+                // Fallback: fuzzy text matching against acceptance_criteria, for QA
+                // reports written before subtask_ids existed. Prone to false
+                // negatives (criterion label ≠ acceptance-criteria wording) and
+                // false positives (generic phrasing overlap) — see ADR on
+                // subtask attribution. Kept only for backward compatibility.
                 if (!subtask.acceptance_criteria) continue;
                 const idx = subtask.acceptance_criteria.findIndex(
                   (ac: string) => {
@@ -123,6 +142,23 @@ export function writeQaFeedback(
             const desc = issue.description || issue.message || '';
             const fix = issue.fix_needed || '';
             if (!desc && !fix) continue;
+            // Primary: explicit subtask_ids (needed for meta-issues about the
+            // plan itself, e.g. "subtask 11 is incorrectly marked complete" —
+            // these have no source `file` the filename matcher below could
+            // ever key off).
+            const explicitIds = (issue.subtask_ids ?? []).filter(id => typeof id === 'number');
+            if (explicitIds.length > 0) {
+              for (const subtask of plan.subtasks) {
+                if (!explicitIds.includes(subtask.id)) continue;
+                if (!subtask.acceptance_criteria) subtask.acceptance_criteria = [];
+                subtask.acceptance_criteria.push(`[QA ISSUE: ${desc}${fix ? ` → Fix: ${fix}` : ''}]`);
+                subtask.qa_flagged = true;
+                modified = true;
+              }
+              continue;
+            }
+            // Fallback: match by filename overlap against subtask.files, for
+            // QA reports written before subtask_ids existed.
             for (const subtask of plan.subtasks) {
               if (!subtask.files || !Array.isArray(subtask.files)) continue;
               if (issue.file && subtask.files.some((f: string) => {
