@@ -347,6 +347,52 @@ describe('Orchestrator Pipeline Integration', () => {
         .map((c: unknown[]) => (c[1] as { phase: string }).phase);
       expect(phaseChanges).toContain('failed');
     });
+
+    // Regression: two retries in quick succession for the same task (e.g. a
+    // user retrying twice before the first shows any feedback) race inside
+    // runTask's own try/catch. The first retry's cancelPipeline kills its
+    // session; moments later a second retry's cancelPipeline/runTask
+    // registers a FRESH pipeline for the same taskId before the first
+    // retry's now-rejected executePhase() promise is actually processed.
+    // `this.pipelines.has(taskId)` is true again by then — but it holds the
+    // second retry's pipeline, not the first's. The catch block must tell
+    // the difference (identity, not membership) or it stomps the second
+    // retry's phase to 'failed' out from under its still-running session.
+    it('does not stomp phase or tear down the map when a newer pipeline supersedes this one mid-flight (SessionKilledError race)', async () => {
+      // Dynamically imported (not statically, up top) so this resolves to
+      // the SAME module instance orchestrator.ts itself throws against —
+      // vi.resetModules() in afterEach means a static top-level import here
+      // would be bound to a stale copy of orchestrator/errors.ts from an
+      // earlier test's module registry, making `instanceof` silently false.
+      const { SessionKilledError } = await import('@/lib/orchestrator/errors');
+      let newPipeline: unknown;
+      const executePhaseSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockImplementation(async () => {
+        // Simulate a second retry racing in while this (the first retry's)
+        // executePhase() is still in flight: it cancels this pipeline and
+        // registers a fresh one for the same taskId, then this first
+        // retry's session dies (killed by the second retry's cancelPipeline)
+        // and its own executePhase() rejects.
+        newPipeline = makePipeline({ phase: 'qa-review' });
+        (orch as AnyOrch).pipelines.set(taskId, newPipeline);
+        (orch as AnyOrch).activeTasks.add(taskId);
+        throw new SessionKilledError('SIGTERM');
+      });
+
+      await (orch as AnyOrch).runTask(taskId, 'race test').catch(() => { /* best-effort */ });
+
+      const phaseChanges = mockEmit.mock.calls
+        .filter((c: unknown[]) => c[0] === 'phase-change')
+        .map((c: unknown[]) => (c[1] as { phase: string }).phase);
+      expect(phaseChanges).not.toContain('failed');
+
+      // The superseding pipeline must still be the one registered — the
+      // stale run's finally block must not have deleted it out from under
+      // its still-running session.
+      expect((orch as AnyOrch).pipelines.get(taskId)).toBe(newPipeline);
+      expect((orch as AnyOrch).activeTasks.has(taskId)).toBe(true);
+
+      executePhaseSpy.mockRestore();
+    });
   });
 
   // ── Pause Race Regression (#10) ───────────────────────────────────
