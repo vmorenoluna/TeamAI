@@ -563,6 +563,8 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
         if (args[1] === '--abort') return '';
         throw new Error('CONFLICT (content): Merge conflict');
       }
+      // Confirms a genuine conflict — required for the merger-spawn path.
+      if (args && args[0] === 'diff' && args.includes('--diff-filter=U')) return 'src/conflicted-file.ts\n';
       if (args && args[0] === 'push') {
         pushCalls++;
         // 1st push: the initial precheck, rejected (non-fast-forward) — triggers reconciliation.
@@ -615,6 +617,8 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
         if (args[1] === '--abort') return '';
         throw new Error('CONFLICT (content): Merge conflict');
       }
+      // Confirms a genuine conflict — required for the merger-spawn path.
+      if (args && args[0] === 'diff' && args.includes('--diff-filter=U')) return 'src/conflicted-file.ts\n';
       if (args && args[0] === 'push') throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');
       return '';
     });
@@ -655,6 +659,8 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
         if (args[1] === '--abort') return '';
         throw new Error('CONFLICT (content): Merge conflict');
       }
+      // Confirms a genuine conflict — required for the merger-spawn path.
+      if (args && args[0] === 'diff' && args.includes('--diff-filter=U')) return 'src/conflicted-file.ts\n';
       // Every push attempt fails — both the initial precheck push and the
       // orchestrator's own push after the merger resolves the conflict.
       if (args && args[0] === 'push') throw new Error('! [rejected]  feat/robustness-test -> feat/robustness-test (non-fast-forward)');

@@ -30,6 +30,7 @@ import type { FailureReason } from './qa-feedback';
 export interface RebaseDeps {
   projectRoot: string;
   execGit: (args: string[], hostCwd: string) => void;
+  execGitCapture: (args: string[], hostCwd: string) => string;
   sessionOpts: SessionOptsFn;
   waitForCompletion: (sessionId: string) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
@@ -71,6 +72,16 @@ export async function rebaseOntoLatestDefault(
   logFile: string,
   deps: RebaseDeps & { baseBranch: string },
 ): Promise<boolean> {
+  // Reset any git operation left in progress on this worktree. TeamAI is the
+  // sole writer to a task's worktree (no external actor touches it), so a
+  // stuck rebase/merge here is never ambiguous — it's the leftover of one of
+  // our own sessions (most concretely: a merger killed mid-`git merge` by
+  // recovery.ts's stall sweep, which has no cleanup of its own) getting
+  // interrupted before it could finish or abort cleanly. Both are safe
+  // unconditional no-ops when nothing is actually in progress.
+  try { deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* nothing to abort */ }
+  try { deps.execGit(['merge', '--abort'], worktreePath); } catch { /* nothing to abort */ }
+
   try {
     execFileSync('git', ['fetch', 'origin', deps.baseBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
   } catch {
@@ -113,13 +124,59 @@ export async function rebaseOntoLatestDefault(
     }
   };
 
+  // `git rebase` refuses to even start against a dirty worktree — not a
+  // content conflict, just an uncommitted leftover (most commonly a coder
+  // session that ended without committing). This is deterministically
+  // fixable without an agent: auto-commit it first, matching the same
+  // WIP-commit safety net used elsewhere (implement.ts's COMMIT-GUARD,
+  // artifact-commit.ts's pre-squash commit) — a session's real work should
+  // never be lost to a failed rebase precheck. `.teamai` is excluded since
+  // pipeline artifacts are the orchestrator's responsibility, not a coder
+  // commit's, mirroring COMMIT-GUARD's own exclusion.
+  try {
+    const status = deps.execGitCapture(['status', '--porcelain'], worktreePath).trim();
+    if (status) {
+      deps.execGit(['add', '-A', '--', '.', ':!.teamai'], worktreePath);
+      deps.execGit(['commit', '-m', 'WIP: auto-commit uncommitted changes before rebase'], worktreePath);
+      logToOutput(path.dirname(logFile), `\n[INFO] Worktree had uncommitted changes — auto-committed before rebasing onto ${deps.baseBranch}\n`);
+    }
+  } catch (guardErr) {
+    const guardMsg = guardErr instanceof Error ? guardErr.message : String(guardErr);
+    logToOutput(path.dirname(logFile), `\n[WARN] Could not auto-commit dirty worktree before rebase: ${guardMsg}\n`);
+  }
+
   try {
     deps.execGit(['rebase', `origin/${deps.baseBranch}`], worktreePath);
     logToOutput(path.dirname(logFile), `\n[INFO] Feature branch rebased onto latest ${deps.baseBranch}\n`);
     return pushRebased();
-  } catch {
+  } catch (rebaseErr) {
+    // A failed `git rebase` is NOT necessarily a real conflict — the dirty-
+    // worktree case is handled deterministically above, but a stale git
+    // lock, a permission error, or any other git failure raises the exact
+    // same way and has no mechanical fix the orchestrator can apply. Check
+    // for actual unmerged paths (mid-rebase, before aborting — the abort
+    // below clears this state) before deciding a merger session is
+    // warranted. Spawning one for a non-conflict failure wastes a session
+    // on an agent that finds nothing to resolve and reports "nothing to
+    // do" — which reads as if the orchestrator lied about there being a
+    // conflict in the first place; the merger is for resolving conflicting
+    // content, not for causes it has no more ability to fix than we do.
+    let unmergedFiles = '';
+    try {
+      unmergedFiles = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], worktreePath).trim();
+    } catch { /* best-effort — treat as unknown, fall through to the conflict path below */ }
     try { deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* ignore */ }
-    logToOutput(path.dirname(logFile), '\n[INFO] Rebase had conflicts — spawning merger to resolve via git merge\n');
+
+    if (!unmergedFiles) {
+      const rebaseMsg = rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr);
+      logToOutput(path.dirname(logFile),
+        `\n[WARN] Rebase onto ${deps.baseBranch} failed for a non-conflict reason (no unmerged files found) — ` +
+        `not spawning a merger: ${rebaseMsg}\n`);
+      return false;
+    }
+
+    logToOutput(path.dirname(logFile),
+      `\n[INFO] Rebase had conflicts in ${unmergedFiles.split('\n').length} file(s) — spawning merger to resolve via git merge\n`);
     try {
       const mergeLogFile = path.join(path.dirname(logFile), 'output-merge.log');
       const mergeSessionId = await processManager.createSession(
@@ -162,6 +219,7 @@ interface CascadePhaseDeps extends BasePhaseDeps {
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
   execGit: (args: string[], hostCwd: string) => void;
+  execGitCapture: (args: string[], hostCwd: string) => string;
   // ── Wakeup (ADR 002, generalized beyond implement — see wakeup.ts) ──
   getPipelineConfig: () => { wakeupScanRetryDelayMs?: number; maxImplementRetries: number };
   scheduleWakeup: (pipeline: TaskPipeline) => void;
@@ -602,6 +660,7 @@ export async function runPlanPhase(
 
 interface MergePhaseDeps extends BasePhaseDeps {
   execGit: (args: string[], hostCwd: string) => void;
+  execGitCapture: (args: string[], hostCwd: string) => string;
   gitPush: (pushArgs: string[], logFile: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
   getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig };
@@ -623,7 +682,7 @@ export async function runMergePhase(
   const baseBranch = resolveBaseBranch(deps.projectRoot);
   const rebaseOk = await rebaseOntoLatestDefault(
     pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile,
-    { projectRoot: deps.projectRoot, execGit: deps.execGit, gitPush: deps.gitPush, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
+    { projectRoot: deps.projectRoot, execGit: deps.execGit, execGitCapture: deps.execGitCapture, gitPush: deps.gitPush, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
   );
   if (!rebaseOk) {
     throw new PipelineConfigError(
@@ -739,6 +798,7 @@ export async function runMergePhase(
 interface CreatePRDeps extends BasePhaseDeps {
   taskStore: TaskStore;
   execGit: (args: string[], hostCwd: string) => void;
+  execGitCapture: (args: string[], hostCwd: string) => string;
   gitPush: (pushArgs: string[], logFile: string) => void;
   extractPrUrl: (logFile: string) => string | null;
   /** Build the trailer-bearing commit message for this task (null when recordHistoryInGit is off). */
@@ -771,7 +831,7 @@ export async function runCreatePRPhase(
   const baseBranch = resolveBaseBranch(deps.projectRoot);
   const rebaseOk = await rebaseOntoLatestDefault(
     pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile,
-    { projectRoot: deps.projectRoot, execGit: deps.execGit, gitPush: deps.gitPush, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
+    { projectRoot: deps.projectRoot, execGit: deps.execGit, execGitCapture: deps.execGitCapture, gitPush: deps.gitPush, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
   );
   if (rebaseOk) {
     logToOutput(pipeline.specPath, '\n[INFO] PR will be conflict-free\n');

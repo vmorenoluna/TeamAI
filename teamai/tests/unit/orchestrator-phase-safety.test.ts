@@ -563,6 +563,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const deps = {
       projectRoot: project.root,
       execGit: vi.fn(),
+      execGitCapture: vi.fn(() => ''),
       gitPush: vi.fn(),
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
@@ -572,9 +573,12 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
 
     expect(result).toBe(true);
-    // deps.execGit should NOT have been called with 'rebase'
+    // deps.execGit should NOT have attempted a real rebase (the unconditional
+    // `rebase --abort`/`merge --abort` reset-in-progress-op guard at the top
+    // of the function still runs regardless — that's a cheap, safe no-op,
+    // not the rebase this test is about).
     const rebaseCalls = (deps.execGit as any).mock.calls.filter(
-      (c: any[]) => c[0] && c[0].includes('rebase'),
+      (c: any[]) => c[0] && c[0][0] === 'rebase' && c[0][1] !== '--abort',
     );
     expect(rebaseCalls.length).toBe(0);
     // No-op skip means nothing to push either.
@@ -599,6 +603,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const deps = {
       projectRoot: project.root,
       execGit,
+      execGitCapture: vi.fn(() => ''),
       gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
@@ -633,6 +638,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const deps = {
       projectRoot: project.root,
       execGit: vi.fn(),
+      execGitCapture: vi.fn(() => ''),
       gitPush: vi.fn((args: string[]) => {
         if (args[0] === 'push') throw new Error('offline');
       }),
@@ -663,6 +669,11 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       execGit: vi.fn((args: string[]) => {
         if (args[0] === 'rebase' && args[1] !== '--abort') throw new Error('CONFLICT');
       }),
+      // Non-empty output confirms a genuine conflict — required for the
+      // merger-spawn path to trigger at all (see rebaseOntoLatestDefault's
+      // unmerged-file check, which skips the merger for a non-conflict
+      // rebase failure).
+      execGitCapture: vi.fn(() => 'src/conflicted-file.ts\n'),
       gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(async () => undefined),
@@ -675,6 +686,137 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     expect(gitPush).toHaveBeenCalledWith(['push', '--force-with-lease', 'origin', 'feat/test'], logFile);
     const logContent = readFileSync(logFile, 'utf-8');
     expect(logContent).toContain('Merger resolved rebase conflicts — pushing its result');
+  });
+
+  // Regression: a failed `git rebase` used to be treated as a conflict
+  // unconditionally, spawning a merger session even when the failure had
+  // nothing to do with conflicting content (a dirty worktree, a git lock, a
+  // permission error, ...). The merger would then find no unmerged files,
+  // report "nothing to do", and the orchestrator's own "had conflicts" log
+  // line read as if it had lied. rebaseOntoLatestDefault now checks for
+  // actual unmerged paths before deciding a merger is warranted.
+  it('does not spawn a merger when the rebase fails for a non-conflict reason', async () => {
+    const logFile = join(project.taskDir, 'output.log');
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
+      return '';
+    });
+
+    const gitPush = vi.fn();
+    const sessionOpts = vi.fn();
+    const deps = {
+      projectRoot: project.root,
+      execGit: vi.fn((args: string[]) => {
+        if (args[0] === 'rebase' && args[1] !== '--abort') throw new Error('fatal: cannot rebase: You have unstaged changes.');
+      }),
+      // No unmerged files — the rebase failed for a reason other than a
+      // real conflict.
+      execGitCapture: vi.fn(() => ''),
+      gitPush,
+      sessionOpts,
+      waitForCompletion: vi.fn(async () => undefined),
+      baseBranch: 'master',
+    };
+
+    const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
+
+    expect(result).toBe(false);
+    // No merger session was spawned.
+    expect(sessionOpts).not.toHaveBeenCalled();
+    // Nothing was pushed either (there's nothing resolved to push).
+    expect(gitPush).not.toHaveBeenCalled();
+    const logContent = readFileSync(logFile, 'utf-8');
+    expect(logContent).toContain('failed for a non-conflict reason (no unmerged files found) — not spawning a merger');
+    expect(logContent).toContain('cannot rebase: You have unstaged changes');
+    expect(logContent).not.toContain('spawning merger to resolve via git merge');
+  });
+
+  // Deterministic recovery: the most common real cause of a non-conflict
+  // rebase failure is a dirty worktree (a coder session that ended without
+  // committing) — `git rebase` refuses to even start against one. This is
+  // mechanically fixable without an agent: auto-commit it first, then the
+  // rebase proceeds normally.
+  it('auto-commits a dirty worktree before attempting the rebase, then proceeds normally', async () => {
+    const logFile = join(project.taskDir, 'output.log');
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
+      return '';
+    });
+
+    const execGit = vi.fn();
+    const gitPush = vi.fn();
+    const deps = {
+      projectRoot: project.root,
+      execGit,
+      // Dirty on the first check (before the guard's commit), clean after —
+      // mirrors a real `git status --porcelain` going empty once committed.
+      execGitCapture: vi.fn(() => 'M src/feature.ts\n'),
+      gitPush,
+      sessionOpts: vi.fn(),
+      waitForCompletion: vi.fn(),
+      baseBranch: 'master',
+    };
+
+    const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
+
+    expect(result).toBe(true);
+    const commitCalls = execGit.mock.calls.filter((c: any[]) => c[0]?.[0] === 'commit');
+    expect(commitCalls).toHaveLength(1);
+    expect(commitCalls[0][0]).toEqual(['commit', '-m', 'WIP: auto-commit uncommitted changes before rebase']);
+    const addCalls = execGit.mock.calls.filter((c: any[]) => c[0]?.[0] === 'add');
+    expect(addCalls).toHaveLength(1);
+    // The commit happened before the real rebase attempt (not the
+    // unconditional `rebase --abort` reset-in-progress-op guard that runs
+    // first, unconditionally, at the top of the function).
+    const rebaseCallIndex = execGit.mock.calls.findIndex((c: any[]) => c[0]?.[0] === 'rebase' && c[0]?.[1] !== '--abort');
+    const commitCallIndex = execGit.mock.calls.findIndex((c: any[]) => c[0]?.[0] === 'commit');
+    expect(commitCallIndex).toBeGreaterThanOrEqual(0);
+    expect(rebaseCallIndex).toBeGreaterThan(commitCallIndex);
+    expect(gitPush).toHaveBeenCalledWith(['push', '--force-with-lease', 'origin', 'feat/test'], logFile);
+    const logContent = readFileSync(logFile, 'utf-8');
+    expect(logContent).toContain('Worktree had uncommitted changes — auto-committed before rebasing onto master');
+  });
+
+  // Deterministic recovery: TeamAI is the sole writer to a task's worktree,
+  // so a git operation stuck mid-flight (a merger killed mid-`git merge` by
+  // recovery.ts's stall sweep, most concretely) is never ambiguous — it's
+  // always one of our own interrupted sessions, never a concurrent external
+  // actor. rebaseOntoLatestDefault resets it unconditionally before doing
+  // anything else, rather than letting a stale rebase/merge state confuse
+  // every check downstream.
+  it('resets an in-progress rebase/merge left by a previously interrupted session before doing anything else', async () => {
+    const logFile = join(project.taskDir, 'output.log');
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
+      return '';
+    });
+
+    const execGit = vi.fn();
+    const gitPush = vi.fn();
+    const deps = {
+      projectRoot: project.root,
+      execGit,
+      execGitCapture: vi.fn(() => ''),
+      gitPush,
+      sessionOpts: vi.fn(),
+      waitForCompletion: vi.fn(),
+      baseBranch: 'master',
+    };
+
+    const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
+
+    expect(result).toBe(true);
+    // Both resets attempted, unconditionally, before the real rebase.
+    expect(execGit.mock.calls[0]).toEqual([['rebase', '--abort'], worktreePath]);
+    expect(execGit.mock.calls[1]).toEqual([['merge', '--abort'], worktreePath]);
+    const rebaseCallIndex = execGit.mock.calls.findIndex((c: any[]) => c[0]?.[0] === 'rebase' && c[0]?.[1] !== '--abort');
+    expect(rebaseCallIndex).toBe(2);
   });
 });
 
@@ -710,7 +852,8 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
 
     const gitPush = vi.fn();
     const execGit = vi.fn();
-    const deps = { projectRoot: project.root, gitPush, execGit, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
+    const execGitCapture = vi.fn(() => '');
+    const deps = { projectRoot: project.root, gitPush, execGit, execGitCapture, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
 
     await syncPhaseBaseline(pipeline, deps);
 
@@ -728,7 +871,8 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
 
     const gitPush = vi.fn();
     const execGit = vi.fn();
-    const deps = { projectRoot: project.root, gitPush, execGit, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
+    const execGitCapture = vi.fn(() => '');
+    const deps = { projectRoot: project.root, gitPush, execGit, execGitCapture, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
 
     await syncPhaseBaseline(pipeline, deps);
 
@@ -745,7 +889,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     const deps = {
       projectRoot: project.root,
       gitPush: vi.fn(() => { throw new Error('offline'); }),
-      execGit: vi.fn(), sessionOpts: vi.fn(), waitForCompletion: vi.fn(),
+      execGit: vi.fn(), execGitCapture: vi.fn(() => ''), sessionOpts: vi.fn(), waitForCompletion: vi.fn(),
     };
 
     await expect(syncPhaseBaseline(pipeline, deps)).resolves.toBeUndefined();
@@ -763,6 +907,10 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
         if (args.includes('rebase') && !args.includes('--abort')) throw new Error('CONFLICT');
         // tolerate the --abort call
       }),
+      // Non-empty output confirms a genuine conflict — required to reach
+      // the merger-spawn path at all (see the non-conflict-failure check
+      // in rebaseOntoLatestDefault).
+      execGitCapture: vi.fn(() => 'src/conflicted-file.ts\n'),
       sessionOpts: vi.fn(),
       // Merger-fallback session never resolves the conflict.
       waitForCompletion: vi.fn().mockRejectedValue(new Error('merger failed')),

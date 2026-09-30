@@ -1671,6 +1671,41 @@ describe('Orchestrator', () => {
       expect(mockCreateSession).toHaveBeenCalled();
     });
 
+    // Regression: moveTaskToPhase used to route 'qa-review' through the same
+    // startPhaseFromArtifacts(hasPlan, hasSpec) call as 'implement', which
+    // always resolves to 'implement' once a plan exists — i.e. virtually
+    // every non-fresh task. That meant requesting 'qa-review' (e.g. dragging
+    // a kanban card to the "Review" column) silently ran the coder instead
+    // of QA. Honor 'qa-review' directly whenever its prerequisite (a plan)
+    // is already satisfied.
+    it('starts from qa-review (not implement) when hasPlan is true and target is qa-review', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [{ id: 1, title: 'Test', description: 'Test', files: [], acceptance_criteria: [] }] }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.moveTaskToPhase(testData.taskId, 'qa-review').catch(() => { /* best-effort */ });
+
+      const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
+      expect(logContent).toContain('▶ QA-REVIEW');
+      expect(logContent).not.toContain('▶ IMPLEMENT');
+    });
+
+    it('falls back to plan (not qa-review) when hasPlan is false and target is qa-review', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      // No plan.json — qa-review's own prerequisite is missing.
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+      await orch.moveTaskToPhase(testData.taskId, 'qa-review').catch(() => { /* best-effort */ });
+
+      const logContent = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
+      expect(logContent).toContain('▶ PLAN');
+      expect(logContent).not.toContain('▶ QA-REVIEW');
+    });
+
     it('starts from spec when neither hasSpec nor hasPlan exist', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
@@ -2692,6 +2727,8 @@ describe('Orchestrator', () => {
           if (argStr.includes('rebase') && !argStr.includes('--abort')) {
             throw new Error('Rebase conflict');
           }
+          // Confirms a genuine conflict — required for the merger-spawn path.
+          if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
         }
         return '';
       });
@@ -2747,6 +2784,8 @@ describe('Orchestrator', () => {
           if (argStr.includes('rebase') && !argStr.includes('--abort')) {
             throw new Error('Rebase conflict');
           }
+          // Confirms a genuine conflict — required for the merger-spawn path.
+          if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
         }
         return '';
       });
@@ -3124,6 +3163,8 @@ describe('Orchestrator', () => {
           if (argStr.includes('symbolic-ref')) {
             return 'refs/remotes/origin/main';
           }
+          // Confirms a genuine conflict — required for the merger-spawn path.
+          if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
         }
         // After rebase resolved, gh creates PR directly
         if (cmd === 'gh') {
@@ -3187,6 +3228,8 @@ describe('Orchestrator', () => {
           if (argStr.includes('symbolic-ref')) {
             return 'refs/remotes/origin/main';
           }
+          // Confirms a genuine conflict — required for the merger-spawn path.
+          if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
         }
         // After rebase resolved, gh creates PR
         if (cmd === 'gh') {
@@ -4567,6 +4610,8 @@ describe('Orchestrator', () => {
       if (argStr.includes('rebase') && !argStr.includes('--abort')) {
       throw new Error('Rebase conflict');
       }
+      // Confirms a genuine conflict — required for the merger-spawn path.
+      if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
       }
       return '';
     });
@@ -4629,6 +4674,8 @@ describe('Orchestrator', () => {
       if (argStr.includes('rebase') && !argStr.includes('--abort')) {
       throw new Error('Rebase conflict');
       }
+      // Confirms a genuine conflict — required for the merger-spawn path.
+      if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
       }
       return '';
     });
