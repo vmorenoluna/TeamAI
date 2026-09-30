@@ -95,6 +95,14 @@ export interface QaCriterion {
   fix_needed?: string;
   notes?: string;
   evidence?: string;
+  /** plan.json subtask id(s) that own the fix for this FAIL criterion, as
+   *  determined by the QA agent (see qa-review.md's "Subtask Attribution"
+   *  step). Authoritative for rework dispatch in qa-feedback.ts — takes
+   *  priority over the fuzzy criterion-text/acceptance_criteria matcher,
+   *  which exists only as a fallback for reports written before this field
+   *  existed. Absent/empty means the QA agent couldn't attribute the
+   *  criterion to a specific subtask (falls through to the fuzzy matcher). */
+  subtask_ids?: number[];
 }
 
 export interface QaIssue {
@@ -104,6 +112,12 @@ export interface QaIssue {
   fix_needed?: string;
   /** @deprecated Severity is no longer used — all additional_issues are mandatory. */
   severity?: string;
+  /** plan.json subtask id(s) this issue is about — see QaCriterion.subtask_ids.
+   *  Required for issues that reference a subtask by number in free text
+   *  (e.g. "plan.json marks subtask 11 as completed: true") rather than by
+   *  a source file, since the file-based matcher in qa-feedback.ts cannot
+   *  attribute those. */
+  subtask_ids?: number[];
 }
 
 export interface SpecConcern {
