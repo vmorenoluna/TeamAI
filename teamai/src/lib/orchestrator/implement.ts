@@ -361,6 +361,7 @@ export async function ensureWorktree(
     {
       projectRoot: deps.projectRoot,
       execGit: deps.execGit,
+      execGitCapture: deps.execGitCapture,
       gitPush: deps.gitPush,
       sessionOpts: deps.sessionOpts,
       waitForCompletion: deps.waitForCompletion,

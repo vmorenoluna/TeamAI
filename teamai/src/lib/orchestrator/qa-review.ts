@@ -101,6 +101,7 @@ export interface QaReviewDeps {
   waitForCompletion: (sessionId: string) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
   execGit: (args: string[], hostCwd: string) => void;
+  execGitCapture: (args: string[], hostCwd: string) => string;
   writeQaFeedback: (pipeline: TaskPipeline, report: QaReport) => void;
   writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
@@ -139,12 +140,57 @@ async function reconcileDivergedBranch(
   deps: QaReviewDeps,
 ): Promise<ReconcileOutcome> {
   const targetRef = `origin/${pipeline.branch}`;
+
+  // Reset any git operation left in progress on this worktree (a merger
+  // killed mid-`git merge` by recovery.ts's stall sweep, most concretely) —
+  // see rebaseOntoLatestDefault's matching guard (phase-runners.ts) for the
+  // full rationale. Safe unconditional no-ops when nothing is in progress.
+  try { deps.execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
+  try { deps.execGit(['merge', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
+
+  // `git rebase` refuses to start against a dirty worktree — not a content
+  // conflict, just an uncommitted leftover. Deterministically fixable
+  // without an agent: auto-commit it first. See rebaseOntoLatestDefault's
+  // matching guard (phase-runners.ts) for the full rationale.
+  try {
+    const status = deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath).trim();
+    if (status) {
+      deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
+      deps.execGit(['commit', '-m', 'WIP: auto-commit uncommitted changes before rebase'], pipeline.worktreePath);
+      logToOutput(pipeline.specPath, `[QA-PRECHECK] Worktree had uncommitted changes — auto-committed before rebasing onto ${targetRef}\n`);
+    }
+  } catch (guardErr) {
+    const guardMsg = guardErr instanceof Error ? guardErr.message : String(guardErr);
+    logToOutput(pipeline.specPath, `[QA-PRECHECK] Could not auto-commit dirty worktree before rebase: ${guardMsg}\n`);
+  }
+
   try {
     execFileSync('git', ['rebase', targetRef], { cwd: pipeline.worktreePath, stdio: 'pipe' });
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Rebased onto ${targetRef}\n`);
     return 'rebased';
-  } catch {
+  } catch (rebaseErr) {
+    // Not every failed `git rebase` is a real conflict — the dirty-worktree
+    // case is handled deterministically above, but a stale git lock or a
+    // permission error raises the exact same way and has no mechanical fix.
+    // Check for actual unmerged paths before aborting (aborting clears that
+    // mid-rebase state). Spawning a merger for a non-conflict failure just
+    // wastes a session that finds nothing to resolve and reports "nothing
+    // to do" — see phase-runners.ts's rebaseOntoLatestDefault, which has
+    // the same check for the same reason.
+    let unmergedFiles = '';
+    try {
+      unmergedFiles = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath).trim();
+    } catch { /* best-effort — treat as unknown, fall through to the conflict path below */ }
     try { execFileSync('git', ['rebase', '--abort'], { cwd: pipeline.worktreePath, stdio: 'pipe' }); } catch { /* ignore */ }
+
+    if (!unmergedFiles) {
+      const rebaseMsg = rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr);
+      logToOutput(pipeline.specPath,
+        `[QA-PRECHECK] Rebase onto ${targetRef} failed for a non-conflict reason (no unmerged files found) — ` +
+        `not spawning a merger: ${rebaseMsg}\n`);
+      return 'failed';
+    }
+
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Rebase onto ${targetRef} had conflicts — spawning merger to resolve via git merge\n`);
     try {
       const mergeLogFile = path.join(pipeline.specPath, 'output-merge.log');
