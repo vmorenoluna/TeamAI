@@ -410,11 +410,27 @@ export class Orchestrator {
     try {
       await this.executePhase(pipeline);
     } catch (e) {
-      if (e instanceof SessionKilledError && !this.pipelines.has(taskId)) {
-        // Defect 7: the pipeline was already cancelled (e.g. stopTask killed
-        // the session). The cancelled session's exit event fired with a signal,
-        // causing waitForCompletion to reject with SessionKilledError. Don't
-        // overwrite the phase that stopTask already set to 'backlog'.
+      // Identity check, not membership: moveTaskToPhase/runTask both call
+      // cancelPipeline (which deletes the old pipeline) then register a
+      // FRESH pipeline for the same taskId before this one's in-flight
+      // executePhase() has necessarily unwound — e.g. a user retrying a
+      // task twice in quick succession, the second retry's cancelPipeline
+      // kills the first retry's session mid-flight. `this.pipelines` is
+      // keyed by taskId, so by the time the first retry's session-killed
+      // rejection is actually processed here, `this.pipelines.has(taskId)`
+      // is true again — but it now holds the SECOND retry's pipeline, not
+      // this one. A membership-only check reads that as "still my run,
+      // this is real" and both logs a misleading SESSION_KILLED error and
+      // advancePhase(pipeline, 'failed') using this stale `pipeline`
+      // reference, stomping the second retry's phase to 'failed' out from
+      // under its still-running session (see executePhase's matching
+      // identity check above for the same race, one layer in).
+      if (e instanceof SessionKilledError && this.pipelines.get(taskId) !== pipeline) {
+        // Defect 7: this pipeline was superseded (e.g. stopTask killed the
+        // session, or a second retry replaced it). The superseded session's
+        // exit event fired with a signal, causing waitForCompletion to
+        // reject with SessionKilledError. Don't overwrite whatever phase
+        // the superseding call (or stopTask) already set.
         return;
       }
       if (e instanceof RateLimitError) {
@@ -438,7 +454,14 @@ export class Orchestrator {
       // For rate-limited or wakeup-paused tasks the lock is re-acquired
       // in handleRateLimit / _scheduleWakeup and must not be deleted here —
       // the setTimeout callback owns cleanup.
-      if (!rateLimited && !pipeline.wakeupUntil) {
+      //
+      // Identity-guarded for the same reason as the catch block above: if a
+      // superseding call already registered a fresh pipeline for this
+      // taskId, this stale run must not delete it out of `this.pipelines`/
+      // `this.activeTasks` — that would rip the actually-running pipeline
+      // out from under executePhase's own identity check and drop the
+      // "task already running" guard, letting a third concurrent call in.
+      if (!rateLimited && !pipeline.wakeupUntil && this.pipelines.get(taskId) === pipeline) {
         this.pipelines.delete(taskId);
         this.activeTasks.delete(taskId);
       }
