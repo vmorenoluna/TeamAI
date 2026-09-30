@@ -4,6 +4,47 @@ import type { TaskStore } from '../task-store';
 import type { PlanSubtask, QaReport } from './types';
 import { warn } from '../logger';
 
+/**
+ * Second-tier subtask attribution, tried between explicit `subtask_ids`
+ * (the QA agent's own, authoritative signal — see qa-review.md's Subtask
+ * Attribution rule) and the blind description-text fuzzy match below. The
+ * QA agent doesn't always populate `subtask_ids` despite the instruction
+ * (confirmed live: a report can leave it empty on every single criterion
+ * and issue), and when that happens the fuzzy fallback is known to miss a
+ * criterion that references a subtask by number or label instead of
+ * reusing the plan's own acceptance-criteria wording (e.g. "AC-11
+ * (CS-10/CS-11)", or a meta-issue like "plan.json marks subtask 11 as
+ * completed: true") — the exact gap `subtask_ids` was introduced to close.
+ *
+ * Two patterns, both requiring an exact match (no fuzziness) to keep the
+ * false-positive rate low:
+ *  - "subtask 11" / "subtasks 11 and 12" — a direct numeric id reference,
+ *    checked against real subtask ids.
+ *  - Any "LABEL-N" token (e.g. "CS-10", "REQ-5") that also appears
+ *    verbatim in a subtask's own title — plans commonly title a subtask
+ *    after the constraint/requirement id it implements ("CS-10: ..."),
+ *    and QA prose citing that same id is a far more reliable signal than
+ *    description-text token overlap.
+ */
+function extractReferencedSubtaskIds(text: string, subtasks: PlanSubtask[]): number[] {
+  const ids = new Set<number>();
+  const validIds = new Set(subtasks.map(s => s.id));
+
+  for (const m of text.matchAll(/\bsubtasks?\s+(\d+)\b/gi)) {
+    const id = Number(m[1]);
+    if (validIds.has(id)) ids.add(id);
+  }
+
+  for (const m of text.matchAll(/\b([A-Za-z]{1,8}-\d+)\b/g)) {
+    const token = m[1].toLowerCase();
+    for (const s of subtasks) {
+      if (s.title?.toLowerCase().includes(token)) ids.add(s.id);
+    }
+  }
+
+  return [...ids];
+}
+
 /** Write QA feedback for bouncing back to implement */
 export function writeQaFeedback(
   specPath: string,
@@ -87,22 +128,39 @@ export function writeQaFeedback(
           for (const c of report.criteria) {
             if (c.status === 'FAIL' && c.fix_needed) {
               const criterionName = c.criterion || c.name || '';
-              // Primary: explicit subtask_ids from the QA agent (see
+              // Tier 1: explicit subtask_ids from the QA agent (see
               // QaCriterion.subtask_ids) — exact id lookup, no guessing.
               const explicitIds = (c.subtask_ids ?? []).filter(id => typeof id === 'number');
-              const targeted = explicitIds.length > 0
-                ? plan.subtasks.filter((s: PlanSubtask) => explicitIds.includes(s.id))
+              // Tier 2: number/label references in the criterion's own text
+              // (see extractReferencedSubtaskIds) — tried only when the QA
+              // agent left subtask_ids empty despite the instruction.
+              const referencedIds = explicitIds.length === 0
+                ? extractReferencedSubtaskIds(`${criterionName} ${c.fix_needed}`, plan.subtasks)
+                : [];
+              const targetedIds = explicitIds.length > 0 ? explicitIds : referencedIds;
+              const targeted = targetedIds.length > 0
+                ? plan.subtasks.filter((s: PlanSubtask) => targetedIds.includes(s.id))
                 : null;
               for (const subtask of targeted ?? plan.subtasks) {
                 if (targeted) {
-                  // Explicit id match: flag unconditionally, no text matching needed.
+                  // Tier 1/2 id match: flag unconditionally, no text matching needed.
+                  // completed=false makes plan.json's own record of "is this
+                  // subtask actually done" trustworthy on its own — the
+                  // orchestrator's qa_flagged-driven re-dispatch (implement.ts's
+                  // selectSubtasks) still reads qa_flagged, but this field is
+                  // what a NEXT retry falls back to if qa_feedback.md/qa_flagged
+                  // ever gets lost before that retry runs (e.g. an intervening
+                  // implement-phase failure that never reaches QA again) —
+                  // without it, a subtask QA just failed can still read as
+                  // "completed": true forever, with nothing left to correct it.
                   if (!subtask.acceptance_criteria) subtask.acceptance_criteria = [];
                   subtask.acceptance_criteria.push(`[QA CORRECTION: ${c.fix_needed}]`);
                   subtask.qa_flagged = true;
+                  subtask.completed = false;
                   modified = true;
                   continue;
                 }
-                // Fallback: fuzzy text matching against acceptance_criteria, for QA
+                // Tier 3: fuzzy text matching against acceptance_criteria, for QA
                 // reports written before subtask_ids existed. Prone to false
                 // negatives (criterion label ≠ acceptance-criteria wording) and
                 // false positives (generic phrasing overlap) — see ADR on
@@ -130,6 +188,7 @@ export function writeQaFeedback(
                 if (idx >= 0) {
                   subtask.acceptance_criteria[idx] += ` [QA CORRECTION: ${c.fix_needed}]`;
                   subtask.qa_flagged = true;
+                  subtask.completed = false;
                   modified = true;
                 }
               }
@@ -142,22 +201,30 @@ export function writeQaFeedback(
             const desc = issue.description || issue.message || '';
             const fix = issue.fix_needed || '';
             if (!desc && !fix) continue;
-            // Primary: explicit subtask_ids (needed for meta-issues about the
+            // Tier 1: explicit subtask_ids (needed for meta-issues about the
             // plan itself, e.g. "subtask 11 is incorrectly marked complete" —
             // these have no source `file` the filename matcher below could
             // ever key off).
             const explicitIds = (issue.subtask_ids ?? []).filter(id => typeof id === 'number');
-            if (explicitIds.length > 0) {
+            // Tier 2: number/label references in the issue's own text (see
+            // extractReferencedSubtaskIds) — the same fallback used for
+            // criteria above, tried before the file-overlap fallback.
+            const referencedIds = explicitIds.length === 0
+              ? extractReferencedSubtaskIds(`${desc} ${fix}`, plan.subtasks)
+              : [];
+            const targetedIds = explicitIds.length > 0 ? explicitIds : referencedIds;
+            if (targetedIds.length > 0) {
               for (const subtask of plan.subtasks) {
-                if (!explicitIds.includes(subtask.id)) continue;
+                if (!targetedIds.includes(subtask.id)) continue;
                 if (!subtask.acceptance_criteria) subtask.acceptance_criteria = [];
                 subtask.acceptance_criteria.push(`[QA ISSUE: ${desc}${fix ? ` → Fix: ${fix}` : ''}]`);
                 subtask.qa_flagged = true;
+                subtask.completed = false;
                 modified = true;
               }
               continue;
             }
-            // Fallback: match by filename overlap against subtask.files, for
+            // Tier 3: match by filename overlap against subtask.files, for
             // QA reports written before subtask_ids existed.
             for (const subtask of plan.subtasks) {
               if (!subtask.files || !Array.isArray(subtask.files)) continue;
@@ -169,6 +236,7 @@ export function writeQaFeedback(
                 if (!subtask.acceptance_criteria) subtask.acceptance_criteria = [];
                 subtask.acceptance_criteria.push(`[QA ISSUE: ${desc}${fix ? ` → Fix: ${fix}` : ''}]`);
                 subtask.qa_flagged = true;
+                subtask.completed = false;
                 modified = true;
               }
             }
