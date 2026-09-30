@@ -573,9 +573,12 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
 
     expect(result).toBe(true);
-    // deps.execGit should NOT have been called with 'rebase'
+    // deps.execGit should NOT have attempted a real rebase (the unconditional
+    // `rebase --abort`/`merge --abort` reset-in-progress-op guard at the top
+    // of the function still runs regardless — that's a cheap, safe no-op,
+    // not the rebase this test is about).
     const rebaseCalls = (deps.execGit as any).mock.calls.filter(
-      (c: any[]) => c[0] && c[0].includes('rebase'),
+      (c: any[]) => c[0] && c[0][0] === 'rebase' && c[0][1] !== '--abort',
     );
     expect(rebaseCalls.length).toBe(0);
     // No-op skip means nothing to push either.
@@ -766,14 +769,54 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     expect(commitCalls[0][0]).toEqual(['commit', '-m', 'WIP: auto-commit uncommitted changes before rebase']);
     const addCalls = execGit.mock.calls.filter((c: any[]) => c[0]?.[0] === 'add');
     expect(addCalls).toHaveLength(1);
-    // The commit happened before the rebase attempt.
-    const rebaseCallIndex = execGit.mock.calls.findIndex((c: any[]) => c[0]?.[0] === 'rebase');
+    // The commit happened before the real rebase attempt (not the
+    // unconditional `rebase --abort` reset-in-progress-op guard that runs
+    // first, unconditionally, at the top of the function).
+    const rebaseCallIndex = execGit.mock.calls.findIndex((c: any[]) => c[0]?.[0] === 'rebase' && c[0]?.[1] !== '--abort');
     const commitCallIndex = execGit.mock.calls.findIndex((c: any[]) => c[0]?.[0] === 'commit');
     expect(commitCallIndex).toBeGreaterThanOrEqual(0);
     expect(rebaseCallIndex).toBeGreaterThan(commitCallIndex);
     expect(gitPush).toHaveBeenCalledWith(['push', '--force-with-lease', 'origin', 'feat/test'], logFile);
     const logContent = readFileSync(logFile, 'utf-8');
     expect(logContent).toContain('Worktree had uncommitted changes — auto-committed before rebasing onto master');
+  });
+
+  // Deterministic recovery: TeamAI is the sole writer to a task's worktree,
+  // so a git operation stuck mid-flight (a merger killed mid-`git merge` by
+  // recovery.ts's stall sweep, most concretely) is never ambiguous — it's
+  // always one of our own interrupted sessions, never a concurrent external
+  // actor. rebaseOntoLatestDefault resets it unconditionally before doing
+  // anything else, rather than letting a stale rebase/merge state confuse
+  // every check downstream.
+  it('resets an in-progress rebase/merge left by a previously interrupted session before doing anything else', async () => {
+    const logFile = join(project.taskDir, 'output.log');
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
+      return '';
+    });
+
+    const execGit = vi.fn();
+    const gitPush = vi.fn();
+    const deps = {
+      projectRoot: project.root,
+      execGit,
+      execGitCapture: vi.fn(() => ''),
+      gitPush,
+      sessionOpts: vi.fn(),
+      waitForCompletion: vi.fn(),
+      baseBranch: 'master',
+    };
+
+    const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
+
+    expect(result).toBe(true);
+    // Both resets attempted, unconditionally, before the real rebase.
+    expect(execGit.mock.calls[0]).toEqual([['rebase', '--abort'], worktreePath]);
+    expect(execGit.mock.calls[1]).toEqual([['merge', '--abort'], worktreePath]);
+    const rebaseCallIndex = execGit.mock.calls.findIndex((c: any[]) => c[0]?.[0] === 'rebase' && c[0]?.[1] !== '--abort');
+    expect(rebaseCallIndex).toBe(2);
   });
 });
 

@@ -141,6 +141,13 @@ async function reconcileDivergedBranch(
 ): Promise<ReconcileOutcome> {
   const targetRef = `origin/${pipeline.branch}`;
 
+  // Reset any git operation left in progress on this worktree (a merger
+  // killed mid-`git merge` by recovery.ts's stall sweep, most concretely) —
+  // see rebaseOntoLatestDefault's matching guard (phase-runners.ts) for the
+  // full rationale. Safe unconditional no-ops when nothing is in progress.
+  try { deps.execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
+  try { deps.execGit(['merge', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
+
   // `git rebase` refuses to start against a dirty worktree — not a content
   // conflict, just an uncommitted leftover. Deterministically fixable
   // without an agent: auto-commit it first. See rebaseOntoLatestDefault's

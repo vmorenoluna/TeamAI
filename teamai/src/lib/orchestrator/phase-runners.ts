@@ -72,6 +72,16 @@ export async function rebaseOntoLatestDefault(
   logFile: string,
   deps: RebaseDeps & { baseBranch: string },
 ): Promise<boolean> {
+  // Reset any git operation left in progress on this worktree. TeamAI is the
+  // sole writer to a task's worktree (no external actor touches it), so a
+  // stuck rebase/merge here is never ambiguous — it's the leftover of one of
+  // our own sessions (most concretely: a merger killed mid-`git merge` by
+  // recovery.ts's stall sweep, which has no cleanup of its own) getting
+  // interrupted before it could finish or abort cleanly. Both are safe
+  // unconditional no-ops when nothing is actually in progress.
+  try { deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* nothing to abort */ }
+  try { deps.execGit(['merge', '--abort'], worktreePath); } catch { /* nothing to abort */ }
+
   try {
     execFileSync('git', ['fetch', 'origin', deps.baseBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
   } catch {
