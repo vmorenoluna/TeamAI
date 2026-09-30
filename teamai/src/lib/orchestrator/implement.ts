@@ -2312,30 +2312,44 @@ function checkCherryPickInProgress(worktreePath: string, execGitCapture: Impleme
  * session that was interrupted before it could finish or abort — called
  * from integrateGroup right before it attempts a new one. The main
  * worktree has no writer but this pipeline's own sessions (integrateGroup's
- * cherry-picks, this repair), so CHERRY_PICK_HEAD still being set here is
- * never an ambiguous external actor, always the leftover of a session that
- * died mid-flight (crashed, killed by the stall sweep, etc.) with nothing
- * to clean it up. Mirrors rebaseOntoLatestDefault's unconditional
- * rebase/merge reset guard (phase-runners.ts) for the same class of race,
- * one layer in: implement never calls that guard (it rebases per-subtask
- * branches via cherry-pick, not the base branch), so a stuck cherry-pick
- * here had nothing resetting it before a fresh cherry-pick was attempted.
+ * cherry-picks, this repair), so leftover cherry-pick state here is never
+ * an ambiguous external actor, always the leftover of a session that died
+ * mid-flight (crashed, killed by the stall sweep, etc.) with nothing to
+ * clean it up. Mirrors rebaseOntoLatestDefault's unconditional rebase/merge
+ * reset guard (phase-runners.ts) for the same class of race, one layer in:
+ * implement never calls that guard (it rebases per-subtask branches via
+ * cherry-pick, not the base branch), so a stuck cherry-pick here had
+ * nothing resetting it before a fresh cherry-pick was attempted.
  *
- * A clean pending cherry-pick (no unmerged paths — the commit just never
- * landed) is finished by committing it, preserving whatever work it
- * contains, since that content may be a real, otherwise-unrecoverable fix
- * (found via QA: an interrupted session had left a correct test fix
- * sitting uncommitted this way for three review rounds). A genuinely
- * conflicted one (unmerged paths left mid resolution) is aborted instead —
- * a resolution abandoned mid-session can't be trusted — and left to
- * integrateGroup's own cherry-pick retry/merger-recovery path to re-run
+ * Runs unconditionally rather than gating on a CHERRY_PICK_HEAD check:
+ * a multi-commit `git cherry-pick <range>` killed in the narrow window
+ * between finishing one commit and starting the next leaves
+ * `.git/sequencer/todo` with pending entries but *no* live
+ * CHERRY_PICK_HEAD — real git still refuses a fresh cherry-pick with
+ * "cherry-pick is already in progress" in that state, but a
+ * CHERRY_PICK_HEAD-only existence check reports "nothing to repair" and
+ * this function would silently no-op right past it (confirmed live: this
+ * exact gap let a first version of this fix still fail on the task that
+ * motivated it). `git cherry-pick --quit` forgets sequencer bookkeeping
+ * unconditionally, regardless of which of those shapes it's in, and is a
+ * documented no-op when nothing is in progress at all — so it's always
+ * safe to call first. It never touches the working tree or index, so the
+ * content-preservation decision below is independent of it.
+ *
+ * A clean pending change (no unmerged paths) is committed, preserving
+ * whatever work it contains, since that content may be a real, otherwise-
+ * unrecoverable fix (found via QA: an interrupted session had left a
+ * correct test fix sitting uncommitted this way for three review rounds).
+ * Unmerged paths (conflict markers left mid resolution) are discarded
+ * instead — a resolution abandoned mid-session can't be trusted — and left
+ * to integrateGroup's own cherry-pick retry/merger-recovery path to re-run
  * cleanly from the subtask's own branch.
  */
 export async function repairStuckCherryPick(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
 ): Promise<void> {
-  if (!checkCherryPickInProgress(pipeline.worktreePath, deps.execGitCapture)) return;
+  try { deps.execGit(['cherry-pick', '--quit'], pipeline.worktreePath); } catch { /* best-effort */ }
 
   let unmergedFiles = '';
   try {
@@ -2344,10 +2358,10 @@ export async function repairStuckCherryPick(
 
   if (unmergedFiles) {
     logToOutput(pipeline.specPath,
-      '\n[WORKTREE] Main worktree has a cherry-pick stuck mid-conflict-resolution ' +
-      '(left by an interrupted session) in ' + unmergedFiles.split('\n').length +
-      ' file(s) — aborting so a fresh cherry-pick can run cleanly\n');
-    try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+      '\n[WORKTREE] Main worktree has conflict markers left by an interrupted ' +
+      'cherry-pick in ' + unmergedFiles.split('\n').length +
+      ' file(s) — discarding so a fresh cherry-pick can run cleanly\n');
+    try { deps.execGit(['reset', '--hard', 'HEAD'], pipeline.worktreePath); } catch { /* best-effort */ }
     return;
   }
 
@@ -2355,16 +2369,12 @@ export async function repairStuckCherryPick(
     const statusOut = deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath).trim();
     if (statusOut) {
       logToOutput(pipeline.specPath,
-        '\n[WORKTREE] Main worktree has a cherry-pick stuck mid-flight (left by an ' +
-        'interrupted session) with no conflicts — committing its pending changes to ' +
-        'finish it instead of discarding them:\n' + statusOut + '\n');
+        '\n[WORKTREE] Main worktree has pending changes left by an interrupted ' +
+        'cherry-pick with no conflicts — committing them to finish it instead of ' +
+        'discarding them:\n' + statusOut + '\n');
       deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
       deps.execGit(['commit', '-m', 'chore: finish cherry-pick left in progress by an interrupted session'], pipeline.worktreePath);
       logToOutput(pipeline.specPath, '[WORKTREE] Finished the stuck cherry-pick\n');
-    } else {
-      // CHERRY_PICK_HEAD set but nothing pending (e.g. an already-applied,
-      // empty commit) — abort just clears the leftover state.
-      deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath);
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);

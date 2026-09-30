@@ -6847,47 +6847,51 @@ describe('repairStuckCherryPick', () => {
     };
   }
 
-  it('is a no-op when no cherry-pick is in progress', async () => {
-    const deps = makeDeps({ execGitCapture: vi.fn(() => { throw new Error('not found'); }) });
+  it('always runs cherry-pick --quit first, even when nothing is in progress', async () => {
+    const execGit = vi.fn();
+    const deps = makeDeps({ execGit, execGitCapture: vi.fn(() => '') });
     const pipeline = makeImplPipeline();
 
     await repairStuckCherryPick(pipeline, deps);
 
-    expect(deps.execGit).not.toHaveBeenCalled();
+    expect(execGit).toHaveBeenCalledWith(['cherry-pick', '--quit'], pipeline.worktreePath);
+    // Nothing pending (status --porcelain returns '') — no commit, no reset.
+    expect(execGit).not.toHaveBeenCalledWith(expect.arrayContaining(['commit']), expect.anything());
+    expect(execGit).not.toHaveBeenCalledWith(['reset', '--hard', 'HEAD'], pipeline.worktreePath);
   });
 
   it('commits pending changes to finish a clean stuck cherry-pick (no conflicts)', async () => {
-    // rev-parse CHERRY_PICK_HEAD succeeds (in progress); diff --diff-filter=U
-    // returns nothing (no conflicts); status --porcelain shows the pending edit.
+    // diff --diff-filter=U returns nothing (no conflicts); status --porcelain
+    // shows the pending edit an interrupted cherry-pick left behind.
     const execGitCapture = vi.fn()
-      .mockImplementationOnce(() => 'abc123\n')        // rev-parse CHERRY_PICK_HEAD
-      .mockImplementationOnce(() => '')                 // diff --diff-filter=U
-      .mockImplementationOnce(() => ' M src/Foo.scala\n'); // status --porcelain
+      .mockImplementationOnce(() => '')                    // diff --diff-filter=U
+      .mockImplementationOnce(() => ' M src/Foo.scala\n');  // status --porcelain
     const deps = makeDeps({ execGitCapture });
     const pipeline = makeImplPipeline();
 
     await repairStuckCherryPick(pipeline, deps);
 
+    expect(deps.execGit).toHaveBeenCalledWith(['cherry-pick', '--quit'], pipeline.worktreePath);
     expect(deps.execGit).toHaveBeenCalledWith(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
     expect(deps.execGit).toHaveBeenCalledWith(
       ['commit', '-m', 'chore: finish cherry-pick left in progress by an interrupted session'],
       pipeline.worktreePath,
     );
-    // Never aborts a clean, preservable cherry-pick — that would discard
-    // the interrupted session's real (otherwise unrecoverable) work.
-    expect(deps.execGit).not.toHaveBeenCalledWith(['cherry-pick', '--abort'], pipeline.worktreePath);
+    // Never discards a clean, preservable cherry-pick — that would throw
+    // away the interrupted session's real (otherwise unrecoverable) work.
+    expect(deps.execGit).not.toHaveBeenCalledWith(['reset', '--hard', 'HEAD'], pipeline.worktreePath);
   });
 
-  it('aborts a stuck cherry-pick left mid unresolved conflict', async () => {
+  it('discards conflict markers left mid unresolved conflict resolution', async () => {
     const execGitCapture = vi.fn()
-      .mockImplementationOnce(() => 'abc123\n')          // rev-parse CHERRY_PICK_HEAD
-      .mockImplementationOnce(() => 'src/Foo.scala\n');  // diff --diff-filter=U (still conflicted)
+      .mockImplementationOnce(() => 'src/Foo.scala\n'); // diff --diff-filter=U (still conflicted)
     const deps = makeDeps({ execGitCapture });
     const pipeline = makeImplPipeline();
 
     await repairStuckCherryPick(pipeline, deps);
 
-    expect(deps.execGit).toHaveBeenCalledWith(['cherry-pick', '--abort'], pipeline.worktreePath);
+    expect(deps.execGit).toHaveBeenCalledWith(['cherry-pick', '--quit'], pipeline.worktreePath);
+    expect(deps.execGit).toHaveBeenCalledWith(['reset', '--hard', 'HEAD'], pipeline.worktreePath);
     // Never commits conflict-marker content as if it were resolved.
     expect(deps.execGit).not.toHaveBeenCalledWith(
       expect.arrayContaining(['commit']),
@@ -6895,17 +6899,21 @@ describe('repairStuckCherryPick', () => {
     );
   });
 
-  it('aborts to clear leftover state when CHERRY_PICK_HEAD is set but nothing is pending', async () => {
+  it('clears leftover sequencer state via --quit even with no CHERRY_PICK_HEAD and nothing pending', async () => {
+    // Regression: a multi-commit cherry-pick killed between finishing one
+    // commit and starting the next leaves .git/sequencer/todo non-empty
+    // with no live CHERRY_PICK_HEAD — a CHERRY_PICK_HEAD-only check would
+    // wrongly conclude nothing needs repairing, and the next cherry-pick
+    // attempt still hard-fails with "cherry-pick is already in progress".
     const execGitCapture = vi.fn()
-      .mockImplementationOnce(() => 'abc123\n') // rev-parse CHERRY_PICK_HEAD
-      .mockImplementationOnce(() => '')          // diff --diff-filter=U
-      .mockImplementationOnce(() => '');         // status --porcelain (nothing pending)
+      .mockImplementationOnce(() => '')  // diff --diff-filter=U
+      .mockImplementationOnce(() => ''); // status --porcelain (nothing pending)
     const deps = makeDeps({ execGitCapture });
     const pipeline = makeImplPipeline();
 
     await repairStuckCherryPick(pipeline, deps);
 
-    expect(deps.execGit).toHaveBeenCalledWith(['cherry-pick', '--abort'], pipeline.worktreePath);
+    expect(deps.execGit).toHaveBeenCalledWith(['cherry-pick', '--quit'], pipeline.worktreePath);
   });
 });
 
