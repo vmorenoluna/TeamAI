@@ -713,8 +713,21 @@ export function cleanQaFlaggedMarkers(pipeline: ImplementPipeline): void {
  *
  * Any real subtask whose `files_to_create` are all present on disk is marked
  * completed here regardless of which subtask's session actually produced
- * them — mirrors the same existsSync check runSubtaskSession's own
- * deliverable verification already applies to the subtask that ran.
+ * them — mirrors the same existence check runSubtaskSession's own deliverable
+ * verification applies to the subtask that ran, now ALSO freshness-checked
+ * the same way (see that check's comment): existence alone can't distinguish
+ * a file this pass genuinely produced from one left over, untouched, from a
+ * prior QA-rejected round. When `passStartHead`/`execGitCapture` are given,
+ * a files_to_create path only counts if it also appears in `cwd`'s own
+ * `git diff passStartHead..HEAD` — i.e. was actually (re)committed somewhere
+ * during THIS pass, whether by the subtask's own session or, per this
+ * function's whole reason for existing, a DIFFERENT one (9999). Omitted or
+ * unresolvable, this falls back to existence-only, same as before. Found on
+ * task give-minor-mode-melodies-a-real-leading-: subtask 15's five
+ * files_to_create survived on disk from a stale commit two rounds back; no
+ * session in the current pass touched them, yet this reconciliation marked
+ * subtask 15 completed anyway immediately after the per-session check had
+ * correctly rejected it moments earlier in the same pass.
  *
  * Also flags (`qa_flagged: true`) any not-yet-complete real subtask whose
  * `depends_on` are now all satisfied by this reconciliation pass, so a
@@ -732,14 +745,24 @@ export function reconcileSubtaskCompletionFromDeliverables(
   subtasks: PlanSubtask[],
   cwd: string,
   specPath: string,
+  passStartHead?: string,
+  execGitCapture?: ImplementDeps['execGitCapture'],
 ): boolean {
   let changed = false;
   const newlyCompletedIds: number[] = [];
 
+  let changedFiles: string[] | null = null;
+  if (passStartHead && execGitCapture) {
+    try {
+      changedFiles = execGitCapture(['diff', '--name-only', passStartHead + '..HEAD'], cwd).trim().split('\n').filter(Boolean);
+    } catch { changedFiles = null; }
+  }
+
   for (const s of subtasks) {
     if (s.completed || s.id === 9999 || !s.files_to_create?.length) continue;
     const allPresent = s.files_to_create.every(f => existsSync(path.join(cwd, f)));
-    if (allPresent) {
+    const allFresh = changedFiles === null || s.files_to_create.every(f => changedFiles!.includes(f));
+    if (allPresent && allFresh) {
       s.completed = true;
       changed = true;
       newlyCompletedIds.push(s.id);
@@ -955,6 +978,11 @@ export async function runSubtaskSession(
     preSessionHead = deps.execGitCapture(['rev-parse', 'HEAD'], cwd).trim();
   } catch { /* best-effort — scope check is skipped if snapshot fails */ }
 
+  // Populated by the scope check below (preSessionHead..HEAD diff) whenever
+  // it runs; reused by the files_to_create deliverable check further down to
+  // require freshness, not just existence — see that check's comment for why.
+  let sessionChangedFiles: string[] = [];
+
   // Stall-detector-kill recovery loop. A session killed for stalling
   // (killReason 'stalled' — 30+ min with a tool call in flight and zero
   // output) doesn't necessarily mean the work is unrecoverable: the command
@@ -1143,6 +1171,7 @@ export async function runSubtaskSession(
   if (preSessionHead && subtask.id !== 9999) {
     try {
       const changedFiles = deps.execGitCapture(['diff', '--name-only', preSessionHead + '..HEAD'], cwd).trim().split('\n').filter(Boolean);
+      sessionChangedFiles = changedFiles;
 
       // A subtask's declared scope is files it edits (`files`) plus files it
       // creates fresh (`files_to_create`) — deliverable verification already
@@ -1350,10 +1379,38 @@ export async function runSubtaskSession(
   // EARLIER, legitimate wakeup on the same subtask.
   let skipCompletion = false;
   if (!wakeupDetected && subtask.files_to_create?.length) {
+    // `existsSync` alone only proves a path was created at SOME point in the
+    // branch's history — not that THIS session (or this wakeup chain's final
+    // session) actually produced it. A subtask re-dispatched for QA rework
+    // (qa_flagged paired with completed: false — see writeQaFeedback) starts
+    // in a worktree that already contains whatever its files_to_create held
+    // from the PRIOR, QA-rejected attempt: those paths still exist on disk,
+    // untouched, if this session's coder stalls out before redoing the work
+    // (e.g. still waiting on a background job it kicked off, never reaching
+    // the point of collecting results and committing). Require each
+    // files_to_create path to also appear in this session's own commit diff
+    // (sessionChangedFiles, preSessionHead..HEAD) whenever that diff could be
+    // computed at all — matching the actual coder pattern for long jobs (the
+    // wakeup-authoring session commits nothing; the session that eventually
+    // collects results and commits does so for every deliverable at once).
+    // Falls back to existence-only when preSessionHead couldn't be snapshotted
+    // (git failure), the same best-effort fallback the scope check above uses.
+    // Found on task give-minor-mode-melodies-a-real-leading-: subtask 15's
+    // five files_to_create had existed on disk since a stale commit three
+    // rounds earlier; a session that only stood up background sweep servers
+    // and ended before running them was marked completed anyway, because the
+    // five paths — untouched this session, carrying three-day-old evidence —
+    // still passed existsSync.
+    const requireFreshness = preSessionHead !== '';
     for (const file of subtask.files_to_create) {
-      if (!existsSync(path.join(cwd, file))) {
+      const exists = existsSync(path.join(cwd, file));
+      const isFresh = !requireFreshness || sessionChangedFiles.includes(file);
+      if (!exists) {
         skipCompletion = true;
         logToOutput(pipeline.specPath, '\n[VERIFY] Subtask ' + subtask.id + ': expected file/directory missing — ' + file + '\n');
+      } else if (!isFresh) {
+        skipCompletion = true;
+        logToOutput(pipeline.specPath, '\n[VERIFY] Subtask ' + subtask.id + ': ' + file + ' exists but was not created or modified this session (stale from an earlier attempt) — ' + file + '\n');
       }
     }
     if (skipCompletion) {
@@ -1361,8 +1418,10 @@ export async function runSubtaskSession(
       const maxFails = deps.getPipelineConfig().maxImplementRetries;
       const count = (pipeline.deliverableFailCounts[subtask.id] || 0) + 1;
       pipeline.deliverableFailCounts[subtask.id] = count;
-      const missingFiles = subtask.files_to_create.filter(f => !existsSync(path.join(cwd, f))).join(', ');
-      logToOutput(pipeline.specPath, '[VERIFY] Subtask ' + subtask.id + ' failed deliverable verification (attempt ' + count + '/' + maxFails + ') — missing: ' + missingFiles + '\n');
+      const missingFiles = subtask.files_to_create
+        .filter(f => !existsSync(path.join(cwd, f)) || (requireFreshness && !sessionChangedFiles.includes(f)))
+        .join(', ');
+      logToOutput(pipeline.specPath, '[VERIFY] Subtask ' + subtask.id + ' failed deliverable verification (attempt ' + count + '/' + maxFails + ') — missing or stale: ' + missingFiles + '\n');
       if (count >= maxFails) {
         const reportPath = path.join(pipeline.specPath, 'qa_report.json');
         writeFileSync(reportPath, JSON.stringify({
@@ -1371,7 +1430,7 @@ export async function runSubtaskSession(
             criterion: 'Deliverable verification — missing files',
             name: 'Deliverable verification',
             status: 'FAIL',
-            notes: 'Subtask ' + subtask.id + ' failed deliverable verification ' + maxFails + ' times. Missing files: ' + missingFiles,
+            notes: 'Subtask ' + subtask.id + ' failed deliverable verification ' + maxFails + ' times. Missing or stale files: ' + missingFiles,
           }],
         }, null, 2));
         logToOutput(pipeline.specPath, '[VERIFY] Subtask ' + subtask.id + ' exceeded deliverable verification cap (' + maxFails + ') — advancing to failed\n');
@@ -1711,6 +1770,18 @@ export async function runImplement(
   // ── Phase 1: Ensure worktree is ready ──
   await ensureWorktree(pipeline, deps);
 
+  // Snapshot the shared worktree's HEAD before any subtask in this pass
+  // dispatches — used by reconcileSubtaskCompletionFromDeliverables below to
+  // tell a deliverable this pass actually (re)produced from one merely left
+  // over, untouched, from an earlier round. By the time that check runs,
+  // every subtask this pass successfully integrated has been cherry-picked
+  // back into pipeline.worktreePath, so a diff against this snapshot covers
+  // the whole pass regardless of which subtask's session did the committing.
+  let passStartHead = '';
+  try {
+    passStartHead = deps.execGitCapture(['rev-parse', 'HEAD'], pipeline.worktreePath).trim();
+  } catch { /* best-effort — reconciliation falls back to existence-only if snapshot fails */ }
+
   // ── Phase 2: Select subtasks ──
   const selection = selectSubtasks(pipeline);
   const { plan, effectiveSubtasks, groups, hasQaFeedback, hasHumanFeedback } = selection;
@@ -2037,7 +2108,7 @@ export async function runImplement(
   // Reconcile before checking — see reconcileSubtaskCompletionFromDeliverables's
   // doc comment for why a real subtask's `completed` flag can go stale when a
   // QA-fallback synthetic subtask (id 9999) fixes its deliverables instead.
-  if (reconcileSubtaskCompletionFromDeliverables(finalSubtasks, pipeline.worktreePath, pipeline.specPath)) {
+  if (reconcileSubtaskCompletionFromDeliverables(finalSubtasks, pipeline.worktreePath, pipeline.specPath, passStartHead, deps.execGitCapture)) {
     try {
       const tmpPath = finalPlanPath + '.tmp';
       writeFileSync(tmpPath, JSON.stringify(finalPlanResult.data, null, 2));
