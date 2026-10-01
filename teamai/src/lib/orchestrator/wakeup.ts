@@ -201,14 +201,29 @@ export function checkArtifactProgress(
 }
 
 /**
+ * Tolerance subtracted from `sinceMtimeMs` before comparing against a pid
+ * file's mtime in {@link findLiveOrphanedJob}. Some filesystems (observed on
+ * CI's Linux runners, not reproduced locally on Windows/NTFS) round a
+ * just-written file's mtime down to a coarser boundary than `Date.now()`'s
+ * millisecond precision, so a file written a genuine instant after
+ * `sinceMtimeMs` can still stat back with an mtime that compares earlier.
+ * A few seconds of slack costs nothing against the case this guards —
+ * rejecting a leftover pid file from an actually earlier, unrelated run of
+ * the same task, which is stale by minutes or hours, not low single-digit
+ * seconds.
+ */
+const MTIME_TOLERANCE_MS = 5000;
+
+/**
  * Scan `dir` (recursively — agents organize their own subdirectories, e.g. a
  * `sweep/` folder for an A/B job) for `*.pid` files written no earlier than
- * `sinceMtimeMs`, and return the first one whose recorded process is still
- * alive. The mtime floor matters: without it, a leftover `*.pid` from a
- * long-finished, unrelated earlier run of this same task could falsely match
- * if the OS has since recycled that PID number onto some other running
- * process — restricting the scan to files this session could plausibly have
- * written removes that false-positive window.
+ * `sinceMtimeMs` (within {@link MTIME_TOLERANCE_MS}), and return the first
+ * one whose recorded process is still alive. The mtime floor matters:
+ * without it, a leftover `*.pid` from a long-finished, unrelated earlier run
+ * of this same task could falsely match if the OS has since recycled that
+ * PID number onto some other running process — restricting the scan to
+ * files this session could plausibly have written removes that
+ * false-positive window.
  *
  * Best-effort throughout: an unreadable directory, a malformed/empty pid
  * file, or a liveness check that fails for a reason other than "no such
@@ -227,7 +242,7 @@ export function findLiveOrphanedJob(dir: string, sinceMtimeMs: number): { pidFil
     if (!entry.endsWith('.pid')) continue;
     const pidFile = path.join(dir, entry);
     try {
-      if (statSync(pidFile).mtimeMs < sinceMtimeMs) continue;
+      if (statSync(pidFile).mtimeMs < sinceMtimeMs - MTIME_TOLERANCE_MS) continue;
     } catch {
       continue;
     }
