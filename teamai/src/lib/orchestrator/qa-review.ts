@@ -432,6 +432,9 @@ export async function runQaReview(
   // missing an upstream fix its own prior failure depended on.
   await syncPhaseBaseline(pipeline, deps);
 
+  // Floor for findLiveOrphanedJob's pid-file scan in resolvePhaseWakeup below
+  // — see runSpecPhase's identical capture (phase-runners.ts) for why.
+  const sessionStartedAt = Date.now();
   const sessionId = await processManager.createSession(
     deps.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId, qaLogFile),
   );
@@ -471,7 +474,7 @@ export async function runQaReview(
   // in-progress job gets treated as a QA agent that produced nothing.
   if (await resolvePhaseWakeup({
     pipeline, specDir: pipeline.specPath, cwd: pipeline.worktreePath, wasReentry: isWakeupReentry,
-    unitLabel: 'The QA review', deps,
+    sessionStartedAt, unitLabel: 'The QA review', deps,
   }) === 'pending') return;
 
   consumeFeedbackIfDue(pipeline.specPath, 'qa-review');

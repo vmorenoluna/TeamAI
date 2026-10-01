@@ -35,6 +35,20 @@
  * phases — but calls into these same primitives for the actual file
  * scanning, parsing, attempt-count bookkeeping, staleness verification, and
  * prompt text.
+ *
+ * A second gap surfaced later, on the same task, twice in a row: an analyst
+ * session detached a multi-hour A/B sweep, narrated an intent to wait for it,
+ * and then its turn simply ended — without ever writing phase_wakeup.json.
+ * The file-based contract above only has a safety net for a session that was
+ * ALREADY mid-wakeup-cycle going silent (`checkStaleWakeupReentry`); a FIRST
+ * session that launches background work and goes silent without ever writing
+ * the file once had no net at all, so the orchestrator correctly, but
+ * wastefully, treated it as a missing artifact and parked for human review —
+ * discarding hours of still-running (or already-finished, uncollected) real
+ * work both times. `findLiveOrphanedJob` below closes that gap: it looks for
+ * a still-alive process behind one of the `*.pid` files the wakeup protocol
+ * already asks agents to record, and — if found — synthesizes a wakeup cycle
+ * instead of trusting the agent's silence as "nothing to wait for."
  */
 import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import path from 'path';
@@ -184,6 +198,58 @@ export function checkArtifactProgress(
   const currentMtime = snapshotMtime(path.join(cwd, relArtifact));
   const producedThisCycle = currentMtime != null && (mtimeAtSchedule == null || currentMtime > mtimeAtSchedule);
   return { producedThisCycle, currentMtime };
+}
+
+/**
+ * Scan `dir` (recursively — agents organize their own subdirectories, e.g. a
+ * `sweep/` folder for an A/B job) for `*.pid` files written no earlier than
+ * `sinceMtimeMs`, and return the first one whose recorded process is still
+ * alive. The mtime floor matters: without it, a leftover `*.pid` from a
+ * long-finished, unrelated earlier run of this same task could falsely match
+ * if the OS has since recycled that PID number onto some other running
+ * process — restricting the scan to files this session could plausibly have
+ * written removes that false-positive window.
+ *
+ * Best-effort throughout: an unreadable directory, a malformed/empty pid
+ * file, or a liveness check that fails for a reason other than "no such
+ * process" are all treated as "nothing found here" rather than throwing —
+ * the caller's fallback (park for human review) is always a safe direction
+ * to fail in.
+ */
+export function findLiveOrphanedJob(dir: string, sinceMtimeMs: number): { pidFile: string; pid: number } | null {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir, { recursive: true }) as string[];
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    if (!entry.endsWith('.pid')) continue;
+    const pidFile = path.join(dir, entry);
+    try {
+      if (statSync(pidFile).mtimeMs < sinceMtimeMs) continue;
+    } catch {
+      continue;
+    }
+    let raw: string;
+    try {
+      raw = readFileSync(pidFile, 'utf-8').trim();
+    } catch {
+      continue;
+    }
+    const pid = Number(raw);
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    try {
+      process.kill(pid, 0);
+      return { pidFile, pid };
+    } catch (err) {
+      // EPERM means the process exists but we lack permission to signal it —
+      // still alive from our perspective. ESRCH (or anything else) means no
+      // such process — keep scanning other pid files.
+      if ((err as NodeJS.ErrnoException).code === 'EPERM') return { pidFile, pid };
+    }
+  }
+  return null;
 }
 
 /** Clear every wakeup-related field on the pipeline. Shared by every phase's
@@ -378,6 +444,10 @@ export interface ResolvePhaseWakeupOptions {
   /** Was this phase invocation a wakeup re-entry (i.e. did `wakeupCommand`
    *  already carry over from a previous cycle when this session started)? */
   wasReentry: boolean;
+  /** `Date.now()` captured just before this phase's session was dispatched —
+   *  the mtime floor for `findLiveOrphanedJob`'s pid-file scan, so a stale
+   *  pid file from an earlier, unrelated run of this task can't false-match. */
+  sessionStartedAt: number;
   /** Named in logs and the synthetic FAIL report, e.g. "The spec phase". */
   unitLabel: string;
   deps: PhaseWakeupDeps;
@@ -391,11 +461,13 @@ export interface ResolvePhaseWakeupOptions {
  * artifact as a failure.
  *
  * Detects a fresh `phase_wakeup.json`, falls back to the artifact-staleness
- * auto-reschedule when a re-entry ended silently, clears wakeup state on a
- * genuine completion, and enforces the same attempt-cap circuit breaker
- * implement.ts uses (reusing `maxImplementRetries` — the existing knob for
- * "how many wakeup cycles before giving up," not implement-specific despite
- * the name).
+ * auto-reschedule when a re-entry ended silently, falls back further to a
+ * live-orphaned-job pid scan when the session never wrote a wakeup file at
+ * all (see this module's doc for the incident that motivated it), clears
+ * wakeup state on a genuine completion, and enforces the same attempt-cap
+ * circuit breaker implement.ts uses (reusing `maxImplementRetries` — the
+ * existing knob for "how many wakeup cycles before giving up," not
+ * implement-specific despite the name).
  *
  * Returns `'pending'` when the caller must return immediately — either a
  * wakeup was scheduled (the timer will re-invoke this same phase) or the
@@ -414,7 +486,28 @@ export async function resolvePhaseWakeup(opts: ResolvePhaseWakeupOptions): Promi
   const staleRescheduled = !wakeupDetected && checkStaleWakeupReentry({
     pipeline: opts.pipeline, wasReentry: opts.wasReentry, wakeupDetected, cwd: opts.cwd, unitLabel: opts.unitLabel,
   });
-  const pending = wakeupDetected || staleRescheduled;
+  let pending = wakeupDetected || staleRescheduled;
+
+  // Last-resort safety net: the session never wrote phase_wakeup.json at
+  // all (so there's nothing to detect or compare staleness against above),
+  // but a process behind one of its own recorded pid files is still alive —
+  // treat that as hard evidence of in-flight work rather than trusting the
+  // silence as "there was nothing to wait for."
+  if (!pending) {
+    const orphan = findLiveOrphanedJob(opts.specDir, opts.sessionStartedAt);
+    if (orphan) {
+      pending = true;
+      opts.pipeline.wakeupUntil = new Date(Date.now() + 15 * 60_000).toISOString();
+      opts.pipeline.wakeupCommand = `auto-detected orphaned background job (PID ${orphan.pid}, ${path.relative(opts.specDir, orphan.pidFile)})`;
+      opts.pipeline.wakeupArtifact = undefined;
+      opts.pipeline.wakeupAttemptCount = (opts.pipeline.wakeupAttemptCount || 0) + 1;
+      logToOutput(opts.pipeline.specPath,
+        '[WAKEUP] ' + opts.unitLabel + ' ended without writing phase_wakeup.json, but PID ' + orphan.pid +
+        ' (from ' + path.relative(opts.specDir, orphan.pidFile) + ') is still running — auto-scheduling a ' +
+        're-entry in 15 minutes instead of treating this as a failure (attempt ' +
+        opts.pipeline.wakeupAttemptCount + ')\n');
+    }
+  }
 
   if (opts.wasReentry && !pending) {
     clearWakeupState(opts.pipeline);

@@ -400,3 +400,89 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
     expect(ctx.pipeline.phase).toBe('plan');
   });
 });
+
+// ── Orphaned background job safety net (findLiveOrphanedJob) ──────────────
+//
+// Covers the second gap on the fix-off-by-one-in-melodycontext-accented
+// incident: the analyst twice detached a multi-hour sweep and narrated an
+// intent to wait for it, but its session ended without ever writing
+// phase_wakeup.json — the pre-existing stale-reentry safety net only covers
+// a session that was ALREADY mid-wakeup-cycle going silent, not a first
+// session that never wrote the file once. These tests exercise
+// resolvePhaseWakeup's pid-file fallback through runSpecPhase end to end.
+describe('runSpecPhase — orphaned background job safety net', () => {
+  let ctx: ReturnType<typeof makeCtx>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ctx = makeCtx();
+    mockCreateSession.mockResolvedValue('sess-spec');
+  });
+
+  afterEach(() => {
+    try { rmSync(ctx.root, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+
+  it('auto-schedules a wakeup instead of parking when the session leaves behind a live pid file but no phase_wakeup.json', async () => {
+    const { mkdirSync: mkdir, writeFileSync } = await import('fs');
+    // Written during the session (inside waitForCompletion, same as the
+    // agent would do mid-session) so its mtime postdates runSpecPhase's
+    // sessionStartedAt capture, which happens before the session even starts.
+    ctx.deps.waitForCompletion = vi.fn(async () => {
+      mkdir(join(ctx.specPath, 'sweep'), { recursive: true });
+      writeFileSync(join(ctx.specPath, 'sweep', 'server.pid'), String(process.pid));
+      return undefined;
+    });
+
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    // Never parked — the orphaned job was detected and a re-entry scheduled.
+    expect(ctx.pipeline.phase).toBe('spec');
+    expect(ctx.advancePhaseCalls).toHaveLength(0);
+    expect(ctx.deps.scheduleWakeup).toHaveBeenCalledTimes(1);
+    const p = ctx.pipeline as unknown as {
+      wakeupCommand?: string; wakeupUntil?: string; wakeupAttemptCount?: number;
+    };
+    expect(p.wakeupCommand).toContain('auto-detected orphaned background job');
+    expect(p.wakeupCommand).toContain(String(process.pid));
+    expect(p.wakeupAttemptCount).toBe(1);
+    expect(p.wakeupUntil).toBeDefined();
+    expect(new Date(p.wakeupUntil!).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('still parks in awaiting-review when the pid file points to a process that is not running', async () => {
+    ctx.deps.waitForCompletion = vi.fn(async () => {
+      const { mkdirSync: mkdir, writeFileSync } = await import('fs');
+      mkdir(join(ctx.specPath, 'sweep'), { recursive: true });
+      // Picked to reliably not exist on this machine during the test run.
+      writeFileSync(join(ctx.specPath, 'sweep', 'server.pid'), '999999');
+      return undefined;
+    });
+
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    expect(ctx.pipeline.phase).toBe('awaiting-review');
+    const rollback = ctx.advancePhaseCalls[ctx.advancePhaseCalls.length - 1];
+    expect(rollback.eventExtra?.awaitingReviewReason).toEqual(
+      expect.stringContaining('Spec phase produced no spec.md'),
+    );
+  });
+
+  it('ignores a pid file left over from an earlier, unrelated run of this task (mtime predates this session)', async () => {
+    const { mkdirSync: mkdir, writeFileSync, utimesSync } = await import('fs');
+    // Backdated well before sessionStartedAt (captured inside runSpecPhase,
+    // a moment from now) — even though the recorded PID (this test process)
+    // is genuinely alive, it must not match a pre-dispatch leftover file.
+    mkdir(join(ctx.specPath, 'sweep'), { recursive: true });
+    const pidFile = join(ctx.specPath, 'sweep', 'server.pid');
+    writeFileSync(pidFile, String(process.pid));
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(pidFile, past, past);
+
+    await runSpecPhase(ctx.pipeline as never, ctx.deps as never);
+
+    expect(ctx.pipeline.phase).toBe('awaiting-review');
+    const p = ctx.pipeline as unknown as { wakeupCommand?: string };
+    expect(p.wakeupCommand).toBeUndefined();
+  });
+});
