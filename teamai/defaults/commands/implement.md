@@ -258,6 +258,13 @@ If a background script (benchmark, verification run, data pipeline) is still
 running and won't complete before your session ends, schedule an orchestrator
 wakeup so the task resumes once the job finishes:
 
+Do steps 1–3 below back to back, immediately after you launch the job — not as a final
+step you'll get to once you're done waiting. Your turn can end at any point without
+warning once a long job is running; if that happens before you've written
+`subtask_wakeup-st<ID>.json`, the orchestrator has no way to tell your in-progress job
+apart from a subtask that made no progress, and your commits for it are discarded as a
+scope violation however far the job got.
+
 1. **Detach the job** so it keeps running after your session ends:
    `nohup <command> > job.log 2>&1 & disown`. A bare `&` only backgrounds
    within your current shell and dies the instant your session exits. Write the
@@ -274,9 +281,13 @@ wakeup so the task resumes once the job finishes:
    (`$TEAMAI_SPEC_DIR`). The per-subtask filename prevents parallel subtasks
    from clobbering each other's wakeup schedules.
 
-**Do NOT call an interactive `ScheduleWakeup`-style tool** — it is an
-interactive-session feature and is a no-op in this pipeline. The orchestrator's
-resume mechanism only understands the file.
+**Do NOT call an interactive `ScheduleWakeup`-style tool, and do NOT use `Monitor` (or
+any other tool) to wait on the job inline.** Neither pauses and resumes you across
+turns in this pipeline — a `Monitor` call that outlives your remaining turn budget ends
+your session exactly like any other silent timeout, and narrating that you'll "wait for
+the completion notification" accomplishes nothing if `subtask_wakeup-st<ID>.json` was
+never written. The file is the only thing the orchestrator's resume mechanism
+understands.
 
 **Size `wakeup_at` realistically.** Estimate completion from the job's actual
 throughput, not an optimistic guess, and add a 20% safety margin. An undersized

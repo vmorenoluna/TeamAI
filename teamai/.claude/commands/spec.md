@@ -56,6 +56,13 @@ your session ends, schedule an orchestrator wakeup instead of ending the session
 the job uncollected. The orchestrator will re-enter you once it's done — you do NOT
 need to write `spec.md` first, and you do NOT need to guess at the job's results.
 
+Do steps 1–3 below back to back, immediately after you launch the job — not as a final
+step you'll get to once you're done waiting. Your turn can end at any point without
+warning once a long job is running; if that happens before you've written
+`phase_wakeup.json`, the orchestrator has no way to tell your in-progress job apart from
+a session that produced nothing, and the task is parked for human review with the job's
+results discarded, however far they got.
+
 1. **Detach the job**: `nohup <command> > job.log 2>&1 & disown`. A bare `&` dies the
    instant your session exits. Write the log inside `$TEAMAI_SPEC_DIR` (your cwd is the
    project root, not a worktree, at this phase), not a container-local temp path.
@@ -84,8 +91,12 @@ need to write `spec.md` first, and you do NOT need to guess at the job's results
   whenever the job writes one — the orchestrator periodically checks this file's
   freshness while you're asleep and re-enters you early if it goes stale.
 
-**Do NOT call an interactive `ScheduleWakeup`-style tool** — it is a no-op in this
-pipeline. The orchestrator's resume mechanism only understands the file.
+**Do NOT call an interactive `ScheduleWakeup`-style tool, and do NOT use `Monitor` (or
+any other tool) to wait on the job inline.** Neither pauses and resumes you across
+turns in this pipeline — a `Monitor` call that outlives your remaining turn budget ends
+your session exactly like any other silent timeout, and narrating that you'll "wait for
+the completion notification" accomplishes nothing if `phase_wakeup.json` was never
+written. The file is the only thing the orchestrator's resume mechanism understands.
 
 Then end your session normally without writing `spec.md` — the orchestrator will NOT
 treat this as a missing spec, it pauses instead. On re-entry (headed

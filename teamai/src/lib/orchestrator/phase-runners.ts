@@ -296,6 +296,10 @@ export async function runSpecPhase(
   deps.phaseHeader(logFile, 'spec');
   deps.persistAndEmitPhase(pipeline);
   await syncPhaseBaseline(pipeline, deps);
+  // Floor for findLiveOrphanedJob's pid-file scan in resolvePhaseWakeup below
+  // — captured just before dispatch so a leftover pid file from an earlier,
+  // unrelated run of this task can't false-match.
+  const sessionStartedAt = Date.now();
   const sessionId = await processManager.createSession(
     deps.sessionOpts('analyst', deps.projectRoot, pipeline.taskId, specLogFile),
   );
@@ -354,7 +358,7 @@ export async function runSpecPhase(
   // with no way to signal "still running").
   if (await resolvePhaseWakeup({
     pipeline, specDir: pipeline.specPath, cwd: deps.projectRoot, wasReentry: isWakeupReentry,
-    unitLabel: 'The spec phase', deps,
+    sessionStartedAt, unitLabel: 'The spec phase', deps,
   }) === 'pending') return;
 
   if (isRevision && existsSync(revisionFeedbackPath)) {
@@ -513,6 +517,9 @@ export async function runPlanPhase(
   deps.phaseHeader(logFile, 'plan');
   deps.persistAndEmitPhase(pipeline);
   await syncPhaseBaseline(pipeline, deps);
+  // Floor for findLiveOrphanedJob's pid-file scan in resolvePhaseWakeup below
+  // — see runSpecPhase's identical capture for why.
+  const sessionStartedAt = Date.now();
   const sessionId = await processManager.createSession(
     deps.sessionOpts('planner', deps.projectRoot, pipeline.taskId, planLogFile),
   );
@@ -573,7 +580,7 @@ export async function runPlanPhase(
   // check or dry run before committing to a plan built on its results.
   if (await resolvePhaseWakeup({
     pipeline, specDir: pipeline.specPath, cwd: deps.projectRoot, wasReentry: isWakeupReentry,
-    unitLabel: 'The plan phase', deps,
+    sessionStartedAt, unitLabel: 'The plan phase', deps,
   }) === 'pending') return;
 
   // Enforce the preserve-list unconditionally: whatever the planner wrote for
