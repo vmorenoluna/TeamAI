@@ -71,11 +71,13 @@ function setup() {
   const specPath = join(root, 'task-slug');
   mkdirSync(specPath, { recursive: true });
 
-  // All subtasks complete + qa_flagged — the exact state right after a
-  // QA FAIL bounce where every subtask was finished pre-review.
+  // Subtask 1 QA-flagged for rework (completed: false — writeQaFeedback
+  // pairs qa_flagged with completed: false atomically at flag time, see
+  // qa-feedback.ts), siblings already complete and not flagged — the exact
+  // state right after a QA FAIL bounce names one subtask for rework.
   writeFileSync(join(specPath, 'plan.json'), JSON.stringify({
     subtasks: [
-      { id: 1, title: 'S1', description: '', files: ['src/a.ts'], acceptance_criteria: ['A works'], depends_on: [], completed: true, qa_flagged: true },
+      { id: 1, title: 'S1', description: '', files: ['src/a.ts'], acceptance_criteria: ['A works'], depends_on: [], completed: false, qa_flagged: true },
       { id: 2, title: 'S2', description: '', files: ['src/b.ts'], acceptance_criteria: ['B works'], depends_on: [], completed: true },
       { id: 3, title: 'S3', description: '', files: ['src/c.ts'], acceptance_criteria: ['C works'], depends_on: [], completed: true },
     ],
@@ -198,6 +200,37 @@ describe('selectSubtasks — stale wakeup isolation must not empty the QA-rework
       // (subtasks 2 and 3, in dependency order via parallel groups) runs
       // instead of isolating to subtask 3 alone.
       expect(selection.effectiveSubtasks.map(s => s.id)).toEqual([2, 3]);
+    } finally {
+      try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+
+  it('excludes a qa_flagged subtask that already completed on an earlier pass of this same round', () => {
+    // Regression test for task give-minor-mode-melodies-a-real-leading-:
+    // subtask 1 genuinely finished on an earlier pass within the SAME
+    // multi-pass bounce-back round (persistCompletedSubtasks already wrote
+    // completed: true to plan.json), but qa_flagged is intentionally left
+    // set until the whole QA-targeted set finishes (see qaTargetedDone in
+    // implement.ts). Selecting by qa_flagged alone would reselect subtask 1
+    // on the next pass, and the old unconditional reset in runImplement
+    // would then wipe its real completion back to false — redispatching a
+    // subtask with nothing left to fix, which gets rejected as a false
+    // scope violation and defers every later group via GROUP-BARRIER until
+    // the pass cap fails the task outright.
+    const root = join(tmpdir(), `teamai-flagged-done-${randomUUID().slice(0, 8)}`);
+    const donePath = join(root, 'task-slug');
+    mkdirSync(donePath, { recursive: true });
+    writeFileSync(join(donePath, 'plan.json'), JSON.stringify({
+      subtasks: [
+        { id: 1, title: 'S1 (finished this round, still qa_flagged)', description: '', files: ['src/a.ts'], acceptance_criteria: ['A works'], depends_on: [], completed: true, qa_flagged: true },
+        { id: 2, title: 'S2 (still needs rework)', description: '', files: ['src/b.ts'], acceptance_criteria: ['B works'], depends_on: [], completed: false, qa_flagged: true },
+      ],
+    }));
+    writeFileSync(join(donePath, 'qa_feedback.md'), '# QA Feedback\n\n- fix subtask 2');
+
+    try {
+      const selection = selectSubtasks(pipeline(donePath) as never);
+      expect(selection.effectiveSubtasks.map(s => s.id)).toEqual([2]);
     } finally {
       try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
     }
