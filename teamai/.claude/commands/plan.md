@@ -144,6 +144,13 @@ whether an approach the spec assumes is even viable — and it won't complete be
 your session ends, schedule an orchestrator wakeup instead of guessing at the plan
 based on an incomplete check.
 
+Do steps 1–3 below back to back, immediately after you launch the job — not as a final
+step you'll get to once you're done waiting. Your turn can end at any point without
+warning once a long job is running; if that happens before you've written
+`phase_wakeup.json`, the orchestrator has no way to tell your in-progress job apart from
+a session that produced nothing, and the task is parked for human review with the job's
+results discarded, however far they got.
+
 1. **Detach the job**: `nohup <command> > job.log 2>&1 & disown`. Write the log inside
    `$TEAMAI_SPEC_DIR` (your cwd is the project root at this phase, not a worktree).
 2. **Record its PID** (`echo $! > job.pid`) if you launch more than one job at once —
@@ -169,8 +176,12 @@ based on an incomplete check.
 - `progress_log_path`: the job's own log file, relative to the project root — include it
   whenever the job writes one.
 
-**Do NOT call an interactive `ScheduleWakeup`-style tool** — it is a no-op in this
-pipeline. The orchestrator's resume mechanism only understands the file.
+**Do NOT call an interactive `ScheduleWakeup`-style tool, and do NOT use `Monitor` (or
+any other tool) to wait on the job inline.** Neither pauses and resumes you across
+turns in this pipeline — a `Monitor` call that outlives your remaining turn budget ends
+your session exactly like any other silent timeout, and narrating that you'll "wait for
+the completion notification" accomplishes nothing if `phase_wakeup.json` was never
+written. The file is the only thing the orchestrator's resume mechanism understands.
 
 Then end your session normally without writing `plan.json` — the orchestrator pauses
 instead of treating this as a failed plan. On re-entry (headed
