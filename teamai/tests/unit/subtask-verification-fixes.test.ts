@@ -173,7 +173,7 @@ describe('runImplement — no-op subtask detection', () => {
     }
   });
 
-  it('does not reject a subtask that declares files_to_create even if its edit-files diff is empty', async () => {
+  it('does not reject a subtask that declares files_to_create even if its edit-files diff is empty, as long as the deliverable was committed this session', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
         id: 1, title: 'Generate report', description: 'Write analysis output',
@@ -182,8 +182,12 @@ describe('runImplement — no-op subtask detection', () => {
       }],
     }));
 
+    // scripts/analyze.py (the edit-scope file) is untouched, but the
+    // files_to_create deliverable WAS committed this session — the diff
+    // must show it for freshness verification to accept it (see the stale
+    // no-op regression test below for the case where it's missing from here).
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-      if (Array.isArray(args) && args[0] === 'diff') return '';
+      if (Array.isArray(args) && args[0] === 'diff') return 'results/report.txt\n';
       if (Array.isArray(args) && args[0] === 'status') return '';
       return 'abc123\n';
     });
@@ -207,6 +211,64 @@ describe('runImplement — no-op subtask detection', () => {
 
       const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
       expect(plan.subtasks[0].completed).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('rejects a files_to_create deliverable that exists but is stale from an earlier round, instead of marking it completed', async () => {
+    // Regression test for task give-minor-mode-melodies-a-real-leading-:
+    // subtask 15's five files_to_create had existed on disk since a stale
+    // commit from an EARLIER, QA-rejected round. This session's coder only
+    // stood up background sweep servers and ended before running them —
+    // zero commits, zero new changes — yet the subtask was marked completed
+    // anyway, because existsSync alone can't distinguish "freshly produced"
+    // from "leftover from three rounds ago, carrying stale evidence QA
+    // already rejected."
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 15, title: 'Sweep-level verification', description: 'Gate on a fresh sweep',
+        files_to_create: ['results/gate-report.txt'], acceptance_criteria: ['All gates pass'],
+        qa_flagged: true, completed: false,
+      }],
+    }));
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nRe-run the sweep — prior evidence was stale.');
+
+    const worktreeDir = join(project.root, 'worktrees', 'test-task');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'diff') return '';
+      if (Array.isArray(args) && args[0] === 'status') return '';
+      return 'abc123\n';
+    });
+    mockCreateSession.mockResolvedValue('sess-stale-deliverable');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      worktreePath: worktreeDir,
+      maxImplementRetries: 3,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      // Deliverable already exists on disk (stale, from a prior round), but
+      // this session's diff stays empty: the coder committed nothing new.
+      // Written here (after worktree setup, mirroring the sibling "committed
+      // this session" test above) so test setup doesn't race the real
+      // worktree-preparation step.
+      mkdirSync(join(worktreeDir, 'results'), { recursive: true });
+      writeFileSync(join(worktreeDir, 'results', 'gate-report.txt'), 'stale evidence from an earlier round');
+
+      fireEvent('event', { sessionId: 'sess-stale-deliverable', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks[0].completed).not.toBe(true);
+      // The stale file itself is left untouched — this check only flags completion.
+      expect(existsSync(join(worktreeDir, 'results', 'gate-report.txt'))).toBe(true);
     } finally {
       executeSpy.mockRestore();
     }

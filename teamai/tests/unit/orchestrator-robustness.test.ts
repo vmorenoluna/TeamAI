@@ -3377,6 +3377,18 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       writeFileSync(join(project.root, "worktrees", "test-task", "output.txt"), "deliverable content");
       expect(existsSync(join(project.root, 'worktrees', 'test-task', 'output.txt'))).toBe(true);
 
+      // Freshness verification requires the deliverable to show up in THIS
+      // session's own diff (preSessionHead..HEAD) — override the describe's
+      // default empty diff so the committed-this-session case is simulated.
+      mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+        if (Array.isArray(args)) {
+          if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+          if (args[0] === 'rev-parse') return 'abc123\n';
+          if (args[0] === 'diff') return 'output.txt\n';
+        }
+        return '';
+      });
+
       fireEvent('event', { sessionId: 'sess-deliverable-pass', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
 
@@ -7659,6 +7671,51 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
     ] as any[];
 
     const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+
+    expect(changed).toBe(true);
+    expect(subtasks[0].completed).toBe(true);
+  });
+
+  it('leaves a subtask incomplete when its files_to_create exist but are stale — untouched since before this pass started', () => {
+    // Regression test for task give-minor-mode-melodies-a-real-leading-:
+    // subtask 15's five files_to_create survived on disk from a commit two
+    // rounds back. No subtask in the CURRENT pass touched them — the git
+    // diff against the pass's start HEAD is empty — yet existence alone used
+    // to mark it completed anyway.
+    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'stale evidence');
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'b.log'), 'stale evidence');
+
+    const subtasks = [
+      {
+        id: 5, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log'],
+        completed: false,
+      },
+    ] as any[];
+
+    const execGitCapture = vi.fn(() => ''); // empty diff — nothing changed this pass
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
+
+    expect(changed).toBe(false);
+    expect(subtasks[0].completed).toBeFalsy();
+  });
+
+  it('marks a subtask completed when its files_to_create exist AND were (re)committed during this pass', () => {
+    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'fresh evidence');
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'b.log'), 'fresh evidence');
+
+    const subtasks = [
+      {
+        id: 5, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log'],
+        completed: false,
+      },
+    ] as any[];
+
+    const execGitCapture = vi.fn(() => 'scripts/sweep_logs/a.log\nscripts/sweep_logs/b.log\n');
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
 
     expect(changed).toBe(true);
     expect(subtasks[0].completed).toBe(true);
