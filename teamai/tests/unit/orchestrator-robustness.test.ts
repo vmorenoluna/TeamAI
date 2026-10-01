@@ -2588,7 +2588,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
         { id: 1, title: 'Add login', description: 'Build login page', files: ['src/login.ts'], acceptance_criteria: ['Works'], completed: true },
-        { id: 2, title: 'Fix auth', description: 'Fix auth module', files: ['src/auth.ts'], acceptance_criteria: ['No 401 errors [QA CORRECTION: Add token refresh]'], qa_flagged: true, completed: true },
+        { id: 2, title: 'Fix auth', description: 'Fix auth module', files: ['src/auth.ts'], acceptance_criteria: ['No 401 errors [QA CORRECTION: Add token refresh]'], qa_flagged: true, completed: false },
         { id: 3, title: 'Add dashboard', description: 'Build dashboard', files: ['src/dashboard.ts'], acceptance_criteria: ['Data loads'], completed: true },
       ],
     }));
@@ -2896,15 +2896,28 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
   });
 
   it('cleans up qa_flagged markers from plan.json after bounce-back implement completes', async () => {
-    // Scenario: subtask was flagged, implement runs and completes — qa_flagged should be removed
+    // Scenario: subtask was flagged (completed: false — writeQaFeedback pairs
+    // qa_flagged with completed: false atomically, see qa-feedback.ts),
+    // implement runs and genuinely completes it — qa_flagged should be removed.
     const planPath = join(project.taskDir, 'plan.json');
     writeFileSync(planPath, JSON.stringify({
       subtasks: [
-        { id: 1, title: 'Fix bug', description: 'Fix the bug', files: ['src/bug.ts'], acceptance_criteria: ['Bug fixed [QA CORRECTION: Add tests]'], qa_flagged: true, completed: true },
+        { id: 1, title: 'Fix bug', description: 'Fix the bug', files: ['src/bug.ts'], acceptance_criteria: ['Bug fixed [QA CORRECTION: Add tests]'], qa_flagged: true, completed: false },
       ],
     }));
 
     writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nFix the bug');
+
+    // The flagged subtask must show its own assigned file changed — an empty
+    // diff now trips the no-op-subtask rejection instead of completing.
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'diff') return 'src/bug.ts\n';
+      }
+      return '';
+    });
 
     mockCreateSession.mockResolvedValue('sess-cleanup');
 
@@ -2950,9 +2963,9 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
     writeFileSync(planPath, JSON.stringify({
       subtasks: [
         { id: 1, title: 'Add login', description: 'Login', files: ['src/login.ts'], acceptance_criteria: ['Works'], completed: true },
-        { id: 2, title: 'Fix auth', description: 'Auth fix', files: ['src/auth.ts'], acceptance_criteria: ['No 401 [QA CORRECTION: Refresh token]'], qa_flagged: true, completed: true },
+        { id: 2, title: 'Fix auth', description: 'Auth fix', files: ['src/auth.ts'], acceptance_criteria: ['No 401 [QA CORRECTION: Refresh token]'], qa_flagged: true, completed: false },
         { id: 3, title: 'Add dashboard', description: 'Dashboard', files: ['src/dashboard.ts'], acceptance_criteria: ['Loads'], completed: true },
-        { id: 4, title: 'Fix API', description: 'API fix', files: ['src/api.ts'], acceptance_criteria: ['Returns 200 [QA CORRECTION: Handle errors]'], qa_flagged: true, completed: true },
+        { id: 4, title: 'Fix API', description: 'API fix', files: ['src/api.ts'], acceptance_criteria: ['Returns 200 [QA CORRECTION: Handle errors]'], qa_flagged: true, completed: false },
       ],
     }));
 
@@ -3060,7 +3073,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
     const planPath = join(project.taskDir, 'plan.json');
     writeFileSync(planPath, JSON.stringify({
       subtasks: [
-        { id: 1, title: 'Fix auth bug', description: 'Fix the auth null pointer', files: ['src/auth.ts'], acceptance_criteria: ['No crash on null session [QA CORRECTION: Add null guard]'], parallel_group: 'critical-fixes', qa_flagged: true, completed: true },
+        { id: 1, title: 'Fix auth bug', description: 'Fix the auth null pointer', files: ['src/auth.ts'], acceptance_criteria: ['No crash on null session [QA CORRECTION: Add null guard]'], parallel_group: 'critical-fixes', qa_flagged: true, completed: false },
         { id: 2, title: 'Refactor logger', description: 'Extract logger interface', files: ['src/logger.ts'], acceptance_criteria: ['Passes existing tests'], parallel_group: 'critical-fixes', completed: true },
         { id: 3, title: 'Update docs', description: 'Update API docs', files: ['docs/api.md'], acceptance_criteria: ['All routes documented'], completed: true },
       ],

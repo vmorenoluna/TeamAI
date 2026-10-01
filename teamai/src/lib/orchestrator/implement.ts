@@ -488,10 +488,26 @@ export function selectSubtasks(
     }
   }
 
+  // `qa_flagged` alone is not enough: it is intentionally left set on an
+  // already-completed subtask until the whole QA-targeted set finishes (see
+  // the qaTargetedDone cleanup below, which needs it to stay readable as
+  // "was this part of the targeted set" after completion). A multi-pass
+  // bounce-back round re-enters this selection once per pass, so without the
+  // `!s.completed` guard a subtask that genuinely finished on an earlier
+  // pass of the SAME round gets reselected on the next one, forced back to
+  // `completed: false` by the reset below, redispatched with nothing left to
+  // fix, and rejected by the "ended without touching any files" heuristic as
+  // a false scope violation — which then trips GROUP-BARRIER to defer every
+  // later group (including whichever one holds the subtask that actually
+  // still needs work) until the pass cap fails the task outright. Found on
+  // task give-minor-mode-melodies-a-real-leading-: subtask 11 genuinely
+  // completed on pass 1, then looped as a false rejection on passes 2–3
+  // while subtask 12 — in a later group, deferred by the barrier each time —
+  // never got a chance to run again.
   const subtasksToRun = humanReworkIds
     ? realSubtasks.filter((s: PlanSubtask) => humanReworkIds!.has(s.id))
     : hasQaFeedback
-      ? realSubtasks.filter((s: PlanSubtask) => s.qa_flagged)
+      ? realSubtasks.filter((s: PlanSubtask) => s.qa_flagged && !s.completed)
       : realSubtasks.filter((s: PlanSubtask) => !s.completed);
 
   let effectiveSubtasks: PlanSubtask[];
@@ -1711,9 +1727,12 @@ export async function runImplement(
     return;
   }
 
-  if (hasQaFeedback) {
-    for (const s of effectiveSubtasks) s.completed = false;
-  }
+  // No force-reset needed here: every path that builds effectiveSubtasks
+  // above (the qa_flagged && !completed filter, the human-rework filter, and
+  // the synthetic 9999 fallback) already guarantees completed === false for
+  // every member. Do not reintroduce an unconditional reset — see the
+  // qa_flagged && !completed comment above for why that clobbers a subtask
+  // that completes partway through a multi-pass bounce-back round.
 
   // ── Phase 3: Process groups of subtasks ──
   // Tracks every subtask id completed so far — both before this pass
