@@ -2,8 +2,9 @@ import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import * as pty from 'node-pty';
-import { readFileSync, existsSync, appendFileSync } from 'fs';
+import { readFileSync, existsSync, appendFileSync, writeFileSync, unlinkSync } from 'fs';
 import { containerManager, readContainerConfig, readContainerRemoteUser, hostToContainerPath } from './container-manager';
 import { getToolPath } from './tool-checker';
 import { log, warn } from './logger';
@@ -525,8 +526,24 @@ export class ProcessManager extends EventEmitter {
       'spec -> plan -> implement -> QA pipeline once started. Do not hand-write task.json yourself.';
     const systemPrompt = roleContent ? `${roleContent}\n\n${ticketInstruction}` : ticketInstruction;
 
-    const args = ['--append-system-prompt', systemPrompt];
+    // `--model` goes first so it can never be lost behind the (large) prompt.
+    const args: string[] = [];
     if (opts.model) args.push('--model', opts.model);
+
+    // On Windows the CLI is launched via `cmd.exe /c` (see resolvePtyTarget),
+    // and cmd.exe terminates the command line at the first newline — the
+    // multi-line prompt would be truncated and every argument after it
+    // (including --model) silently dropped, so the session fell back to the
+    // CLI's default model with a cut-off role persona. Hand the prompt over
+    // as a file instead; the argv then holds no newlines or quotes.
+    let promptFile: string | undefined;
+    if (process.platform === 'win32') {
+      promptFile = join(tmpdir(), `teamai-terminal-${id}-prompt.md`);
+      writeFileSync(promptFile, systemPrompt, 'utf-8');
+      args.push('--append-system-prompt-file', promptFile);
+    } else {
+      args.push('--append-system-prompt', systemPrompt);
+    }
 
     const claudeBin = getToolPath('claude');
     const { file: ptyFile, args: ptyArgs } = resolvePtyTarget(claudeBin, args);
@@ -563,6 +580,9 @@ export class ProcessManager extends EventEmitter {
     });
 
     ptyProcess.onExit(() => {
+      if (promptFile) {
+        try { unlinkSync(promptFile); } catch { /* already gone */ }
+      }
       this.terminalSessions.delete(id);
       this.emit('terminal-exit', { sessionId: id });
     });
