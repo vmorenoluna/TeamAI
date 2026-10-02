@@ -927,6 +927,44 @@ describe('UnifiedTerminal — component', () => {
     });
   });
 
+  // ── Short container must still be fitted (regression) ─────────────────────
+  //
+  // The terminal opens with a fixed `rows: 24`. The ResizeObserver used to skip
+  // fit() for containers shorter than 10 rows (195px), so on a small window
+  // xterm stayed 24 rows tall inside an overflow-hidden box: the last log line
+  // was clipped and the view looked scrollable while already at the bottom.
+
+  describe('fits a short container (regression)', () => {
+    it('calls fit() for a container shorter than 10 rows, but not for a 0-height one', async () => {
+      let observerCallback: (() => void) | null = null;
+      vi.stubGlobal('ResizeObserver', class {
+        constructor(cb: () => void) { observerCallback = cb; }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      });
+      try {
+        render(<UnifiedTerminal {...makeDefaultProps({ qaLog: '[12:00:00] QA line' })} />);
+        await waitFor(() => { expect(observerCallback).not.toBeNull(); });
+
+        const container = document.querySelector('[data-component="terminal-container"] > div:last-child') as HTMLElement;
+        mockFitAddonFit.mockClear();
+        mockTerminalInstance.scrollToBottom.mockClear();
+
+        Object.defineProperty(container, 'clientHeight', { configurable: true, value: 0 });
+        observerCallback!();
+        expect(mockFitAddonFit).not.toHaveBeenCalled();
+
+        Object.defineProperty(container, 'clientHeight', { configurable: true, value: 88 });
+        observerCallback!();
+        expect(mockFitAddonFit).toHaveBeenCalledTimes(1);
+        expect(mockTerminalInstance.scrollToBottom).toHaveBeenCalled();
+      } finally {
+        vi.stubGlobal('ResizeObserver', MockResizeObserver);
+      }
+    });
+  });
+
   // ── Responsive layout ─────────────────────────────────────────────────────
 
   describe('responsive layout', () => {
