@@ -11,11 +11,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Module-level mocks (must be before any imports from the file under test) ──
 
-const { mockSpawn, mockExecFileSync, mockPtySpawn, mockAppendFileSync, mockReadFileSync, mockExistsSync, mockWarn, mockLog } = vi.hoisted(() => ({
+const { mockSpawn, mockExecFileSync, mockPtySpawn, mockAppendFileSync, mockWriteFileSync, mockUnlinkSync, mockReadFileSync, mockExistsSync, mockWarn, mockLog } = vi.hoisted(() => ({
   mockSpawn: vi.fn(),
   mockExecFileSync: vi.fn(),
   mockPtySpawn: vi.fn(),
   mockAppendFileSync: vi.fn(),
+  mockWriteFileSync: vi.fn(),
+  mockUnlinkSync: vi.fn(),
   mockReadFileSync: vi.fn(),
   mockExistsSync: vi.fn(),
   mockWarn: vi.fn(),
@@ -41,6 +43,8 @@ vi.mock('node-pty', () => ({
 }));
 
 vi.mock('fs', () => ({
+  writeFileSync: mockWriteFileSync,
+  unlinkSync: mockUnlinkSync,
   appendFileSync: mockAppendFileSync,
   readFileSync: mockReadFileSync,
   existsSync: mockExistsSync,
@@ -834,34 +838,54 @@ describe('ProcessManager — Full Coverage', () => {
       });
 
       it('routes the bare "claude" command through cmd.exe', () => {
-        process.env.ComSpec = 'C:\\Windows\\System32\\cmd.exe';
+        process.env.ComSpec = 'C:\Windows\System32\cmd.exe';
         mockExistsSync.mockReturnValue(false);
 
         pm.createTerminalSession({ projectPath: '/test/project', role: 'coder.md' });
 
         const callArgs = mockPtySpawn.mock.calls[0];
-        expect(callArgs[0]).toBe('C:\\Windows\\System32\\cmd.exe');
+        expect(callArgs[0]).toBe('C:\Windows\System32\cmd.exe');
         expect(callArgs[1].slice(0, 4)).toEqual(['/d', '/s', '/c', 'claude']);
-        expect(callArgs[1][4]).toBe('--append-system-prompt');
-        expect(callArgs[1][5]).toContain('create-task-cli.mjs');
       });
 
-      it('preserves --append-system-prompt and --model after the cmd.exe wrapper', () => {
+      // Regression: cmd.exe truncates its command line at the first newline,
+      // so a multi-line --append-system-prompt dropped every later argument
+      // (--model included) and the session ran on the CLI's default model.
+      it('passes --model first and the prompt as a file, with no newline in any argument', () => {
         mockExistsSync.mockReturnValue(true);
-        mockReadFileSync.mockReturnValue('You are a coding expert.');
+        mockReadFileSync.mockReturnValue('You are a coding expert.\nSecond line with "quotes".');
 
         pm.createTerminalSession({
           projectPath: '/test/project',
           role: 'coder.md',
-          model: 'claude-sonnet-4',
+          model: 'claude-opus-5-5',
         });
 
-        const callArgs = mockPtySpawn.mock.calls[0];
-        expect(callArgs[1].slice(0, 4)).toEqual(['/d', '/s', '/c', 'claude']);
-        expect(callArgs[1][4]).toBe('--append-system-prompt');
-        expect(callArgs[1][5]).toContain('You are a coding expert.');
-        expect(callArgs[1][5]).toContain('create-task-cli.mjs');
-        expect(callArgs[1].slice(6)).toEqual(['--model', 'claude-sonnet-4']);
+        const args: string[] = mockPtySpawn.mock.calls[0][1];
+        expect(args.slice(0, 6)).toEqual(['/d', '/s', '/c', 'claude', '--model', 'claude-opus-5-5']);
+        expect(args[6]).toBe('--append-system-prompt-file');
+        expect(args).not.toContain('--append-system-prompt');
+        expect(args.some(a => /[\r\n"]/.test(a))).toBe(false);
+
+        const [writtenPath, content] = mockWriteFileSync.mock.calls[0];
+        expect(writtenPath).toBe(args[7]);
+        expect(content).toContain('You are a coding expert.\nSecond line');
+        expect(content).toContain('create-task-cli.mjs');
+      });
+
+      it('deletes the temp prompt file when the PTY exits', () => {
+        let exitHandler: (() => void) | undefined;
+        mockPtySpawn.mockReturnValue({
+          onData: vi.fn(),
+          onExit: vi.fn((cb: () => void) => { exitHandler = cb; }),
+          write: vi.fn(), resize: vi.fn(), kill: vi.fn(),
+        });
+
+        pm.createTerminalSession({ projectPath: '/test/project', role: 'coder.md' });
+        const promptPath = mockWriteFileSync.mock.calls[0][0];
+        exitHandler!();
+
+        expect(mockUnlinkSync).toHaveBeenCalledWith(promptPath);
       });
 
       it('falls back to cmd.exe when ComSpec is unset', () => {
