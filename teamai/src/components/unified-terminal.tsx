@@ -224,11 +224,13 @@ export function formatLiveEventWithLabel(
 
 const FONT_SIZE = 13;
 const LINE_HEIGHT = 1.5;
-/** Minimum rows the container must hold before calling fitAddon.fit().
- *  Fewer rows than this risk collapsing the viewport under E2E load
- *  where headless Chrome delivers intermediate container heights. */
-const MIN_FIT_ROWS = 10;
-const MIN_FIT_HEIGHT = FONT_SIZE * LINE_HEIGHT * MIN_FIT_ROWS;
+/** Minimum container height (one row) before calling fitAddon.fit().
+ *  Guards only against a 0-height container (hidden tab, unmounted layout).
+ *  Any larger height MUST be fitted: the terminal opens with a fixed
+ *  `rows: 24`, so skipping the fit for a short container leaves xterm taller
+ *  than its `overflow-hidden` box and clips the last log line with nothing
+ *  left to scroll. */
+const MIN_FIT_HEIGHT = FONT_SIZE * LINE_HEIGHT;
 
 // ── Component ───────────────────────────────────────────────────────────────
 
@@ -459,12 +461,13 @@ export function UnifiedTerminal({
     // This avoids a race where headless Chrome under E2E load fires the
     // observer before content is written, fitting to an intermediate
     // height and collapsing the viewport to 1-2 rows.
-    // MIN_FIT_HEIGHT (= FONT_SIZE * LINE_HEIGHT * MIN_FIT_ROWS) ensures
-    // the container has settled at a meaningful height before calling fit().
+    // MIN_FIT_HEIGHT (one row) only skips a 0-height container; every other
+    // height is fitted, and the view is re-pinned to the bottom afterwards.
     if (!resizeObserverRef.current && container) {
       resizeObserverRef.current = new ResizeObserver(() => {
         if (container.clientHeight >= MIN_FIT_HEIGHT) {
           fitAddon.fit();
+          if (!userScrolledRef.current) terminal.scrollToBottom();
         }
       });
       resizeObserverRef.current.observe(container);
