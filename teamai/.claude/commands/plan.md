@@ -90,6 +90,13 @@ Rules:
   benchmark only once the baseline and comparison runs are both done and their
   servers are shut down") — declare that ordering in `depends_on`, not only in the
   description.
+- **A subtask description never refers to a later subtask.** Each subtask must be
+  self-contained: state only its own scope and constraints, never "this must land
+  before the sweep (subtask 5)" or "subtask 9 adds the entry". A reference to an
+  EARLIER subtask is allowed only with that id in `depends_on`. If a later subtask
+  must run after this one, put the ordering in the LATER subtask's `depends_on`;
+  never add a forward id to an earlier subtask's `depends_on` (it can never be
+  satisfied). The orchestrator logs a `[PLAN-LINT]` warning for both cases.
 - **Verification scripts need dedicated subtasks:** When the spec includes an acceptance
   criterion that requires running a script to produce empirical evidence (e.g. a
   benchmark, integration run, or data pipeline), the plan MUST include a dedicated

@@ -163,6 +163,35 @@ describe('detectUndeclaredSubtaskReferences', () => {
     );
   });
 
+  it('classifies a reference to an earlier subtask as direction "earlier"', () => {
+    const subtasks = [
+      st(1, ['a.ts'], 'A'),
+      { ...st(2, ['b.ts'], 'B'), description: 'Confirm Subtask 1 has finished before starting this one.' },
+    ];
+    expect(detectUndeclaredSubtaskReferences(subtasks).map(f => f.direction)).toEqual(['earlier']);
+  });
+
+  it('classifies a reference to a later subtask as direction "later" (forward reference)', () => {
+    const subtasks = [
+      { ...st(2, ['a.ts'], 'B'),
+        description: 'This must land BEFORE the verification sweep (subtask 5); nothing may change after subtask 9.' },
+      st(5, [], 'D'),
+      st(9, ['b.ts'], 'H'),
+    ];
+    const findings = detectUndeclaredSubtaskReferences(subtasks);
+    expect(findings.map(f => [f.referencedId, f.direction])).toEqual(
+      expect.arrayContaining([[5, 'later'], [9, 'later']]),
+    );
+  });
+
+  it('uses id order when both subtasks share a parallel_group', () => {
+    const subtasks = [
+      { ...st(1, ['a.ts'], 'A'), description: 'Run this before Subtask 2 starts.' },
+      st(2, ['b.ts'], 'A'),
+    ];
+    expect(detectUndeclaredSubtaskReferences(subtasks).map(f => f.direction)).toEqual(['later']);
+  });
+
   it('does not flag a reference already declared in depends_on', () => {
     const subtasks = [
       st(1, ['a.ts'], 'A'),

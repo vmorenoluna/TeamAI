@@ -177,6 +177,11 @@ export interface UndeclaredDependencyReference {
   referencedId: number;
   /** The sentence the reference was found in (trimmed, for the log line). */
   sentence: string;
+  /** `earlier`: the referenced subtask runs before this one, so the fix is a
+   *  `depends_on` edge. `later`: it runs after (higher parallel_group, or the
+   *  same/no group and a higher id) - a depends_on edge would point forward
+   *  and never be satisfied, so the fix is to drop the reference. */
+  direction: 'earlier' | 'later';
 }
 
 /** Words whose presence near a subtask-id reference signals an ordering
@@ -207,6 +212,12 @@ const ORDERING_CUES = [
  * schedule this subtask as soon as its (incomplete) declared depends_on are
  * satisfied — regardless of whether 13 ever ran.
  *
+ * A reference to a LATER subtask is a different defect: a subtask must be
+ * self-contained and never describe future work, because a depends_on edge
+ * cannot point forward (it would never be satisfied). Such findings carry
+ * `direction: 'later'`; the ordering belongs in the later subtask's own
+ * `depends_on`, and the sentence should be dropped from this description.
+ *
  * Detection only — this does not mutate the plan. Auto-adding a depends_on
  * edge from a regex match risks introducing an incorrect gate (or a cycle)
  * from a reference that wasn't actually a dependency; a logged warning lets
@@ -214,7 +225,16 @@ const ORDERING_CUES = [
  */
 export function detectUndeclaredSubtaskReferences(subtasks: PlanSubtask[]): UndeclaredDependencyReference[] {
   const validIds = new Set(subtasks.map(s => s.id));
+  const byId = new Map(subtasks.map(s => [s.id, s]));
   const found: UndeclaredDependencyReference[] = [];
+
+  // Execution order is parallel_group letter, then id - the same order the
+  // implement-phase scheduler uses. A missing group sorts first.
+  const isLater = (from: PlanSubtask, to: PlanSubtask): boolean => {
+    const gf = from.parallel_group ?? '';
+    const gt = to.parallel_group ?? '';
+    return gt !== gf ? gt > gf : to.id > from.id;
+  };
 
   for (const s of subtasks) {
     // The synthetic QA-rework subtask (id 9999, see selectSubtasks) is
@@ -247,7 +267,13 @@ export function detectUndeclaredSubtaskReferences(subtasks: PlanSubtask[]): Unde
           if (!validIds.has(referencedId)) continue;
           if (declared.has(referencedId)) continue;
           if (found.some(f => f.subtaskId === s.id && f.referencedId === referencedId)) continue;
-          found.push({ subtaskId: s.id, referencedId, sentence: sentence.trim() });
+          const ref = byId.get(referencedId)!;
+          found.push({
+            subtaskId: s.id,
+            referencedId,
+            sentence: sentence.trim(),
+            direction: isLater(s, ref) ? 'later' : 'earlier',
+          });
         }
       }
     }
@@ -276,6 +302,17 @@ export function logUndeclaredSubtaskReferences(specPath: string): UndeclaredDepe
   const subtasks = Array.isArray(plan.subtasks) ? plan.subtasks : [];
   const findings = detectUndeclaredSubtaskReferences(subtasks);
   for (const f of findings) {
+    if (f.direction === 'later') {
+      logToOutput(specPath,
+        `
+[PLAN-LINT] Subtask ${f.subtaskId} refers to LATER Subtask ${f.referencedId} in its ` +
+        `description ("${f.sentence}"). A subtask must be self-contained and must not describe future ` +
+        `subtasks — do NOT add ${f.referencedId} to its depends_on (a forward edge is never satisfied). ` +
+        `Remove the reference; if Subtask ${f.referencedId} must run after Subtask ${f.subtaskId}, declare ` +
+        `that in Subtask ${f.referencedId}'s own depends_on.
+`);
+      continue;
+    }
     logToOutput(specPath,
       `\n[PLAN-LINT] Subtask ${f.subtaskId} references Subtask ${f.referencedId}'s completion in its ` +
       `description ("${f.sentence}") but does not list ${f.referencedId} in its own depends_on — the ` +
