@@ -1015,12 +1015,22 @@ new file mode 100644
         { id: 3, title: 'Zero-rate B2B orders with a valid VAT ID', acceptance_criteria: ['VAT ID is validated against the VIES service', 'Invalid VAT IDs keep the standard rate'], depends_on: [1], qa_flagged: false },
       ],
     },
-    outputLog: `[2026-09-24T14:02:10] [ORCHESTRATOR] Tax Rules for EU Countries
+    outputLog: `[2026-09-24T10:01:18] [ORCHESTRATOR] Tax Rules for EU Countries
 
-[2026-09-24T14:02:11] Review feedback received — routing to the analyst (spec revision)
-[2026-09-24T14:02:12] spec.md snapshotted to spec_revision_before.md
-[2026-09-24T14:02:13] Restarting from 'spec' — downstream QA artifacts cleared, plan.json preserved
-[2026-09-24T14:02:14] Session created: analyst (spec revision)
+[2026-09-24T10:01:20] Task started from backlog — start phase: 'spec'
+[2026-09-24T11:00:48] Phase 'spec' complete — advancing to 'plan'
+[2026-09-24T11:00:49] Session created: planner (plan)
+[2026-09-24T12:00:48] Phase 'plan' complete — advancing to 'implement'
+[2026-09-24T12:00:49] Session created: coder (subtask 1) (implement)
+[2026-09-24T12:10:48] Subtask 1 complete — dispatching subtask 2
+[2026-09-24T12:20:48] Subtask 2 complete — dispatching subtask 3
+[2026-09-24T13:00:48] All 3 subtasks complete — advancing to 'qa-review'
+[2026-09-24T13:00:49] Session created: qa-reviewer (qa-review)
+[2026-09-24T14:01:48] QA FAIL — the VAT-ID acceptance criteria are underspecified (spec gap, not an implementation bug)
+[2026-09-24T14:02:10] Review feedback received — routing to the analyst (spec revision)
+[2026-09-24T14:02:11] spec.md snapshotted to spec_revision_before.md
+[2026-09-24T14:02:12] Restarting from 'spec' — downstream QA artifacts cleared, plan.json preserved
+[2026-09-24T14:02:13] Session created: analyst (spec revision)
 [2026-09-24T14:31:40] Spec revision session ended — spec.md is byte-identical to spec_revision_before.md
 [2026-09-24T14:31:41] Parked at 'awaiting-review' (no-op revision) — human decision required
 `,
@@ -1192,13 +1202,34 @@ new file mode 100644
       ],
       additional_issues: [],
     },
-    outputLog: `[2026-08-19T09:12:00] [ORCHESTRATOR] Guest Checkout Without Account Creation
+    outputLog: `[2026-08-19T05:11:00] [ORCHESTRATOR] Guest Checkout Without Account Creation
 
+[2026-08-19T05:11:02] Task started from backlog — start phase: 'spec'
+[2026-08-19T06:10:30] Phase 'spec' complete — advancing to 'plan'
+[2026-08-19T06:10:31] Session created: planner (plan)
+[2026-08-19T07:10:30] Phase 'plan' complete — advancing to 'implement'
+[2026-08-19T07:10:31] Session created: coder (subtask 1) (implement)
+[2026-08-19T07:20:30] Subtask 1 complete — dispatching subtask 2
+[2026-08-19T07:30:30] Subtask 2 complete — dispatching subtask 3
+[2026-08-19T08:10:30] All 3 subtasks complete — advancing to 'qa-review'
+[2026-08-19T08:10:31] Session created: qa-reviewer (qa-review)
+[2026-08-19T09:10:30] QA PASS — 6/6 criteria, no additional issues
+[2026-08-19T09:10:31] Advanced to 'merge'
 [2026-08-19T09:12:04] Phase 'create-pr' complete — PR #131 opened
 [2026-08-19T09:12:04] CI checks queued: lint, typecheck, unit-tests, integration-tests
 [2026-08-19T09:41:37] All 4 checks passed in 29m 33s
 [2026-08-19T09:41:38] Merged PR #131 into main — task marked done
 `,
+    // The explicit QA log anchors the generated session timeline (spec 05:12,
+    // plan 06:12, subtasks 07:12/07:22/07:32, merge 09:12) so the orchestrator
+    // header above can sit before everything without shifting it.
+    roleLogs: {
+      'output-qa.log': `[2026-08-19T08:12:00] [SESSION] Demo session started — role: qa-reviewer
+[2026-08-19T08:12:20] > Reviewing the implementation and acceptance criteria for Guest Checkout Without Account Creation
+[2026-08-19T08:12:40] > Overall seeded QA result: PASS
+[2026-08-19T08:13:00] > QA handoff recorded — scripted demo transcript; no tests were executed.
+`,
+    },
     events: ['backlog', 'spec', 'plan', 'implement', 'qa-review', 'awaiting-review', 'done'],
   },
   {
@@ -1225,12 +1256,32 @@ new file mode 100644
       ],
       additional_issues: [],
     },
-    outputLog: `[2026-08-28T15:03:15] [ORCHESTRATOR] Fix Cart Total Rounding at Checkout
+    outputLog: `[2026-08-28T11:02:15] [ORCHESTRATOR] Fix Cart Total Rounding at Checkout
 
+[2026-08-28T11:02:17] Task started from backlog — start phase: 'spec'
+[2026-08-28T12:01:45] Phase 'spec' complete — advancing to 'plan'
+[2026-08-28T12:01:46] Session created: planner (plan)
+[2026-08-28T13:01:45] Phase 'plan' complete — advancing to 'implement'
+[2026-08-28T13:01:46] Session created: coder (subtask 1) (implement)
+[2026-08-28T13:11:45] Subtask 1 complete — dispatching subtask 2
+[2026-08-28T14:01:45] All 2 subtasks complete — advancing to 'qa-review'
+[2026-08-28T14:01:46] Session created: qa-reviewer (qa-review)
+[2026-08-28T15:01:45] QA PASS — 3/3 criteria, no additional issues
+[2026-08-28T15:01:46] Advanced to 'merge'
 [2026-08-28T15:03:19] Phase 'create-pr' complete — PR #133 opened
 [2026-08-28T15:31:52] All 4 checks passed in 28m 33s
 [2026-08-28T15:31:53] Merged PR #133 into main — task marked done
 `,
+    // The explicit QA log anchors the generated session timeline (spec
+    // 11:03, plan 12:03, subtasks 13:03/13:13, merge 15:03) so the
+    // orchestrator header above can sit before everything without shifting it.
+    roleLogs: {
+      'output-qa.log': `[2026-08-28T14:03:15] [SESSION] Demo session started — role: qa-reviewer
+[2026-08-28T14:03:35] > Reviewing the implementation and acceptance criteria for Fix Cart Total Rounding at Checkout
+[2026-08-28T14:03:55] > Overall seeded QA result: PASS
+[2026-08-28T14:04:15] > QA handoff recorded — scripted demo transcript; no tests were executed.
+`,
+    },
     events: ['backlog', 'spec', 'plan', 'implement', 'qa-review', 'awaiting-review', 'done'],
   },
 
@@ -1406,12 +1457,25 @@ function explicitRole(roleLogName: string): AgentRole | 'orchestrator' | null {
   return null;
 }
 
+function stampsIn(content: string): number[] {
+  return [...content.matchAll(/^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\] /gm)]
+    .map((match) => Date.parse(`${match[1]}Z`))
+    .filter(Number.isFinite);
+}
+
 function firstLogTimestamp(task: SeedTask): number | null {
-  const candidates = [task.outputLog ?? '', ...Object.values(task.roleLogs ?? {})];
-  const stamps = candidates.flatMap((content) =>
-    [...content.matchAll(/^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\] /gm)]
-      .map((match) => Date.parse(`${match[1]}Z`))
-  ).filter(Number.isFinite);
+  // Anchor the session timeline on role logs, never on the orchestrator log:
+  // an orchestrator transcript may span the whole pipeline (its header sits a
+  // minute before the first session), so anchoring on its first stamp would
+  // drag every generated session earlier by that same offset. Fall back to
+  // the orchestrator log only when a task defines no explicit role logs —
+  // there its first stamp IS the merge/PR moment the sessions are spaced
+  // around (see the DONE tickets' PR/CI transcripts).
+  const roleLogContents = Object.entries(task.roleLogs ?? {})
+    .filter(([file]) => explicitRole(file) !== 'orchestrator')
+    .map(([, content]) => content);
+  const candidates = roleLogContents.length ? roleLogContents : [task.outputLog ?? ''];
+  const stamps = candidates.flatMap((content) => stampsIn(content));
   return stamps.length ? Math.min(...stamps) : null;
 }
 
@@ -1427,6 +1491,117 @@ function generatedRoleLog(task: SeedTask, role: AgentRole, startedAt: string, su
       : `[SESSION] Demo session started — role: merger\n> Reviewing delivery state for ${task.title}\n> ${task.prUrl ? `Placeholder PR link for display only: ${task.prUrl}` : 'Recording the seeded merge handoff; no real repository or merge operation exists.'}\n> Merger handoff complete — scripted demo transcript; no CLI session was run.`,
   };
   return timestampDemoLog(snippets[role], startedAt);
+}
+
+interface RoleSession {
+  role: AgentRole;
+  subtaskId?: number;
+  /** Session start, epoch ms. */
+  start: number;
+  /** Last timestamped line of the session's log, epoch ms. */
+  end: number;
+}
+
+const ROLE_PHASE: Record<AgentRole, string> = {
+  analyst: 'spec',
+  planner: 'plan',
+  coder: 'implement',
+  qa: 'qa-review',
+  merge: 'merge',
+};
+
+function roleDisplayLabel(role: AgentRole, subtaskId?: number): string {
+  if (role === 'coder') return `coder (subtask ${subtaskId ?? 1})`;
+  if (role === 'qa') return 'qa-reviewer';
+  if (role === 'merge') return 'merger';
+  return role;
+}
+
+function isoStamp(epochMs: number): string {
+  return `[${new Date(epochMs).toISOString().slice(0, 19)}]`;
+}
+
+/** Final orchestrator line for a generated transcript, per the seeded phase. */
+function orchestratorClosingLine(task: SeedTask): string {
+  const prNumber = task.prUrl?.match(/pull\/(\d+)/)?.[1];
+  switch (task.phase) {
+    case 'done':
+      return prNumber ? `Merged PR #${prNumber} into main — task marked done` : 'Task marked done';
+    case 'pr-open':
+      return prNumber
+        ? `PR #${prNumber} opened — CI checks queued; paused for human review`
+        : 'PR opened — CI checks queued; paused for human review';
+    case 'awaiting-review':
+      return task.awaitingReviewReason
+        ? 'Parked at \'awaiting-review\' (no-op revision) — human decision required'
+        : 'Parked at \'awaiting-review\' — awaiting human review';
+    case 'failed':
+      return 'Task marked failed — no PR created';
+    case 'qa-review':
+      return 'QA review in progress — awaiting the QA verdict';
+    case 'implement': {
+      const count = plannedSubtasks(task).length || 1;
+      return `All ${count} subtask sessions complete — phase evaluation pending`;
+    }
+    case 'plan':
+      return 'Planner session ended — plan.json written; phase evaluation pending';
+    case 'spec':
+      return 'Analyst session ended — spec.md written; phase evaluation pending';
+    default:
+      return `Task is seeded in phase '${task.phase}'`;
+  }
+}
+
+/**
+ * Orchestrator transcript for tasks without an explicit one. Announces the
+ * task, then narrates each phase transition ~90s before the corresponding
+ * role session starts, so the interleaved terminal view shows orchestrator
+ * lines between the agent sessions the way a real pipeline run reads.
+ */
+function buildOrchestratorTranscript(task: SeedTask, sessions: RoleSession[]): string {
+  const ordered = [...sessions].sort((a, b) => a.start - b.start);
+  const first = ordered[0];
+  const headerTime = first.start - 60 * 1000;
+  const lines: string[] = [
+    `${isoStamp(headerTime)} [ORCHESTRATOR] ${task.title}`,
+    `${isoStamp(headerTime + 2 * 1000)} Task started from backlog — start phase: '${ROLE_PHASE[first.role]}'`,
+    `${isoStamp(first.start - 30 * 1000)} Session created: ${roleDisplayLabel(first.role, first.subtaskId)} (${ROLE_PHASE[first.role]})`,
+  ];
+
+  for (let i = 1; i < ordered.length; i++) {
+    const prev = ordered[i - 1];
+    const cur = ordered[i];
+    // Narrate just before the next session starts, but never before the
+    // previous session's last logged line has landed.
+    const stamp = Math.max(cur.start - 90 * 1000, prev.end + 20 * 1000);
+    if (cur.role === prev.role) {
+      if (cur.role === 'coder') {
+        lines.push(`${isoStamp(stamp)} Subtask ${prev.subtaskId} complete — dispatching subtask ${cur.subtaskId}`);
+      } else {
+        lines.push(`${isoStamp(stamp)} ${roleDisplayLabel(prev.role, prev.subtaskId)} session ended`);
+      }
+      continue;
+    }
+    let transition: string;
+    if (cur.role === 'qa') {
+      const subtaskCount = ordered.filter((session) => session.role === 'coder').length;
+      transition = `All ${subtaskCount} subtasks complete — advancing to 'qa-review'`;
+    } else if (cur.role === 'merge') {
+      const overall = task.qaReport ? (task.qaReport as { overall?: string }).overall : undefined;
+      const failed = task.phase === 'failed' || overall === 'FAIL';
+      transition = failed
+        ? 'QA FAIL — task marked failed; running the merge readiness check only'
+        : 'QA PASS — advancing to \'merge\'';
+    } else {
+      transition = `Phase '${ROLE_PHASE[prev.role]}' complete — advancing to '${ROLE_PHASE[cur.role]}'`;
+    }
+    lines.push(`${isoStamp(stamp)} ${transition}`);
+    lines.push(`${isoStamp(stamp + 1000)} Session created: ${roleDisplayLabel(cur.role, cur.subtaskId)} (${ROLE_PHASE[cur.role]})`);
+  }
+
+  const lastEnd = Math.max(...ordered.map((session) => session.end));
+  lines.push(`${isoStamp(lastEnd + 90 * 1000)} ${orchestratorClosingLine(task)}`);
+  return `${lines.join('\n')}\n`;
 }
 
 function buildTaskLogs(task: SeedTask): { orchestratorLog: string | null; roleLogs: Record<string, string> } {
@@ -1447,10 +1622,22 @@ function buildTaskLogs(task: SeedTask): { orchestratorLog: string | null; roleLo
   // spec→plan→implement→QA work. Place missing historical phase logs before
   // the dated revision transcript instead of fabricating work after parking.
   const anchor = (timestamp ?? fallback) - (revisionPark ? 4 * 60 * 60 * 1000 : 0);
-  const inferredRole = rolesFromLogs.find((item) => item.role !== 'orchestrator')?.role;
+  const inferredRole = rolesFromLogs.map((item) => item.role).find((role): role is AgentRole => role !== 'orchestrator');
   const anchorRoleIndex = revisionPark ? 0 : inferredRole ? AGENT_ROLE_INDEX[inferredRole]
     : Math.max(-1, ...[...needed].map((role) => AGENT_ROLE_INDEX[role]));
+  // Track the later revision transcript separately: after the prepend below,
+  // output-spec.log contains two analyst sessions (initial spec + revision),
+  // and the orchestrator timeline must treat them as such.
+  let revisionSpecSession: RoleSession | null = null;
   if (revisionPark && roleLogs['output-spec.log']) {
+    const revisionStamps = stampsIn(roleLogs['output-spec.log']);
+    if (revisionStamps.length) {
+      revisionSpecSession = {
+        role: 'analyst',
+        start: Math.min(...revisionStamps),
+        end: Math.max(...revisionStamps),
+      };
+    }
     const initialSpecLog = timestampDemoLog(
       `[SESSION] Demo session started — role: analyst (initial spec)\n> Reviewing the seeded request for ${task.title}\n> Recording the original acceptance criteria before planning\n> Initial spec handoff complete — scripted demo transcript; no CLI session was run.`,
       new Date(anchor).toISOString().slice(0, 19),
@@ -1464,35 +1651,50 @@ function buildTaskLogs(task: SeedTask): { orchestratorLog: string | null; roleLo
   const anchorCoderId = transcriptCoderId ? Number(transcriptCoderId)
     : task.phase === 'implement' ? coderIds[coderIds.length - 1] : coderIds[0];
 
+  // One entry per role session (explicit or generated) — the orchestrator
+  // transcript interleaves its phase transitions between these sessions.
+  const sessions: RoleSession[] = [];
   for (const role of needed) {
     const roleFiles = role === 'coder'
       ? coderIds.map((id) => roleLogFile('coder', id))
       : [roleLogFile(role)];
     for (const file of roleFiles) {
-      if (roleLogs[file]) continue;
-      const roleIndex = AGENT_ROLE_INDEX[role];
       const idMatch = file.match(/^output-st(\d+)\.log$/);
+      const subtaskId = idMatch ? Number(idMatch[1]) : undefined;
+      const existing = roleLogs[file];
+      if (existing) {
+        if (file === 'output-spec.log' && revisionSpecSession) {
+          // The prepended initial-spec block (at the anchor) and the later
+          // revision transcript are two separate analyst sessions.
+          sessions.push({ role, subtaskId, start: anchor, end: anchor + 60 * 1000 });
+          sessions.push(revisionSpecSession);
+          continue;
+        }
+        const stamps = stampsIn(existing);
+        sessions.push({
+          role,
+          subtaskId,
+          start: stamps.length ? Math.min(...stamps) : anchor,
+          end: stamps.length ? Math.max(...stamps) : anchor + 60 * 1000,
+        });
+        continue;
+      }
+      const roleIndex = AGENT_ROLE_INDEX[role];
       const subtaskOffset = role === 'coder' && idMatch
         ? (Number(idMatch[1]) - anchorCoderId) * 10 * 60 * 1000
         : 0;
-      const startedAt = new Date(anchor + (roleIndex - anchorRoleIndex) * 60 * 60 * 1000 + subtaskOffset)
-        .toISOString().slice(0, 19);
+      const startedAtMs = anchor + (roleIndex - anchorRoleIndex) * 60 * 60 * 1000 + subtaskOffset;
+      const startedAt = new Date(startedAtMs).toISOString().slice(0, 19);
       roleLogs[file] = generatedRoleLog(task, role, startedAt, idMatch ? Number(idMatch[1]) : 1);
+      sessions.push({ role, subtaskId, start: startedAtMs, end: startedAtMs + 60 * 1000 });
     }
   }
 
   const existingOrchestrator = roleLogs['output.log'];
-  const earliestRoleStart = Math.min(anchor, ...[...needed].flatMap((role) => {
-    const roleStarts = role === 'coder' ? coderIds.map((id) => {
-      const offset = (id - anchorCoderId) * 10 * 60 * 1000;
-      return anchor + (AGENT_ROLE_INDEX[role] - anchorRoleIndex) * 60 * 60 * 1000 + offset;
-    }) : [anchor + (AGENT_ROLE_INDEX[role] - anchorRoleIndex) * 60 * 60 * 1000];
-    return roleStarts;
-  }));
-  const orchestratorLog = existingOrchestrator ?? (task.phase === 'backlog' ? null : timestampDemoLog(
-    `[ORCHESTRATOR] ${task.title}\nTask is seeded in phase '${task.phase}'.\nDemo transcript only — no agent subprocesses or external services were run.`,
-    new Date(earliestRoleStart - 60 * 1000).toISOString().slice(0, 19),
-  ));
+  const orchestratorLog = existingOrchestrator
+    ?? (task.phase === 'backlog' || sessions.length === 0
+      ? null
+      : buildOrchestratorTranscript(task, sessions));
   delete roleLogs['output.log'];
   return { orchestratorLog, roleLogs };
 }

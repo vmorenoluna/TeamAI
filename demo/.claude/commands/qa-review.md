@@ -44,6 +44,8 @@ This means on a rework pass where only one criterion failed and its file was cha
 3. Check the git diff to see what actually changed: `git diff origin/HEAD...HEAD`
 4. **Ticket-creation subtasks**: If the coder's summary contains `[SKIPPED] Ticket creation is the analyst's responsibility`, treat all acceptance criteria for that subtask as **PASS**. Creating files under `.teamai/` is explicitly out of scope for the coder role — the analyst handles follow-up tickets. Do NOT mark these criteria as FAIL.
 
+**Also read `plan.json`** in the same directory as the spec. You need its `subtasks` array (each with an `id`, `title`, and `files`) for the subtask attribution required in Step 5 below. A subtask's numeric `id` does **not** necessarily match any "CS-N"/constraint-number label the spec or plan uses in titles — attribute by `files` overlap and by title text, never by assuming the id equals a number appearing in the criterion's own label.
+
 ### Step 5: Evaluate Each Criterion
 
 5. For each acceptance criterion, determine PASS or FAIL with evidence from the actual file content:
@@ -52,6 +54,7 @@ This means on a rework pass where only one criterion failed and its file was cha
    - If a criterion requires empirical evidence from a script run (benchmark, integration test, etc.): read the committed output and confirm the results meet the criterion's thresholds — apply your role's evidence-substitution discipline when deciding whether a claim actually satisfies this.
    - **Unverifiable criterion detection**: If a criterion demands evidence that structurally cannot exist in any committed artifact (e.g., it asks for detail from an uncommitted log, a transient server response, or the coder's self-reported observation), do NOT mark it as a standard FAIL. Instead, add a `spec_concerns` entry: the spec/plan failed to provide a producing artifact for this criterion. The issue is that the criterion itself is unverifiable — the coder cannot fix this by changing code. Flagging it as a standard FAIL would guarantee a useless cleanup bounce.
    - Never infer a criterion is satisfied from the diff alone — verify against current code.
+   - **Subtask attribution (FAIL criteria only)**: identify which `plan.json` subtask(s) own the fix, using the files your evidence cites — match them against each subtask's `files` array (fall back to title-text matching only if no file match is found). Record the matching subtask id(s) in that criterion's `subtask_ids` array in the JSON output (see Output section). This is the orchestrator's only reliable signal for which subtask to re-dispatch on rework — do not leave it empty when a `fix_needed` exists and at least one subtask can be identified. If a fix genuinely spans no existing subtask (e.g. it only touches files no subtask declared), leave `subtask_ids` empty; do not guess a loosely-related id.
      - **After evaluating each criterion**: write the partial QA report to disk immediately
        (with `"overall": "IN_PROGRESS"` as a placeholder). This ensures that if the session
        is interrupted, partial results are preserved and the next pass can continue from
@@ -85,6 +88,70 @@ suite in Step 6):
 - **Use dynamic ports.** When starting a local server, bind to port 0 (OS-assigned free port). Never hardcode a fixed shared port — another concurrent task may collide.
 - **Never kill what you didn't start.** Do NOT use `kill`, `fuser -k`, `taskkill`, or equivalent against any port or process. Another task's agent may be using it.
 - **Stop your own instances.** When verification is complete, explicitly tear down any server or service you started.
+- **If you're managing more than one process you DID start** (e.g. a server plus its
+  client), stop or relaunch each one by its own PID (`kill $(cat job.pid)`, recorded at
+  launch with `echo $! > job.pid`) — never by a command-line pattern match
+  (`pkill -f <substring>`). A substring broad enough to match every process's command
+  line can also match your own shell's, killing the session that's trying to manage them.
+
+### When a verification job won't finish before your session budget
+
+The guidance below is for a genuinely long-running job — re-running a benchmark or
+verification script to independently confirm a criterion's evidence, for example — NOT
+the routine test suite in Step 6, which stays foreground per that step's own guidance (its
+10–25 minute budget is generous enough that this doesn't apply there).
+
+If confirming a criterion's evidence requires a job that won't complete before your
+session ends, schedule an orchestrator wakeup instead of guessing at the verdict from
+an incomplete run:
+
+Do steps 1–2 below back to back, immediately after you launch the job — not as a final
+step you'll get to once you're done waiting. Your turn can end at any point without
+warning once a long job is running; if that happens before you've written
+`phase_wakeup.json`, the orchestrator has no way to tell your in-progress job apart from
+a reviewer that produced nothing, and the task is treated as a failed review with the
+job's results discarded, however far they got.
+
+1. **Detach the job**: `nohup <command> > job.log 2>&1 & disown`. A bare `&` dies the
+   instant your session exits. Write the log inside `$TEAMAI_SPEC_DIR` (use this
+   environment variable — your cwd is the worktree, not the project root, during
+   QA review).
+2. Write `phase_wakeup.json` to `$TEAMAI_SPEC_DIR`:
+
+```json
+{
+  "wakeup_at": "2026-07-03T23:20:00Z",
+  "background_command": "python scripts/verify_evidence.py --output results/",
+  "expected_artifact": "results/summary.jsonl",
+  "progress_log_path": "results/job.log"
+}
+```
+
+- `wakeup_at`: ISO 8601 timestamp when the process should be done — estimate from the
+  job's actual throughput plus a 20% safety margin.
+- `background_command`: the command you ran (informational).
+- `expected_artifact`: the file you expect the process to produce.
+- `progress_log_path`: the job's own log file, relative to the worktree root — include
+  it whenever the job writes one.
+
+**Do NOT call an interactive `ScheduleWakeup`-style tool, and do NOT use `Monitor` (or
+any other tool) to wait on the job inline.** Neither pauses and resumes you across
+turns in this pipeline — a `Monitor` call that outlives your remaining turn budget ends
+your session exactly like any other silent timeout, and narrating that you'll "wait for
+the completion notification" accomplishes nothing if `phase_wakeup.json` was never
+written. The file is the only thing the orchestrator's resume mechanism understands.
+
+Then end your session normally without writing `qa_report.json` — the orchestrator
+pauses instead of treating this as a QA agent that produced nothing. On re-entry
+(headed `⚠️ WAKEUP RE-ENTRY`): check if the artifact exists and is complete. If it is,
+use its results to finish the review from Step 0 (a rework-pass carry-forward makes
+re-gathering the rest of the evidence cheap). If it's missing or incomplete, check
+whether the process is still running — write an updated `phase_wakeup.json` with a new
+`wakeup_at` if so; if it crashed, do NOT write another wakeup file and report the
+failure immediately as a FAIL criterion (the orchestrator fails the task after 3
+consecutive wakeup attempts without progress). A materially different
+`background_command` on relaunch (you fixed a real blocker) resets that 3-attempt
+budget instead of consuming it.
 
 ## Step 6: Run Test Suite
 
@@ -98,7 +165,30 @@ suite in Step 6):
 2. Run it ONCE and wait for completion — do NOT re-run repeatedly. Capture only the
    pass/fail summary line — do not read the full test output into context unless a
    failure requires diagnosis.
-   See `.claude/teamai-workflow.md` for full guidance on long-running scripts.
+   See `.claude/teamai-workflow.md` for general guidance on long-running scripts —
+   **except its `run_in_background` advice, which does NOT apply to this QA-review
+   session.** That guidance assumes a later turn will receive the completion
+   notification; a QA-review session gets exactly one turn and is torn down the
+   moment this turn ends, so a backgrounded test run's notification never arrives —
+   the process is killed mid-run and the report is left with no real verdict for that
+   criterion. Run the test command in the foreground and block on it instead. (A
+   genuinely long-running verification job — not the routine test suite — has a real
+   cross-session mechanism instead: see "When a verification job won't finish before
+   your session budget" above.) This
+   role's Bash tool timeouts are raised specifically for this: your default (no
+   `timeout` passed) is 10 minutes, not Claude Code's stock 2 minutes — plenty for
+   most suites (very often minutes, not seconds), so you do not need to think about
+   this for the common case. Only if you know (from history/CI) or discover that this
+   project's full suite runs longer than 10 minutes, pass an explicit `timeout` up to
+   25 minutes, sized to that known duration — do not assume a run is done just
+   because your first check-in is quick. If a full run to completion within this
+   single turn genuinely isn't possible, do NOT write `"overall": "IN_PROGRESS"` as
+   your final report and stop there (Step 5 permits it only as a mid-evaluation
+   checkpoint you then replace, not as a way to end the turn without a verdict) —
+   instead FAIL the affected criterion with a `notes` entry explaining verification
+   could not complete in one session, so the task can bounce back through
+   implement/QA rather than silently exhausting the QA-attempt budget on a report
+   that never reached PASS or FAIL.
 3. **On rework passes** (a previous `qa_report.json` exists in `.teamai/{slug}/`):
    - Run the FULL suite, not just tests targeting changed files.
    - The coder was told to run tests, but they may have introduced regressions
@@ -178,14 +268,16 @@ The orchestrator uses this to route cleanup failures directly without spawning a
       "criterion": "text from spec",
       "status": "PASS" | "FAIL",
       "evidence": "what you found",
-      "fix_needed": "description of fix if FAIL"
+      "fix_needed": "description of fix if FAIL",
+      "subtask_ids": [1, 2]
     }
   ],
   "additional_issues": [
     {
       "description": "issue found",
       "file": "path",
-      "fix_needed": "how to fix"
+      "fix_needed": "how to fix",
+      "subtask_ids": [3]
     }
   ],
   "spec_concerns": [
@@ -197,6 +289,8 @@ The orchestrator uses this to route cleanup failures directly without spawning a
   ]
 }
 ```
+
+`subtask_ids`: required on every FAIL criterion (populate per the Subtask Attribution rule in Step 5) and on every `additional_issues` entry — including one that names a subtask by number in its own `description` (e.g. "plan.json marks subtask 11 as completed: true"): the orchestrator matches `additional_issues` by `file` alone, which cannot resolve a meta-issue about the plan itself, so `subtask_ids` is the *only* signal that reaches the right subtask in that case. Omit or leave empty only when no subtask can be identified — never fill it with a guess.
 
 **Any `additional_issues` entry means overall FAIL.** There are no severity levels — every issue found beyond the spec's acceptance criteria is a hard blocker. The coder MUST fix all of them.
 

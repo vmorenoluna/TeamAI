@@ -106,6 +106,15 @@ re-read a file to verify an `Edit` that returned success.
    `.claude/teamai-workflow.md` for full guidance on long-running scripts.
 5. If tests fail, fix the issues before proceeding.
 6. Commit your changes with a descriptive message: `feat(scope): description`
+   - **A subtask with an empty (or absent) `files` array is a verification-only subtask —
+     no code diff is expected.** Still commit: create an empty commit
+     (`git commit --allow-empty -m "..."`) whose message records what you verified
+     (commands run, results, acceptance criteria confirmed). This matters even though
+     there's no diff to carry: without a real commit on the branch, there's nothing
+     for a PR to attach to, and the task can only be marked done directly with no
+     reviewable trail — an empty commit lets a PR still open, showing the verification
+     evidence in its description even with 0 files changed. Never invent a code change
+     just to have something to commit.
 7. **Verify nothing in your scope is left uncommitted.** Run `git status --porcelain --
    <path1> <path2> ...` restricted to exactly the paths in this subtask's `files`
    and `files_to_create` arrays. Any non-empty output is a blocking failure — stage
@@ -212,25 +221,73 @@ If the subtask requires running a script that **produces files you will commit**
    and re-run from the beginning. A committed summary.jsonl with 1,431 of 3,000 expected
    records is harder to diagnose than no file at all.
 
+### When comparing build-SHA-stamped output across multiple servers
+
+Some evidence subtasks require running the SAME script against two or more server
+processes at different commits (a "before" server and an "after" server, or a
+deterministic-mode run alongside a production-mode run) and gating the comparison on
+each server's build being clean (no `-dirty` suffix on its build SHA).
+
+**Never run a server and its benchmark/verification client from the same checkout.**
+A client that writes its own output files (a run log, a results directory) into the
+same working tree the server was started from will taint that checkout's `git
+status` the moment it writes — and a server's dirty-flag is normally computed once
+at startup and frozen for the life of the process, so this makes the build SHA
+**permanently** `-dirty` for that server, failing any acceptance criterion that
+requires a clean SHA. This is not intermittent or timing-dependent: it reproduces
+every time client and server share a directory.
+
+Use a separate, isolated checkout (`git worktree add <scratch-path> <sha>`, or an
+equivalent clean clone) for each server process, and a further separate checkout for
+the client issuing requests against it — never the coder's own feature-branch
+worktree for either role, and never the same scratch checkout for both. Confirm each
+server reports a clean (non-`-dirty`) build SHA immediately after starting it and
+before committing to a long run — cheaper to catch a contaminated checkout in the
+first few seconds than after a multi-hour run completes against it.
+
+If your client script derives the build SHA by scanning a log directory relative to
+its own working directory (a common shortcut for the common case, where client and
+server share one checkout), that scan will silently fail once you isolate the
+checkouts as above — prefer whatever the server's own API response reports as its
+build SHA over a same-directory file scan, and treat "(unavailable)" in your own
+tooling's output as a bug in the tooling to fix, not a result to accept.
+
 ### When a background script won't finish before your session budget
 
 If a background script (benchmark, verification run, data pipeline) is still
 running and won't complete before your session ends, schedule an orchestrator
 wakeup so the task resumes once the job finishes:
 
+Do steps 1–3 below back to back, immediately after you launch the job — not as a final
+step you'll get to once you're done waiting. Your turn can end at any point without
+warning once a long job is running; if that happens before you've written
+`subtask_wakeup-st<ID>.json`, the orchestrator has no way to tell your in-progress job
+apart from a subtask that made no progress, and your commits for it are discarded as a
+scope violation however far the job got.
+
 1. **Detach the job** so it keeps running after your session ends:
    `nohup <command> > job.log 2>&1 & disown`. A bare `&` only backgrounds
    within your current shell and dies the instant your session exits. Write the
    log and PID file inside the worktree, not a container-local temp path, so
    they survive even if the container is reprovisioned.
-2. Write a `subtask_wakeup-st<ID>.json` file (where `<ID>` is your current
+2. **If you're managing more than one job at once** (e.g. a server plus its
+   client, or several parallel runs), stop or relaunch each one by its own PID
+   (`kill $(cat job.pid)`) — never by a command-line pattern match
+   (`pkill -f <substring>`). A substring broad enough to match every job's
+   command line can also match your own shell's, killing the session that's
+   trying to manage them right when it's about to record what it just did.
+3. Write a `subtask_wakeup-st<ID>.json` file (where `<ID>` is your current
    subtask ID, e.g. `subtask_wakeup-st3.json`) to the spec directory
    (`$TEAMAI_SPEC_DIR`). The per-subtask filename prevents parallel subtasks
    from clobbering each other's wakeup schedules.
 
-**Do NOT call an interactive `ScheduleWakeup`-style tool** — it is an
-interactive-session feature and is a no-op in this pipeline. The orchestrator's
-resume mechanism only understands the file.
+**Do NOT call an interactive `ScheduleWakeup`-style tool, and do NOT use `Monitor` (or
+any other tool) to wait on the job inline.** Neither pauses and resumes you across
+turns in this pipeline — a `Monitor` call that outlives your remaining turn budget ends
+your session exactly like any other silent timeout, and narrating that you'll "wait for
+the completion notification" accomplishes nothing if `subtask_wakeup-st<ID>.json` was
+never written. The file is the only thing the orchestrator's resume mechanism
+understands.
 
 **Size `wakeup_at` realistically.** Estimate completion from the job's actual
 throughput, not an optimistic guess, and add a 20% safety margin. An undersized
@@ -252,7 +309,7 @@ do nothing but write another wakeup file.
 - `background_command`: the command you ran (informational)
 - `expected_artifact`: the file you expect the process to produce
 - `progress_log_path`: the job's own log file, relative to the worktree root.
-  Include it whenever the job writes one — the orchestrator's periodic sweep
+  Include it whenever the job writes one — the orchestrator periodically
   checks this file's freshness while you're asleep and re-enters you early if
   it goes stale, instead of always waiting out the full `wakeup_at` window.
 
@@ -265,8 +322,49 @@ with a `⚠️ WAKEUP RE-ENTRY` header. On re-entry:
   - **Still running**: read its latest reported progress, write an updated
     `subtask_wakeup-st<ID>.json` with a new `wakeup_at`, and end again.
   - **Crashed or exited with error**: do NOT write another wakeup file.
-    Report the failure immediately — the orchestrator advances the task to
-    failed after 3 consecutive wakeup attempts without progress.
+    Write a `subtask_blocked-st<ID>.json` (see "When you've root-caused a
+    defect and retrying won't help" below) instead of just narrating the
+    failure — that's what actually fails the task immediately, rather than
+    waiting out the remaining wakeup-attempt budget.
+
+**If you diagnose and fix a real blocker before relaunching** (a compile error, a
+contaminated checkout, a bug in your own tooling), state the new `background_command`
+in your fresh `subtask_wakeup-st<ID>.json` rather than reusing the old one verbatim —
+the orchestrator treats a materially different command on re-entry as evidence of
+genuine progress and resets the wakeup attempt budget instead of charging the fix
+against the same 3-attempt cap as a job that simply needed more time. Reusing the
+exact same command when nothing actually changed still counts as a normal attempt.
 
 Use `$TEAMAI_SPEC_DIR` to resolve the path — your cwd is the worktree, not
 the project root.
+
+### When you've root-caused a defect and retrying won't help
+
+If your investigation concludes that this subtask cannot succeed as planned —
+an earlier subtask's change was never actually made despite being marked
+`completed: true`, a precondition the spec assumed doesn't hold, or any other
+defect that a code fix (possibly in a *different* subtask) must resolve
+before this one can — do NOT just explain that in your summary and end the
+session. A summary is prose; nothing reads it before the orchestrator decides
+what happens next. Write `subtask_blocked-st<ID>.json` (`<ID>` = your current
+subtask ID) to `$TEAMAI_SPEC_DIR` instead:
+
+```json
+{
+  "reason": "Subtask #1 (CS-1) was never actually implemented despite plan.json marking it completed — Chord.containsPitch is byte-identical to the pre-task baseline. This subtask's own acceptance gate (AC-S3) can't pass until that fix lands.",
+  "blocking_subtask_id": 1
+}
+```
+
+- `reason`: a specific, evidence-backed explanation — what you checked and
+  what you found, not a guess. This becomes the QA report's failure note.
+- `blocking_subtask_id`: optional — the id of the subtask whose defect
+  actually needs fixing, if you traced the root cause to one.
+
+This immediately fails the task (skipping any further retries of this
+subtask) instead of leaving the orchestrator to eventually reach the same
+conclusion on its own via an unrelated cap — burning a session that will only
+re-verify what you already verified. Only use this when you've done the
+investigation and are confident retrying is pointless; if there's a real
+chance a fresh session (or waiting on a background job) could still resolve
+this, use the wakeup mechanism above or just end normally instead.
