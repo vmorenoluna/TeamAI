@@ -157,6 +157,11 @@ export interface PlanSubtask {
   /** Files or directories this subtask must create on disk.
    *  Verified after the session ends -- subtask stays incomplete if any are missing. */
   files_to_create?: string[];
+  /** Run-only gate (full test suite, sweep, build): `files` lists what the
+   *  subtask MAY edit if the run turns up a failure, not what it is expected
+   *  to edit. Exempts the subtask from the "ended without touching any of its
+   *  assigned files" no-op check; the out-of-scope check still applies. */
+  verify_only?: boolean;
 }
 
 // ── Session options ─────────────────────────────────────────────────────
