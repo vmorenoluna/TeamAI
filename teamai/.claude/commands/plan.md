@@ -98,6 +98,14 @@ Rules:
   (c) the specific check to apply to the output (e.g. "section X shows fewer than N
   failures"). This makes the criterion independently verifiable by QA without relying
   on the engineer's self-report.
+- **Run-only gate subtasks set `"verify_only": true`.** A subtask whose job is to
+  run something and report (the full test suite, a build, a sweep) and which edits
+  nothing when everything passes MUST carry `"verify_only": true`. List in `files`
+  only the files it may need to fix if the run fails (or leave `files: []` if it
+  must not edit anything). Without the flag, the orchestrator rejects a session
+  that made no edit as a no-op, re-runs it, and fails the task after 3 passes —
+  even though the run itself succeeded. Do NOT set it on subtasks expected to
+  change files.
 - **`files_to_create` paths are relative to the repository root.** When populating
   `files_to_create` for a subtask that must produce committed file artifacts
   (benchmark output, data pipeline output, generated documentation),

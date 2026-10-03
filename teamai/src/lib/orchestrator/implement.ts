@@ -1189,7 +1189,7 @@ export async function runSubtaskSession(
           violations.map(f => '  - ' + f).join('\n') + '\n' +
           '[SCOPE] Assigned files: ' + ([...assignedFiles].join(', ') || '(none)') + '\n'
         );
-      } else if ((subtask.files || []).length > 0 && !(subtask.files_to_create || []).length && changedFiles.length === 0) {
+      } else if ((subtask.files || []).length > 0 && !(subtask.files_to_create || []).length && changedFiles.length === 0 && !subtask.verify_only) {
         // No-op subtask detection: the coder session ended having committed
         // NO changes at all, for a subtask whose only declared scope is
         // EXISTING files to edit. Deterministic and orchestrator-side — does
@@ -1206,6 +1206,14 @@ export async function runSubtaskSession(
         // same condition.) Exempt a deliberate `[SKIPPED]` deferral (ticket
         // creation, pipeline-artifact management — see plan.md/implement.md)
         // since those subtasks can legitimately make no code changes at all.
+        //
+        // Exempt `verify_only` subtasks (run-only gates such as "run the full
+        // test suite"): their `files` is the permitted scope for fixing a
+        // failure, and a clean run legitimately edits nothing. Found on task
+        // fix-calm-minor-8-note-melodies-have-no-v: the suite-gate subtask
+        // passed 2618/2618 three times, was rejected each time for making no
+        // edit, and the group barrier then deferred subtasks 5-10 until the
+        // pass cap failed the task.
         //
         // Found on task give-minor-mode-melodies-a-real-leading-: subtask 1's
         // entire session was "read some files, dispatch a research sub-agent,
