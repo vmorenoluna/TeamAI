@@ -465,7 +465,23 @@ export interface ResolvePhaseWakeupOptions {
   sessionStartedAt: number;
   /** Named in logs and the synthetic FAIL report, e.g. "The spec phase". */
   unitLabel: string;
+  /** Absolute paths of the files that constitute this phase's finished
+   *  output (spec.md + spec_summary.md, plan.json, qa_report.json). A
+   *  re-entry that ends silently with every one of them written during
+   *  that session has finished its work — whatever background job it once
+   *  waited on is no longer what the phase is blocked on. */
+  deliverables?: string[];
   deps: PhaseWakeupDeps;
+}
+
+/** True when every deliverable exists and was written during the session
+ *  that started at `sessionStartedAt` (same mtime slack as the pid scan). */
+function deliverablesWrittenSince(deliverables: string[] | undefined, sessionStartedAt: number): boolean {
+  if (!deliverables || deliverables.length === 0) return false;
+  return deliverables.every(f => {
+    const mtime = snapshotMtime(f);
+    return mtime != null && mtime >= sessionStartedAt - MTIME_TOLERANCE_MS;
+  });
 }
 
 /**
@@ -498,7 +514,20 @@ export async function resolvePhaseWakeup(opts: ResolvePhaseWakeupOptions): Promi
     cwd: opts.cwd,
     wakeupScanRetryDelayMs: pipelineConfig.wakeupScanRetryDelayMs ?? 0,
   });
-  const staleRescheduled = !wakeupDetected && checkStaleWakeupReentry({
+  // A silent re-entry that wrote the phase's deliverables is a completed
+  // phase, not a job still running: the stale-artifact heuristic below only
+  // sees the wakeup's *old* expected artifact (e.g. a log from a sweep that a
+  // host restart interrupted and the agent re-ran under new names), which
+  // never updates, so it would re-arm until the attempt cap and fail a
+  // finished spec as 'wakeup-exhausted'.
+  const deliverablesDone = opts.wasReentry && !wakeupDetected &&
+    deliverablesWrittenSince(opts.deliverables, opts.sessionStartedAt);
+  if (deliverablesDone) {
+    logToOutput(opts.pipeline.specPath,
+      '[WAKEUP] ' + opts.unitLabel + ' re-entry ended without a wakeup file but wrote its deliverables — ' +
+      'treating the phase as complete instead of waiting on ' + (opts.pipeline.wakeupArtifact || 'the old artifact') + '\n');
+  }
+  const staleRescheduled = !wakeupDetected && !deliverablesDone && checkStaleWakeupReentry({
     pipeline: opts.pipeline, wasReentry: opts.wasReentry, wakeupDetected, cwd: opts.cwd, unitLabel: opts.unitLabel,
   });
   let pending = wakeupDetected || staleRescheduled;
@@ -508,7 +537,7 @@ export async function resolvePhaseWakeup(opts: ResolvePhaseWakeupOptions): Promi
   // but a process behind one of its own recorded pid files is still alive —
   // treat that as hard evidence of in-flight work rather than trusting the
   // silence as "there was nothing to wait for."
-  if (!pending) {
+  if (!pending && !deliverablesDone) {
     const orphan = findLiveOrphanedJob(opts.specDir, opts.sessionStartedAt);
     if (orphan) {
       pending = true;

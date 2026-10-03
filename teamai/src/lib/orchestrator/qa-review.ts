@@ -475,6 +475,7 @@ export async function runQaReview(
   if (await resolvePhaseWakeup({
     pipeline, specDir: pipeline.specPath, cwd: pipeline.worktreePath, wasReentry: isWakeupReentry,
     sessionStartedAt, unitLabel: 'The QA review', deps,
+    deliverables: [reportPath],
   }) === 'pending') return;
 
   consumeFeedbackIfDue(pipeline.specPath, 'qa-review');

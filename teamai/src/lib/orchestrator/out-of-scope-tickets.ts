@@ -1,7 +1,7 @@
 /**
  * Out-of-scope bug ticket creation.
  *
- * The coder role reports bugs, missing features, or refactor opportunities it
+ * The coder (implement) and analyst (spec) roles report bugs, missing features, or refactor opportunities it
  * discovers outside its assigned subtask scope as `[BUG] ...` summary lines
  * instead of hand-writing `.teamai/{slug}/task.json` files. This module parses
  * those lines and creates deterministic kanban tickets via TaskStore, so the
@@ -59,8 +59,8 @@ export function createOutOfScopeTickets(
   for (const bug of bugs) {
     if (existingTitles.has(bug.title)) continue;
     const description = bug.reason
-      ? `Reported by the implement agent as out-of-scope for its assigned subtask.\n\nReason: ${bug.reason}`
-      : 'Reported by the implement agent as out-of-scope for its assigned subtask.';
+      ? `Reported by a pipeline agent as out of scope for its assigned work.\n\nReason: ${bug.reason}`
+      : 'Reported by a pipeline agent as out of scope for its assigned work.';
     const task = store.create(randomUUID(), bug.title, description);
     existingTitles.add(bug.title);
     ids.push(task.id);
