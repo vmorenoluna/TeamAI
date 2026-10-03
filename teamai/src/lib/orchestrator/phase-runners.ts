@@ -19,6 +19,7 @@ import { removeStaleWorktreeRegistration } from './worktree-utils';
 import { applyPlanFileSerialization, logUndeclaredSubtaskReferences, snapshotPreservedPlanSubtasks, restorePreservedPlanSubtasks, loadPreservedPlanSubtasks, clearPreservedPlanSubtasks, planDeclaresRealFileChanges } from './plan-validation';
 import { warn } from '../logger';
 import { WorktreeError, PipelineConfigError } from './errors';
+import { createOutOfScopeTicketsFromLog } from './out-of-scope-tickets';
 import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
@@ -224,6 +225,8 @@ interface CascadePhaseDeps extends BasePhaseDeps {
   getPipelineConfig: () => { wakeupScanRetryDelayMs?: number; maxImplementRetries: number };
   scheduleWakeup: (pipeline: TaskPipeline) => void;
   writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
+  /** Used to file the analyst's `[BUG]` follow-up reports as backlog tickets. */
+  taskStore?: TaskStore;
 }
 
 // ── Shared pre-phase freshness sync ─────────────────────────────────────────
@@ -359,7 +362,23 @@ export async function runSpecPhase(
   if (await resolvePhaseWakeup({
     pipeline, specDir: pipeline.specPath, cwd: deps.projectRoot, wasReentry: isWakeupReentry,
     sessionStartedAt, unitLabel: 'The spec phase', deps,
+    deliverables: [path.join(pipeline.specPath, 'spec.md'), path.join(pipeline.specPath, 'spec_summary.md')],
   }) === 'pending') return;
+
+  // Deferred defects found while analysing: the analyst has no CLI in a
+  // pipeline session (TEAMAI_CREATE_TASK_CLI is only set for interactive
+  // terminals), so it reports `[BUG] Fix: ... — ...` lines in its output and
+  // the orchestrator files them, exactly as for implement subtasks. The log
+  // spans every wakeup re-entry; existing titles are skipped, so re-parsing
+  // is idempotent. Best-effort.
+  try {
+    const createdIds = createOutOfScopeTicketsFromLog(deps.projectRoot, specLogFile, deps.taskStore);
+    if (createdIds.length > 0) {
+      logToOutput(pipeline.specPath, '[BUG-TICKET] The spec phase reported ' + createdIds.length + ' deferred defect(s) — created ticket(s): ' + createdIds.join(', ') + '\n');
+    }
+  } catch (err) {
+    logToOutput(pipeline.specPath, '\n[BUG-TICKET] Failed to create deferred-defect tickets: ' + (err instanceof Error ? err.message : String(err)) + '\n');
+  }
 
   if (isRevision && existsSync(revisionFeedbackPath)) {
     unlinkSync(revisionFeedbackPath);
@@ -581,6 +600,7 @@ export async function runPlanPhase(
   if (await resolvePhaseWakeup({
     pipeline, specDir: pipeline.specPath, cwd: deps.projectRoot, wasReentry: isWakeupReentry,
     sessionStartedAt, unitLabel: 'The plan phase', deps,
+    deliverables: [path.join(pipeline.specPath, 'plan.json')],
   }) === 'pending') return;
 
   // Enforce the preserve-list unconditionally: whatever the planner wrote for
