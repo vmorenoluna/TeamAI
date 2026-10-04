@@ -37,12 +37,12 @@ Needed no matter how you install:
 
 - **A Claude account** (or a Claude API key). TeamAI drives its agents through the `claude` command-line tool; without an account, nothing runs.
 - **Claude Code CLI**: install it with `npm install -g @anthropic-ai/claude-code`
+- **Git**
+- **Docker** (optional): only if you want agent sessions to run sandboxed in a container
 
 Only needed for building from source:
 
 - **Node.js** version 20 or newer
-- **Git**
-- **Docker** (optional): only if you want agent sessions to run sandboxed in a container
 
 ## Safety & Privacy
 
@@ -196,26 +196,13 @@ teamai/
 
 Per-project `.teamai/` directory:
 
-| File | Purpose |
-|---|---|
-| `providers.json` | LLM backend per role (Anthropic, Bedrock, Vertex, OpenAI, Gemini, Ollama) |
-| `pipeline.json` | Phase order and max QA retry attempts |
-| `container.json` | Enable/disable Docker devcontainer sandboxing |
+| File | Purpose                                                      |
+|---|--------------------------------------------------------------|
+| `providers.json` | LLM backend per role (only Anthropic is currently supported) |
+| `pipeline.json` | Phase order and max QA retry attempts                        |
+| `container.json` | Enable/disable Docker devcontainer sandboxing                |
 
 Default configs live in `defaults/` and are synced to projects on startup.
-
-## TODO
-
-Features temporarily hidden from the sidebar (routes still exist; re-enable by adding them back to the nav list in `src/components/sidebar.tsx`):
-
-- [ ] **GitHub** (`/github`): import tasks from GitHub issues
-- [ ] **Analytics** (`/analytics`): agent performance, pipeline bottlenecks, and QA trends
-- [ ] **Insights** (`/insights`): pipeline analytics plus a project chat
-- [ ] **Ideation** (`/ideation`): scans the codebase for improvements, vulnerabilities, and tech debt
-
-Not yet built:
-
-- [ ] **Remote access & notifications**: Tailscale for remote access to the app; Web Push or a Telegram webhook for review-ready notifications
 
 ## Contributing
 
