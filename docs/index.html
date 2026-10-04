@@ -249,7 +249,7 @@
       <a href="#failures" class="nav-link" onclick="closeNav()">Failures</a>
       <a href="#refine" class="nav-link" onclick="closeNav()">Refinements</a>
       <a href="#auto" class="nav-link" onclick="closeNav()">Auto Mode</a>
-      <a href="#delivered" class="nav-link" onclick="closeNav()">Delivered</a>
+      <a href="#history" class="nav-link" onclick="closeNav()">History</a>
       <a href="#extras" class="nav-link" onclick="closeNav()">Roadmap</a>
       <a href="https://github.com/vmorenoluna/TeamAI" class="nav-link" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
@@ -331,7 +331,7 @@
     <h2>See every task at a glance</h2>
     <p class="section-desc">Tasks are organized into columns by stage. Drag and drop to move them between stages, or let the pipeline advance them automatically. Click any task to see its full details, specification, plan, and review report.</p>
 
-      <img src="images/board.jpg" alt="TeamAI kanban board with tasks across pipeline stages" width="2812" height="1602" loading="lazy" decoding="async" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:0 auto;">
+      <img src="images/board.jpg" alt="TeamAI kanban board with tasks across pipeline stages" width="2995" height="1888" loading="lazy" decoding="async" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:0 auto;">
   </div>
 </section>
 
@@ -476,8 +476,6 @@
         <p>Auto mode watches for recurring failures and analyzes them within a daily budget. With a further opt-in, small high-confidence fixes can even be applied and retried automatically, with a safety guard that escalates back to you if a fix doesn't work.</p>
       </div>
     </div>
-
-    <img src="images/analyse-failure.jpg" alt="TeamAI Role Refinement Assistant analyzing a failed task's root cause" width="1134" height="135" loading="lazy" decoding="async" style="max-width:900px;width:100%;margin:36px auto 0;display:block;border-radius:12px;">
   </div>
 </section>
 
@@ -502,15 +500,15 @@
   </div>
 </section>
 
-<!-- ==================== Delivered ==================== -->
-<section id="delivered">
+<!-- ==================== History ==================== -->
+<section id="history">
   <div class="container">
-    <span class="section-label">Delivered</span>
-    <h2>Everything you shipped, in one place</h2>
-    <p class="section-desc">Completed tickets don't disappear. The Delivered column keeps a lasting record of finished work (what was built, which pull request shipped it, and when), so you can look back on the history of your project long after the agents have moved on.</p>
+    <span class="section-label">History</span>
+    <h2>Every ticket, on the record</h2>
+    <p class="section-desc">Completed tickets don't disappear. TeamAI relies on GitHub to track the history of finished work: each ticket ships as a pull request, so what was built, which PR delivered it, and when it merged are all recorded in your repository. Look back on your project's history anytime, right where your code lives.</p>
 
-    <!-- Optional screenshot: drop docs/images/delivered.jpg in and it appears here. While the file is missing this img removes itself on error, so no broken-image icon is shown. -->
-    <img src="images/delivered.jpg" alt="TeamAI Delivered column showing completed tickets with pull request links" width="2812" height="1602" loading="lazy" decoding="async" onerror="this.remove()" style="max-width:1100px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
+    <!-- Optional screenshot: drop docs/images/board.jpg in and it appears here. While the file is missing this img removes itself on error, so no broken-image icon is shown. -->
+    <img src="images/board.jpg" alt="TeamAI kanban board with completed tickets in the Delivered column and pull request links" width="2995" height="1888" loading="lazy" decoding="async" onerror="this.remove()" style="max-width:1100px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
   </div>
 </section>
 

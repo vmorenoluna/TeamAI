@@ -92,12 +92,12 @@ This wipes and recreates `demo/.teamai/`, `demo/.claude/`, `demo/src/` and `demo
 
 Capture screenshots from the running app (with ShopForge registered as the active project) and save them to `docs/images/` — the landing page reads them by relative path from there, so no build step is involved.
 
-All 11 `<img>` tags on the page now carry a `width` and `height`, so lazy loading never shifts the layout.
+All 12 `<img>` tags on the page now carry a `width` and `height`, so lazy loading never shifts the layout.
 
 The three newest sections on `docs/index.html` have live `<img>` tags pointing at screenshots that may not exist yet, so saving the file into `docs/images/` is all that's needed — no HTML edit. Each tag carries a reserved `width`/`height` (taken from the closest matching existing screenshot) to cut layout shift while the image loads, plus an `onerror` that removes the tag while the file is missing, so there's no broken-image icon:
 
-| File | Capture |
-|---|---|
-| `docs/images/terminals.jpg` | Terminals page with a live session open |
+| File                          | Capture |
+|-------------------------------|---|
+| `docs/images/terminals.jpg`   | Terminals page with a live session open |
 | `docs/images/diagnostics.jpg` | A failed task's overview, plus a "Needs attention" parked ticket |
-| `docs/images/delivered.jpg` | The DONE column: PR links on the disk tasks and history cards below |
+| `docs/images/board.jpg`          | The DONE column: PR links on the disk tasks and history cards below |
