@@ -297,23 +297,26 @@ app.prepare().then(async () => {
       .catch(err => logError('providers', 'Startup model prefetch failed', err));
 
     // ── Demo project registration ──────────────────────────────────────
-    // The demo project only appears when --with-demo is passed on the
-    // command line (e.g. in dev mode from Electron). Without the flag,
-    // the demo is removed from the registry so it doesn't clutter the
-    // production app but can be re-added later via the UI.
+    // The demo ships for development: it registers automatically whenever
+    // the server runs outside production mode (npm run dev, and
+    // electron:dev, which also passes --with-demo). Production runs
+    // (npm run start, the packaged app, E2E) set NODE_ENV=production and
+    // leave the demo out so it never clutters a real install; pass
+    // --with-demo there if you want it anyway.
     const DEMO_PATH = resolve(process.cwd(), '..', 'demo');
-    const WITH_DEMO = process.argv.includes('--with-demo');
+    const WITH_DEMO =
+      process.argv.includes('--with-demo') || process.env.NODE_ENV !== 'production';
     const existingDemo = projectStore.getByPath(DEMO_PATH);
     if (WITH_DEMO && !existingDemo) {
       try {
         projectStore.add(DEMO_PATH, 'ShopForge Demo');
-        console.log('[demo] Demo project registered (--with-demo)');
+        console.log('[demo] Demo project registered (dev mode)');
       } catch (err) {
         logError('demo', 'Failed to register demo project', err);
       }
     } else if (!WITH_DEMO && existingDemo) {
       projectStore.remove(DEMO_PATH);
-      console.log('[demo] Demo project removed (no --with-demo flag)');
+      console.log('[demo] Demo project removed (production mode)');
     }
 
     // ── Force-sync default commands at startup ──────────────────────────

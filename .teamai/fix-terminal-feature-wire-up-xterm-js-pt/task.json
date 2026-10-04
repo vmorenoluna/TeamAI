@@ -1,9 +1,0 @@
-{
-  "id": "b2e5b61d-892f-43f1-afaa-27695252a122",
-  "title": "Fix terminal feature — wire up xterm.js PTY sessions properly",
-  "description": "xterm.js and node-pty are installed and the ProcessManager has terminal session support, but the Terminals page and TerminalPanel component are described as incomplete. Wire up the existing PTY infrastructure to the UI so users can open interactive Claude sessions from the Terminals page.",
-  "phase": "done",
-  "source": "ideation",
-  "createdAt": "2026-05-11T21:48:27.745Z",
-  "updatedAt": "2026-05-11T22:45:50.335Z"
-}

@@ -14,7 +14,14 @@
   <style>
     /* ========== Reset & Base ========== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html { scroll-behavior: smooth; }
+    /* Anchor jumps park the target at the very top of the viewport, which is
+       underneath the fixed nav. Reserve the nav's height (57px: 14px container
+       padding + 28px logo line + 1px border) plus a small gap, so a section
+       lands below the bar instead of behind it. The nav grows to ~63px once the
+       hamburger button replaces the inline links, which this value still clears.
+       Set on the scrolling element rather than on each section, so any future
+       anchor target is covered without having to remember this. */
+    html { scroll-behavior: smooth; scroll-padding-top: 73px; }
     body {
       font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
       background: #0b0f19;
@@ -160,8 +167,9 @@
     nav .container { display: flex; align-items: center; justify-content: space-between; padding-top: 14px; padding-bottom: 14px; }
     nav .logo { font-weight: 700; font-size: 1.1rem; color: #e2e8f0; }
     nav .logo span { color: #38bdf8; }
-    nav .nav-links { display: flex; align-items: center; gap: 6px; }
-    nav a.nav-link { color: #94a3b8; font-size: 0.85rem; margin-left: 18px; text-decoration: none; }
+    /* Spacing is tuned so all 13 links fit inside the 1100px container. */
+    nav .nav-links { display: flex; align-items: center; gap: 0; }
+    nav a.nav-link { color: #94a3b8; font-size: 0.8rem; margin-left: 12px; text-decoration: none; }
     nav a.nav-link:hover { color: #cbd5e1; }
     /* Mobile hamburger */
     .nav-toggle {
@@ -185,6 +193,30 @@
     .arch-arrow { color: #334155; font-size: 1.5rem; }
 
     /* ========== Responsive ========== */
+    /* The inline nav needs the full 1100px container to hold 13 links, so the
+       hamburger engages below that rather than at the 768px layout breakpoint. */
+    @media (max-width: 1100px) {
+      nav .nav-links {
+        display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+        position: absolute; top: 100%; left: 12px; right: 12px; margin-top: 8px;
+        background: #111827; border: 1px solid #1e293b; border-radius: 12px;
+        box-shadow: 0 16px 32px rgba(0,0,0,0.4);
+        max-height: 0; overflow: hidden; opacity: 0; pointer-events: none;
+        padding: 0 8px;
+        transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+      }
+      nav .nav-links.open {
+        max-height: min(800px, calc(100vh - 80px)); overflow-y: auto;
+        opacity: 1; pointer-events: auto; padding: 8px;
+      }
+      nav .nav-links a.nav-link {
+        margin: 0; padding: 12px 14px; font-size: 1rem;
+        border-bottom: 1px solid #1e293b;
+      }
+      nav .nav-links a.nav-link:last-child { border-bottom: none; }
+      .nav-toggle { display: block; }
+    }
+
     @media (max-width: 768px) {
       section { padding: 64px 0; }
       .two-col { grid-template-columns: 1fr; gap: 24px; }
@@ -194,25 +226,6 @@
       .hero { padding: 110px 0 64px; }
       .hero-cta-secondary { margin-left: 0; }
       .cta-row { flex-direction: column; }
-      /* Mobile nav */
-      nav .nav-links {
-        display: flex; flex-direction: column; align-items: stretch;
-        position: absolute; top: 100%; left: 12px; right: 12px; margin-top: 8px;
-        background: #111827; border: 1px solid #1e293b; border-radius: 12px;
-        box-shadow: 0 16px 32px rgba(0,0,0,0.4);
-        max-height: 0; overflow: hidden; opacity: 0; pointer-events: none;
-        padding: 0 8px;
-        transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
-      }
-      nav .nav-links.open {
-        max-height: 600px; opacity: 1; pointer-events: auto; padding: 8px;
-      }
-      nav .nav-links a.nav-link {
-        margin: 0; padding: 12px 14px; font-size: 1rem;
-        border-bottom: 1px solid #1e293b;
-      }
-      nav .nav-links a.nav-link:last-child { border-bottom: none; }
-      .nav-toggle { display: block; }
       .arch-flow { flex-direction: column; }
       .arch-arrow { transform: rotate(90deg); }
     }
@@ -229,11 +242,14 @@
       <a href="#kanban" class="nav-link" onclick="closeNav()">Kanban</a>
       <a href="#pipeline" class="nav-link" onclick="closeNav()">Pipeline</a>
       <a href="#streaming" class="nav-link" onclick="closeNav()">Streaming</a>
+      <a href="#terminals" class="nav-link" onclick="closeNav()">Terminals</a>
       <a href="#subtasks" class="nav-link" onclick="closeNav()">Subtasks</a>
       <a href="#resume" class="nav-link" onclick="closeNav()">Recovery</a>
       <a href="#review" class="nav-link" onclick="closeNav()">Review</a>
+      <a href="#failures" class="nav-link" onclick="closeNav()">Failures</a>
       <a href="#refine" class="nav-link" onclick="closeNav()">Refinements</a>
       <a href="#auto" class="nav-link" onclick="closeNav()">Auto Mode</a>
+      <a href="#history" class="nav-link" onclick="closeNav()">History</a>
       <a href="#extras" class="nav-link" onclick="closeNav()">Roadmap</a>
       <a href="https://github.com/vmorenoluna/TeamAI" class="nav-link" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
@@ -315,7 +331,7 @@
     <h2>See every task at a glance</h2>
     <p class="section-desc">Tasks are organized into columns by stage. Drag and drop to move them between stages, or let the pipeline advance them automatically. Click any task to see its full details, specification, plan, and review report.</p>
 
-      <img src="images/board.jpg" alt="TeamAI kanban board with tasks across pipeline stages" loading="lazy" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:0 auto;">
+      <img src="images/board.jpg" alt="TeamAI kanban board with tasks across pipeline stages" width="2995" height="1888" loading="lazy" decoding="async" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:0 auto;">
   </div>
 </section>
 
@@ -344,7 +360,7 @@
       When the coder finds a gap in the spec, the task loops back to the analyst for clarification.
     </p>
 
-    <img src="images/workflow.jpg" alt="TeamAI pipeline view showing task detail with spec, plan, and subtask breakdown" loading="lazy" style="max-width:650px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
+    <img src="images/workflow.jpg" alt="TeamAI pipeline view showing task detail with spec, plan, and subtask breakdown" width="820" height="1186" loading="lazy" decoding="async" style="max-width:650px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
 
   </div>
 </section>
@@ -356,7 +372,18 @@
     <h2>Watch every agent work in real time</h2>
     <p class="section-desc">Each agent's terminal output streams live to the app. Watch the analyst write the spec, the planner break it into subtasks, the coder implement each change, and QA validate the results. Every thought, file edit, and command run, visible as it happens.</p>
 
-      <img src="images/ticket-terminal.jpg" alt="TeamAI terminal view for interactive Claude agent sessions" loading="lazy" style="width:100%;border-radius:12px;">
+      <img src="images/ticket-terminal.jpg" alt="TeamAI terminal view for interactive Claude agent sessions" width="1293" height="1128" loading="lazy" decoding="async" style="width:100%;border-radius:12px;">
+  </div>
+</section>
+
+<!-- ==================== Terminals ==================== -->
+<section id="terminals">
+  <div class="container">
+    <span class="section-label">Terminals</span>
+    <h2>Work hands-on when you want to</h2>
+    <p class="section-desc">Open a live terminal with any of your agents and step in whenever you like, with no task or pipeline required. Sessions keep running while you move around the app, so you can paste, scroll, and use full-screen tools just like a normal terminal. Any session can also file a new ticket for you, straight from the conversation.</p>
+
+    <img src="images/terminals.jpg" alt="TeamAI terminals page with live interactive agent sessions" width="3823" height="1887" loading="lazy" decoding="async" style="width:100%;border-radius:12px;">
   </div>
 </section>
 
@@ -366,7 +393,7 @@
     <span class="section-label">Subtasks</span>
     <h2>Every task is broken into subtasks</h2>
     <p class="section-desc">The planner divides complex features into small, independent subtasks. Each subtask runs in its own git worktree so parallel agents never conflict.</p>
-    <img src="images/subtasks.jpg" alt="TeamAI subtask breakdown with git worktree assignment" loading="lazy" style="width:100%;border-radius:12px;">
+    <img src="images/subtasks.jpg" alt="TeamAI subtask breakdown with git worktree assignment" width="1279" height="1138" loading="lazy" decoding="async" style="width:100%;border-radius:12px;">
   </div>
 </section>
 
@@ -381,7 +408,7 @@
       </div>
     </div>
 
-    <img src="images/autoresume.jpg" alt="TeamAI auto-resume showing rate-limited task recovery" loading="lazy" style="max-width:900px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
+    <img src="images/autoresume.jpg" alt="TeamAI auto-resume showing rate-limited task recovery" width="1162" height="108" loading="lazy" decoding="async" style="max-width:900px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
   </div>
 </section>
 
@@ -409,7 +436,18 @@
       </div>
     </div>
 
-    <img src="images/review.jpg" alt="TeamAI review panel showing QA report with pass/fail criteria" loading="lazy" style="max-width:900px;width:100%;margin:36px auto 0;display:block;border-radius:12px;">
+    <img src="images/review.jpg" alt="TeamAI review panel showing QA report with pass/fail criteria" width="1258" height="1107" loading="lazy" decoding="async" style="max-width:900px;width:100%;margin:36px auto 0;display:block;border-radius:12px;">
+  </div>
+</section>
+
+<!-- ==================== Diagnostics ==================== -->
+<section id="failures">
+  <div class="container">
+    <span class="section-label">Diagnostics</span>
+    <h2>Nothing fails silently</h2>
+    <p class="section-desc">A failed task doesn't leave you guessing. The task overview shows exactly which criteria failed and what QA recommends doing about it, and any task that pauses for your attention says plainly what it's waiting for, both on the board and inside the task itself.</p>
+
+    <img src="images/diagnostics.jpg" alt="TeamAI failed task overview showing failed criteria and QA recommendations" width="1300" height="1146" loading="lazy" decoding="async" style="max-width:900px;width:100%;margin:36px auto 0;display:block;border-radius:12px;">
   </div>
 </section>
 
@@ -418,8 +456,10 @@
   <div class="container">
     <span class="section-label">Role Refinement Assistant</span>
     <h2>When tasks fail, TeamAI learns why</h2>
-    <p class="section-desc">Not every failure is a hard task — sometimes an agent's role prompt is missing a project convention. TeamAI analyzes failed tasks, tells you whether a role prompt is the root cause, and proposes a fix that you approve.</p>
-    <div class="features-grid" style="margin-bottom: 36px;">
+    <p class="section-desc">Not every failure is a hard task; sometimes an agent's role prompt is missing a project convention. TeamAI analyzes failed tasks, tells you whether a role prompt is the root cause, and proposes a fix that you approve.</p>
+
+    <img src="images/analyse-failure.jpg" alt="TeamAI Role Refinement Assistant analyzing a failed task's root cause" width="1134" height="135" loading="lazy" decoding="async" style="max-width:900px;width:100%;margin:36px auto 0;display:block;border-radius:12px;">
+    <div class="features-grid" style="margin-top: 36px;">
       <div class="feature-card">
         <div class="icon icon-blue">🔬</div>
         <h3>Failure Post-Mortem</h3>
@@ -428,12 +468,12 @@
       <div class="feature-card">
         <div class="icon icon-purple">✏️</div>
         <h3>Editable, Revertible Fixes</h3>
-        <p>Role gaps come back as a before/after diff you can hand-edit. Apply, apply and retry, or dismiss — every change is backed up for one-click revert.</p>
+        <p>Role gaps come back as a before/after diff you can hand-edit. Apply, apply and retry, or dismiss: every change is backed up for one-click revert.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-emerald">🤖</div>
         <h3>Optional Automation</h3>
-        <p>Auto mode watches for recurring failures and analyzes them within a daily budget. With a further opt-in, small high-confidence fixes can even be applied and retried automatically — with a safety guard that escalates back to you if a fix doesn't work.</p>
+        <p>Auto mode watches for recurring failures and analyzes them within a daily budget. With a further opt-in, small high-confidence fixes can even be applied and retried automatically, with a safety guard that escalates back to you if a fix doesn't work.</p>
       </div>
     </div>
   </div>
@@ -455,36 +495,42 @@
           <li>Highlights automatically merged tasks for later review</li>
         </ul>
       </div>
-        <img src="images/automode.jpg" alt="TeamAI auto mode enabled on the kanban board" loading="lazy" style="max-width:225px;width:100%;border-radius:12px;display:block;margin:0 auto;">
+        <img src="images/automode.jpg" alt="TeamAI auto mode enabled on the kanban board" width="165" height="79" loading="lazy" decoding="async" style="max-width:225px;width:100%;border-radius:12px;display:block;margin:0 auto;">
     </div>
   </div>
 </section>
 
-<!-- ==================== Roadmap & Insights ==================== -->
+<!-- ==================== History ==================== -->
+<section id="history">
+  <div class="container">
+    <span class="section-label">History</span>
+    <h2>Every ticket, on the record</h2>
+    <p class="section-desc">Completed tickets don't disappear. TeamAI tracks the history of finished work by relying on GitHub: each ticket's implementation lands in your repository, so the record of what was built stays with your code. Look back on your project's history anytime, right where it lives.</p>
+
+    <img src="images/board.jpg" alt="TeamAI kanban board with completed tickets in the Delivered column" width="2995" height="1888" loading="lazy" decoding="async" style="max-width:1100px;width:100%;margin:48px auto 0;display:block;border-radius:12px;">
+  </div>
+</section>
+
+<!-- ==================== Roadmap ==================== -->
 <section id="extras">
   <div class="container">
-    <span class="section-label">Roadmap and Insights</span>
+    <span class="section-label">Roadmap</span>
     <h2>Plan the big picture, not just the next task</h2>
     <p class="section-desc">TeamAI helps you think strategically about where your project is headed, not just what to build next.</p>
     <div class="features-grid">
       <div class="feature-card">
         <div class="icon icon-purple">🗺️</div>
         <h3>Product Roadmap</h3>
-        <p>Generate multi-phase roadmaps with competitors analysis. Group features into Now, Next, Later, and Icebox. You can then convert them into tasks with one click.</p>
+        <p>Generate multi-phase roadmaps with competitor analysis. Group features into Now, Next, Later, and Icebox. You can then convert them into tasks with one click.</p>
       </div>
       <div class="feature-card">
         <div class="icon icon-blue">💡</div>
         <h3>Ideation Scanner</h3>
         <p>Let AI scan your codebase and surface opportunities you might have missed: performance improvements, tech debt cleanup, missing features, and architectural suggestions.</p>
       </div>
-      <div class="feature-card">
-        <div class="icon icon-emerald">📊</div>
-        <h3>Project Insights</h3>
-        <p>Ask questions about your project in plain English. "Which tasks are stuck?" "Show me recent QA failures." "What did we ship this week?"</p>
-      </div>
     </div>
 
-      <img src="images/roadmap.jpg" alt="TeamAI product roadmap with phased items" loading="lazy" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:48px auto 0;">
+      <img src="images/roadmap.jpg" alt="TeamAI product roadmap with phased items" width="2253" height="1756" loading="lazy" decoding="async" style="max-width:1100px;width:100%;border-radius:12px;display:block;margin:48px auto 0;">
   </div>
 </section>
 
@@ -494,7 +540,7 @@
     <span class="section-label">Get Started</span>
     <h2>Ready to put AI agents to work?</h2>
     <p class="section-desc" style="margin:16px auto 32px;">
-      TeamAI is open source. Grab an installer for Windows, macOS, or Linux from GitHub Releases — the app keeps itself up to date automatically. Prefer running from source? Clone the repo and follow the README.
+      TeamAI is open source. Grab an installer for Windows, macOS, or Linux from GitHub Releases. The app keeps itself up to date automatically. Prefer running from source? Clone the repo and follow the README.
     </p>
     <div class="cta-row">
       <a class="hero-cta" href="https://github.com/vmorenoluna/TeamAI/releases">Download</a>

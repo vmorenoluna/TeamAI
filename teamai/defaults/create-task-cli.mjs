@@ -16,10 +16,18 @@
  * collision handling, task.json shape) — keep both in sync if that method
  * ever changes.
  *
+ * --depends-on sets the `dependencies` field (src/lib/task-store.ts:68, "IDs
+ * of tasks this task depends on") — the same field auto-mode.ts gates
+ * auto-start on (a backlog task is only picked once every dependency's
+ * phase is "done") and the kanban UI's dependency arrows read. TaskStore
+ * itself only sets this via update() after creation (see
+ * app/actions/tasks.ts addDependency); this CLI sets it directly in the
+ * initial write since the task doesn't exist yet for update() to target.
+ *
  * Usage:
- *   node create-task-cli.mjs --project <path> --title "..." --description "..."
+ *   node create-task-cli.mjs --project <path> --title "..." --description "..." [--depends-on <id1,id2,...>]
  */
-import { existsSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, renameSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -43,8 +51,22 @@ function fail(message) {
   process.exit(1);
 }
 
+/** Scan every `.teamai/*\/task.json` for known task ids, for --depends-on validation. */
+function existingTaskIds(specsDir) {
+  const ids = new Set();
+  if (!existsSync(specsDir)) return ids;
+  for (const entry of readdirSync(specsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const task = JSON.parse(readFileSync(join(specsDir, entry.name, 'task.json'), 'utf-8'));
+      if (task?.id) ids.add(task.id);
+    } catch { /* unreadable/missing task.json — skip */ }
+  }
+  return ids;
+}
+
 function main() {
-  const { project, title, description } = parseArgs(process.argv.slice(2));
+  const { project, title, description, 'depends-on': dependsOn } = parseArgs(process.argv.slice(2));
 
   if (!project) fail('--project <path> is required');
   if (!title) fail('--title "<text>" is required');
@@ -53,6 +75,17 @@ function main() {
 
   const specsDir = join(project, '.teamai');
   mkdirSync(specsDir, { recursive: true });
+
+  let dependencies;
+  if (dependsOn) {
+    dependencies = [...new Set(dependsOn.split(',').map(s => s.trim()).filter(Boolean))];
+    const known = existingTaskIds(specsDir);
+    for (const depId of dependencies) {
+      if (!known.has(depId)) {
+        console.error(`create-task-cli: warning — --depends-on id "${depId}" does not match any existing task.json; the new ticket will never auto-start until a task with that id reaches "done"`);
+      }
+    }
+  }
 
   const base = slugify(title).replace(/^-+$/, '') || 'task';
   let slug = base;
@@ -69,6 +102,7 @@ function main() {
     description,
     slug,
     phase: 'backlog',
+    ...(dependencies && dependencies.length > 0 ? { dependencies } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -80,6 +114,9 @@ function main() {
 
   console.log(`Created ticket "${title}" (backlog) at .teamai/${slug}/task.json`);
   console.log(`id: ${task.id}`);
+  if (dependencies && dependencies.length > 0) {
+    console.log(`depends on: ${dependencies.join(', ')}`);
+  }
 }
 
 main();

@@ -1,7 +1,7 @@
 # TeamAI Workflow
 
 This project uses an automated pipeline managed by an external orchestrator.
-When you receive slash commands (/spec, /plan, /implement, /qa-review, /qa-fix, /merge),
+When you receive slash commands (/spec, /plan, /implement, /qa-review, /merge),
 follow their instructions precisely and output structured files as specified.
 
 ## Key Conventions
@@ -14,95 +14,58 @@ follow their instructions precisely and output structured files as specified.
 
 ## Artifact Commits
 
-When the pipeline reaches the merge or PR-creation phase, the orchestrator commits the
-task's pipeline artifacts into the worktree so the PR or merge includes the full
-implementation story alongside the code changes.
+`.teamai/{slug}/` — the task's spec, plan, QA report, events, and every other
+pipeline artifact — is **never committed to the branch**. `.teamai/*` is gitignored
+(added to the project's `.gitignore` on import), and nothing force-adds past that: the
+folder stays purely local pipeline state, and is deleted once the task reaches `done`
+(its worktree removed). It is never pulled into the base branch and never shows up in
+`git log`.
 
-### What gets committed
+Instead, the pipeline's story reaches git two ways, both assembled fresh from those
+local files at merge/PR time — never as committed copies of the files themselves:
 
-Files from `.teamai/{task-slug}/` are copied into the worktree at `.teamai/{slug}/`.
-Everything is included **except** these two files:
+### Commit-message trailers
 
-| Excluded file | Reason |
-|---------------|--------|
-| `output.log`, `output-*.log` | Raw session logs — may contain sensitive data (API keys, errors, code snippets). All per-phase (`output-spec.log`, `output-plan.log`, `output-qa.log`, `output-merge.log`) and per-subtask (`output-st1.log`, `output-st2.log`, ...) variants are excluded. |
-| `.pipeline_state.json` | Transient crash-recovery checkpoint — session IDs and runtime paths, meaningless after commit |
+Just before pushing (in `runCreatePR`) or before the merge attempt (in `runMerge`), the
+orchestrator collapses the feature branch to a single commit
+(`git reset --soft <merge-base>` + `git commit`, so any messy per-subtask history is
+gone) whose message carries a trailer block:
 
-Everything else that tells the story of the implementation is included:
+```
+Task: <slug>
+Task-ID: <uuid>
+QA: PASS (6/6 criteria, retried 1 times)
+Phases: spec>plan>implement>qa-review(x2)>create-pr
+Reviewed-by: TeamAI QA agent
+```
 
-- **`task.json`** — task metadata and current phase
-- **`spec.md`** — feature specification (including `spec_v1.md`, `spec_v2.md`, ... revision snapshots)
-- **`plan.json`** — implementation plan with subtask breakdown and completion status
-- **`qa_report.json`** — QA review results (PASS/FAIL criteria, additional issues, severity levels)
-- **`qa_report_before_*.json`** — snapshots from QA bounce-back cycles (shows what went wrong on each attempt)
-- **`completion_summary.md`** — failure summary with subtask status and last QA report (if the task failed)
-- **`events.jsonl`** — phase transition timeline (spec → plan → implement → QA → merge)
-- **`qa_feedback.md`** — QA feedback sent to the engineer for fixes (if present at commit time)
-- **`human_feedback.md`** — human reviewer feedback from `rejectTask` (if present at commit time)
-- **`human_feedback_before_bounce.md`** — feedback snapshot preserved across bounce cycles
-- **`spec_revision_feedback.md`** — QA spec concerns used to auto-revise the spec
+- **`QA:`** comes straight from `qa_report.json`'s top-level `overall`, with a
+  pass/fail criteria count and a retry count derived from how many times `qa-review`
+  appears in `events.jsonl`.
+- **`Phases:`** is the actual path taken through the pipeline, including loops
+  (`qa-review(x2)` means QA bounced back once before passing).
+- The commit body is `implementation_summary.md` (written by QA on a PASS verdict),
+  falling back to the task description if that's missing.
+- This whole trailer block is only added when `recordHistoryInGit` is on (default) —
+  turning it off skips the squash/message entirely and merges/pushes the branch as-is.
 
-### `task.json` phase rewriting
+### PR body (pull-request strategy only)
 
-`task.json` is committed with one important modification: its `phase` field is rewritten
-to `"done"` in the committed copy. The live pipeline workspace retains the actual current
-phase (`merge` or `create-pr`), but the committed copy reflects the final state.
+When opening a PR, `spec_summary.md` and `implementation_summary.md` are read and
+assembled into the PR body alongside the description and the same trailer lines — this
+is the only place a reviewer sees the fuller story, and it's built at PR-creation time,
+not committed as separate files.
 
-**Why**: TaskStore discovers tasks by scanning every `.teamai/` subdirectory for
-`task.json`. After the PR is merged and `git pull` brings the branch's artifacts into
-`main`, a `task.json` frozen at `pr-open` or `merge` would create a **ghost task** in
-the kanban — a task that appears active but has no live pipeline behind it. By committing
-`"done"`, the committed artifacts accurately reflect that the branch's work is complete
-once it reaches `main`.
+### Nothing to merge
 
-The `updatedAt` timestamp is also refreshed to the commit time, marking when the
-artifact snapshot was finalized.
-
-### Commit behavior
-
-1. Artifacts are committed to the feature branch in the worktree with a message like
-   `Add TeamAI pipeline artifacts for "<description>"`.
-2. The commit happens just before the push (in `runCreatePR`) or before the merge agent
-   runs (in `runMerge`).
-3. **Already committed**: If artifacts are already on the branch (e.g., re-running PR
-   creation after a reject-bounce cycle), the commit is a no-op — no duplicate commit is made.
-4. **Gitignore-proof**: TeamAI adds `.teamai/*` to the project's `.gitignore` when the
-   project is imported, so the live pipeline workspace never shows up as untracked
-   noise in the main project root. The artifact commit is unaffected: it force-adds
-   (`git add -f .teamai/<slug>`) the task's directory in the worktree, so snapshots
-   are committed to the feature branch regardless of the ignore rule.
-
-### Why this matters
-
-When a reviewer looks at a PR, they can see the full story alongside the code:
-
-- **What was asked for** — the spec (`spec.md`)
-- **How it was planned** — the implementation plan (`plan.json`)
-- **What QA found** — the review results (`qa_report.json`)
-- **How it evolved** — spec revisions and QA bounce-back snapshots
-
-This gives reviewers context for *why* the code looks the way it does, without needing
-access to the TeamAI server. The artifacts are versioned alongside the code and persist
-in the repository history.
-
-### Two directory trees
-
-The artifact commit copies files into `.teamai/{slug}/` inside the worktree. This is
-distinct from the pipeline workspace at `.teamai/{task-slug}/` in the main project root:
-
-- **Pipeline workspace** (`.teamai/{task-slug}/`) — live runtime state, rewritten on every
-  phase transition, kept out of git by the `.teamai/*` entry TeamAI adds to the
-  project's `.gitignore` on import
-- **Committed artifacts** (`.teamai/{slug}/` in the worktree) — frozen snapshot at PR/merge
-  time, force-added past the ignore rule, pushed to the remote, pulled into main after merge
-
-These two directories coexist without conflict — they're the same top-level `.teamai/`
-directory but with different subdirectories (`task-slug` vs `slug`). When a task reaches
-**done** (its PR is merged), the orchestrator deletes the live workspace directory and
-pulls the updated default branch into the main project root — the merged artifact
-snapshot (already frozen at `phase: "done"`) becomes the on-disk copy, and the working
-tree stays clean. If the pull fails (offline, non-fast-forward), a minimal `task.json`
-is recreated so the task stays visible on the kanban until the next successful pull.
+A task can legitimately reach this phase with **no commits beyond the base branch** —
+most commonly a pure verification ticket whose own acceptance criteria mandate an empty
+`src/` diff (the code was already correct; the job was only to confirm it), combined
+with the artifact folder never being committed either. Both `runMerge` and `runCreatePR`
+check for this before squashing/pushing: if there's nothing beyond the base, the task is
+marked `done` directly with a clear log line, instead of attempting a merge/PR that has
+nothing to act on (GitHub's `createPullRequest` correctly, but confusingly, rejects an
+empty PR with "No commits between `<base>` and `<branch>`").
 
 ## Memory
 Claude Code's Auto Memory is enabled for this project. Claude will automatically:

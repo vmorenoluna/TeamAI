@@ -1,9 +1,0 @@
-{
-  "id": "4ba8540e-80ef-487a-83fd-74a6ec966499",
-  "title": "Pipeline analytics dashboard",
-  "description": "Add an analytics dashboard showing pipeline metrics: average task duration, QA pass rate, most common failure points, and agent session costs. This helps teams optimize their pipeline configurations and catch systemic issues. All the event data already flows through the system — it just needs aggregation and visualization.",
-  "phase": "backlog",
-  "source": "ideation",
-  "createdAt": "2026-06-24T20:51:22.357Z",
-  "updatedAt": "2026-06-24T20:51:22.357Z"
-}

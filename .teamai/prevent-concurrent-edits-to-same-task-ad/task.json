@@ -1,9 +1,0 @@
-{
-  "id": "51c70a15-5ba8-496b-a064-b4c647176f44",
-  "title": "Prevent concurrent edits to same task — add phase-lock per task",
-  "description": "If two pipeline runs or drag-and-drop events target the same task simultaneously, they can create duplicate subprocesses or corrupt the task's state directory. Implement an in-memory lock per task that prevents concurrent pipeline execution.",
-  "phase": "done",
-  "source": "ideation",
-  "createdAt": "2026-05-11T21:48:25.366Z",
-  "updatedAt": "2026-05-11T22:35:50.949Z"
-}

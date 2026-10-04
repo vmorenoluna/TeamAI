@@ -1,9 +1,0 @@
-{
-  "id": "7fc25c01-ebc1-4f28-94c9-4d78dd969c3c",
-  "title": "Task search, filter, and sort on the Kanban board",
-  "description": "As the number of tasks grows, finding specific cards becomes difficult. Add a search bar above the board that filters cards by title/description, and dropdowns to filter by phase, priority, or date range.",
-  "phase": "done",
-  "source": "ideation",
-  "createdAt": "2026-05-12T10:19:00.754Z",
-  "updatedAt": "2026-05-12T15:12:00.000Z"
-}

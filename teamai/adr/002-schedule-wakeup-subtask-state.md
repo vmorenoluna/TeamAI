@@ -245,7 +245,7 @@ If the TeamAI process crashes while a wakeup is scheduled, the `autoResumeInterr
 
 ## 2026-09-27 addition: generalized to spec, plan, and qa-review
 
-**Exhibit:** task `fix-off-by-one-in-melodycontext-accented`. An analyst session (spec
+**Exhibit:** task `an-earlier-demo-task`. An analyst session (spec
 phase) launched a multi-hour deterministic verification run, correctly said it would
 wait for it to finish, and then its turn simply ended — headless pipeline sessions have
 no interactive `ScheduleWakeup`-style capability to actually wait across turns.
@@ -284,16 +284,16 @@ skipped when `wakeupCommand` is already set at entry (i.e., this invocation is a
 re-entry, not a fresh attempt).
 
 **Terminology note:** earlier drafts of this generalization used "sweep" throughout
-(Sample-project's term for a parameter sweep) — genericized to "script"/"job"/"background
+(an earlier private project's term for a parameter sweep) — genericized to "script"/"job"/"background
 process" in code comments and command templates, since TeamAI itself is
 project-agnostic. `expected_artifact`/`background_command`/`progress_log_path` always
 described an arbitrary command; only the prose calling it a "sweep" was
-Sample-project-specific.
+project-specific.
 
 **Also added while touching this area:** the command templates' "detach the job"
 instructions now warn against relaunching or stopping multiple background jobs via a
 command-line pattern match (`pkill -f <substring>`) instead of by recorded PID — a
 substring broad enough to match every job's command line can also match the managing
 session's own shell, killing the session that was trying to record what it just did.
-Observed twice in the same live session (task `give-minor-mode-melodies-a-real-leading-`)
+Observed twice in the same live session (task `a-later-demo-task`)
 while this generalization was being scoped.

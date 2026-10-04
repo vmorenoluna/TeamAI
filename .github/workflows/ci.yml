@@ -73,7 +73,8 @@ jobs:
         run: bash tests/unit/changelog-parsing.test.sh
 
   # Fast parallel checks for quick feedback on PRs.
-  # The `test-all` job below runs the full canonical suite independently.
+  # The `pr-suite` job below runs the fast PR-gate suite independently;
+  # the full E2E suite runs pre-release instead (see release.yml).
 
   # AI review: runs after checks pass, only on PRs, only if API key is set
   ai-review:
@@ -100,11 +101,12 @@ jobs:
           REPO: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
 
-  # Run the exact same suite developers use locally, with vitest coverage
-  # collected alongside (option 3): `test:all:coverage` = typecheck + lint +
-  # vitest --coverage + one E2E run + changelog. Single canonical gate, one
-  # Playwright run per PR, coverage artifact uploaded from the same run.
-  test-all:
+  # PR/push gate, with vitest coverage collected alongside: `test:pr:coverage`
+  # = typecheck + lint + vitest --coverage + the E2E *smoke* subset (~2 min,
+  # 5 critical specs) + changelog. Fast enough to run on every push. The full
+  # E2E suite (`test:all:coverage`) runs pre-release instead — see the
+  # `full-test-suite` job in release.yml, which gates the GitHub Release.
+  pr-suite:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -127,8 +129,8 @@ jobs:
         run: |
           sudo lsof -ti:3001 | xargs -r sudo kill -9 2>/dev/null || true
           echo "Port 3001 cleared for E2E tests"
-      - name: Run full test suite (coverage collected alongside)
-        run: npm run test:all:coverage
+      - name: Run PR-gate suite (coverage collected alongside)
+        run: npm run test:pr:coverage
         env:
           CI: 'true'
       - name: Upload coverage HTML report
