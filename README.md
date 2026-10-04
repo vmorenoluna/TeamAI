@@ -70,16 +70,7 @@ Open `http://localhost:3002` in a browser or use the Electron app. Both connect 
 
 ### Demo Project
 
-A demo project (`demo/`) ships with tasks already seeded across every pipeline phase, handy for exploring the UI without setting up a real project. It's hidden by default and only appears when the server is started with the `--with-demo` flag:
-
-```bash
-npm run dev -- --with-demo    # from teamai/: dev server
-npm run start -- --with-demo  # production server
-```
-
-The first `--` is npm's separator: it tells npm to stop parsing flags and pass the rest to the app, which is how `--with-demo` reaches the server.
-
-`npm run electron:dev` passes the flag for you. In packaged builds the demo stays hidden; add any folder as a project with the "+" button in the project selector instead.
+A demo project (`demo/`) ships with tasks already seeded across every pipeline phase, handy for exploring the UI without setting up a real project. It's included automatically whenever the app runs in development (`npm run dev` or `npm run electron:dev`). Production runs leave it out, so it never clutters a real install; add any folder as a project with the "+" button in the project selector instead.
 
 ## Auto-Updates
 
