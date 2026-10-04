@@ -90,15 +90,7 @@ This wipes and recreates `demo/.teamai/`, `demo/.claude/`, `demo/src/` and `demo
 
 ## Screenshots
 
-Capture screenshots from the running app and save them to `docs/images/` — the landing page reads them by relative path from there, so no build step is involved.
-
-The three showcase shots (terminals, diagnostics, delivered) can be captured headlessly while the dev server runs with the demo registered:
-
-```bash
-cd teamai && node scripts/capture-screenshots.mjs
-```
-
-The script selects ShopForge via the same `activeProject` cookie the app uses, opens a live terminal session if none is running, and writes all three JPEGs straight into `docs/images/`.
+Capture screenshots from the running app (with ShopForge registered as the active project) and save them to `docs/images/` — the landing page reads them by relative path from there, so no build step is involved.
 
 All 11 `<img>` tags on the page now carry a `width` and `height`, so lazy loading never shifts the layout.
 
