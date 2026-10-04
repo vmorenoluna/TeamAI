@@ -1,6 +1,6 @@
 /**
  * Deterministic orchestrator-side verification for two gaps found on task
- * give-minor-mode-melodies-a-real-leading-:
+ * a-later-demo-task:
  *
  * 1. No-op subtask detection: a coder subtask that declares `files` to edit
  *    (and no `files_to_create`) but commits NO changes at all used to sail
@@ -217,7 +217,7 @@ describe('runImplement — no-op subtask detection', () => {
   });
 
   it('rejects a files_to_create deliverable that exists but is stale from an earlier round, instead of marking it completed', async () => {
-    // Regression test for task give-minor-mode-melodies-a-real-leading-:
+    // Regression test for task a-later-demo-task:
     // subtask 15's five files_to_create had existed on disk since a stale
     // commit from an EARLIER, QA-rejected round. This session's coder only
     // stood up background sweep servers and ended before running them —

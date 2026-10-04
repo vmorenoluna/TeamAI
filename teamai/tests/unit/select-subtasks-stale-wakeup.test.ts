@@ -206,7 +206,7 @@ describe('selectSubtasks — stale wakeup isolation must not empty the QA-rework
   });
 
   it('excludes a qa_flagged subtask that already completed on an earlier pass of this same round', () => {
-    // Regression test for task give-minor-mode-melodies-a-real-leading-:
+    // Regression test for task a-later-demo-task:
     // subtask 1 genuinely finished on an earlier pass within the SAME
     // multi-pass bounce-back round (persistCompletedSubtasks already wrote
     // completed: true to plan.json), but qa_flagged is intentionally left

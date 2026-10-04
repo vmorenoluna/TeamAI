@@ -403,7 +403,7 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
 
 // ── Orphaned background job safety net (findLiveOrphanedJob) ──────────────
 //
-// Covers the second gap on the fix-off-by-one-in-melodycontext-accented
+// Covers the second gap on the an-earlier-demo-task
 // incident: the analyst twice detached a multi-hour sweep and narrated an
 // intent to wait for it, but its session ended without ever writing
 // phase_wakeup.json — the pre-existing stale-reentry safety net only covers

@@ -7677,7 +7677,7 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
   });
 
   it('leaves a subtask incomplete when its files_to_create exist but are stale — untouched since before this pass started', () => {
-    // Regression test for task give-minor-mode-melodies-a-real-leading-:
+    // Regression test for task a-later-demo-task:
     // subtask 15's five files_to_create survived on disk from a commit two
     // rounds back. No subtask in the CURRENT pass touched them — the git
     // diff against the pass's start HEAD is empty — yet existence alone used

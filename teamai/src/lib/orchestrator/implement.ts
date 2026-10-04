@@ -500,7 +500,7 @@ export function selectSubtasks(
   // a false scope violation — which then trips GROUP-BARRIER to defer every
   // later group (including whichever one holds the subtask that actually
   // still needs work) until the pass cap fails the task outright. Found on
-  // task give-minor-mode-melodies-a-real-leading-: subtask 11 genuinely
+  // task a-later-demo-task: subtask 11 genuinely
   // completed on pass 1, then looped as a false rejection on passes 2–3
   // while subtask 12 — in a later group, deferred by the barrier each time —
   // never got a chance to run again.
@@ -723,7 +723,7 @@ export function cleanQaFlaggedMarkers(pipeline: ImplementPipeline): void {
  * during THIS pass, whether by the subtask's own session or, per this
  * function's whole reason for existing, a DIFFERENT one (9999). Omitted or
  * unresolvable, this falls back to existence-only, same as before. Found on
- * task give-minor-mode-melodies-a-real-leading-: subtask 15's five
+ * task a-later-demo-task: subtask 15's five
  * files_to_create survived on disk from a stale commit two rounds back; no
  * session in the current pass touched them, yet this reconciliation marked
  * subtask 15 completed anyway immediately after the per-session check had
@@ -803,7 +803,7 @@ export function reconcileSubtaskCompletionFromDeliverables(
  * pointless writes this file instead of relying on a human (or a later pass)
  * to read and act on its prose explanation.
  *
- * Found on task give-minor-mode-melodies-a-real-leading-: subtask 15's
+ * Found on task a-later-demo-task: subtask 15's
  * session correctly diagnosed a defect in an earlier subtask, wrote "this
  * should go to the pipeline's failure path... no wakeup file written" in its
  * summary, and ended. Nothing read that sentence — the orchestrator
@@ -1215,7 +1215,7 @@ export async function runSubtaskSession(
         // edit, and the group barrier then deferred subtasks 5-10 until the
         // pass cap failed the task.
         //
-        // Found on task give-minor-mode-melodies-a-real-leading-: subtask 1's
+        // Found on task a-later-demo-task: subtask 1's
         // entire session was "read some files, dispatch a research sub-agent,
         // wait for it" — the turn ended before any Edit/Write call, before
         // the sub-agent's findings were ever used, and before a single line
@@ -1403,7 +1403,7 @@ export async function runSubtaskSession(
     // collects results and commits does so for every deliverable at once).
     // Falls back to existence-only when preSessionHead couldn't be snapshotted
     // (git failure), the same best-effort fallback the scope check above uses.
-    // Found on task give-minor-mode-melodies-a-real-leading-: subtask 15's
+    // Found on task a-later-demo-task: subtask 15's
     // five files_to_create had existed on disk since a stale commit three
     // rounds earlier; a session that only stood up background sweep servers
     // and ended before running them was marked completed anyway, because the

@@ -3,7 +3,7 @@
  * wakeup-file contract implement.ts has always had, via orchestrator/wakeup.ts.
  *
  * Covers the incident that motivated this (task
- * fix-off-by-one-in-melodycontext-accented): an analyst session started a
+ * an-earlier-demo-task): an analyst session started a
  * multi-hour deterministic verification job and correctly said it would
  * wait, but the spec phase had no wakeup detection at all — the missing
  * spec.md was parked for human review, discarding a still-running
