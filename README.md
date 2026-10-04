@@ -77,6 +77,8 @@ npm run dev -- --with-demo    # from teamai/: dev server
 npm run start -- --with-demo  # production server
 ```
 
+The first `--` is npm's separator: it tells npm to stop parsing flags and pass the rest to the app, which is how `--with-demo` reaches the server.
+
 `npm run electron:dev` passes the flag for you. In packaged builds the demo stays hidden; add any folder as a project with the "+" button in the project selector instead.
 
 ## Auto-Updates
