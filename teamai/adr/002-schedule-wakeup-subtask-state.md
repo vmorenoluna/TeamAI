@@ -284,11 +284,11 @@ skipped when `wakeupCommand` is already set at entry (i.e., this invocation is a
 re-entry, not a fresh attempt).
 
 **Terminology note:** earlier drafts of this generalization used "sweep" throughout
-(Sample-project's term for a parameter sweep) — genericized to "script"/"job"/"background
+(an earlier private project's term for a parameter sweep) — genericized to "script"/"job"/"background
 process" in code comments and command templates, since TeamAI itself is
 project-agnostic. `expected_artifact`/`background_command`/`progress_log_path` always
 described an arbitrary command; only the prose calling it a "sweep" was
-Sample-project-specific.
+project-specific.
 
 **Also added while touching this area:** the command templates' "detach the job"
 instructions now warn against relaunching or stopping multiple background jobs via a
