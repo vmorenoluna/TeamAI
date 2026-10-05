@@ -32,6 +32,7 @@ import type { TaskStore } from '../task-store';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
 import type { FailureReason } from './qa-feedback';
+import { readFilesToFix } from './qa-feedback';
 
 export interface ImplementPipeline extends TaskPipeline {
   /** Internal flag: set when wakeup completes during this run so post-groups code re-enters (ADR 002) */
@@ -693,6 +694,28 @@ export function cleanQaFlaggedMarkers(pipeline: ImplementPipeline): void {
 }
 
 /**
+ * The `files_to_create` paths a dispatch must freshly (re)commit — one rule for
+ * every pass. Freshness exists to reject stale evidence the dispatch was meant
+ * to produce, so only the deliverables QA said need fixing count. `filesToFix`
+ * null = nothing narrows the dispatch (the first pass, or QA/a human didn't say
+ * which files), so every deliverable is relevant; an empty array = QA asserts
+ * no file needs to change, so none is required to be fresh.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export function relevantDeliverables(filesToCreate: string[], filesToFix: string[] | null): string[] {
+  if (filesToFix === null) return filesToCreate;
+  const fix = new Set(filesToFix);
+  return filesToCreate.filter(f => fix.has(f));
+}
+
+/** QA's files_to_fix for the current rework; null when absent, or a human directive is in play. */
+function reworkFilesToFix(specPath: string): string[] | null {
+  if (existsSync(path.join(specPath, 'human_feedback.md'))) return null;
+  return readFilesToFix(specPath);
+}
+
+/**
  * Reconcile stale `completed: false` flags against what's actually on disk,
  * right before the implement-completeness gate reads them.
  *
@@ -751,6 +774,7 @@ export function reconcileSubtaskCompletionFromDeliverables(
   let changed = false;
   const newlyCompletedIds: number[] = [];
 
+  const filesToFix = reworkFilesToFix(specPath);
   let changedFiles: string[] | null = null;
   if (passStartHead && execGitCapture) {
     try {
@@ -761,7 +785,8 @@ export function reconcileSubtaskCompletionFromDeliverables(
   for (const s of subtasks) {
     if (s.completed || s.id === 9999 || !s.files_to_create?.length) continue;
     const allPresent = s.files_to_create.every(f => existsSync(path.join(cwd, f)));
-    const allFresh = changedFiles === null || s.files_to_create.every(f => changedFiles!.includes(f));
+    const allFresh = changedFiles === null
+      || relevantDeliverables(s.files_to_create, filesToFix).every(f => changedFiles!.includes(f));
     if (allPresent && allFresh) {
       s.completed = true;
       changed = true;
@@ -1410,9 +1435,15 @@ export async function runSubtaskSession(
     // five paths — untouched this session, carrying three-day-old evidence —
     // still passed existsSync.
     const requireFreshness = preSessionHead !== '';
+    // Only the deliverables this dispatch is about must be fresh (see
+    // relevantDeliverables): on a rework, QA names the file(s) to fix and the
+    // other declared deliverables stay as committed earlier — demanding they
+    // change too is unsatisfiable and burns the retry cap on no-op re-dispatches.
+    const mustBeFresh = new Set(relevantDeliverables(subtask.files_to_create, reworkFilesToFix(pipeline.specPath)));
+    const isFreshFile = (f: string) => !requireFreshness || !mustBeFresh.has(f) || sessionChangedFiles.includes(f);
     for (const file of subtask.files_to_create) {
       const exists = existsSync(path.join(cwd, file));
-      const isFresh = !requireFreshness || sessionChangedFiles.includes(file);
+      const isFresh = isFreshFile(file);
       if (!exists) {
         skipCompletion = true;
         logToOutput(pipeline.specPath, '\n[VERIFY] Subtask ' + subtask.id + ': expected file/directory missing — ' + file + '\n');
@@ -1427,7 +1458,7 @@ export async function runSubtaskSession(
       const count = (pipeline.deliverableFailCounts[subtask.id] || 0) + 1;
       pipeline.deliverableFailCounts[subtask.id] = count;
       const missingFiles = subtask.files_to_create
-        .filter(f => !existsSync(path.join(cwd, f)) || (requireFreshness && !sessionChangedFiles.includes(f)))
+        .filter(f => !existsSync(path.join(cwd, f)) || !isFreshFile(f))
         .join(', ');
       logToOutput(pipeline.specPath, '[VERIFY] Subtask ' + subtask.id + ' failed deliverable verification (attempt ' + count + '/' + maxFails + ') — missing or stale: ' + missingFiles + '\n');
       if (count >= maxFails) {

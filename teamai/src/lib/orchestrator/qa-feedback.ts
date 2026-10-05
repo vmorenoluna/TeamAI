@@ -45,6 +45,33 @@ function extractReferencedSubtaskIds(text: string, subtasks: PlanSubtask[]): num
   return [...ids];
 }
 
+const FILES_TO_FIX_MARKER = /<!-- teamai:files_to_fix (\[.*?\]) -->/;
+
+/**
+ * The files QA says need changing, unioned over every FAIL criterion and
+ * additional issue; null when QA didn't say (any failing item lacks a
+ * `files_to_fix` array, or there are none). An empty array is an explicit
+ * statement that no file needs to change.
+ */
+export function collectFilesToFix(report: QaReport): string[] | null {
+  const items = [
+    ...(report.criteria ?? []).filter(c => c.status === 'FAIL'),
+    ...(report.additional_issues ?? report.issues ?? []),
+  ];
+  if (items.length === 0 || items.some(i => !Array.isArray(i.files_to_fix))) return null;
+  return [...new Set(items.flatMap(i => i.files_to_fix!.map(f => f.trim().replace(/\\/g, '/'))))].filter(Boolean);
+}
+
+/** Read back what writeQaFeedback recorded; null = unspecified (or no feedback file). */
+export function readFilesToFix(specPath: string): string[] | null {
+  try {
+    const m = FILES_TO_FIX_MARKER.exec(readFileSync(path.join(specPath, 'qa_feedback.md'), 'utf-8'));
+    if (!m) return null;
+    const parsed: unknown = JSON.parse(m[1]);
+    return Array.isArray(parsed) ? parsed.filter((f): f is string => typeof f === 'string') : null;
+  } catch { return null; }
+}
+
 /** Write QA feedback for bouncing back to implement */
 export function writeQaFeedback(
   specPath: string,
@@ -114,6 +141,14 @@ export function writeQaFeedback(
       const fix = issue.fix_needed ? ` → Fix: ${issue.fix_needed}` : '';
       content += `- ${desc}${file}${fix}\n`;
     }
+  }
+  const filesToFix = collectFilesToFix(report);
+  if (filesToFix) {
+    content += `\n## Files to fix\n\n`;
+    content += filesToFix.length > 0
+      ? filesToFix.map(f => `- ${f}\n`).join('')
+      : `(none — QA asserts no file needs to change)\n`;
+    content += `\n<!-- teamai:files_to_fix ${JSON.stringify(filesToFix)} -->\n`;
   }
   writeFileSync(feedbackPath, content);
 

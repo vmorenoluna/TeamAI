@@ -75,7 +75,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator } from '../../src/lib/orchestrator';
-import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks, reconcileSubtaskCompletionFromDeliverables, repairStuckCherryPick } from '../../src/lib/orchestrator/implement';
+import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks, reconcileSubtaskCompletionFromDeliverables, relevantDeliverables, repairStuckCherryPick } from '../../src/lib/orchestrator/implement';
 import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
@@ -7642,6 +7642,18 @@ describe('persistCompletedSubtasks', () => {
 // subtask 6 (depends_on 5, never named in qa_feedback.md) was permanently
 // unreachable.
 
+describe('relevantDeliverables', () => {
+  it('is every deliverable when nothing narrows the dispatch (null)', () => {
+    expect(relevantDeliverables(['a.log', 'b.log'], null)).toEqual(['a.log', 'b.log']);
+  });
+  it('is only the deliverables QA says need fixing', () => {
+    expect(relevantDeliverables(['a.log', 'b.log'], ['a.log', 'src/x.scala'])).toEqual(['a.log']);
+  });
+  it('is no deliverable when QA asserts no file needs to change ([])', () => {
+    expect(relevantDeliverables(['a.log', 'b.log'], [])).toEqual([]);
+  });
+});
+
 describe('reconcileSubtaskCompletionFromDeliverables', () => {
   let project: ReturnType<typeof setupProject>;
   let worktreePath: string;
@@ -7719,6 +7731,50 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
 
     expect(changed).toBe(true);
     expect(subtasks[0].completed).toBe(true);
+  });
+
+  it('marks a rework subtask completed when only the deliverable QA listed in files_to_fix was re-committed this pass', () => {
+    // QA-rework is scoped to the deliverable QA named; the other declared files
+    // stay as committed in an earlier pass and must not block completion.
+    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'fixed');
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'b.log'), 'unchanged');
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'c.log'), 'unchanged');
+
+    const subtasks = [
+      {
+        id: 4, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log', 'scripts/sweep_logs/c.log'],
+        completed: false, qa_flagged: true,
+      },
+    ] as any[];
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\n<!-- teamai:files_to_fix ["scripts/sweep_logs/a.log"] -->\n');
+
+    const execGitCapture = vi.fn(() => 'scripts/sweep_logs/a.log\n');
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
+
+    expect(changed).toBe(true);
+    expect(subtasks[0].completed).toBe(true);
+  });
+
+  it('requires ALL files_to_create to be fresh when no feedback narrows the dispatch (first pass)', () => {
+    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'x');
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'b.log'), 'x');
+
+    const subtasks = [
+      {
+        id: 4, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log'],
+        completed: false,
+      },
+    ] as any[];
+
+    const execGitCapture = vi.fn(() => 'scripts/sweep_logs/a.log\n');
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
+
+    expect(changed).toBe(false);
+    expect(subtasks[0].completed).toBeFalsy();
   });
 
   it('leaves a subtask incomplete when only some of its files_to_create exist', () => {

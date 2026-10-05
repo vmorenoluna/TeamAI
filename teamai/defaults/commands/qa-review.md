@@ -269,7 +269,8 @@ The orchestrator uses this to route cleanup failures directly without spawning a
       "status": "PASS" | "FAIL",
       "evidence": "what you found",
       "fix_needed": "description of fix if FAIL",
-      "subtask_ids": [1, 2]
+      "subtask_ids": [1, 2],
+      "files_to_fix": ["path/that/must/change"]
     }
   ],
   "additional_issues": [
@@ -277,7 +278,8 @@ The orchestrator uses this to route cleanup failures directly without spawning a
       "description": "issue found",
       "file": "path",
       "fix_needed": "how to fix",
-      "subtask_ids": [3]
+      "subtask_ids": [3],
+      "files_to_fix": ["path/that/must/change"]
     }
   ],
   "spec_concerns": [
@@ -291,6 +293,8 @@ The orchestrator uses this to route cleanup failures directly without spawning a
 ```
 
 `subtask_ids`: required on every FAIL criterion (populate per the Subtask Attribution rule in Step 5) and on every `additional_issues` entry — including one that names a subtask by number in its own `description` (e.g. "plan.json marks subtask 11 as completed: true"): the orchestrator matches `additional_issues` by `file` alone, which cannot resolve a meta-issue about the plan itself, so `subtask_ids` is the *only* signal that reaches the right subtask in that case. Omit or leave empty only when no subtask can be identified — never fill it with a guess.
+
+`files_to_fix`: on every FAIL criterion and every `additional_issues` entry, list the repo-relative paths that must be **changed** to resolve it. The orchestrator uses this to decide which of a subtask's declared deliverables the rework has to re-commit — a deliverable you don't list may stay exactly as committed. List only files that genuinely need to change, never files you merely referenced as context. Use `[]` when the fix changes no file (e.g. the run is correct and only needs re-verifying). If you cannot say, omit the field; the orchestrator then requires every deliverable of the attributed subtask to be re-committed.
 
 **Any `additional_issues` entry means overall FAIL.** There are no severity levels — every issue found beyond the spec's acceptance criteria is a hard blocker. The coder MUST fix all of them.
 
