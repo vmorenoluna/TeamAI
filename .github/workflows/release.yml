@@ -138,7 +138,7 @@ jobs:
         run: npm run build:server
 
       - name: Package Electron (macOS)
-        run: npx electron-builder --mac --universal --publish=never
+        run: npx electron-builder --mac --arm64 --publish=never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Skip code signing and notarization (requires Apple Developer account)
@@ -241,9 +241,9 @@ jobs:
             echo "- \`TeamAI Setup ${VERSION}.exe\` — NSIS installer, auto-updates (recommended)"
             echo "- \`TeamAI-${VERSION}-win.zip\` — portable (extract & run), does not auto-update"
             echo ""
-            echo "**macOS** *(unsigned — right-click → Open on first launch; manual updates only)*"
-            echo "- \`TeamAI-${VERSION}-universal.dmg\`"
-            echo "- \`TeamAI-${VERSION}-mac.zip\`"
+            echo "**macOS** *(Apple Silicon; unsigned — right-click → Open on first launch; manual updates only)*"
+            echo "- \`TeamAI-${VERSION}-arm64.dmg\`"
+            echo "- \`TeamAI-${VERSION}-arm64-mac.zip\`"
             echo "Download a newer DMG or ZIP from each release to update."
             echo ""
             echo "**Linux**"

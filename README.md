@@ -27,7 +27,7 @@ TeamAI is a desktop app that runs several [Claude Code](https://docs.anthropic.c
 
 ## Install
 
-Download a build from [Releases](https://github.com/vmorenoluna/TeamAI/releases): Windows (`.exe` installer), macOS (`.dmg`), or Linux (`.AppImage`). See [Auto-Updates](#auto-updates) for which platforms update themselves, and for the first-launch warnings you'll see on unsigned builds.
+Download a build from [Releases](https://github.com/vmorenoluna/TeamAI/releases): Windows (`.exe` installer), macOS (`.dmg`, Apple Silicon), or Linux (`.AppImage`). See [Auto-Updates](#auto-updates) for which platforms update themselves, and for the first-launch warnings you'll see on unsigned builds.
 
 To run from source instead, see [Quick Start](#quick-start).
 
@@ -80,12 +80,12 @@ Packaged builds from [Releases](https://github.com/vmorenoluna/TeamAI/releases) 
 |---|---|---|
 | Windows | NSIS installer (`.exe`) | ✅ |
 | Windows | Portable zip | ❌ (re-download manually) |
-| macOS (unsigned) | `.dmg` / `.zip` | ❌ (download each release manually) |
+| macOS (unsigned, Apple Silicon) | `.dmg` / `.zip` | ❌ (download each release manually) |
 | Linux | AppImage | ✅ |
 
 Builds aren't code-signed yet, so the first launch may show a warning:
 - **Windows**: SmartScreen. Click "More info", then "Run anyway".
-- **macOS**: Gatekeeper. Control-click the app and choose "Open" on first launch. Unsigned builds do not support in-app updates; download new releases manually.
+- **macOS**: Gatekeeper. Control-click the app and choose "Open" on first launch. Unsigned builds do not support in-app updates; download new releases manually. macOS builds are for Apple Silicon (M-series) Macs; Intel Macs are not supported yet.
 
 ## Development
 
