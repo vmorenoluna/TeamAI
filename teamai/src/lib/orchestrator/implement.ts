@@ -761,7 +761,13 @@ export function reconcileSubtaskCompletionFromDeliverables(
   for (const s of subtasks) {
     if (s.completed || s.id === 9999 || !s.files_to_create?.length) continue;
     const allPresent = s.files_to_create.every(f => existsSync(path.join(cwd, f)));
-    const allFresh = changedFiles === null || s.files_to_create.every(f => changedFiles!.includes(f));
+    // A QA-rework subtask is deliberately narrow: QA names the one deliverable
+    // that is wrong and the other declared files stay as committed in an earlier
+    // pass. Requiring ALL of them to be re-committed is unsatisfiable, so one
+    // re-committed deliverable proves the rework ran.
+    const allFresh = changedFiles === null || (s.qa_flagged
+      ? s.files_to_create.some(f => changedFiles!.includes(f))
+      : s.files_to_create.every(f => changedFiles!.includes(f)));
     if (allPresent && allFresh) {
       s.completed = true;
       changed = true;
@@ -1410,9 +1416,18 @@ export async function runSubtaskSession(
     // five paths — untouched this session, carrying three-day-old evidence —
     // still passed existsSync.
     const requireFreshness = preSessionHead !== '';
+    // QA-rework exception (qa_flagged): rework is scoped to what QA named, so
+    // the other declared deliverables legitimately stay untouched from the
+    // earlier pass that produced them. Accept the subtask when every file
+    // exists and at least one was re-committed this session; the strict
+    // per-file rule would fail a correct fix that touched 1 of N deliverables
+    // and then burn the retry cap on no-op re-dispatches.
+    const reworkFresh = !!subtask.qa_flagged
+      && subtask.files_to_create.some(f => sessionChangedFiles.includes(f));
+    const isFreshFile = (f: string) => !requireFreshness || reworkFresh || sessionChangedFiles.includes(f);
     for (const file of subtask.files_to_create) {
       const exists = existsSync(path.join(cwd, file));
-      const isFresh = !requireFreshness || sessionChangedFiles.includes(file);
+      const isFresh = isFreshFile(file);
       if (!exists) {
         skipCompletion = true;
         logToOutput(pipeline.specPath, '\n[VERIFY] Subtask ' + subtask.id + ': expected file/directory missing — ' + file + '\n');
@@ -1427,7 +1442,7 @@ export async function runSubtaskSession(
       const count = (pipeline.deliverableFailCounts[subtask.id] || 0) + 1;
       pipeline.deliverableFailCounts[subtask.id] = count;
       const missingFiles = subtask.files_to_create
-        .filter(f => !existsSync(path.join(cwd, f)) || (requireFreshness && !sessionChangedFiles.includes(f)))
+        .filter(f => !existsSync(path.join(cwd, f)) || !isFreshFile(f))
         .join(', ');
       logToOutput(pipeline.specPath, '[VERIFY] Subtask ' + subtask.id + ' failed deliverable verification (attempt ' + count + '/' + maxFails + ') — missing or stale: ' + missingFiles + '\n');
       if (count >= maxFails) {

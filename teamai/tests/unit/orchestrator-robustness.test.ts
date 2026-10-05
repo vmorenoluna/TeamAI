@@ -7721,6 +7721,49 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
     expect(subtasks[0].completed).toBe(true);
   });
 
+  it('marks a qa_flagged rework subtask completed when only one of its files_to_create was re-committed this pass', () => {
+    // QA-rework is scoped to the deliverable QA named; the other declared files
+    // stay as committed in an earlier pass and must not block completion.
+    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'fixed');
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'b.log'), 'unchanged');
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'c.log'), 'unchanged');
+
+    const subtasks = [
+      {
+        id: 4, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log', 'scripts/sweep_logs/c.log'],
+        completed: false, qa_flagged: true,
+      },
+    ] as any[];
+
+    const execGitCapture = vi.fn(() => 'scripts/sweep_logs/a.log\n');
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
+
+    expect(changed).toBe(true);
+    expect(subtasks[0].completed).toBe(true);
+  });
+
+  it('still requires ALL files_to_create to be fresh for a non-qa_flagged subtask', () => {
+    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'x');
+    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'b.log'), 'x');
+
+    const subtasks = [
+      {
+        id: 4, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log'],
+        completed: false,
+      },
+    ] as any[];
+
+    const execGitCapture = vi.fn(() => 'scripts/sweep_logs/a.log\n');
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
+
+    expect(changed).toBe(false);
+    expect(subtasks[0].completed).toBeFalsy();
+  });
+
   it('leaves a subtask incomplete when only some of its files_to_create exist', () => {
     mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
     writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'x');

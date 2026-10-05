@@ -274,6 +274,53 @@ describe('runImplement — no-op subtask detection', () => {
     }
   });
 
+  it('accepts a qa_flagged rework subtask when only one of its multiple files_to_create was re-committed this session', async () => {
+    // QA-rework is scoped to the deliverable QA named; the other declared
+    // deliverables stay as committed in an earlier pass. Requiring all of them
+    // to change made a correct one-file fix fail verification and burn the cap.
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 4, title: 'Run sweep', description: 'Commit sweep artefacts',
+        files_to_create: ['results/sweep.log', 'results/sweep.jsonl'], acceptance_criteria: ['Artefacts exist'],
+        qa_flagged: true, completed: false,
+      }],
+    }));
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nFix the sweep.log headers.');
+
+    const worktreeDir = join(project.root, 'worktrees', 'test-task');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'diff') return 'results/sweep.log\n';
+      if (Array.isArray(args) && args[0] === 'status') return '';
+      return 'abc123\n';
+    });
+    mockCreateSession.mockResolvedValue('sess-partial-rework');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      worktreePath: worktreeDir,
+      maxImplementRetries: 3,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      mkdirSync(join(worktreeDir, 'results'), { recursive: true });
+      writeFileSync(join(worktreeDir, 'results', 'sweep.log'), 'fixed');
+      writeFileSync(join(worktreeDir, 'results', 'sweep.jsonl'), 'unchanged from earlier pass');
+
+      fireEvent('event', { sessionId: 'sess-partial-rework', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks[0].completed).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   it('does not reject a subtask whose summary explicitly declares a [SKIPPED] deferral', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
