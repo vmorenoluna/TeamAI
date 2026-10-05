@@ -230,6 +230,45 @@ export function writeFailReport(pipeline: TaskPipeline, failReport: QaReport, la
 }
 
 /**
+ * A QA PASS resolves the subtasks the previous QA FAIL flagged: the defects QA
+ * named are, by its own new verdict, fixed — so they become `completed: true`
+ * and lose their `qa_flagged` marker.
+ *
+ * Why this is needed: a QA FAIL marks the subtasks it attributes as
+ * `completed: false` + `qa_flagged` (writeQaFeedback), and only an implement
+ * pass that finishes them clears that (implement.ts's QA-targeted cleanup). If
+ * the rework never completes through implement — the task failed there and a
+ * human sent it straight back to QA, which then passed — nothing reset the
+ * flags, and the board kept showing e.g. "5 / 7 subtasks completed" on a
+ * passed task.
+ *
+ * Deliberately narrower than the blind "stamp every subtask" reconciliation
+ * removed in 9a7b975: subtasks QA never flagged are left exactly as they are,
+ * so a manual bypass of implement's completeness gate still shows an honest
+ * count. Only subtasks QA itself failed and has now passed are resolved.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export function resolveQaFlaggedSubtasksOnPass(pipeline: TaskPipeline): void {
+  const planPath = path.join(pipeline.specPath, 'plan.json');
+  try {
+    const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+    if (!Array.isArray(plan.subtasks)) return;
+    let changed = false;
+    for (const s of plan.subtasks) {
+      if (!s.qa_flagged) continue;
+      s.completed = true;
+      delete s.qa_flagged;
+      changed = true;
+    }
+    if (changed) writeFileSync(planPath, JSON.stringify(plan, null, 2));
+  } catch (err) {
+    // Cosmetic for the pipeline (QA already passed) but misleading on the board — surface it.
+    warn('qa-review', `Failed to resolve QA-flagged subtasks in plan.json after QA PASS for ${pipeline.taskId}`, err);
+  }
+}
+
+/**
  * Terminal routing for a FAIL report whose QA budget is exhausted — always
  * write qa_feedback.md first (so there's a record of what was flagged, and
  * moveTaskToPhase's retry-preservation logic has something to re-derive from
@@ -577,6 +616,7 @@ export async function runQaReview(
     await deps.autoReviseSpec(pipeline);
     return;
   } else if (report.overall === 'PASS') {
+    resolveQaFlaggedSubtasksOnPass(pipeline);
     deps.advancePhase(pipeline, 'awaiting-review');
   } else {
     // FAIL-type router
