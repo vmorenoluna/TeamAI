@@ -74,19 +74,19 @@ A demo project (`demo/`) ships with tasks already seeded across every pipeline p
 
 ## Auto-Updates
 
-Packaged builds from [Releases](https://github.com/vmorenoluna/TeamAI/releases) check for updates automatically and prompt you in-app when one is ready. Not every platform supports it:
+Packaged builds from [Releases](https://github.com/vmorenoluna/TeamAI/releases) check for updates where supported. Unsigned macOS builds cannot use the in-app updater; download each new macOS release manually. Not every platform supports automatic updates:
 
 | Platform | Format | Auto-updates? |
 |---|---|---|
 | Windows | NSIS installer (`.exe`) | ✅ |
 | Windows | Portable zip | ❌ (re-download manually) |
-| macOS | `.dmg` / `.zip` | ✅ |
+| macOS (unsigned) | `.dmg` / `.zip` | ❌ (download each release manually) |
 | Linux | AppImage | ✅ |
 | Linux | `.deb` | ❌ (re-download manually) |
 
 Builds aren't code-signed yet, so the first launch may show a warning:
 - **Windows**: SmartScreen. Click "More info", then "Run anyway".
-- **macOS**: Gatekeeper. Right-click the app and choose "Open" instead of double-clicking.
+- **macOS**: Gatekeeper. Control-click the app and choose "Open" on first launch. Unsigned builds do not support in-app updates; download new releases manually.
 
 ## Development
 
