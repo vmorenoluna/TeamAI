@@ -266,10 +266,19 @@ apart from a subtask that made no progress, and your commits for it are discarde
 scope violation however far the job got.
 
 1. **Detach the job** so it keeps running after your session ends:
-   `nohup <command> > job.log 2>&1 & disown`. A bare `&` only backgrounds
-   within your current shell and dies the instant your session exits. Write the
-   log and PID file inside the worktree, not a container-local temp path, so
-   they survive even if the container is reprovisioned.
+   `nohup <command> > "$TEAMAI_SPEC_DIR/job-st<ID>.log" 2>&1 & disown`. A bare `&` only
+   backgrounds within your current shell and dies the instant your session exits.
+   **Everything the wakeup needs to find on re-entry — the job log, the PID file, and
+   the `expected_artifact` — must live inside the worktree, never in `/tmp` or any other
+   container-local path.** Each re-entry may run in a fresh container: a `/tmp` file
+   from this session does not exist there, so the orchestrator's freshness check sees
+   an artifact that never updates and spends your wakeup attempts without ever showing
+   you a failure. Put these files in `$TEAMAI_SPEC_DIR` (`.teamai/{slug}/` — inside the
+   worktree and gitignored) unless the artifact belongs in an already-gitignored project
+   path. Gitignored matters: an untracked file elsewhere in the tree makes
+   `git status --porcelain` dirty, which fails any clean-tree check in the project's
+   own tooling or the scope check. `/tmp` is only for scratch nothing outside this
+   turn will read again.
 2. **If you're managing more than one job at once** (e.g. a server plus its
    client, or several parallel runs), stop or relaunch each one by its own PID
    (`kill $(cat job.pid)`) — never by a command-line pattern match
@@ -307,7 +316,7 @@ do nothing but write another wakeup file.
 - `subtask_id`: your current subtask ID
 - `wakeup_at`: ISO 8601 timestamp when the process should be done
 - `background_command`: the command you ran (informational)
-- `expected_artifact`: the file you expect the process to produce
+- `expected_artifact`: the file you expect the process to produce (inside the worktree)
 - `progress_log_path`: the job's own log file, relative to the worktree root.
   Include it whenever the job writes one — the orchestrator periodically
   checks this file's freshness while you're asleep and re-enters you early if
