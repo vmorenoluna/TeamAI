@@ -103,6 +103,10 @@ export interface QaCriterion {
    *  existed. Absent/empty means the QA agent couldn't attribute the
    *  criterion to a specific subtask (falls through to the fuzzy matcher). */
   subtask_ids?: number[];
+  /** Repo-relative paths this FAIL needs changed. Empty array = QA asserts no
+   *  file needs to change (e.g. re-running produces identical output); absent
+   *  = QA didn't say. See collectFilesToFix in qa-feedback.ts. */
+  files_to_fix?: string[];
 }
 
 export interface QaIssue {
@@ -118,6 +122,8 @@ export interface QaIssue {
    *  a source file, since the file-based matcher in qa-feedback.ts cannot
    *  attribute those. */
   subtask_ids?: number[];
+  /** Same meaning as QaCriterion.files_to_fix. */
+  files_to_fix?: string[];
 }
 
 export interface SpecConcern {

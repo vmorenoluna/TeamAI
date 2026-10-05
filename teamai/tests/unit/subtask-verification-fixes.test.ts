@@ -274,7 +274,7 @@ describe('runImplement — no-op subtask detection', () => {
     }
   });
 
-  it('accepts a rework subtask when only the deliverable the QA feedback names was re-committed this session', async () => {
+  it('accepts a rework subtask when only the deliverable QA listed in files_to_fix was re-committed this session', async () => {
     // QA-rework is scoped to the deliverable QA named; the other declared
     // deliverables stay as committed in an earlier pass. Requiring all of them
     // to change made a correct one-file fix fail verification and burn the cap.
@@ -285,7 +285,7 @@ describe('runImplement — no-op subtask detection', () => {
         qa_flagged: true, completed: false,
       }],
     }));
-    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nFix the headers in results/sweep.log.');
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\n<!-- teamai:files_to_fix ["results/sweep.log"] -->\n');
 
     const worktreeDir = join(project.root, 'worktrees', 'test-task');
 

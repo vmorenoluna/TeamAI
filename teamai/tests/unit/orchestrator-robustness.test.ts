@@ -7643,14 +7643,14 @@ describe('persistCompletedSubtasks', () => {
 // unreachable.
 
 describe('relevantDeliverables', () => {
-  it('is every deliverable when there is no feedback', () => {
-    expect(relevantDeliverables(['a.log', 'b.log'], '')).toEqual(['a.log', 'b.log']);
+  it('is every deliverable when nothing narrows the dispatch (null)', () => {
+    expect(relevantDeliverables(['a.log', 'b.log'], null)).toEqual(['a.log', 'b.log']);
   });
-  it('is only the deliverables the feedback names', () => {
-    expect(relevantDeliverables(['a.log', 'b.log'], 'fix a.log headers')).toEqual(['a.log']);
+  it('is only the deliverables QA says need fixing', () => {
+    expect(relevantDeliverables(['a.log', 'b.log'], ['a.log', 'src/x.scala'])).toEqual(['a.log']);
   });
-  it('is every deliverable when the feedback names none of them', () => {
-    expect(relevantDeliverables(['a.log', 'b.log'], 'prose only')).toEqual(['a.log', 'b.log']);
+  it('is no deliverable when QA asserts no file needs to change ([])', () => {
+    expect(relevantDeliverables(['a.log', 'b.log'], [])).toEqual([]);
   });
 });
 
@@ -7733,7 +7733,7 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
     expect(subtasks[0].completed).toBe(true);
   });
 
-  it('marks a rework subtask completed when only the deliverable the QA feedback names was re-committed this pass', () => {
+  it('marks a rework subtask completed when only the deliverable QA listed in files_to_fix was re-committed this pass', () => {
     // QA-rework is scoped to the deliverable QA named; the other declared files
     // stay as committed in an earlier pass and must not block completion.
     mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
@@ -7748,7 +7748,7 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
         completed: false, qa_flagged: true,
       },
     ] as any[];
-    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nFix the headers in scripts/sweep_logs/a.log');
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\n<!-- teamai:files_to_fix ["scripts/sweep_logs/a.log"] -->\n');
 
     const execGitCapture = vi.fn(() => 'scripts/sweep_logs/a.log\n');
     const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
