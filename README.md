@@ -27,7 +27,7 @@ TeamAI is a desktop app that runs several [Claude Code](https://docs.anthropic.c
 
 ## Install
 
-Download a build from [Releases](https://github.com/vmorenoluna/TeamAI/releases): Windows (`.exe` installer), macOS (`.dmg`), or Linux (`.AppImage` / `.deb`). See [Auto-Updates](#auto-updates) for which platforms update themselves, and for the first-launch warnings you'll see on unsigned builds.
+Download a build from [Releases](https://github.com/vmorenoluna/TeamAI/releases): Windows (`.exe` installer), macOS (`.dmg`), or Linux (`.AppImage`). See [Auto-Updates](#auto-updates) for which platforms update themselves, and for the first-launch warnings you'll see on unsigned builds.
 
 To run from source instead, see [Quick Start](#quick-start).
 
@@ -82,7 +82,6 @@ Packaged builds from [Releases](https://github.com/vmorenoluna/TeamAI/releases) 
 | Windows | Portable zip | ❌ (re-download manually) |
 | macOS (unsigned) | `.dmg` / `.zip` | ❌ (download each release manually) |
 | Linux | AppImage | ✅ |
-| Linux | `.deb` | ❌ (re-download manually) |
 
 Builds aren't code-signed yet, so the first launch may show a warning:
 - **Windows**: SmartScreen. Click "More info", then "Run anyway".
@@ -132,7 +131,7 @@ npm run test:all
 | `npm run build:server` | Bundle the custom server with esbuild |
 | `npm run electron:build` | Windows installer (NSIS + zip) |
 | `npm run electron:build:mac` | macOS installer (DMG + zip) |
-| `npm run electron:build:linux` | Linux packages (AppImage + deb) |
+| `npm run electron:build:linux` | Linux package (AppImage) |
 | `npm run electron:build:all` | All three targets on this machine |
 
 Build each platform on that platform: native dependencies (`sharp`, `esbuild`, `node-pty`) can't be cross-compiled, so `electron:build:all` only produces a working build for the host OS. Use separate per-platform CI jobs for real multi-platform releases. The build also replaces Next's absolute-path symlink for `node-pty` with a portable proxy under `external-shims/` so the packaged app can resolve it. Outputs land in `dist-electron/`.
