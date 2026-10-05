@@ -693,6 +693,31 @@ export function cleanQaFlaggedMarkers(pipeline: ImplementPipeline): void {
 }
 
 /**
+ * The `files_to_create` paths a dispatch must freshly (re)commit — one rule for
+ * every pass. Freshness exists to reject stale evidence the dispatch was meant
+ * to produce, so only the deliverables the current dispatch is actually about
+ * count. With no feedback (the first pass) every deliverable is relevant; on a
+ * rework, the deliverables the feedback names are, and the others legitimately
+ * stay as committed earlier. Feedback naming none of them (e.g. prose-only)
+ * leaves all relevant.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export function relevantDeliverables(filesToCreate: string[], feedbackText: string): string[] {
+  const named = filesToCreate.filter(f => feedbackText.includes(f));
+  return named.length > 0 ? named : filesToCreate;
+}
+
+/** Text of the QA / human feedback driving the current rework ('' on a first pass). */
+function readReworkFeedbackText(specPath: string): string {
+  let text = '';
+  for (const name of ['qa_feedback.md', 'human_feedback.md']) {
+    try { text += readFileSync(path.join(specPath, name), 'utf-8') + '\n'; } catch { /* absent on a first pass */ }
+  }
+  return text;
+}
+
+/**
  * Reconcile stale `completed: false` flags against what's actually on disk,
  * right before the implement-completeness gate reads them.
  *
@@ -751,6 +776,7 @@ export function reconcileSubtaskCompletionFromDeliverables(
   let changed = false;
   const newlyCompletedIds: number[] = [];
 
+  const feedbackText = readReworkFeedbackText(specPath);
   let changedFiles: string[] | null = null;
   if (passStartHead && execGitCapture) {
     try {
@@ -761,13 +787,8 @@ export function reconcileSubtaskCompletionFromDeliverables(
   for (const s of subtasks) {
     if (s.completed || s.id === 9999 || !s.files_to_create?.length) continue;
     const allPresent = s.files_to_create.every(f => existsSync(path.join(cwd, f)));
-    // A QA-rework subtask is deliberately narrow: QA names the one deliverable
-    // that is wrong and the other declared files stay as committed in an earlier
-    // pass. Requiring ALL of them to be re-committed is unsatisfiable, so one
-    // re-committed deliverable proves the rework ran.
-    const allFresh = changedFiles === null || (s.qa_flagged
-      ? s.files_to_create.some(f => changedFiles!.includes(f))
-      : s.files_to_create.every(f => changedFiles!.includes(f)));
+    const allFresh = changedFiles === null
+      || relevantDeliverables(s.files_to_create, feedbackText).every(f => changedFiles!.includes(f));
     if (allPresent && allFresh) {
       s.completed = true;
       changed = true;
@@ -1416,15 +1437,12 @@ export async function runSubtaskSession(
     // five paths — untouched this session, carrying three-day-old evidence —
     // still passed existsSync.
     const requireFreshness = preSessionHead !== '';
-    // QA-rework exception (qa_flagged): rework is scoped to what QA named, so
-    // the other declared deliverables legitimately stay untouched from the
-    // earlier pass that produced them. Accept the subtask when every file
-    // exists and at least one was re-committed this session; the strict
-    // per-file rule would fail a correct fix that touched 1 of N deliverables
-    // and then burn the retry cap on no-op re-dispatches.
-    const reworkFresh = !!subtask.qa_flagged
-      && subtask.files_to_create.some(f => sessionChangedFiles.includes(f));
-    const isFreshFile = (f: string) => !requireFreshness || reworkFresh || sessionChangedFiles.includes(f);
+    // Only the deliverables this dispatch is about must be fresh (see
+    // relevantDeliverables): on a rework, QA names the file(s) to fix and the
+    // other declared deliverables stay as committed earlier — demanding they
+    // change too is unsatisfiable and burns the retry cap on no-op re-dispatches.
+    const mustBeFresh = new Set(relevantDeliverables(subtask.files_to_create, readReworkFeedbackText(pipeline.specPath)));
+    const isFreshFile = (f: string) => !requireFreshness || !mustBeFresh.has(f) || sessionChangedFiles.includes(f);
     for (const file of subtask.files_to_create) {
       const exists = existsSync(path.join(cwd, file));
       const isFresh = isFreshFile(file);
