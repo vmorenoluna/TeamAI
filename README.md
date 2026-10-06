@@ -83,9 +83,19 @@ Packaged builds from [Releases](https://github.com/vmorenoluna/TeamAI/releases) 
 | macOS (unsigned, Apple Silicon) | `.dmg` / `.zip` | ❌ (download each release manually) |
 | Linux | AppImage | ✅ |
 
-Builds aren't code-signed yet, so the first launch may show a warning:
+Builds aren't code-signed or notarized yet, so macOS may block the first launch. macOS builds are for Apple Silicon (M-series) Macs; Intel Macs are not supported yet. Unsigned builds do not support in-app updates; download new releases manually.
+
 - **Windows**: SmartScreen. Click "More info", then "Run anyway".
-- **macOS**: Gatekeeper. Control-click the app and choose "Open" on first launch. Unsigned builds do not support in-app updates; download new releases manually. macOS builds are for Apple Silicon (M-series) Macs; Intel Macs are not supported yet.
+- **macOS — unidentified developer / Apple can't check the app**: Control-click the app and choose **Open**, then confirm.
+- **macOS — “TeamAI is damaged and can't be opened. You should move it to the Bin/Trash”**: this can occur with downloaded unsigned builds, but can also indicate that the app was altered or corrupted. Only if you downloaded it from the official [TeamAI Releases](https://github.com/vmorenoluna/TeamAI/releases) page and trust that copy, you can try removing the quarantine attribute from that one app bundle in Terminal:
+
+  ```bash
+  sudo xattr -dr com.apple.quarantine "/Applications/TeamAI.app"
+  ```
+
+  If you installed TeamAI somewhere else, replace the path with the actual `TeamAI.app` location. This removes macOS quarantine metadata from that app bundle; it does **not** verify the download, sign or notarize the app, or make other apps trusted. Do not disable Gatekeeper globally. If the app still will not open, stop and contact the project maintainer rather than bypassing additional security checks.
+
+A proper fix for these warnings is Developer ID code signing and Apple notarization; until those are configured, these manual steps may be needed for each downloaded release.
 
 ## Development
 
