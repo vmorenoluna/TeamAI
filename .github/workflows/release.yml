@@ -98,6 +98,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Smoke test packaged app
+        run: node scripts/smoke-test-release-package.mjs
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -137,6 +140,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Skip code signing and notarization (requires Apple Developer account)
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Smoke test packaged app
+        run: node scripts/smoke-test-release-package.mjs
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
@@ -180,6 +186,9 @@ jobs:
         run: npx electron-builder --linux --publish=never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke test packaged app
+        run: node scripts/smoke-test-release-package.mjs
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
