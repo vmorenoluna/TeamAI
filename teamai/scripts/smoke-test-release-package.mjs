@@ -58,9 +58,6 @@ export function checkPackagedApp(appRoot) {
   if (!isDirectory(serverRoot)) {
     throw new Error(`Packaged app is missing .next/server: ${appRoot}`);
   }
-  if (!isDirectory(shimsRoot)) {
-    throw new Error(`Packaged app is missing external-shims: ${appRoot}`);
-  }
 
   const serverFiles = listServerFiles(serverRoot);
   const referencedShimNames = new Set();
@@ -70,12 +67,11 @@ export function checkPackagedApp(appRoot) {
       referencedShimNames.add(match[1]);
     }
   }
-  if (referencedShimNames.size === 0) {
-    throw new Error(`Next.js server bundle references no generated external shims: ${serverRoot}`);
-  }
-
-  const shimEntries = readdirSync(shimsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory());
+  // Some platform builds have no native externals and therefore correctly
+  // produce neither shim references nor an external-shims directory.
+  const shimEntries = isDirectory(shimsRoot)
+    ? readdirSync(shimsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory())
+    : [];
   const shimNames = new Set(shimEntries.map((entry) => entry.name));
   const failures = [];
   for (const shimName of referencedShimNames) {
