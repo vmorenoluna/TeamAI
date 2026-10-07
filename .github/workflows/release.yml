@@ -90,16 +90,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Next.js
-        run: npm run build
-
-      - name: Build server bundle
-        run: npm run build:server
+      - name: Build Next.js, external shims, and server bundle
+        run: npm run build:electron
 
       - name: Package Electron (Windows)
         run: npx electron-builder --win --publish=never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke test packaged app
+        run: node scripts/smoke-test-release-package.mjs
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -131,11 +131,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Next.js
-        run: npm run build
-
-      - name: Build server bundle
-        run: npm run build:server
+      - name: Build Next.js, external shims, and server bundle
+        run: npm run build:electron
 
       - name: Package Electron (macOS)
         run: npx electron-builder --mac --arm64 --publish=never
@@ -143,6 +140,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Skip code signing and notarization (requires Apple Developer account)
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Smoke test packaged app
+        run: node scripts/smoke-test-release-package.mjs
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
@@ -179,16 +179,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Next.js
-        run: npm run build
-
-      - name: Build server bundle
-        run: npm run build:server
+      - name: Build Next.js, external shims, and server bundle
+        run: npm run build:electron
 
       - name: Package Electron (Linux)
         run: npx electron-builder --linux --publish=never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke test packaged app
+        run: node scripts/smoke-test-release-package.mjs
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
