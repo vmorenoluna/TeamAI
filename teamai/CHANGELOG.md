@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-10-08
+
+- Allow packaged macOS and Linux builds without generated external shims to pass release validation; continue to reject any package that omits a shim its server bundle requires
+
 ## [0.1.1] — 2026-10-08
 
 - Fix packaged Windows, macOS, and Linux apps returning HTTP 500 when Next.js could not resolve generated external-module shims; release builds now verify shims before uploading artifacts
