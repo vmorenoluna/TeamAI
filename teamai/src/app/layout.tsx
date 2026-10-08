@@ -17,6 +17,28 @@ import { checkTools } from '@/app/actions/tools';
 import { getRefinementSuggestions } from '@/app/actions/role-refinement';
 import { getActiveTerminals } from '@/app/actions/terminals';
 import { TerminalSessionsProvider } from '@/components/terminal-sessions-provider';
+import { AppVersionFooter } from '@/components/app-version-footer';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { execSync } from 'child_process';
+import { unstable_cache } from 'next/cache';
+
+const getVersionBuildBadge = unstable_cache(
+  async () => {
+    let version = '';
+    let sha = '';
+    try {
+      const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf-8'));
+      version = String(pkg.version ?? '');
+      sha = (execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim().slice(0, 7) || '');
+    } catch {
+      // Leave both empty — the footer renders nothing when version is unknown.
+    }
+    return { version, sha };
+  },
+  ['teamai-version-badge'],
+  { revalidate: 0 },
+);
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
@@ -36,6 +58,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const onboardingState = getOnboardingState();
   const needsOnboarding = !onboardingState.completed && projects.length === 0;
   const activeTerminals = activeProject ? await getActiveTerminals() : [];
+
+  const { version: footerVersion, sha: footerSha } = await getVersionBuildBadge();
 
   // Role Refinement Assistant — pending-suggestion count for the sidebar badge.
   // Only fetched when a project is active (getActiveProjectPath throws otherwise).
@@ -79,9 +103,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </TerminalSessionsProvider>
           </div>
         </div>
-        {/* Global dialog: shown when container mode is enabled but Docker is not running */}
-        <ContainerDockerMissingDialog projectPath={activeProject?.path ?? null} />
-      </body>
-    </html>
-  );
+      {/* Global dialog: shown when container mode is enabled but Docker is not running */}
+      <ContainerDockerMissingDialog projectPath={activeProject?.path ?? null} />
+      {footerVersion && (
+        <AppVersionFooter initialVersion={footerVersion} initialSha={footerSha} />
+      )}
+    </body>
+  </html>
+);
 }
