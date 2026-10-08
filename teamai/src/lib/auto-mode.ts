@@ -8,10 +8,9 @@ import { join } from 'path';
 import { projectStore } from './project-store';
 import { getToolPath } from './tool-checker';
 import { log, error as logError, warn as logWarn } from './logger';
-import { TERMINAL_PHASES, PAUSED_PHASES } from '@/constants/phases';
 import { computePipelineConfig } from './orchestrator/helpers';
 import { buildTicketMessageForPipeline } from './orchestrator/artifact-commit';
-import { isAutoModeEnabled, getAutoModeState } from './auto-mode-state';
+import { isAutoModeEnabled, getAutoModeState, countSlotOccupyingTasks } from './auto-mode-state';
 import { recordAutoProcessed } from './auto-review-store';
 import { ContainerDockerMissingError } from './orchestrator/errors';
 import { getAwaitingReviewReason } from './task-utils';
@@ -336,10 +335,9 @@ function _tick(projectRoot: string, state: AutoProjectState): void {
 
   const allTasks = taskStore.getAll();
 
-  // Count active tasks (running phases: spec, plan, implement, qa-review, merge, create-pr)
-  const activeCount = allTasks.filter(t =>
-    !TERMINAL_PHASES.has(t.phase) && !PAUSED_PHASES.has(t.phase)
-  ).length;
+  // Paused tasks (awaiting-review, create-pr, pr-open) hold their slot until
+  // done/failed — see countSlotOccupyingTasks.
+  const activeCount = countSlotOccupyingTasks(allTasks);
 
   if (activeCount >= state.maxParallel) return;
 
