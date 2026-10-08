@@ -18,16 +18,19 @@ test.describe('Spec Revision — Command Template Verification', () => {
     expect(content, 'qa-review.md should have Step 6 header').toContain('Step 6');
   });
 
-  test('seed project has updated spec.md with Revision Mode', () => {
+  test('seed project has the spec-revise command with the revision workflow', () => {
     const seedDir = getActiveSeedDir();
 
-    const specPath = join(seedDir, '.claude', 'commands', 'spec.md');
-    expect(existsSync(specPath), 'spec.md should exist in seed project').toBe(true);
+    const revisePath = join(seedDir, '.claude', 'commands', 'spec-revise.md');
+    expect(existsSync(revisePath), 'spec-revise.md should exist in seed project').toBe(true);
 
-    const content = readFileSync(specPath, 'utf-8');
-    expect(content, 'spec.md should contain Revision Mode section').toContain('Revision Mode');
-    expect(content, 'spec.md should reference spec_revision_feedback.md').toContain('spec_revision_feedback');
-    expect(content, 'spec.md should mention REVISION prompt').toContain('REVISION');
+    const content = readFileSync(revisePath, 'utf-8');
+    expect(content, 'spec-revise.md should contain the Revision Workflow').toContain('Revision Workflow');
+    expect(content, 'spec-revise.md should reference spec_revision_feedback.md').toContain('spec_revision_feedback');
+
+    // The fresh-spec command no longer carries the revision workflow.
+    const spec = readFileSync(join(seedDir, '.claude', 'commands', 'spec.md'), 'utf-8');
+    expect(spec, 'spec.md should not contain the Revision Workflow').not.toContain('Revision Workflow');
   });
 });
 
