@@ -6,7 +6,7 @@
  * mode is enabled — not to start/stop it.
  */
 import { TaskStore } from './task-store';
-import { TERMINAL_PHASES, PAUSED_PHASES } from '@/constants/phases';
+import { TERMINAL_PHASES } from '@/constants/phases';
 
 /** Mirrors the subset of AutoProjectState from auto-mode.ts that this module needs. */
 interface AutoProjectState {
@@ -20,6 +20,18 @@ function getProjectStates(): Map<string, AutoProjectState> {
   const g = globalThis as unknown as { __autoModeProjectStates?: Map<string, AutoProjectState> };
   if (!g.__autoModeProjectStates) g.__autoModeProjectStates = new Map();
   return g.__autoModeProjectStates;
+}
+
+/**
+ * Count the tasks occupying an auto-mode slot: every task between leaving the
+ * backlog and reaching a terminal phase, including tasks paused in
+ * awaiting-review / create-pr / pr-open. A paused task's branch is not yet on
+ * the base branch, so starting the next backlog task in its slot would spec,
+ * plan and implement against a codebase missing that unmerged work — with
+ * maxParallel 1, auto mode must run tickets strictly one after another.
+ */
+export function countSlotOccupyingTasks(tasks: ReadonlyArray<{ phase: string }>): number {
+  return tasks.filter(t => !TERMINAL_PHASES.has(t.phase)).length;
 }
 
 export function isAutoModeEnabled(projectRoot: string): boolean {
@@ -37,9 +49,7 @@ export function getAutoModeState(projectRoot: string): {
   let activeCount = 0;
   try {
     const taskStore = new TaskStore(projectRoot);
-    activeCount = taskStore.getAll().filter(t =>
-      !TERMINAL_PHASES.has(t.phase) && !PAUSED_PHASES.has(t.phase)
-    ).length;
+    activeCount = countSlotOccupyingTasks(taskStore.getAll());
   } catch { /* taskStore may fail if projectRoot doesn't exist yet */ }
   return { enabled, maxParallel, activeCount };
 }

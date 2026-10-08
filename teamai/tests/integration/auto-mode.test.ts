@@ -425,6 +425,27 @@ describe('Auto Mode Integration', () => {
 
       expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskA);
     });
+
+    it.each(['awaiting-review', 'create-pr', 'pr-open'])(
+      'does not start a backlog task while a %s task holds the only slot',
+      async (pausedPhase) => {
+        // With maxParallel 1, the next ticket must not start until the paused
+        // one is merged — otherwise it is specced against a stale codebase.
+        const { TaskStore } = await import('@/lib/task-store');
+        const store = new TaskStore(testDir);
+        store.updatePhase(taskB, pausedPhase);
+
+        mockOrch.resumeTask.mockClear();
+
+        autoMode.setAutoModeState(testDir, true, 1);
+
+        await new Promise(r => setTimeout(r, 50));
+        expect(mockOrch.resumeTask).not.toHaveBeenCalled();
+
+        const { getAutoModeState } = await import('@/lib/auto-mode-state');
+        expect(getAutoModeState(testDir).activeCount).toBe(1);
+      },
+    );
   });
 
   // ── Dependency Blocking ──────────────────────────────────────────────────
