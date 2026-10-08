@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { ProjectStore } from '@/lib/project-store';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, rmSync, mkdirSync, cpSync } from 'fs';
 import { join } from 'path';
@@ -39,16 +39,35 @@ vi.mock('os', () => ({
   homedir: () => TEST_HOME,
 }));
 
+// ── Isolated defaults ──────────────────────────────────────────────────────
+// Many tests below simulate a TeamAI update by editing (or adding files to)
+// `defaults/commands/`. Doing that to the real checkout races every other
+// test file that reads the templates in parallel — a renderCommand() in an
+// orchestrator test could pick up a half-applied edit. ProjectStore and
+// command-templates resolve `defaults/` from process.cwd(), so this suite runs
+// against its own copy: a private root holding `defaults/`, with cwd pointed
+// at it for the duration of the file.
+const REAL_CWD = process.cwd();
+const ISOLATED_ROOT = join(REAL_CWD, '.teamai-test-defaults-' + randomUUID().slice(0, 8));
+
 describe('ProjectStore', () => {
   let store: ProjectStore;
   let projectDir: string;
   let clean: () => void;
 
+  beforeAll(() => {
+    mkdirSync(ISOLATED_ROOT, { recursive: true });
+    cpSync(join(REAL_CWD, 'defaults'), join(ISOLATED_ROOT, 'defaults'), { recursive: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(ISOLATED_ROOT);
+  });
+
   // Cleanup the mock home directory after ALL tests
   afterAll(() => {
+    vi.mocked(process.cwd).mockRestore();
     if (existsSync(TEST_HOME)) {
       rmSync(TEST_HOME, { recursive: true, force: true });
     }
+    rmSync(ISOLATED_ROOT, { recursive: true, force: true });
   });
 
   beforeEach(() => {

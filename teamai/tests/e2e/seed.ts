@@ -19,6 +19,7 @@ import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rename
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { homedir } from 'os';
+import { listCommandNames, readCommandTemplate } from '../../src/lib/command-templates';
 
 // ── Config ─────────────────────────────────────────────────────────────
 
@@ -521,12 +522,13 @@ async function main(): Promise<void> {
     console.log(`  Copied ${roles.length} role files to .claude/roles/`);
   }
 
-  // Copy default command templates for sync-status testing
+  // Copy default command templates for sync-status testing — written
+  // include-expanded, exactly as ProjectStore.syncDefaults writes them, so the
+  // seeded project starts in sync.
   if (existsSync(defaultCommandsDir)) {
-    const cmds = readdirSync(defaultCommandsDir).filter(f => f.endsWith('.md'));
+    const cmds = listCommandNames(defaultCommandsDir);
     for (const cmd of cmds) {
-      const content = readFileSync(join(defaultCommandsDir, cmd), 'utf-8');
-      writeFileSync(join(SEED_DIR, '.claude', 'commands', cmd), content);
+      writeFileSync(join(SEED_DIR, '.claude', 'commands', `${cmd}.md`), readCommandTemplate(cmd, defaultCommandsDir));
     }
     console.log(`  Copied ${cmds.length} command files to .claude/commands/`);
   }
