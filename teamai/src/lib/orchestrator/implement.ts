@@ -20,6 +20,7 @@ import { rebaseOntoLatestDefault } from './phase-runners';
 import { updateSessionMap, logToOutput } from './helpers';
 import { createOutOfScopeTicketsFromLog } from './out-of-scope-tickets';
 import { humanDirectiveFor, readHumanFeedback } from './human-feedback';
+import { renderCommand } from '../command-templates';
 import { resolveBaseBranch } from '../git-platform';
 import { getUnpushedCommits } from './worktree-ops';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
@@ -979,12 +980,15 @@ export async function runSubtaskSession(
   resumeContext += 'Current: Subtask ' + subtask.id + ': ' + subtask.title + '\n';
   resumeContext += 'Working directory: ' + cwd + ' (this is your git worktree)\n\n';
 
-  const prompt =
+  // QA rework is its own command (implement-fix) — the orchestrator already
+  // knows which mode this is, so the agent never has to infer it.
+  const command = hasQaFeedback ? 'implement-fix' : 'implement';
+  const request =
     humanDirectiveFor(pipeline.specPath, 'coder') +
     promptHeader +
     resumeContext +
     (subtaskFeedback ? subtaskFeedback + '\n---\n' : '') +
-    '/implement Subtask ' + subtask.id + ': ' + subtask.title + '\n\n' +
+    'Subtask ' + subtask.id + ': ' + subtask.title + '\n\n' +
     subtask.description + '\n\n' +
     'Files: ' + subtask.files.join(', ') + '\n\n' +
     criteriaLine + '\n' +
@@ -1018,6 +1022,9 @@ export async function runSubtaskSession(
   let sessionId: string;
   let stallRecoveryHeader = '';
   for (;;) {
+    // Rendered before the session exists, so a template problem can never
+    // leave a spawned session waiting on a message that never comes.
+    const message = renderCommand(command, stallRecoveryHeader + request);
     try {
       sessionId = await processManager.createSession(deps.sessionOpts(coderRole, cwd, pipeline.taskId, subtaskLogFile));
     } catch (err) {
@@ -1030,7 +1037,7 @@ export async function runSubtaskSession(
       updateSessionMap(pipeline.specPath, String(subtask.id), sessionId);
     });
 
-    processManager.sendMessage(sessionId, stallRecoveryHeader + prompt);
+    processManager.sendMessage(sessionId, message);
 
     try {
       await deps.waitForCompletion(sessionId);
@@ -1181,7 +1188,7 @@ export async function runSubtaskSession(
   // its `files` array is only a best-effort union seeded from the real
   // subtasks' own declared files, not an authoritative scope, because
   // criterion-matching already found nothing to target it against. Its real
-  // scope is whatever qa_feedback.md names (implement.md's QA Rework Mode:
+  // scope is whatever qa_feedback.md names (implement-fix.md's QA Rework Mode:
   // "Fix every listed issue. That's the entire scope."), which routinely
   // includes paths no real subtask's `files`/`files_to_create` ever listed —
   // e.g. deliverables owned by a subtask QA's criterion-matcher didn't flag.

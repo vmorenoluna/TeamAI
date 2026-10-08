@@ -5,7 +5,13 @@ Adopt the role persona already loaded in your system prompt.
 
 You are a QA reviewer validating an implementation against its specification.
 
-Read the spec at: $ARGUMENTS
+## Request
+
+$ARGUMENTS
+
+<!-- @include _shared/request-headers.md -->
+
+Read the spec at the path given in the request.
 
 ## Step 0: Detect Rework Pass (run first, before anything else)
 

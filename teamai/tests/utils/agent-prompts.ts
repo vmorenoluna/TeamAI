@@ -9,12 +9,13 @@
  * the functions below, so a change to the delivery mechanism updates this
  * file and leaves every assertion in those suites untouched.
  *
- * Current encoding: a slash command (or a bare `REVISION:` / `REPLAN:` marker)
- * embedded in the message, with the instructions for every mode of a phase
- * living in that phase's single command file.
+ * Current encoding: the orchestrator renders one command template per work
+ * mode (src/lib/command-templates.ts) and sends the rendered text; its first
+ * line is the template's `<!-- .claude/commands/<mode>.md -->` header and the
+ * orchestrator's request is substituted for `$ARGUMENTS`. The spec-summary
+ * retry and cherry-pick conflict resolution are still described inline.
  */
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { readCommandTemplate } from '../../src/lib/command-templates';
 
 /** Every distinct kind of work the orchestrator hands to an agent session. */
 export type AgentMode =
@@ -29,19 +30,38 @@ export type AgentMode =
   | 'merge'
   | 'resolve-cherry-pick';
 
+/** Command template that defines each mode's instructions, or null for modes
+ *  the orchestrator currently describes inline instead of via a command. */
+const MODE_COMMAND: Record<AgentMode, string | null> = {
+  'spec': 'spec',
+  'spec-revise': 'spec-revise',
+  'spec-summary': null,
+  'plan': 'plan',
+  'plan-revise': 'plan-revise',
+  'implement': 'implement',
+  'implement-fix': 'implement-fix',
+  'qa-review': 'qa-review',
+  'merge': 'merge',
+  'resolve-cherry-pick': null,
+};
+
+const COMMAND_HEADER = /^<!-- \.claude\/commands\/([a-z-]+)\.md -->\n/;
+
+/** Name of the command template a message was rendered from, if any. */
+function renderedCommand(message: string): string | null {
+  return COMMAND_HEADER.exec(message)?.[1] ?? null;
+}
+
 /** Classify the work mode an orchestrator → agent message selects. */
 export function promptMode(message: string): AgentMode {
+  const command = renderedCommand(message);
+  if (command) {
+    const mode = (Object.keys(MODE_COMMAND) as AgentMode[]).find(m => MODE_COMMAND[m] === command);
+    if (mode) return mode;
+    throw new Error(`Message renders unknown command "${command}"`);
+  }
   if (message.includes('Resolve cherry-pick conflicts')) return 'resolve-cherry-pick';
   if (message.includes('It has no `spec_summary.md` alongside it')) return 'spec-summary';
-  if (message.includes('REVISION: ')) return 'spec-revise';
-  if (message.includes('REPLAN: ')) return 'plan-revise';
-  if (/(^|\n)\/spec /.test(message)) return 'spec';
-  if (/(^|\n)\/plan /.test(message)) return 'plan';
-  if (/(^|\n)\/implement Subtask /.test(message)) {
-    return message.includes('## ⚠️ QA FEEDBACK') ? 'implement-fix' : 'implement';
-  }
-  if (/(^|\n)\/qa-review /.test(message)) return 'qa-review';
-  if (/(^|\n)\/merge /.test(message)) return 'merge';
   throw new Error('Unclassifiable agent message:\n' + message.slice(0, 400));
 }
 
@@ -52,27 +72,25 @@ export function promptMode(message: string): AgentMode {
  * Content and header assertions are made against this.
  */
 export function requestOf(message: string): string {
-  return message;
+  const command = renderedCommand(message);
+  if (!command) return message;
+  const template = readCommandTemplate(command);
+  const parts = template.split('$ARGUMENTS');
+  if (parts.length === 1) {
+    const prefix = `${template.replace(/\s+$/, '')}\n\nARGUMENTS: `;
+    if (!message.startsWith(prefix)) throw new Error(`Message is not a rendering of "${command}"`);
+    return message.slice(prefix.length);
+  }
+  if (parts.length !== 2) throw new Error(`"${command}" uses $ARGUMENTS more than once`);
+  const [prefix, suffix] = parts;
+  if (!message.startsWith(prefix) || !message.endsWith(suffix)) {
+    throw new Error(`Message is not a rendering of "${command}"`);
+  }
+  return message.slice(prefix.length, message.length - suffix.length);
 }
-
-/** Command file that defines each mode's instructions, or null for modes
- *  the orchestrator currently describes inline instead of via a command. */
-const MODE_COMMAND_FILE: Record<AgentMode, string | null> = {
-  'spec': 'spec.md',
-  'spec-revise': 'spec.md',
-  'spec-summary': null,
-  'plan': 'plan.md',
-  'plan-revise': 'plan.md',
-  'implement': 'implement.md',
-  'implement-fix': 'implement.md',
-  'qa-review': 'qa-review.md',
-  'merge': 'merge.md',
-  'resolve-cherry-pick': null,
-};
 
 /** The instruction text that governs a mode, or null when none exists. */
 export function commandInstructions(mode: AgentMode): string | null {
-  const file = MODE_COMMAND_FILE[mode];
-  if (!file) return null;
-  return readFileSync(join(process.cwd(), 'defaults', 'commands', file), 'utf-8');
+  const command = MODE_COMMAND[mode];
+  return command ? readCommandTemplate(command) : null;
 }

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vites
 import { ProjectStore } from '@/lib/project-store';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, rmSync, mkdirSync, cpSync } from 'fs';
 import { join } from 'path';
+import { readCommandTemplate } from '@/lib/command-templates';
 import { randomUUID } from 'crypto';
 
 // ── Windows file-lock retry helper ──────────────────────────────────────────
@@ -243,7 +244,8 @@ describe('ProjectStore', () => {
 
       // The project file should now match the new default
       const updatedContent = readFileSync(implPath, 'utf-8');
-      expect(updatedContent).toBe(modifiedDefault);
+      // Synced include-expanded, i.e. exactly as the orchestrator renders it
+      expect(updatedContent).toBe(readCommandTemplate('implement'));
       expect(updatedContent).toContain('Updated in TeamAI v2.0');
     } finally {
       // Restore the default file
@@ -272,7 +274,7 @@ describe('ProjectStore', () => {
       store.add(projectDir, 'Test Project');
 
       const currentContent = readFileSync(implPath, 'utf-8');
-      expect(currentContent).toBe(modifiedDefault);
+      expect(currentContent).toBe(readCommandTemplate('implement'));
       expect(currentContent).toContain('Updated in TeamAI v2.0');
       // Customization is gone — commands are TeamAI-owned, not user-owned.
       expect(currentContent).not.toContain('My custom additions');
@@ -305,6 +307,20 @@ describe('ProjectStore', () => {
     }
   });
 
+  it('syncDefaults writes commands include-expanded and never copies the _shared fragments', () => {
+    store.add(projectDir, 'Test Project');
+    const commandsDir = join(projectDir, '.claude', 'commands');
+
+    expect(existsSync(join(commandsDir, '_shared'))).toBe(false);
+    for (const name of ['implement', 'implement-fix', 'spec', 'spec-revise', 'plan', 'plan-revise']) {
+      const content = readFileSync(join(commandsDir, `${name}.md`), 'utf-8');
+      expect(content).toBe(readCommandTemplate(name));
+      expect(content).not.toContain('@include');
+    }
+    // Checksums are over the expanded content, so a second sync is a no-op.
+    expect(store.syncDefaults(projectDir)).toEqual([]);
+  });
+
   it('syncDefaults handles projects with missing command files', () => {
     // Manually create project dirs without calling scaffold
     mkdirSync(join(projectDir, '.claude', 'commands'), { recursive: true });
@@ -320,8 +336,7 @@ describe('ProjectStore', () => {
 
     // The already-existing implement.md should NOT be overwritten (no baseline — preserved)
     const implContent = readFileSync(join(projectDir, '.claude', 'commands', 'implement.md'), 'utf-8');
-    const defaultContent = readFileSync(defaultImplSrc, 'utf-8');
-    expect(implContent).toBe(defaultContent);
+    expect(implContent).toBe(readCommandTemplate('implement'));
   });
   // ── syncDefaults dryRun edge cases ───────────────────────────────
 

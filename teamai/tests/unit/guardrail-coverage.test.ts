@@ -27,6 +27,14 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { expandCommandIncludes } from '../../src/lib/command-templates';
+
+/** Read an agent-facing file as agents receive it: command templates with
+ *  their `_shared/` includes expanded (see src/lib/command-templates.ts). */
+function readAgentFile(filePath: string): string {
+  const raw = readFileSync(filePath, 'utf-8');
+  return filePath.replace(/\\/g, '/').includes('/defaults/commands/') ? expandCommandIncludes(raw) : raw;
+}
 
 // ---------------------------------------------------------------------------
 // Data: one entry per guardrail, with the file it must appear in and one or
@@ -82,8 +90,8 @@ const GUARDRAILS: GuardrailCheck[] = [
   {
     id: 7,
     name: 'Cleanup-Only Rework Mode',
-    description: 'implement.md QA Rework — mechanical fixes without spec re-read or test suite',
-    file: 'defaults/commands/implement.md',
+    description: 'implement-fix.md QA Rework — mechanical fixes without spec re-read or test suite',
+    file: 'defaults/commands/implement-fix.md',
     signatures: ['cleanup-only rework mode', 'zero source code changes'],
   },
   {
@@ -274,7 +282,7 @@ describe('Guardrail Coverage', () => {
       const filePath = join(root, g.file);
       expect(existsSync(filePath), `File not found: ${filePath}`).toBe(true);
 
-      const content = readFileSync(filePath, 'utf-8').toLowerCase();
+      const content = readAgentFile(filePath).toLowerCase();
       const found = g.signatures.some(sig => content.includes(sig.toLowerCase()));
 
       expect(
@@ -302,7 +310,7 @@ describe('Guardrail Coverage', () => {
       const filePath = join(root, ce.file);
       expect(existsSync(filePath), `File not found: ${filePath}`).toBe(true);
 
-      const content = readFileSync(filePath, 'utf-8').toLowerCase();
+      const content = readAgentFile(filePath).toLowerCase();
       const found = ce.signatures.some(sig => content.includes(sig.toLowerCase()));
 
       expect(
@@ -331,7 +339,7 @@ describe('Contract placement — commands, not roles', () => {
       it(`contract #${c.id} "${c.name}" is present in ${file}`, () => {
         const filePath = join(root, file);
         expect(existsSync(filePath), `File not found: ${filePath}`).toBe(true);
-        const content = readFileSync(filePath, 'utf-8').toLowerCase();
+        const content = readAgentFile(filePath).toLowerCase();
         const found = c.signatures.some(sig => content.includes(sig.toLowerCase()));
         expect(
           found,
@@ -345,7 +353,7 @@ describe('Contract placement — commands, not roles', () => {
       it(`contract #${c.id} "${c.name}" is NOT in ${file}`, () => {
         const filePath = join(root, file);
         expect(existsSync(filePath), `File not found: ${filePath}`).toBe(true);
-        const content = readFileSync(filePath, 'utf-8').toLowerCase();
+        const content = readAgentFile(filePath).toLowerCase();
         const drifted = c.signatures.filter(sig => content.includes(sig.toLowerCase()));
         expect(
           drifted,

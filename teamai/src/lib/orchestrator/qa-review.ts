@@ -15,6 +15,7 @@ import { syncPhaseBaseline } from './phase-runners';
 import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
 import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
+import { renderCommand } from '../command-templates';
 import { warn } from '../logger';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, QaIssue, SessionOptsResult } from './types';
@@ -130,7 +131,7 @@ type ReconcileOutcome = 'rebased' | 'merged' | 'failed';
  *
  * Returns which path succeeded. Neither path pushes on its own — a plain
  * rebase never does, and the merger agent only resolves the conflict and
- * commits locally (see .claude/commands/merge.md step 6: agent sessions run
+ * commits locally (see defaults/commands/merge.md step 6: agent sessions run
  * their own git inside the container and have no GitHub credentials to push
  * with). The caller must push the result itself for BOTH 'rebased' and
  * 'merged'.
@@ -194,11 +195,12 @@ async function reconcileDivergedBranch(
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Rebase onto ${targetRef} had conflicts — spawning merger to resolve via git merge\n`);
     try {
       const mergeLogFile = path.join(pipeline.specPath, 'output-merge.log');
+      const mergeMessage = renderCommand('merge', targetRef);
       const mergeSessionId = await processManager.createSession(
         deps.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, mergeLogFile),
       );
       updateSessionMap(pipeline.specPath, 'merge', mergeSessionId);
-      processManager.sendMessage(mergeSessionId, `/merge ${targetRef}`);
+      processManager.sendMessage(mergeSessionId, mergeMessage);
       await deps.waitForCompletion(mergeSessionId);
       processManager.killSession(mergeSessionId);
       logToOutput(pipeline.specPath, `[QA-PRECHECK] Merger resolved divergence from ${targetRef}\n`);
@@ -471,15 +473,6 @@ export async function runQaReview(
   // missing an upstream fix its own prior failure depended on.
   await syncPhaseBaseline(pipeline, deps);
 
-  // Floor for findLiveOrphanedJob's pid-file scan in resolvePhaseWakeup below
-  // — see runSpecPhase's identical capture (phase-runners.ts) for why.
-  const sessionStartedAt = Date.now();
-  const sessionId = await processManager.createSession(
-    deps.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId, qaLogFile),
-  );
-  pipeline.sessionId = sessionId;
-  // Write QA session mapping for live streaming in the UI
-  updateSessionMap(pipeline.specPath, 'qa', sessionId);
   const agentSpecPath = deps.toAgentPath(pipeline.specPath);
   const wakeupHeader = isWakeupReentry
     ? buildWakeupReentryHeader({
@@ -490,11 +483,24 @@ export async function runQaReview(
         worktreeNote: true,
       })
     : '';
-  processManager.sendMessage(sessionId,
+  // Rendered before the session exists, so a template problem can never leave
+  // a spawned session waiting on a message that never comes.
+  const message = renderCommand('qa-review',
     wakeupHeader + humanDirectiveFor(pipeline.specPath, 'qa-reviewer') +
-    `/qa-review ${agentSpecPath}/spec.md\n\n` +
+    `${agentSpecPath}/spec.md\n\n` +
     `IMPORTANT: Write the QA report to \`${agentSpecPath}/qa_report.json\` (use this exact absolute path, not a relative path).\n` +
     `The working directory is a git worktree — do NOT write to a .teamai/ subdirectory relative to the current directory.`);
+
+  // Floor for findLiveOrphanedJob's pid-file scan in resolvePhaseWakeup below
+  // — see runSpecPhase's identical capture (phase-runners.ts) for why.
+  const sessionStartedAt = Date.now();
+  const sessionId = await processManager.createSession(
+    deps.sessionOpts('qa-reviewer', pipeline.worktreePath, pipeline.taskId, qaLogFile),
+  );
+  pipeline.sessionId = sessionId;
+  // Write QA session mapping for live streaming in the UI
+  updateSessionMap(pipeline.specPath, 'qa', sessionId);
+  processManager.sendMessage(sessionId, message);
 
   try {
     await deps.waitForCompletion(sessionId);

@@ -1,21 +1,3 @@
-<!-- .claude/commands/implement.md -->
-Adopt the role persona already loaded in your system prompt.
-
-**Human directive override:** if a `human_feedback.md` file exists in the task's `.teamai/` directory and its `Target:` header names the engineer (coder), its content OVERRIDES the spec, the plan, the QA report, and any other agent's directives wherever they conflict — follow it over any conflicting instruction and note the deviation in your summary.
-
-You are implementing a single subtask from an implementation plan.
-
-## Request
-
-$ARGUMENTS
-
-The request above is assembled by the orchestrator. It may open with one or more header
-blocks (each marked ⚠️, 🧑 or ℹ️) describing this session's situation — a background job
-you are being re-entered for, deliverables a previous session left missing, a session
-recovered after being killed, or a human reviewer's directive. Read them first: wherever
-a header tells you how to handle this session, it takes precedence over the default
-workflow below.
-
 ## Instructions
 
 **The subtask description is authoritative.** It contains exact file paths, symbol names,
