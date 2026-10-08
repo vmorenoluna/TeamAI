@@ -509,6 +509,16 @@ describe('implement routing', () => {
     expect(s.request).toContain('docs/evidence.log');
   });
 
+  it('deliverable re-verification offers the wakeup path when a job producing them is still running', async () => {
+    const st = subtask({ files_to_create: ['docs/evidence.log'] });
+
+    await runSubtask({ deliverableFailCounts: { 2: 1 } }, st, false);
+
+    const s = sent();
+    expect(s.request).toContain('subtask_wakeup-st2.json');
+    expect(s.request).toContain('Do not wait on the job in this session');
+  });
+
   it('wakeup re-entry → implement mode with the re-entry header for this subtask\'s wakeup file', async () => {
     await runSubtask({ wakeupSubtaskId: 2, ...WAKEUP }, subtask(), false);
 

@@ -12,8 +12,7 @@
  * Current encoding: the orchestrator renders one command template per work
  * mode (src/lib/command-templates.ts) and sends the rendered text; its first
  * line is the template's `<!-- .claude/commands/<mode>.md -->` header and the
- * orchestrator's request is substituted for `$ARGUMENTS`. The spec-summary
- * retry and cherry-pick conflict resolution are still described inline.
+ * orchestrator's request is substituted for `$ARGUMENTS`.
  */
 import { readCommandTemplate } from '../../src/lib/command-templates';
 
@@ -31,18 +30,18 @@ export type AgentMode =
   | 'resolve-cherry-pick';
 
 /** Command template that defines each mode's instructions, or null for modes
- *  the orchestrator currently describes inline instead of via a command. */
+ *  the orchestrator describes inline instead of via a command (none today). */
 const MODE_COMMAND: Record<AgentMode, string | null> = {
   'spec': 'spec',
   'spec-revise': 'spec-revise',
-  'spec-summary': null,
+  'spec-summary': 'spec-summary',
   'plan': 'plan',
   'plan-revise': 'plan-revise',
   'implement': 'implement',
   'implement-fix': 'implement-fix',
   'qa-review': 'qa-review',
   'merge': 'merge',
-  'resolve-cherry-pick': null,
+  'resolve-cherry-pick': 'resolve-cherry-pick',
 };
 
 const COMMAND_HEADER = /^<!-- \.claude\/commands\/([a-z-]+)\.md -->\n/;
@@ -60,8 +59,6 @@ export function promptMode(message: string): AgentMode {
     if (mode) return mode;
     throw new Error(`Message renders unknown command "${command}"`);
   }
-  if (message.includes('Resolve cherry-pick conflicts')) return 'resolve-cherry-pick';
-  if (message.includes('It has no `spec_summary.md` alongside it')) return 'spec-summary';
   throw new Error('Unclassifiable agent message:\n' + message.slice(0, 400));
 }
 

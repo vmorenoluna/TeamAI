@@ -114,6 +114,10 @@ turns in this pipeline — a `Monitor` call that outlives your remaining turn bu
 your session exactly like any other silent timeout, and narrating that you'll "wait for
 the completion notification" accomplishes nothing if `phase_wakeup.json` was never
 written. The file is the only thing the orchestrator's resume mechanism understands.
+Shell polling loops count as waiting inline too — `while …; do sleep …; done`, a
+`for … sleep …` loop, or a series of long `sleep` calls, whether foreground or
+backgrounded: they burn your session (or die with it) and never resume you. Once the
+wakeup file is written, end the session.
 
 Then end your session normally without writing `spec.md` — the orchestrator will NOT
 treat this as a missing spec, it pauses instead. On re-entry (headed

@@ -492,18 +492,19 @@ export async function runSpecPhase(
       `\n[SPEC] Spec phase produced no spec_summary.md — retrying with a focused follow-up session.\n`);
     warn('spec', `Spec phase produced no spec_summary.md for ${pipeline.taskId} — retrying once before parking`);
 
+    // Same guidelines as the spec command's own summary step — both include
+    // _shared/spec-summary-guidelines.md, so the two can't drift apart.
+    const retryMessage = renderCommand('spec-summary',
+      `Spec: \`${agentSpecPath}/spec.md\`\n` +
+      `Write: \`${agentSpecPath}/spec_summary.md\`\n` +
+      `Do not modify spec.md.`);
     const retrySessionId = await processManager.createSession(
       deps.sessionOpts('analyst', deps.projectRoot, pipeline.taskId, specLogFile),
     );
     pipeline.sessionId = retrySessionId;
     deps.savePipelineState(pipeline);
     updateSessionMap(pipeline.specPath, 'spec', retrySessionId);
-    processManager.sendMessage(retrySessionId,
-      `Read the spec at \`${agentSpecPath}/spec.md\`. It has no \`spec_summary.md\` alongside it — ` +
-      `write \`${agentSpecPath}/spec_summary.md\` now: roughly 3-8 lines of plain prose capturing ` +
-      `the spec's intent and the key decisions made (the "why" behind non-obvious choices, notable ` +
-      `formulas/thresholds and why, how tricky edge cases are handled) — not a restated requirements ` +
-      `list. Do not modify spec.md.`);
+    processManager.sendMessage(retrySessionId, retryMessage);
     await deps.waitForCompletion(retrySessionId);
     processManager.killSession(retrySessionId);
 

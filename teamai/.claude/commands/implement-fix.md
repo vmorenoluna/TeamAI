@@ -305,6 +305,10 @@ your session exactly like any other silent timeout, and narrating that you'll "w
 the completion notification" accomplishes nothing if `subtask_wakeup-st<ID>.json` was
 never written. The file is the only thing the orchestrator's resume mechanism
 understands.
+Shell polling loops count as waiting inline too — `while …; do sleep …; done`, a
+`for … sleep …` loop, or a series of long `sleep` calls, whether foreground or
+backgrounded: they burn your session (or die with it) and never resume you. Once the
+wakeup file is written, end the session.
 
 **Size `wakeup_at` realistically.** Estimate completion from the job's actual
 throughput, not an optimistic guess, and add a 20% safety margin. An undersized

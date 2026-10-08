@@ -75,7 +75,10 @@ describe('command-templates (fixture directory)', () => {
 });
 
 /** Commands the orchestrator renders for pipeline sessions. */
-const PIPELINE_COMMANDS = ['spec', 'spec-revise', 'plan', 'plan-revise', 'implement', 'implement-fix', 'qa-review', 'merge'];
+const PIPELINE_COMMANDS = [
+  'spec', 'spec-revise', 'spec-summary', 'plan', 'plan-revise', 'implement', 'implement-fix', 'qa-review',
+  'merge', 'resolve-cherry-pick',
+];
 
 describe('shipped command templates', () => {
   const names = listCommandNames();
