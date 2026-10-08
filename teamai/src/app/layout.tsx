@@ -37,7 +37,7 @@ const getVersionBuildBadge = unstable_cache(
     return { version, sha };
   },
   ['teamai-version-badge'],
-  { revalidate: 0 },
+  { revalidate: false },
 );
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
