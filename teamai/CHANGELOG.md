@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-10-08
+
+- Resolve Next.js native-package symlinks whether their targets are absolute or relative, ensuring macOS and Linux release packages include the node-pty runtime shim
+
 ## [0.1.2] — 2026-10-08
 
 - Allow packaged macOS and Linux builds without generated external shims to pass release validation; continue to reject any package that omits a shim its server bundle requires

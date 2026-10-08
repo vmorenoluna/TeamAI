@@ -21,7 +21,7 @@
 // none of the above applies. electron/main.js adds that directory to
 // NODE_PATH so Node's module resolution still finds it at runtime.
 import { readdirSync, statSync, readlinkSync, unlinkSync, mkdirSync, writeFileSync, existsSync } from 'fs';
-import { join, dirname, basename, relative, isAbsolute } from 'path';
+import { join, dirname, basename, relative, isAbsolute, resolve } from 'path';
 
 const shimsRoot = join(process.cwd(), 'external-shims');
 
@@ -36,14 +36,15 @@ function fixSymlinksIn(dir) {
     const entryPath = join(dir, entry.name);
     if (entry.isSymbolicLink()) {
       const target = readlinkSync(entryPath);
-      if (isAbsolute(target) && statSync(entryPath).isDirectory()) {
+      const targetPath = isAbsolute(target) ? target : resolve(dirname(entryPath), target);
+      if (statSync(entryPath).isDirectory()) {
         unlinkSync(entryPath);
 
         const proxyName = basename(entryPath);
         const proxyDir = join(shimsRoot, proxyName);
         if (!existsSync(proxyDir)) {
           mkdirSync(proxyDir, { recursive: true });
-          const relativeTarget = relative(proxyDir, target).split('\\').join('/');
+          const relativeTarget = relative(proxyDir, targetPath).split('\\').join('/');
           writeFileSync(
             join(proxyDir, 'package.json'),
             JSON.stringify({ name: proxyName, main: 'index.js' }, null, 2) + '\n'
