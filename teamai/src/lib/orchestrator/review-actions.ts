@@ -364,6 +364,10 @@ export async function routeHumanFeedback(
   feedback: { target: FeedbackTarget; message: string; subtaskIds?: number[] },
 ): Promise<void> {
   writeHumanFeedback(pipeline.specPath, feedback.target, feedback.message, feedback.subtaskIds);
+  // A rework run starts now, so a previous failure's summary/reason no longer
+  // describes the task. Cleared here (as task-retry does) so only an error from
+  // this run can show in the Task Failed banner.
+  deps.taskStore.update(pipeline.taskId, { completionSummary: undefined, failureReason: undefined });
   snapshotHumanFeedback(pipeline.specPath, pipeline.taskId);
   // The "Change Request" audit entry lives in qa_report.json. That file is
   // preserved only for the coder target — trimArtifactsForTarget deletes it for

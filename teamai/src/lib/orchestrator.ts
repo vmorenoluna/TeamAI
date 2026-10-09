@@ -59,7 +59,7 @@ export class Orchestrator {
       savePipelineState: (pipeline) => savePipelineState(pipeline),
       executePhase: (pipeline) => this.executePhase(pipeline),
       handleRateLimit: (pipeline, resetsAt) => this.handleRateLimit(pipeline, resetsAt),
-      handleRunFailure: (pipeline, err) => { this._handleRunFailure(pipeline, err); },
+      handleRunFailure: (pipeline, err) => { this._handleRunFailure(pipeline, err, { writeSummary: true }); },
 
       sessionOpts: (role, cwd, taskId, logFile) => buildSessionOpts(projectRoot, role, cwd, taskId, logFile),
       waitForCompletion: (sessionId) => waitForCompletion(sessionId, { parseSessionLimitReset }),
@@ -452,7 +452,11 @@ export class Orchestrator {
    * runTask can keep its lock bookkeeping (rate-limited tasks keep their
    * lock; superseded runs touch nothing).
    */
-  private _handleRunFailure(pipeline: TaskPipeline, e: unknown): 'superseded' | 'rate-limited' | 'failed' {
+  private _handleRunFailure(
+    pipeline: TaskPipeline,
+    e: unknown,
+    opts: { writeSummary?: boolean } = {},
+  ): 'superseded' | 'rate-limited' | 'failed' {
     const taskId = pipeline.taskId;
     // Identity check, not membership: moveTaskToPhase/runTask both call
     // cancelPipeline (which deletes the old pipeline) then register a
@@ -496,6 +500,14 @@ ${e.stack ?? ''}` : String(e);
 [ERROR] Task failed: ${errMsg}
 `);
       logError('orchestrator', `Task ${taskId} failed`, e);
+    }
+    if (opts.writeSummary) {
+      // Runs started outside runTask (detached rework after a reject) have no other
+      // way to tell the reviewer why the task is `failed` — the Task Failed banner
+      // is driven by completionSummary. Written before the phase change so the
+      // refresh triggered by it already carries the current error.
+      const msg = e instanceof Error ? e.message : String(e);
+      this._ctx.writeCompletionSummary(pipeline, 'run-error', `${pipeline.phase} phase: ${msg}`);
     }
     this.advancePhase(pipeline, 'failed');
     return 'failed';

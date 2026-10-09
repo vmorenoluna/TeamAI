@@ -6,7 +6,7 @@
  * pending and Next.js queues the board's router.refresh() behind it.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdirSync, rmSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -22,6 +22,7 @@ function makeDeps(executePhase: () => Promise<void>) {
     phase: 'awaiting-review',
     specPath,
     qaAttempt: 1,
+    specRevision: 1,
     deliverableFailCounts: {},
     persistedCriterionFailCounts: {},
   };
@@ -48,27 +49,50 @@ describe('rejectTask — does not await the rework run', () => {
   let root: string | undefined;
   afterEach(() => { if (root) rmSync(root, { recursive: true, force: true }); root = undefined; });
 
-  it('resolves after advancePhase while executePhase is still running', async () => {
+  // Every reject target must resume at its own phase and return without
+  // waiting for the rework run. The analyst path goes through
+  // beginSpecRevision (needs an existing spec.md), the others through the
+  // generic resume branch.
+  it.each([
+    ['analyst', 'spec'],
+    ['planner', 'plan'],
+    ['coder', 'implement'],
+    ['qa-reviewer', 'qa-review'],
+  ] as const)('target %s: resolves after advancing to %s while executePhase is still running', async (target, resumePhase) => {
     let finish!: () => void;
     const h = makeDeps(() => new Promise<void>(r => { finish = r; }));
     root = h.root;
+    writeFileSync(join(h.specPath, 'spec.md'), '# Spec');
 
-    await rejectTask('task-1', 'fix it', 'qa-reviewer', undefined, h.deps as never);
+    await rejectTask('task-1', 'fix it', target, undefined, h.deps as never);
 
-    expect(h.deps.advancePhase).toHaveBeenCalledWith(h.pipeline, 'qa-review');
+    expect(h.deps.advancePhase).toHaveBeenCalledWith(h.pipeline, resumePhase);
     expect(h.deps.executePhase).toHaveBeenCalledTimes(1);
     finish();
   });
 
-  it('hands a failed rework run to handleRunFailure instead of leaving an unhandled rejection', async () => {
-    const boom = new Error('boom');
-    const h = makeDeps(async () => { throw boom; });
+  it.each(['analyst', 'planner', 'coder', 'qa-reviewer'] as const)(
+    'target %s: hands a failed rework run to handleRunFailure',
+    async (target) => {
+      const boom = new Error('boom');
+      const h = makeDeps(async () => { throw boom; });
+      root = h.root;
+      writeFileSync(join(h.specPath, 'spec.md'), '# Spec');
+
+      await rejectTask('task-1', 'fix it', target, undefined, h.deps as never);
+      await new Promise(r => setTimeout(r, 10));
+
+      expect(h.deps.handleRunFailure).toHaveBeenCalledWith(h.pipeline, boom);
+    },
+  );
+
+  it('clears the previous failure summary and reason before the rework starts', async () => {
+    const h = makeDeps(async () => undefined);
     root = h.root;
 
-    await rejectTask('task-1', 'fix it', 'qa-reviewer', undefined, h.deps as never);
-    await new Promise(r => setTimeout(r, 10));
+    await rejectTask('task-1', 'fix it', 'coder', undefined, h.deps as never);
 
-    expect(h.deps.handleRunFailure).toHaveBeenCalledWith(h.pipeline, boom);
+    expect(h.deps.taskStore.update).toHaveBeenCalledWith('task-1', { completionSummary: undefined, failureReason: undefined });
   });
 
   it('still rejects synchronously on a disallowed phase', async () => {

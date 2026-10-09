@@ -563,7 +563,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
       const taskStore = (orch as AnyOrch).taskStore;
-      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
+      taskStore.update(testData.taskId, { phase: 'awaiting-review', completionSummary: 'stale summary', failureReason: 'qa-attempts-exhausted' });
       const pipeline = makePipeline({
         taskId: testData.taskId,
         phase: 'awaiting-review',
@@ -579,6 +579,11 @@ describe('Orchestrator', () => {
       expect(pipeline.phase).toBe('failed');
       const log = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
       expect(log).toContain('[ERROR] Task failed');
+      // The Task Failed banner shows this run's error, not the earlier failure's.
+      const task = taskStore.getById(testData.taskId);
+      expect(task.failureReason).toBe('run-error');
+      expect(task.completionSummary).toContain('implement phase:');
+      expect(task.completionSummary).not.toContain('stale summary');
     });
   });
 
