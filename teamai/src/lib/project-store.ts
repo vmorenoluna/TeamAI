@@ -3,6 +3,7 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
 import { error as logError, warn as logWarn } from './logger';
+import { listCommandNames, readCommandTemplate } from './command-templates';
 
 /**
  * Resolve the TeamAI config directory. Precedence:
@@ -178,15 +179,11 @@ export class ProjectStore {
     const manifest: Record<string, string> = {};
     // roles/ are user-configurable from the UI (persona / tone / domain customisation)
     // and must never be auto-synced — only commands/ and top-level files are managed.
-    const scanDirs = [
-      { src: join(getDefaultsDir(), 'commands'), prefix: 'commands' },
-    ];
-    for (const { src, prefix } of scanDirs) {
-      if (!existsSync(src)) continue;
-      for (const file of readdirSync(src)) {
-        const relPath = `${prefix}/${file}`;
-        manifest[relPath] = this._computeChecksum(readFileSync(join(src, file), 'utf-8'));
-      }
+    // Commands are checksummed as they are written: include-expanded (see
+    // command-templates.ts), so `_shared/` fragments are never copied on
+    // their own and every project copy is self-contained.
+    for (const name of listCommandNames()) {
+      manifest[`commands/${name}.md`] = this._computeChecksum(readCommandTemplate(name));
     }
     // teamai-workflow.md is a top-level default, not in commands/ or roles/
     const workflowSrc = join(getDefaultsDir(), 'teamai-workflow.md');
@@ -302,8 +299,11 @@ export class ProjectStore {
    * Force-sync default command files (and teamai-workflow.md) into the
    * project's .claude/ directory.
    *
-   * Commands are TeamAI's orchestration contract — the pipeline reads them
-   * from each project and depends on them matching the shipped defaults.
+   * Commands are TeamAI's orchestration contract. The orchestrator renders
+   * pipeline sessions' instructions from TeamAI's own defaults (see
+   * command-templates.ts), so these project copies serve sessions that invoke
+   * a command themselves (the root checkout's ideation/roadmap/refinement
+   * sessions, or a user typing one) and must match the shipped defaults.
    * Unlike roles (the user-owned persona surface, never auto-synced), commands are overwritten unconditionally so a
    * customized command can never drift the workflow away from what the
    * orchestrator expects. Overwrite detection compares each live project
@@ -329,13 +329,21 @@ export class ProjectStore {
       if (!matches) {
         if (!dryRun) {
           mkdirSync(dirname(destFile), { recursive: true });
-          cpSync(srcFile, destFile);
+          writeFileSync(destFile, this._renderDefault(relPath));
         }
         updated.push(relPath);
       }
     }
 
     return updated;
+  }
+
+  /** Content a synced default is written with: commands include-expanded,
+   *  everything else verbatim. */
+  private _renderDefault(relPath: string): string {
+    const command = /^commands\/([^/]+)\.md$/.exec(relPath);
+    if (command) return readCommandTemplate(command[1]);
+    return readFileSync(join(getDefaultsDir(), relPath), 'utf-8');
   }
 
   /** Path of the persisted auto-sync report read by the UI banner. */
@@ -435,18 +443,22 @@ export class ProjectStore {
    * if they don't already exist. Never overwrites existing files.
    */
   private scaffold(projectPath: string): void {
-    const targets = [
-      { src: join(getDefaultsDir(), 'roles'), dest: join(projectPath, '.claude', 'roles') },
-      { src: join(getDefaultsDir(), 'commands'), dest: join(projectPath, '.claude', 'commands') },
-    ];
+    const rolesSrc = join(getDefaultsDir(), 'roles');
+    const rolesDest = join(projectPath, '.claude', 'roles');
+    mkdirSync(rolesDest, { recursive: true });
+    for (const file of readdirSync(rolesSrc)) {
+      const destFile = join(rolesDest, file);
+      if (!existsSync(destFile)) {
+        cpSync(join(rolesSrc, file), destFile);
+      }
+    }
 
-    for (const { src, dest } of targets) {
-      mkdirSync(dest, { recursive: true });
-      for (const file of readdirSync(src)) {
-        const destFile = join(dest, file);
-        if (!existsSync(destFile)) {
-          cpSync(join(src, file), destFile);
-        }
+    const commandsDest = join(projectPath, '.claude', 'commands');
+    mkdirSync(commandsDest, { recursive: true });
+    for (const name of listCommandNames()) {
+      const destFile = join(commandsDest, `${name}.md`);
+      if (!existsSync(destFile)) {
+        writeFileSync(destFile, readCommandTemplate(name));
       }
     }
 

@@ -117,7 +117,8 @@ describe('runSpecPhase — human directive injection', () => {
     const prompt = mockSendMessage.mock.calls[0][1] as string;
     expect(prompt).toContain('OVERRIDES EVERYTHING');
     expect(prompt).toContain('Derive the formula from first principles');
-    expect(prompt).toContain('/spec Build the thing');
+    expect(prompt.startsWith('<!-- .claude/commands/spec.md -->')).toBe(true);
+    expect(prompt).toContain('Build the thing');
 
     // Consumed after the spec phase
     expect(existsSync(join(ctx.specPath, 'human_feedback.md'))).toBe(false);
@@ -169,7 +170,7 @@ describe('runPlanPhase — human directive injection', () => {
     const prompt = mockSendMessage.mock.calls[0][1] as string;
     expect(prompt).toContain('OVERRIDES EVERYTHING');
     expect(prompt).toContain('Split the migration into two subtasks');
-    expect(prompt).toContain('/plan');
+    expect(prompt.startsWith('<!-- .claude/commands/plan.md -->')).toBe(true);
 
     // Consumed after the plan phase
     expect(existsSync(join(ctx.specPath, 'human_feedback.md'))).toBe(false);
@@ -206,9 +207,8 @@ describe('runPlanPhase — human directive injection', () => {
     await runPlanPhase(pipeline as never, deps as never);
 
     const prompt = mockSendMessage.mock.calls[0][1] as string;
-    expect(prompt).toContain('REPLAN');
+    expect(prompt.startsWith('<!-- .claude/commands/plan-revise.md -->')).toBe(true);
     expect(prompt).toContain('PRESERVING');
-    expect(prompt).not.toContain('/plan ');
   });
 
   it('enforces the preserve-list: restores unselected subtasks a scoped replan clobbered, and clears the persisted snapshot', async () => {

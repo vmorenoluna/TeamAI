@@ -16,6 +16,7 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
+import { renderCommand } from '../../src/lib/command-templates';
 
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
 
@@ -717,10 +718,10 @@ describe('Rate Limit Integration', () => {
 
       await new Promise(r => setTimeout(r, 50));
 
-      // Verify the coder received the correct /implement command with subtask details
+      // Verify the coder received the implement command with subtask details
       expect(mockSendMessage).toHaveBeenCalledWith(
         'sess-impl-cmd',
-        expect.stringContaining('/implement Subtask 7: Add auth'),
+        expect.stringContaining('Subtask 7: Add auth'),
       );
       expect(mockSendMessage).toHaveBeenCalledWith(
         'sess-impl-cmd',
@@ -1065,7 +1066,7 @@ describe('Rate Limit Integration', () => {
       // The merger should receive the branch name in the command
       expect(mockSendMessage).toHaveBeenCalledWith(
         'sess-merge-branch',
-        expect.stringContaining('/merge feat/my-feature-branch'),
+        renderCommand('merge', 'feat/my-feature-branch'),
       );
 
       // Complete the session cleanly

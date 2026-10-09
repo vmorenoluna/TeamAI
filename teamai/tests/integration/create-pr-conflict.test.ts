@@ -16,6 +16,7 @@ import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
 import { addWorktreeWithRetry } from '../utils/git-worktree';
+import { renderCommand } from '../../src/lib/command-templates';
 
 // ── Hoisted mocks ────────────────────────────────────────────────────────────
 
@@ -246,7 +247,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     await new Promise(r => setTimeout(r, 100));
 
     // Verify the merger agent was spawned
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', '/merge origin/master');
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('merge', 'origin/master'));
 
     // Simulate the merger agent resolving the conflict:
     try {
@@ -303,7 +304,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     await new Promise(r => setTimeout(r, 100));
 
     // Verify merger was spawned
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', '/merge origin/master');
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('merge', 'origin/master'));
 
     // Simulate merger failure — exit with non-zero code
     fireEvent('exit', { sessionId: 'sess-merge', code: 1 });
@@ -345,10 +346,10 @@ describe('CreatePR Conflict Resolution Integration', () => {
     await (orch as AnyOrch).runCreatePR(pipeline).catch(() => { /* best-effort */ });
     await new Promise(r => setTimeout(r, 100));
 
-    // Should NOT have sent /merge origin/master (no rebase conflict)
+    // Should NOT have sent the merge command for origin/master (no rebase conflict)
     const sendCalls = mockSendMessage.mock.calls as any[][];
     const mergeCalls = sendCalls.filter(
-      (c) => c[1] && typeof c[1] === 'string' && c[1].includes('/merge origin/master'),
+      (c) => c[1] && typeof c[1] === 'string' && c[1] === renderCommand('merge', 'origin/master'),
     );
     expect(mergeCalls.length).toBe(0);
 

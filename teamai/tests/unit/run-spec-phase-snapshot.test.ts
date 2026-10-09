@@ -283,7 +283,7 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
     const sendCalls = mockSendMessage.mock.calls.filter((c: unknown[]) => c[0] === 'sess-spec');
     expect(sendCalls.length).toBeGreaterThanOrEqual(1);
     const prompt = sendCalls[0][1] as string;
-    expect(prompt).toContain('REVISION:');
+    expect(prompt.startsWith('<!-- .claude/commands/spec-revise.md -->')).toBe(true);
     // The analyst must read the pre-revision snapshot (v1), not a live file
     // that no longer holds the original content.
     expect(prompt).toContain('spec_v1.md');

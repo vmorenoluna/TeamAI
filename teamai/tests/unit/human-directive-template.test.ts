@@ -17,6 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { readCommandTemplate } from '../../src/lib/command-templates';
 
 // Resolve the package root (teamai/) from this file's location instead of
 // relying on the test runner's cwd, so the test works from any directory.
@@ -26,8 +27,11 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
  *  command loads do not repeat it — the command is the single source. */
 const OVERRIDE_FILES: string[] = [
   'defaults/commands/spec.md',
+  'defaults/commands/spec-revise.md',
   'defaults/commands/plan.md',
+  'defaults/commands/plan-revise.md',
   'defaults/commands/implement.md',
+  'defaults/commands/implement-fix.md',
   'defaults/commands/qa-review.md',
 ];
 
@@ -63,7 +67,11 @@ describe('human directive template coverage', () => {
 
       it(`${claudeDir} file contents match ${defaultsDir}`, () => {
         for (const f of mdFiles(join('defaults', defaultsDir))) {
-          const defaults = normalize(readFileSync(join(root, 'defaults', defaultsDir, f), 'utf-8'));
+          // Commands are synced include-expanded (command-templates.ts), so
+          // the mirror holds each template as rendered, not its raw source.
+          const defaults = normalize(defaultsDir === 'commands'
+            ? readCommandTemplate(f.slice(0, -'.md'.length), join(root, 'defaults', 'commands'))
+            : readFileSync(join(root, 'defaults', defaultsDir, f), 'utf-8'));
           const claude = normalize(readFileSync(join(root, '.claude', claudeDir, f), 'utf-8'));
           expect(claude, `${claudeDir}/${f} drifted from ${defaultsDir}/${f}`).toBe(defaults);
         }

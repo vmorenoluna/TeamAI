@@ -21,6 +21,7 @@ import { warn } from '../logger';
 import { WorktreeError, PipelineConfigError } from './errors';
 import { createOutOfScopeTicketsFromLog } from './out-of-scope-tickets';
 import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
+import { renderCommand } from '../command-templates';
 import type { PipelinePhase } from '@/constants/phases';
 import type { AgentSession } from '../process-manager';
 import type { TaskPipeline, SessionOptsResult } from './types';
@@ -180,11 +181,12 @@ export async function rebaseOntoLatestDefault(
       `\n[INFO] Rebase had conflicts in ${unmergedFiles.split('\n').length} file(s) — spawning merger to resolve via git merge\n`);
     try {
       const mergeLogFile = path.join(path.dirname(logFile), 'output-merge.log');
+      const mergeMessage = renderCommand('merge', `origin/${deps.baseBranch}`);
       const mergeSessionId = await processManager.createSession(
         deps.sessionOpts('merger', worktreePath, taskId, mergeLogFile),
       );
       updateSessionMap(path.dirname(logFile), 'merge', mergeSessionId);
-      processManager.sendMessage(mergeSessionId, `/merge origin/${deps.baseBranch}`);
+      processManager.sendMessage(mergeSessionId, mergeMessage);
       await deps.waitForCompletion(mergeSessionId);
       processManager.killSession(mergeSessionId);
       logToOutput(path.dirname(logFile), '\n[INFO] Merger resolved rebase conflicts — pushing its result\n');
@@ -299,16 +301,6 @@ export async function runSpecPhase(
   deps.phaseHeader(logFile, 'spec');
   deps.persistAndEmitPhase(pipeline);
   await syncPhaseBaseline(pipeline, deps);
-  // Floor for findLiveOrphanedJob's pid-file scan in resolvePhaseWakeup below
-  // — captured just before dispatch so a leftover pid file from an earlier,
-  // unrelated run of this task can't false-match.
-  const sessionStartedAt = Date.now();
-  const sessionId = await processManager.createSession(
-    deps.sessionOpts('analyst', deps.projectRoot, pipeline.taskId, specLogFile),
-  );
-  pipeline.sessionId = sessionId;
-  deps.savePipelineState(pipeline);
-  updateSessionMap(pipeline.specPath, 'spec', sessionId);
   const agentSpecPath = deps.toAgentPath(pipeline.specPath);
 
   const revisionFeedbackPath = path.join(pipeline.specPath, 'spec_revision_feedback.md');
@@ -330,14 +322,17 @@ export async function runSpecPhase(
       })
     : '';
 
+  // Rendered before the session exists, so a template problem can never leave
+  // a spawned session waiting on a message that never comes.
+  let message: string;
   if (isRevision) {
     // beginSpecRevision renamed the pre-revision spec to spec_v{R-1}.md — the
     // analyst reads THAT baseline (spec.md no longer holds the original), and
     // writes the revised spec to spec.md.
     const baselineFile = `spec_v${pipeline.specRevision - 1}.md`;
-    processManager.sendMessage(sessionId,
+    message = renderCommand('spec-revise',
       wakeupHeader + humanDirective +
-      `REVISION: ${pipeline.description}\n\n` +
+      `Feature request: ${pipeline.description}\n\n` +
       `Read the existing spec at: \`${agentSpecPath}/${baselineFile}\`\n` +
       `Read the spec revision feedback at: \`${agentSpecPath}/spec_revision_feedback.md\`\n` +
       `Revise the spec to address ALL concerns in the feedback.\n` +
@@ -345,11 +340,23 @@ export async function runSpecPhase(
       `IMPORTANT: Write the revised spec to \`${agentSpecPath}/spec.md\` (overwrite the existing file).\n` +
       `IMPORTANT: Also update \`${agentSpecPath}/spec_summary.md\` to reflect the revised spec — this is a required step, not optional. Do not end the session without it.`);
   } else {
-    processManager.sendMessage(sessionId,
+    message = renderCommand('spec',
       wakeupHeader + humanDirective +
-      `/spec ${pipeline.description}\n\nIMPORTANT: Write the spec file to \`${agentSpecPath}/spec.md\` (use this exact path, not a new subdirectory).\n` +
+      `${pipeline.description}\n\nIMPORTANT: Write the spec file to \`${agentSpecPath}/spec.md\` (use this exact path, not a new subdirectory).\n` +
       `IMPORTANT: Also write \`${agentSpecPath}/spec_summary.md\` next to it — this is a required step, not optional. Do not end the session without it.`);
   }
+
+  // Floor for findLiveOrphanedJob's pid-file scan in resolvePhaseWakeup below
+  // — captured just before dispatch so a leftover pid file from an earlier,
+  // unrelated run of this task can't false-match.
+  const sessionStartedAt = Date.now();
+  const sessionId = await processManager.createSession(
+    deps.sessionOpts('analyst', deps.projectRoot, pipeline.taskId, specLogFile),
+  );
+  pipeline.sessionId = sessionId;
+  deps.savePipelineState(pipeline);
+  updateSessionMap(pipeline.specPath, 'spec', sessionId);
+  processManager.sendMessage(sessionId, message);
   await deps.waitForCompletion(sessionId);
   processManager.killSession(sessionId);
 
@@ -432,7 +439,7 @@ export async function runSpecPhase(
         // keep existing so a follow-up "Request Changes → Analyst" can find
         // it — routeHumanFeedback's analyst target only enters revision mode
         // when spec.md exists, so deleting it here would silently downgrade
-        // the next revision attempt into a from-scratch /spec run that
+        // the next revision attempt into a from-scratch spec run that
         // discards the human's feedback and orphans this baseline.
         return;
       }
@@ -536,15 +543,6 @@ export async function runPlanPhase(
   deps.phaseHeader(logFile, 'plan');
   deps.persistAndEmitPhase(pipeline);
   await syncPhaseBaseline(pipeline, deps);
-  // Floor for findLiveOrphanedJob's pid-file scan in resolvePhaseWakeup below
-  // — see runSpecPhase's identical capture for why.
-  const sessionStartedAt = Date.now();
-  const sessionId = await processManager.createSession(
-    deps.sessionOpts('planner', deps.projectRoot, pipeline.taskId, planLogFile),
-  );
-  pipeline.sessionId = sessionId;
-  deps.savePipelineState(pipeline);
-  updateSessionMap(pipeline.specPath, 'plan', sessionId);
 
   // Re-plan mode: when plan.json already exists (preserved by a spec revision),
   // the planner must re-work it in place, keeping completed subtasks that are
@@ -552,13 +550,13 @@ export async function runPlanPhase(
   const agentSpecPath = deps.toAgentPath(pipeline.specPath);
   const isReplan = existsSync(path.join(pipeline.specPath, 'plan.json'));
   const planInstruction = isReplan
-    ? `REPLAN: Read the existing plan at \`${agentSpecPath}/plan.json\` and the spec at \`${agentSpecPath}/spec.md\`.\n` +
+    ? `Read the existing plan at \`${agentSpecPath}/plan.json\` and the spec at \`${agentSpecPath}/spec.md\`.\n` +
       `Re-plan to match the spec while PRESERVING work that is still valid:\n` +
       `- Keep completed subtasks whose files and acceptance criteria are still covered by the spec, and leave their \`completed: true\` flag set so they are NOT re-implemented.\n` +
       `- Mark only affected/invalidated subtasks \`completed: false\` (and drop any stale \`qa_flagged\`) so they re-run.\n` +
       `- Rewrite plan.json in place — do NOT delete it.\n` +
       `IMPORTANT: Write the updated plan to \`${agentSpecPath}/plan.json\` (overwrite the existing file).`
-    : `/plan ${agentSpecPath}/spec.md`;
+    : `${agentSpecPath}/spec.md`;
 
   // Scoped re-plan preserve-list guardrail: when the pending human feedback
   // targets the planner and carries a subtask selection, snapshot the subtasks
@@ -589,8 +587,20 @@ export async function runPlanPhase(
       })
     : '';
 
-  processManager.sendMessage(sessionId,
+  // Rendered before the session exists — see runSpecPhase.
+  const message = renderCommand(isReplan ? 'plan-revise' : 'plan',
     wakeupHeader + humanDirectiveFor(pipeline.specPath, 'planner') + planInstruction);
+
+  // Floor for findLiveOrphanedJob's pid-file scan in resolvePhaseWakeup below
+  // — see runSpecPhase's identical capture for why.
+  const sessionStartedAt = Date.now();
+  const sessionId = await processManager.createSession(
+    deps.sessionOpts('planner', deps.projectRoot, pipeline.taskId, planLogFile),
+  );
+  pipeline.sessionId = sessionId;
+  deps.savePipelineState(pipeline);
+  updateSessionMap(pipeline.specPath, 'plan', sessionId);
+  processManager.sendMessage(sessionId, message);
   await deps.waitForCompletion(sessionId);
   processManager.killSession(sessionId);
 
@@ -804,12 +814,13 @@ export async function runMergePhase(
 
   if (!mergeSucceeded) {
     const mergeLogFile = path.join(pipeline.specPath, 'output-merge.log');
+    const mergeMessage = renderCommand('merge', pipeline.branch);
     const sessionId = await processManager.createSession(
       deps.sessionOpts('merger', deps.projectRoot, pipeline.taskId, mergeLogFile),
     );
     pipeline.sessionId = sessionId;
     updateSessionMap(pipeline.specPath, 'merge', sessionId);
-    processManager.sendMessage(sessionId, `/merge ${pipeline.branch}`);
+    processManager.sendMessage(sessionId, mergeMessage);
     await deps.waitForCompletion(sessionId);
     processManager.killSession(sessionId);
   }

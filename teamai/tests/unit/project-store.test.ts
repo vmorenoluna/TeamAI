@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { ProjectStore } from '@/lib/project-store';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, rmSync, mkdirSync, cpSync } from 'fs';
 import { join } from 'path';
+import { readCommandTemplate } from '@/lib/command-templates';
 import { randomUUID } from 'crypto';
 
 // ── Windows file-lock retry helper ──────────────────────────────────────────
@@ -38,16 +39,35 @@ vi.mock('os', () => ({
   homedir: () => TEST_HOME,
 }));
 
+// ── Isolated defaults ──────────────────────────────────────────────────────
+// Many tests below simulate a TeamAI update by editing (or adding files to)
+// `defaults/commands/`. Doing that to the real checkout races every other
+// test file that reads the templates in parallel — a renderCommand() in an
+// orchestrator test could pick up a half-applied edit. ProjectStore and
+// command-templates resolve `defaults/` from process.cwd(), so this suite runs
+// against its own copy: a private root holding `defaults/`, with cwd pointed
+// at it for the duration of the file.
+const REAL_CWD = process.cwd();
+const ISOLATED_ROOT = join(REAL_CWD, '.teamai-test-defaults-' + randomUUID().slice(0, 8));
+
 describe('ProjectStore', () => {
   let store: ProjectStore;
   let projectDir: string;
   let clean: () => void;
 
+  beforeAll(() => {
+    mkdirSync(ISOLATED_ROOT, { recursive: true });
+    cpSync(join(REAL_CWD, 'defaults'), join(ISOLATED_ROOT, 'defaults'), { recursive: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(ISOLATED_ROOT);
+  });
+
   // Cleanup the mock home directory after ALL tests
   afterAll(() => {
+    vi.mocked(process.cwd).mockRestore();
     if (existsSync(TEST_HOME)) {
       rmSync(TEST_HOME, { recursive: true, force: true });
     }
+    rmSync(ISOLATED_ROOT, { recursive: true, force: true });
   });
 
   beforeEach(() => {
@@ -243,7 +263,8 @@ describe('ProjectStore', () => {
 
       // The project file should now match the new default
       const updatedContent = readFileSync(implPath, 'utf-8');
-      expect(updatedContent).toBe(modifiedDefault);
+      // Synced include-expanded, i.e. exactly as the orchestrator renders it
+      expect(updatedContent).toBe(readCommandTemplate('implement'));
       expect(updatedContent).toContain('Updated in TeamAI v2.0');
     } finally {
       // Restore the default file
@@ -272,7 +293,7 @@ describe('ProjectStore', () => {
       store.add(projectDir, 'Test Project');
 
       const currentContent = readFileSync(implPath, 'utf-8');
-      expect(currentContent).toBe(modifiedDefault);
+      expect(currentContent).toBe(readCommandTemplate('implement'));
       expect(currentContent).toContain('Updated in TeamAI v2.0');
       // Customization is gone — commands are TeamAI-owned, not user-owned.
       expect(currentContent).not.toContain('My custom additions');
@@ -305,6 +326,20 @@ describe('ProjectStore', () => {
     }
   });
 
+  it('syncDefaults writes commands include-expanded and never copies the _shared fragments', () => {
+    store.add(projectDir, 'Test Project');
+    const commandsDir = join(projectDir, '.claude', 'commands');
+
+    expect(existsSync(join(commandsDir, '_shared'))).toBe(false);
+    for (const name of ['implement', 'implement-fix', 'spec', 'spec-revise', 'plan', 'plan-revise']) {
+      const content = readFileSync(join(commandsDir, `${name}.md`), 'utf-8');
+      expect(content).toBe(readCommandTemplate(name));
+      expect(content).not.toContain('@include');
+    }
+    // Checksums are over the expanded content, so a second sync is a no-op.
+    expect(store.syncDefaults(projectDir)).toEqual([]);
+  });
+
   it('syncDefaults handles projects with missing command files', () => {
     // Manually create project dirs without calling scaffold
     mkdirSync(join(projectDir, '.claude', 'commands'), { recursive: true });
@@ -320,8 +355,7 @@ describe('ProjectStore', () => {
 
     // The already-existing implement.md should NOT be overwritten (no baseline — preserved)
     const implContent = readFileSync(join(projectDir, '.claude', 'commands', 'implement.md'), 'utf-8');
-    const defaultContent = readFileSync(defaultImplSrc, 'utf-8');
-    expect(implContent).toBe(defaultContent);
+    expect(implContent).toBe(readCommandTemplate('implement'));
   });
   // ── syncDefaults dryRun edge cases ───────────────────────────────
 

@@ -80,6 +80,7 @@ import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrato
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
 import { warn as mockWarn } from '../../src/lib/logger';
+import { renderCommand } from '../../src/lib/command-templates';
 
 const fireEvent = createFireEvent(onHandlers);
 
@@ -587,7 +588,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(1);
     });
-    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', expect.stringContaining('/merge origin/feat/robustness-test'));
+    expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('merge', 'origin/feat/robustness-test'));
     fireEvent('event', { sessionId: 'sess-merge', event: { type: 'result' } });
 
     // Then the QA session, once the orchestrator has pushed the merger's result

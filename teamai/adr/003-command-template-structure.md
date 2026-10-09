@@ -18,7 +18,7 @@ Command templates follow a **structured tiered approach**:
 
 | Tier | Element | Purpose | When to use |
 |------|---------|---------|-------------|
-| 0 | **Mode detection trigger** | Route agent to correct mode section | Multi-mode templates only (e.g., normal vs. QA rework) |
+| 0 | **Mode detection trigger** | Route agent to correct mode section | Only for a mode the agent must detect itself (e.g., `qa-review.md`'s rework pass) |
 | 1 | **Scannable callout** | Override environmental signals | Always — the first thing an agent reads in a mode section |
 | 2 | **Scenario-specific subsections** | Resolve common misinterpretations | When multiple agents have made the same mistake |
 | 3 | **Numbered lists** | Detailed workflow steps | For procedural "do this, then that" instructions |
@@ -30,8 +30,8 @@ templates that have a single mode and no known misinterpretation patterns:
 
 | Template complexity | Applied tiers | Example |
 |---------------------|---------------|---------|
-| **Multi-mode + known anti-patterns** | All four tiers (0–3) | `implement.md` (normal + QA rework) |
-| **Multi-mode, no known anti-patterns** | Tier 0 + Tier 1 + Tier 3 | A new mode section without historical failures |
+| **Agent-detected modes + known anti-patterns** | All four tiers (0–3) | `qa-review.md` (first pass + rework pass) |
+| **Single-mode + known anti-patterns** | Tier 1 + Tier 2 + Tier 3 | `implement-fix.md` (QA rework) |
 | **Single-mode, well-understood** | Tier 3 only | `spec.md`, `merge.md` |
 | **Single-mode with a common mistake** | Tier 1 + Tier 3 | A template where agents consistently skip one step |
 
@@ -41,60 +41,47 @@ templates that have a single mode and no known misinterpretation patterns:
   failure logs showing the same mistake across 3+ pipeline runs.
 - **Add Tier 2** when a specific scenario causes misinterpretation. Evidence: QA
   reports or completion summaries citing a specific misunderstanding pattern.
-- **Add Tier 0** only when the template bifurcates into multiple modes (e.g.,
-  normal implement vs. QA rework). Single-mode templates never need Tier 0.
-  Tier 0 is documented below in the Mode Detection section.
+- **Add Tier 0** only when the template bifurcates into modes the agent must
+  detect itself. A mode the orchestrator can choose is a separate command
+  instead (ADR 009). Single-mode templates never need Tier 0. Tier 0 is
+  documented below in the Mode Detection section.
 - **Don't pre-emptively add callouts.** If no agent has made the mistake yet,
   don't add a callout for it. Callouts exist to fix real failures, not hypothetical
   ones. A template with 5 callouts for problems that never happened is noise.
 
 `spec.md`, `plan.md`, and `merge.md` are single-mode templates — they have Tier 3
-only. `implement.md` is the canonical multi-mode template — it uses all four tiers.
-`qa-review.md` uses Tier 0 (rework detection), Tier 1 (rework callout), Tier 2
-(First QA Pass / Rework Pass subsections), and Tier 3 (numbered steps).
+only. `implement-fix.md` is the canonical template with known anti-patterns — it
+uses Tiers 1–3. `qa-review.md` is the one template with an agent-detected mode: it
+uses Tier 0 (rework detection), Tier 1 (rework callout), Tier 2 (First QA Pass /
+Rework Pass subsections), and Tier 3 (numbered steps).
 
 ### Tier 0: Mode Detection
 
-Before any callout or subsection, multi-mode templates need a **mode detection
-trigger** — a short instruction that tells the agent which mode section to read.
+When the orchestrator knows the mode, it sends that mode's own command (ADR 009) and
+the template needs no detection. Tier 0 is for the remaining case: a mode only the
+agent can establish, by checking the task's files.
 
-**Format (one line, at the very top of each mode section):**
+**Format: a step at the very top of the template that routes to a mode subsection:**
 ```markdown
-If the prompt includes "⚠️ QA FEEDBACK" at the top, you are in QA rework mode.
+## Step 0: Detect Rework Pass (run first, before anything else)
+
+Check whether a previous `qa_report.json` already exists in `.teamai/{slug}/`.
 ```
 
-**Example from `implement.md`:**
-```markdown
-## QA Rework Mode
-
-If the prompt includes "⚠️ QA FEEDBACK" at the top, you are in QA rework mode.
-```
-
-This line sits **above** the `⚠️ CRITICAL` callout. It is NOT a callout itself —
-it is a routing instruction. The agent reads it, checks its own prompt for the
-signal string, and either enters rework mode or skips to the next section.
-
-The orchestrator injects the signal string into the prompt when constructing
-the subtask message (see `buildSubtaskFeedback` in `implement.ts`):
-```typescript
-lines.push('## ⚠️ QA FEEDBACK — FIX THESE FIRST ⚠️');
-```
-This creates a contract between the orchestrator (injects the signal) and the
-template (detects the signal). Both sides agree on the exact string.
+`qa-review.md` uses it: a previous `qa_report.json` means the coder has reworked the
+branch, and the agent continues in `### Rework Pass`; otherwise it continues in
+`### First QA Pass`.
 
 **Design rules for mode detection:**
-- **Place it first.** Mode detection must be the very first line at the top of
-  a multi-mode template section — before the Tier 1 callout. If the agent reads
-  the callout first but isn't in rework mode, the callout is confusing.
-- **Use a concrete string match.** "If the prompt includes '⚠️ QA FEEDBACK'" is
-  checkable — the agent can scan its own prompt for that literal string. Avoid
-  vague triggers like "If this is a rework pass" or "If QA feedback exists."
+- **Place it first.** Mode detection comes before the Tier 1 callout. If the agent
+  reads the callout first but isn't in that mode, the callout is confusing.
+- **Use a concrete check.** "Check whether `qa_report.json` exists" is something the
+  agent can verify. Avoid vague triggers like "If this is a rework pass."
 - **One mode trigger per section.** Don't chain multiple detection conditions.
-- **The orchestrator and template agree on the signal.** The orchestrator's
-  prompt-builder function injects the same string the template looks for.
-- **Not needed for single-mode templates.** `spec.md`, `plan.md`, `merge.md`
-  don't need Tier 0 — they have one mode. See "Adapting to Simpler Templates"
-  above.
+- **Prefer a separate command.** If the orchestrator can tell the modes apart from
+  state that survives a restart, split the template into one command per mode
+  instead of adding Tier 0.
+- **Not needed for single-mode templates.** See "Adapting to Simpler Templates" above.
 
 ### Tier 1: Scannable Callout
 
@@ -108,7 +95,7 @@ A blockquote (`>`) at the very top of a mode section. Uses `⚠️` and bold tex
 
 **Examples from the codebase:**
 
-`implement.md` QA Rework Mode:
+`implement-fix.md` QA Rework Mode:
 ```markdown
 > ⚠️ **CRITICAL: THERE IS STILL WORK TO DO.** QA found failures — that means
 > something is broken or missing, regardless of what `plan.json` says about
@@ -146,7 +133,7 @@ A named `###` subsection that addresses one specific misinterpretation scenario.
 
 **Examples from the codebase:**
 
-`implement.md` — "When All Subtasks Are Already Completed":
+`implement-fix.md` — "When All Subtasks Are Already Completed":
 ```markdown
 ### When All Subtasks Are Already Completed
 
@@ -158,7 +145,7 @@ If every plan subtask is marked `completed: true` but QA still found failures:
 - Read the QA feedback. Fix every listed issue. That's the entire scope.
 ```
 
-`implement.md` — "Cleanup-Only Rework Mode":
+`implement-fix.md` — "Cleanup-Only Rework Mode":
 ```markdown
 ### Cleanup-Only Rework Mode
 
@@ -208,7 +195,7 @@ Sequential, ordered steps for the agent to execute. Use numbered lists for proce
 
 **Examples from the codebase:**
 
-`implement.md` Standard QA Rework Steps (1–9):
+`implement-fix.md` Standard QA Rework Steps:
 ```markdown
 ### Standard QA Rework Steps
 
@@ -246,20 +233,16 @@ tiers? The answer is **no** — repetition creates noise, and noise dilutes sign
 | Environmental signal override (e.g., "QA is the ground truth") | Tier 1 callout | The callout is the one place an agent can't miss it. Repeating it in Tier 2 and Tier 3 makes it feel like boilerplate. |
 | Mode-specific procedural steps (e.g., "Run the full test suite") | Tier 3 numbered list | These are workflow items — they belong in the ordered list. Adding them to a callout overstates their importance. |
 | Situational anti-patterns (e.g., "Do NOT treat `completed: true` as nothing to do") | Tier 2 subsection | The subsection is the right granularity — it's scannable by agents in that situation, not a global alarm. |
-| Cross-mode invariants (e.g., "Don't touch `.teamai/` files") | Plain rules block in each mode section | These apply regardless of mode — repeat them in each mode section, but in a rules block (not the `⚠️` callout, which is reserved for the mode's most-missed instruction). |
+| Cross-mode invariants (e.g., "Don't touch `.teamai/` files") | A `_shared/` fragment included by every mode's command | These apply regardless of mode — every mode's command includes the same fragment (ADR 009), as a plain rules block (not the `⚠️` callout, which is reserved for the mode's most-missed instruction). |
 
 **When TO repeat:**
-- **Cross-mode invariants** (rules that apply in ALL modes) should appear in each
-  mode section — typically in a plain rules block, not the `⚠️` callout. The
-  callout is reserved for the mode-specific most-missed instruction; cross-mode
-  invariants go in a bulleted rules list following the callout. An agent reading
-  only the QA Rework Mode section doesn't see the Instructions section's rules —
-  so invariants must be duplicated. *(Note: the current templates don't fully
-  follow this yet — `implement.md`'s `.teamai/` file rule lives only in the
-  Instructions Rules block. Duplicating invariants across mode sections is a goal
-  for future template updates.)*
+- **Cross-mode invariants** (rules that apply in ALL modes) reach every mode
+  through a `_shared/` fragment that each mode's command includes — for example,
+  `implement.md` and `implement-fix.md` both include `_shared/implement-body.md`,
+  which holds the pipeline-artifact and no-push rules. Keep them in a plain rules block, not the
+  `⚠️` callout, which is reserved for the mode-specific most-missed instruction.
 - **The "don't re-read the spec" instruction** appears in both the Tier 1 callout
-  and the Tier 2 subsection in `implement.md` — this is intentional because agents
+  and the Tier 2 subsection in `implement-fix.md` — this is intentional because agents
   in the "all subtasks done" scenario are the most likely to re-read the spec.
 
 **When NOT to repeat:**
@@ -324,7 +307,7 @@ Accepted. All command templates in `defaults/commands/` follow this structure.
 
 ### Positive
 
-- **Fewer "nothing to do" failures.** The `implement.md` restructure eliminated the most common QA rework failure mode — agents interpreting `completed: true` as "no work needed."
+- **Fewer "nothing to do" failures.** `implement-fix.md`'s callout and subsection address the most common QA rework failure mode — agents interpreting `completed: true` as "no work needed."
 - **Scannable by agents.** The `###` headers create a table of contents that agents can jump to. An agent entering "cleanup mode" finds "### Cleanup-Only Rework Mode" without reading the entire section.
 - **Testable.** Scenario subsections can be verified with unit tests on extracted prompt-builder functions (e.g., `buildSyntheticReworkDescription`).
 - **Consistent across templates.** All templates follow the same structured tiered approach, reducing the cognitive load for template authors and making reviews predictable.
@@ -348,7 +331,8 @@ Rejected because bold text within a paragraph doesn't create enough visual separ
 
 ## References
 
-- `defaults/commands/implement.md` — QA Rework Mode (canonical three-tier example)
+- `defaults/commands/implement-fix.md` — QA Rework Mode (canonical callout + subsection + steps example)
+- ADR 009 — one command per work mode
 - `defaults/commands/qa-review.md` — Step 0 and Steps 6–8 (callout + subsection pattern)
 - `src/lib/orchestrator/implement.ts` — `buildSyntheticReworkDescription()` (extracted prompt builder, testable via unit tests)
 - Bug report: task 437920fa — agent missed implement.md point 5, treated `completed: true` as "nothing to do"

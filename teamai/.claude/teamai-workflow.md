@@ -1,8 +1,9 @@
 # TeamAI Workflow
 
 This project uses an automated pipeline managed by an external orchestrator.
-When you receive slash commands (/spec, /plan, /implement, /qa-review, /merge),
-follow their instructions precisely and output structured files as specified.
+When you receive a TeamAI command (spec, spec-revise, plan, plan-revise, implement,
+implement-fix, qa-review, merge), follow its instructions precisely and output structured
+files as specified.
 
 ## Key Conventions
 - Specs live in `.teamai/{slug}/`

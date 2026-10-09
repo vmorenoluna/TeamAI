@@ -108,7 +108,9 @@ Core engine. Extends `EventEmitter` and manages a `Map<string, AgentSession>`. E
 Key methods: `createSession(taskId, role, cwd)`, `writeToSession(id, data)`, `terminateSession(id)` (SIGTERM).
 
 ### Multi-Agent Pipeline
-Defined in `defaults/roles/` (analyst, planner, coder, qa-reviewer, merger) and `defaults/commands/` (spec, plan, implement, qa-review, merge, roadmap, ideation, changelog, create-task, role-refinement-analysis). Each session gets its role persona injected as a system prompt (`--append-system-prompt` in `process-manager.ts`) before the first turn; the slash-command template (e.g. `/implement`) supplies the task instructions.
+Defined in `defaults/roles/` (analyst, planner, coder, qa-reviewer, merger) and `defaults/commands/` (spec, spec-revise, plan, plan-revise, implement, implement-fix, qa-review, merge, roadmap, ideation, changelog, create-task, role-refinement-analysis). Each session gets its role persona injected as a system prompt (`--append-system-prompt` in `process-manager.ts`) before the first turn; the command template for the session's work mode supplies the task instructions.
+
+**One command per work mode, rendered by the orchestrator.** Each distinct kind of pipeline work has its own command — a fresh spec vs. a revision (`spec` / `spec-revise`), a fresh plan vs. a re-plan (`plan` / `plan-revise`), a subtask vs. QA rework (`implement` / `implement-fix`) — chosen by the orchestrator from on-disk state, so the agent never has to infer its mode from a marker. Sections several commands need verbatim (wakeup contract, coder rules, plan.json rules) live once under `defaults/commands/_shared/` and are pulled in with `<!-- @include _shared/<name>.md -->`. Pipeline sessions do NOT invoke commands as slash commands: `src/lib/command-templates.ts` renders the template (includes expanded, `$ARGUMENTS` substituted) and the rendered text is the session's message. Claude Code only expands a slash command at the very start of a message (the orchestrator prepends header blocks), and a worktree session only sees its branch's committed `.claude/commands/` — rendering from TeamAI's own defaults guarantees every session gets this version's instructions, including tasks already in flight across an upgrade. `tests/unit/agent-prompt-routing.test.ts` pins which mode each pipeline state selects; `tests/unit/command-contract-coverage.test.ts` pins the contract rules each mode's instructions must carry. Design: `teamai/adr/009-per-mode-agent-commands.md`.
 
 #### Commands vs. roles — responsibilities
 
@@ -234,11 +236,11 @@ The spec revision workflow allows a human reviewer to fix the spec itself (rathe
    - Resets retry counters
    - Advances to `spec` phase → runs spec → plan → implement → QA
 
-4. **Revision-mode spec**: `runSpec` detects `spec_revision_feedback.md` and sends a `REVISION:` prompt instead of `/spec`. The spec command template (`spec.md` Revision Mode) instructs the analyst to read the existing spec + revision feedback, address all concerns, preserve valid parts, and re-validate.
+4. **Revision-mode spec**: `runSpec` detects `spec_revision_feedback.md` and renders the `spec-revise` command instead of `spec`. It instructs the analyst to read the existing spec + revision feedback, address all concerns, preserve valid parts, and re-validate.
 
 5. **After revision**: The revised spec flows through plan → implement → QA normally. If QA now passes, the task goes to `awaiting-review` for final approval.
 
-**How retry integrates**: Ensure the project's `.claude/commands/` has the updated templates (synced from `defaults/commands/`) — then clicking **Retry** on any previously-failed task works seamlessly. It resumes from the last real phase using the updated command templates (with spec-gap detection) on the next run. No manual migration needed.
+**How retry integrates**: Pipeline sessions render their instructions from TeamAI's own `defaults/commands/`, so clicking **Retry** on any previously-failed task works seamlessly: it resumes from the last real phase using the current command templates (with spec-gap detection) on the next run. No manual migration needed.
 
 **Revision counter persistence**: The `specRevision` counter tracks how many times the spec has been revised for a given task (max 3 before falling back to human review). Without persistence, server restarts or pipeline recreation would reset it to 0, causing the next revision to overwrite `spec_v1.md` instead of creating `spec_v{N+1}.md`.
 

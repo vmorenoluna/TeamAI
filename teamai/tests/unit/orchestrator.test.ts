@@ -83,6 +83,7 @@ import { getToolPath } from '../../src/lib/tool-checker';
 import { processManager } from '../../src/lib/process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache, readContainerRemoteUser } from '../../src/lib/container-manager';
 import { ContainerDockerMissingError } from '../../src/lib/orchestrator/errors';
+import { renderCommand } from '../../src/lib/command-templates';
 
 const fireEvent = createFireEvent(onHandlers);
 
@@ -2530,8 +2531,8 @@ describe('Orchestrator', () => {
       const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
-      // Should be in revision mode — sends REVISION: prompt, not /spec
-      expect(mockSendMessage).toHaveBeenCalledWith('spec-sess-rev', expect.stringContaining('REVISION:'));
+      // Should be in revision mode — renders the spec-revise command, not spec
+      expect(mockSendMessage).toHaveBeenCalledWith('spec-sess-rev', expect.stringMatching(/^<!-- \.claude\/commands\/spec-revise\.md -->/));
 
       // Simulate the analyst writing the revised spec to the live path
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec v2 — Revised');
@@ -2737,7 +2738,7 @@ describe('Orchestrator', () => {
       await new Promise(r => setTimeout(r, 20));
 
       // Merger session should have been created for rebase conflict
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', '/merge origin/main');
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', renderCommand('merge', 'origin/main'));
 
       // Complete the merger session
       fireEvent('event', { sessionId: 'sess-merge-rebase', event: { type: 'result' } });
@@ -2794,7 +2795,7 @@ describe('Orchestrator', () => {
       await new Promise(r => setTimeout(r, 20));
 
       // Merger session was created
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', '/merge origin/main');
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', renderCommand('merge', 'origin/main'));
 
       // Simulate merger failure — exit with non-zero code
       fireEvent('exit', { sessionId: 'sess-merge-rebase', code: 1 });
@@ -3181,7 +3182,7 @@ describe('Orchestrator', () => {
       expect(rebaseCalled).toBe(true);
 
       // Merger session should have been created and sent /merge origin/main
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', '/merge origin/main');
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', renderCommand('merge', 'origin/main'));
 
       // Complete the merger session
       fireEvent('event', { sessionId: 'sess-merger', event: { type: 'result' } });
@@ -3243,7 +3244,7 @@ describe('Orchestrator', () => {
       const promise = (orch as AnyOrch).runCreatePR(pipeline);
       await new Promise(r => setTimeout(r, 20));
 
-      // Merger session was created      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', '/merge origin/main');
+      // Merger session was created      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', renderCommand('merge', 'origin/main'));
       // Simulate merger failure — exit with non-zero code
       fireEvent('exit', { sessionId: 'sess-merger', code: 1 });
       await promise;
@@ -4413,7 +4414,7 @@ describe('Orchestrator', () => {
       expect(promptText).toContain('QA FEEDBACK');
       expect(promptText).toContain('Mobile layout is broken');
       expect(promptText).toContain('Also fix the header alignment');
-      expect(promptText).toContain('/implement Subtask 1');
+      expect(promptText).toContain('Subtask 1: ');
 
       // Fire events to complete implement -> QA -> done
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
@@ -4511,7 +4512,7 @@ describe('Orchestrator', () => {
       );
       const promptText = sendCalls[0][1];
       expect(promptText).not.toContain('QA FEEDBACK');
-      expect(promptText).toContain('/implement Subtask 1');
+      expect(promptText).toContain('Subtask 1: ');
 
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
       await new Promise(r => setTimeout(r, 10));
@@ -4556,12 +4557,12 @@ describe('Orchestrator', () => {
     // No merger spawned on fast path
       const sendCalls = mockSendMessage.mock.calls;
       const mergeCalls = sendCalls.filter(
-      (call: any[]) => typeof call[1] === 'string' && call[1].includes('/merge origin/main'),
+      (call: any[]) => typeof call[1] === 'string' && call[1] === renderCommand('merge', 'origin/main'),
       );
       expect(mergeCalls.length).toBe(0);
 
       const implCalls = sendCalls.filter(
-      (call: any[]) => typeof call[1] === 'string' && call[1].includes('/implement Subtask 1'),
+      (call: any[]) => typeof call[1] === 'string' && call[1].includes('Subtask 1: '),
       );
       expect(implCalls.length).toBeGreaterThanOrEqual(1);
 
@@ -4620,14 +4621,14 @@ describe('Orchestrator', () => {
       await new Promise(r => setTimeout(r, 20));
 
     // Merger session spawns first
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', '/merge origin/main');
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', renderCommand('merge', 'origin/main'));
 
     // Complete merger
       fireEvent('event', { sessionId: 'sess-impl-rebase', event: { type: 'result' } });
       await new Promise(r => setTimeout(r, 10));
 
     // After rebase resolves, implement proceeds to subtask
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-subtask', expect.stringContaining('/implement Subtask 1'));
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-subtask', expect.stringContaining('Subtask 1: '));
 
     // Complete subtask -> push -> QA -> done
       fireEvent('event', { sessionId: 'sess-subtask', event: { type: 'result' } });
@@ -4684,14 +4685,14 @@ describe('Orchestrator', () => {
       await new Promise(r => setTimeout(r, 20));
 
     // Merger was spawned
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', '/merge origin/main');
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', renderCommand('merge', 'origin/main'));
 
     // Simulate merger failure
       fireEvent('exit', { sessionId: 'sess-impl-rebase', code: 1 });
       await new Promise(r => setTimeout(r, 10));
 
     // Even though merger failed, implement continues (unlike merge which throws)
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-subtask-after', expect.stringContaining('/implement Subtask 1'));
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-subtask-after', expect.stringContaining('Subtask 1: '));
 
     // Complete subtask -> push -> QA -> done
       fireEvent('event', { sessionId: 'sess-subtask-after', event: { type: 'result' } });
@@ -5409,17 +5410,15 @@ describe('Orchestrator', () => {
       const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
-      // Should have sent a REVISION prompt, not /spec
+      // Should have rendered the spec-revise command, not spec
       const sendCalls = mockSendMessage.mock.calls.filter(
         (call: any[]) => call[0] === 'sess-spec-rev'
       );
       expect(sendCalls.length).toBeGreaterThanOrEqual(1);
       const prompt = sendCalls[0][1];
-      expect(prompt).toContain('REVISION:');
+      expect(prompt.startsWith('<!-- .claude/commands/spec-revise.md -->')).toBe(true);
       expect(prompt).toContain('spec_revision_feedback.md');
       expect(prompt).toContain('Revise the spec to address ALL concerns');
-      // REVISION prompt starts with REVISION:, not /spec
-      expect(prompt.startsWith('REVISION:')).toBe(true);
 
       // Fire completion
       fireEvent('event', { sessionId: 'sess-spec-rev', event: { type: 'result' } });

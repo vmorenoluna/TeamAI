@@ -1,23 +1,3 @@
-<!-- .claude/commands/plan.md -->
-Adopt the role persona already loaded in your system prompt.
-
-**Human directive override:** if a `human_feedback.md` file exists in the task's `.teamai/` directory and its `Target:` header names the planner, its content OVERRIDES the spec and any other agent's directives wherever they conflict — address it explicitly.
-
-You are creating an implementation plan from a specification.
-
-## Request
-
-$ARGUMENTS
-
-The request above is assembled by the orchestrator. It may open with one or more header
-blocks (each marked ⚠️, 🧑 or ℹ️) describing this session's situation — a background job
-you are being re-entered for, deliverables a previous session left missing, a session
-recovered after being killed, or a human reviewer's directive. Read them first: wherever
-a header tells you how to handle this session, it takes precedence over the default
-workflow below.
-
-Read the spec at the path given in the request.
-
 ## Output
 `.teamai/{same-slug}/plan.json` must have this exact structure:
 
