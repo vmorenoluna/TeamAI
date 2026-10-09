@@ -198,7 +198,7 @@ describe('retryTask — Gap 5: qa_report.json snapshot', () => {
   // other counter carried in .pipeline_state.json) used to retry with that
   // counter intact, so the very next wakeup/deliverable check could trip the
   // same cap almost instantly — even when the retry's underlying work (e.g.
-  // a long-running sweep) was legitimately healthy and about to finish.
+  // a long-running job) was legitimately healthy and about to finish.
   // retryTask must always clear the pipeline-state budget before resuming.
   it('always clears the pipeline-state budget before resuming', async () => {
     const slug = 'retry-clears-budget';

@@ -3,7 +3,7 @@
 /**
  * Unit tests: alert-banner absence contract.
  *
- * The silent-failure audit + fix sweep established a uniform
+ * The silent-failure audit + fix pass established a uniform
  * `try/catch + role='alert'` pattern across 9 components. This file
  * locks in the COMPLEMENTARY contract: when no action has thrown, the
  * `role='alert'` banner is NOT rendered. Without this sanity check,

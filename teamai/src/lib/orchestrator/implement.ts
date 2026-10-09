@@ -95,7 +95,7 @@ export interface ClearWorktreeDirDeps {
 /**
  * Retry clearing a worktree directory that still exists after git-level
  * removal (`git worktree remove --force`). A leftover file handle held
- * open by an orphaned process — a background server/sweep from an
+ * open by an orphaned process — a background server/job from an
  * earlier, incompletely-torn-down run of this same task — can block
  * deletion on Windows even with force:true, which only suppresses ENOENT,
  * not a lock. git's own worktree metadata gets deregistered regardless of
@@ -123,7 +123,7 @@ export async function clearWorktreeDirectoryOrThrow(
     throw new WorktreeError(
       `Worktree directory at ${worktreePath} could not be fully removed — ` +
       `it likely still has a file locked open by a leftover process from an earlier ` +
-      `run (e.g. an orphaned background server/sweep). Manually stop whatever holds ` +
+      `run (e.g. an orphaned background server/job). Manually stop whatever holds ` +
       `it open and delete the directory, then retry the task.`,
       'WORKTREE_LOCKED',
     );
@@ -731,7 +731,7 @@ function reworkFilesToFix(specPath: string): string[] | null {
  * ever flip it, so the task fails deterministically regardless of how many
  * times the coder fixes the actual problem. Found on task
  * detect-mechanical-periodic-melodic-loops: 9999 restored subtask 5's three
- * missing sweep-evidence files across two further (correctly-idle) rework
+ * missing evidence files across two further (correctly-idle) rework
  * attempts, yet the task still failed with "Subtask(s) 5, 6 remained
  * incomplete."
  *
@@ -1127,8 +1127,8 @@ export async function runSubtaskSession(
   // unchecked; and squashWithMessage's `git reset --soft <merge-base>` only
   // restages the tree of the previous commit, so anything never staged is
   // silently dropped from the PR entirely — no error, no warning, the code
-  // just never reaches the branch. Found on task
-  // guard-standalone-melody-endpoint-chord-s: subtask 1 implemented the fix
+  // just never reaches the branch. Found on a real
+  // task: subtask 1 implemented the fix
   // and its tests, verified all green, and ended the session having never
   // committed either file; QA (which runs directly against the worktree, not
   // its git history) reviewed the working tree and passed it; the eventual PR
@@ -1201,7 +1201,7 @@ export async function runSubtaskSession(
   // synthesis's entire purpose: it fires precisely when nothing else can be
   // targeted, so its coder session must be free to fix what QA actually
   // named. Found on task detect-mechanical-periodic-melodic-loops: 9999
-  // correctly produced the three missing sweep-evidence files subtask 5 was
+  // correctly produced the three missing evidence files subtask 5 was
   // supposed to create, and got rejected for it — the commit itself was
   // never reverted (this check only marks the subtask incomplete), but the
   // attempt was burned regardless.
@@ -1259,7 +1259,7 @@ export async function runSubtaskSession(
         // of the assigned fix was written. Nothing rejected it: no
         // files_to_create to fail, no out-of-scope files to flag. It was
         // marked completed, and the missing fix silently propagated through
-        // 14 further subtasks until a sweep-verification subtask caught the
+        // 14 further subtasks until a verification subtask caught the
         // regression empirically ~12 hours and several dollars of session
         // cost later.
         let sessionSummary = '';
@@ -1281,7 +1281,7 @@ export async function runSubtaskSession(
   // ADR 002: Check for wakeup file (engineer scheduled background work).
   // NOT gated on hasQaFeedback — a QA-rework/cleanup coder session can
   // legitimately need to start a long verification job (e.g. re-running a
-  // sweep after a fix) just like a first-pass session. Gating this on
+  // benchmark after a fix) just like a first-pass session. Gating this on
   // hasQaFeedback silently dropped wakeup files written during rework: the
   // coder would correctly schedule a wait, but the orchestrator would never
   // look for the file, advance straight to QA before the job finished, and
@@ -1442,7 +1442,7 @@ export async function runSubtaskSession(
     // (git failure), the same best-effort fallback the scope check above uses.
     // Found on task a-later-demo-task: subtask 15's
     // five files_to_create had existed on disk since a stale commit three
-    // rounds earlier; a session that only stood up background sweep servers
+    // rounds earlier; a session that only stood up background job servers
     // and ended before running them was marked completed anyway, because the
     // five paths — untouched this session, carrying three-day-old evidence —
     // still passed existsSync.

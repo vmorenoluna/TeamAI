@@ -235,9 +235,9 @@ describe('_writeQaFeedback', () => {
       overall: 'FAIL',
       criteria: [
         {
-          criterion: 'AC-11 (CS-10/CS-11): cadence gating on the true leading tone',
+          criterion: 'AC-11 (CS-10/CS-11): ending detection gated on the true header',
           status: 'FAIL',
-          fix_needed: 'Use chord.soundsAs instead of ScalePosition.equals',
+          fix_needed: 'Use Token.matches instead of Token.equals',
           subtask_ids: [2],
         },
       ],
@@ -250,7 +250,7 @@ describe('_writeQaFeedback', () => {
 
     const subtaskA = plan.subtasks.find((s: any) => s.id === 1);
     const subtaskB = plan.subtasks.find((s: any) => s.id === 2);
-    expect(subtaskB.acceptance_criteria.some((ac: string) => ac.includes('[QA CORRECTION: Use chord.soundsAs instead of ScalePosition.equals]'))).toBe(true);
+    expect(subtaskB.acceptance_criteria.some((ac: string) => ac.includes('[QA CORRECTION: Use Token.matches instead of Token.equals]'))).toBe(true);
     expect(subtaskB.qa_flagged).toBe(true);
     // subtask 1 was not named in subtask_ids — must not be flagged by this criterion
     expect(subtaskA.qa_flagged).toBeFalsy();

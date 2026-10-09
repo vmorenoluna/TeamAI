@@ -78,7 +78,7 @@ Quality failures are the core retry loop: the QA reviewer produced a FAIL report
 > counter. Found on task `add-per-constraint-soft-score-attributio`: three
 > wakeups each diagnosed and fixed a distinct real bug (a compile-visibility
 > error, a git-dirty checkout-sharing contamination, a build-SHA-scanning
-> script bug) and relaunched the ~2h evidence sweep each time; the counter
+> script bug) and relaunched the ~2h evidence job each time; the counter
 > incremented on every relaunch regardless, and the task failed 2 minutes into
 > the third (correct) relaunch. See `src/lib/orchestrator/implement.ts`'s
 > wakeup-file-detection block (search `isGenuineRelaunch`).

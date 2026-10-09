@@ -500,7 +500,7 @@ describe('triggerEarlyWakeup — end a pending wakeup wait immediately', () => {
 
     (orch as AnyOrch).triggerEarlyWakeup(
       project.taskId,
-      "progress log sweep_progress.log hasn't been modified in 20min — background job appears dead",
+      "progress log job_progress.log hasn't been modified in 20min — background job appears dead",
     );
 
     const outputLog = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
@@ -783,7 +783,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
 
   // Deterministic recovery: TeamAI is the sole writer to a task's worktree,
   // so a git operation stuck mid-flight (a merger killed mid-`git merge` by
-  // recovery.ts's stall sweep, most concretely) is never ambiguous — it's
+  // recovery.ts's stall job, most concretely) is never ambiguous — it's
   // always one of our own interrupted sessions, never a concurrent external
   // actor. rebaseOntoLatestDefault resets it unconditionally before doing
   // anything else, rather than letting a stale rebase/merge state confuse

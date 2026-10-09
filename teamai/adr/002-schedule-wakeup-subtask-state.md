@@ -6,9 +6,9 @@
 
 ## Problem
 
-When an engineer starts a long-running background process (sweep, benchmark, data pipeline) and the session budget ends before it completes, the orchestrator has no concept of "background work pending." It treats the session ending as subtask completion and advances to the next subtask — even though the deliverable file was never created.
+When an engineer starts a long-running background process (benchmark, simulation, data pipeline) and the session budget ends before it completes, the orchestrator has no concept of "background work pending." It treats the session ending as subtask completion and advances to the next subtask — even though the deliverable file was never created.
 
-**Exhibit (task 437920fa):** Subtask 3 required a 100-minute Python sweep producing `docs/melody-optimizer-analysis.md`. The sweep output was 0 bytes when the session started (Python only flushes its 8KB buffer when full or the process exits). The engineer correctly identified the issue, scheduled a `ScheduleWakeup` for 23:20, and ended the session. The orchestrator marked subtask 3 complete. Subtask 4 then added cross-references to a file that didn't exist.
+**Exhibit (task 437920fa):** Subtask 3 required a 100-minute Python script producing `docs/analysis.md`. The script's output was 0 bytes when the session started (Python only flushes its 8KB buffer when full or the process exits). The engineer correctly identified the issue, scheduled a `ScheduleWakeup` for 23:20, and ended the session. The orchestrator marked subtask 3 complete. Subtask 4 then added cross-references to a file that didn't exist.
 
 ## Design
 
@@ -20,8 +20,8 @@ When an engineer session needs to end before a background process completes, the
 {
   "subtask_id": 3,
   "wakeup_at": "2026-07-03T23:20:00Z",
-  "background_command": "python sweep.py --output sweep-results/",
-  "expected_artifact": "sweep-results/summary.jsonl"
+  "background_command": "python run_benchmark.py --output results/",
+  "expected_artifact": "results/summary.jsonl"
 }
 ```
 
@@ -173,13 +173,13 @@ The `task.json` task record also gets `wakeupUntil?: string` and `wakeupSubtaskI
 
 7. **Artifact exists and is complete** — If the artifact file exists and passes verification (non-zero size, valid format, expected record count), the engineer commits it and marks the subtask as done. The pipeline advances normally.
 
-8. **Artifact is still missing or incomplete** — If the sweep hasn't finished, the output is truncated, or the file doesn't exist, the engineer first checks whether the background process is still running. If it's still running: the engineer estimates remaining time, writes an updated `subtask_wakeup.json` with a new `wakeup_at`, and ends. If the process crashed or exited with an error: the engineer does NOT write a new wakeup file — the task fails immediately (no point waiting for an artifact that will never appear). The orchestrator increments `pipeline.wakeupAttemptCount` each time it detects a new `subtask_wakeup.json` for the same subtask. After 3 consecutive wakeup attempts with no artifact, the subtask is marked as blocked and the task advances to `failed` with a clear message. `wakeupAttemptCount` resets to 0 when the artifact is successfully committed.
+8. **Artifact is still missing or incomplete** — If the job hasn't finished, the output is truncated, or the file doesn't exist, the engineer first checks whether the background process is still running. If it's still running: the engineer estimates remaining time, writes an updated `subtask_wakeup.json` with a new `wakeup_at`, and ends. If the process crashed or exited with an error: the engineer does NOT write a new wakeup file — the task fails immediately (no point waiting for an artifact that will never appear). The orchestrator increments `pipeline.wakeupAttemptCount` each time it detects a new `subtask_wakeup.json` for the same subtask. After 3 consecutive wakeup attempts with no artifact, the subtask is marked as blocked and the task advances to `failed` with a clear message. `wakeupAttemptCount` resets to 0 when the artifact is successfully committed.
 
 9. **Wakeup composes with rate limits** — If the re-entered session hits a rate limit during the artifact verification, `handleRateLimit` pauses and resumes normally. The `wakeup*` pipeline state fields are NOT cleared until the wakeup subtask completes successfully — this way, rate-limit retries don't lose the isolation filter or re-entry prompt context. The `wakeupUntil` timestamp is ignored once the timer fires (it's only used to schedule the initial `setTimeout`).
 
 10. **Wakeup composes with `files_to_create`** — If `subtask_wakeup.json` exists, `files_to_create` verification is SKIPPED entirely for that subtask (the re-entered engineer handles artifact verification via the wakeup prompt). If `subtask_wakeup.json` does NOT exist, `files_to_create` verification works as before.
 
-11. **implement.md template updated** — The `Long-Running Verification Scripts > When the sweep output is a committed artifact` section includes instructions for writing `subtask_wakeup.json` when the session budget won't cover the sweep duration.
+11. **implement.md template updated** — The `Long-Running Verification Scripts > When the run's output is a committed artifact` section includes instructions for writing `subtask_wakeup.json` when the session budget won't cover the job's duration.
 
 12. **Wakeup file cleanup** — The orchestrator deletes `subtask_wakeup.json` immediately after reading it (at session end, when the wakeup timer is scheduled). The pipeline state (`wakeupUntil`, `wakeupSubtaskId`, `wakeupCommand`, `wakeupArtifact`) is stored in memory and persisted to the task record, so the timer fires independently of the file. A stale wakeup file from a previous run is harmless — it's read, processed, and deleted.
 
@@ -189,7 +189,7 @@ The `task.json` task record also gets `wakeupUntil?: string` and `wakeupSubtaskI
 
 ### Nested wakeups (artifact still not ready)
 
-If the wakeup fires and the sweep still hasn't finished, the engineer checks whether the background process is still running. If it's still running: the engineer writes an updated `subtask_wakeup.json` with a new `wakeup_at`. If the process crashed: the engineer does NOT write a new wakeup file — the task fails immediately. The orchestrator increments `pipeline.wakeupAttemptCount` each time it detects a new wakeup file for the same subtask — UNLESS the new file's `background_command` differs from the one recorded on the previous wakeup, in which case the counter resets to 1 instead (see ADR 004's 2026-09-26 addition): a materially different command means the engineer fixed a real blocker before relaunching, which is forward progress rather than a stalled retry, and earns a fresh attempt budget. The counter resets to 0 when the artifact is successfully committed. After 3 consecutive wakeup attempts with no artifact completion and no command change, the task fails.
+If the wakeup fires and the job still hasn't finished, the engineer checks whether the background process is still running. If it's still running: the engineer writes an updated `subtask_wakeup.json` with a new `wakeup_at`. If the process crashed: the engineer does NOT write a new wakeup file — the task fails immediately. The orchestrator increments `pipeline.wakeupAttemptCount` each time it detects a new wakeup file for the same subtask — UNLESS the new file's `background_command` differs from the one recorded on the previous wakeup, in which case the counter resets to 1 instead (see ADR 004's 2026-09-26 addition): a materially different command means the engineer fixed a real blocker before relaunching, which is forward progress rather than a stalled retry, and earns a fresh attempt budget. The counter resets to 0 when the artifact is successfully committed. After 3 consecutive wakeup attempts with no artifact completion and no command change, the task fails.
 
 ### Wakeup during QA rework
 
@@ -207,7 +207,7 @@ If multiple subtasks in the SAME group each write `subtask_wakeup.json`, the orc
 
 ### Planner role populates `files_to_create`
 
-The planner should populate `files_to_create` for any subtask whose acceptance criteria require a committed file artifact (benchmark output, sweep results, data pipeline output, generated documentation). This feeds naturally into the wakeup flow: the `expected_artifact` in `subtask_wakeup.json` should match one of the entries in the plan's `files_to_create`. The `plan.md` command template should include this guidance in its Rules section.
+The planner should populate `files_to_create` for any subtask whose acceptance criteria require a committed file artifact (benchmark output, script results, data pipeline output, generated documentation). This feeds naturally into the wakeup flow: the `expected_artifact` in `subtask_wakeup.json` should match one of the entries in the plan's `files_to_create`. The `plan.md` command template should include this guidance in its Rules section.
 
 ### Wakeup file format errors
 
@@ -282,13 +282,6 @@ the SAME attempt's background check — would burn a QA-attempt-budget increment
 on wakeup cycles, before the reviewer ever reached a fresh verdict. The increment is now
 skipped when `wakeupCommand` is already set at entry (i.e., this invocation is a
 re-entry, not a fresh attempt).
-
-**Terminology note:** earlier drafts of this generalization used "sweep" throughout
-(an earlier private project's term for a parameter sweep) — genericized to "script"/"job"/"background
-process" in code comments and command templates, since TeamAI itself is
-project-agnostic. `expected_artifact`/`background_command`/`progress_log_path` always
-described an arbitrary command; only the prose calling it a "sweep" was
-project-specific.
 
 **Also added while touching this area:** the command templates' "detach the job"
 instructions now warn against relaunching or stopping multiple background jobs via a

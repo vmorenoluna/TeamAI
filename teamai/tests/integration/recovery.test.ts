@@ -534,7 +534,7 @@ describe('Recovery Integration', () => {
       const projectPath = registerProject('wakeup-pending');
       createTask(projectPath, 't-waking', {
         phase: 'implement',
-        title: 'Waiting on sweep',
+        title: 'Waiting on job',
         wakeupUntil: new Date(Date.now() + 60 * 60_000).toISOString(),
       });
 
@@ -549,7 +549,7 @@ describe('Recovery Integration', () => {
       const projectPath = registerProject('wakeup-elapsed');
       createTask(projectPath, 't-woken', {
         phase: 'implement',
-        title: 'Sweep finished',
+        title: 'Job finished',
         wakeupUntil: new Date(Date.now() - 1000).toISOString(),
       });
 

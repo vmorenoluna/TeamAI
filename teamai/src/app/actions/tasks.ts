@@ -85,7 +85,7 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
   // doc comment. Carrying a near-exhausted counter into a retry means a
   // subtask that already burned its wakeup budget on the failed run gets
   // killed almost instantly on the very next wakeup, even if the underlying
-  // work (e.g. a long-running sweep) is legitimately healthy and about to finish.
+  // work (e.g. a long-running script) is legitimately healthy and about to finish.
   orchestrator.clearPipelineStateFile(taskStore.getDirById(taskId));
 
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket

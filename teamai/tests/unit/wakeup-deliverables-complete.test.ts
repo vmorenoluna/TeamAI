@@ -2,7 +2,7 @@
  * Regression: a wakeup re-entry that ends silently (no phase_wakeup.json) but
  * wrote the phase's deliverables is a finished phase. Previously the
  * stale-artifact heuristic only watched the wakeup's old expected artifact —
- * a log from a sweep that a host restart had interrupted and the agent re-ran
+ * a log from a job that a host restart had interrupted and the agent re-ran
  * under new names — so it re-armed until the attempt cap and failed a
  * completed spec as 'wakeup-exhausted'.
  */
@@ -27,7 +27,7 @@ describe('resolvePhaseWakeup — deliverables written on a silent re-entry', () 
   function makePipeline(attempts: number): TaskPipeline {
     return {
       taskId: 't1', specPath: specDir, wakeupUntil: new Date().toISOString(),
-      wakeupCommand: 'sweep', wakeupArtifact: 'old/never-updated.log', wakeupAttemptCount: attempts,
+      wakeupCommand: 'job', wakeupArtifact: 'old/never-updated.log', wakeupAttemptCount: attempts,
       // the artifact has not changed since the wakeup was scheduled
       wakeupArtifactMtimeAtSchedule: statSync(join(root, 'old', 'never-updated.log')).mtimeMs,
     } as unknown as TaskPipeline;

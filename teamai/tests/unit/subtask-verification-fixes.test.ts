@@ -138,12 +138,12 @@ describe('runImplement — no-op subtask detection', () => {
   it('rejects a subtask whose session committed no changes at all, instead of marking it completed', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
-        id: 1, title: 'Fix Chord.containsPitch', description: 'Pitch-class rewrite',
-        files: ['src/main/scala/sample-project/core/Chord.scala'], acceptance_criteria: ['Recognizes altered pitches'],
+        id: 1, title: 'Fix Parser.parseHeader', description: 'Header parsing rewrite',
+        files: ['src/main/scala/sample-project/core/Parser.scala'], acceptance_criteria: ['Parses every header form'],
       }],
     }));
 
-    // The session never touched Chord.scala — git diff comes back empty for
+    // The session never touched Parser.scala — git diff comes back empty for
     // everything, simulating a coder that read files, dispatched a research
     // sub-agent, and ended without writing a single line.
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
@@ -220,19 +220,19 @@ describe('runImplement — no-op subtask detection', () => {
     // Regression test for task a-later-demo-task:
     // subtask 15's five files_to_create had existed on disk since a stale
     // commit from an EARLIER, QA-rejected round. This session's coder only
-    // stood up background sweep servers and ended before running them —
+    // stood up background job servers and ended before running them —
     // zero commits, zero new changes — yet the subtask was marked completed
     // anyway, because existsSync alone can't distinguish "freshly produced"
     // from "leftover from three rounds ago, carrying stale evidence QA
     // already rejected."
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
-        id: 15, title: 'Sweep-level verification', description: 'Gate on a fresh sweep',
+        id: 15, title: 'Job-level verification', description: 'Gate on a fresh job',
         files_to_create: ['results/gate-report.txt'], acceptance_criteria: ['All gates pass'],
         qa_flagged: true, completed: false,
       }],
     }));
-    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nRe-run the sweep — prior evidence was stale.');
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nRe-run the job — prior evidence was stale.');
 
     const worktreeDir = join(project.root, 'worktrees', 'test-task');
 
@@ -280,17 +280,17 @@ describe('runImplement — no-op subtask detection', () => {
     // to change made a correct one-file fix fail verification and burn the cap.
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
-        id: 4, title: 'Run sweep', description: 'Commit sweep artefacts',
-        files_to_create: ['results/sweep.log', 'results/sweep.jsonl'], acceptance_criteria: ['Artefacts exist'],
+        id: 4, title: 'Run job', description: 'Commit job artefacts',
+        files_to_create: ['results/job.log', 'results/job.jsonl'], acceptance_criteria: ['Artefacts exist'],
         qa_flagged: true, completed: false,
       }],
     }));
-    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\n<!-- teamai:files_to_fix ["results/sweep.log"] -->\n');
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\n<!-- teamai:files_to_fix ["results/job.log"] -->\n');
 
     const worktreeDir = join(project.root, 'worktrees', 'test-task');
 
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-      if (Array.isArray(args) && args[0] === 'diff') return 'results/sweep.log\n';
+      if (Array.isArray(args) && args[0] === 'diff') return 'results/job.log\n';
       if (Array.isArray(args) && args[0] === 'status') return '';
       return 'abc123\n';
     });
@@ -307,8 +307,8 @@ describe('runImplement — no-op subtask detection', () => {
       await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
 
       mkdirSync(join(worktreeDir, 'results'), { recursive: true });
-      writeFileSync(join(worktreeDir, 'results', 'sweep.log'), 'fixed');
-      writeFileSync(join(worktreeDir, 'results', 'sweep.jsonl'), 'unchanged from earlier pass');
+      writeFileSync(join(worktreeDir, 'results', 'job.log'), 'fixed');
+      writeFileSync(join(worktreeDir, 'results', 'job.jsonl'), 'unchanged from earlier pass');
 
       fireEvent('event', { sessionId: 'sess-partial-rework', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
@@ -325,7 +325,7 @@ describe('runImplement — no-op subtask detection', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
         id: 1, title: 'File follow-up ticket', description: 'Defer to analyst',
-        files: ['src/main/scala/sample-project/core/Chord.scala'], acceptance_criteria: ['Ticket filed'],
+        files: ['src/main/scala/sample-project/core/Parser.scala'], acceptance_criteria: ['Ticket filed'],
       }],
     }));
 
@@ -388,7 +388,7 @@ describe('runImplement — explicit subtask_blocked declaration', () => {
   it('fails the task immediately when the coder writes subtask_blocked-st<ID>.json, without further retries', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
-        id: 15, title: 'Sweep-level verification', description: 'Gate on a fresh sweep',
+        id: 15, title: 'Job-level verification', description: 'Gate on a fresh job',
         files_to_create: ['results/gate-report.txt'], acceptance_criteria: ['All gates pass'],
       }],
     }));

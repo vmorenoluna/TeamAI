@@ -149,7 +149,7 @@ describe('findInterruptedTasks', () => {
   });
 
   // Regression: a task legitimately paused mid-implement waiting on a
-  // scheduled wakeup (ADR 002 — e.g. a ~100min verification sweep) is not
+  // scheduled wakeup (ADR 002 — e.g. a ~100min verification job) is not
   // "interrupted". autoResumeInterruptedTasks calls orchestrator.resumeTask
   // unconditionally for everything this function returns, and resumeTask has
   // no wakeup-aware guard of its own — so including such a task here re-runs
@@ -1876,7 +1876,7 @@ describe('sweepStalledTasks', () => {
 
   // ── Wakeup progress-log freshness check ──────────────────────────────
   //
-  // A task mid-wakeup-wait for a detached background job (the sweep) whose
+  // A task mid-wakeup-wait for a detached background job (the job) whose
   // coder provided a progress_log_path gets checked here: if that log has
   // gone stale, end the wait early via triggerEarlyWakeup rather than
   // blindly waiting out the full wakeup_at window.
@@ -1888,7 +1888,7 @@ describe('sweepStalledTasks', () => {
     const taskFile = join(taskDir, 'task.json');
     const statePath = join(taskDir, '.pipeline_state.json');
     const worktreePath = '/test/worktrees/my-task';
-    const progressLogPath = join(worktreePath, 'sweep_progress.log');
+    const progressLogPath = join(worktreePath, 'job_progress.log');
 
     function setUpFiles(opts: {
       wakeupUntil: string | undefined;
@@ -1926,7 +1926,7 @@ describe('sweepStalledTasks', () => {
     it('ends the wait early when the progress log has gone stale (>30min)', async () => {
       setUpFiles({
         wakeupUntil: new Date(Date.now() + 3600_000).toISOString(), // 1h still to go
-        state: { wakeupProgressPath: 'sweep_progress.log', worktreePath },
+        state: { wakeupProgressPath: 'job_progress.log', worktreePath },
         progressLogExists: true,
         progressLogMtimeMs: Date.now() - 40 * 60_000, // 40 min stale
       });
@@ -1937,14 +1937,14 @@ describe('sweepStalledTasks', () => {
       expect(mockTriggerEarlyWakeup).toHaveBeenCalledTimes(1);
       const [taskId, reason] = mockTriggerEarlyWakeup.mock.calls[0];
       expect(taskId).toBe('t1');
-      expect(reason).toContain('sweep_progress.log');
+      expect(reason).toContain('job_progress.log');
       expect(reason).toContain('40min');
     });
 
     it('does not trigger when the progress log is fresh', async () => {
       setUpFiles({
         wakeupUntil: new Date(Date.now() + 3600_000).toISOString(),
-        state: { wakeupProgressPath: 'sweep_progress.log', worktreePath },
+        state: { wakeupProgressPath: 'job_progress.log', worktreePath },
         progressLogExists: true,
         progressLogMtimeMs: Date.now() - 30_000, // 30s ago — fresh
       });
@@ -1955,7 +1955,7 @@ describe('sweepStalledTasks', () => {
     });
 
     it('does not trigger on a 15-20min silent gap — within normal buffered-stdout range, not death', async () => {
-      // Regression guard: a real task's background sweep piped short, frequent
+      // Regression guard: a real task's background job piped short, frequent
       // progress lines to a file rather than a TTY. Block-buffered stdout meant
       // the file's mtime could legitimately sit still for 15-20+ minutes while
       // the job kept solving cells correctly. A 15-minute threshold treated
@@ -1966,7 +1966,7 @@ describe('sweepStalledTasks', () => {
       // gap with real margin.
       setUpFiles({
         wakeupUntil: new Date(Date.now() + 3600_000).toISOString(),
-        state: { wakeupProgressPath: 'sweep_progress.log', worktreePath },
+        state: { wakeupProgressPath: 'job_progress.log', worktreePath },
         progressLogExists: true,
         progressLogMtimeMs: Date.now() - 20 * 60_000, // 20 min stale
       });
@@ -1990,7 +1990,7 @@ describe('sweepStalledTasks', () => {
     it('does not treat a not-yet-created progress log as stale', async () => {
       setUpFiles({
         wakeupUntil: new Date(Date.now() + 3600_000).toISOString(),
-        state: { wakeupProgressPath: 'sweep_progress.log', worktreePath },
+        state: { wakeupProgressPath: 'job_progress.log', worktreePath },
         progressLogExists: false, // job hasn't written its first line yet
       });
 
@@ -2010,7 +2010,7 @@ describe('sweepStalledTasks', () => {
     it('does not run the freshness check once wakeupUntil has already passed (natural timer about to fire)', async () => {
       setUpFiles({
         wakeupUntil: new Date(Date.now() - 1000).toISOString(), // already due
-        state: { wakeupProgressPath: 'sweep_progress.log', worktreePath },
+        state: { wakeupProgressPath: 'job_progress.log', worktreePath },
         progressLogExists: true,
         progressLogMtimeMs: Date.now() - 20 * 60_000,
       });

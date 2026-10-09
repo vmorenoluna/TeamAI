@@ -41,7 +41,7 @@ describe('create-task-cli.mjs', () => {
     const result = run([
       '--project', projectDir,
       '--title', 'Investigate AC-T1 regression',
-      '--description', 'Fresh sweep on HEAD shows AC-T1 dropped from 95.7% to 59.3%.',
+      '--description', 'Fresh job on HEAD shows AC-T1 dropped from 95.7% to 59.3%.',
     ]);
 
     expect(result.status).toBe(0);
@@ -51,7 +51,7 @@ describe('create-task-cli.mjs', () => {
 
     const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
     expect(task.title).toBe('Investigate AC-T1 regression');
-    expect(task.description).toBe('Fresh sweep on HEAD shows AC-T1 dropped from 95.7% to 59.3%.');
+    expect(task.description).toBe('Fresh job on HEAD shows AC-T1 dropped from 95.7% to 59.3%.');
     expect(task.phase).toBe('backlog');
     expect(task.slug).toBe('investigate-ac-t1-regression');
     expect(typeof task.id).toBe('string');
