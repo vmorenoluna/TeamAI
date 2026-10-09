@@ -108,6 +108,8 @@ sessions do not read them.
   orchestrator already chooses.
 - Put a section that another command also needs into `_shared/` and include it. Never copy
   it.
+- Keep work-mode rules out of role files. A role is loaded the same way in every mode, so a
+  rule for one mode belongs in that mode's command (`guardrail-coverage.test.ts` checks it).
 - Add a mode by adding a command and selecting it at the call site from on-disk state that
   survives a restart.
 - Structure within a command follows ADR 003.

@@ -161,6 +161,23 @@ Rules:
     route the task to human review.
   - A criterion satisfied by code changes alone (new function, type, config) is
     self-evident in the diff — no additional artifact is required.
+- **Set `files_to_create` on ANY subtask whose deliverable is a brand-new file** —
+  not only evidence artifacts: a new test file, a new script, a new source module.
+  The deliverable check runs right after the coder session ends and forces a retry
+  when a listed file is missing. Without `files_to_create`, the only check that the
+  file exists is the coder's own report and, later, QA — a subtask can be marked
+  complete although the file was never written.
+- **A verification job that won't finish inside one coder session must say so in
+  the subtask description**: note the expected order of magnitude, and that the
+  coder must schedule an orchestrator wakeup if the job is still running when the
+  session needs to end. Don't write instructions that read as if a long job
+  completes inline in one sitting.
+- **Never state a path for the subtask wakeup file.** Its location is fixed and the
+  coder's own instructions name it; if a description needs to mention the wakeup at
+  all, note that one may be required and leave the location out. A subtask's
+  explicit, task-specific instruction reads as higher priority to the coder than
+  general policy, so a wrong path here defeats the wakeup: the orchestrator only
+  reads the task directory, and a file written anywhere else is never read.
 
 ## When a feasibility check won't finish before your session budget
 
