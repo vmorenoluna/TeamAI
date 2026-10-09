@@ -318,7 +318,7 @@ export function buildHeadMovedNote(headAtSchedule?: string, currentHead?: string
   return "WARNING: this branch's HEAD moved while you were paused (" + headAtSchedule.slice(0, 7) + ' → ' +
     currentHead.slice(0, 7) + ') — e.g. a rebase onto a base that gained commits. The background job was\n' +
     'started against ' + headAtSchedule.slice(0, 7) + ', so whatever it produced describes that revision, not\n' +
-    'this one. If your deliverables must be recorded at the current HEAD (a build SHA in a log, a sweep\n' +
+    'this one. If your deliverables must be recorded at the current HEAD (a build SHA in a log, a benchmark\n' +
     'baseline), do not collect that output as evidence: stop the old job, relaunch it against the current\n' +
     'HEAD, and schedule a new wakeup.\n\n';
 }
