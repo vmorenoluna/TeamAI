@@ -67,6 +67,16 @@ export interface TaskPipeline {
    * not that the job genuinely finished.
    */
   wakeupArtifactMtimeAtSchedule?: number | null;
+  /**
+   * Worktree HEAD SHA when the current wakeup cycle was scheduled. The
+   * background job was started against that revision; if the branch is
+   * rebased onto a moved base (or gains commits) while the task is paused,
+   * evidence the job produces describes the OLD revision. The re-entry
+   * prompt compares this against the current HEAD so the coder knows to
+   * relaunch instead of committing evidence for a revision the branch no
+   * longer is.
+   */
+  wakeupHeadAtSchedule?: string;
   /** Consecutive implement passes that ended with one or more subtasks
    *  still `!completed` in plan.json — an unmet dependency, a repeated
    *  scope violation, etc. Bounded by maxImplementRetries: below

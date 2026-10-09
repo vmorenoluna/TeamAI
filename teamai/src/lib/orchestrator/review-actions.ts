@@ -59,6 +59,7 @@ function resetAllCounters(pipeline: TaskPipeline, preserveQaHistory = false): vo
   pipeline.wakeupCommand = undefined;
   pipeline.wakeupArtifact = undefined;
   pipeline.wakeupProgressPath = undefined;
+  pipeline.wakeupHeadAtSchedule = undefined;
 }
 
 /**

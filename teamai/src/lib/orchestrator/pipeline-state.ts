@@ -55,6 +55,7 @@ export function savePipelineState(pipeline: TaskPipeline): void {
       wakeupArtifact: pipeline.wakeupArtifact,
       wakeupProgressPath: pipeline.wakeupProgressPath,
       wakeupAttemptCount: pipeline.wakeupAttemptCount,
+      wakeupHeadAtSchedule: pipeline.wakeupHeadAtSchedule,
       persistedCriterionFailCounts: pipeline.persistedCriterionFailCounts,
       persistedAdditionalIssueCounts: pipeline.persistedAdditionalIssueCounts,
       specRevision: pipeline.specRevision,

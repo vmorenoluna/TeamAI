@@ -28,6 +28,7 @@ import { warn } from '../logger';
 import {
   scanWakeupFilesWithRetry, parseWakeupFile, computeNextAttemptCount, isGenuineRelaunch,
   snapshotMtime, checkStaleWakeupReentry, clearWakeupState, wakeupAttemptsExceeded, buildWakeupReentryHeader,
+  findLiveOrphanedJob,
 } from './wakeup';
 import type { TaskStore } from '../task-store';
 import type { PipelinePhase } from '@/constants/phases';
@@ -932,6 +933,10 @@ export async function runSubtaskSession(
       command: pipeline.wakeupCommand,
       artifact: pipeline.wakeupArtifact,
       worktreeNote: true,
+      headAtSchedule: pipeline.wakeupHeadAtSchedule,
+      currentHead: (() => {
+        try { return deps.execGitCapture(['rev-parse', 'HEAD'], pipeline.worktreePath).trim(); } catch { return undefined; }
+      })(),
     });
   }
 
@@ -1025,12 +1030,14 @@ export async function runSubtaskSession(
   // failing outright. A deliberate stop (killReason unset) is never
   // retried — it rethrows immediately, exactly as before this loop existed.
   let sessionId: string;
+  let sessionStartedAt = Date.now();
   let stallRecoveryHeader = '';
   for (;;) {
     // Rendered before the session exists, so a template problem can never
     // leave a spawned session waiting on a message that never comes.
     const message = renderCommand(command, stallRecoveryHeader + request);
     try {
+      sessionStartedAt = Date.now();
       sessionId = await processManager.createSession(deps.sessionOpts(coderRole, cwd, pipeline.taskId, subtaskLogFile));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1354,6 +1361,9 @@ export async function runSubtaskSession(
           pipeline.wakeupArtifactMtimeAtSchedule = wd.expected_artifact
             ? snapshotMtime(path.join(cwd, wd.expected_artifact))
             : null;
+          try {
+            pipeline.wakeupHeadAtSchedule = deps.execGitCapture(['rev-parse', 'HEAD'], pipeline.worktreePath).trim() || undefined;
+          } catch { pipeline.wakeupHeadAtSchedule = undefined; }
         }
 
         // Progress-aware circuit breaker: a wakeup re-entry that relaunches
@@ -1412,6 +1422,29 @@ export async function runSubtaskSession(
       pipeline, wasReentry: wasWakeupReentry, wakeupDetected, cwd, unitLabel: 'Subtask ' + subtask.id,
     });
     if (staleRescheduled) wakeupDetected = true;
+  }
+
+  // Last-resort safety net, mirroring resolvePhaseWakeup for the single-session
+  // phases: the session wrote no wakeup file this cycle (or wrote it somewhere
+  // the orchestrator doesn't scan), yet a process behind one of its own
+  // recorded pid files is still alive. For a subtask with a deliverable check
+  // that is hard evidence of an in-flight job, not a missing deliverable —
+  // counting it as a failed pass burns the retry budget while hours of real
+  // work are still running. Auto-schedule a re-entry instead.
+  if (!wakeupDetected && subtask.files_to_create?.length) {
+    const orphan = findLiveOrphanedJob(pipeline.specPath, sessionStartedAt);
+    if (orphan) {
+      wakeupDetected = true;
+      pipeline.wakeupSubtaskId = subtask.id;
+      pipeline.wakeupUntil = new Date(Date.now() + 15 * 60_000).toISOString();
+      pipeline.wakeupCommand = 'auto-detected orphaned background job (PID ' + orphan.pid + ', ' + path.relative(pipeline.specPath, orphan.pidFile) + ')';
+      pipeline.wakeupArtifact = undefined;
+      pipeline.wakeupAttemptCount = (pipeline.wakeupAttemptCount || 0) + 1;
+      logToOutput(pipeline.specPath,
+        '[WAKEUP] Subtask ' + subtask.id + ' ended without a wakeup file, but PID ' + orphan.pid + ' (from ' +
+        path.relative(pipeline.specPath, orphan.pidFile) + ') is still running — auto-scheduling a re-entry in 15 minutes ' +
+        'instead of counting a failed deliverable check (attempt ' + pipeline.wakeupAttemptCount + ')\n');
+    }
   }
 
   // Verify deliverable files exist before marking subtask complete.

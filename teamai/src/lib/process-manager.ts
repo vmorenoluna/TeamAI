@@ -168,6 +168,9 @@ export class ProcessManager extends EventEmitter {
     model?: string;
     permissionMode?: string;
     env?: Record<string, string>;
+    /** Host path of the task's `.teamai/{slug}/` directory. Exported to the
+     *  session as TEAMAI_SPEC_DIR (container path in container mode). */
+    specDir?: string;
     projectRoot?: string;
     logFile?: string;   // append formatted agent output here for cross-phase persistence
   }): Promise<string> {
@@ -210,7 +213,11 @@ export class ProcessManager extends EventEmitter {
         await containerManager.ensureContainer(opts.projectRoot, opts.logFile);
 
       const containerCwd = hostToContainerPath(opts.cwd, opts.projectRoot, remoteWorkspaceFolder);
-      const envFlags = Object.entries(opts.env ?? {}).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+      const containerEnv = { ...(opts.env ?? {}) };
+      if (opts.specDir) {
+        containerEnv.TEAMAI_SPEC_DIR = hostToContainerPath(opts.specDir, opts.projectRoot, remoteWorkspaceFolder);
+      }
+      const envFlags = Object.entries(containerEnv).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
 
       // In container mode use --dangerously-skip-permissions (safe inside isolated container)
       claudeArgs.push('--dangerously-skip-permissions');
@@ -231,7 +238,7 @@ export class ProcessManager extends EventEmitter {
       const claudePath = getToolPath('claude');
       proc = spawn(claudePath, claudeArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, ...(opts.env ?? {}) },
+        env: { ...process.env, ...(opts.env ?? {}), ...(opts.specDir ? { TEAMAI_SPEC_DIR: opts.specDir } : {}) },
         cwd: opts.cwd,
       });
     }

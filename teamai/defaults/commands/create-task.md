@@ -32,6 +32,12 @@ reward/constant/function another ticket also changes," where running both in par
 is likely to produce conflicting PRs. Pass `--depends-on` for those; leave truly independent
 tickets unlinked. If unsure whether two tickets conflict, ask rather than guessing either way.
 
+A ticket whose acceptance criteria depend on a measurement against the current baseline (a
+benchmark, verification run, or any measurement compared with earlier numbers) is blocked by every ticket
+that changes the code that measurement exercises: a merge in between moves the baseline, so the
+measurement and the thresholds derived from it go stale and must be redone. Link those tickets
+with `--depends-on` so they run one after another rather than side by side.
+
 ## Step 3: Confirm
 
 The script prints the ticket's slug and id on success. Report both to the user, e.g.:

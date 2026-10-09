@@ -279,6 +279,7 @@ export function clearWakeupState(pipeline: TaskPipeline): void {
   pipeline.wakeupProgressPath = undefined;
   pipeline.wakeupAttemptCount = 0;
   pipeline.wakeupArtifactMtimeAtSchedule = undefined;
+  pipeline.wakeupHeadAtSchedule = undefined;
 }
 
 /** True once `wakeupAttemptCount` reaches the configured cap — the shared
@@ -303,6 +304,23 @@ export interface WakeupReentryHeaderOptions {
    *  (implement, qa-review) but not spec/plan, which run in the project root
    *  and haven't created (or don't use) a worktree yet. */
   worktreeNote?: boolean;
+  /** Worktree HEAD when the wakeup was scheduled vs. now. Rendered as a
+   *  warning only when both are known and differ. */
+  headAtSchedule?: string;
+  currentHead?: string;
+}
+
+/** Warning appended to a re-entry prompt when the branch HEAD moved while the
+ *  task was paused (typically a rebase onto a base that gained commits).
+ *  Empty when either SHA is unknown or they match. */
+export function buildHeadMovedNote(headAtSchedule?: string, currentHead?: string): string {
+  if (!headAtSchedule || !currentHead || headAtSchedule === currentHead) return '';
+  return "WARNING: this branch's HEAD moved while you were paused (" + headAtSchedule.slice(0, 7) + ' → ' +
+    currentHead.slice(0, 7) + ') — e.g. a rebase onto a base that gained commits. The background job was\n' +
+    'started against ' + headAtSchedule.slice(0, 7) + ', so whatever it produced describes that revision, not\n' +
+    'this one. If your deliverables must be recorded at the current HEAD (a build SHA in a log, a benchmark\n' +
+    'baseline), do not collect that output as evidence: stop the old job, relaunch it against the current\n' +
+    'HEAD, and schedule a new wakeup.\n\n';
 }
 
 /** Build the `⚠️ WAKEUP RE-ENTRY` prompt header injected ahead of a
@@ -322,6 +340,7 @@ export function buildWakeupReentryHeader(opts: WakeupReentryHeaderOptions): stri
         'this worktree is your branch\'s revision; running from the project root would\n' +
         'exercise the wrong code and produce meaningless results.\n\n'
       : '') +
+    buildHeadMovedNote(opts.headAtSchedule, opts.currentHead) +
     'Check if the artifact exists and is complete. If it is: verify it and finish your\n' +
     'normal end-of-session work (commit, write the required file, etc). If it is missing\n' +
     'or incomplete, first check whether the background process is still running:\n' +
