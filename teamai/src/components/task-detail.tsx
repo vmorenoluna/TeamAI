@@ -259,6 +259,11 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   // the same "nothing to report" copy a genuine, fully-evaluated PASS-minus-
   // recommendations report would use.
   const qaIncomplete = !!qaReport && qaReport.overall !== 'PASS' && qaReport.overall !== 'FAIL';
+  // A failed criterion that carries a fix_needed is already listed (with its
+  // title and the fix) under "QA recommendations"; repeating it under "Failed
+  // acceptance criteria" is redundant, and the QA tab has the full detail. Only
+  // criteria with no recommendation still need their own entry.
+  const failedWithoutRecommendation = failedCriteria.filter(c => !c.fix_needed);
   const pendingCriteria = qaReport?.criteria?.filter(c => c.status !== 'PASS' && c.status !== 'FAIL') ?? [];
   const qaRecommendations = [
     ...failedCriteria
@@ -486,13 +491,13 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                     </section>
                   )}
 
-                  {qaReport && failedCriteria.length > 0 && (
+                  {qaReport && failedWithoutRecommendation.length > 0 && (
                     <section data-component="failed-qa-criteria">
                       <h4 className="text-xs font-semibold uppercase tracking-wider text-red-300 mb-2">
                         Failed acceptance criteria
                       </h4>
                       <div className="space-y-2">
-                        {failedCriteria.map((criterion, index) => (
+                        {failedWithoutRecommendation.map((criterion, index) => (
                           <div key={index} className="rounded-md border border-red-900/30 bg-red-950/10 px-3 py-2">
                             <p className="text-sm font-medium text-slate-200">
                               {criterion.criterion || criterion.name || 'Unnamed acceptance criterion'}
@@ -530,7 +535,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
                     </p>
                   )}
 
-                  {qaReport && !qaIncomplete && failedCriteria.length === 0 && qaRecommendations.length === 0 && (
+                  {qaReport && !qaIncomplete && failedWithoutRecommendation.length === 0 && qaRecommendations.length === 0 && (
                     <p className="text-xs text-slate-400">
                       No specific QA findings were recorded. See the QA tab and terminal output for details.
                     </p>

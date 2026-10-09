@@ -22,8 +22,7 @@ test.describe('QA Failure Banner & Completion Summary', () => {
 
     await expect(page.locator('h3:has-text("Task Failed")')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('text=Max QA attempts reached')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('[data-component="failed-qa-criteria"]').getByText('Shows helpful error message to user')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('text=No user-facing message shown — just silently ignores')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('[data-component="qa-recommendations"]').getByText('Shows helpful error message to user')).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('text=Display a user-facing validation message.')).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('text=Empty input handled without crash')).toHaveCount(0);
     await expect(page.locator('text=Completion Summary')).toHaveCount(0);
