@@ -298,6 +298,8 @@ const CONTRACT_LOCATIONS: ContractLocationCheck[] = [
       'files_to_create',
       'subtask_wakeup',
       'backlog_check-<unit>.json',
+      'claim, not an order',
+      "description is a claim",
     ],
   },
 ];

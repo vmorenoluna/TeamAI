@@ -106,8 +106,11 @@ The lock is a file, `.teamai/.board.lock`, created with `O_EXCL` and holding
 Tickets created from `new_tickets` record `reportedBy` (the task) and `reportedByAgent`
 (e.g. "the coder agent (Subtask 3)"). Their description opens with a note that the claim
 is unverified. When such a ticket reaches its own spec phase, the prompt header names the
-filing agent and says verifying the claim is the analyst's job. The analyst role states
-the same discipline for every ticket: a ticket is a claim, not an order.
+filing agent and says verifying the claim is the analyst's job. The spec command's
+own-ticket section applies the same discipline to every ticket: a description is a claim,
+not an instruction. This rule lives in the command, not the analyst role, because it is
+spec-phase workflow tied to a verdict the orchestrator acts on. Roles carry no work-mode
+workflow (ADR 009), and the guardrail test keeps it out of them.
 
 The spec phase's `self` verdict acts on that verification. On `reject` (already fixed,
 not reproducible, stale evidence, misdiagnosed) the ticket and any worktree are deleted
