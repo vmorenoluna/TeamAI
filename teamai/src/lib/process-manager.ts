@@ -527,8 +527,13 @@ export class ProcessManager extends EventEmitter {
     const createTaskCliPath = join(process.cwd(), 'defaults', 'create-task-cli.mjs');
     const ticketInstruction =
       '## Creating kanban tickets\n\n' +
-      'To file a new backlog ticket, run:\n' +
-      `  node "${createTaskCliPath}" --project "${opts.projectPath}" --title "<short title>" --description "<one-sentence description>"\n\n` +
+      'Before filing, list the open tickets and check the new one against each (already covered, ' +
+      "makes one obsolete, changes one's premise, depends on one); report any overlap to the user " +
+      'and wait for their decision:\n' +
+      `  node "${createTaskCliPath}" --project "${opts.projectPath}" --list\n\n` +
+      'Then file it with the fingerprint that --list printed:\n' +
+      `  node "${createTaskCliPath}" --project "${opts.projectPath}" --board "<fingerprint>" --title "<short title>" --description "<one-sentence description>"\n\n` +
+      'Exit code 3 means tickets were added since --list: check the new one against them and retry with the new fingerprint. ' +
       'This creates a bare ticket (phase: backlog, no spec, no plan) that goes through the normal ' +
       'spec -> plan -> implement -> QA pipeline once started. Do not hand-write task.json yourself.';
     const systemPrompt = roleContent ? `${roleContent}\n\n${ticketInstruction}` : ticketInstruction;

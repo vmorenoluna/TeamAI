@@ -9,6 +9,7 @@ import { slugify } from './utils';
 import { warn as logWarn } from './logger';
 import { PHASE_ARTIFACTS } from './orchestrator/artifacts';
 import { processManager } from './process-manager';
+import { withBoardLock } from './board-lock';
 
 type MergeStrategy = 'local-merge' | 'pull-request';
 
@@ -66,6 +67,19 @@ export interface Task {
   taskType?: string;
   branch?: string;
   dependencies?: string[];     // IDs of tasks this task depends on
+  /** ID of the task whose work makes this one unnecessary, set by a
+   *  `[SUPERSEDES]` directive (orchestrator/backlog-check.ts). Auto mode
+   *  never starts a superseded task while its superseder is alive, and the
+   *  superseded task is deleted once the superseder reaches `done`. If the
+   *  superseder is deleted without completing, the mark is inert. */
+  supersededBy?: string;
+  /** ID of the task whose agent filed this ticket during its own pipeline
+   *  run (backlog-check.ts). Set only on agent-filed tickets: their spec
+   *  phase is told the description is an unverified claim. */
+  reportedBy?: string;
+  /** Which agent filed it, e.g. "the coder agent (Subtask 3)" — shown to the
+   *  analyst who specs it. Set together with `reportedBy`. */
+  reportedByAgent?: string;
   rateLimitedUntil?: string;   // ISO timestamp — set when pipeline is paused by API rate limit
   wakeupUntil?: string;        // ISO timestamp — set when implement phase is paused for background process (ADR 002)
   wakeupSubtaskId?: number;    // Subtask ID that triggered the wakeup (ADR 002)
@@ -91,7 +105,7 @@ export interface Task {
    *  of being silently retried until an unrelated cap eventually caught it"
    *  (see implement.ts's subtask_blocked-st<ID>.json handling) from "a phase run threw an error before reaching any verdict" ('run-error'). Undefined for
    *  legacy failed tasks written before this field existed. */
-  failureReason?: 'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'wakeup-exhausted' | 'subtask-blocked' | 'run-error';
+  failureReason?: 'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'wakeup-exhausted' | 'subtask-blocked' | 'run-error' | 'backlog-check-incomplete';
   /** Why a task landed on `awaiting-review` when that was NOT a genuine QA
    *  pass — spec phase producing no spec.md/spec_summary.md, a no-op spec
    *  revision, a rolled-back approval attempt. Mirrors `failureReason`'s
@@ -194,6 +208,12 @@ export class TaskStore {
   }
 
   create(id: string, title: string, description: string, source?: string, competitiveContext?: string, taskType?: string): Task {
+    // Under the board lock (board-lock.ts): a ticket must not appear between
+    // an overlap check's board comparison and its writes.
+    return withBoardLock(this.specsDir, () => this._create(id, title, description, source, competitiveContext, taskType));
+  }
+
+  private _create(id: string, title: string, description: string, source?: string, competitiveContext?: string, taskType?: string): Task {
     // Canonical unique slug (BUG-13): two tasks whose titles share a 40-char
     // prefix must not share a directory (and later a branch/worktree).
     // A title of only symbols slugifies to hyphens — fall back to 'task'.
@@ -341,6 +361,10 @@ export class TaskStore {
   }
 
   delete(id: string): void {
+    withBoardLock(this.specsDir, () => this._delete(id));
+  }
+
+  private _delete(id: string): void {
     const dir = this.getDirById(id);
     // Clean up any stale .tmp file that might remain from a failed atomic write
     try { const tmpPath = join(dir, 'task.json.tmp'); if (existsSync(tmpPath)) unlinkSync(tmpPath); } catch { /* best-effort */ }

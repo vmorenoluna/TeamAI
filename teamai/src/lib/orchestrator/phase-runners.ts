@@ -19,7 +19,8 @@ import { removeStaleWorktreeRegistration } from './worktree-utils';
 import { applyPlanFileSerialization, logUndeclaredSubtaskReferences, snapshotPreservedPlanSubtasks, restorePreservedPlanSubtasks, loadPreservedPlanSubtasks, clearPreservedPlanSubtasks, planDeclaresRealFileChanges } from './plan-validation';
 import { warn } from '../logger';
 import { WorktreeError, PipelineConfigError } from './errors';
-import { createOutOfScopeTicketsFromLog } from './out-of-scope-tickets';
+import { prepareBacklogCheck, runBacklogCheck, backlogCheckEnabled } from './backlog-check';
+import { log as logInfo } from '../logger';
 import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
 import { renderCommand } from '../command-templates';
 import type { PipelinePhase } from '@/constants/phases';
@@ -215,6 +216,8 @@ interface BasePhaseDeps {
 
 /** Shared callbacks for spec and plan — phases that cascade to the next phase. */
 interface CascadePhaseDeps extends BasePhaseDeps {
+  /** Remove the task's worktree (spec phase: a rejected ticket is deleted). */
+  removeWorktree?: (taskId: string) => void;
   rotateOutputLog: (logFile: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
   savePipelineState: (pipeline: TaskPipeline) => void;
@@ -224,10 +227,10 @@ interface CascadePhaseDeps extends BasePhaseDeps {
   execGit: (args: string[], hostCwd: string) => void;
   execGitCapture: (args: string[], hostCwd: string) => string;
   // ── Wakeup (ADR 002, generalized beyond implement — see wakeup.ts) ──
-  getPipelineConfig: () => { wakeupScanRetryDelayMs?: number; maxImplementRetries: number };
+  getPipelineConfig: () => { wakeupScanRetryDelayMs?: number; maxImplementRetries: number; backlogCheck?: boolean };
   scheduleWakeup: (pipeline: TaskPipeline) => void;
   writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
-  /** Used to file the analyst's `[BUG]` follow-up reports as backlog tickets. */
+  /** Board access for the backlog check (backlog-check.ts). */
   taskStore?: TaskStore;
 }
 
@@ -306,6 +309,13 @@ export async function runSpecPhase(
   const revisionFeedbackPath = path.join(pipeline.specPath, 'spec_revision_feedback.md');
   const isRevision = existsSync(revisionFeedbackPath);
   const humanDirective = humanDirectiveFor(pipeline.specPath, 'analyst');
+  // Every ticket-capable session judges the whole open board (backlog-check.ts);
+  // the spec phase also judges its own ticket.
+  const specStore = deps.taskStore ?? new TaskStore(deps.projectRoot);
+  const backlogOn = backlogCheckEnabled(deps.getPipelineConfig);
+  const backlogHeader = backlogOn ? prepareBacklogCheck({
+    specPath: pipeline.specPath, unit: 'spec', store: specStore, ownTaskId: pipeline.taskId, requireSelf: true,
+  }) : '';
 
   // ADR 002 (generalized — see wakeup.ts): a wakeup cycle is in flight for
   // this phase iff wakeupCommand already carried over from a previous cycle
@@ -331,7 +341,7 @@ export async function runSpecPhase(
     // writes the revised spec to spec.md.
     const baselineFile = `spec_v${pipeline.specRevision - 1}.md`;
     message = renderCommand('spec-revise',
-      wakeupHeader + humanDirective +
+      wakeupHeader + humanDirective + backlogHeader +
       `Feature request: ${pipeline.description}\n\n` +
       `Read the existing spec at: \`${agentSpecPath}/${baselineFile}\`\n` +
       `Read the spec revision feedback at: \`${agentSpecPath}/spec_revision_feedback.md\`\n` +
@@ -341,7 +351,7 @@ export async function runSpecPhase(
       `IMPORTANT: Also update \`${agentSpecPath}/spec_summary.md\` to reflect the revised spec — this is a required step, not optional. Do not end the session without it.`);
   } else {
     message = renderCommand('spec',
-      wakeupHeader + humanDirective +
+      wakeupHeader + humanDirective + backlogHeader +
       `${pipeline.description}\n\nIMPORTANT: Write the spec file to \`${agentSpecPath}/spec.md\` (use this exact path, not a new subdirectory).\n` +
       `IMPORTANT: Also write \`${agentSpecPath}/spec_summary.md\` next to it — this is a required step, not optional. Do not end the session without it.`);
   }
@@ -371,21 +381,6 @@ export async function runSpecPhase(
     sessionStartedAt, unitLabel: 'The spec phase', deps,
     deliverables: [path.join(pipeline.specPath, 'spec.md'), path.join(pipeline.specPath, 'spec_summary.md')],
   }) === 'pending') return;
-
-  // Deferred defects found while analysing: the analyst has no CLI in a
-  // pipeline session (TEAMAI_CREATE_TASK_CLI is only set for interactive
-  // terminals), so it reports `[BUG] Fix: ... — ...` lines in its output and
-  // the orchestrator files them, exactly as for implement subtasks. The log
-  // spans every wakeup re-entry; existing titles are skipped, so re-parsing
-  // is idempotent. Best-effort.
-  try {
-    const createdIds = createOutOfScopeTicketsFromLog(deps.projectRoot, specLogFile, deps.taskStore);
-    if (createdIds.length > 0) {
-      logToOutput(pipeline.specPath, '[BUG-TICKET] The spec phase reported ' + createdIds.length + ' deferred defect(s) — created ticket(s): ' + createdIds.join(', ') + '\n');
-    }
-  } catch (err) {
-    logToOutput(pipeline.specPath, '\n[BUG-TICKET] Failed to create deferred-defect tickets: ' + (err instanceof Error ? err.message : String(err)) + '\n');
-  }
 
   if (isRevision && existsSync(revisionFeedbackPath)) {
     unlinkSync(revisionFeedbackPath);
@@ -521,6 +516,30 @@ export async function runSpecPhase(
     logToOutput(pipeline.specPath, `\n[SPEC] Retry produced spec_summary.md — continuing to plan.\n`);
   }
 
+  // Backlog check (backlog-check.ts): verified and applied only once the
+  // spec itself is complete, so a parked spec never touches other tickets.
+  const specBacklog = backlogOn ? await runBacklogCheck({
+    specPath: pipeline.specPath, unit: 'spec', unitLabel: 'The spec phase', taskId: pipeline.taskId,
+    role: 'analyst', cwd: deps.projectRoot, requireSelf: true, projectRoot: deps.projectRoot,
+    store: specStore, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion,
+  }) : { ok: true as const };
+  if (!specBacklog.ok) {
+    deps.writeCompletionSummary(pipeline, 'backlog-check-incomplete', specBacklog.problems.join('; '));
+    deps.advancePhase(pipeline, 'failed');
+    return;
+  }
+  // The analyst verified the ticket's premise and found it does not hold
+  // (already fixed, obsolete, or a misreading by the agent that filed it).
+  // Its verdict is final: the ticket is removed without planning anything.
+  const selfVerdict = 'self' in specBacklog ? specBacklog.self : undefined;
+  if (selfVerdict?.verdict === 'reject') {
+    const reason = selfVerdict.reason;
+    logInfo('spec', `Ticket "${pipeline.title}" (${pipeline.taskId}) deleted — the analyst rejected its premise: ${reason}`);
+    try { deps.removeWorktree?.(pipeline.taskId); } catch { /* no worktree yet */ }
+    specStore.delete(pipeline.taskId);
+    return;
+  }
+
   deps.advancePhase(pipeline, 'plan');
   await deps.executePhase(pipeline);
 }
@@ -588,9 +607,14 @@ export async function runPlanPhase(
       })
     : '';
 
+  const planStore = deps.taskStore ?? new TaskStore(deps.projectRoot);
+  const backlogOn = backlogCheckEnabled(deps.getPipelineConfig);
+  const backlogHeader = backlogOn ? prepareBacklogCheck({
+    specPath: pipeline.specPath, unit: 'plan', store: planStore, ownTaskId: pipeline.taskId, requireSelf: false,
+  }) : '';
   // Rendered before the session exists — see runSpecPhase.
   const message = renderCommand(isReplan ? 'plan-revise' : 'plan',
-    wakeupHeader + humanDirectiveFor(pipeline.specPath, 'planner') + planInstruction);
+    wakeupHeader + humanDirectiveFor(pipeline.specPath, 'planner') + backlogHeader + planInstruction);
 
   // Floor for findLiveOrphanedJob's pid-file scan in resolvePhaseWakeup below
   // — see runSpecPhase's identical capture for why.
@@ -613,6 +637,7 @@ export async function runPlanPhase(
     sessionStartedAt, unitLabel: 'The plan phase', deps,
     deliverables: [path.join(pipeline.specPath, 'plan.json')],
   }) === 'pending') return;
+
 
   // Enforce the preserve-list unconditionally: whatever the planner wrote for
   // the unselected subtasks is overwritten with the pre-session snapshot.
@@ -655,6 +680,17 @@ export async function runPlanPhase(
   // cherry-pick conflict at implement time — fixing it here is cheap and
   // deterministic, and cheaper than burning a merger-agent session later.
   applyPlanFileSerialization(pipeline.specPath);
+
+  const planBacklog = backlogOn ? await runBacklogCheck({
+    specPath: pipeline.specPath, unit: 'plan', unitLabel: 'The plan phase', taskId: pipeline.taskId,
+    role: 'planner', cwd: deps.projectRoot, requireSelf: false, projectRoot: deps.projectRoot,
+    store: planStore, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion,
+  }) : { ok: true as const };
+  if (!planBacklog.ok) {
+    deps.writeCompletionSummary(pipeline, 'backlog-check-incomplete', planBacklog.problems.join('; '));
+    deps.advancePhase(pipeline, 'failed');
+    return;
+  }
 
   // Plan-time validation: warn when a subtask's own prose says it must wait
   // on another subtask (a "confirm N has finished before starting this one"

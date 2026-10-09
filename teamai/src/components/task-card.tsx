@@ -31,7 +31,7 @@ const DESCRIPTION_LIMIT = 80;
 // qa-review session's background wakeup cycle never produced its artifact"
 // from "a coder subtask explicitly declared itself blocked on a defect".
 // 'unknown' covers legacy failed tasks written before failureReason existed.
-const FAILURE_REASON_TOOLTIP: Record<'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'wakeup-exhausted' | 'subtask-blocked' | 'run-error' | 'unknown', string> = {
+const FAILURE_REASON_TOOLTIP: Record<'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'wakeup-exhausted' | 'subtask-blocked' | 'run-error' | 'backlog-check-incomplete' | 'unknown', string> = {
   'qa-attempts-exhausted': 'Task failed — QA attempt budget exhausted',
   'qa-incomplete': 'Task failed — QA never finished its review (no defect found)',
   'spec-revision-exhausted': 'Task failed — spec revision budget exhausted (QA never passed)',
@@ -40,6 +40,7 @@ const FAILURE_REASON_TOOLTIP: Record<'qa-attempts-exhausted' | 'qa-incomplete' |
   'wakeup-exhausted': 'Task failed — a background job’s wakeup attempt budget was exhausted',
   'subtask-blocked': 'Task failed — a subtask reported a blocking defect',
   'run-error': 'Task failed — the phase run stopped with an error',
+  'backlog-check-incomplete': 'Task failed — an agent never completed its check of the open tickets',
   unknown: 'Task failed',
 };
 
@@ -248,6 +249,15 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
         <div className="absolute top-2 right-2" title="Task paused — click Resume to continue">
           <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-900/40 text-slate-400 border border-slate-700/40">
             ⏸ Paused
+          </span>
+        </div>
+      )}
+      {/* Superseded indicator — another task declared this one obsolete; auto
+          mode holds it and deletes it when that task completes. */}
+      {task.supersededBy && (task.phase === 'backlog' || task.phase === 'failed') && !task.isPaused && (
+        <div className="absolute top-2 right-2" title={`Superseded by task ${task.supersededBy} — deleted when that task completes`} data-component="superseded-badge">
+          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-900/40 text-slate-400 border border-slate-700/40">
+            Superseded
           </span>
         </div>
       )}

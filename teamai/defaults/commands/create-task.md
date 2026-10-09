@@ -8,13 +8,44 @@ Extract the task title and description from the user's message or conversation c
 user did not provide enough detail to write a clear one-sentence description, ASK clarifying
 questions before proceeding — do not guess what they want.
 
+## Step 1b: Check the open tickets
+
+Before creating anything, list the open tickets:
+
+```
+node "$TEAMAI_CREATE_TASK_CLI" --project "<project root>" --list
+```
+
+It prints every open ticket (`id`, `title`, `phase`, `description`) and the board
+`fingerprint`. Read each description in full and compare it with the ticket you are about
+to file:
+
+- **Already covered:** an open ticket covers the same problem. Do not file a duplicate.
+  Tell the user which ticket it is (title and `id`), and offer to add the new evidence to
+  it instead.
+- **Makes another ticket obsolete:** the new ticket's work fully resolves an open ticket.
+  Tell the user, and suggest deleting that ticket or filing this one in its place.
+- **Changes another ticket's premise:** the new ticket's work changes the evidence or
+  baseline an open ticket relies on. Tell the user. If the other ticket is still in
+  `backlog`, suggest that it depend on this one, so it waits and is specced against the
+  new state.
+- **Depends on another ticket:** pass `--depends-on` for it (see Step 2).
+
+If nothing overlaps, go straight to Step 2. When something does overlap, report it and
+wait for the user's decision before running the CLI.
+
 ## Step 2: Create the ticket
 
 Run:
 
 ```
-node "$TEAMAI_CREATE_TASK_CLI" --project "<project root>" --title "<short, imperative title>" --description "<one-sentence description>" [--depends-on "<id1>,<id2>,..."]
+node "$TEAMAI_CREATE_TASK_CLI" --project "<project root>" --board "<fingerprint from --list>" --title "<short, imperative title>" --description "<one-sentence description>" [--depends-on "<id1>,<id2>,..."]
 ```
+
+- `--board` is required. The CLI checks it under a board lock. If tickets were added since
+  your `--list`, it creates nothing, prints the current tickets and fingerprint, and exits
+  with code 3. Check the new ticket against the newcomers (Step 1b), then retry with the
+  new fingerprint.
 
 - `$TEAMAI_CREATE_TASK_CLI` is already set in your environment — use it as-is.
 - `<project root>` is your current working directory unless you were told otherwise.

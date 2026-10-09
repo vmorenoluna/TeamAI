@@ -26,6 +26,14 @@ function run(args: string[]): { status: number; stdout: string; stderr: string }
   }
 }
 
+/** Create a ticket the way the command instructs: --list first, then pass
+ *  the printed fingerprint as --board. */
+function create(args: string[]): { status: number; stdout: string; stderr: string } {
+  const project = args[args.indexOf('--project') + 1];
+  const { fingerprint } = JSON.parse(run(['--project', project, '--list']).stdout);
+  return run([...args, '--board', fingerprint]);
+}
+
 describe('create-task-cli.mjs', () => {
   let projectDir: string;
 
@@ -38,7 +46,7 @@ describe('create-task-cli.mjs', () => {
   });
 
   it('creates a bare backlog task.json with only title, description, and phase set', () => {
-    const result = run([
+    const result = create([
       '--project', projectDir,
       '--title', 'Investigate AC-T1 regression',
       '--description', 'Fresh job on HEAD shows AC-T1 dropped from 95.7% to 59.3%.',
@@ -67,7 +75,7 @@ describe('create-task-cli.mjs', () => {
   });
 
   it('does not write spec.md or plan.json alongside the bare ticket', () => {
-    run(['--project', projectDir, '--title', 'Fix: flaky retry test', '--description', 'Retry test intermittently times out.']);
+    create(['--project', projectDir, '--title', 'Fix: flaky retry test', '--description', 'Retry test intermittently times out.']);
 
     const dir = join(projectDir, '.teamai', 'fix-flaky-retry-test');
     expect(existsSync(join(dir, 'task.json'))).toBe(true);
@@ -76,9 +84,9 @@ describe('create-task-cli.mjs', () => {
   });
 
   it('dedupes slugs the same way TaskStore.create() does, appending -2, -3, ...', () => {
-    run(['--project', projectDir, '--title', 'Add dark mode', '--description', 'first']);
-    run(['--project', projectDir, '--title', 'Add dark mode', '--description', 'second']);
-    run(['--project', projectDir, '--title', 'Add dark mode', '--description', 'third']);
+    create(['--project', projectDir, '--title', 'Add dark mode', '--description', 'first']);
+    create(['--project', projectDir, '--title', 'Add dark mode', '--description', 'second']);
+    create(['--project', projectDir, '--title', 'Add dark mode', '--description', 'third']);
 
     expect(existsSync(join(projectDir, '.teamai', 'add-dark-mode', 'task.json'))).toBe(true);
     expect(existsSync(join(projectDir, '.teamai', 'add-dark-mode-2', 'task.json'))).toBe(true);
@@ -88,14 +96,14 @@ describe('create-task-cli.mjs', () => {
   it('creates the .teamai directory if the project has never had a ticket before', () => {
     expect(existsSync(join(projectDir, '.teamai'))).toBe(false);
 
-    const result = run(['--project', projectDir, '--title', 'First ever ticket', '--description', 'x']);
+    const result = create(['--project', projectDir, '--title', 'First ever ticket', '--description', 'x']);
 
     expect(result.status).toBe(0);
     expect(existsSync(join(projectDir, '.teamai', 'first-ever-ticket', 'task.json'))).toBe(true);
   });
 
   it('falls back to slug "task" when the title is entirely non-alphanumeric', () => {
-    const result = run(['--project', projectDir, '--title', '!!!', '--description', 'x']);
+    const result = create(['--project', projectDir, '--title', '!!!', '--description', 'x']);
 
     expect(result.status).toBe(0);
     expect(existsSync(join(projectDir, '.teamai', 'task', 'task.json'))).toBe(true);
@@ -132,7 +140,7 @@ describe('create-task-cli.mjs', () => {
   it('reuses an existing .teamai directory without erroring', () => {
     mkdirSync(join(projectDir, '.teamai'), { recursive: true });
 
-    const result = run(['--project', projectDir, '--title', 'Second project ticket', '--description', 'x']);
+    const result = create(['--project', projectDir, '--title', 'Second project ticket', '--description', 'x']);
 
     expect(result.status).toBe(0);
     expect(existsSync(join(projectDir, '.teamai', 'second-project-ticket', 'task.json'))).toBe(true);

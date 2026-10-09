@@ -159,6 +159,12 @@ Rules:
   general policy, so a wrong path here defeats the wakeup: the orchestrator only
   reads the task directory, and a file written anywhere else is never read.
 
+<!-- @include _shared/backlog-effects.md -->
+
+The spec's **Backlog impact** section records the analyst's overlaps. Use it to keep this
+plan from colliding with work queued in those tickets. Your own backlog check still judges
+every open ticket, from what planning reveals about the code.
+
 ## When a feasibility check won't finish before your session budget
 
 If sizing a subtask's verification requirements leads you to dry-run a script or

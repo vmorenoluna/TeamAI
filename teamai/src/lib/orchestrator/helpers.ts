@@ -12,6 +12,7 @@ import { readContainerConfig } from '../container-manager';
 import { resolveProvider, providerToSessionOpts } from '../providers';
 import { containerSessionOpts, type AgentSession } from '../process-manager';
 import { readPipelineSensors, type SensorsConfig } from '../sensors';
+import { MAX_REVISION_SNAPSHOTS } from './artifacts';
 import type { PipelinePhase } from '@/constants/phases';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -67,6 +68,11 @@ export interface PipelineConfig {
    *  it aren't slowed down; computePipelineConfig gives real pipelines a
    *  production default. */
   wakeupScanRetryDelayMs?: number;
+  /** When true (default), every ticket-capable session must write a verified
+   *  backlog check (orchestrator/backlog-check.ts) before its phase can
+   *  advance. Optional so test deps that don't set it run without the check;
+   *  computePipelineConfig gives real pipelines the `true` default. */
+  backlogCheck?: boolean;
 }
 
 // ── Pure: session-limit parsing ───────────────────────────────────────────
@@ -259,6 +265,10 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
   // such test, since the delay exists purely to absorb container/bind-mount
   // write latency that doesn't exist in-process.
   const defaultWakeupScanRetryDelayMs = process.env.VITEST ? 0 : 2000;
+  // Same pattern: tests that drive the real Orchestrator simulate agents that
+  // predate the backlog check, so it defaults off under Vitest only. Its own
+  // tests (backlog-check.test.ts) exercise it directly or opt in explicitly.
+  const defaultBacklogCheck = !process.env.VITEST;
   const cfgPath = path.join(projectRoot, '.teamai', 'pipeline.json');
   if (existsSync(cfgPath)) {
     try {
@@ -276,11 +286,12 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
         includePhasesTrailer: typeof raw.includePhasesTrailer === 'boolean' ? raw.includePhasesTrailer : true,
         demo: typeof raw.demo === 'boolean' ? raw.demo : undefined,
         wakeupScanRetryDelayMs: typeof raw.wakeupScanRetryDelayMs === 'number' ? raw.wakeupScanRetryDelayMs : defaultWakeupScanRetryDelayMs,
+        backlogCheck: typeof raw.backlogCheck === 'boolean' ? raw.backlogCheck : defaultBacklogCheck,
         ...(sensors ? { sensors } : {}),
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
   }
-  return { maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true, wakeupScanRetryDelayMs: defaultWakeupScanRetryDelayMs };
+  return { maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true, wakeupScanRetryDelayMs: defaultWakeupScanRetryDelayMs, backlogCheck: defaultBacklogCheck };
 }
 
 // ── Session map ───────────────────────────────────────────────────────────
@@ -346,9 +357,66 @@ export function buildSessionOpts(
  * crash. `moveTaskToPhase` and `resumeTask` both need this exact fallback
  * chain (previously duplicated 4x across those two methods); consolidated
  * here so a future change to the rule only needs to happen once.
+ *
+ * `pendingSpecRevision` (see hasPendingSpecRevision) wins over everything:
+ * a revision prepared while no pipeline was running must run before any
+ * plan written against the old spec is executed.
  */
-export function startPhaseFromArtifacts(hasPlan: boolean, hasSpec: boolean): PipelinePhase {
+export function startPhaseFromArtifacts(hasPlan: boolean, hasSpec: boolean, pendingSpecRevision = false): PipelinePhase {
+  if (pendingSpecRevision) return 'spec';
   if (hasPlan) return 'implement';
   if (hasSpec) return 'plan';
   return 'spec';
+}
+
+/**
+ * True when a spec revision was prepared on disk (prepareSpecRevisionArtifacts:
+ * feedback written, spec.md archived to spec_v{N}.md) but the revising
+ * analyst has not yet written the new spec.md. Set outside a live pipeline
+ * by an `[INVALIDATES]` directive (orchestrator/backlog-check.ts), so the
+ * task's next start or retry re-specs against the changed context.
+ */
+export function hasPendingSpecRevision(specDir: string): boolean {
+  return existsSync(path.join(specDir, 'spec_revision_feedback.md'))
+    && !existsSync(path.join(specDir, 'spec.md'));
+}
+
+/**
+ * The task's current live spec version, recovered from `.pipeline_state.json`
+ * or, failing that, from the spec_v{N}.md snapshots on disk. Backs
+ * Orchestrator._restoreSpecRevision (whose doc comment has the precedence
+ * rationale) and is shared with callers that prepare a spec revision for a
+ * task with no pipeline running (orchestrator/backlog-check.ts).
+ */
+export function restoreSpecRevisionFromDir(dir: string): number {
+  // Prefer the persisted pipeline state (most accurate)
+  try {
+    const statePath = path.join(dir, '.pipeline_state.json');
+    if (existsSync(statePath)) {
+      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+      if (typeof state.specRevision === 'number' && state.specRevision > 0) {
+        return state.specRevision;
+      }
+    }
+  } catch { /* fall through to on-disk counting */ }
+  // Fallback: find the highest existing spec_v{N}.md on disk. Scan a fixed
+  // range and take the max instead of stopping at the first gap — v1 can
+  // legitimately be missing on tasks whose pipeline entered tracked
+  // execution after spec.md already existed, and breaking at the first
+  // missing file would return 0 for a task with v2..v4 on disk, silently
+  // resetting revision numbering if .pipeline_state.json is ever lost.
+  let maxN = 0;
+  for (let v = 1; v <= MAX_REVISION_SNAPSHOTS; v++) {
+    if (existsSync(path.join(dir, `spec_v${v}.md`))) {
+      maxN = v;
+    }
+  }
+  // Under the rename-at-revision scheme the live spec.md is one version
+  // AHEAD of the highest snapshot (snapshots = completed revisions − the
+  // pre-revision archives; the current spec is always un-archived at
+  // spec.md). The next beginSpecRevision renames spec.md to
+  // spec_v{maxN + 1}.md, so the restored counter must be maxN + 1 — under
+  // the old copy scheme maxN alone was correct, and reusing it here would
+  // clobber the highest snapshot on the next revision.
+  return maxN + 1;
 }

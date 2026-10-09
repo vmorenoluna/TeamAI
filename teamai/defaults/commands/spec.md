@@ -36,6 +36,7 @@ Create the file `.teamai/{feature-slug}/spec.md` containing:
 - **Files to Modify**: List each file with a one-line rationale
 - **New Files to Create**: List with purpose
 - **Dependencies & Risks**: External dependencies, breaking changes, migration needs
+- **Backlog impact**: Open tickets this change supersedes, invalidates or overlaps (see **Backlog check** below)
 
 ## Step 4: Self-Critique
 Review your own spec. Check for:

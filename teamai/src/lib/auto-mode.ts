@@ -1,3 +1,4 @@
+import { finalizeSupersededTickets, isHeldBySuperseder } from './orchestrator/backlog-check';
 import { TaskStore } from './task-store';
 import { getOrchestrator } from './orchestrator';
 import { processManager } from './process-manager';
@@ -333,6 +334,13 @@ function _tick(projectRoot: string, state: AutoProjectState): void {
     return; // project not yet initialized
   }
 
+  // Tickets superseded by a task that has since completed are obsolete —
+  // delete them before picking, so they can never start (covers completions
+  // that bypassed markTaskDone's own finalization).
+  for (const id of finalizeSupersededTickets(taskStore)) {
+    log('auto-mode', `Deleted superseded ticket ${id}`);
+  }
+
   const allTasks = taskStore.getAll();
 
   // Paused tasks (awaiting-review, create-pr, pr-open) hold their slot until
@@ -349,6 +357,9 @@ function _tick(projectRoot: string, state: AutoProjectState): void {
   const eligible = allTasks.filter(t => {
     if (t.phase !== 'backlog') return false;
     if (state.startingIds.has(t.id)) return false;
+    // A ticket another task declared it supersedes ([SUPERSEDES]) must not
+    // start while that task is alive — it would redo or fight its work.
+    if (isHeldBySuperseder(t, allTasks, id => taskStore.isTaskCompleted(id))) return false;
     if (!t.dependencies || t.dependencies.length === 0) return true;
     return t.dependencies.every(depId => {
       const dep = allTasks.find(dt => dt.id === depId);

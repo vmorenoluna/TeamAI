@@ -9,9 +9,10 @@ import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitF
 import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelineState, pipelineAdvancePhase } from './orchestrator/pipeline-state';
 import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedback';
 import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './orchestrator/phase-runners';
-import { parseSessionLimitReset, extractPrUrl, phaseHeader, logToOutput, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, resolveWorktreeDirName, computePipelineConfig, buildSessionOpts, startPhaseFromArtifacts, type PipelineConfig } from './orchestrator/helpers';
+import { parseSessionLimitReset, extractPrUrl, phaseHeader, logToOutput, restoreQaReportFromSnapshot, restoreHumanFeedbackFromSnapshot, getWorktreeBase, resolveWorktreeDirName, computePipelineConfig, buildSessionOpts, startPhaseFromArtifacts, hasPendingSpecRevision, restoreSpecRevisionFromDir, type PipelineConfig } from './orchestrator/helpers';
 import { cleanStaleSubtaskWorktrees, removeWorktree as removeWorktreeFn, cleanWorktree as cleanWorktreeFn } from './orchestrator/worktree-ops';
 import { buildTicketMessageForPipeline } from './orchestrator/artifact-commit';
+import { finalizeSupersededTickets } from './orchestrator/backlog-check';
 import { appendSessionTicket, synthesizeDoneTicket } from './history-session';
 import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
@@ -177,6 +178,17 @@ export class Orchestrator {
 
     const hasSpec = existsSync(path.join(dir, 'spec.md'));
     const hasPlan = existsSync(path.join(dir, 'plan.json'));
+
+    // A spec revision prepared while no pipeline ran (an `[INVALIDATES]`
+    // directive from another task — orchestrator/backlog-check.ts) means
+    // the spec no longer reflects the project. Every restart goes through it
+    // first, whichever column the card is moved to; the revision keeps the
+    // plan and code (as any spec revision does) for the planner to reuse.
+    if (hasPendingSpecRevision(dir)) {
+      this.clearPipelineStateFile(dir);
+      await this.runTask(taskId, task.description, 'spec');
+      return;
+    }
 
     // A retry to spec/plan/implement/qa-review clears qa_report.json AND
     // qa_feedback.md below (see PHASE_ARTIFACTS) — silently dropping the last
@@ -688,6 +700,17 @@ export class Orchestrator {
       logWarn('orchestrator', `markTaskDone: failed to delete task folder ${dir} for ${taskId}`, err);
     }
 
+    // Tickets this task declared it supersedes ([SUPERSEDES] directive —
+    // orchestrator/backlog-check.ts) are obsolete now that its work has
+    // landed. Best-effort: auto mode's tick re-sweeps anything missed here.
+    try {
+      for (const id of finalizeSupersededTickets(this.taskStore, taskId)) {
+        log('orchestrator', `markTaskDone: deleted ticket ${id}, superseded by ${taskId}`);
+      }
+    } catch (err) {
+      logWarn('orchestrator', `markTaskDone: failed to delete tickets superseded by ${taskId}`, err);
+    }
+
     // Only emit phase-change once, after the record is finalized and the
     // folder removed — UI listeners refetch exactly once against the final,
     // settled state.
@@ -757,37 +780,7 @@ export class Orchestrator {
    *   2. Count existing spec_v{N}.md files on disk (robust fallback)
    */
   private _restoreSpecRevision(taskId: string): number {
-    const dir = this.taskStore.getDirById(taskId);
-    // Prefer the persisted pipeline state (most accurate)
-    try {
-      const statePath = path.join(dir, '.pipeline_state.json');
-      if (existsSync(statePath)) {
-        const state = JSON.parse(readFileSync(statePath, 'utf-8'));
-        if (typeof state.specRevision === 'number' && state.specRevision > 0) {
-          return state.specRevision;
-        }
-      }
-    } catch { /* fall through to on-disk counting */ }
-    // Fallback: find the highest existing spec_v{N}.md on disk. Scan a fixed
-    // range and take the max instead of stopping at the first gap — v1 can
-    // legitimately be missing on tasks whose pipeline entered tracked
-    // execution after spec.md already existed, and breaking at the first
-    // missing file would return 0 for a task with v2..v4 on disk, silently
-    // resetting revision numbering if .pipeline_state.json is ever lost.
-    let maxN = 0;
-    for (let v = 1; v <= MAX_REVISION_SNAPSHOTS; v++) {
-      if (existsSync(path.join(dir, `spec_v${v}.md`))) {
-        maxN = v;
-      }
-    }
-    // Under the rename-at-revision scheme the live spec.md is one version
-    // AHEAD of the highest snapshot (snapshots = completed revisions − the
-    // pre-revision archives; the current spec is always un-archived at
-    // spec.md). The next beginSpecRevision renames spec.md to
-    // spec_v{maxN + 1}.md, so the restored counter must be maxN + 1 — under
-    // the old copy scheme maxN alone was correct, and reusing it here would
-    // clobber the highest snapshot on the next revision.
-    return maxN + 1;
+    return restoreSpecRevisionFromDir(this.taskStore.getDirById(taskId));
   }
 
   /**
@@ -1031,7 +1024,7 @@ export class Orchestrator {
       // cleanupTaskArtifacts.
       const hasSpec = existsSync(path.join(dir, 'spec.md'));
       const hasPlan = existsSync(path.join(dir, 'plan.json'));
-      startPhase = startPhaseFromArtifacts(hasPlan, hasSpec);
+      startPhase = startPhaseFromArtifacts(hasPlan, hasSpec, hasPendingSpecRevision(dir));
     }
 
     // Clear output.log for a fresh terminal view

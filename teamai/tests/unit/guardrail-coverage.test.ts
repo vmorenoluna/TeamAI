@@ -297,7 +297,7 @@ const CONTRACT_LOCATIONS: ContractLocationCheck[] = [
       'qa_feedback.md',
       'files_to_create',
       'subtask_wakeup',
-      '[BUG] Fix:',
+      'backlog_check-<unit>.json',
     ],
   },
 ];
