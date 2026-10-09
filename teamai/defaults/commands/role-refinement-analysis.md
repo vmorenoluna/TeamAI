@@ -12,6 +12,7 @@ Known contract-gap classes that are NOT role edits:
 - an undocumented orchestrator mechanism (e.g. the `subtask_wakeup-st<id>.json` schema and its detach/nohup requirement, worktree/port discipline),
 - a `.gitignore` / `git add -f` trap when committing verification evidence,
 - an interactive-only tool that no-ops in headless sessions.
+- a rule for one work mode only (spec revision, re-plan, QA rework, cherry-pick conflict resolution) — each mode has its own command, and a role file is loaded identically in every mode, so a role cannot target one.
 
 A role gap is a persona or practice instruction missing or misworded in `.claude/roles/*.md`: house style, a repo-specific convention, a misworded project convention, OR a generic analysis/verification-discipline practice that isn't tied to any orchestrator mechanism.
 

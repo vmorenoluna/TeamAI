@@ -32,6 +32,11 @@ $ARGUMENTS
   editing a preserved one. (The orchestrator deterministically restores any
   unlisted subtask that drifts — but a clean replan avoids the churn.)
 
+### Re-verifying "Already Satisfied" Subtasks
+
+- **Matching the source implementation is not the same as satisfying the acceptance criterion.** When a spec revision adds or changes a concrete worked example inside an acceptance criterion — a literal "given X, then Y" case (a specific input combination and its exact expected output) — grep the actual test file for an assertion matching that exact example before marking the covering subtask `completed: true` with "no further action required." Confirming the implementation is theoretically capable of producing the right output is not sufficient; the criterion is only satisfied once a test exercises that specific example.
+- If the grep comes back empty, do not mark the subtask done — either flip it back to `completed: false` with a description naming the missing test case, or add a new small subtask for it. A re-plan that reasons from "the source is correct" alone, without re-checking every artifact the criterion actually names (test files included), can silently drop a newly-added worked example for multiple QA rounds in a row, since nothing else in the pipeline re-derives what changed between spec revisions.
+
 The re-written `plan.json` must still satisfy every rule below.
 
 <!-- @include _shared/plan-body.md -->

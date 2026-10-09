@@ -270,6 +270,36 @@ const CONTRACT_LOCATIONS: ContractLocationCheck[] = [
       'Stop your own instances',
     ],
   },
+  {
+    id: 20,
+    name: 'Work-Mode Workflow',
+    description: 'rules for one work mode (spec revision, re-plan, QA rework) and the pipeline artifacts they touch live in the command for that mode — a role is loaded identically in every mode, so it cannot target one',
+    presentIn: [
+      'defaults/commands/spec-revise.md',
+      'defaults/commands/plan-revise.md',
+      'defaults/commands/implement-fix.md',
+    ],
+    absentFrom: [
+      'defaults/roles/analyst.md',
+      'defaults/roles/planner.md',
+      'defaults/roles/coder.md',
+      'defaults/roles/qa-reviewer.md',
+      'defaults/roles/merger.md',
+    ],
+    signatures: [
+      'REPLAN:',
+      'REVISION:',
+      're-plan',
+      'replan',
+      'QA rework',
+      'rework mode',
+      'spec_revision_feedback',
+      'qa_feedback.md',
+      'files_to_create',
+      'subtask_wakeup',
+      '[BUG] Fix:',
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------
