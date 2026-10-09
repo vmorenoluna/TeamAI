@@ -90,6 +90,11 @@ of duplicates and obsolete work, every one of them checks the whole open board f
 - **Interactive filing** uses `create-task-cli.mjs --list` to see the board and its
   fingerprint, then `--board <fingerprint>` to create. The CLI refuses (exit 3) if the
   board changed in between.
+- **Implement subtasks** check only when they file or report something. The exception is
+  a session that produced evidence files matching `backlogCheckEvidencePaths` in
+  `.teamai/pipeline.json` (e.g. `["benchmarks/results/**", "$TEAMAI_SPEC_DIR/probe/**"]`):
+  that session must check, because evidence can matter to other tickets. Spec and QA
+  always check.
 - A project can opt out with `"backlogCheck": false` in `.teamai/pipeline.json`. It is on
   by default.
 

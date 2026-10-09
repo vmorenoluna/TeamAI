@@ -90,6 +90,13 @@ each ticket. A title alone is not enough to judge it.
   description, because the next analyst will verify it before acting on it.
 - `self` is required only when the header asks for it (the spec phase). See below.
 
+**Implement subtasks.** The spec and QA phases always check the whole board. In an implement
+subtask the check file is required only when you have something to say: a new ticket, or a
+verdict other than `unrelated` on an existing one. It is also required whenever your session
+produced evidence files matching the patterns named in the header (logs, measurements, probe
+output), because what they show may matter to other tickets even when it doesn't matter to
+yours. If you write the file at all, it must still cover every ticket in the snapshot.
+
 **Verdicts.** Judge each ticket against what your task does and what it has found:
 
 | Verdict | Meaning | Effect |

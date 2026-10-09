@@ -73,6 +73,15 @@ export interface PipelineConfig {
    *  advance. Optional so test deps that don't set it run without the check;
    *  computePipelineConfig gives real pipelines the `true` default. */
   backlogCheck?: boolean;
+  /** Globs for evidence files (benchmark logs, measurement output, probe
+   *  data). An implement subtask may skip its backlog check when it has
+   *  nothing to report — unless its session produced a file matching one of
+   *  these, because evidence learned mid-implementation can bear on other
+   *  tickets and would otherwise reach no one. A pattern matches repo paths
+   *  the session changed; a pattern starting with `$TEAMAI_SPEC_DIR/`
+   *  matches files written under the task's own `.teamai/<slug>/` folder.
+   *  Default none. */
+  backlogCheckEvidencePaths?: string[];
 }
 
 // ── Pure: session-limit parsing ───────────────────────────────────────────
@@ -287,11 +296,14 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
         demo: typeof raw.demo === 'boolean' ? raw.demo : undefined,
         wakeupScanRetryDelayMs: typeof raw.wakeupScanRetryDelayMs === 'number' ? raw.wakeupScanRetryDelayMs : defaultWakeupScanRetryDelayMs,
         backlogCheck: typeof raw.backlogCheck === 'boolean' ? raw.backlogCheck : defaultBacklogCheck,
+        backlogCheckEvidencePaths: Array.isArray(raw.backlogCheckEvidencePaths)
+          ? raw.backlogCheckEvidencePaths.filter((x: unknown): x is string => typeof x === 'string' && x.trim() !== '')
+          : [],
         ...(sensors ? { sensors } : {}),
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
   }
-  return { maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true, wakeupScanRetryDelayMs: defaultWakeupScanRetryDelayMs, backlogCheck: defaultBacklogCheck };
+  return { maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true, wakeupScanRetryDelayMs: defaultWakeupScanRetryDelayMs, backlogCheck: defaultBacklogCheck, backlogCheckEvidencePaths: [] };
 }
 
 // ── Session map ───────────────────────────────────────────────────────────

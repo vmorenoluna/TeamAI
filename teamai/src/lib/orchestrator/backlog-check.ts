@@ -35,7 +35,7 @@
  *    unverified claim. A title already on the board is not filed twice.
  */
 import { createHash } from 'crypto';
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync } from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { processManager, type AgentSession } from '../process-manager';
@@ -78,6 +78,10 @@ export interface CheckFile {
 
 export const snapshotFile = (unit: string) => `open_tickets-${unit}.json`;
 export const checkFile = (unit: string) => `backlog_check-${unit}.json`;
+/** When the unit's first session started — survives wakeup re-entries so
+ *  evidence written by a background job between sessions still counts. */
+export const windowFile = (unit: string) => `backlog_window-${unit}.json`;
+export const SPEC_DIR_PREFIX = '$TEAMAI_SPEC_DIR/';
 
 const IDLE_PHASES = new Set(['backlog', 'failed']);
 const NEW_TICKET_PREFIX = /^(Fix|Feat|Refactor|Docs): \S/;
@@ -142,16 +146,32 @@ export function prepareBacklogCheck(opts: {
   store: TaskStore;
   ownTaskId: string;
   requireSelf: boolean;
+  /** Implement subtasks: the check file is optional unless the session
+   *  files/reports something or produces evidence matching these globs. */
+  optionalUnlessEvidence?: string[];
 }): string {
-  const { specPath, unit, store, ownTaskId, requireSelf } = opts;
+  const { specPath, unit, store, ownTaskId, requireSelf, optionalUnlessEvidence } = opts;
   try { unlinkSync(path.join(specPath, checkFile(unit))); } catch { /* none */ }
+  const windowPath = path.join(specPath, windowFile(unit));
+  if (!existsSync(windowPath)) writeFileSync(windowPath, JSON.stringify({ startedAt: Date.now() }));
   const snap = writeSnapshot(specPath, unit, store, ownTaskId);
   const own = store.getById(ownTaskId);
   let header =
     `ℹ️ BACKLOG CHECK — the open tickets for this session are in ` +
-    `\`$TEAMAI_SPEC_DIR/${snapshotFile(unit)}\` (${snap.tickets.length} ticket(s)). ` +
-    `Before ending, write \`$TEAMAI_SPEC_DIR/${checkFile(unit)}\` as described under **Backlog effects**. ` +
-    `The orchestrator verifies it covers every ticket in the snapshot.\n`;
+    `\`$TEAMAI_SPEC_DIR/${snapshotFile(unit)}\` (${snap.tickets.length} ticket(s)). `;
+  if (optionalUnlessEvidence) {
+    header +=
+      `In this implement subtask the check file \`$TEAMAI_SPEC_DIR/${checkFile(unit)}\` is required only if ` +
+      `you file or report anything about another ticket` +
+      (optionalUnlessEvidence.length
+        ? `, or if this session produces evidence files matching ${optionalUnlessEvidence.map(g => `\`${g}\``).join(', ')}`
+        : '') +
+      `. When you write it, it must cover every ticket in the snapshot, as described under **Backlog check**.\n`;
+  } else {
+    header +=
+      `Before ending, write \`$TEAMAI_SPEC_DIR/${checkFile(unit)}\` as described under **Backlog check**. ` +
+      `The orchestrator verifies it covers every ticket in the snapshot.\n`;
+  }
   if (requireSelf) {
     header += `This session must also give a \`self\` verdict on its own ticket.\n`;
     if (own?.reportedBy) {
@@ -165,6 +185,81 @@ export function prepareBacklogCheck(opts: {
     }
   }
   return header + '\n';
+}
+
+// ── Evidence trigger (implement subtasks) ────────────────────────────────
+
+/** Minimal glob → RegExp: `**` spans directories, `*` and `?` stay within a
+ *  path segment. Paths are matched with forward slashes. */
+export function globToRegExp(glob: string): RegExp {
+  let re = '';
+  const g = glob.replace(/\\/g, '/');
+  for (let i = 0; i < g.length; i++) {
+    const ch = g[i];
+    if (ch === '*') {
+      if (g[i + 1] === '*') {
+        i++;
+        if (g[i + 1] === '/') { i++; re += '(?:.*/)?'; } else { re += '.*'; }
+      } else {
+        re += '[^/]*';
+      }
+    } else if (ch === '?') {
+      re += '[^/]';
+    } else {
+      re += ch.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+function listFilesSince(dir: string, since: number, rel = ''): string[] {
+  const out: string[] = [];
+  let entries: import('fs').Dirent[];
+  try { entries = readdirSync(path.join(dir, rel), { withFileTypes: true }); } catch { return out; }
+  for (const e of entries) {
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) out.push(...listFilesSince(dir, since, r));
+    else {
+      try { if (statSync(path.join(dir, r)).mtimeMs >= since) out.push(r); } catch { /* vanished */ }
+    }
+  }
+  return out;
+}
+
+/** Start of the unit's evidence window (prepareBacklogCheck), or `fallback`. */
+export function evidenceWindowStart(specPath: string, unit: string, fallback: number): number {
+  try {
+    const w = JSON.parse(readFileSync(path.join(specPath, windowFile(unit)), 'utf-8'));
+    return typeof w.startedAt === 'number' ? w.startedAt : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Evidence files the unit produced: `changedFiles` (repo-relative paths the
+ * session changed) matched against plain patterns, and files under
+ * `specPath` modified since `since` matched against `$TEAMAI_SPEC_DIR/`
+ * patterns. Returns the matching paths, spec-dir ones prefixed.
+ */
+export function evidenceProduced(opts: {
+  patterns: string[];
+  changedFiles: string[];
+  specPath: string;
+  since: number;
+}): string[] {
+  const repoPatterns = opts.patterns.filter(p => !p.startsWith(SPEC_DIR_PREFIX)).map(globToRegExp);
+  const specPatterns = opts.patterns.filter(p => p.startsWith(SPEC_DIR_PREFIX))
+    .map(p => globToRegExp(p.slice(SPEC_DIR_PREFIX.length)));
+  const hits = opts.changedFiles
+    .map(f => f.replace(/\\/g, '/'))
+    .filter(f => repoPatterns.some(re => re.test(f)));
+  if (specPatterns.length) {
+    for (const f of listFilesSince(opts.specPath, opts.since)) {
+      if (specPatterns.some(re => re.test(f))) hits.push(SPEC_DIR_PREFIX + f);
+    }
+  }
+  return [...new Set(hits)];
 }
 
 // ── Validation ───────────────────────────────────────────────────────────
@@ -348,6 +443,11 @@ export interface BacklogCheckRun {
   store?: TaskStore;
   sessionOpts: (role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) => SessionOptsResult;
   waitForCompletion: (sessionId: string) => Promise<void>;
+  /** Accept a missing check file as "nothing to report" (implement subtasks
+   *  that produced no evidence). A file that exists is always verified. */
+  optional?: boolean;
+  /** Why the check is mandatory, quoted in the follow-up prompt. */
+  requiredBecause?: string;
 }
 
 export type BacklogCheckOutcome =
@@ -367,6 +467,7 @@ function followUpMessage(run: BacklogCheckRun, why: string): string {
   return (
     `⚠️ BACKLOG CHECK INCOMPLETE — ${run.unitLabel} of this task ended without a backlog check the ` +
     `orchestrator could accept.\n\n${why}\n\n` +
+    (run.requiredBecause ? `The check is required because ${run.requiredBecause}.\n\n` : '') +
     `Do only this: read \`$TEAMAI_SPEC_DIR/${snapshotFile(run.unit)}\` and write a complete ` +
     `\`$TEAMAI_SPEC_DIR/${checkFile(run.unit)}\`. Do not redo or change the task's own work.` +
     (run.requireSelf ? ' Include the `self` verdict on this task\'s own ticket.' : '') +
@@ -390,6 +491,12 @@ function formatEffects(e: AppliedEffects, label: string): string {
 export async function runBacklogCheck(run: BacklogCheckRun): Promise<BacklogCheckOutcome> {
   const store = run.store ?? new TaskStore(run.projectRoot);
   const specsDir = path.join(run.projectRoot, '.teamai');
+  const endWindow = () => { try { unlinkSync(path.join(run.specPath, windowFile(run.unit))); } catch { /* none */ } };
+  if (run.optional && !existsSync(path.join(run.specPath, checkFile(run.unit)))) {
+    logToOutput(run.specPath, `[BACKLOG-CHECK] ${run.unitLabel}: nothing to report (no check file, no evidence produced)\n`);
+    endWindow();
+    return { ok: true, effects: { created: [], outcomes: [] } };
+  }
   let lastProblems: string[] = [];
   for (let round = 0; ; round++) {
     const res = commitBacklogCheck({
@@ -398,6 +505,7 @@ export async function runBacklogCheck(run: BacklogCheckRun): Promise<BacklogChec
     });
     if (res.status === 'applied') {
       logToOutput(run.specPath, formatEffects(res.effects, run.unitLabel));
+      endWindow();
       return { ok: true, self: res.self, effects: res.effects };
     }
 
@@ -415,7 +523,7 @@ export async function runBacklogCheck(run: BacklogCheckRun): Promise<BacklogChec
         `verdicts, and drop any entry in \`new_tickets\` that one of the new tickets already covers.`;
     }
     logToOutput(run.specPath, `[BACKLOG-CHECK] ${run.unitLabel}: not accepted (round ${round + 1}/${MAX_ROUNDS}) — ${lastProblems.join('; ')}\n`);
-    if (round >= MAX_ROUNDS) return { ok: false, problems: lastProblems };
+    if (round >= MAX_ROUNDS) { endWindow(); return { ok: false, problems: lastProblems }; }
 
     const logFile = path.join(run.specPath, `output-backlog-${run.unit}.log`);
     const sessionId = await processManager.createSession(run.sessionOpts(run.role, run.cwd, run.taskId, logFile));

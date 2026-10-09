@@ -1,12 +1,13 @@
 // @vitest-environment node
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
   prepareBacklogCheck, validateCheck, commitBacklogCheck, runBacklogCheck,
   isHeldBySuperseder, finalizeSupersededTickets, checkFile, snapshotFile,
+  globToRegExp, evidenceProduced,
   type BoardSnapshot, type CheckFile,
 } from '@/lib/orchestrator/backlog-check';
 import { hasPendingSpecRevision, startPhaseFromArtifacts } from '@/lib/orchestrator/helpers';
@@ -196,5 +197,58 @@ describe('superseded lifecycle', () => {
     env.store.delete(SRC);
     expect(finalizeSupersededTickets(env.store)).toEqual([A]);
     expect(env.store.getById(B)).not.toBeNull();
+  });
+});
+
+describe('evidence trigger (implement subtasks)', () => {
+  it('globToRegExp: ** spans directories, * stays in a segment', () => {
+    expect(globToRegExp('scripts/sweep_logs/**').test('scripts/sweep_logs/a/b.log')).toBe(true);
+    expect(globToRegExp('scripts/*.log').test('scripts/a.log')).toBe(true);
+    expect(globToRegExp('scripts/*.log').test('scripts/x/a.log')).toBe(false);
+    expect(globToRegExp('**/*.jsonl').test('a.jsonl')).toBe(true);
+    expect(globToRegExp('a.b').test('axb')).toBe(false);
+  });
+
+  it('matches changed repo files and recent files under the task folder', () => {
+    const env = setup();
+    mkdirSync(join(env.specPath, 'probe'), { recursive: true });
+    const since = Date.now() - 1000;
+    writeFileSync(join(env.specPath, 'probe', 'run.jsonl'), '{}');
+    const hits = evidenceProduced({
+      patterns: ['scripts/sweep_logs/**', '$TEAMAI_SPEC_DIR/probe/**'],
+      changedFiles: ['src/main/x.scala', 'scripts/sweep_logs/new.log'],
+      specPath: env.specPath, since,
+    });
+    expect(hits.sort()).toEqual(['$TEAMAI_SPEC_DIR/probe/run.jsonl', 'scripts/sweep_logs/new.log']);
+    expect(evidenceProduced({ patterns: ['$TEAMAI_SPEC_DIR/probe/**'], changedFiles: [], specPath: env.specPath, since: Date.now() + 60_000 }))
+      .toEqual([]);
+  });
+
+  it('optional: a missing file means nothing to report, but a written file is still verified', async () => {
+    const env = setup();
+    vi.spyOn(processManager, 'createSession').mockResolvedValue('s' as never);
+    vi.spyOn(processManager, 'sendMessage').mockImplementation(() => undefined as never);
+    vi.spyOn(processManager, 'killSession').mockImplementation(() => undefined as never);
+    const base = {
+      specPath: env.specPath, unit: 'st2', unitLabel: 'Subtask 2', taskId: SRC, role: 'coder' as const, cwd: env.root,
+      requireSelf: false, projectRoot: env.root, store: env.store, sessionOpts: () => ({}) as never, optional: true,
+    };
+    prepareBacklogCheck({ specPath: env.specPath, unit: 'st2', store: env.store, ownTaskId: SRC, requireSelf: false, optionalUnlessEvidence: [] });
+    const idle = vi.fn(async () => undefined);
+    expect((await runBacklogCheck({ ...base, waitForCompletion: idle })).ok).toBe(true);
+    expect(idle).not.toHaveBeenCalled();
+
+    prepareBacklogCheck({ specPath: env.specPath, unit: 'st2', store: env.store, ownTaskId: SRC, requireSelf: false, optionalUnlessEvidence: [] });
+    writeCheck(env.specPath, 'st2', { tickets: [{ id: A, verdict: 'update', reason: 'new evidence' }] }); // misses B
+    const fix = vi.fn(async () => writeCheck(env.specPath, 'st2', { tickets: [{ id: A, verdict: 'update', reason: 'new evidence' }, { id: B, verdict: 'unrelated', reason: '' }] }));
+    expect((await runBacklogCheck({ ...base, waitForCompletion: fix })).ok).toBe(true);
+    expect(fix).toHaveBeenCalledTimes(1);
+  });
+
+  it('the header says when an implement subtask must check', () => {
+    const env = setup();
+    const h = prepareBacklogCheck({ specPath: env.specPath, unit: 'st3', store: env.store, ownTaskId: SRC, requireSelf: false, optionalUnlessEvidence: ['scripts/sweep_logs/**'] });
+    expect(h).toContain('required only if');
+    expect(h).toContain('`scripts/sweep_logs/**`');
   });
 });
