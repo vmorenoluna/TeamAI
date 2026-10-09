@@ -558,6 +558,28 @@ describe('Orchestrator', () => {
       await new Promise(r => setTimeout(r, 30));
       await promise;
     });
+
+    it('moves the task to failed and logs the error when the detached rework run throws', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        phase: 'awaiting-review',
+        specPath: testData.taskDir,
+      });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+      mockCreateSession.mockRejectedValue(new Error('simulated rework failure'));
+
+      // Resolves without waiting for the rework run, which fails afterwards.
+      await orch.rejectTask(testData.taskId, 'Fix the tests', 'coder');
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(pipeline.phase).toBe('failed');
+      const log = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
+      expect(log).toContain('[ERROR] Task failed');
+    });
   });
 
   // ── sessionOpts ────────────────────────────────────────────────────

@@ -6,19 +6,10 @@
  * pending and Next.js queues the board's router.refresh() behind it.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdirSync, rmSync, readFileSync } from 'fs';
+import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
-
-const { mockError } = vi.hoisted(() => ({ mockError: vi.fn() }));
-
-vi.mock('../../src/lib/logger', () => ({
-  log: vi.fn(),
-  warn: vi.fn(),
-  error: mockError,
-  info: vi.fn(),
-}));
 
 import { rejectTask } from '../../src/lib/orchestrator/review-actions';
 
@@ -46,6 +37,7 @@ function makeDeps(executePhase: () => Promise<void>) {
     restorePipeline: vi.fn(),
     advancePhase: vi.fn((p: { phase: string }, phase: string) => { p.phase = phase; }),
     executePhase: vi.fn(executePhase),
+    handleRunFailure: vi.fn(),
     savePipelineState: vi.fn(),
     writeCompletionSummary: vi.fn(),
   };
@@ -68,15 +60,15 @@ describe('rejectTask — does not await the rework run', () => {
     finish();
   });
 
-  it('logs rework failures instead of leaving an unhandled rejection', async () => {
-    const h = makeDeps(async () => { throw new Error('boom'); });
+  it('hands a failed rework run to handleRunFailure instead of leaving an unhandled rejection', async () => {
+    const boom = new Error('boom');
+    const h = makeDeps(async () => { throw boom; });
     root = h.root;
 
     await rejectTask('task-1', 'fix it', 'qa-reviewer', undefined, h.deps as never);
     await new Promise(r => setTimeout(r, 10));
 
-    expect(mockError).toHaveBeenCalled();
-    expect(readFileSync(join(h.specPath, 'output.log'), 'utf-8')).toContain('Rework after reject failed: boom');
+    expect(h.deps.handleRunFailure).toHaveBeenCalledWith(h.pipeline, boom);
   });
 
   it('still rejects synchronously on a disallowed phase', async () => {

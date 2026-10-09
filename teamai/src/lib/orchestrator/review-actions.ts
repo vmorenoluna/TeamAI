@@ -14,7 +14,7 @@ import { REVISION_CLEANUP_EXTRA, PHASE_ARTIFACTS } from './artifacts';
 import { writeHumanFeedback, targetToResumePhase, type FeedbackTarget } from './human-feedback';
 import { logToOutput } from './helpers';
 import { TaskNotFoundError, PhaseTransitionError } from './errors';
-import { warn, error as logError } from '../logger';
+import { warn } from '../logger';
 
 // ── Dependencies ──────────────────────────────────────────────────────────
 
@@ -30,6 +30,7 @@ export interface ReviewActionsDeps {
   restorePipeline: (taskId: string, requiredPhase: PipelinePhase) => TaskPipeline;
   advancePhase: (pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
+  handleRunFailure: (pipeline: TaskPipeline, err: unknown) => void;
   savePipelineState: (pipeline: TaskPipeline) => void;
   writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
 }
@@ -332,16 +333,13 @@ export async function rejectTask(
   // router.refresh() behind a pending server action, so the board would keep
   // showing the old column until a hard refresh. Mirrors runTask/restartPhase,
   // which start the pipeline without awaiting it. Synchronous failures
-  // (validation, artifact writes) still propagate; run failures surface via
-  // the pipeline's own phase handling and are logged here.
+  // (validation, artifact writes) still propagate to the caller; a failure of
+  // the detached run gets runTask's treatment (output.log entry, rate-limit
+  // pause, otherwise the task moves to `failed`).
   const detached: ReviewActionsDeps = {
     ...deps,
     executePhase: (p) => {
-      deps.executePhase(p).catch(err => {
-        const msg = err instanceof Error ? err.message : String(err);
-        try { logToOutput(p.specPath, `\n[ERROR] Rework after reject failed: ${msg}\n`); } catch { /* best-effort */ }
-        logError('review', `Rework after reject failed for ${taskId}`, err);
-      });
+      deps.executePhase(p).catch(err => deps.handleRunFailure(p, err));
       return Promise.resolve();
     },
   };
