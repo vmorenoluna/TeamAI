@@ -1,11 +1,15 @@
 <!-- .claude/commands/merge.md -->
 Adopt the role persona already loaded in your system prompt.
 
-You are merging branch `{branch}` into the current branch using
-`git merge {branch} --no-commit`.
+You are merging a branch into the current branch using `git merge <branch> --no-commit`.
+
+## Request
+
+Branch to merge: $ARGUMENTS
 
 ## Instructions
-1. Run `git merge {branch} --no-commit` to attempt the merge.
+1. Run `git merge <branch> --no-commit` with the branch named in the request to attempt
+   the merge.
 2. If there are no conflicts (merge succeeds cleanly), check whether the merge
    actually brought in any changes:
    - If `git diff --cached` is empty (the branch was already up-to-date),
@@ -29,4 +33,3 @@ You are merging branch `{branch}` into the current branch using
    one actually attempting the push).
 7. If tests fail, fix the issues and re-run.
 8. Print a summary of conflicts resolved and test results.
-```

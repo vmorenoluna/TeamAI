@@ -944,9 +944,14 @@ export async function runSubtaskSession(
       'Your previous session for this subtask ended but the following required\n' +
       'deliverable files were NOT created:\n\n' +
       (subtask.files_to_create?.map(f => '  - ' + f).join('\n') || '') + '\n\n' +
-      'You MUST create these files before ending your session. If you cannot\n' +
-      'create them (e.g., the task is impossible with the current spec), explain\n' +
-      'why and the orchestrator will advance the task to failed.\n\n';
+      'You MUST create these files before ending your session — unless they come from\n' +
+      'a long-running job (yours, or one the previous session already started) that\n' +
+      'will not finish within this session. Then confirm the job is still running, write\n' +
+      '`subtask_wakeup-st' + subtask.id + '.json` as your instructions describe, and end the\n' +
+      'session: the orchestrator pauses this subtask instead of counting it as missing.\n' +
+      'Do not wait on the job in this session. If you cannot create them at all (e.g.,\n' +
+      'the task is impossible with the current spec), explain why and the orchestrator\n' +
+      'will advance the task to failed.\n\n';
   }
 
   const promptHeader = wakeupHeader || deliverableHeader;
@@ -2632,22 +2637,20 @@ export async function tryCherryPickWithRecovery(
   logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick has conflicts — spawning merger agent for subtask ' + subtaskId + '\n');
   try {
     const mergeLogFile = path.join(pipeline.specPath, 'output-merge.log');
+    // The command has the merger run the tests BEFORE `--continue`, so it
+    // fixes its resolution while it still has the conflict context, and
+    // report (never hide) failures it couldn't fix — QA stays the backstop
+    // for those. Only an unresolvable conflict is left in progress, which the
+    // check below turns into an abort + preserved branches, as before.
+    const mergeMessage = renderCommand('resolve-cherry-pick',
+      'Subtask ' + subtaskId + ': a `git cherry-pick` of branch `' + stBranch + '` onto `' + pipeline.branch + '`\n' +
+      'stopped on merge conflicts. Resolve them, run the tests, and complete the ' +
+      'cherry-pick (`git cherry-pick --continue`) as the instructions below describe.');
     const mergeSessionId = await processManager.createSession(
       deps.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, mergeLogFile),
     );
     updateSessionMap(pipeline.specPath, 'merge', mergeSessionId);
-    processManager.sendMessage(mergeSessionId,
-      'Resolve cherry-pick conflicts\n\n' +
-      'A `git cherry-pick` from branch `' + stBranch + '` was attempted onto `' + pipeline.branch + '`\n' +
-      'but encountered merge conflicts. The conflict markers are already in the files.\n\n' +
-      'Your job:\n' +
-      '1. Read each conflicted file and understand the intent of both sides of each conflict\n' +
-      '2. Resolve all conflicts semantically — preserve the intent of BOTH sets of changes\n' +
-      '3. `git add` the resolved files\n' +
-      '4. Run `git cherry-pick --continue` to complete the cherry-pick\n' +
-      '5. Run the test suite to verify correctness (one attempt, wait for completion)\n' +
-      '6. Print a summary of conflicts resolved and test results'
-    );
+    processManager.sendMessage(mergeSessionId, mergeMessage);
     await deps.waitForCompletion(mergeSessionId);
     processManager.killSession(mergeSessionId);
 

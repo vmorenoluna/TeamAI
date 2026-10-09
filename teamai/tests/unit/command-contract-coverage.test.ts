@@ -37,6 +37,7 @@ const PHASE_WAKEUP: Rule[] = [
   r('wakeup schema: progress_log_path', '"progress_log_path"'),
   r('detach long jobs so they outlive the session', 'nohup'),
   r('no inline waiting tools', 'Do NOT call an interactive `ScheduleWakeup`-style tool'),
+  r('shell polling loops are inline waiting too', 'Shell polling loops count as waiting inline'),
   r('re-entry header handling', 'WAKEUP RE-ENTRY'),
   r('relaunch with a different command resets the budget', 'materially different'),
   r('spec dir env var for job files', 'TEAMAI_SPEC_DIR'),
@@ -51,6 +52,7 @@ const SUBTASK_WAKEUP: Rule[] = [
   r('detach long jobs so they outlive the session', 'nohup'),
   r('job files live inside the worktree, never /tmp', 'never in `/tmp`'),
   r('no inline waiting tools', 'Do NOT call an interactive `ScheduleWakeup`-style tool'),
+  r('shell polling loops are inline waiting too', 'Shell polling loops count as waiting inline'),
   r('re-entry header handling', 'WAKEUP RE-ENTRY'),
   r('relaunch with a different command resets the budget', 'materially different'),
   r('blocked-subtask declaration file', 'subtask_blocked-st<ID>.json'),
@@ -146,6 +148,20 @@ const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
     r('adopt the injected role persona', 'Adopt the role persona'),
     r('never push from the agent', 'Do NOT push'),
     r('stage the merge for review before committing', '--no-commit'),
+  ],
+  'spec-summary': [
+    r('adopt the injected role persona', 'Adopt the role persona'),
+    r('summary length and focus', 'Roughly 3–8 lines of plain prose'),
+    r('summary is the durable record embedded in the PR', 'embedded in the pull request'),
+    r('never touch spec.md', 'Do NOT modify `spec.md`'),
+  ],
+  'resolve-cherry-pick': [
+    r('adopt the injected role persona', 'Adopt the role persona'),
+    r('never push from the agent', 'Do NOT push'),
+    r('tests run before the cherry-pick is completed', 'Do NOT run `git cherry-pick --continue` yet'),
+    r('remaining test failures are reported, never hidden', 'state clearly in your summary which tests fail'),
+    r('only an unresolvable conflict is left unfinished', 'Leave the cherry-pick unfinished only if'),
+    r('non-interactive continue', 'GIT_EDITOR=true git cherry-pick --continue'),
   ],
 };
 
