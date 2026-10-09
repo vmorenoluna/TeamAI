@@ -80,7 +80,7 @@ export function findInterruptedTasks(): InterruptedTask[] {
           // sweepStalledTasks's Check 0), so including such a task here
           // re-invokes its wakeup-isolated subtask session immediately —
           // ignoring however much of the scheduled wait (routinely 1-2h for a
-          // verification sweep) remains. Every server restart during that
+          // verification job) remains. Every server restart during that
           // window (dev-server reload, crash, redeploy) then burns another
           // premature re-entry, and because the re-entered subtask's
           // deliverable genuinely isn't ready yet, each one counts toward
@@ -496,8 +496,8 @@ const SESSION_IDLE_STALL_THRESHOLD_MS = 15 * 60_000; // 15 minutes
  *  log as stale — i.e. the job most likely died. Checked against the log's
  *  own mtime, not the scheduled `wakeup_at`, so a dead process is caught
  *  well before the full wait window elapses rather than only when the
- *  coder wakes up naturally. Generous relative to a sweep's own per-cell
- *  cadence (seconds), tight relative to a 1-2h wait.
+ *  coder wakes up naturally. Generous relative to a typical job's per-step
+ *  progress cadence (seconds), tight relative to a 1-2h wait.
  *
  *  Deliberately well above 15 minutes: a background job's stdout, when
  *  redirected to a log file rather than a TTY, is commonly block-buffered
@@ -517,14 +517,14 @@ const WAKEUP_PROGRESS_STALE_THRESHOLD_MS = 30 * 60_000; // 30 minutes
 /** Threshold for killing a session that has a tool call in flight
  *  (`AgentSession.toolInFlight`). The CLI emits nothing between issuing a
  *  Bash tool call and that call returning, so a single slow-but-legitimate
- *  command (a cold `sbt compile`/`sbt test` on a Scala/Timefold project, a
+ *  command (a cold build or test run on a large JVM project, a
  *  slow HTTP call, a big git operation) looks identical to a hung session
  *  under a flat no-output metric — this was observed directly, killing a
  *  session mid-investigation that was making real progress on one silent
  *  command, not stuck. Using the actual "is a tool running" signal instead
  *  of a single bigger number means idle stalls are still caught fast while
  *  genuine long-running work gets real headroom; a tool call that somehow
- *  never returns (e.g. a sweep the coder forgot to detach, despite being
+ *  never returns (e.g. a job the coder forgot to detach, despite being
  *  instructed to) is still eventually caught here. */
 const SESSION_TOOL_STALL_THRESHOLD_MS = 30 * 60_000; // 30 minutes
 

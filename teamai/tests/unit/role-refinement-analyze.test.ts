@@ -51,9 +51,9 @@ function seedTask(phase = 'failed'): string {
   const dir = taskStore.getDirById('task-1');
   writeFileSync(join(dir, 'qa_report.json'), JSON.stringify({
     overall: 'FAIL',
-    criteria: [{ name: 'Sweep completes', status: 'FAIL' }],
+    criteria: [{ name: 'Job completes', status: 'FAIL' }],
   }));
-  writeFileSync(join(dir, 'completion_summary.md'), 'Sweep never finished.\n');
+  writeFileSync(join(dir, 'completion_summary.md'), 'Job never finished.\n');
   // Seed role files so the prompt lists them as paths.
   mkdirSync(join(root, '.claude', 'roles'), { recursive: true });
   writeFileSync(join(root, '.claude', 'roles', 'planner.md'), '# Role: Planner\n');

@@ -300,7 +300,7 @@ export class Orchestrator {
    * inherit a near-exhausted qaAttempt/wakeupAttemptCount/
    * deliverableFailCounts from the run that just failed, or a subtask can
    * get killed almost instantly on the very next wakeup/QA pass even
-   * though the underlying work (e.g. a long-running sweep) is legitimately
+   * though the underlying work (e.g. a long-running script) is legitimately
    * healthy. This used to be an opt-in choice (the retry-phase dialog's
    * "Reset QA-attempt budget" toggle, ADR 005's circuit breaker preserved
    * across manual retries) but a carried-over counter proved unsafe often

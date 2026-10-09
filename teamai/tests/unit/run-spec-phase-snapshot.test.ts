@@ -404,7 +404,7 @@ describe('runSpecPhase — spec versioning (rename-at-revision scheme)', () => {
 // ── Orphaned background job safety net (findLiveOrphanedJob) ──────────────
 //
 // Covers the second gap on the an-earlier-demo-task
-// incident: the analyst twice detached a multi-hour sweep and narrated an
+// incident: the analyst twice detached a multi-hour job and narrated an
 // intent to wait for it, but its session ended without ever writing
 // phase_wakeup.json — the pre-existing stale-reentry safety net only covers
 // a session that was ALREADY mid-wakeup-cycle going silent, not a first
@@ -429,8 +429,8 @@ describe('runSpecPhase — orphaned background job safety net', () => {
     // agent would do mid-session) so its mtime postdates runSpecPhase's
     // sessionStartedAt capture, which happens before the session even starts.
     ctx.deps.waitForCompletion = vi.fn(async () => {
-      mkdir(join(ctx.specPath, 'sweep'), { recursive: true });
-      writeFileSync(join(ctx.specPath, 'sweep', 'server.pid'), String(process.pid));
+      mkdir(join(ctx.specPath, 'ab-run'), { recursive: true });
+      writeFileSync(join(ctx.specPath, 'ab-run', 'server.pid'), String(process.pid));
       return undefined;
     });
 
@@ -453,9 +453,9 @@ describe('runSpecPhase — orphaned background job safety net', () => {
   it('still parks in awaiting-review when the pid file points to a process that is not running', async () => {
     ctx.deps.waitForCompletion = vi.fn(async () => {
       const { mkdirSync: mkdir, writeFileSync } = await import('fs');
-      mkdir(join(ctx.specPath, 'sweep'), { recursive: true });
+      mkdir(join(ctx.specPath, 'ab-run'), { recursive: true });
       // Picked to reliably not exist on this machine during the test run.
-      writeFileSync(join(ctx.specPath, 'sweep', 'server.pid'), '999999');
+      writeFileSync(join(ctx.specPath, 'ab-run', 'server.pid'), '999999');
       return undefined;
     });
 
@@ -473,8 +473,8 @@ describe('runSpecPhase — orphaned background job safety net', () => {
     // Backdated well before sessionStartedAt (captured inside runSpecPhase,
     // a moment from now) — even though the recorded PID (this test process)
     // is genuinely alive, it must not match a pre-dispatch leftover file.
-    mkdir(join(ctx.specPath, 'sweep'), { recursive: true });
-    const pidFile = join(ctx.specPath, 'sweep', 'server.pid');
+    mkdir(join(ctx.specPath, 'ab-run'), { recursive: true });
+    const pidFile = join(ctx.specPath, 'ab-run', 'server.pid');
     writeFileSync(pidFile, String(process.pid));
     const past = new Date(Date.now() - 60_000);
     utimesSync(pidFile, past, past);

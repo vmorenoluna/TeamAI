@@ -37,7 +37,7 @@
  * prompt text.
  *
  * A second gap surfaced later, on the same task, twice in a row: an analyst
- * session detached a multi-hour A/B sweep, narrated an intent to wait for it,
+ * session detached a multi-hour A/B benchmark, narrated an intent to wait for it,
  * and then its turn simply ended — without ever writing phase_wakeup.json.
  * The file-based contract above only has a safety net for a session that was
  * ALREADY mid-wakeup-cycle going silent (`checkStaleWakeupReentry`); a FIRST
@@ -216,7 +216,7 @@ const MTIME_TOLERANCE_MS = 5000;
 
 /**
  * Scan `dir` (recursively — agents organize their own subdirectories, e.g. a
- * `sweep/` folder for an A/B job) for `*.pid` files written no earlier than
+ * `ab-run/` folder for an A/B job) for `*.pid` files written no earlier than
  * `sinceMtimeMs` (within {@link MTIME_TOLERANCE_MS}), and return the first
  * one whose recorded process is still alive. The mtime floor matters:
  * without it, a leftover `*.pid` from a long-finished, unrelated earlier run
@@ -516,7 +516,7 @@ export async function resolvePhaseWakeup(opts: ResolvePhaseWakeupOptions): Promi
   });
   // A silent re-entry that wrote the phase's deliverables is a completed
   // phase, not a job still running: the stale-artifact heuristic below only
-  // sees the wakeup's *old* expected artifact (e.g. a log from a sweep that a
+  // sees the wakeup's *old* expected artifact (e.g. a log from a job that a
   // host restart interrupted and the agent re-ran under new names), which
   // never updates, so it would re-arm until the attempt cap and fail a
   // finished spec as 'wakeup-exhausted'.

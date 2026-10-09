@@ -177,7 +177,7 @@ is `"cleanup"`. If so, you are in **cleanup-only rework mode**:
 - **Name the scenario in the header.** "When All Subtasks Are Already Completed" is immediately recognizable to an agent looking at `plan.json` and seeing `completed: true`.
 
   **Naming conventions for subsection headers:**
-  - **Use "When X" for conditional scenarios** the agent must detect: "When All Subtasks Are Already Completed," "When the sweep output is a committed artifact."
+  - **Use "When X" for conditional scenarios** the agent must detect: "When All Subtasks Are Already Completed," "When the run's output is a committed artifact."
   - **Use the agent's internal monologue** for anti-patterns: "Do NOT treat this as 'nothing to do'."
   - **Use imperative descriptions** for mode variants: "Cleanup-Only Rework Mode," "Standard QA Rework Steps."
   - **Use phase names** for bifurcations: "First QA Pass," "Rework Pass."

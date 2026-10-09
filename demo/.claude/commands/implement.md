@@ -351,7 +351,7 @@ subtask ID) to `$TEAMAI_SPEC_DIR` instead:
 
 ```json
 {
-  "reason": "Subtask #1 (CS-1) was never actually implemented despite plan.json marking it completed — Chord.containsPitch is byte-identical to the pre-task baseline. This subtask's own acceptance gate (AC-S3) can't pass until that fix lands.",
+  "reason": "Subtask #1 (CS-1) was never actually implemented despite plan.json marking it completed — Parser.parseHeader is byte-identical to the pre-task baseline. This subtask's own acceptance gate (AC-S3) can't pass until that fix lands.",
   "blocking_subtask_id": 1
 }
 ```

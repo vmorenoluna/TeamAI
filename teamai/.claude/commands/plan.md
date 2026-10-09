@@ -103,7 +103,7 @@ Rules:
   description.
 - **A subtask description never refers to a later subtask.** Each subtask must be
   self-contained: state only its own scope and constraints, never "this must land
-  before the sweep (subtask 5)" or "subtask 9 adds the entry". A reference to an
+  before the benchmark run (subtask 5)" or "subtask 9 adds the entry". A reference to an
   EARLIER subtask is allowed only with that id in `depends_on`. If a later subtask
   must run after this one, put the ordering in the LATER subtask's `depends_on`;
   never add a forward id to an earlier subtask's `depends_on` (it can never be
@@ -117,7 +117,7 @@ Rules:
   failures"). This makes the criterion independently verifiable by QA without relying
   on the engineer's self-report.
 - **Run-only gate subtasks set `"verify_only": true`.** A subtask whose job is to
-  run something and report (the full test suite, a build, a sweep) and which edits
+  run something and report (the full test suite, a build, a benchmark) and which edits
   nothing when everything passes MUST carry `"verify_only": true`. List in `files`
   only the files it may need to fix if the run fails (or leave `files: []` if it
   must not edit anything). Without the flag, the orchestrator rejects a session

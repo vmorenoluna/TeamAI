@@ -352,7 +352,7 @@ describe('Workflow Improvements', () => {
         subtasks: [{
           id: 1,
           title: 'Run benchmark verification',
-          description: 'Run ./scripts/benchmark.sh and commit output/sweep_output/. Verify the summary shows fewer than 20 failures. Command: ./scripts/benchmark.sh. Output artifact: sweep_output/summary.jsonl. Check: section failures shows < 20.',
+          description: 'Run ./scripts/benchmark.sh and commit output/job_output/. Verify the summary shows fewer than 20 failures. Command: ./scripts/benchmark.sh. Output artifact: job_output/summary.jsonl. Check: section failures shows < 20.',
           files: ['scripts/benchmark.sh'],
           acceptance_criteria: ['Post-fix benchmark exits with < 20 failures'],
           completed: false,
@@ -385,7 +385,7 @@ describe('Workflow Improvements', () => {
       expect(coderCalls.length).toBe(1);
       const coderPrompt = coderCalls[0][1] as string;
       expect(coderPrompt).toContain('Run ./scripts/benchmark.sh');
-      expect(coderPrompt).toContain('commit output/sweep_output/');
+      expect(coderPrompt).toContain('commit output/job_output/');
       expect(coderPrompt).toContain('Post-fix benchmark exits with < 20 failures');
       expect(coderPrompt).toContain('Command: ./scripts/benchmark.sh');
       expect(coderPrompt).toContain('section failures shows < 20');

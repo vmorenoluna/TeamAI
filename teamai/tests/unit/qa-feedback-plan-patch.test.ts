@@ -108,8 +108,8 @@ describe('writeQaFeedback — subtask completion correction', () => {
     // / "CS-11".
     mockReadFileSync.mockReturnValueOnce(JSON.stringify({
       subtasks: [
-        { id: 11, title: 'CS-10: make analyzeCadencePatterns distinguish the leading tone from the subtonic', files: [], acceptance_criteria: [], completed: true },
-        { id: 12, title: 'CS-11: make encourageCadenceAppropriateEnding use pitch-class chord-tone identity', files: [], acceptance_criteria: [], completed: true },
+        { id: 11, title: 'CS-10: make analyzePatterns distinguish a header from a footer', files: [], acceptance_criteria: [], completed: true },
+        { id: 12, title: 'CS-11: make validateEnding use canonical token identity', files: [], acceptance_criteria: [], completed: true },
         { id: 13, title: 'Unrelated subtask', files: [], acceptance_criteria: [], completed: true },
       ],
     }));
@@ -117,8 +117,8 @@ describe('writeQaFeedback — subtask completion correction', () => {
       overall: 'FAIL',
       criteria: [{
         status: 'FAIL',
-        criterion: 'AC-11 (CS-10/CS-11): minor PAC/HC/DC cadenceDegree gating on the true leading tone',
-        fix_needed: 'wire chord.soundsAs into analyzeCadencePatterns and encourageCadenceAppropriateEnding',
+        criterion: 'AC-11 (CS-10/CS-11): ending detection gated on the true header',
+        fix_needed: 'wire Token.matches into analyzePatterns and validateEnding',
       }],
     };
 
@@ -138,13 +138,13 @@ describe('writeQaFeedback — subtask completion correction', () => {
   it('unmarks a subtask referenced by "subtask N" in an additional_issues meta-note', () => {
     mockReadFileSync.mockReturnValueOnce(JSON.stringify({
       subtasks: [
-        { id: 15, title: 'Sweep-level verification', files: [], acceptance_criteria: [], completed: true },
+        { id: 15, title: 'Job-level verification', files: [], acceptance_criteria: [], completed: true },
       ],
     }));
     const reportMetaIssue = {
       overall: 'FAIL',
       additional_issues: [{
-        description: 'plan.json marks subtask 15 (sweep verification) as "completed": true, but its evidence predates the fix',
+        description: 'plan.json marks subtask 15 (job verification) as "completed": true, but its evidence predates the fix',
       }],
     };
 

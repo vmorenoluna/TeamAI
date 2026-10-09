@@ -2717,9 +2717,9 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       subtasks: [
         {
           id: 1,
-          title: 'Run sweep and commit evidence log',
-          description: 'Run the sweep and commit the evidence artifact.',
-          files_to_create: ['scripts/sweep_logs/evidence.log'],
+          title: 'Run job and commit evidence log',
+          description: 'Run the job and commit the evidence artifact.',
+          files_to_create: ['scripts/job_logs/evidence.log'],
           depends_on: [],
           acceptance_criteria: ['Evidence file is committed'],
           // `files` deliberately omitted — this is the exact shape that crashed.
@@ -4179,7 +4179,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
         id: 1,
-        title: 'Run benchmark sweep',
+        title: 'Run benchmark job',
         description: 'Execute benchmark and save results',
         files: ['src/bench.ts'],
         acceptance_criteria: ['Benchmark completes'],
@@ -4202,7 +4202,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
       writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), JSON.stringify({
         subtask_id: 1,
         wakeup_at: '2026-07-04T12:00:00Z',
-        background_command: 'python sweep.py --output results/',
+        background_command: 'python long_job.py --output results/',
         expected_artifact: 'results/summary.jsonl',
       }));
 
@@ -4215,7 +4215,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
       // Pipeline wakeup fields should be set
       expect(pipeline.wakeupSubtaskId).toBe(1);
       expect(pipeline.wakeupUntil).toBe('2026-07-04T12:00:00Z');
-      expect(pipeline.wakeupCommand).toBe('python sweep.py --output results/');
+      expect(pipeline.wakeupCommand).toBe('python long_job.py --output results/');
       expect(pipeline.wakeupArtifact).toBe('results/summary.jsonl');
       expect(pipeline.wakeupAttemptCount).toBe(1);
 
@@ -4228,7 +4228,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
   it('detects subtask_wakeup-st<id>.json during a QA-rework (cleanup) session, not just first-pass (regression)', async () => {
     // A coder session running with QA feedback present (hasQaFeedback=true) can
     // legitimately need to start a long background verification job — e.g.
-    // re-running a sweep after fixing the code — just like a first-pass
+    // re-running a job after fixing the code — just like a first-pass
     // session. The wakeup-file check used to be gated behind `!hasQaFeedback`,
     // so a rework session's wakeup file was silently ignored: the orchestrator
     // advanced straight to QA before the background job finished, and QA
@@ -4237,8 +4237,8 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
         id: 2,
-        title: 'Run post-fix isolation sweep and commit evidence',
-        description: 'Re-verify the fix against a fresh sweep',
+        title: 'Run post-fix isolation job and commit evidence',
+        description: 'Re-verify the fix against a fresh job',
         files: ['src/bench.ts'],
         acceptance_criteria: ['Evidence artifact committed'],
         qa_flagged: true,
@@ -4262,8 +4262,8 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
       writeFileSync(join(project.taskDir, 'subtask_wakeup-st2.json'), JSON.stringify({
         subtask_id: 2,
         wakeup_at: '2026-07-04T12:00:00Z',
-        background_command: 'python scripts/optimizer_sweep.py --batch',
-        expected_artifact: 'scripts/sweep_logs/evidence.log',
+        background_command: 'python scripts/benchmark.py --batch',
+        expected_artifact: 'scripts/job_logs/evidence.log',
       }));
 
       fireEvent('event', { sessionId: 'sess-wakeup-qa-rework', event: { type: 'result' } });
@@ -4274,8 +4274,8 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
       expect(existsSync(join(project.taskDir, 'subtask_wakeup-st2.json'))).toBe(false);
       expect(pipeline.wakeupSubtaskId).toBe(2);
       expect(pipeline.wakeupUntil).toBe('2026-07-04T12:00:00Z');
-      expect(pipeline.wakeupCommand).toBe('python scripts/optimizer_sweep.py --batch');
-      expect(pipeline.wakeupArtifact).toBe('scripts/sweep_logs/evidence.log');
+      expect(pipeline.wakeupCommand).toBe('python scripts/benchmark.py --batch');
+      expect(pipeline.wakeupArtifact).toBe('scripts/job_logs/evidence.log');
       expect(pipeline.wakeupAttemptCount).toBe(1);
 
       await promise;
@@ -4316,7 +4316,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
         id: 4,
-        title: 'Run benchmark sweep',
+        title: 'Run benchmark job',
         description: 'Execute benchmark and save results',
         files: ['src/bench.ts'],
         acceptance_criteria: ['Benchmark completes'],
@@ -4339,7 +4339,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
       writeFileSync(join(project.taskDir, 'subtask_wakeup-st4.json'), JSON.stringify({
         subtask_id: 4,
         wakeup_at: '2026-07-04T12:00:00Z',
-        background_command: 'python sweep.py',
+        background_command: 'python long_job.py',
         expected_artifact: 'results/summary.jsonl',
       }));
 
@@ -4379,10 +4379,10 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
         id: 9,
-        title: 'Run production sweep',
-        description: 'Launch a long-running sweep',
+        title: 'Run production job',
+        description: 'Launch a long-running job',
         files: [],
-        acceptance_criteria: ['Sweep completes'],
+        acceptance_criteria: ['Job completes'],
         files_to_create: ['results/summary.jsonl'],
       }],
     }));
@@ -4411,7 +4411,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
       writeFileSync(join(project.taskDir, 'subtask_wakeup-st9.json'), JSON.stringify({
         subtask_id: 9,
         wakeup_at: '2026-07-04T14:00:00Z',
-        background_command: 'python scripts/optimizer_sweep.py --batch',
+        background_command: 'python scripts/benchmark.py --batch',
         expected_artifact: 'results/summary.jsonl',
       }));
 
@@ -4472,8 +4472,8 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
       writeFileSync(join(project.taskDir, 'subtask_wakeup-st7.json'), JSON.stringify({
         subtask_id: 7,
         wakeup_at: '2026-09-03T14:30:00Z',
-        background_command: 'python sweep.py',
-        expected_artifact: 'scripts/sweep_logs/evidence.log',
+        background_command: 'python long_job.py',
+        expected_artifact: 'scripts/job_logs/evidence.log',
       }));
 
       fireEvent('event', { sessionId: 'sess-gate', event: { type: 'result' } });
@@ -4497,8 +4497,8 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
   it('adopts the EARLIEST wakeup when two parallel subtasks both schedule one (BUG-10)', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
-        { id: 1, title: 'Sweep A', description: 'Run sweep A', files: ['src/a.ts'], acceptance_criteria: ['A done'], parallel_group: 1 },
-        { id: 2, title: 'Sweep B', description: 'Run sweep B', files: ['src/b.ts'], acceptance_criteria: ['B done'], parallel_group: 1 },
+        { id: 1, title: 'Job A', description: 'Run job A', files: ['src/a.ts'], acceptance_criteria: ['A done'], parallel_group: 1 },
+        { id: 2, title: 'Job B', description: 'Run job B', files: ['src/b.ts'], acceptance_criteria: ['B done'], parallel_group: 1 },
       ],
     }));
 
@@ -4521,13 +4521,13 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
       writeFileSync(join(project.taskDir, 'subtask_wakeup-st1.json'), JSON.stringify({
         subtask_id: 1,
         wakeup_at: '2026-07-04T12:00:00Z',
-        background_command: 'python sweep_a.py',
+        background_command: 'python job_a.py',
         expected_artifact: 'results/a.jsonl',
       }));
       writeFileSync(join(project.taskDir, 'subtask_wakeup-st2.json'), JSON.stringify({
         subtask_id: 2,
         wakeup_at: '2026-07-04T10:00:00Z',
-        background_command: 'python sweep_b.py',
+        background_command: 'python job_b.py',
         expected_artifact: 'results/b.jsonl',
       }));
 
@@ -4638,7 +4638,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
 
   it('injects WAKEUP RE-ENTRY header with background command and expected artifact', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
-      subtasks: [{ id: 2, title: 'Run data sweep', description: 'Execute data analysis sweep', files: ['src/sweep.ts'], acceptance_criteria: ['Sweep completes'] }],
+      subtasks: [{ id: 2, title: 'Run data job', description: 'Execute data analysis job', files: ['src/job.ts'], acceptance_criteria: ['Job completes'] }],
     }));
 
     mockCreateSession.mockResolvedValue('sess-wakeup-prompt');
@@ -4646,7 +4646,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
-      wakeupSubtaskId: 2, wakeupCommand: 'python sweep.py --data large-dataset.csv', wakeupArtifact: 'output/sweep-results.json', wakeupAttemptCount: 1,
+      wakeupSubtaskId: 2, wakeupCommand: 'python long_job.py --data large-dataset.csv', wakeupArtifact: 'output/job-results.json', wakeupAttemptCount: 1,
     });
 
     try {
@@ -4655,8 +4655,8 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
 
       const prompt = mockSendMessage.mock.calls[0][1];
       expect(prompt).toContain('WAKEUP RE-ENTRY');
-      expect(prompt).toContain('python sweep.py --data large-dataset.csv');
-      expect(prompt).toContain('output/sweep-results.json');
+      expect(prompt).toContain('python long_job.py --data large-dataset.csv');
+      expect(prompt).toContain('output/job-results.json');
 
       fireEvent('event', { sessionId: 'sess-wakeup-prompt', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(30);
@@ -4680,11 +4680,11 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
         id: 4,
-        title: 'Run isolation sweep and commit evidence',
-        description: 'Run the sweep and commit the evidence artifact',
-        files: ['scripts/sweep.py'],
+        title: 'Run isolation job and commit evidence',
+        description: 'Run the job and commit the evidence artifact',
+        files: ['scripts/long_job.py'],
         acceptance_criteria: ['Evidence committed'],
-        files_to_create: ['scripts/sweep_logs/evidence.log'],
+        files_to_create: ['scripts/job_logs/evidence.log'],
       }],
     }));
 
@@ -4695,7 +4695,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
     // an earlier, legitimate wakeup cycle on the same subtask.
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement', qaAttempt: 0, worktreePath: join(project.root, 'worktrees', 'test-task'),
-      wakeupSubtaskId: 4, wakeupCommand: 'python sweep.py', wakeupArtifact: 'scripts/sweep_logs/evidence.log', wakeupAttemptCount: 2,
+      wakeupSubtaskId: 4, wakeupCommand: 'python long_job.py', wakeupArtifact: 'scripts/job_logs/evidence.log', wakeupAttemptCount: 2,
     });
 
     try {
@@ -4704,7 +4704,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
 
       // No fresh wakeup file written this session, and the expected
       // deliverable was never produced.
-      expect(existsSync(join(project.root, 'scripts/sweep_logs/evidence.log'))).toBe(false);
+      expect(existsSync(join(project.root, 'scripts/job_logs/evidence.log'))).toBe(false);
 
       fireEvent('event', { sessionId: 'sess-wakeup-silent-drop', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
@@ -4724,7 +4724,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
   });
 
   // Regression coverage for a real production failure (task 585a32e0): a
-  // ~2h background sweep was still genuinely running (605-cell solve log
+  // ~2h background job was still genuinely running (progress log
   // still being written) when the wakeup re-entry coder session ran out of
   // turns mid-monitoring and ended WITHOUT writing a fresh wakeup file —
   // never reaching its own "if still running, reschedule" instruction. The
@@ -4733,7 +4733,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
   // rather than creating a new one), had no other check to catch this —
   // silently declared the subtask complete and moved on, so the analysis
   // subtask that followed ran against months-old evidence instead of the
-  // fresh sweep. The fix verifies the declared wakeupArtifact actually
+  // fresh job. The fix verifies the declared wakeupArtifact actually
   // advanced past its mtime at the last schedule point before trusting
   // silence as completion; an unchanged artifact auto-reschedules another
   // check instead.
@@ -4741,9 +4741,9 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
         id: 3,
-        title: 'Run fresh sweep and extract evidence',
-        description: 'Run the sweep and overwrite the existing evidence file',
-        files: ['scripts/sweep_logs/evidence.log'],
+        title: 'Run fresh job and extract evidence',
+        description: 'Run the job and overwrite the existing evidence file',
+        files: ['scripts/job_logs/evidence.log'],
         acceptance_criteria: ['Fresh evidence committed'],
       }],
     }));
@@ -4751,16 +4751,16 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
     mockCreateSession.mockResolvedValue('sess-wakeup-stuck');
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
 
-    // The stale evidence file already exists (from before this sweep even
+    // The stale evidence file already exists (from before this job even
     // started) — its presence alone must not be mistaken for freshness.
     const worktreePath = join(project.root, 'worktrees', 'test-task');
-    mkdirSync(join(worktreePath, 'scripts/sweep_logs'), { recursive: true });
-    writeFileSync(join(worktreePath, 'scripts/sweep_logs/evidence.log'), 'stale evidence from a prior sweep');
-    const staleMtime = statSync(join(worktreePath, 'scripts/sweep_logs/evidence.log')).mtimeMs;
+    mkdirSync(join(worktreePath, 'scripts/job_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts/job_logs/evidence.log'), 'stale evidence from a prior job');
+    const staleMtime = statSync(join(worktreePath, 'scripts/job_logs/evidence.log')).mtimeMs;
 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement', qaAttempt: 0, worktreePath,
-      wakeupSubtaskId: 3, wakeupCommand: 'python sweep.py', wakeupArtifact: 'scripts/sweep_logs/evidence.log',
+      wakeupSubtaskId: 3, wakeupCommand: 'python long_job.py', wakeupArtifact: 'scripts/job_logs/evidence.log',
       wakeupAttemptCount: 1, wakeupArtifactMtimeAtSchedule: staleMtime,
     });
 
@@ -4801,10 +4801,10 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
         id: 3,
-        title: 'Run files_to_create-gated sweep',
-        description: 'Run the sweep and commit the evidence artifact',
-        files: ['scripts/sweep.py'],
-        acceptance_criteria: ['Sweep evidence committed'],
+        title: 'Run files_to_create-gated job',
+        description: 'Run the job and commit the evidence artifact',
+        files: ['scripts/long_job.py'],
+        acceptance_criteria: ['Job evidence committed'],
       }],
     }));
 
@@ -4814,8 +4814,8 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
     // check must see this as newer than wakeupArtifactMtimeAtSchedule (a
     // minute in the past here) and trust the completion.
     const worktreePath = join(project.root, 'worktrees', 'test-task');
-    mkdirSync(join(worktreePath, 'scripts/sweep_logs'), { recursive: true });
-    writeFileSync(join(worktreePath, 'scripts/sweep_logs/evidence.log'), 'sweep evidence');
+    mkdirSync(join(worktreePath, 'scripts/job_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts/job_logs/evidence.log'), 'job evidence');
 
     // The re-entry session also touched its assigned script file (e.g. a
     // small tweak while investigating the evidence) — an empty diff now
@@ -4824,7 +4824,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
       if (Array.isArray(args)) {
         if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
         if (args[0] === 'rev-parse') return 'abc123\n';
-        if (args[0] === 'diff') return 'scripts/sweep.py\n';
+        if (args[0] === 'diff') return 'scripts/long_job.py\n';
       }
       return '';
     });
@@ -4832,16 +4832,16 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
     // Resuming after an earlier, legitimate wakeup cycle on the same subtask.
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement', qaAttempt: 0, worktreePath,
-      wakeupSubtaskId: 3, wakeupCommand: 'python sweep.py', wakeupArtifact: 'scripts/sweep_logs/evidence.log', wakeupAttemptCount: 1,
+      wakeupSubtaskId: 3, wakeupCommand: 'python long_job.py', wakeupArtifact: 'scripts/job_logs/evidence.log', wakeupAttemptCount: 1,
       wakeupArtifactMtimeAtSchedule: Date.now() - 60_000,
     });
 
     const subtask: PlanSubtask = {
       id: 3,
-      title: 'Run files_to_create-gated sweep',
-      description: 'Run the sweep and commit the evidence artifact',
-      files: ['scripts/sweep.py'],
-      acceptance_criteria: ['Sweep evidence committed'],
+      title: 'Run files_to_create-gated job',
+      description: 'Run the job and commit the evidence artifact',
+      files: ['scripts/long_job.py'],
+      acceptance_criteria: ['Job evidence committed'],
       depends_on: [],
     };
 
@@ -4915,7 +4915,7 @@ describe('runImplement — scope check honors files_to_create', () => {
         title: 'Capture evidence',
         description: 'Capture evidence into a new file',
         files: [],
-        files_to_create: ['scripts/sweep_logs/evidence.txt'],
+        files_to_create: ['scripts/job_logs/evidence.txt'],
         acceptance_criteria: ['Evidence captured'],
       }],
     }));
@@ -4924,7 +4924,7 @@ describe('runImplement — scope check honors files_to_create', () => {
       if (Array.isArray(args)) {
         if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
         if (args[0] === 'rev-parse') return 'abc123\n';
-        if (args[0] === 'diff') return 'scripts/sweep_logs/evidence.txt\n';
+        if (args[0] === 'diff') return 'scripts/job_logs/evidence.txt\n';
       }
       return '';
     });
@@ -4942,8 +4942,8 @@ describe('runImplement — scope check honors files_to_create', () => {
       await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
 
       // The deliverable is actually produced before the session ends.
-      mkdirSync(join(worktreePath, 'scripts/sweep_logs'), { recursive: true });
-      writeFileSync(join(worktreePath, 'scripts/sweep_logs/evidence.txt'), 'evidence');
+      mkdirSync(join(worktreePath, 'scripts/job_logs'), { recursive: true });
+      writeFileSync(join(worktreePath, 'scripts/job_logs/evidence.txt'), 'evidence');
 
       fireEvent('event', { sessionId: 'sess-scope-ok', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
@@ -4967,7 +4967,7 @@ describe('runImplement — scope check honors files_to_create', () => {
         title: 'Capture evidence',
         description: 'Capture evidence into a new file',
         files: [],
-        files_to_create: ['scripts/sweep_logs/evidence.txt'],
+        files_to_create: ['scripts/job_logs/evidence.txt'],
         acceptance_criteria: ['Evidence captured'],
       }],
     }));
@@ -4976,7 +4976,7 @@ describe('runImplement — scope check honors files_to_create', () => {
       if (Array.isArray(args)) {
         if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
         if (args[0] === 'rev-parse') return 'abc123\n';
-        if (args[0] === 'diff') return 'scripts/sweep_logs/evidence.txt\nsrc/UnrelatedFile.scala\n';
+        if (args[0] === 'diff') return 'scripts/job_logs/evidence.txt\nsrc/UnrelatedFile.scala\n';
       }
       return '';
     });
@@ -4993,8 +4993,8 @@ describe('runImplement — scope check honors files_to_create', () => {
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
 
-      mkdirSync(join(worktreePath, 'scripts/sweep_logs'), { recursive: true });
-      writeFileSync(join(worktreePath, 'scripts/sweep_logs/evidence.txt'), 'evidence');
+      mkdirSync(join(worktreePath, 'scripts/job_logs'), { recursive: true });
+      writeFileSync(join(worktreePath, 'scripts/job_logs/evidence.txt'), 'evidence');
 
       fireEvent('event', { sessionId: 'sess-scope-violated', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
@@ -5022,7 +5022,7 @@ describe('runImplement — scope check honors files_to_create', () => {
         id: 9999,
         title: 'QA Rework: fix failing criteria (criterion matching found no flagged subtasks)',
         description: 'Fix every issue in qa_feedback.md',
-        files: ['src/main/scala/sample-project/MelodyConstraintProvider.scala'],
+        files: ['src/main/scala/sample-project/ScoringRules.scala'],
         files_to_create: [],
         depends_on: [],
         acceptance_criteria: ['All criteria listed in the QA feedback above are satisfied'],
@@ -5037,7 +5037,7 @@ describe('runImplement — scope check honors files_to_create', () => {
         if (args[0] === 'rev-parse') return 'abc123\n';
         // The coder produced the actual deliverable QA named — a path never
         // listed in 9999's own `files` array.
-        if (args[0] === 'diff') return 'scripts/sweep_logs/evidence.txt\n';
+        if (args[0] === 'diff') return 'scripts/job_logs/evidence.txt\n';
       }
       return '';
     });
@@ -5049,14 +5049,14 @@ describe('runImplement — scope check honors files_to_create', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement', qaAttempt: 0, worktreePath,
     });
-    writeFileSync(join(project.taskDir, 'qa_feedback.md'), 'Missing scripts/sweep_logs/evidence.txt');
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), 'Missing scripts/job_logs/evidence.txt');
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
 
-      mkdirSync(join(worktreePath, 'scripts/sweep_logs'), { recursive: true });
-      writeFileSync(join(worktreePath, 'scripts/sweep_logs/evidence.txt'), 'evidence');
+      mkdirSync(join(worktreePath, 'scripts/job_logs'), { recursive: true });
+      writeFileSync(join(worktreePath, 'scripts/job_logs/evidence.txt'), 'evidence');
 
       fireEvent('event', { sessionId: 'sess-9999-scope', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
@@ -5076,8 +5076,8 @@ describe('runImplement — scope check honors files_to_create', () => {
 // ═══════════════════════════════════════════════════════════════════════
 //  Commit guard — sequential subtasks that never git-commit their own work
 // ═══════════════════════════════════════════════════════════════════════
-// Regression coverage for a real production failure (task
-// guard-standalone-melody-endpoint-chord-s): a coder session edited its
+// Regression coverage for a real production failure (a real
+// task): a coder session edited its
 // assigned file, ran tests, verified them green, and ended the session
 // having never run `git add`/`git commit`. integrateGroup already had a
 // safety-net auto-commit, but ONLY for the parallel per-subtask-worktree
@@ -5111,9 +5111,9 @@ describe('runImplement — commit guard for sequential subtasks', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
         id: 1,
-        title: 'Fix chord-span guard',
+        title: 'Fix span guard',
         description: 'Add the missing floor guard',
-        files: ['src/main/scala/sample-project/api/util/MelodyContextBuilder.scala'],
+        files: ['src/main/scala/sample-project/api/util/ContextBuilder.scala'],
         acceptance_criteria: ['Guard prevents zero-width spans'],
       }],
     }));
@@ -5132,11 +5132,11 @@ describe('runImplement — commit guard for sequential subtasks', () => {
         if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
         if (args[0] === 'rev-parse') return 'abc123\n';
         if (args[0] === 'status' && args.includes('--porcelain')) {
-          return ' M src/main/scala/sample-project/api/util/MelodyContextBuilder.scala\n';
+          return ' M src/main/scala/sample-project/api/util/ContextBuilder.scala\n';
         }
         if (args[0] === 'add') { addCalls.push(args); return ''; }
         if (args[0] === 'commit') { commitCalls.push(args); autoCommitted = true; return ''; }
-        if (args[0] === 'diff') return autoCommitted ? 'src/main/scala/sample-project/api/util/MelodyContextBuilder.scala\n' : '';
+        if (args[0] === 'diff') return autoCommitted ? 'src/main/scala/sample-project/api/util/ContextBuilder.scala\n' : '';
       }
       return '';
     });
@@ -5272,10 +5272,10 @@ describe('runImplement — depends_on gates dispatch across groups', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
         // Group F: never completes (deliverable missing), no wakeup file.
-        { id: 13, title: 'V0 sweep', description: 'x', files: [], files_to_create: ['out/v0.log'], acceptance_criteria: ['V0 exists'], parallel_group: 'F' },
+        { id: 13, title: 'V0 job', description: 'x', files: [], files_to_create: ['out/v0.log'], acceptance_criteria: ['V0 exists'], parallel_group: 'F' },
         // Group G: depends_on is empty — does NOT name 13, matching the
         // real plan's under-declared dependency exactly.
-        { id: 15, title: 'P1 sweep', description: 'x', files: ['src/p1.ts'], acceptance_criteria: ['P1 exists'], parallel_group: 'G' },
+        { id: 15, title: 'P1 job', description: 'x', files: ['src/p1.ts'], acceptance_criteria: ['P1 exists'], parallel_group: 'G' },
       ],
     }));
 
@@ -5536,7 +5536,7 @@ describe('runImplement — implement completeness gate', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
         {
-          id: 5, title: 'Run sweep', description: 'x', files: [],
+          id: 5, title: 'Run job', description: 'x', files: [],
           files_to_create: ['out/evidence.txt'], acceptance_criteria: ['Evidence exists'],
         },
         {
@@ -5609,8 +5609,8 @@ describe('runImplement — implement completeness gate', () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
         {
-          id: 1, title: 'Unrelated sweep', description: 'Never named by QA', files: [],
-          files_to_create: ['out/never-created.txt'], acceptance_criteria: ['Sweep exists'],
+          id: 1, title: 'Unrelated job', description: 'Never named by QA', files: [],
+          files_to_create: ['out/never-created.txt'], acceptance_criteria: ['Job exists'],
         },
       ],
     }));
@@ -5668,7 +5668,7 @@ describe('runImplement — implement completeness gate', () => {
 //  Wakeup inside a multi-subtask parallel group (ADR 002 x parallel groups)
 // ═══════════════════════════════════════════════════════════════════════
 // Regression coverage for a real production failure: a group with 2
-// subtasks where one schedules a wakeup (long-running sweep, no commits
+// subtasks where one schedules a wakeup (long-running job, no commits
 // yet) and the other finishes normally. Before this fix, integrateGroup
 // cherry-picked BOTH subtasks immediately — the wakeup subtask's branch had
 // zero commits, so `git cherry-pick <empty range>` hard-failed with "empty
@@ -5714,7 +5714,7 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
 
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
-        { id: 1, title: 'Run baseline sweep', description: 'Run pre-fix sweep and commit evidence', files: ['scripts/sweep.py'], acceptance_criteria: ['Sweep runs'], parallel_group: 1 },
+        { id: 1, title: 'Run baseline job', description: 'Run pre-fix job and commit evidence', files: ['scripts/long_job.py'], acceptance_criteria: ['Job runs'], parallel_group: 1 },
         { id: 2, title: 'Implement fix', description: 'Implement the suppression constraint', files: ['src/fix.ts'], acceptance_criteria: ['Constraint added'], parallel_group: 1 },
       ],
     }));
@@ -5739,14 +5739,14 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
 
-      // Subtask 1's sweep hasn't finished — it schedules a wakeup instead of
+      // Subtask 1's job hasn't finished — it schedules a wakeup instead of
       // committing anything. Subtask 2 finishes normally.
       writeFileSync(join(project.taskDir, 'subtask_wakeup-st1.json'), JSON.stringify({
         subtask_id: 1,
         wakeup_at: '2026-07-04T12:00:00Z',
-        background_command: 'python sweep.py',
-        expected_artifact: 'results/sweep.jsonl',
-        progress_log_path: 'sweep_progress.log',
+        background_command: 'python long_job.py',
+        expected_artifact: 'results/job.jsonl',
+        progress_log_path: 'job_progress.log',
       }));
 
       fireEvent('event', { sessionId: 'sess-group-st1', event: { type: 'result' } });
@@ -5850,7 +5850,7 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
   // `git worktree remove --force` cleanup afterward destroyed it silently.
   it('auto-commits stray uncommitted changes in a per-subtask ISOLATED worktree before cherry-picking from it', async () => {
     const execGitCapture = vi.fn((args: string[], cwd: string) => {
-      if (args[0] === 'status' && cwd.endsWith('-st2')) return ' M MelodyConstraintProvider.scala\n';
+      if (args[0] === 'status' && cwd.endsWith('-st2')) return ' M ScoringRules.scala\n';
       return '';
     });
     const execGit = vi.fn();
@@ -5916,7 +5916,7 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
     // subtask 1 is the sole remaining subtask, resuming after its wakeup fired.
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
-        { id: 1, title: 'Run baseline sweep', description: 'Run pre-fix sweep and commit evidence', files: ['scripts/sweep.py'], acceptance_criteria: ['Sweep runs'], parallel_group: 1 },
+        { id: 1, title: 'Run baseline job', description: 'Run pre-fix job and commit evidence', files: ['scripts/long_job.py'], acceptance_criteria: ['Job runs'], parallel_group: 1 },
         { id: 2, title: 'Implement fix', description: 'Implement the suppression constraint', files: ['src/fix.ts'], acceptance_criteria: ['Constraint added'], parallel_group: 1, completed: true },
       ],
     }));
@@ -5930,7 +5930,7 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
       phase: 'implement', qaAttempt: 0, worktreePath,
-      wakeupSubtaskId: 1, wakeupCommand: 'python sweep.py', wakeupArtifact: 'results/sweep.jsonl', wakeupAttemptCount: 1,
+      wakeupSubtaskId: 1, wakeupCommand: 'python long_job.py', wakeupArtifact: 'results/job.jsonl', wakeupAttemptCount: 1,
     });
 
     try {
@@ -5938,7 +5938,7 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
       await vi.waitFor(() => { expect(mockCreateSession).toHaveBeenCalled(); });
 
       // The resumed session must run in the preserved isolated worktree —
-      // not fall back to the main pipeline worktree, where the sweep's
+      // not fall back to the main pipeline worktree, where the job's
       // progress log and expected artifact don't exist.
       expect(mockCreateSession.mock.calls[0][0].cwd).toBe(stWorktreePath);
 
@@ -6007,18 +6007,18 @@ describe('runImplement — deliverable-verification failure inside a multi-subta
         // deliverable on disk either way (that's the actual scenario under
         // test), and its declared files_to_create exempts it from this
         // no-op check regardless of what diff its own session shows.
-        if (args[0] === 'diff') return options?.cwd?.includes('st1') ? 'scripts/sweep.py\n' : '';
+        if (args[0] === 'diff') return options?.cwd?.includes('st1') ? 'scripts/long_job.py\n' : '';
       }
       return '';
     });
 
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [
-        { id: 1, title: 'Run baseline sweep', description: 'Run pre-fix sweep and commit evidence', files: ['scripts/sweep.py'], acceptance_criteria: ['Sweep runs'], parallel_group: 1 },
+        { id: 1, title: 'Run baseline job', description: 'Run pre-fix job and commit evidence', files: ['scripts/long_job.py'], acceptance_criteria: ['Job runs'], parallel_group: 1 },
         {
           id: 2, title: 'Implement fix', description: 'Implement the suppression constraint',
           files: ['src/fix.ts'], acceptance_criteria: ['Constraint added'], parallel_group: 1,
-          files_to_create: ['scripts/sweep_logs/post-fix-abab-fix.log'],
+          files_to_create: ['scripts/job_logs/post-fix.log'],
         },
       ],
     }));
@@ -6295,7 +6295,7 @@ describe('runImplement — wakeup state persistence (ADR 002)', () => {
 
   it('wakeup fields are persisted in pipeline_state.json', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, {
-      wakeupSubtaskId: 2, wakeupUntil: '2026-07-04T15:00:00Z', wakeupCommand: 'npm run sweep', wakeupArtifact: 'data/output.jsonl', wakeupAttemptCount: 2,
+      wakeupSubtaskId: 2, wakeupUntil: '2026-07-04T15:00:00Z', wakeupCommand: 'npm run job', wakeupArtifact: 'data/output.jsonl', wakeupAttemptCount: 2,
     });
 
     (orch as AnyOrch)._ctx.savePipelineState(pipeline);
@@ -6305,7 +6305,7 @@ describe('runImplement — wakeup state persistence (ADR 002)', () => {
     const state = JSON.parse(readFileSync(statePath, 'utf-8'));
     expect(state.wakeupSubtaskId).toBe(2);
     expect(state.wakeupUntil).toBe('2026-07-04T15:00:00Z');
-    expect(state.wakeupCommand).toBe('npm run sweep');
+    expect(state.wakeupCommand).toBe('npm run job');
     expect(state.wakeupArtifact).toBe('data/output.jsonl');
     expect(state.wakeupAttemptCount).toBe(2);
   });
@@ -6376,7 +6376,7 @@ describe('Defect 3 — isInfraError (infra vs git error detection)', () => {
 //
 // git worktree remove --force can deregister a worktree from git's own
 // bookkeeping while the directory itself survives on disk — a file
-// locked open by an orphaned process (a background server/sweep from an
+// locked open by an orphaned process (a background server/job from an
 // earlier, incompletely-torn-down run) blocks deletion on Windows even
 // with force:true. Left unhandled, the next `worktree add` at the same
 // path crashes on "already exists" with no indication why. This retries
@@ -7671,14 +7671,14 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
   });
 
   it('marks a subtask completed when its declared files_to_create all exist, even though it never ran', () => {
-    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
-    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'x');
-    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'b.log'), 'x');
+    mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'x');
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'b.log'), 'x');
 
     const subtasks = [
       {
-        id: 5, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
-        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log'],
+        id: 5, title: 'Run job', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/job_logs/a.log', 'scripts/job_logs/b.log'],
         completed: false,
       },
     ] as any[];
@@ -7695,14 +7695,14 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
     // rounds back. No subtask in the CURRENT pass touched them — the git
     // diff against the pass's start HEAD is empty — yet existence alone used
     // to mark it completed anyway.
-    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
-    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'stale evidence');
-    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'b.log'), 'stale evidence');
+    mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'stale evidence');
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'b.log'), 'stale evidence');
 
     const subtasks = [
       {
-        id: 5, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
-        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log'],
+        id: 5, title: 'Run job', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/job_logs/a.log', 'scripts/job_logs/b.log'],
         completed: false,
       },
     ] as any[];
@@ -7715,19 +7715,19 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
   });
 
   it('marks a subtask completed when its files_to_create exist AND were (re)committed during this pass', () => {
-    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
-    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'fresh evidence');
-    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'b.log'), 'fresh evidence');
+    mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'fresh evidence');
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'b.log'), 'fresh evidence');
 
     const subtasks = [
       {
-        id: 5, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
-        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log'],
+        id: 5, title: 'Run job', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/job_logs/a.log', 'scripts/job_logs/b.log'],
         completed: false,
       },
     ] as any[];
 
-    const execGitCapture = vi.fn(() => 'scripts/sweep_logs/a.log\nscripts/sweep_logs/b.log\n');
+    const execGitCapture = vi.fn(() => 'scripts/job_logs/a.log\nscripts/job_logs/b.log\n');
     const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
 
     expect(changed).toBe(true);
@@ -7737,21 +7737,21 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
   it('marks a rework subtask completed when only the deliverable QA listed in files_to_fix was re-committed this pass', () => {
     // QA-rework is scoped to the deliverable QA named; the other declared files
     // stay as committed in an earlier pass and must not block completion.
-    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
-    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'fixed');
-    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'b.log'), 'unchanged');
-    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'c.log'), 'unchanged');
+    mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'fixed');
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'b.log'), 'unchanged');
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'c.log'), 'unchanged');
 
     const subtasks = [
       {
-        id: 4, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
-        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log', 'scripts/sweep_logs/c.log'],
+        id: 4, title: 'Run job', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/job_logs/a.log', 'scripts/job_logs/b.log', 'scripts/job_logs/c.log'],
         completed: false, qa_flagged: true,
       },
     ] as any[];
-    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\n<!-- teamai:files_to_fix ["scripts/sweep_logs/a.log"] -->\n');
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\n<!-- teamai:files_to_fix ["scripts/job_logs/a.log"] -->\n');
 
-    const execGitCapture = vi.fn(() => 'scripts/sweep_logs/a.log\n');
+    const execGitCapture = vi.fn(() => 'scripts/job_logs/a.log\n');
     const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
 
     expect(changed).toBe(true);
@@ -7759,19 +7759,19 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
   });
 
   it('requires ALL files_to_create to be fresh when no feedback narrows the dispatch (first pass)', () => {
-    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
-    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'x');
-    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'b.log'), 'x');
+    mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'x');
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'b.log'), 'x');
 
     const subtasks = [
       {
-        id: 4, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
-        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log'],
+        id: 4, title: 'Run job', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/job_logs/a.log', 'scripts/job_logs/b.log'],
         completed: false,
       },
     ] as any[];
 
-    const execGitCapture = vi.fn(() => 'scripts/sweep_logs/a.log\n');
+    const execGitCapture = vi.fn(() => 'scripts/job_logs/a.log\n');
     const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
 
     expect(changed).toBe(false);
@@ -7779,14 +7779,14 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
   });
 
   it('leaves a subtask incomplete when only some of its files_to_create exist', () => {
-    mkdirSync(join(worktreePath, 'scripts', 'sweep_logs'), { recursive: true });
-    writeFileSync(join(worktreePath, 'scripts', 'sweep_logs', 'a.log'), 'x');
-    // b.log deliberately missing — sweep still in flight.
+    mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'x');
+    // b.log deliberately missing — job still in flight.
 
     const subtasks = [
       {
-        id: 5, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
-        files_to_create: ['scripts/sweep_logs/a.log', 'scripts/sweep_logs/b.log'],
+        id: 5, title: 'Run job', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/job_logs/a.log', 'scripts/job_logs/b.log'],
         completed: false,
       },
     ] as any[];
@@ -7802,7 +7802,7 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
 
     const subtasks = [
       {
-        id: 5, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
+        id: 5, title: 'Run job', description: '', files: [], acceptance_criteria: [],
         files_to_create: ['evidence.log'], completed: false,
       },
       {
@@ -7825,7 +7825,7 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
     const subtasks = [
       { id: 4, title: 'Other prereq', description: '', files: [], acceptance_criteria: [], completed: false },
       {
-        id: 5, title: 'Run sweep', description: '', files: [], acceptance_criteria: [],
+        id: 5, title: 'Run job', description: '', files: [], acceptance_criteria: [],
         files_to_create: ['evidence.log'], completed: false,
       },
       {

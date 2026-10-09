@@ -285,7 +285,7 @@ The command templates in `defaults/commands/` enforce cross-cutting guardrails t
 
 12. **Spec Executability** (`analyst.md` Standards): The spec must be self-contained and executable without the analyst's tribal knowledge. No unquantified requirements ("fast enough", "sufficient", "reasonable"), no reference implementations ("do it like module X"), no vague justifications ("obviously", "clearly"). Every requirement must be independently testable by QA without needing the analyst's context.
 
-19. **Evidence Currency** (`analyst.md` Standards): Before treating a cited artifact's numbers (a sweep log, a benchmark, a prior investigation) as ground truth, the analyst checks whether the code that produced it has changed since — if relevant commits landed after the artifact's timestamp, the evidence is stale and must be re-measured, not embedded as-is. This matters most for calibration tickets whose description was written before a related fix landed elsewhere in the same subsystem.
+19. **Evidence Currency** (`analyst.md` Standards): Before treating a cited artifact's numbers (a benchmark run, a job's output log, a prior investigation) as ground truth, the analyst checks whether the code that produced it has changed since — if relevant commits landed after the artifact's timestamp, the evidence is stale and must be re-measured, not embedded as-is. This matters most for calibration tickets whose description was written before a related fix landed elsewhere in the same subsystem.
 
 #### Plan Phase (planner)
 

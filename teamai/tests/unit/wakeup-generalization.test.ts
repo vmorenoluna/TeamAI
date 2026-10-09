@@ -156,8 +156,8 @@ describe('ADR 002 generalized to spec/plan/qa-review (wakeup.ts)', () => {
 
       writeFileSync(join(project.taskDir, 'phase_wakeup.json'), JSON.stringify({
         wakeup_at: '2026-07-04T12:00:00Z',
-        background_command: 'python sweep.py --seed 42',
-        expected_artifact: 'sweep-results/summary.jsonl',
+        background_command: 'python long_job.py --seed 42',
+        expected_artifact: 'job-results/summary.jsonl',
       }));
       fireEvent('event', { sessionId: 'sess-spec-wakeup', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(30);
@@ -166,8 +166,8 @@ describe('ADR 002 generalized to spec/plan/qa-review (wakeup.ts)', () => {
       // Never parked for human review — a legitimate background job is running.
       expect(pipeline.phase).toBe('spec');
       expect(pipeline.wakeupUntil).toBe('2026-07-04T12:00:00Z');
-      expect(pipeline.wakeupCommand).toBe('python sweep.py --seed 42');
-      expect(pipeline.wakeupArtifact).toBe('sweep-results/summary.jsonl');
+      expect(pipeline.wakeupCommand).toBe('python long_job.py --seed 42');
+      expect(pipeline.wakeupArtifact).toBe('job-results/summary.jsonl');
       expect(pipeline.wakeupAttemptCount).toBe(1);
       expect(existsSync(join(project.taskDir, 'phase_wakeup.json'))).toBe(false);
     });
@@ -177,7 +177,7 @@ describe('ADR 002 generalized to spec/plan/qa-review (wakeup.ts)', () => {
       const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
       const pipeline = makePipeline(project.taskId, project.taskDir, {
         phase: 'spec',
-        wakeupCommand: 'python sweep.py --seed 42', wakeupArtifact: 'sweep-results/summary.jsonl', wakeupAttemptCount: 1,
+        wakeupCommand: 'python long_job.py --seed 42', wakeupArtifact: 'job-results/summary.jsonl', wakeupAttemptCount: 1,
       });
 
       try {
@@ -186,14 +186,14 @@ describe('ADR 002 generalized to spec/plan/qa-review (wakeup.ts)', () => {
 
         const prompt = mockSendMessage.mock.calls[0][1] as string;
         expect(prompt).toContain('WAKEUP RE-ENTRY');
-        expect(prompt).toContain('python sweep.py --seed 42');
-        expect(prompt).toContain('sweep-results/summary.jsonl');
+        expect(prompt).toContain('python long_job.py --seed 42');
+        expect(prompt).toContain('job-results/summary.jsonl');
         // The re-entered session still needs the original spec instruction.
         expect(prompt).toContain('/spec');
 
         // The background job's artifact landed — the re-entered analyst
         // verified it and went on to finish the actual spec.
-        writeArtifact(join(project.root, 'sweep-results', 'summary.jsonl'), '{}');
+        writeArtifact(join(project.root, 'job-results', 'summary.jsonl'), '{}');
         writeFileSync(join(project.taskDir, 'spec.md'), '# Spec');
         writeFileSync(join(project.taskDir, 'spec_summary.md'), 'Summary.');
         fireEvent('event', { sessionId: 'sess-spec-reentry', event: { type: 'result' } });
@@ -214,7 +214,7 @@ describe('ADR 002 generalized to spec/plan/qa-review (wakeup.ts)', () => {
       mockCreateSession.mockResolvedValue('sess-spec-cap');
       const pipeline = makePipeline(project.taskId, project.taskDir, {
         phase: 'spec',
-        wakeupCommand: 'python sweep.py --seed 42', wakeupArtifact: 'sweep-results/summary.jsonl', wakeupAttemptCount: 2,
+        wakeupCommand: 'python long_job.py --seed 42', wakeupArtifact: 'job-results/summary.jsonl', wakeupAttemptCount: 2,
       });
 
       const promise = (orch as AnyOrch).runSpec(pipeline);
@@ -223,8 +223,8 @@ describe('ADR 002 generalized to spec/plan/qa-review (wakeup.ts)', () => {
       // Same command relaunched a 3rd time — not a genuine fix, still counts.
       writeFileSync(join(project.taskDir, 'phase_wakeup.json'), JSON.stringify({
         wakeup_at: '2026-07-05T00:00:00Z',
-        background_command: 'python sweep.py --seed 42',
-        expected_artifact: 'sweep-results/summary.jsonl',
+        background_command: 'python long_job.py --seed 42',
+        expected_artifact: 'job-results/summary.jsonl',
       }));
       fireEvent('event', { sessionId: 'sess-spec-cap', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(30);
@@ -251,7 +251,7 @@ describe('ADR 002 generalized to spec/plan/qa-review (wakeup.ts)', () => {
 
       writeFileSync(join(project.taskDir, 'phase_wakeup.json'), JSON.stringify({
         wakeup_at: '2026-07-04T12:00:00Z',
-        background_command: 'python dry_run_sweep.py',
+        background_command: 'python dry_run_job.py',
         expected_artifact: 'dry-run/summary.jsonl',
       }));
       fireEvent('event', { sessionId: 'sess-plan-wakeup', event: { type: 'result' } });
@@ -260,7 +260,7 @@ describe('ADR 002 generalized to spec/plan/qa-review (wakeup.ts)', () => {
 
       expect(pipeline.phase).toBe('plan');
       expect(pipeline.wakeupUntil).toBe('2026-07-04T12:00:00Z');
-      expect(pipeline.wakeupCommand).toBe('python dry_run_sweep.py');
+      expect(pipeline.wakeupCommand).toBe('python dry_run_job.py');
       expect(existsSync(join(project.taskDir, 'phase_wakeup.json'))).toBe(false);
       // plan.json was never written this cycle — nothing to validate/serialize yet.
       expect(existsSync(join(project.taskDir, 'plan.json'))).toBe(false);
@@ -281,7 +281,7 @@ describe('ADR 002 generalized to spec/plan/qa-review (wakeup.ts)', () => {
 
       writeFileSync(join(project.taskDir, 'phase_wakeup.json'), JSON.stringify({
         wakeup_at: '2026-07-04T12:00:00Z',
-        background_command: 'python verify_evidence_sweep.py',
+        background_command: 'python verify_evidence_job.py',
         expected_artifact: 'verify/summary.jsonl',
       }));
       fireEvent('event', { sessionId: 'sess-qa-wakeup', event: { type: 'result' } });
@@ -300,7 +300,7 @@ describe('ADR 002 generalized to spec/plan/qa-review (wakeup.ts)', () => {
       mockCreateSession.mockResolvedValue('sess-qa-reentry');
       const pipeline = makePipeline(project.taskId, project.taskDir, {
         phase: 'qa-review', worktreePath: project.root, qaAttempt: 1,
-        wakeupCommand: 'python verify_evidence_sweep.py', wakeupArtifact: 'verify/summary.jsonl', wakeupAttemptCount: 1,
+        wakeupCommand: 'python verify_evidence_job.py', wakeupArtifact: 'verify/summary.jsonl', wakeupAttemptCount: 1,
       });
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);

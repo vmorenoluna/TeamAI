@@ -155,7 +155,7 @@ describe('detectUndeclaredSubtaskReferences', () => {
       st(13, ['a.ts'], 'F'),
       st(14, ['b.ts'], 'F'),
       { ...st(15, ['c.ts'], 'G'),
-        description: 'Confirm Subtasks 13 (V0) and 14 (V1) have fully finished their sweeps and their servers are shut down before starting this one.' },
+        description: 'Confirm Subtasks 13 (V0) and 14 (V1) have fully finished their jobs and their servers are shut down before starting this one.' },
     ];
     const findings = detectUndeclaredSubtaskReferences(subtasks);
     expect(findings.map(f => [f.subtaskId, f.referencedId])).toEqual(
@@ -174,7 +174,7 @@ describe('detectUndeclaredSubtaskReferences', () => {
   it('classifies a reference to a later subtask as direction "later" (forward reference)', () => {
     const subtasks = [
       { ...st(2, ['a.ts'], 'B'),
-        description: 'This must land BEFORE the verification sweep (subtask 5); nothing may change after subtask 9.' },
+        description: 'This must land BEFORE the verification job (subtask 5); nothing may change after subtask 9.' },
       st(5, [], 'D'),
       st(9, ['b.ts'], 'H'),
     ];

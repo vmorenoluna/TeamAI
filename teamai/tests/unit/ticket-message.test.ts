@@ -266,8 +266,8 @@ describe('buildTicketMessageForPipeline', () => {
 
 // ── squashWithMessage ──
 //
-// Regression coverage for a real production failure (task
-// guard-standalone-melody-endpoint-chord-s): a coder session edited a file
+// Regression coverage for a real production failure (a real
+// task): a coder session edited a file
 // and ended its turn without ever running `git add`/`git commit`. squashing
 // via `git reset --soft <merge-base>` only restages the tree of the commit
 // it resets to — it never touches the working directory — so that
