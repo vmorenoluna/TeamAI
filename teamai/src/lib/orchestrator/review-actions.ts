@@ -14,7 +14,7 @@ import { REVISION_CLEANUP_EXTRA, PHASE_ARTIFACTS } from './artifacts';
 import { writeHumanFeedback, targetToResumePhase, type FeedbackTarget } from './human-feedback';
 import { logToOutput } from './helpers';
 import { TaskNotFoundError, PhaseTransitionError } from './errors';
-import { warn } from '../logger';
+import { warn, error as logError } from '../logger';
 
 // ── Dependencies ──────────────────────────────────────────────────────────
 
@@ -324,7 +324,28 @@ export async function rejectTask(
   }
 
   const pipeline = deps.pipelines.get(taskId) ?? deps.restorePipeline(taskId, phase);
-  await routeHumanFeedback(pipeline, deps, { target, message: feedback, subtaskIds });
+
+  // Return as soon as the pipeline has advanced to the resume phase instead of
+  // awaiting the rework run. executePhase resolves only after the whole
+  // downstream cycle (e.g. a full QA review) completes, and the server action
+  // wrapping this call would stay pending that long — Next.js queues
+  // router.refresh() behind a pending server action, so the board would keep
+  // showing the old column until a hard refresh. Mirrors runTask/restartPhase,
+  // which start the pipeline without awaiting it. Synchronous failures
+  // (validation, artifact writes) still propagate; run failures surface via
+  // the pipeline's own phase handling and are logged here.
+  const detached: ReviewActionsDeps = {
+    ...deps,
+    executePhase: (p) => {
+      deps.executePhase(p).catch(err => {
+        const msg = err instanceof Error ? err.message : String(err);
+        try { logToOutput(p.specPath, `\n[ERROR] Rework after reject failed: ${msg}\n`); } catch { /* best-effort */ }
+        logError('review', `Rework after reject failed for ${taskId}`, err);
+      });
+      return Promise.resolve();
+    },
+  };
+  await routeHumanFeedback(pipeline, detached, { target, message: feedback, subtaskIds });
 }
 
 /**
