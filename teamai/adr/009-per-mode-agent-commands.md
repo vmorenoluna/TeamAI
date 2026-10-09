@@ -34,10 +34,12 @@ out its mode from a marker in the message.
 |---|---|---|
 | spec | `spec` | `spec_revision_feedback.md` is absent |
 | spec | `spec-revise` | `spec_revision_feedback.md` is present |
+| spec | `spec-summary` | the spec session ended without writing `spec_summary.md` (one focused retry) |
 | plan | `plan` | `plan.json` is absent |
 | plan | `plan-revise` | `plan.json` is present (full or scoped re-plan) |
 | implement | `implement` | the subtask has no QA feedback |
 | implement | `implement-fix` | the subtask has QA feedback (including synthetic subtask 9999) |
+| implement | `resolve-cherry-pick` | integrating a parallel subtask's branch stops on cherry-pick conflicts (merger role) |
 | qa-review | `qa-review` | always |
 | merge | `merge` | rebase merger, QA-precheck reconcile, final merge |
 
@@ -56,8 +58,8 @@ are pulled in by a whole line of the form:
 
 | Fragment | Used by |
 |---|---|
-| `request-headers.md` | every pipeline command except `merge`: how to read the orchestrator's header blocks |
-| `spec-summary-guidelines.md` | `spec`, `spec-revise` |
+| `request-headers.md` | every command whose request can open with header blocks (all but `spec-summary`, `merge`, `resolve-cherry-pick`): how to read them |
+| `spec-summary-guidelines.md` | `spec`, `spec-revise`, `spec-summary` |
 | `deferred-defects.md` | `spec`, `spec-revise` |
 | `spec-phase-wakeup.md` | `spec`, `spec-revise` |
 | `plan-body.md` | `plan`, `plan-revise`: the `plan.json` schema, plan rules and the plan-phase wakeup |
@@ -81,10 +83,9 @@ wherever it runs, and whatever `.claude/commands/` its working directory holds.
 
 The request is the text the orchestrator assembles for the session: header blocks first,
 then the task-specific lines (description, file paths, subtask title and criteria, QA
-feedback). Each command places it under a `## Request` heading, followed by the
-`request-headers.md` guidance: wherever a header says how to handle the session, it takes
-precedence over the command's default workflow. `merge` is the exception: its argument is
-only the branch to merge.
+feedback). Each command places it under a `## Request` heading. Commands whose request can
+open with header blocks follow it with the `request-headers.md` guidance: wherever a header
+says how to handle the session, it takes precedence over the command's default workflow.
 
 The message is rendered **before** `createSession`. A broken template fails the phase
 without leaving a spawned session waiting for a message.
@@ -100,8 +101,8 @@ sessions do not read them.
 
 - Start the template with `Adopt the role persona already loaded in your system prompt.`
   The role file arrives through `--append-system-prompt`.
-- Put `$ARGUMENTS` under a `## Request` heading, followed by
-  `<!-- @include _shared/request-headers.md -->`.
+- Put `$ARGUMENTS` under a `## Request` heading. If the orchestrator can open that
+  request with header blocks, follow it with `<!-- @include _shared/request-headers.md -->`.
 - State the mode in the opening paragraph ("You are re-planning an existing
   implementation plan in place"). Do not add in-template mode detection for a mode the
   orchestrator already chooses.

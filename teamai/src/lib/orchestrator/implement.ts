@@ -2644,8 +2644,8 @@ export async function tryCherryPickWithRecovery(
     // check below turns into an abort + preserved branches, as before.
     const mergeMessage = renderCommand('resolve-cherry-pick',
       'Subtask ' + subtaskId + ': a `git cherry-pick` of branch `' + stBranch + '` onto `' + pipeline.branch + '`\n' +
-      'stopped on merge conflicts. Resolve them and complete the cherry-pick ' +
-      '(`git cherry-pick --continue`) once the tests pass.');
+      'stopped on merge conflicts. Resolve them, run the tests, and complete the ' +
+      'cherry-pick (`git cherry-pick --continue`) as the instructions below describe.');
     const mergeSessionId = await processManager.createSession(
       deps.sessionOpts('merger', pipeline.worktreePath, pipeline.taskId, mergeLogFile),
     );

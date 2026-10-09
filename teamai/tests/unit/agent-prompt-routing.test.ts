@@ -605,6 +605,10 @@ describe('implement routing', () => {
     expect(s.request).toContain('feat/build-the-thing-st2');
     expect(s.request).toContain('feat/build-the-thing');
     expect(s.request).toContain('git cherry-pick --continue');
+    // The request must not make completing the cherry-pick conditional on a
+    // green suite: the command has the merger complete it and report any
+    // failure, and an unfinished cherry-pick is aborted for manual recovery.
+    expect(s.request).not.toMatch(/once the tests pass/i);
   });
 });
 
