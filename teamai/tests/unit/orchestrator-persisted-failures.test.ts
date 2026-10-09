@@ -1125,7 +1125,10 @@ describe('resetAllCounters — persistedCriterionFailCounts clearing', () => {
     }));
 
     // Spy on runImplement to prevent cascade into implement phase
-    const implSpy = vi.spyOn(orch as AnyOrch, 'runImplement').mockResolvedValue(undefined);
+    // The rework run releases its pipeline when it ends (same lifecycle as
+    // runTask), so capture the pipeline the run actually started with.
+    let newPipeline: any;  
+    const implSpy = vi.spyOn(orch as AnyOrch, 'runImplement').mockImplementation(async (p: unknown) => { newPipeline = p; });
 
     try {
       // Mock git operations for the reject-task implement phase
@@ -1133,9 +1136,9 @@ describe('resetAllCounters — persistedCriterionFailCounts clearing', () => {
 
       // Reject the task
       await (orch as AnyOrch).rejectTask(project.taskId, 'Please fix the actual FAIL criterion', 'coder');
+      await new Promise(r => setTimeout(r, 20));
 
       // Verify the pipeline was created and persistedCriterionFailCounts was cleared
-      const newPipeline = (orch as AnyOrch).pipelines.get(project.taskId);
       expect(newPipeline).toBeDefined();
       // After resetAllCounters, persistedCriterionFailCounts should be {}
       expect(newPipeline.persistedCriterionFailCounts).toEqual({});

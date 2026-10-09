@@ -293,7 +293,7 @@ export function writeQaFeedback(
 }
 
 /** Why a `failed` task failed — see Task.failureReason in task-store.ts for
- *  the full distinction between these seven. */
+ *  the full distinction between these eight. */
 export type FailureReason =
   | 'qa-attempts-exhausted'
   | 'qa-incomplete'
@@ -301,7 +301,8 @@ export type FailureReason =
   | 'implement-failure'
   | 'session-crashed'
   | 'wakeup-exhausted'
-  | 'subtask-blocked';
+  | 'subtask-blocked'
+  | 'run-error';
 
 /** Write a completion summary when the task fails — a QA-attempt budget, a
  *  spec-revision budget, or an implement-phase retry/verification cap was
@@ -354,6 +355,11 @@ export function writeCompletionSummary(
       `subtask blocked (a defect in an earlier subtask, an unmet precondition, or similar) ` +
       `rather than retrying, so the orchestrator failed the task immediately instead of ` +
       `burning further retry attempts on a conclusion the coder had already reached.\n\n`;
+  } else if (reason === 'run-error') {
+    content += `Task failed because a phase run stopped with an error` +
+      (detail ? `: ${detail}` : '.') +
+      ` This is an orchestrator/session error, not a QA verdict on the work — the run threw ` +
+      `before it could finish. The orchestrator log in the Terminal tab has the full error.\n\n`;
   } else if (reason === 'qa-incomplete') {
     const rounds = counters.qaRoundCount ?? counters.qaAttempt;
     content += `Task failed after ${rounds} QA round(s) in which the reviewer never reached ` +

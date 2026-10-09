@@ -71,6 +71,7 @@ function makeDeps() {
     restorePipeline: vi.fn(),
     advancePhase: (p: typeof pipeline, phase: string) => { (p as { phase: string }).phase = phase; },
     executePhase: vi.fn(async () => undefined),
+    startRun: vi.fn(),
     savePipelineState: vi.fn(),
   };
 

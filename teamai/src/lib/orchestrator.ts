@@ -59,6 +59,7 @@ export class Orchestrator {
       savePipelineState: (pipeline) => savePipelineState(pipeline),
       executePhase: (pipeline) => this.executePhase(pipeline),
       handleRateLimit: (pipeline, resetsAt) => this.handleRateLimit(pipeline, resetsAt),
+      startRun: (pipeline) => this._startRunDetached(pipeline),
 
       sessionOpts: (role, cwd, taskId, logFile) => buildSessionOpts(projectRoot, role, cwd, taskId, logFile),
       waitForCompletion: (sessionId) => waitForCompletion(sessionId, { parseSessionLimitReset }),
@@ -406,49 +407,25 @@ export class Orchestrator {
     }
 
     this._ctx.savePipelineState(pipeline);
+    await this._runPipeline(pipeline);
+  }
+
+  /**
+   * Run a registered pipeline from its current phase to wherever it parks,
+   * with the shared run lifecycle: failure handling (log, rate-limit pause,
+   * move to `failed` with a summary) and lock release. The single place that
+   * defines how a run ends — runTask awaits it, and detached runs (the rework
+   * after a human reject) go through _startRunDetached.
+   */
+  private async _runPipeline(pipeline: TaskPipeline): Promise<void> {
+    const taskId = pipeline.taskId;
     let rateLimited = false;
     try {
       await this.executePhase(pipeline);
     } catch (e) {
-      // Identity check, not membership: moveTaskToPhase/runTask both call
-      // cancelPipeline (which deletes the old pipeline) then register a
-      // FRESH pipeline for the same taskId before this one's in-flight
-      // executePhase() has necessarily unwound — e.g. a user retrying a
-      // task twice in quick succession, the second retry's cancelPipeline
-      // kills the first retry's session mid-flight. `this.pipelines` is
-      // keyed by taskId, so by the time the first retry's session-killed
-      // rejection is actually processed here, `this.pipelines.has(taskId)`
-      // is true again — but it now holds the SECOND retry's pipeline, not
-      // this one. A membership-only check reads that as "still my run,
-      // this is real" and both logs a misleading SESSION_KILLED error and
-      // advancePhase(pipeline, 'failed') using this stale `pipeline`
-      // reference, stomping the second retry's phase to 'failed' out from
-      // under its still-running session (see executePhase's matching
-      // identity check above for the same race, one layer in).
-      if (e instanceof SessionKilledError && this.pipelines.get(taskId) !== pipeline) {
-        // Defect 7: this pipeline was superseded (e.g. stopTask killed the
-        // session, or a second retry replaced it). The superseded session's
-        // exit event fired with a signal, causing waitForCompletion to
-        // reject with SessionKilledError. Don't overwrite whatever phase
-        // the superseding call (or stopTask) already set.
-        return;
-      }
-      if (e instanceof RateLimitError) {
-        rateLimited = true;
-        this.handleRateLimit(pipeline, e.resetsAt);
-      } else {
-        if (e instanceof OrchestratorError) {
-          // Structured error — log with error code for observability
-          logToOutput(pipeline.specPath, `\n[ERROR] Task failed [${e.code}]: ${e.message}\n`);
-          if (e.stack) logToOutput(pipeline.specPath, `${e.stack}\n`);
-          logError('orchestrator', `Task ${taskId} failed [${e.code}]`, e);
-        } else {
-          const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
-          logToOutput(pipeline.specPath, `\n[ERROR] Task failed: ${errMsg}\n`);
-          logError('orchestrator', `Task ${taskId} failed`, e);
-        }
-        this.advancePhase(pipeline, 'failed');
-      }
+      const outcome = this._handleRunFailure(pipeline, e);
+      if (outcome === 'superseded') return;
+      if (outcome === 'rate-limited') rateLimited = true;
     } finally {
       // Release lock after pipeline completes or fails.
       // For rate-limited or wakeup-paused tasks the lock is re-acquired
@@ -468,17 +445,80 @@ export class Orchestrator {
     }
   }
 
+  /** Start _runPipeline without awaiting it, registering the task as active
+   *  first (runTask's "task already running" guard covers detached runs too). */
+  private _startRunDetached(pipeline: TaskPipeline): void {
+    this.activeTasks.add(pipeline.taskId);
+    this._runPipeline(pipeline).catch(err => logError('orchestrator', `Detached run for ${pipeline.taskId} failed`, err));
+  }
+
   async approveTask(taskId: string, strategy: MergeStrategy): Promise<void> {
     await approveTaskFn(taskId, strategy, this._ctx);
   }
 
   async rejectTask(taskId: string, feedback: string, target: FeedbackTarget, subtaskIds?: number[]): Promise<void> {
+    // Same guard as runTask: the rework run is registered as active, so a run
+    // still unwinding for this task must not be started over.
+    if (this.activeTasks.has(taskId)) throw new TaskAlreadyRunningError(taskId);
     await rejectTaskFn(taskId, feedback, target, subtaskIds, this._ctx);
   }
 
   // Delegates to review-actions.autoReviseSpec
   private async _autoReviseSpec(pipeline: TaskPipeline): Promise<void> {
     await autoReviseSpec(pipeline, this._ctx);
+  }
+
+  /**
+   * Shared failure handling for a pipeline run that threw: used by runTask and
+   * by detached reruns started from rejectTask. Returns what happened so
+   * runTask can keep its lock bookkeeping (rate-limited tasks keep their
+   * lock; superseded runs touch nothing).
+   */
+  private _handleRunFailure(pipeline: TaskPipeline, e: unknown): 'superseded' | 'rate-limited' | 'failed' {
+    const taskId = pipeline.taskId;
+    // Identity check, not membership: moveTaskToPhase/runTask both call
+    // cancelPipeline (which deletes the old pipeline) then register a
+    // FRESH pipeline for the same taskId before this one's in-flight
+    // executePhase() has necessarily unwound — e.g. a user retrying a
+    // task twice in quick succession, the second retry's cancelPipeline
+    // kills the first retry's session mid-flight. `this.pipelines` is
+    // keyed by taskId, so by the time the first retry's session-killed
+    // rejection is actually processed here, `this.pipelines.has(taskId)`
+    // is true again — but it now holds the SECOND retry's pipeline, not
+    // this one. A membership-only check reads that as "still my run,
+    // this is real" and both logs a misleading SESSION_KILLED error and
+    // advancePhase(pipeline, 'failed') using this stale `pipeline`
+    // reference, stomping the second retry's phase to 'failed' out from
+    // under its still-running session (see executePhase's matching
+    // identity check above for the same race, one layer in).
+    if (e instanceof SessionKilledError && this.pipelines.get(taskId) !== pipeline) {
+      // Defect 7: this pipeline was superseded (e.g. stopTask killed the
+      // session, or a second retry replaced it). The superseded session's
+      // exit event fired with a signal, causing waitForCompletion to
+      // reject with SessionKilledError. Don't overwrite whatever phase
+      // the superseding call (or stopTask) already set.
+      return 'superseded';
+    }
+    if (e instanceof RateLimitError) {
+      this.handleRateLimit(pipeline, e.resetsAt);
+      return 'rate-limited';
+    }
+    if (e instanceof OrchestratorError) {
+      // Structured error — log with error code for observability
+      logToOutput(pipeline.specPath, `\n[ERROR] Task failed [${e.code}]: ${e.message}\n`);
+      if (e.stack) logToOutput(pipeline.specPath, `${e.stack}\n`);
+      logError('orchestrator', `Task ${taskId} failed [${e.code}]`, e);
+    } else {
+      const errMsg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
+      logToOutput(pipeline.specPath, `\n[ERROR] Task failed: ${errMsg}\n`);
+      logError('orchestrator', `Task ${taskId} failed`, e);
+    }
+    // The Task Failed banner is driven by completionSummary, so a run that
+    // threw needs one to explain itself. Written before the phase change so
+    // the refresh triggered by it already carries the current error.
+    this._ctx.writeCompletionSummary(pipeline, 'run-error', `${pipeline.phase} phase: ${e instanceof Error ? e.message : String(e)}`);
+    this.advancePhase(pipeline, 'failed');
+    return 'failed';
   }
 
   private async executePhase(pipeline: TaskPipeline): Promise<void> {

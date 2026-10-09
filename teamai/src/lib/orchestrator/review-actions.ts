@@ -30,6 +30,7 @@ export interface ReviewActionsDeps {
   restorePipeline: (taskId: string, requiredPhase: PipelinePhase) => TaskPipeline;
   advancePhase: (pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
+  startRun: (pipeline: TaskPipeline) => void;
   savePipelineState: (pipeline: TaskPipeline) => void;
   writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
 }
@@ -324,7 +325,25 @@ export async function rejectTask(
   }
 
   const pipeline = deps.pipelines.get(taskId) ?? deps.restorePipeline(taskId, phase);
-  await routeHumanFeedback(pipeline, deps, { target, message: feedback, subtaskIds });
+
+  // Return as soon as the pipeline has advanced to the resume phase instead of
+  // awaiting the rework run. executePhase resolves only after the whole
+  // downstream cycle (e.g. a full QA review) completes, and the server action
+  // wrapping this call would stay pending that long — Next.js queues
+  // router.refresh() behind a pending server action, so the board would keep
+  // showing the old column until a hard refresh. Mirrors runTask/restartPhase,
+  // which start the pipeline without awaiting it. Synchronous failures
+  // (validation, artifact writes) still propagate to the caller; the run
+  // itself goes through the orchestrator's shared run lifecycle (startRun), so
+  // it is registered, fails, and releases its lock exactly like a runTask run.
+  const detached: ReviewActionsDeps = {
+    ...deps,
+    executePhase: (p) => {
+      deps.startRun(p);
+      return Promise.resolve();
+    },
+  };
+  await routeHumanFeedback(pipeline, detached, { target, message: feedback, subtaskIds });
 }
 
 /**
@@ -345,6 +364,10 @@ export async function routeHumanFeedback(
   feedback: { target: FeedbackTarget; message: string; subtaskIds?: number[] },
 ): Promise<void> {
   writeHumanFeedback(pipeline.specPath, feedback.target, feedback.message, feedback.subtaskIds);
+  // A rework run starts now, so a previous failure's summary/reason no longer
+  // describes the task. Cleared here (as task-retry does) so only an error from
+  // this run can show in the Task Failed banner.
+  deps.taskStore.update(pipeline.taskId, { completionSummary: undefined, failureReason: undefined });
   snapshotHumanFeedback(pipeline.specPath, pipeline.taskId);
   // The "Change Request" audit entry lives in qa_report.json. That file is
   // preserved only for the coder target — trimArtifactsForTarget deletes it for

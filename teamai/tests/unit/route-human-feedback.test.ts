@@ -61,6 +61,7 @@ function makeCtx() {
     restorePipeline: vi.fn(),
     advancePhase: (p: typeof pipeline, phase: string) => { (p as { phase: string }).phase = phase; },
     executePhase: vi.fn(async () => undefined),
+    startRun: vi.fn(),
     savePipelineState: vi.fn(),
   };
   // Silence the phase-change emit during tests — we only care about the
@@ -268,7 +269,7 @@ describe('rejectTask — Request Changes → Planner with subtask scoping from p
     // The pipeline resumes at the planner's phase, not create-pr or anything
     // PR-specific — no duplicate PR is created; the existing PR is reused.
     expect(ctx.pipeline.phase).toBe('plan');
-    expect(ctx.deps.executePhase).toHaveBeenCalledTimes(1);
+    expect(ctx.deps.startRun).toHaveBeenCalledTimes(1);
   });
 
   it('rejects subtask scoping for planner only if the task is awaiting-review, pr-open, or failed', async () => {
@@ -305,7 +306,7 @@ describe('rejectTask from a failed task', () => {
     expect(raw).toContain('Target: analyst');
     expect(raw).toContain('redesign the constraint');
     expect(ctx.pipeline.phase).toBe('spec');
-    expect(ctx.deps.executePhase).toHaveBeenCalledTimes(1);
+    expect(ctx.deps.startRun).toHaveBeenCalledTimes(1);
   });
 
   it('still rejects a phase that is neither awaiting-review, pr-open, nor failed', async () => {
