@@ -1635,10 +1635,11 @@ describe('TaskDetail', () => {
         },
       });
 
-      expect(screen.getByTestId('failed-qa-criteria')).toBeInTheDocument();
-      expect(within(screen.getByTestId('failed-qa-criteria')).getByText('Helpful error is shown')).toBeInTheDocument();
-      expect(screen.getByText('No message appears')).toBeInTheDocument();
-      expect(screen.getByTestId('qa-recommendations')).toBeInTheDocument();
+      // The failed criterion has a fix_needed, so it appears once — in the
+      // recommendations — not again under "Failed acceptance criteria".
+      expect(screen.queryByTestId('failed-qa-criteria')).not.toBeInTheDocument();
+      expect(within(screen.getByTestId('qa-recommendations')).getByText('Helpful error is shown')).toBeInTheDocument();
+      expect(screen.getAllByText('Helpful error is shown')).toHaveLength(1);
       expect(screen.getByText('Display an inline validation message.')).toBeInTheDocument();
       expect(screen.getByText('Trim input before validating.')).toBeInTheDocument();
 
@@ -1680,8 +1681,22 @@ describe('TaskDetail', () => {
         },
       });
 
-      expect(within(screen.getByTestId('failed-qa-criteria')).getByText('Legacy acceptance criterion')).toBeInTheDocument();
+      expect(within(screen.getByTestId('qa-recommendations')).getByText('Legacy acceptance criterion')).toBeInTheDocument();
       expect(screen.getByText('Implement the missing behavior.')).toBeInTheDocument();
+      expect(screen.queryByTestId('failed-qa-criteria')).not.toBeInTheDocument();
+    });
+
+    it('still lists a failed criterion that has no recommendation', () => {
+      renderDetail({
+        task: { phase: 'failed', completionSummary: 'x' },
+        qaReport: {
+          overall: 'FAIL',
+          criteria: [{ criterion: 'No fix given', status: 'FAIL', notes: 'Broken somehow' }],
+        },
+      });
+
+      expect(within(screen.getByTestId('failed-qa-criteria')).getByText('No fix given')).toBeInTheDocument();
+      expect(screen.getByText('Broken somehow')).toBeInTheDocument();
     });
   });
 });
