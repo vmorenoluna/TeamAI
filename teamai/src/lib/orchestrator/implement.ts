@@ -18,7 +18,7 @@ import { readContainerConfig, containerManager, dockerAvailable, _resetDockerAva
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { rebaseOntoLatestDefault } from './phase-runners';
 import { updateSessionMap, logToOutput } from './helpers';
-import { createOutOfScopeTicketsFromLog } from './out-of-scope-tickets';
+import { prepareBacklogCheck, runBacklogCheck, backlogCheckEnabled, evidenceProduced, evidenceWindowStart } from './backlog-check';
 import { humanDirectiveFor, readHumanFeedback } from './human-feedback';
 import { renderCommand } from '../command-templates';
 import { resolveBaseBranch } from '../git-platform';
@@ -69,7 +69,7 @@ export interface ImplementDeps {
    *  directly (bypassing QA) must call this so the UI reflects the actual
    *  cause instead of a stale summary from a prior QA-driven failure. */
   writeCompletionSummary: (pipeline: ImplementPipeline, reason: FailureReason, detail?: string) => void;
-  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxImplementRetries: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number; wakeupScanRetryDelayMs?: number };
+  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxImplementRetries: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number; wakeupScanRetryDelayMs?: number; backlogCheck?: boolean; backlogCheckEvidencePaths?: string[] };
   phaseHeader: (logFile: string, phase: string) => void;
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
@@ -1032,10 +1032,21 @@ export async function runSubtaskSession(
   let sessionId: string;
   let sessionStartedAt = Date.now();
   let stallRecoveryHeader = '';
+  // Every ticket-capable session judges the whole open board (backlog-check.ts).
+  const backlogUnit = 'st' + subtask.id;
+  const backlogOn = backlogCheckEnabled(deps.getPipelineConfig);
+  // Subtasks check only when they have something to say; spec and QA bracket
+  // every change with mandatory checks. Evidence files force the check,
+  // because what they show can bear on other tickets (PipelineConfig.backlogCheckEvidencePaths).
+  const evidencePatterns = backlogOn ? (deps.getPipelineConfig().backlogCheckEvidencePaths ?? []) : [];
+  const backlogHeader = backlogOn ? prepareBacklogCheck({
+    specPath: pipeline.specPath, unit: backlogUnit, store: deps.taskStore, ownTaskId: pipeline.taskId, requireSelf: false,
+    optionalUnlessEvidence: evidencePatterns,
+  }) : '';
   for (;;) {
     // Rendered before the session exists, so a template problem can never
     // leave a spawned session waiting on a message that never comes.
-    const message = renderCommand(command, stallRecoveryHeader + request);
+    const message = renderCommand(command, stallRecoveryHeader + backlogHeader + request);
     try {
       sessionStartedAt = Date.now();
       sessionId = await processManager.createSession(deps.sessionOpts(coderRole, cwd, pipeline.taskId, subtaskLogFile));
@@ -1180,19 +1191,6 @@ export async function runSubtaskSession(
     deps.writeCompletionSummary(pipeline, 'subtask-blocked', detail);
     deps.advancePhase(pipeline, 'failed');
     return;
-  }
-
-  // Out-of-scope bug tickets (#3b): the coder reports `[BUG] Fix: ...` lines
-  // in its summary instead of hand-writing task.json files; the orchestrator
-  // parses the session log and creates deterministic tickets. Best-effort.
-  try {
-    const createdIds = createOutOfScopeTicketsFromLog(deps.projectRoot, subtaskLogFile, deps.taskStore);
-    if (createdIds.length > 0) {
-      logToOutput(pipeline.specPath, '[BUG-TICKET] Subtask ' + subtask.id + ' reported ' + createdIds.length + ' out-of-scope bug(s) — created ticket(s): ' + createdIds.join(', ') + '\n');
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logToOutput(pipeline.specPath, '\n[BUG-TICKET] Failed to create out-of-scope tickets: ' + msg + '\n');
   }
 
   // Post-session scope check: verify agent only modified assigned files.
@@ -1534,6 +1532,38 @@ export async function runSubtaskSession(
       skipCompletion = true;
       logToOutput(pipeline.specPath, '[SCOPE] Subtask ' + subtask.id + ' rejected — will re-run (see the specific reason logged above)\n');
     } else {
+      // Backlog check (backlog-check.ts) — verified only when the subtask
+      // actually completes, never for a session that paused on a wakeup.
+      let evidence: string[] = [];
+      if (backlogOn && evidencePatterns.length) {
+        let changed: string[] = [];
+        try {
+          if (preSessionHead) {
+            changed = deps.execGitCapture(['diff', '--name-only', preSessionHead + '..HEAD'], cwd).trim().split('\n').filter(Boolean);
+          }
+          // Uncommitted evidence counts too (the commit guard may not have run on it).
+          changed.push(...deps.execGitCapture(['status', '--porcelain', '--untracked-files=all'], cwd)
+            .split('\n').filter(Boolean).map(l => l.slice(3).replace(/^"|"$/g, '')));
+        } catch { /* git unavailable — spec-dir patterns still apply */ }
+        evidence = evidenceProduced({
+          patterns: evidencePatterns, changedFiles: changed, specPath: pipeline.specPath,
+          since: evidenceWindowStart(pipeline.specPath, backlogUnit, sessionStartedAt),
+        });
+      }
+      const subtaskBacklog = backlogOn ? await runBacklogCheck({
+        specPath: pipeline.specPath, unit: backlogUnit, unitLabel: 'Subtask ' + subtask.id, taskId: pipeline.taskId,
+        role: coderRole, cwd, requireSelf: false, projectRoot: deps.projectRoot,
+        store: deps.taskStore, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion,
+        optional: evidence.length === 0,
+        requiredBecause: evidence.length
+          ? 'this subtask produced evidence files (' + evidence.slice(0, 8).join(', ') + (evidence.length > 8 ? ', …' : '') + '), and what they show may bear on other tickets'
+          : undefined,
+      }) : { ok: true as const };
+      if (!subtaskBacklog.ok) {
+        deps.writeCompletionSummary(pipeline, 'backlog-check-incomplete', 'Subtask ' + subtask.id + ': ' + subtaskBacklog.problems.join('; '));
+        deps.advancePhase(pipeline, 'failed');
+        return;
+      }
       if (pipeline.deliverableFailCounts?.[subtask.id] !== undefined) {
         delete pipeline.deliverableFailCounts[subtask.id];
       }

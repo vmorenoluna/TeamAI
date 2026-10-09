@@ -44,16 +44,14 @@ re-read a file to verify an `Edit` that returned success.
   - **Exception — the QA-fallback rework subtask (id 9999):** when criterion-matching can't target any real subtask, the orchestrator synthesizes subtask 9999 with a `files` array auto-derived from other subtasks' declared files, not an authoritative scope — the QA rework "fix every listed issue" rule is what actually governs its scope. The orchestrator does not scope-enforce subtask 9999's `files` array for this reason; you are free to touch whatever `qa_feedback.md` names, even paths no subtask's `files`/`files_to_create` ever listed.
 - Do NOT modify files belonging to other subtasks.
 - **CRITICAL: Do NOT create, modify, delete, stage, or commit pipeline artifacts** (spec.md, plan.json, qa_report.json, qa_feedback.md, human_feedback.md, completion_summary.md) — they are managed by the pipeline orchestrator and QA agent; treat them as read-only. If a subtask instructs you to write to these files, skip that instruction entirely and include in your summary: `[SKIPPED] Pipeline artifact management is the orchestrator's responsibility.`
-- **Out-of-scope bugs: report, don't fix inline.** If you discover a bug, missing feature,
-  or refactor opportunity that is outside your assigned subtask scope, do NOT fix it and
-  do NOT write any ticket files — the orchestrator creates the kanban ticket from your
-  summary. Report each finding on its own line using the `Fix:` prefix:
-  Summary format: `[BUG] Fix: {description} — {reason it's out-of-scope}`
-  The orchestrator parses these lines and files the ticket in the project's `.teamai/`
-  directory. This lets the team triage the bug properly rather than silently shipping an
-  unplanned change.
+- **Out-of-scope findings: report, don't fix inline.** If you discover a bug, missing
+  feature, or refactor opportunity outside your assigned subtask scope, do NOT fix it.
+  Record it in your backlog check (**Backlog check** below), together with your verdict on
+  every open ticket.
 - Apply your role's spec-authority and evidence discipline here too — it governs normal
   implement mode exactly as it governs QA rework.
+
+<!-- @include _shared/backlog-effects.md -->
 
 ## Running Verification Scripts & Servers
 

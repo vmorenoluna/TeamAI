@@ -302,7 +302,8 @@ export type FailureReason =
   | 'session-crashed'
   | 'wakeup-exhausted'
   | 'subtask-blocked'
-  | 'run-error';
+  | 'run-error'
+  | 'backlog-check-incomplete';
 
 /** Write a completion summary when the task fails — a QA-attempt budget, a
  *  spec-revision budget, or an implement-phase retry/verification cap was
@@ -360,6 +361,12 @@ export function writeCompletionSummary(
       (detail ? `: ${detail}` : '.') +
       ` This is an orchestrator/session error, not a QA verdict on the work — the run threw ` +
       `before it could finish. The orchestrator log in the Terminal tab has the full error.\n\n`;
+  } else if (reason === 'backlog-check-incomplete') {
+    content += `Task failed because an agent session never produced a backlog check the ` +
+      `orchestrator could accept` + (detail ? `: ${detail}` : '.') +
+      ` Every session that can file tickets must judge every open ticket in its snapshot ` +
+      `(backlog_check-<unit>.json); the follow-up sessions allowed for completing it were ` +
+      `used up. Retry to run that phase again.\n\n`;
   } else if (reason === 'qa-incomplete') {
     const rounds = counters.qaRoundCount ?? counters.qaAttempt;
     content += `Task failed after ${rounds} QA round(s) in which the reviewer never reached ` +

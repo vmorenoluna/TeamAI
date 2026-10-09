@@ -68,6 +68,36 @@ marked `done` directly with a clear log line, instead of attempting a merge/PR t
 nothing to act on (GitHub's `createPullRequest` correctly, but confusingly, rejects an
 empty PR with "No commits between `<base>` and `<branch>`").
 
+## Tickets and the Backlog Check
+
+Any agent can file tickets: the analyst, planner, coder and QA reviewer during a
+pipeline run, or any interactive session through `/create-task`. To keep the board free
+of duplicates and obsolete work, every one of them checks the whole open board first.
+
+- **Pipeline sessions** get a snapshot of the open tickets (`open_tickets-<unit>.json`)
+  and must write a verdict for every ticket in it (`backlog_check-<unit>.json`):
+  `unrelated`, `overlaps`, `supersedes`, `invalidates` or `update`. New tickets go in the
+  same file. The orchestrator verifies the file covers the whole snapshot before the
+  phase can advance. It then applies the verdicts under a short board lock, but only if
+  no ticket appeared since the snapshot. Otherwise the agent is asked to judge the
+  newcomers first.
+- **Superseded tickets** are never started by auto mode while the superseding task is
+  alive, and are deleted once it completes. **Invalidated tickets** wait for the task that
+  changed their context, then re-spec against it.
+- **Agent-filed tickets are unverified claims.** The analyst who specs one verifies its
+  premise first, and gives a `reject` verdict when it doesn't hold (already fixed,
+  stale evidence, misdiagnosed). The ticket is then deleted without being planned.
+- **Interactive filing** uses `create-task-cli.mjs --list` to see the board and its
+  fingerprint, then `--board <fingerprint>` to create. The CLI refuses (exit 3) if the
+  board changed in between.
+- **Implement subtasks** check only when they file or report something. The exception is
+  a session that produced evidence files matching `backlogCheckEvidencePaths` in
+  `.teamai/pipeline.json` (e.g. `["benchmarks/results/**", "$TEAMAI_SPEC_DIR/probe/**"]`):
+  that session must check, because evidence can matter to other tickets. Spec and QA
+  always check.
+- A project can opt out with `"backlogCheck": false` in `.teamai/pipeline.json`. It is on
+  by default.
+
 ## Memory
 Claude Code's Auto Memory is enabled for this project. Claude will automatically:
 - Save useful patterns, decisions, and lessons learned as it works.

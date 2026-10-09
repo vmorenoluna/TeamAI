@@ -4102,6 +4102,36 @@ describe('Orchestrator', () => {
       runTaskSpy.mockRestore();
     });
 
+    it('starts at spec when a spec revision is pending, even with a plan on disk', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      // An [INVALIDATES] directive archived spec.md and left revision feedback.
+      writeFileSync(join(testData.taskDir, 'spec_v1.md'), '# Old spec');
+      writeFileSync(join(testData.taskDir, 'spec_revision_feedback.md'), '# Context changed');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [], completed: true }],
+      }));
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'backlog' });
+
+      const runTaskSpy = vi.spyOn(orch as AnyOrch, 'runTask')
+        .mockRejectedValue(new Error('simulated abort'));
+
+      await orch.resumeTask(testData.taskId).catch(() => { /* best-effort */ });
+      expect(runTaskSpy).toHaveBeenCalledWith(testData.taskId, expect.any(String), 'spec');
+
+      // A retry that targets a later phase is redirected to the revision too,
+      // and keeps the prepared revision artifacts.
+      runTaskSpy.mockClear();
+      await orch.moveTaskToPhase(testData.taskId, 'implement').catch(() => { /* best-effort */ });
+      expect(runTaskSpy).toHaveBeenCalledWith(testData.taskId, expect.any(String), 'spec');
+      expect(existsSync(join(testData.taskDir, 'spec_revision_feedback.md'))).toBe(true);
+      expect(existsSync(join(testData.taskDir, 'spec_v1.md'))).toBe(true);
+
+      runTaskSpy.mockRestore();
+    });
+
 
 // ── restorePipeline ───────────────────────────────────────────────
 

@@ -14,6 +14,8 @@ import { processManager, type AgentSession } from '../process-manager';
 import { syncPhaseBaseline } from './phase-runners';
 import { readJsonFile } from '../json-io';
 import { RateLimitError } from './rate-limit';
+import { prepareBacklogCheck, runBacklogCheck, backlogCheckEnabled } from './backlog-check';
+import { TaskStore } from '../task-store';
 import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } from './wakeup';
 import { renderCommand } from '../command-templates';
 import { warn } from '../logger';
@@ -111,7 +113,7 @@ export interface QaReviewDeps {
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
   // ── Wakeup (ADR 002, generalized beyond implement — see wakeup.ts) ──
-  getPipelineConfig: () => { wakeupScanRetryDelayMs?: number; maxImplementRetries: number };
+  getPipelineConfig: () => { wakeupScanRetryDelayMs?: number; maxImplementRetries: number; backlogCheck?: boolean };
   scheduleWakeup: (pipeline: TaskPipeline) => void;
 }
 
@@ -485,8 +487,12 @@ export async function runQaReview(
     : '';
   // Rendered before the session exists, so a template problem can never leave
   // a spawned session waiting on a message that never comes.
+  const backlogOn = backlogCheckEnabled(deps.getPipelineConfig);
+  const backlogHeader = backlogOn ? prepareBacklogCheck({
+    specPath: pipeline.specPath, unit: 'qa', store: new TaskStore(deps.projectRoot), ownTaskId: pipeline.taskId, requireSelf: false,
+  }) : '';
   const message = renderCommand('qa-review',
-    wakeupHeader + humanDirectiveFor(pipeline.specPath, 'qa-reviewer') +
+    wakeupHeader + humanDirectiveFor(pipeline.specPath, 'qa-reviewer') + backlogHeader +
     `${agentSpecPath}/spec.md\n\n` +
     `IMPORTANT: Write the QA report to \`${agentSpecPath}/qa_report.json\` (use this exact absolute path, not a relative path).\n` +
     `The working directory is a git worktree — do NOT write to a .teamai/ subdirectory relative to the current directory.`);
@@ -522,6 +528,19 @@ export async function runQaReview(
     sessionStartedAt, unitLabel: 'The QA review', deps,
     deliverables: [reportPath],
   }) === 'pending') return;
+
+  // Backlog check (backlog-check.ts): QA sees the finished work against the
+  // whole project and judges every open ticket, like every other phase.
+  const qaBacklog = backlogOn ? await runBacklogCheck({
+    specPath: pipeline.specPath, unit: 'qa', unitLabel: 'The QA review', taskId: pipeline.taskId,
+    role: 'qa-reviewer', cwd: pipeline.worktreePath, requireSelf: false, projectRoot: deps.projectRoot,
+    sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion,
+  }) : { ok: true as const };
+  if (!qaBacklog.ok) {
+    deps.writeCompletionSummary(pipeline, 'backlog-check-incomplete', qaBacklog.problems.join('; '));
+    deps.advancePhase(pipeline, 'failed');
+    return;
+  }
 
   consumeFeedbackIfDue(pipeline.specPath, 'qa-review');
 

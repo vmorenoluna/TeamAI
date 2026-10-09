@@ -60,7 +60,7 @@ const SUBTASK_WAKEUP: Rule[] = [
 
 const SPEC_OUTPUTS: Rule[] = [
   r('spec summary file', 'spec_summary.md'),
-  r('deferred defects reported as parsed [BUG] lines', '[BUG] Fix:'),
+  r('deferred defects filed through the verified backlog check', 'backlog_check-<unit>.json'),
 ];
 
 const PLAN_CONTRACT: Rule[] = [
@@ -87,7 +87,7 @@ const CODER_CONTRACT: Rule[] = [
   r('verify nothing in scope is left uncommitted', 'git status --porcelain'),
   r('verification-only subtasks commit an empty commit', 'git commit --allow-empty'),
   r('gitignored artifacts need git add -f', 'git add -f'),
-  r('out-of-scope bugs reported as parsed [BUG] lines', '[BUG] Fix:'),
+  r('out-of-scope findings filed through the verified backlog check', 'backlog_check-<unit>.json'),
   r('never foreground a known-long job', 'NEVER foreground a known-long job'),
 ];
 
@@ -100,16 +100,25 @@ const QA_REWORK: Rule[] = [
   r('formula changes escalate as spec concerns', 'escalate it as a spec concern'),
 ];
 
+// Every mode whose agent can file tickets judges the whole open board
+// (orchestrator/backlog-check.ts), so all of them carry the same contract.
+const BACKLOG_CHECK: Rule[] = [
+  r('verdict file the orchestrator verifies', 'backlog_check-<unit>.json'),
+  r('snapshot of open tickets', 'open_tickets-<unit>.json'),
+  r('one verdict per snapshot ticket', 'exactly one entry per ticket in the snapshot'),
+  r('agent-filed tickets are unverified claims', "A ticket's description is a claim, not an"),
+];
+
 // ── Mode → required rules ────────────────────────────────────────────────
 
 const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
   'spec': [
-    ...PIPELINE_PREAMBLE, ...PHASE_WAKEUP, ...SPEC_OUTPUTS,
+    ...PIPELINE_PREAMBLE, ...PHASE_WAKEUP, ...SPEC_OUTPUTS, ...BACKLOG_CHECK,
     r('acceptance criteria format', 'Given/When/Then'),
     r('self-critique step', 'Self-Critique'),
   ],
   'spec-revise': [
-    ...PIPELINE_PREAMBLE, ...PHASE_WAKEUP,
+    ...PIPELINE_PREAMBLE, ...PHASE_WAKEUP, ...BACKLOG_CHECK,
     r('spec summary file', 'spec_summary.md'),
     r('revision feedback file', 'spec_revision_feedback.md'),
     r('address every concern', 'Address EVERY concern'),
@@ -120,18 +129,18 @@ const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
     r('verify the spec actually changed', 'Verify you actually changed something'),
     r('before → after change report', 'before → after'),
   ],
-  'plan': [...PIPELINE_PREAMBLE, ...PHASE_WAKEUP, ...PLAN_CONTRACT],
+  'plan': [...PIPELINE_PREAMBLE, ...PHASE_WAKEUP, ...PLAN_CONTRACT, ...BACKLOG_CHECK],
   'plan-revise': [
-    ...PIPELINE_PREAMBLE, ...PHASE_WAKEUP, ...PLAN_CONTRACT,
+    ...PIPELINE_PREAMBLE, ...PHASE_WAKEUP, ...PLAN_CONTRACT, ...BACKLOG_CHECK,
     r('keep completed subtasks completed', '`completed: true`'),
     r('re-run only invalidated subtasks, dropping stale qa_flagged', 'qa_flagged'),
     r('rewrite plan.json in place', 'Rewrite `plan.json` in place'),
     r('scoped replan preserves unlisted subtasks byte-for-byte', 'byte-for-byte'),
   ],
-  'implement': [...PIPELINE_PREAMBLE, ...SUBTASK_WAKEUP, ...CODER_CONTRACT],
-  'implement-fix': [...PIPELINE_PREAMBLE, ...SUBTASK_WAKEUP, ...CODER_CONTRACT, ...QA_REWORK],
+  'implement': [...PIPELINE_PREAMBLE, ...SUBTASK_WAKEUP, ...CODER_CONTRACT, ...BACKLOG_CHECK],
+  'implement-fix': [...PIPELINE_PREAMBLE, ...SUBTASK_WAKEUP, ...CODER_CONTRACT, ...QA_REWORK, ...BACKLOG_CHECK],
   'qa-review': [
-    ...PIPELINE_PREAMBLE, ...PHASE_WAKEUP,
+    ...PIPELINE_PREAMBLE, ...PHASE_WAKEUP, ...BACKLOG_CHECK,
     r('rework-pass detection', 'Detect Rework Pass'),
     r('rework carry-forward keyed on head_at_review', 'head_at_review'),
     r('report schema: fail_type', '"fail_type"'),

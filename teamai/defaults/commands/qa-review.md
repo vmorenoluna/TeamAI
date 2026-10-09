@@ -254,6 +254,12 @@ what you can resolve yourself first rather than listing hypotheses.
    - Populate `spec_concerns` using the same criteria as Step 7 if the formula change is a spec-level deviation
 4. A coder inventing a new formula during a qa-fix pass is a red flag — it means the fix approach is wrong and the spec likely needs revision.
 
+<!-- @include _shared/backlog-effects.md -->
+
+As QA, judge the open tickets against the work as delivered, which can differ from what
+the spec predicted. For example, the finished change may fully resolve a ticket the spec
+only listed as overlapping. Your PASS/FAIL verdict never depends on the backlog check.
+
 ## Output
 Write the QA report to the **exact absolute path** specified in the prompt instructions (e.g., `/path/to/.teamai/{slug}/qa_report.json`).
 
