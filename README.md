@@ -24,6 +24,7 @@ TeamAI is a desktop app that runs several [Claude Code](https://docs.anthropic.c
 - **Git worktree isolation**: each agent works in its own copy of your repo, so parallel agents never conflict.
 - **Multi-project support**: manage several codebases from one window. Each project keeps its settings in `.teamai/` and its agent config in `.claude/`.
 - **Crash recovery**: interrupted tasks and rate-limited sessions resume automatically.
+- **Self-maintaining backlog**: every agent that can file tickets judges the whole open board first, and the orchestrator verifies it did. Duplicates aren't filed. Tickets a task makes obsolete are held back and then deleted. Tickets whose premise a task changes wait and are re-specced. Agent-filed tickets are verified by the analyst before any work is planned. See `teamai/adr/010-verified-backlog-check.md`.
 
 ## Install
 
@@ -208,7 +209,7 @@ Per-project `.teamai/` directory:
 | File | Purpose                                                      |
 |---|--------------------------------------------------------------|
 | `providers.json` | LLM backend per role (only Anthropic is currently supported) |
-| `pipeline.json` | Phase order and max QA retry attempts                        |
+| `pipeline.json` | Phase order, max QA retry attempts, and the backlog check (`backlogCheck`, `backlogCheckEvidencePaths`; see ADR 010) |
 | `container.json` | Enable/disable Docker devcontainer sandboxing                |
 
 Default configs live in `defaults/` and are synced to projects on startup.
