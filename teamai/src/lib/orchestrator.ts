@@ -61,7 +61,7 @@ export class Orchestrator {
       handleRateLimit: (pipeline, resetsAt) => this.handleRateLimit(pipeline, resetsAt),
       startRun: (pipeline) => this._startRunDetached(pipeline),
 
-      sessionOpts: (role, cwd, taskId, logFile) => buildSessionOpts(projectRoot, role, cwd, taskId, logFile),
+      sessionOpts: (role, cwd, taskId, logFile) => buildSessionOpts(projectRoot, role, cwd, taskId, logFile, this._specDirOrUndefined(taskId)),
       waitForCompletion: (sessionId) => waitForCompletion(sessionId, { parseSessionLimitReset }),
 
       execGit: (args, hostCwd) => this._execGit(args, hostCwd),
@@ -398,6 +398,7 @@ export class Orchestrator {
       if (savedState.wakeupArtifact !== undefined) pipeline.wakeupArtifact = savedState.wakeupArtifact;
       if (savedState.wakeupProgressPath !== undefined) pipeline.wakeupProgressPath = savedState.wakeupProgressPath;
       if (savedState.wakeupAttemptCount !== undefined) pipeline.wakeupAttemptCount = savedState.wakeupAttemptCount;
+      if (savedState.wakeupHeadAtSchedule !== undefined) pipeline.wakeupHeadAtSchedule = savedState.wakeupHeadAtSchedule;
       if (savedState.persistedCriterionFailCounts !== undefined) pipeline.persistedCriterionFailCounts = savedState.persistedCriterionFailCounts;
       if (savedState.persistedAdditionalIssueCounts !== undefined) pipeline.persistedAdditionalIssueCounts = savedState.persistedAdditionalIssueCounts;
       if (savedState.qaRoundCount !== undefined) pipeline.qaRoundCount = savedState.qaRoundCount;
@@ -698,6 +699,12 @@ export class Orchestrator {
   // so the extracted runImplement can mutate the current promise through
   // its deps reference without aliasing `this`.
   private _planWriteLockRef = { current: Promise.resolve() };
+
+  /** The task's `.teamai/{slug}/` dir for $TEAMAI_SPEC_DIR, or undefined when the
+   *  task has no directory (callers then spawn without the variable). */
+  private _specDirOrUndefined(taskId: string): string | undefined {
+    try { return this.taskStore.getDirById(taskId); } catch { return undefined; }
+  }
 
   private _restorePipelineState(_taskId: string, specPath: string): Partial<TaskPipeline> | null { return restorePipelineState(_taskId, specPath); }
 

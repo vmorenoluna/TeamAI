@@ -316,6 +316,10 @@ export function updateSessionMap(
 /**
  * Build session creation options for processManager.createSession().
  * Resolves the provider config and merges container-session and provider opts.
+ * `specDir` is the task's real `.teamai/{slug}/` directory in the project root;
+ * createSession exports it to the agent as `$TEAMAI_SPEC_DIR` (translated to the
+ * container path in container mode) so job logs, PID files, and wakeup files
+ * land where the orchestrator scans rather than in a worktree's own copy.
  */
 export function buildSessionOpts(
   projectRoot: string,
@@ -323,10 +327,11 @@ export function buildSessionOpts(
   cwd: string,
   taskId: string,
   logFile?: string,
+  specDir?: string,
 ) {
   const providerCfg = resolveProvider(projectRoot, role);
   const providerOpts = providerToSessionOpts(providerCfg);
-  return { taskId, role, cwd, ...containerSessionOpts(projectRoot), logFile, ...providerOpts };
+  return { taskId, role, cwd, ...containerSessionOpts(projectRoot), logFile, specDir, ...providerOpts };
 }
 
 // ── Artifact-based phase resolution ───────────────────────────────────────

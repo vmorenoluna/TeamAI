@@ -113,6 +113,31 @@ describe('ProcessManager createSession — Docker container mode', () => {
     );
   });
 
+  it('exports TEAMAI_SPEC_DIR as the container path of specDir', async () => {
+    mockReadContainerConfig.mockReturnValue({ enabled: true });
+    mockEnsureContainer.mockResolvedValue({
+      containerId: 'container-abc',
+      remoteWorkspaceFolder: '/workspace',
+    });
+    mockHostToContainerPath.mockImplementation((p: string) =>
+      p === '/host/project/.teamai/my-task' ? '/workspace/.teamai/my-task' : '/workspace/wt');
+    mockSpawn.mockReturnValue(createMockProcess());
+
+    await pm.createSession({
+      taskId: 'task-spec-dir',
+      role: 'coder',
+      cwd: '/host/project/.worktrees/my-task',
+      projectRoot: '/host/project',
+      specDir: '/host/project/.teamai/my-task',
+    });
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      getToolPath('docker'),
+      expect.arrayContaining(['-e', 'TEAMAI_SPEC_DIR=/workspace/.teamai/my-task']),
+      expect.any(Object),
+    );
+  });
+
   it('includes env flags when env is provided', async () => {
     mockReadContainerConfig.mockReturnValue({ enabled: true });
     mockEnsureContainer.mockResolvedValue({
