@@ -37,8 +37,8 @@ export interface PhaseContext {
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
   /** For rate-limit recursive reuse — unwinds the failed attempt budget. */
   handleRateLimit: (pipeline: TaskPipeline, resetsAt: number) => void;
-  /** Failure handling for a run that threw (log, rate-limit pause, or move to `failed`). Used by runs started without runTask's try/catch, e.g. a detached rerun after reject. */
-  handleRunFailure: (pipeline: TaskPipeline, err: unknown) => void;
+  /** Start a pipeline run without awaiting it, with the same lifecycle as runTask (active-task registration, failure handling, lock release). */
+  startRun: (pipeline: TaskPipeline) => void;
 
   // ── Session management ──
   sessionOpts: (role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) => SessionOptsResult;

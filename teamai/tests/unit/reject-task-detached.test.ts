@@ -2,7 +2,8 @@
 
 /**
  * rejectTask must resolve as soon as the pipeline has advanced to the resume
- * phase, not when the rework run finishes — otherwise the server action stays
+ * phase, handing the rework to the orchestrator's shared run lifecycle
+ * (startRun) instead of awaiting it — otherwise the server action stays
  * pending and Next.js queues the board's router.refresh() behind it.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -13,10 +14,11 @@ import { randomUUID } from 'crypto';
 
 import { rejectTask } from '../../src/lib/orchestrator/review-actions';
 
-function makeDeps(executePhase: () => Promise<void>) {
+function makeDeps() {
   const root = join(tmpdir(), `teamai-reject-detached-${randomUUID().slice(0, 8)}`);
   const specPath = join(root, 'task-slug');
   mkdirSync(specPath, { recursive: true });
+  writeFileSync(join(specPath, 'spec.md'), '# Spec');
   const pipeline = {
     taskId: 'task-1',
     phase: 'awaiting-review',
@@ -37,57 +39,41 @@ function makeDeps(executePhase: () => Promise<void>) {
     pipelines: new Map([['task-1', pipeline]]),
     restorePipeline: vi.fn(),
     advancePhase: vi.fn((p: { phase: string }, phase: string) => { p.phase = phase; }),
-    executePhase: vi.fn(executePhase),
-    handleRunFailure: vi.fn(),
+    executePhase: vi.fn(),
+    startRun: vi.fn(),
     savePipelineState: vi.fn(),
     writeCompletionSummary: vi.fn(),
   };
   return { root, specPath, pipeline, deps };
 }
 
-describe('rejectTask — does not await the rework run', () => {
+describe('rejectTask — hands the rework to the shared run lifecycle', () => {
   let root: string | undefined;
   afterEach(() => { if (root) rmSync(root, { recursive: true, force: true }); root = undefined; });
 
-  // Every reject target must resume at its own phase and return without
-  // waiting for the rework run. The analyst path goes through
-  // beginSpecRevision (needs an existing spec.md), the others through the
-  // generic resume branch.
+  // Every reject target must resume at its own phase and start exactly one
+  // run. The analyst path goes through beginSpecRevision (needs an existing
+  // spec.md), the others through the generic resume branch.
   it.each([
     ['analyst', 'spec'],
     ['planner', 'plan'],
     ['coder', 'implement'],
     ['qa-reviewer', 'qa-review'],
-  ] as const)('target %s: resolves after advancing to %s while executePhase is still running', async (target, resumePhase) => {
-    let finish!: () => void;
-    const h = makeDeps(() => new Promise<void>(r => { finish = r; }));
+  ] as const)('target %s: advances to %s then starts one run without awaiting it', async (target, resumePhase) => {
+    const h = makeDeps();
     root = h.root;
-    writeFileSync(join(h.specPath, 'spec.md'), '# Spec');
 
     await rejectTask('task-1', 'fix it', target, undefined, h.deps as never);
 
     expect(h.deps.advancePhase).toHaveBeenCalledWith(h.pipeline, resumePhase);
-    expect(h.deps.executePhase).toHaveBeenCalledTimes(1);
-    finish();
+    expect(h.deps.startRun).toHaveBeenCalledTimes(1);
+    expect(h.deps.startRun).toHaveBeenCalledWith(h.pipeline);
+    // The run is the orchestrator's to execute and own; review-actions never awaits it.
+    expect(h.deps.executePhase).not.toHaveBeenCalled();
   });
 
-  it.each(['analyst', 'planner', 'coder', 'qa-reviewer'] as const)(
-    'target %s: hands a failed rework run to handleRunFailure',
-    async (target) => {
-      const boom = new Error('boom');
-      const h = makeDeps(async () => { throw boom; });
-      root = h.root;
-      writeFileSync(join(h.specPath, 'spec.md'), '# Spec');
-
-      await rejectTask('task-1', 'fix it', target, undefined, h.deps as never);
-      await new Promise(r => setTimeout(r, 10));
-
-      expect(h.deps.handleRunFailure).toHaveBeenCalledWith(h.pipeline, boom);
-    },
-  );
-
   it('clears the previous failure summary and reason before the rework starts', async () => {
-    const h = makeDeps(async () => undefined);
+    const h = makeDeps();
     root = h.root;
 
     await rejectTask('task-1', 'fix it', 'coder', undefined, h.deps as never);
@@ -96,10 +82,10 @@ describe('rejectTask — does not await the rework run', () => {
   });
 
   it('still rejects synchronously on a disallowed phase', async () => {
-    const h = makeDeps(async () => undefined);
+    const h = makeDeps();
     root = h.root;
     h.deps.taskStore.getById = () => ({ id: 'task-1', description: 'd', phase: 'backlog' });
     await expect(rejectTask('task-1', 'x', 'coder', undefined, h.deps as never)).rejects.toThrow();
-    expect(h.deps.executePhase).not.toHaveBeenCalled();
+    expect(h.deps.startRun).not.toHaveBeenCalled();
   });
 });

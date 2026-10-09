@@ -30,7 +30,7 @@ export interface ReviewActionsDeps {
   restorePipeline: (taskId: string, requiredPhase: PipelinePhase) => TaskPipeline;
   advancePhase: (pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>) => void;
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
-  handleRunFailure: (pipeline: TaskPipeline, err: unknown) => void;
+  startRun: (pipeline: TaskPipeline) => void;
   savePipelineState: (pipeline: TaskPipeline) => void;
   writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
 }
@@ -333,13 +333,13 @@ export async function rejectTask(
   // router.refresh() behind a pending server action, so the board would keep
   // showing the old column until a hard refresh. Mirrors runTask/restartPhase,
   // which start the pipeline without awaiting it. Synchronous failures
-  // (validation, artifact writes) still propagate to the caller; a failure of
-  // the detached run gets runTask's treatment (output.log entry, rate-limit
-  // pause, otherwise the task moves to `failed`).
+  // (validation, artifact writes) still propagate to the caller; the run
+  // itself goes through the orchestrator's shared run lifecycle (startRun), so
+  // it is registered, fails, and releases its lock exactly like a runTask run.
   const detached: ReviewActionsDeps = {
     ...deps,
     executePhase: (p) => {
-      deps.executePhase(p).catch(err => deps.handleRunFailure(p, err));
+      deps.startRun(p);
       return Promise.resolve();
     },
   };

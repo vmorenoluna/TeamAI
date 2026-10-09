@@ -89,7 +89,7 @@ export interface Task {
    *  implement — see orchestrator/wakeup.ts) from "a coder subtask explicitly
    *  declared itself blocked on a defect it had already root-caused, instead
    *  of being silently retried until an unrelated cap eventually caught it"
-   *  (see implement.ts's subtask_blocked-st<ID>.json handling) from "a phase run started outside runTask (e.g. the rework after a human reject) threw an error" ('run-error'). Undefined for
+   *  (see implement.ts's subtask_blocked-st<ID>.json handling) from "a phase run threw an error before reaching any verdict" ('run-error'). Undefined for
    *  legacy failed tasks written before this field existed. */
   failureReason?: 'qa-attempts-exhausted' | 'qa-incomplete' | 'spec-revision-exhausted' | 'implement-failure' | 'session-crashed' | 'wakeup-exhausted' | 'subtask-blocked' | 'run-error';
   /** Why a task landed on `awaiting-review` when that was NOT a genuine QA

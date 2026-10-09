@@ -358,11 +358,8 @@ export function writeCompletionSummary(
   } else if (reason === 'run-error') {
     content += `Task failed because a phase run stopped with an error` +
       (detail ? `: ${detail}` : '.') +
-      ` This did NOT go through a normal QA review — the run was started outside the ` +
-      `main task runner (e.g. the rework after a human reject) and threw before it could finish. ` +
-      `The orchestrator log in the Terminal tab has the full error.
-
-`;
+      ` This is an orchestrator/session error, not a QA verdict on the work — the run threw ` +
+      `before it could finish. The orchestrator log in the Terminal tab has the full error.\n\n`;
   } else if (reason === 'qa-incomplete') {
     const rounds = counters.qaRoundCount ?? counters.qaAttempt;
     content += `Task failed after ${rounds} QA round(s) in which the reviewer never reached ` +

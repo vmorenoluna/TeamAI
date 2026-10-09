@@ -559,6 +559,28 @@ describe('Orchestrator', () => {
       await promise;
     });
 
+    it('registers the rework as an active task and refuses a second concurrent reject', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const taskStore = (orch as AnyOrch).taskStore;
+      taskStore.update(testData.taskId, { phase: 'awaiting-review' });
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        phase: 'awaiting-review',
+        specPath: testData.taskDir,
+      });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+      mockCreateSession.mockResolvedValue('sess-active');
+
+      await orch.rejectTask(testData.taskId, 'Fix the tests', 'coder');
+
+      expect(orch.isTaskActive(testData.taskId)).toBe(true);
+      await expect(orch.rejectTask(testData.taskId, 'again', 'coder')).rejects.toThrow(/already running/i);
+
+      fireEvent('event', { sessionId: 'sess-active', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 30));
+    });
+
     it('moves the task to failed and logs the error when the detached rework run throws', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
@@ -577,6 +599,9 @@ describe('Orchestrator', () => {
       await new Promise(r => setTimeout(r, 50));
 
       expect(pipeline.phase).toBe('failed');
+      // Same lifecycle as a runTask run: lock and pipeline released once it ends.
+      expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(false);
+      expect((orch as AnyOrch).pipelines.has(testData.taskId)).toBe(false);
       const log = readFileSync(join(testData.taskDir, 'output.log'), 'utf-8');
       expect(log).toContain('[ERROR] Task failed');
       // The Task Failed banner shows this run's error, not the earlier failure's.
