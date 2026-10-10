@@ -64,7 +64,7 @@ export interface PhaseContext {
   /** Get GIT_DIR / GIT_WORK_TREE env vars for worktree git commands. */
   worktreeGitEnv: (hostCwd: string, containerWs?: string) => Record<string, string>;
   isWorktreeHealthy: (worktreePath: string) => boolean;
-  cleanStaleSubtaskWorktrees: (pipeline: TaskPipeline) => void;
+  cleanStaleSubtaskWorktrees: (pipeline: TaskPipeline) => Promise<void>;
   removeWorktree: (taskId: string) => void;
 
   // ── Snapshots ──

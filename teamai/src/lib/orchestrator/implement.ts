@@ -60,7 +60,7 @@ export interface ImplementDeps {
   gitPush: (pushArgs: string[], logFile: string) => void;
   patchWorktreeGitFile: (hostWorktreePath: string, containerWorkspace: string) => void;
   isWorktreeHealthy: (worktreePath: string) => boolean;
-  cleanStaleSubtaskWorktrees: (pipeline: ImplementPipeline) => void;
+  cleanStaleSubtaskWorktrees: (pipeline: ImplementPipeline) => Promise<void>;
   restoreQaReportFromSnapshot: (specPath: string) => void;
   restoreHumanFeedbackFromSnapshot: (specPath: string) => void;
   writeQaFeedback: (pipeline: ImplementPipeline, report: QaReport) => void;
@@ -373,7 +373,7 @@ export async function ensureWorktree(
   );
 
   // AC9: clean stale per-subtask worktrees
-  deps.cleanStaleSubtaskWorktrees(pipeline);
+  await deps.cleanStaleSubtaskWorktrees(pipeline);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
