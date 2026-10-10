@@ -22,6 +22,14 @@ export interface WorktreeOpsDeps {
   projectRoot: string;
 }
 
+export interface SubtaskCleanupDeps extends WorktreeOpsDeps {
+  /** Retry-then-throw directory removal (clearWorktreeDirectoryOrThrow). */
+  clearWorktreeDirectory: (
+    worktreePath: string,
+    deps: { exists: (p: string) => boolean; rm: (p: string) => void; pruneWorktrees: () => void },
+  ) => Promise<void>;
+}
+
 export interface RemoveWorktreeDeps extends WorktreeOpsDeps {
   taskStore: TaskStore;
 }
@@ -68,11 +76,16 @@ export function getWorktreePath(
  * Clean up stale per-subtask worktrees from a previous crashed run (AC9).
  * Scans for directories matching <worktree-base>/<task-slug>-st* and removes
  * them along with their branches and git worktree metadata.
+ *
+ * A directory that survives `git worktree remove --force` (e.g. a file held
+ * open by an orphaned process on Windows) is retried and, if it never
+ * clears, fails with WORKTREE_LOCKED rather than letting the later
+ * `git worktree add` crash with an opaque "already exists".
  */
-export function cleanStaleSubtaskWorktrees(
+export async function cleanStaleSubtaskWorktrees(
   pipeline: SubtaskWorktreePipeline,
-  deps: WorktreeOpsDeps,
-): void {
+  deps: SubtaskCleanupDeps,
+): Promise<void> {
   const slug = path.basename(pipeline.worktreePath);
   const prefix = slug + '-st';
   const worktreeBase = getWorktreeBase(deps.projectRoot);
@@ -96,6 +109,14 @@ export function cleanStaleSubtaskWorktrees(
     } catch {
       try { rmSync(stPath, { recursive: true, force: true }); } catch { /* best-effort */ }
       removeStaleWorktreeRegistration(deps.projectRoot, stPath);
+    }
+
+    if (existsSync(stPath)) {
+      await deps.clearWorktreeDirectory(stPath, {
+        exists: existsSync,
+        rm: (p) => rmSync(p, { recursive: true, force: true }),
+        pruneWorktrees: () => removeStaleWorktreeRegistration(deps.projectRoot, stPath),
+      });
     }
 
     try {

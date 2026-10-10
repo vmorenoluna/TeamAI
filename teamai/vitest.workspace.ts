@@ -1,6 +1,10 @@
 import { defineWorkspace } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { forceTestNodeEnv } from './tests/node-env';
+
+// Must run before vite resolves its config — see tests/node-env.ts.
+forceTestNodeEnv();
 
 /**
  * Tests that create real `git worktree add` processes on Windows, where a

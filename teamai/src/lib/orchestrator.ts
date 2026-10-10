@@ -18,7 +18,7 @@ import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
 import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError, SessionKilledError, ContainerDockerMissingError } from './orchestrator/errors';
 import { NO_RESUME_PHASES } from '@/constants/phases';
-import { runImplement, _recoverStBranchCommits } from './orchestrator/implement';
+import { runImplement, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
 import { CLEANUP_ARTIFACTS, MAX_REVISION_SNAPSHOTS } from './orchestrator/artifacts';
 import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec, prepareSpecRevisionArtifacts, buildSpecRevisionFeedback } from './orchestrator/review-actions';
@@ -87,7 +87,11 @@ export class Orchestrator {
         worktreeGitEnv(hostCwd, projectRoot, containerWs),
       isWorktreeHealthy: (worktreePath) => isWorktreeHealthy(worktreePath, projectRoot),
       cleanStaleSubtaskWorktrees: (pipeline) =>
-        cleanStaleSubtaskWorktrees(pipeline, { execGit: (a, c) => this._execGit(a, c), projectRoot }),
+        cleanStaleSubtaskWorktrees(pipeline, {
+          execGit: (a, c) => this._execGit(a, c),
+          projectRoot,
+          clearWorktreeDirectory: clearWorktreeDirectoryOrThrow,
+        }),
       removeWorktree: (taskId) =>
         removeWorktreeFn(taskId, { execGit: (a, c) => this._execGit(a, c), projectRoot, taskStore }),
 

@@ -13,6 +13,7 @@
 
 import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { restoreNodeEnv } from './node-env';
 
 // Safety: refuse to touch the real ~/.teamai/projects.json unless explicitly
 // opted in via TEAMAI_TEST_HOME. Operating on the real file can cause silent
@@ -80,6 +81,9 @@ export function setup() {
 }
 
 export function teardown() {
+  // Put back the NODE_ENV that vitest.workspace.ts overrode (see node-env.ts).
+  restoreNodeEnv();
+
   // Clean stale git lock files — if tests themselves left any behind
   // (e.g. a git command was killed mid-flight), don't let them poison
   // the next run. The setup() also does this, but teardown catches locks
