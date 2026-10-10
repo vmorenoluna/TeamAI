@@ -418,8 +418,14 @@ app.prepare().then(async () => {
     // ── Periodic stall-detection sweep ──────────────────────────────────
     // Every 5 minutes, scan all projects for tasks stuck in active phases
     // (expired rate-limit windows, silent session exits, etc.) and re-queue them.
+    // sweepStalledTasks() is the SOLE owner of session stall-kills — do not add
+    // another inline kill loop here. It must stay the only place that decides a
+    // session has stalled because: (1) it reads each project's configured
+    // per-project idle/tool-stall thresholds, so a second hardcoded timeout here
+    // would silently override those settings; (2) it passes the 'stalled' reason
+    // to killSession, which gates the stall-recovery retry classification in
+    // implement.ts — a kill from any other call site breaks that classification.
     const SWEEP_INTERVAL_MS = 5 * 60_000; // 5 minutes
-    const STALLED_SESSION_TIMEOUT_MS = 10 * 60_000; // 10 minutes
     setInterval(() => {
       sweepStalledTasks().then(count => {
         if (count > 0) {
@@ -428,19 +434,6 @@ app.prepare().then(async () => {
       }).catch(err => {
         logError('sweep', 'Periodic stall-detection sweep failed', err);
       });
-
-      // Also detect and clean up hung agent sessions (no output for >10 min)
-      const stalled = processManager.getStalledSessions(() => ({
-        idleMs: STALLED_SESSION_TIMEOUT_MS,
-        toolMs: STALLED_SESSION_TIMEOUT_MS,
-      }));
-      for (const s of stalled) {
-        console.log(`[sweep] Session ${s.id.substring(0, 8)}… task=${s.taskId} role=${s.role} stalled >10 min — killing`);
-        processManager.killSession(s.id);
-      }
-      if (stalled.length > 0) {
-        console.log(`[sweep] Killed ${stalled.length} stalled session(s)`);
-      }
     }, SWEEP_INTERVAL_MS);
   });
 
