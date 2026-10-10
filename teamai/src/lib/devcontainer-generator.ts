@@ -581,5 +581,6 @@ function getBuiltInGenericTemplate(): string {
       'ghcr.io/devcontainers/features/github-cli:1': {},
     },
     postCreateCommand: 'npm install -g @anthropic-ai/claude-code && sudo apt-get update -q && sudo apt-get install -y -q gh && sudo git config --system --add safe.directory \'*\'',
+    postStartCommand: 'npm install -g @anthropic-ai/claude-code@latest || echo \'claude-code update skipped (offline?)\'',
   }, null, 2);
 }

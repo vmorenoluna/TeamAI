@@ -10,6 +10,7 @@
   ],
 
   "postCreateCommand": "npm install -g @anthropic-ai/claude-code playwright-mcp && sudo apt-get update -q && sudo apt-get install -y -q gh && sudo git config --system --add safe.directory '*'",
+  "postStartCommand": "npm install -g @anthropic-ai/claude-code@latest || echo 'claude-code update skipped (offline?)'",
 
   "forwardPorts": [3000],
 

@@ -86,6 +86,9 @@ function assertValidDevcontainer(json: string, expectedImagePrefix: string, expe
   expect(parsed.postCreateCommand).toContain('@anthropic-ai/claude-code');
   expect(parsed.postCreateCommand).toContain("safe.directory '*'");
 
+  // Claude CLI refreshed on every container start so it can't go stale as new models ship
+  expect(parsed.postStartCommand).toContain('@anthropic-ai/claude-code@latest');
+
   return parsed;
 }
 

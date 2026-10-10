@@ -15,6 +15,7 @@
   },
 
   "postCreateCommand": "npm install -g @anthropic-ai/claude-code && sudo apt-get update -q && sudo apt-get install -y -q gh{{EXTRA_APT}} && sudo git config --system --add safe.directory '*'",
+  "postStartCommand": "npm install -g @anthropic-ai/claude-code@latest || echo 'claude-code update skipped (offline?)'",
 
   "remoteEnv": {
     "GO111MODULE": "on"
