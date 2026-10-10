@@ -1,3 +1,5 @@
 # Force LF line endings for all text files, even on Windows.
 # This overrides core.autocrlf and eliminates CRLF conversion warnings.
 * text=auto eol=lf
+
+# TeamAI — consistent line-ending normalization across host and container
