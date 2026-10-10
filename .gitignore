@@ -44,3 +44,6 @@ worktrees/
 .idea/
 .mcp.json
 .claude/settings.local.json
+
+# TeamAI — exclude transient pipeline files
+.teamai/*
