@@ -44,7 +44,7 @@ vi.mock('../../src/lib/process-manager', () => ({
   processManager: {
     getAllSessions: (...args: unknown[]) => mockGetAllSessions(...args as []),
     getStalledSessions: (resolveThresholds: (session: { projectRoot?: string }) => { idleMs: number; toolMs: number }) => mockGetStalledSessions(resolveThresholds),
-    killSession: (sessionId: string) => mockKillSession(sessionId),
+    killSession: (...args: unknown[]) => mockKillSession(...args),
   },
 }));
 
@@ -1752,7 +1752,7 @@ describe('sweepStalledTasks', () => {
     const count = await sweepStalledTasks();
     // No project tasks were swept, so count stays 0 — session kills are side-effect only
     expect(count).toBe(0);
-    expect(mockKillSession).toHaveBeenCalledWith('sess-abc');
+    expect(mockKillSession).toHaveBeenCalledWith('sess-abc', 'stalled', 'idle');
   });
 
   it('kills sessions stalled >30min with a tool in flight', async () => {
@@ -1763,7 +1763,7 @@ describe('sweepStalledTasks', () => {
 
     const count = await sweepStalledTasks();
     expect(count).toBe(0);
-    expect(mockKillSession).toHaveBeenCalledWith('sess-xyz');
+    expect(mockKillSession).toHaveBeenCalledWith('sess-xyz', 'stalled', 'tool');
   });
 
   it('uses per-session resolver (not flat numbers) so each project gets its own configured thresholds', async () => {
