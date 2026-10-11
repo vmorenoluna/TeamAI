@@ -33,6 +33,8 @@ interface ContainerRecord {
   eventWatcher: ChildProcess | null;
   validationSteps: ValidationStep[];
   validationPromise: Promise<boolean> | null;
+  /** Workspace trust has been recorded in this container (see _trustWorkspaceInContainer). */
+  trusted: boolean;
 }
 
 /** What the pipeline needs to know about a project's container validation. */
@@ -155,6 +157,7 @@ export class ContainerManager extends EventEmitter {
       containerId: null, remoteWorkspaceFolder: null,
       startPromise: null, eventWatcher: null,
       validationSteps: [], validationPromise: null,
+      trusted: false,
     };
   }
 
@@ -177,13 +180,12 @@ export class ContainerManager extends EventEmitter {
         record.remoteWorkspaceFolder = existing.remoteWorkspaceFolder;
         this.records.set(projectRoot, record);
         this._watchEvents(record);
-        return existing;
+      } else {
+        record = this._newRecord(projectRoot, 'starting');
+        this.records.set(projectRoot, record);
+        this._emit(record, 'starting');
+        record.startPromise = this._doStart(record, logFile);
       }
-
-      record = this._newRecord(projectRoot, 'starting');
-      this.records.set(projectRoot, record);
-      this._emit(record, 'starting');
-      record.startPromise = this._doStart(record, logFile);
     }
 
     if (record.state === 'starting' || record.state === 'restarting') {
@@ -192,6 +194,16 @@ export class ContainerManager extends EventEmitter {
 
     if (record.state !== 'running' || !record.containerId || !record.remoteWorkspaceFolder) {
       throw new Error(`Container for ${projectRoot} is not available (state: ${record.state})`);
+    }
+
+    // A container reached without going through _doStart (adopted from a Docker
+    // scan after a server restart, or by getRunningContainer) has not had its
+    // workspace trusted by us, and a start whose trust write failed never set
+    // the flag. Record trust now; a failure throws and leaves the flag unset,
+    // so every later call retries instead of handing out an untrusted container.
+    if (!record.trusted) {
+      this._trustWorkspaceInContainer(record.containerId, record.remoteWorkspaceFolder, logFile);
+      record.trusted = true;
     }
 
     return { containerId: record.containerId, remoteWorkspaceFolder: record.remoteWorkspaceFolder };
@@ -309,6 +321,7 @@ export class ContainerManager extends EventEmitter {
       log('container', `Started — id=${containerId} workspace=${remoteWorkspaceFolder}`);
       this._logContainerClaudeVersion(containerId, record.projectRoot, logFile);
       this._trustWorkspaceInContainer(containerId, remoteWorkspaceFolder, logFile);
+      record.trusted = true;
       this._emit(record, 'running');
       this._watchEvents(record);
     } catch (err) {
