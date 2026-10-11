@@ -27,6 +27,11 @@ function retryOnLock(fn: () => void, maxRetries = 5, baseDelay = 50): void {
 }
 
 // ── Mock homedir to a temp directory so tests NEVER touch the real ~/.teamai ──
+// This file isolates by mocking homedir(); the run-wide TEAMAI_CONFIG_DIR (set by
+// tests/global-setup.ts) would take precedence, so clear it here. Resolving to the real
+// ~/.teamai still throws (see project-store.ts), so a missing mock cannot leak.
+vi.stubEnv('TEAMAI_CONFIG_DIR', '');
+
 // vi.hoisted() runs before vi.mock factories, so TEST_HOME is initialized first.
 const TEST_HOME = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
