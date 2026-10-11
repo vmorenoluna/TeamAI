@@ -34,6 +34,7 @@ import {
 import type { TaskStore } from '../task-store';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './types';
+import { ORCHESTRATOR_FAIL_TYPE } from './types';
 import type { FailureReason } from './qa-feedback';
 import { readFilesToFix } from './qa-feedback';
 
@@ -1134,6 +1135,7 @@ export async function runSubtaskSession(
         const reportPath = path.join(pipeline.specPath, 'qa_report.json');
         writeFileSync(reportPath, JSON.stringify({
           overall: 'FAIL',
+          fail_type: ORCHESTRATOR_FAIL_TYPE,
           criteria: [{
             criterion: 'Session repeatedly stalled',
             name: 'Session repeatedly stalled',
@@ -1222,6 +1224,7 @@ export async function runSubtaskSession(
     try {
       writeFileSync(path.join(pipeline.specPath, 'qa_report.json'), JSON.stringify({
         overall: 'FAIL',
+        fail_type: ORCHESTRATOR_FAIL_TYPE,
         criteria: [{
           criterion: 'Subtask reported a blocking defect',
           name: 'Subtask reported a blocking defect',
@@ -1532,6 +1535,7 @@ export async function runSubtaskSession(
         const reportPath = path.join(pipeline.specPath, 'qa_report.json');
         writeFileSync(reportPath, JSON.stringify({
           overall: 'FAIL',
+          fail_type: ORCHESTRATOR_FAIL_TYPE,
           criteria: [{
             criterion: 'Deliverable verification — missing files',
             name: 'Deliverable verification',
@@ -1827,6 +1831,7 @@ export function pushAndVerify(
       const reportPath = path.join(pipeline.specPath, 'qa_report.json');
       writeFileSync(reportPath, JSON.stringify({
         overall: 'FAIL',
+        fail_type: ORCHESTRATOR_FAIL_TYPE,
         criteria: [{
           criterion: 'Git push verification',
           name: 'Git push verification',
@@ -2202,6 +2207,7 @@ export async function runImplement(
       const reportPath = path.join(pipeline.specPath, 'qa_report.json');
       writeFileSync(reportPath, JSON.stringify({
         overall: 'FAIL',
+        fail_type: ORCHESTRATOR_FAIL_TYPE,
         criteria: [{
           criterion: 'Wakeup attempt limit exceeded',
           name: 'Wakeup attempt limit exceeded',
@@ -2301,6 +2307,7 @@ export async function runImplement(
       const reportPath = path.join(pipeline.specPath, 'qa_report.json');
       writeFileSync(reportPath, JSON.stringify({
         overall: 'FAIL',
+        fail_type: ORCHESTRATOR_FAIL_TYPE,
         criteria: [{
           criterion: 'Implement completeness gate',
           name: 'Implement completeness gate',

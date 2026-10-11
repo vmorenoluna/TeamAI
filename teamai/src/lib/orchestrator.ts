@@ -27,6 +27,7 @@ import { warn as logWarn, log, error as logError } from './logger';
 import type { PhaseContext } from './orchestrator/phase-context';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy, QaReport } from './orchestrator/types';
+import { ORCHESTRATOR_FAIL_TYPE } from './orchestrator/types';
 import type { FeedbackTarget } from './orchestrator/feedback-target';
 
 export class Orchestrator {
@@ -278,7 +279,12 @@ export class Orchestrator {
     // file anyway (only spec_revision_feedback.md) — writing it back here
     // would leave stale QA artifacts on disk a genuine QA-driven bounce to
     // the analyst would never produce.
-    if (clearsQaArtifacts && priorQaReport?.overall === 'FAIL' && !enteredSpecRevisionMode) {
+    // A report the orchestrator wrote when it gave up (implement gate, deliverable
+    // cap, push failure…) holds no QA findings. Carrying it forward as
+    // qa_feedback.md made implement synthesize a rework subtask (9999) that
+    // re-checked the same artifacts, instead of resuming the incomplete subtasks.
+    if (clearsQaArtifacts && priorQaReport?.overall === 'FAIL' && priorQaReport.fail_type !== ORCHESTRATOR_FAIL_TYPE
+      && !enteredSpecRevisionMode) {
       writeQaFeedback(dir, priorQaReport);
     }
 
