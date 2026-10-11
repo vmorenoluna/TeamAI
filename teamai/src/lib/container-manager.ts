@@ -599,7 +599,10 @@ export class ContainerManager extends EventEmitter {
 
       try {
         const { stdout } = await execFileAsync(getToolPath('docker'), [
-          'exec', '-i', '-w', workdir, record.containerId!, 'sh', '-c', step.command,
+          // As the devcontainer's remoteUser, like agent sessions: running as root
+          // leaves root-owned files in node_modules/build output that the real user
+          // (and the next install) then cannot touch.
+          'exec', '-i', '-u', readContainerRemoteUser(projectRoot), '-w', workdir, record.containerId!, 'sh', '-c', step.command,
         ]);
         step.status = 'passed';
         step.output = stdout.slice(-2000); // keep last 2KB for display
