@@ -24,6 +24,7 @@ import { renderCommand } from '../command-templates';
 import { resolveBaseBranch } from '../git-platform';
 import { getUnpushedCommits } from './worktree-ops';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
+import { subtaskWorktreeBasePath, pickFreshSubtaskWorktreePath, recordSubtaskWorktree, resolveSubtaskWorktreePath } from './subtask-worktree-paths';
 import { warn } from '../logger';
 import {
   scanWakeupFilesWithRetry, parseWakeupFile, computeNextAttemptCount, isGenuineRelaunch,
@@ -1970,7 +1971,7 @@ export async function runImplement(
     // Per-subtask worktree isolation
     if (isMultiGroup) {
       for (const subtask of subtasks) {
-        const stWorktreePath = pipeline.worktreePath + '-st' + subtask.id;
+        const stCanonicalPath = subtaskWorktreeBasePath(pipeline.worktreePath, subtask.id);
         const stBranch = pipeline.branch + '-st' + subtask.id;
 
         // Defect 4: auto-recover unintegrated commits from a previous run
@@ -1986,21 +1987,30 @@ export async function runImplement(
         // nothing is ever visible here via existsSync, yet git still
         // considers the branch checked out (and refuses `branch -D`) until
         // that registration is cleared.
-        try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); }
+        try { deps.execGit(['worktree', 'remove', '--force', stCanonicalPath], deps.projectRoot); }
         catch (err) {
           // Log rather than swallow: a failed worktree removal is the root
           // cause of the "branch still checked out" failures downstream, and
           // previously it was invisible.
-          logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to remove per-subtask worktree ${stWorktreePath}: ${err instanceof Error ? err.message : String(err)}\n`);
+          logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to remove per-subtask worktree ${stCanonicalPath}: ${err instanceof Error ? err.message : String(err)}\n`);
         }
-        if (existsSync(stWorktreePath)) {
-          logToOutput(pipeline.specPath, '\n[WORKTREE] Per-subtask worktree at ' + stWorktreePath + ' still exists after git-level removal — falling back to rmSync\n');
-          try { rmSync(stWorktreePath, { recursive: true, force: true }); }
+        if (existsSync(stCanonicalPath)) {
+          logToOutput(pipeline.specPath, '\n[WORKTREE] Per-subtask worktree at ' + stCanonicalPath + ' still exists after git-level removal — falling back to rmSync\n');
+          try { rmSync(stCanonicalPath, { recursive: true, force: true }); }
           catch (err) {
-            logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to rmSync per-subtask worktree ${stWorktreePath}: ${err instanceof Error ? err.message : String(err)}\n`);
+            logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to rmSync per-subtask worktree ${stCanonicalPath}: ${err instanceof Error ? err.message : String(err)}\n`);
           }
         }
-        removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
+        removeStaleWorktreeRegistration(deps.projectRoot, stCanonicalPath);
+
+        // Never depend on the old directory actually going away: if something
+        // (a scanner, an orphaned process — on any OS) still holds it, take the
+        // next free -r<N> path instead of failing the task. The abandoned
+        // directory is reclaimed by the startup sweep once the lock clears.
+        const stWorktreePath = pickFreshSubtaskWorktreePath(stCanonicalPath);
+        if (stWorktreePath !== stCanonicalPath) {
+          logToOutput(pipeline.specPath, `\n[WORKTREE] ${stCanonicalPath} is still locked after cleanup — using ${stWorktreePath} for subtask ${subtask.id} instead of failing the task\n`);
+        }
 
         if (canRecreate) {
           try { execFileSync('git', ['branch', '-D', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' }); }
@@ -2047,6 +2057,7 @@ export async function runImplement(
         }
 
         subtaskWorktrees.set(subtask.id, stWorktreePath);
+        recordSubtaskWorktree(pipeline.specPath, subtask.id, stWorktreePath);
         logToOutput(pipeline.specPath, '\n[WORKTREE] Created isolated worktree for subtask ' + subtask.id + ' at ' + stWorktreePath + '\n');
       }
     } else {
@@ -2061,8 +2072,8 @@ export async function runImplement(
       // expected artifact, which live relative to the isolated worktree.
       const resuming = subtasks.find(s => s.id === pipeline.wakeupSubtaskId);
       if (resuming) {
-        const stWorktreePath = pipeline.worktreePath + '-st' + resuming.id;
-        if (existsSync(stWorktreePath)) {
+        const stWorktreePath = resolveSubtaskWorktreePath(pipeline.specPath, pipeline.worktreePath, resuming.id);
+        if (stWorktreePath) {
           subtaskWorktrees.set(resuming.id, stWorktreePath);
           if (containerWorkspace) {
             // Idempotent — cheap insurance in case the worktree was reset to

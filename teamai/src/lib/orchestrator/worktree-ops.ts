@@ -11,6 +11,7 @@ import { TaskStore } from '../task-store';
 import { warn as logWarn } from '../logger';
 import { getWorktreeBase, resolveWorktreeDirName } from './helpers';
 import { removeStaleWorktreeRegistration } from './worktree-utils';
+import { clearSubtaskWorktreeRecord } from './subtask-worktree-paths';
 import type { TaskPipeline } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -22,19 +23,13 @@ export interface WorktreeOpsDeps {
   projectRoot: string;
 }
 
-export interface SubtaskCleanupDeps extends WorktreeOpsDeps {
-  /** Retry-then-throw directory removal (clearWorktreeDirectoryOrThrow). */
-  clearWorktreeDirectory: (
-    worktreePath: string,
-    deps: { exists: (p: string) => boolean; rm: (p: string) => void; pruneWorktrees: () => void },
-  ) => Promise<void>;
-}
+export type SubtaskCleanupDeps = WorktreeOpsDeps;
 
 export interface RemoveWorktreeDeps extends WorktreeOpsDeps {
   taskStore: TaskStore;
 }
 
-type SubtaskWorktreePipeline = Pick<TaskPipeline, 'worktreePath' | 'branch'>;
+type SubtaskWorktreePipeline = Pick<TaskPipeline, 'worktreePath' | 'branch'> & { specPath?: string };
 
 // ── Unpushed-commit detection ─────────────────────────────────────────────
 
@@ -74,13 +69,15 @@ export function getWorktreePath(
 
 /**
  * Clean up stale per-subtask worktrees from a previous crashed run (AC9).
- * Scans for directories matching <worktree-base>/<task-slug>-st* and removes
- * them along with their branches and git worktree metadata.
+ * Scans for directories matching <worktree-base>/<task-slug>-st<N>[-r<M>] and
+ * removes them along with their branches and git worktree metadata.
  *
- * A directory that survives `git worktree remove --force` (e.g. a file held
- * open by an orphaned process on Windows) is retried and, if it never
- * clears, fails with WORKTREE_LOCKED rather than letting the later
- * `git worktree add` crash with an opaque "already exists".
+ * Strictly best-effort and never throws or waits: a directory that survives
+ * removal (a file held open by a scanner or orphaned process — on any OS) is
+ * simply left behind. The next subtask worktree takes a fresh path
+ * (pickFreshSubtaskWorktreePath) so the run never depends on this cleanup
+ * succeeding, and sweepAbandonedWorktreeRemnants reclaims the leftover at
+ * the next server startup, once the lock has gone.
  */
 export async function cleanStaleSubtaskWorktrees(
   pipeline: SubtaskWorktreePipeline,
@@ -100,29 +97,59 @@ export async function cleanStaleSubtaskWorktrees(
 
   for (const entry of entries) {
     if (!entry.name.startsWith(prefix)) continue;
-    if (!entry.name.slice(prefix.length).match(/^\d+$/)) continue;
+    const suffix = entry.name.slice(prefix.length);
+    if (!/^\d+(-r\d+)?$/.test(suffix)) continue;
     const stPath = path.join(worktreeBase, entry.name);
-    const stBranch = pipeline.branch + entry.name.slice(slug.length);
+    // Relocated variants (-st1-r2) share the canonical subtask branch (-st1).
+    const stBranch = pipeline.branch + '-st' + suffix.replace(/-r\d+$/, '');
 
     try {
       deps.execGit(['worktree', 'remove', '--force', stPath], deps.projectRoot);
     } catch {
-      try { rmSync(stPath, { recursive: true, force: true }); } catch { /* best-effort */ }
-      removeStaleWorktreeRegistration(deps.projectRoot, stPath);
+      try { rmSync(stPath, { recursive: true, force: true }); } catch { /* locked — left for the startup sweep */ }
     }
-
-    if (existsSync(stPath)) {
-      await deps.clearWorktreeDirectory(stPath, {
-        exists: existsSync,
-        rm: (p) => rmSync(p, { recursive: true, force: true }),
-        pruneWorktrees: () => removeStaleWorktreeRegistration(deps.projectRoot, stPath),
-      });
-    }
+    // Unconditional: deregisters the worktree even when the directory itself
+    // couldn't be deleted, so the branch below is no longer "checked out".
+    removeStaleWorktreeRegistration(deps.projectRoot, stPath);
 
     try {
       execFileSync('git', ['branch', '-D', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
     } catch { /* best-effort */ }
   }
+
+  if (pipeline.specPath) clearSubtaskWorktreeRecord(pipeline.specPath);
+}
+
+const REMNANT_NAME = /-(?:st\d+(?:-r\d+)?|r\d+)$/;
+
+/**
+ * Startup sweep: delete leftover worktree directories that an earlier run
+ * abandoned because they were locked at the time. Only touches directories
+ * named like a subtask or relocated worktree (`*-st<N>`, `*-st<N>-r<M>`,
+ * `*-r<M>`) that have no `.git` entry — a live worktree always has one, so
+ * this can never remove a usable worktree (including a container-patched one
+ * whose registration is invisible from the host). Silent on any failure: a
+ * directory that is still locked is simply retried at the next startup.
+ *
+ * @returns the paths that were removed
+ */
+export function sweepAbandonedWorktreeRemnants(projectRoot: string): string[] {
+  const removed: string[] = [];
+  try {
+    const worktreeBase = getWorktreeBase(projectRoot);
+    if (!existsSync(worktreeBase)) return removed;
+    for (const entry of readdirSync(worktreeBase, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !REMNANT_NAME.test(entry.name)) continue;
+      const dir = path.join(worktreeBase, entry.name);
+      if (existsSync(path.join(dir, '.git'))) continue; // live worktree — leave it
+      try {
+        rmSync(dir, { recursive: true, force: true });
+        removed.push(dir);
+      } catch { /* still locked — try again next startup */ }
+      removeStaleWorktreeRegistration(projectRoot, dir);
+    }
+  } catch { /* best-effort */ }
+  return removed;
 }
 
 // ── Worktree removal ──────────────────────────────────────────────────────
