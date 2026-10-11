@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { mkdtempSync, mkdirSync, existsSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { cleanStaleSubtaskWorktrees, sweepAbandonedWorktreeRemnants } from '../../src/lib/orchestrator/worktree-ops';
+import { removeDirBestEffort } from '../../src/lib/orchestrator/worktree-utils';
 import {
   subtaskWorktreeBasePath, pickFreshSubtaskWorktreePath, recordSubtaskWorktree,
   resolveSubtaskWorktreePath, clearSubtaskWorktreeRecord,
@@ -29,7 +30,10 @@ describe('subtask worktree stale handling', () => {
   let specPath: string;
   let pipeline: { worktreePath: string; branch: string; specPath: string };
 
+  let warn: MockInstance;
+
   beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     root = mkdtempSync(path.join(os.tmpdir(), 'stale-st-'));
     projectRoot = path.join(root, 'project');
     base = path.join(root, 'worktrees');
@@ -42,6 +46,7 @@ describe('subtask worktree stale handling', () => {
   });
 
   afterEach(() => {
+    warn.mockRestore();
     fsFaults.rmSyncFails = false;
     rmSync(root, { recursive: true, force: true });
   });
@@ -73,6 +78,9 @@ describe('subtask worktree stale handling', () => {
       try {
         await expect(cleanStaleSubtaskWorktrees(pipeline, { execGit, projectRoot })).resolves.toBeUndefined();
         expect(existsSync(path.join(base, 'my-task-st1'))).toBe(true);
+        // ...but the failure is not silent.
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining(path.join(base, 'my-task-st1')));
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('EBUSY'));
       } finally {
         fsFaults.rmSyncFails = false;
       }
@@ -120,6 +128,21 @@ describe('subtask worktree stale handling', () => {
     });
   });
 
+  describe('removeDirBestEffort', () => {
+    it('returns true and stays quiet when the directory is removed', () => {
+      expect(removeDirBestEffort(path.join(base, 'my-task-st1'), 'test')).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('logs the cause, reports to the task log, and returns false on failure', () => {
+      const onFailure = vi.fn();
+      fsFaults.rmSyncFails = true;
+      expect(removeDirBestEffort(path.join(base, 'my-task-st1'), 'unit test', onFailure)).toBe(false);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('EBUSY'));
+      expect(onFailure).toHaveBeenCalledWith(expect.stringContaining('unit test'));
+    });
+  });
+
   describe('sweepAbandonedWorktreeRemnants', () => {
     it('removes locked-remnant directories that have no .git', () => {
       mkdirSync(path.join(base, 'my-task-st1-r2', 'teamai', 'node_modules'), { recursive: true });
@@ -127,6 +150,12 @@ describe('subtask worktree stale handling', () => {
       expect(removed).toContain(path.join(base, 'my-task-st1-r2'));
       expect(removed).toContain(path.join(base, 'my-task-st1'));
       expect(existsSync(path.join(base, 'my-task-st1'))).toBe(false);
+    });
+
+    it('logs, and does not report as removed, a remnant that is still locked', () => {
+      fsFaults.rmSyncFails = true;
+      expect(sweepAbandonedWorktreeRemnants(projectRoot)).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('startup sweep'));
     });
 
     it('never removes a live worktree (has a .git entry)', () => {

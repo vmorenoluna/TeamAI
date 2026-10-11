@@ -23,7 +23,7 @@ import { humanDirectiveFor, readHumanFeedback } from './human-feedback';
 import { renderCommand } from '../command-templates';
 import { resolveBaseBranch } from '../git-platform';
 import { getUnpushedCommits } from './worktree-ops';
-import { removeStaleWorktreeRegistration } from './worktree-utils';
+import { removeStaleWorktreeRegistration, removeDirBestEffort } from './worktree-utils';
 import { subtaskWorktreeBasePath, pickFreshSubtaskWorktreePath, recordSubtaskWorktree, resolveSubtaskWorktreePath } from './subtask-worktree-paths';
 import { warn } from '../logger';
 import {
@@ -1733,7 +1733,9 @@ export async function integrateGroup(
     for (const [id, stWorktreePath] of subtaskWorktrees.entries()) {
       if (id === pipeline.wakeupSubtaskId) continue;
       try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch {
-        try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+        removeDirBestEffort(stWorktreePath, `subtask ${id} worktree, after integration`, (m) => logToOutput(pipeline.specPath, `
+[WORKTREE] ${m}
+`));
         removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
       }
       try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }

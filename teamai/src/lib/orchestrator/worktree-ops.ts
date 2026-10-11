@@ -5,12 +5,12 @@
  * spy on orchestrator methods via the delegate pattern.
  */
 import { execFileSync } from 'child_process';
-import { existsSync, readdirSync, rmSync, appendFileSync } from 'fs';
+import { existsSync, readdirSync, appendFileSync } from 'fs';
 import path from 'path';
 import { TaskStore } from '../task-store';
 import { warn as logWarn } from '../logger';
 import { getWorktreeBase, resolveWorktreeDirName } from './helpers';
-import { removeStaleWorktreeRegistration } from './worktree-utils';
+import { removeStaleWorktreeRegistration, removeDirBestEffort } from './worktree-utils';
 import { clearSubtaskWorktreeRecord } from './subtask-worktree-paths';
 import type { TaskPipeline } from './types';
 
@@ -105,9 +105,10 @@ export async function cleanStaleSubtaskWorktrees(
 
     try {
       deps.execGit(['worktree', 'remove', '--force', stPath], deps.projectRoot);
-    } catch {
-      try { rmSync(stPath, { recursive: true, force: true }); } catch { /* locked — left for the startup sweep */ }
-    }
+    } catch { /* fall through to direct removal below */ }
+    // git can deregister a worktree yet leave the directory behind (a locked
+    // file), so check the directory itself rather than trusting git's result.
+    if (existsSync(stPath)) removeDirBestEffort(stPath, 'stale subtask worktree from an earlier run');
     // Unconditional: deregisters the worktree even when the directory itself
     // couldn't be deleted, so the branch below is no longer "checked out".
     removeStaleWorktreeRegistration(deps.projectRoot, stPath);
@@ -142,13 +143,12 @@ export function sweepAbandonedWorktreeRemnants(projectRoot: string): string[] {
       if (!entry.isDirectory() || !REMNANT_NAME.test(entry.name)) continue;
       const dir = path.join(worktreeBase, entry.name);
       if (existsSync(path.join(dir, '.git'))) continue; // live worktree — leave it
-      try {
-        rmSync(dir, { recursive: true, force: true });
-        removed.push(dir);
-      } catch { /* still locked — try again next startup */ }
+      if (removeDirBestEffort(dir, 'abandoned worktree remnant, startup sweep')) removed.push(dir);
       removeStaleWorktreeRegistration(projectRoot, dir);
     }
-  } catch { /* best-effort */ }
+  } catch (err) {
+    logWarn('worktree', 'Startup sweep of abandoned worktree remnants failed', err);
+  }
   return removed;
 }
 
@@ -212,7 +212,7 @@ export function removeWorktree(
       deps.execGit(['worktree', 'remove', '--force', wtPath], deps.projectRoot);
     } catch {
       // Worktree is stuck (files locked) — delete manually + prune
-      try { rmSync(wtPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+      removeDirBestEffort(wtPath, `task ${taskId} worktree`);
       removeStaleWorktreeRegistration(deps.projectRoot, wtPath);
     }
   }
