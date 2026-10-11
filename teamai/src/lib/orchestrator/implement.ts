@@ -23,7 +23,8 @@ import { humanDirectiveFor, readHumanFeedback } from './human-feedback';
 import { renderCommand } from '../command-templates';
 import { resolveBaseBranch } from '../git-platform';
 import { getUnpushedCommits } from './worktree-ops';
-import { removeStaleWorktreeRegistration } from './worktree-utils';
+import { removeStaleWorktreeRegistration, removeDirBestEffort } from './worktree-utils';
+import { subtaskWorktreeBasePath, pickFreshSubtaskWorktreePath, nextFreeRelocationPath, recordSubtaskWorktree, resolveSubtaskWorktreePath } from './subtask-worktree-paths';
 import { warn } from '../logger';
 import {
   scanWakeupFilesWithRetry, parseWakeupFile, computeNextAttemptCount, isGenuineRelaunch,
@@ -154,8 +155,6 @@ export function preserveUncommittedWork(pipeline: ImplementPipeline, deps: Imple
   } catch { /* best-effort — never block teardown on this */ }
 }
 
-const WORKTREE_RELOCATE_MAX_SUFFIX = 5;
-
 /**
  * Find the first available `<original-dirname>-rN` path (N=2..5) not
  * currently occupied on disk, switch the pipeline to it, and persist the
@@ -180,25 +179,26 @@ export function relocateStuckWorktree(pipeline: ImplementPipeline, deps: Impleme
   const originalDirName = path.basename(pipeline.worktreePath);
   const baseDirName = originalDirName.replace(/-r\d+$/, ''); // don't stack suffixes on repeated relocations
 
-  for (let n = 2; n <= WORKTREE_RELOCATE_MAX_SUFFIX; n++) {
-    const candidateDirName = `${baseDirName}-r${n}`;
-    const candidatePath = path.join(worktreeBase, candidateDirName);
-    if (existsSync(candidatePath)) continue;
-
-    logToOutput(pipeline.specPath,
-      `[WORKTREE] ${originalDirName} still locked after cleanup retries — relocating to ${candidateDirName} instead of failing the task\n`
+  let candidatePath: string;
+  try {
+    candidatePath = nextFreeRelocationPath(path.join(worktreeBase, baseDirName));
+  } catch (err) {
+    // Thousands of abandoned directories means something is creating them in a
+    // loop — not a transient lock — so surface it rather than papering over it.
+    throw new WorktreeError(
+      `Worktree directory at ${pipeline.worktreePath} could not be removed, and no free relocation ` +
+      `slot is left for "${baseDirName}" under ${worktreeBase} (${err instanceof Error ? err.message : String(err)}). ` +
+      `Clear out stale "${baseDirName}-r*" directories and retry the task.`,
+      'WORKTREE_LOCKED',
     );
-    pipeline.worktreePath = candidatePath;
-    deps.taskStore.update(pipeline.taskId, { worktreeDirName: candidateDirName });
-    return;
   }
+  const candidateDirName = path.basename(candidatePath);
 
-  throw new WorktreeError(
-    `Worktree directory at ${pipeline.worktreePath} could not be removed, and every relocation ` +
-    `slot up to ${baseDirName}-r${WORKTREE_RELOCATE_MAX_SUFFIX} is also occupied. Manually clear out ` +
-    `stale "${baseDirName}-r*" directories under ${worktreeBase} and retry the task.`,
-    'WORKTREE_LOCKED',
+  logToOutput(pipeline.specPath,
+    `[WORKTREE] ${originalDirName} still locked after cleanup retries — relocating to ${candidateDirName} instead of failing the task\n`
   );
+  pipeline.worktreePath = candidatePath;
+  deps.taskStore.update(pipeline.taskId, { worktreeDirName: candidateDirName });
 }
 
 /**
@@ -237,7 +237,7 @@ export function sweepAbandonedWorktreeRelocations(pipeline: ImplementPipeline, d
       if (!/^\d+$/.test(entry.name.slice(baseDirName.length + 2))) continue;
       const candidatePath = path.join(worktreeBase, entry.name);
       if (registered.has(path.resolve(candidatePath))) continue; // live worktree — leave it
-      try { rmSync(candidatePath, { recursive: true, force: true }); } catch { /* still locked — try again next run */ }
+      removeDirBestEffort(candidatePath, `abandoned relocation of task ${pipeline.taskId}'s worktree`, (m) => logToOutput(pipeline.specPath, `[WORKTREE] ${m}\n`));
     }
   } catch { /* best-effort */ }
 }
@@ -1732,7 +1732,7 @@ export async function integrateGroup(
     for (const [id, stWorktreePath] of subtaskWorktrees.entries()) {
       if (id === pipeline.wakeupSubtaskId) continue;
       try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch {
-        try { rmSync(stWorktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+        removeDirBestEffort(stWorktreePath, `subtask ${id} worktree, after integration`, (m) => logToOutput(pipeline.specPath, `\n[WORKTREE] ${m}\n`));
         removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
       }
       try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
@@ -1970,7 +1970,7 @@ export async function runImplement(
     // Per-subtask worktree isolation
     if (isMultiGroup) {
       for (const subtask of subtasks) {
-        const stWorktreePath = pipeline.worktreePath + '-st' + subtask.id;
+        const stCanonicalPath = subtaskWorktreeBasePath(pipeline.worktreePath, subtask.id);
         const stBranch = pipeline.branch + '-st' + subtask.id;
 
         // Defect 4: auto-recover unintegrated commits from a previous run
@@ -1986,21 +1986,30 @@ export async function runImplement(
         // nothing is ever visible here via existsSync, yet git still
         // considers the branch checked out (and refuses `branch -D`) until
         // that registration is cleared.
-        try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); }
+        try { deps.execGit(['worktree', 'remove', '--force', stCanonicalPath], deps.projectRoot); }
         catch (err) {
           // Log rather than swallow: a failed worktree removal is the root
           // cause of the "branch still checked out" failures downstream, and
           // previously it was invisible.
-          logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to remove per-subtask worktree ${stWorktreePath}: ${err instanceof Error ? err.message : String(err)}\n`);
+          logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to remove per-subtask worktree ${stCanonicalPath}: ${err instanceof Error ? err.message : String(err)}\n`);
         }
-        if (existsSync(stWorktreePath)) {
-          logToOutput(pipeline.specPath, '\n[WORKTREE] Per-subtask worktree at ' + stWorktreePath + ' still exists after git-level removal — falling back to rmSync\n');
-          try { rmSync(stWorktreePath, { recursive: true, force: true }); }
+        if (existsSync(stCanonicalPath)) {
+          logToOutput(pipeline.specPath, '\n[WORKTREE] Per-subtask worktree at ' + stCanonicalPath + ' still exists after git-level removal — falling back to rmSync\n');
+          try { rmSync(stCanonicalPath, { recursive: true, force: true }); }
           catch (err) {
-            logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to rmSync per-subtask worktree ${stWorktreePath}: ${err instanceof Error ? err.message : String(err)}\n`);
+            logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to rmSync per-subtask worktree ${stCanonicalPath}: ${err instanceof Error ? err.message : String(err)}\n`);
           }
         }
-        removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
+        removeStaleWorktreeRegistration(deps.projectRoot, stCanonicalPath);
+
+        // Never depend on the old directory actually going away: if something
+        // (a scanner, an orphaned process — on any OS) still holds it, take the
+        // next free -r<N> path instead of failing the task. The abandoned
+        // directory is reclaimed by the startup sweep once the lock clears.
+        const stWorktreePath = pickFreshSubtaskWorktreePath(stCanonicalPath);
+        if (stWorktreePath !== stCanonicalPath) {
+          logToOutput(pipeline.specPath, `\n[WORKTREE] ${stCanonicalPath} is still locked after cleanup — using ${stWorktreePath} for subtask ${subtask.id} instead of failing the task\n`);
+        }
 
         if (canRecreate) {
           try { execFileSync('git', ['branch', '-D', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' }); }
@@ -2047,6 +2056,7 @@ export async function runImplement(
         }
 
         subtaskWorktrees.set(subtask.id, stWorktreePath);
+        recordSubtaskWorktree(pipeline.specPath, subtask.id, stWorktreePath);
         logToOutput(pipeline.specPath, '\n[WORKTREE] Created isolated worktree for subtask ' + subtask.id + ' at ' + stWorktreePath + '\n');
       }
     } else {
@@ -2061,8 +2071,8 @@ export async function runImplement(
       // expected artifact, which live relative to the isolated worktree.
       const resuming = subtasks.find(s => s.id === pipeline.wakeupSubtaskId);
       if (resuming) {
-        const stWorktreePath = pipeline.worktreePath + '-st' + resuming.id;
-        if (existsSync(stWorktreePath)) {
+        const stWorktreePath = resolveSubtaskWorktreePath(pipeline.specPath, pipeline.worktreePath, resuming.id);
+        if (stWorktreePath) {
           subtaskWorktrees.set(resuming.id, stWorktreePath);
           if (containerWorkspace) {
             // Idempotent — cheap insurance in case the worktree was reset to
