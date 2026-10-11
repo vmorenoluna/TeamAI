@@ -336,7 +336,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
       );
       expect(call).toBeDefined();
       const args = call![1] as string[];
-      expect(args.slice(0, 3)).toEqual(['exec', 'devcontainer-trust-test', 'node']);
+      expect(args.slice(0, 5)).toEqual(['exec', '-u', 'node', 'devcontainer-trust-test', 'node']);
       expect(args[args.length - 1]).toBe('/workspaces/project');
       expect(args.join(' ')).toContain('hasTrustDialogAccepted');
     });
@@ -375,7 +375,7 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
 
       expect(info).toEqual({ containerId: 'adopted-container', remoteWorkspaceFolder: '/workspaces/project' });
       expect(trustCalls()).toHaveLength(1);
-      expect((trustCalls()[0][1] as string[]).slice(0, 3)).toEqual(['exec', 'adopted-container', 'node']);
+      expect((trustCalls()[0][1] as string[]).slice(0, 5)).toEqual(['exec', '-u', 'node', 'adopted-container', 'node']);
     });
 
     it('records trust only once per container, not on every ensureContainer call', async () => {
