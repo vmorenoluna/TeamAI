@@ -352,6 +352,9 @@ export class Orchestrator {
         throw new ContainerDockerMissingError(this.projectRoot);
       }
     }
+    // Only await when container mode is on: with it off this must stay synchronous,
+    // since callers observe the freshly registered pipeline right after runTask().
+    if (containerCfg.enabled) await this._requireValidContainer();
 
     // Prevent concurrent runs of the same task
     if (this.activeTasks.has(taskId)) {
@@ -537,6 +540,26 @@ export class Orchestrator {
     return 'failed';
   }
 
+  /**
+   * Container-validity gate: an invalid container setup always blocks. With
+   * container mode on, make sure the container is up and has passed validation
+   * (ensureContainer runs it when this exact setup hasn't been validated yet)
+   * BEFORE a task starts or advances, so nothing runs in — and no tokens are
+   * spent on — an environment that cannot build the project. Other container
+   * start-up errors are left to the pipeline's own start-up path, which reports
+   * them with full context.
+   */
+  private async _requireValidContainer(): Promise<void> {
+    try {
+      await containerManager.ensureContainer(this.projectRoot);
+    } catch (err) {
+      if (err instanceof OrchestratorError && err.code === 'CONTAINER_INVALID') {
+        processManager.emit('container-validation-failed', { projectRoot: this.projectRoot, message: err.message });
+        throw err;
+      }
+    }
+  }
+
   private async executePhase(pipeline: TaskPipeline): Promise<void> {
     // Cooperative pause/cancellation check: cancelPipeline deletes the
     // pipeline from this.pipelines, and a restart/move creates a fresh
@@ -571,6 +594,7 @@ export class Orchestrator {
           throw new ContainerDockerMissingError(this.projectRoot);
         }
       }
+      if (containerCfg.enabled) await this._requireValidContainer();
     }
 
     switch (pipeline.phase) {

@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
+import { findProjectDir } from './container-validation';
 
 export interface ProjectInfo {
   type: 'node' | 'python' | 'go' | 'rust' | 'jvm' | 'generic';
@@ -11,6 +12,8 @@ export interface ProjectInfo {
   jvmBuildTool?: 'maven' | 'gradle' | 'sbt';
   packageManager?: 'npm' | 'yarn' | 'pnpm' | 'bun';
   hasTypeScript?: boolean;
+  /** Where the project lives relative to the analysed root, '/'-separated; '' = the root itself. */
+  relativeDir?: string;
   /** Discovered from README/docs, or heuristic fallback */
   installCommand: string;
   /** Discovered from README/docs, or heuristic fallback */
@@ -34,6 +37,16 @@ interface DocCommands {
  *   3. Language-specific heuristics                         ← sensible defaults
  */
 export function analyzeProject(projectRoot: string): ProjectInfo {
+  // Repos often keep the buildable project in a subdirectory (src/, app/, ...).
+  // Analysing only the root would see "no project" and produce a no-op setup.
+  const relativeDir = findProjectDir(projectRoot);
+  if (relativeDir) {
+    return { ...analyzeDirectory(join(projectRoot, relativeDir)), relativeDir };
+  }
+  return analyzeDirectory(projectRoot);
+}
+
+function analyzeDirectory(projectRoot: string): ProjectInfo {
   const files = readdirSync(projectRoot);
 
   // ── Detect project type ────────────────────────────────────────────────
@@ -479,6 +492,10 @@ interface TemplateVars {
   GO_VERSION: string;
   RUST_VERSION: string;
   JVM_VERSION: string;
+  /** '' for a root project, otherwise 'sub/dir/' — prefixes paths relative to the workspace. */
+  PROJECT_PREFIX: string;
+  /** The project directory relative to the workspace ('.' for the root). */
+  PROJECT_DIR: string;
   INSTALL_COMMAND: string;
   BUILD_COMMAND: string;
   TEST_COMMAND: string;
@@ -550,6 +567,8 @@ function buildTemplateVars(info: ProjectInfo): TemplateVars {
     GO_VERSION: info.goVersion || '1',
     RUST_VERSION: info.rustVersion || '1',
     JVM_VERSION: info.jvmVersion || '21',
+    PROJECT_PREFIX: info.relativeDir ? `${info.relativeDir}/` : '',
+    PROJECT_DIR: info.relativeDir || '.',
     INSTALL_COMMAND: info.installCommand,
     BUILD_COMMAND: info.buildCommand,
     TEST_COMMAND: info.testCommand,

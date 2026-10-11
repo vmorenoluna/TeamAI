@@ -177,6 +177,16 @@ Without this, re-enabling auto mode only picks up *future* phase-change events �
 
 **CI polling:** After a PR is created (`pr-open` phase), auto mode polls `gh pr view` every 30 seconds. When all status checks pass, it auto-merges via `gh pr merge --merge`, calls `markTaskDone`, and sets `autoProcessed: true` on the task. The UI shows a "Mark Reviewed" button for auto-processed tasks so the user can acknowledge they reviewed the auto-merged PR.
 
+### Container Validation Gate
+
+With container mode on, an invalid container setup **always blocks** — it is never a warning. `ContainerManager.ensureContainer()` (the singleton is created with `enforceValidation: true`) only hands out a container whose current setup has passed validation, and throws `ContainerValidationError` (`CONTAINER_INVALID`) otherwise. The orchestrator also runs the same check before a task starts and before each phase (`_requireValidContainer`, next to the Docker-missing gate), so a task never starts in — or spends tokens on — an environment that cannot build the project.
+
+- **Steps** (`validateContainer`): agent tooling → **native modules** (Node projects: fails when `node_modules` holds native packages only for other platforms — a host-installed tree shared into the container) → install → build → tests, run in the project directory found by `findProjectDir()` (the root, or up to two levels down — `teamai/` here), so a repo with its source in a subdirectory is not validated as an empty "generic" project.
+- **Persisted result:** `.teamai/container-validation.json`, keyed by a fingerprint of the devcontainer definition, dependency lockfiles, validation commands and the container id. A passing result is reused until any of those change; a **failed** result is re-run on every start attempt (so fixing the environment unblocks the next attempt without ceremony).
+- **Auto mode** pauses picking up work while the persisted result is a failure (`isContainerBlocked`, no Docker call per tick); editing `devcontainer.json` after the failure, or Settings → Container → **Re-validate**, lifts it. A task that has not started stays in the backlog (a gate, not a failure); one already mid-pipeline when the container goes invalid fails with `CONTAINER_INVALID` and can simply be retried once the container is fixed.
+- **When it runs:** on first start of a new/changed setup via the gate, and whenever container mode is enabled in Settings (also for a hand-written `devcontainer.json`, not only a generated one).
+- **Templates:** the Node devcontainer template shadows `node_modules` with a named volume (`{{PROJECT_PREFIX}}node_modules`) and installs into it on create, so the container never shares the host's platform-specific tree.
+
 ### Role Refinement Assistant
 
 The Role Refinement Assistant (`src/lib/role-refinement.ts`) investigates *failed* tasks and decides whether a project's **role prompts** (`.claude/roles/*.md`) are the root cause. When a task fails, a headless analysis agent reads the failure artifacts (QA report, plan, event history) plus the five role files and classifies the cause:
