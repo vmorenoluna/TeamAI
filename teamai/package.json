@@ -86,8 +86,8 @@
   },
   "lint-staged": {
     "*.{ts,tsx,mts}": [
-      "eslint --fix",
-      "eslint --max-warnings 0"
+      "eslint --fix --no-warn-ignored",
+      "eslint --max-warnings 0 --no-warn-ignored"
     ]
   },
   "build": {

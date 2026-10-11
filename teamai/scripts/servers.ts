@@ -51,8 +51,9 @@ function readConfigPort(
   regex: RegExp,
   configLabel: string,
   literalHint: string,
+  root: string,
 ): number {
-  const absolutePath = join(PROJECT_ROOT, relativePath);
+  const absolutePath = join(root, relativePath);
   if (!existsSync(absolutePath)) {
     throw new Error(
       `${configLabel} not found at ${absolutePath}. Cannot resolve port.`,
@@ -72,12 +73,13 @@ function readConfigPort(
 // ── Test server (Playwright) ────────────────────────────────────────────────
 
 /** Port for `npm run test:e2e` — read from playwright.config.ts. */
-export function getTestPort(): number {
+export function getTestPort(root: string = PROJECT_ROOT): number {
   return readConfigPort(
     'playwright.config.ts',
     /PORT:\s*['"](\d+)['"]/,
     'playwright.config.ts',
     "`PORT: '<digits>'` in webServer.env",
+    root,
   );
 }
 
@@ -88,12 +90,13 @@ export function getTestServerUrl(): string {
 // ── Dev server ──────────────────────────────────────────────────────────────
 
 /** Port for `npm run dev` — read from package.json's `dev` script. */
-export function getDevPort(): number {
+export function getDevPort(root: string = PROJECT_ROOT): number {
   return readConfigPort(
     'package.json',
     /"dev":\s*"[^"]*PORT=(\d+)[^"]*"/,
     "package.json's dev script",
     '`PORT=<digits>` in the dev script command',
+    root,
   );
 }
 
@@ -106,14 +109,19 @@ export function getDevServerUrl(): string {
 // re-introduce the collision the split was designed to prevent. Runs at
 // module load so the error surfaces before any consumer does real work.
 
-if (getDevPort() === getTestPort()) {
-  throw new Error(
-    `Dev and test ports are both ${getDevPort()}; they must differ so ` +
-    `'npm run dev' and 'npm run test:e2e' can coexist. Update the PORT=... ` +
-    `literal in package.json's dev script and/or the PORT literal in ` +
-    `playwright.config.ts.`,
-  );
+/** Throws when the dev and test ports of the project at `root` are equal. */
+export function assertPortsDiffer(root: string = PROJECT_ROOT): void {
+  if (getDevPort(root) === getTestPort(root)) {
+    throw new Error(
+      `Dev and test ports are both ${getDevPort(root)}; they must differ so ` +
+      `'npm run dev' and 'npm run test:e2e' can coexist. Update the PORT=... ` +
+      `literal in package.json's dev script and/or the PORT literal in ` +
+      `playwright.config.ts.`,
+    );
+  }
 }
+
+assertPortsDiffer();
 
 // ── CLI entry ───────────────────────────────────────────────────────────────
 // Usage: npx tsx scripts/servers.ts <test|dev> [--url]

@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, readdirSync, renameSync, rmSync, appendFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
 import { error as logError, warn as logWarn } from './logger';
@@ -13,6 +13,17 @@ import { listCommandNames, readCommandTemplate } from './command-templates';
  * 3. ~/.teamai/ (production)
  */
 function resolveConfigDir(): string {
+  const dir = resolveConfigDirUnchecked();
+  // Test-run safety net: vitest's global setup exports the real user config dir
+  // it must never touch; resolving to it under test is always a bug.
+  const forbidden = process.env.VITEST ? process.env.TEAMAI_TEST_FORBIDDEN_CONFIG : undefined;
+  if (forbidden && resolve(dir).toLowerCase() === resolve(forbidden).toLowerCase()) {
+    throw new Error(`Refusing to use the real config dir ${dir} under test.`);
+  }
+  return dir;
+}
+
+function resolveConfigDirUnchecked(): string {
   if (process.env.TEAMAI_CONFIG_DIR) {
     return join(process.env.TEAMAI_CONFIG_DIR, '.teamai');
   }

@@ -11,7 +11,10 @@ import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 
 import { getTestServerUrl } from '../../scripts/servers';
 
 /** Base seed project path — must match seed.ts */
-const BASE_SEED_DIR = resolve(__dirname, '..', '..', '.teamai-e2e-seed');
+// Seeds live in the run's temp config dir (TEAMAI_CONFIG_DIR, set by
+// playwright.config.ts and inherited by workers), never inside the checkout.
+const SEED_ROOT = process.env.TEAMAI_CONFIG_DIR || resolve(__dirname, '..', '..');
+const BASE_SEED_DIR = join(SEED_ROOT, '.teamai-e2e-seed');
 
 /**
  * Per-worker seed directory for isolated parallel execution (T31).
@@ -21,7 +24,7 @@ const BASE_SEED_DIR = resolve(__dirname, '..', '..', '.teamai-e2e-seed');
 export function getActiveSeedDir(): string {
   try {
     const wi = test.info().workerIndex;
-    return resolve(__dirname, '..', '..', `.teamai-e2e-seed-w${wi}`);
+    return join(SEED_ROOT, `.teamai-e2e-seed-w${wi}`);
   } catch {
     return BASE_SEED_DIR;
   }

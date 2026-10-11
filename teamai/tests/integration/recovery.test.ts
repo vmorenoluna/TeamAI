@@ -20,6 +20,11 @@ import { randomUUID } from 'crypto';
 
 const mockHomedir = vi.hoisted(() => vi.fn());
 
+// This file isolates by mocking homedir(); the run-wide TEAMAI_CONFIG_DIR (set by
+// tests/global-setup.ts) would take precedence, so clear it here. Resolving to the real
+// ~/.teamai still throws (see project-store.ts), so a missing mock cannot leak.
+vi.stubEnv('TEAMAI_CONFIG_DIR', '');
+
 vi.mock('os', async () => {
   const actual = await vi.importActual<typeof import('os')>('os');
   return {
