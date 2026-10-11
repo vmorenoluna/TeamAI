@@ -753,6 +753,32 @@ export function deliverableState(
 }
 
 /**
+ * True when every file already differs between the base branch and HEAD, i.e.
+ * an earlier session committed the edit. Git failures return false so the
+ * no-op rejection still applies.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export function filesAlreadyChangedOnBranch(
+  deps: Pick<ImplementDeps, 'execGitCapture' | 'projectRoot'>,
+  cwd: string,
+  files: string[],
+): boolean {
+  if (files.length === 0) return false;
+  const base = resolveBaseBranch(deps.projectRoot);
+  for (const ref of [base, 'origin/' + base]) {
+    try {
+      const changed = new Set(
+        deps.execGitCapture(['diff', '--name-only', ref + '...HEAD', '--', ...files], cwd)
+          .trim().split('\n').filter(Boolean),
+      );
+      return files.every(f => changed.has(f));
+    } catch { /* try the next ref */ }
+  }
+  return false;
+}
+
+/**
  * The instant (epoch seconds) a QA/human rework began — when its feedback file
  * was written — or null when no rework is in play. A rework deliverable only
  * counts once it was committed at or after this instant (author date, which
@@ -1313,7 +1339,17 @@ export async function runSubtaskSession(
         // cost later.
         let sessionSummary = '';
         try { sessionSummary = readFileSync(subtaskLogFile, 'utf-8'); } catch { /* best-effort */ }
-        if (!sessionSummary.includes('[SKIPPED]')) {
+        // An earlier pass may already have committed the edit on the branch
+        // (a retry after a restart or a lost cherry-pick). A session that
+        // finds the work done correctly edits nothing, so the branch — not
+        // this session's diff — decides: every assigned file must already
+        // differ from the base branch.
+        const alreadyOnBranch = filesAlreadyChangedOnBranch(deps, cwd, subtask.files || []);
+        if (alreadyOnBranch) {
+          logToOutput(pipeline.specPath,
+            '\n[VERIFY] Subtask ' + subtask.id + ' made no edit this session, but its assigned files are already changed on the branch — accepting\n'
+          );
+        } else if (!sessionSummary.includes('[SKIPPED]')) {
           scopeViolations.add(subtask.id);
           logToOutput(pipeline.specPath,
             '\n[VERIFY] Subtask ' + subtask.id + ' ended without touching any of its assigned files — no edit was made:\n' +
