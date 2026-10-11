@@ -3,7 +3,13 @@ import { randomUUID } from 'crypto';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-const TEMP_CONFIG_DIR = join(tmpdir(), `teamai-e2e-config-${randomUUID().slice(0, 8)}`);
+// Playwright re-evaluates this file in every worker process. The run's dir is generated once
+// (main process) and handed down through the environment, so the server, globalSetup and
+// every worker agree on it. A dedicated variable is used on purpose: a caller's own
+// TEAMAI_CONFIG_DIR must never be adopted, because setup deletes this directory.
+const TEMP_CONFIG_DIR = process.env.TEAMAI_E2E_RUN_DIR
+  || join(tmpdir(), `teamai-e2e-config-${randomUUID().slice(0, 8)}`);
+process.env.TEAMAI_E2E_RUN_DIR = TEMP_CONFIG_DIR;
 
 // Set in the Playwright process so globalSetup inherits it.
 // webServer is a separate process — its env is set in webServer.env below.

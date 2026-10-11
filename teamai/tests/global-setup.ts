@@ -2,8 +2,8 @@
  * Vitest global setup/teardown — ensures no test projects are left behind.
  *
  * The teardown performs two independent cleanup passes:
- *   1. Catch-all: scans process.cwd() for .teamai-test-* directories and
- *      removes them.  This handles createTestProject() leftovers from
+ *   1. Catch-all: scans the OS temp dir for stale .teamai-test-* directories
+ *      and removes them.  This handles createTestProject() leftovers from
  *      crashed unit/integration tests (their afterEach → clean() never ran).
  *   2. Registered-project cleanup: if TEAMAI_TEST_HOME is set, prunes test
  *      project entries from ~/.teamai/projects.json and removes their
@@ -11,7 +11,8 @@
  *      projects via ProjectStore.add().
  */
 
-import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync, statSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { restoreNodeEnv } from './node-env';
 
@@ -22,31 +23,6 @@ import { restoreNodeEnv } from './node-env';
 const HOME_DIR = process.env.TEAMAI_TEST_HOME;
 const PROJECTS_FILE = HOME_DIR ? join(HOME_DIR, '.teamai', 'projects.json') : '';
 const TEST_PREFIX = '.teamai-test-';
-
-/** Remove stale git lock files from the main repo's .git directory. */
-function cleanStaleGitLocks() {
-  // Tests run from teamai/, so .git is ../.git
-  const repoRoot = join(process.cwd(), '..');
-  const gitDir = join(repoRoot, '.git');
-  if (!existsSync(gitDir)) return;
-
-  try {
-    const entries = readdirSync(gitDir);
-    let removed = 0;
-    for (const entry of entries) {
-      // Match index.lock, next-index-*.lock.lock, and any other git lock files
-      if (!entry.includes('.lock')) continue;
-      const full = join(gitDir, entry);
-      try {
-        rmSync(full, { force: true });
-        removed++;
-      } catch { /* best-effort per file */ }
-    }
-    if (removed > 0) {
-      console.log(`[test-setup] Removed ${removed} stale git lock file(s) from .git/`);
-    }
-  } catch { /* readdir can fail — nothing to clean */ }
-}
 
 /**
  * When vitest runs inside a git hook (e.g. the pre-commit hook running
@@ -68,12 +44,6 @@ function stripInheritedGitEnv() {
 }
 
 export function setup() {
-  // ── Clean stale git lock files from the main repo ──────────────────
-  // When a basher agent times out during git commit, it leaves stale
-  // .git/index.lock (and .git/next-index-*.lock.lock) files that block
-  // ALL subsequent git operations — including test repo init.
-  // The cwd during tests is teamai/, so .git is one level up.
-  cleanStaleGitLocks();
   stripInheritedGitEnv();
 
   // Per-test cleanup is handled by afterEach hooks.
@@ -84,24 +54,19 @@ export function teardown() {
   // Put back the NODE_ENV that vitest.workspace.ts overrode (see node-env.ts).
   restoreNodeEnv();
 
-  // Clean stale git lock files — if tests themselves left any behind
-  // (e.g. a git command was killed mid-flight), don't let them poison
-  // the next run. The setup() also does this, but teardown catches locks
-  // from the current run before anything else touches the repo.
-  cleanStaleGitLocks();
-
   let cleaned = 0;
 
-  // ── Catch-all: remove leftover .teamai-test-* dirs from cwd ──────────
-  // createTestProject() creates temp dirs in process.cwd(). If a test
-  // crashes before its afterEach → clean() runs, the directory lingers.
-  // Scan cwd and remove any that match the prefix.
-  const cwd = process.cwd();
+  // ── Catch-all: remove leftover .teamai-test-* dirs from the OS temp dir ──
+  // createTestProject() creates temp dirs there. If a test crashes before its
+  // afterEach → clean() runs, the directory lingers. Only dirs older than an
+  // hour are swept, so a concurrent test run's live directories are never hit.
+  const cwd = tmpdir();
   try {
     for (const entry of readdirSync(cwd)) {
       if (!entry.startsWith(TEST_PREFIX)) continue;
       const full = join(cwd, entry);
       try {
+        if (Date.now() - statSync(full).mtimeMs < 60 * 60 * 1000) continue;
         rmSync(full, { recursive: true, force: true });
         cleaned++;
       } catch { /* best-effort per directory */ }
@@ -109,7 +74,7 @@ export function teardown() {
   } catch { /* readdir can fail — nothing to clean */ }
 
   if (cleaned > 0) {
-    console.log(`[test-teardown] Removed ${cleaned} leftover test director${cleaned === 1 ? 'y' : 'ies'} from cwd`);
+    console.log(`[test-teardown] Removed ${cleaned} leftover test director${cleaned === 1 ? 'y' : 'ies'} from the temp dir`);
   }
 
   // ── Registered-project cleanup (requires TEAMAI_TEST_HOME) ───────────

@@ -24,7 +24,8 @@ import { listCommandNames, readCommandTemplate } from '../../src/lib/command-tem
 // ── Config ─────────────────────────────────────────────────────────────
 
 const PROJECT_NAME = 'E2E Test Project';
-const SEED_DIR = join(process.cwd(), '.teamai-e2e-seed');
+// Under the isolated config dir when set (test runs); manual seeding falls back to cwd.
+const SEED_DIR = join(process.env.TEAMAI_CONFIG_DIR || process.cwd(), '.teamai-e2e-seed');
 
 /**
  * Resolve the projects.json path, respecting TEAMAI_CONFIG_DIR for isolation.
