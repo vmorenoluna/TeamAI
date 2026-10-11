@@ -1,8 +1,9 @@
 import { execFileSync } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync, rmSync } from 'fs';
 import path from 'path';
 import { readContainerConfig, readContainerRemoteUser, containerManager, hostToContainerPath } from '../container-manager';
 import { getToolPath } from '../tool-checker';
+import { warn as logWarn } from '../logger';
 
 /**
  * Verify the worktree is a valid git worktree (#4).
@@ -183,6 +184,32 @@ export function removeStaleWorktreeRegistration(projectRoot: string, worktreePat
   try {
     execFileSync('git', ['worktree', 'remove', '--force', path.basename(worktreePath)], { cwd: projectRoot, stdio: 'pipe' });
   } catch { /* best-effort */ }
+}
+
+/**
+ * Delete a worktree directory without ever throwing. A directory that is held
+ * open (a scanner, an orphaned process — on any OS) can survive, so a failure
+ * is logged with its cause and the directory is left for the next opportunity
+ * (the next run's cleanup, or the startup sweep) rather than failing the task.
+ * `onFailure` additionally routes the message to a task's own output log.
+ *
+ * @returns true if the directory is gone afterwards
+ */
+export function removeDirBestEffort(
+  dir: string,
+  context: string,
+  onFailure?: (message: string) => void,
+): boolean {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    const message = `Could not delete ${dir} (${context}): ${reason} — leaving it; it will be retried by the next cleanup and at startup`;
+    logWarn('worktree', message);
+    onFailure?.(message);
+    return false;
+  }
+  return !existsSync(dir);
 }
 
 /**
