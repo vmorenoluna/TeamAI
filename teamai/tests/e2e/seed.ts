@@ -10,30 +10,33 @@
  *   npx tsx tests/e2e/seed.ts --with-qa-report  # Also create qa_report.json
  *   npx tsx tests/e2e/seed.ts --serve           # Start dev server after seeding
  *
- * The script adds the project to ~/.teamai/projects.json using ProjectStore.
- * To clean up: delete the project from the UI or manually remove it from
- * ~/.teamai/projects.json.
+ * It only ever writes to a test config dir, never to ~/.teamai: TEAMAI_CONFIG_DIR
+ * when set (Playwright's globalSetup), otherwise a dedicated throwaway dir under
+ * the OS temp dir. `--serve` starts the dev server against that same dir, so the
+ * seeded data is visible without touching your real projects. To clean up, delete
+ * the config dir (printed at the end).
  */
 
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, renameSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
-import { homedir } from 'os';
+import { tmpdir } from 'os';
 import { listCommandNames, readCommandTemplate } from '../../src/lib/command-templates';
 
 // ── Config ─────────────────────────────────────────────────────────────
 
 const PROJECT_NAME = 'E2E Test Project';
-// Under the isolated config dir when set (test runs); manual seeding falls back to cwd.
-const SEED_DIR = join(process.env.TEAMAI_CONFIG_DIR || process.cwd(), '.teamai-e2e-seed');
+// The test config dir. Never the real ~/.teamai: with no TEAMAI_CONFIG_DIR a
+// dedicated throwaway dir is used, and exported so a child dev server shares it.
+const CONFIG_BASE = process.env.TEAMAI_CONFIG_DIR || join(tmpdir(), 'teamai-e2e-manual');
+process.env.TEAMAI_CONFIG_DIR = CONFIG_BASE;
+const SEED_DIR = join(CONFIG_BASE, '.teamai-e2e-seed');
 
 /**
- * Resolve the projects.json path, respecting TEAMAI_CONFIG_DIR for isolation.
- * Falls back to ~/.teamai/projects.json in production (manual seeding).
+ * The projects.json path inside the test config dir.
  */
 function getConfigPath(): string {
-  const base = process.env.TEAMAI_CONFIG_DIR || homedir();
-  return join(base, '.teamai', 'projects.json');
+  return join(CONFIG_BASE, '.teamai', 'projects.json');
 }
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -392,32 +395,6 @@ function writeSessionMap(dir: string, seed: SeedTask): void {
   }
 }
 
-async function confirmOrSkip(): Promise<boolean> {
-  // Skip confirmation in CI, when --yes flag is passed, or when using a temp config dir
-  if (process.env.CI || process.argv.includes('--yes') || process.argv.includes('-y') || process.env.TEAMAI_CONFIG_DIR) {
-    return true;
-  }
-
-  const configPath = getConfigPath();
-  console.log(`\n⚠️  This will modify your TeamAI project registry at:`);
-  console.log(`   ${configPath}`);
-
-  // Read current projects for display
-  const existing = existsSync(configPath)
-    ? JSON.parse(readFileSync(configPath, 'utf-8')) as Array<{ name: string; path: string }>
-    : [];
-  if (existing.length > 0) {
-    console.log(`   Currently has ${existing.length} project(s):`);
-    for (const p of existing) {
-      console.log(`     - ${p.name} (${p.path})`);
-    }
-  }
-
-  console.log(`   Will add: "${PROJECT_NAME}" at ${SEED_DIR}`);
-  console.log('');
-  return await confirm('Proceed with seeding?');
-}
-
 function registerProject(root: string): void {
   const configPath = getConfigPath();
   const configDir = join(configPath, '..');
@@ -442,40 +419,11 @@ function registerProject(root: string): void {
   console.log(`  Registered project "${PROJECT_NAME}" at ${root}`);
 }
 
-function readlineSync(question: string): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const rl = require('readline').createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  return new Promise(resolve => {
-    rl.question(question, (answer: string) => {
-      rl.close();
-      resolve(answer.trim().toLowerCase());
-    });
-  });
-}
-
-async function confirm(prompt: string): Promise<boolean> {
-  try {
-    const answer = await readlineSync(`${prompt} [y/N] `);
-    return answer === 'y' || answer === 'yes';
-  } catch {
-    // If stdin is not a TTY (e.g., piped), default to skip
-    console.log('  (non-interactive, skipping registration — use --yes to force)');
-    return false;
-  }
-}
-
 // ── Main ───────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
-  if (!(await confirmOrSkip())) {
-    console.log('\n❌ Seeding cancelled. Use --yes to skip confirmation.');
-    process.exit(1);
-  }
   const withPlans = args.includes('--with-plans');
   const withQaReports = args.includes('--with-qa-report');
   const serve = args.includes('--serve');
@@ -579,12 +527,13 @@ async function main(): Promise<void> {
     console.log(`  ✓ ${seed.title} → ${seed.phase}`);
   }
 
-  // Register the project (writes to ~/.teamai/projects.json)
+  // Register the project (in the test config dir)
   registerProject(SEED_DIR);
 
   console.log(`\n✅ Seeded ${createdTasks.length} tasks in "${PROJECT_NAME}"`);
   console.log(`   Project path: ${SEED_DIR}`);
-  console.log(`   Run 'npm run dev' to start the dev server with this data.`);
+  console.log(`   Config dir:   ${CONFIG_BASE}`);
+  console.log(`   Run with --serve to start the dev server on this data (or set TEAMAI_CONFIG_DIR to the config dir).`);
 
   // Optionally start dev server
   if (serve) {

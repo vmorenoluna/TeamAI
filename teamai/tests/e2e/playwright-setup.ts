@@ -53,7 +53,7 @@ async function globalSetup() {
   // ── Seed the test project ────────────────────────────────────────────
   console.log('[playwright-setup] Seeding E2E test project…');
   try {
-    execFileSync('npx', ['tsx', 'tests/e2e/seed.ts', '--with-plans', '--with-qa-report', '--yes'], {
+    execFileSync('npx', ['tsx', 'tests/e2e/seed.ts', '--with-plans', '--with-qa-report'], {
       cwd,
       stdio: 'inherit',
       timeout: 30_000,
