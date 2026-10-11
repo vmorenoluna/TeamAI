@@ -202,7 +202,7 @@ export class ContainerManager extends EventEmitter {
     // the flag. Record trust now; a failure throws and leaves the flag unset,
     // so every later call retries instead of handing out an untrusted container.
     if (!record.trusted) {
-      this._trustWorkspaceInContainer(record.containerId, record.remoteWorkspaceFolder, logFile);
+      this._trustWorkspaceInContainer(record.containerId, record.projectRoot, record.remoteWorkspaceFolder, logFile);
       record.trusted = true;
     }
 
@@ -320,7 +320,7 @@ export class ContainerManager extends EventEmitter {
       record.startPromise = null;
       log('container', `Started — id=${containerId} workspace=${remoteWorkspaceFolder}`);
       this._logContainerClaudeVersion(containerId, record.projectRoot, logFile);
-      this._trustWorkspaceInContainer(containerId, remoteWorkspaceFolder, logFile);
+      this._trustWorkspaceInContainer(containerId, record.projectRoot, remoteWorkspaceFolder, logFile);
       record.trusted = true;
       this._emit(record, 'running');
       this._watchEvents(record);
@@ -377,6 +377,9 @@ export class ContainerManager extends EventEmitter {
    * so marking the remote workspace folder covers the task worktrees under it.
    * `~/.claude.json` lives in the container's own home (only `~/.claude` is
    * bind-mounted), so this never touches the host's configuration.
+   * The write runs as the devcontainer's remoteUser, the user agent sessions run
+   * as: a plain `docker exec` runs as the image's default user (often root) and
+   * would trust a home directory no session ever reads.
    *
    * Not best-effort: a container whose workspace cannot be trusted would run
    * every session without its allowlist, so a failure here fails container
@@ -384,7 +387,7 @@ export class ContainerManager extends EventEmitter {
    * missing `~/.claude.json` is created; an unreadable or invalid one is an
    * error, never silently overwritten.
    */
-  private _trustWorkspaceInContainer(containerId: string, workspaceFolder: string, logFile?: string): void {
+  private _trustWorkspaceInContainer(containerId: string, projectRoot: string, workspaceFolder: string, logFile?: string): void {
     const script =
       'const fs=require("fs"),p=require("os").homedir()+"/.claude.json";' +
       'let j={};' +
@@ -394,7 +397,7 @@ export class ContainerManager extends EventEmitter {
       'fs.writeFileSync(p,JSON.stringify(j,null,2))';
     try {
       execFileSync(getToolPath('docker'), [
-        'exec', containerId, 'node', '-e', script, workspaceFolder,
+        'exec', '-u', readContainerRemoteUser(projectRoot), containerId, 'node', '-e', script, workspaceFolder,
       ], { encoding: 'utf-8', timeout: 10000 });
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
