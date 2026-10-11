@@ -6,10 +6,11 @@
   "mounts": [
     "source=${localEnv:USERPROFILE}\\.claude,target=/home/node/.claude,type=bind",
     "source=${localEnv:USERPROFILE}\\.gitconfig,target=/home/node/.gitconfig,type=bind",
-    "source=${localEnv:USERPROFILE}\\.ssh,target=/home/node/.ssh,type=bind,readonly"
+    "source=${localEnv:USERPROFILE}\\.ssh,target=/home/node/.ssh,type=bind,readonly",
+    "source=${devcontainerId}-teamai-node-modules,target=${containerWorkspaceFolder}/teamai/node_modules,type=volume"
   ],
 
-  "postCreateCommand": "npm install -g @anthropic-ai/claude-code playwright-mcp && sudo apt-get update -q && sudo apt-get install -y -q gh && sudo git config --system --add safe.directory '*'",
+  "postCreateCommand": "npm install -g @anthropic-ai/claude-code playwright-mcp && sudo apt-get update -q && sudo apt-get install -y -q gh && sudo git config --system --add safe.directory '*' && sudo chown node:node teamai/node_modules && (cd teamai && npm ci)",
   "postStartCommand": "npm install -g @anthropic-ai/claude-code@latest || echo 'claude-code update skipped (offline?)'",
 
   "forwardPorts": [3000],
