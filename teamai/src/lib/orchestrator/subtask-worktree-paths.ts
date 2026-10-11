@@ -17,7 +17,7 @@ import path from 'path';
  *  server restart) finds a relocated worktree instead of the canonical one. */
 const SUBTASK_WORKTREES_FILE = 'subtask_worktrees.json';
 
-const MAX_RELOCATION_SUFFIX = 10_000;
+const MAX_RELOCATION_SUFFIX = 100;
 
 /** The canonical (un-relocated) path for a subtask's worktree. */
 export function subtaskWorktreeBasePath(taskWorktreePath: string, subtaskId: number): string {
@@ -48,7 +48,7 @@ export function nextFreeRelocationPath(
     const candidate = `${basePath}-r${n}`;
     if (!exists(candidate)) return candidate;
   }
-  // Ten thousand abandoned directories is a runaway process, not a lock.
+  // A hundred abandoned directories is a runaway process, not a lock.
   throw new Error(`No free worktree path for ${basePath} (checked ${MAX_RELOCATION_SUFFIX} variants)`);
 }
 

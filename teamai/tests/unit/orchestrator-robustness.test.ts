@@ -6579,6 +6579,14 @@ describe('relocateStuckWorktree', () => {
     expect(pipeline.worktreePath).toBe(join(worktreeBase, 'my-task-r13'));
   });
 
+  it('throws a WorktreeError once every one of the 100 slots is occupied', () => {
+    for (let n = 2; n <= 100; n++) mkdirSync(join(worktreeBase, `my-task-r${n}`));
+    const deps = { taskStore: { update: vi.fn() } } as unknown as ImplementDeps;
+    const pipeline = minimalImplPipeline({ specPath: project.taskDir, worktreePath: join(worktreeBase, 'my-task') });
+
+    expect(() => relocateStuckWorktree(pipeline, deps)).toThrow(/no free relocation slot/i);
+  });
+
   it('does not stack suffixes when relocating an already-relocated worktree', () => {
     const stuckPath = join(worktreeBase, 'my-task-r2'); // already relocated once on a prior run
     mkdirSync(stuckPath); // stuck path is, by definition, still occupied on disk
