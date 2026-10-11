@@ -314,6 +314,46 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
     });
   });
 
+  describe('_trustWorkspaceInContainer (via _doStart)', () => {
+    const start = async (projectRoot: string, containerId: string) => {
+      const mockProc = createMockSpawnProcess();
+      mockCrossSpawn.mockReturnValue(mockProc);
+      mockSpawn.mockReturnValue(createMockSpawnProcess());
+      const promise = cm.ensureContainer(projectRoot);
+      mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+        outcome: 'success', containerId, remoteWorkspaceFolder: '/workspaces/project',
+      }) + '\n'));
+      mockProc.emit('exit', 0);
+      return promise;
+    };
+
+    it('records trust for the remote workspace folder in the container\'s own ~/.claude.json', async () => {
+      mockExecFileSync.mockReturnValue('');
+      await start('/test/project-trust', 'devcontainer-trust-test');
+
+      const call = mockExecFileSync.mock.calls.find(
+        ([, args]: [string, string[]]) => args[0] === 'exec' && args.includes('node'),
+      );
+      expect(call).toBeDefined();
+      const args = call![1] as string[];
+      expect(args.slice(0, 3)).toEqual(['exec', 'devcontainer-trust-test', 'node']);
+      expect(args[args.length - 1]).toBe('/workspaces/project');
+      expect(args.join(' ')).toContain('hasTrustDialogAccepted');
+    });
+
+    it('fails container startup, with the cause, when trust cannot be recorded', async () => {
+      mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+        if (args.includes('node')) throw new Error('exec failed: node not found');
+        return '';
+      });
+
+      await expect(start('/test/project-trust-fail', 'devcontainer-trust-fail')).rejects.toThrow(
+        /Failed to record workspace trust for \/workspaces\/project.*node not found/,
+      );
+      expect((cm as any).records.get('/test/project-trust-fail').state).toBe('stopped');
+    });
+  });
+
   describe('ensureContainer guard — non-running state', () => {
     it('throws when container state is starting with a resolved startPromise', async () => {
       mockExecFileSync.mockReturnValue('');
