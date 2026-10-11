@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- An invalid container setup now always blocks agent work. A container must pass validation (agent tooling, native modules, install, build, tests) for its exact devcontainer definition, lockfiles and container before any session runs in it, whether or not you wrote the `devcontainer.json` yourself. A failure shows the failing step in Settings and pauses auto mode until you fix it and press Re-validate or edit the definition. Projects whose source lives in a subdirectory are now validated there instead of passing trivially, and a `node_modules` installed on the host and shared into the container is detected up front
 - Every agent session that can file tickets now judges the whole open board, and the orchestrator verifies the check before the phase advances. Duplicates are no longer filed. Tickets a task makes obsolete are held back from auto mode and deleted when it completes. Tickets whose premise a task changes wait for it and are re-specced. Agent-filed tickets are verified by the analyst, which can reject them.
 - Ticket writes are serialized by a crash-safe board lock. The `create-task` CLI requires the board fingerprint from `--list` and refuses if tickets were added since.
 - New `pipeline.json` options: `backlogCheck` (default on) and `backlogCheckEvidencePaths`

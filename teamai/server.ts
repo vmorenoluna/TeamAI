@@ -153,6 +153,12 @@ app.prepare().then(async () => {
     broadcastToProject(data, msg);
   });
 
+  // Broadcast container-validation-failed so the UI can show why work is blocked
+  processManager.on('container-validation-failed', (data: { projectRoot: string; message: string }) => {
+    const msg = JSON.stringify({ type: 'container-validation-failed', projectRoot: data.projectRoot, message: data.message });
+    broadcastToProject(data, msg);
+  });
+
   server.on('upgrade', (request, socket, head) => {
     const reqUrl = new URL(request.url!, `http://${request.headers.host || `127.0.0.1:${port}`}`);
     const pathname = reqUrl.pathname;
