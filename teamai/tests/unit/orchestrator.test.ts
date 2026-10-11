@@ -1927,6 +1927,29 @@ describe('Orchestrator', () => {
       expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
     });
 
+    it('does not write qa_feedback.md from a failure the orchestrator itself recorded (no QA findings to carry)', async () => {
+      // An implement-gate / deliverable-cap / push failure is written as a FAIL
+      // qa_report.json by the orchestrator. Turning it into qa_feedback.md made
+      // the retry synthesize a pointless rework subtask (9999) instead of
+      // resuming the subtasks that were still incomplete.
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        fail_type: 'orchestrator',
+        criteria: [{ criterion: 'Implement completeness gate', name: 'Implement completeness gate', status: 'FAIL', notes: 'Subtask(s) 10, 11 remained incomplete' }],
+      }));
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'implement');
+      } finally {
+        executeSpy.mockRestore();
+      }
+
+      expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
+    });
+
     it('does not write qa_feedback.md when the last QA report already passed', async () => {
       testData = setupTestProject();
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({ overall: 'PASS', criteria: [] }));

@@ -33,6 +33,8 @@ interface ContainerRecord {
   eventWatcher: ChildProcess | null;
   validationSteps: ValidationStep[];
   validationPromise: Promise<boolean> | null;
+  /** Workspace trust has been recorded in this container (see _trustWorkspaceInContainer). */
+  trusted: boolean;
 }
 
 /** What the pipeline needs to know about a project's container validation. */
@@ -155,6 +157,7 @@ export class ContainerManager extends EventEmitter {
       containerId: null, remoteWorkspaceFolder: null,
       startPromise: null, eventWatcher: null,
       validationSteps: [], validationPromise: null,
+      trusted: false,
     };
   }
 
@@ -177,13 +180,12 @@ export class ContainerManager extends EventEmitter {
         record.remoteWorkspaceFolder = existing.remoteWorkspaceFolder;
         this.records.set(projectRoot, record);
         this._watchEvents(record);
-        return existing;
+      } else {
+        record = this._newRecord(projectRoot, 'starting');
+        this.records.set(projectRoot, record);
+        this._emit(record, 'starting');
+        record.startPromise = this._doStart(record, logFile);
       }
-
-      record = this._newRecord(projectRoot, 'starting');
-      this.records.set(projectRoot, record);
-      this._emit(record, 'starting');
-      record.startPromise = this._doStart(record, logFile);
     }
 
     if (record.state === 'starting' || record.state === 'restarting') {
@@ -192,6 +194,16 @@ export class ContainerManager extends EventEmitter {
 
     if (record.state !== 'running' || !record.containerId || !record.remoteWorkspaceFolder) {
       throw new Error(`Container for ${projectRoot} is not available (state: ${record.state})`);
+    }
+
+    // A container reached without going through _doStart (adopted from a Docker
+    // scan after a server restart, or by getRunningContainer) has not had its
+    // workspace trusted by us, and a start whose trust write failed never set
+    // the flag. Record trust now; a failure throws and leaves the flag unset,
+    // so every later call retries instead of handing out an untrusted container.
+    if (!record.trusted) {
+      this._trustWorkspaceInContainer(record.containerId, record.remoteWorkspaceFolder, logFile);
+      record.trusted = true;
     }
 
     return { containerId: record.containerId, remoteWorkspaceFolder: record.remoteWorkspaceFolder };
@@ -308,6 +320,8 @@ export class ContainerManager extends EventEmitter {
       record.startPromise = null;
       log('container', `Started — id=${containerId} workspace=${remoteWorkspaceFolder}`);
       this._logContainerClaudeVersion(containerId, record.projectRoot, logFile);
+      this._trustWorkspaceInContainer(containerId, remoteWorkspaceFolder, logFile);
+      record.trusted = true;
       this._emit(record, 'running');
       this._watchEvents(record);
     } catch (err) {
@@ -349,6 +363,44 @@ export class ContainerManager extends EventEmitter {
       const message = '⚠ Could not determine the container\'s claude-code version (docker exec failed)\n';
       if (logFile) logToOutput(path.dirname(logFile), message);
       logWarn('container', `Failed to check claude-code version in container ${containerId}`, err);
+    }
+  }
+
+  /**
+   * Pre-accept Claude Code's workspace-trust dialog inside the container.
+   *
+   * Agent sessions run non-interactively, so nobody can answer the trust
+   * dialog. Without a recorded acceptance, Claude Code ignores the project's
+   * `permissions.allow` entries from `.claude/settings.local.json` ("Ignoring N
+   * permissions.allow entries … this workspace has not been trusted") and every
+   * session silently loses its allowlist. Trust is inherited by subdirectories,
+   * so marking the remote workspace folder covers the task worktrees under it.
+   * `~/.claude.json` lives in the container's own home (only `~/.claude` is
+   * bind-mounted), so this never touches the host's configuration.
+   *
+   * Not best-effort: a container whose workspace cannot be trusted would run
+   * every session without its allowlist, so a failure here fails container
+   * startup (the caller's catch marks the container stopped and rethrows). A
+   * missing `~/.claude.json` is created; an unreadable or invalid one is an
+   * error, never silently overwritten.
+   */
+  private _trustWorkspaceInContainer(containerId: string, workspaceFolder: string, logFile?: string): void {
+    const script =
+      'const fs=require("fs"),p=require("os").homedir()+"/.claude.json";' +
+      'let j={};' +
+      'try{j=JSON.parse(fs.readFileSync(p,"utf8"))}catch(e){if(e.code!=="ENOENT")throw e}' +
+      'if(!j.projects||typeof j.projects!=="object")j.projects={};' +
+      'const w=process.argv[1];j.projects[w]=Object.assign({},j.projects[w],{hasTrustDialogAccepted:true});' +
+      'fs.writeFileSync(p,JSON.stringify(j,null,2))';
+    try {
+      execFileSync(getToolPath('docker'), [
+        'exec', containerId, 'node', '-e', script, workspaceFolder,
+      ], { encoding: 'utf-8', timeout: 10000 });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const message = `✗ Could not record workspace trust for ${workspaceFolder} in the container: ${detail}\n`;
+      if (logFile) logToOutput(path.dirname(logFile), message);
+      throw new Error(`Failed to record workspace trust for ${workspaceFolder} in container ${containerId}: ${detail}`, { cause: err });
     }
   }
 

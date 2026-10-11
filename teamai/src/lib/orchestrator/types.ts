@@ -151,6 +151,8 @@ export interface QaReport {
   head_at_review?: string;
   /** The spec version this QA report was produced against (1 = initial spec). */
   spec_revision?: number;
+  /** `ORCHESTRATOR_FAIL_TYPE` marks a report the orchestrator itself wrote when it gave up on a
+   *  task (retry cap, gate, push failure…): there are no QA findings in it to carry into a retry. */
   fail_type?: string;
   /** When true, the QA phase skips re-running and advances to awaiting-review. */
   locked?: boolean;
@@ -189,3 +191,6 @@ export type SessionOptsResult = {
   cwd: string;
   [key: string]: unknown;
 };
+
+/** `QaReport.fail_type` of a failure the orchestrator synthesized rather than QA found. */
+export const ORCHESTRATOR_FAIL_TYPE = 'orchestrator';
