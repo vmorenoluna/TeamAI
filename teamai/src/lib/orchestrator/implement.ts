@@ -24,7 +24,7 @@ import { renderCommand } from '../command-templates';
 import { resolveBaseBranch } from '../git-platform';
 import { getUnpushedCommits } from './worktree-ops';
 import { removeStaleWorktreeRegistration, removeDirBestEffort } from './worktree-utils';
-import { subtaskWorktreeBasePath, pickFreshSubtaskWorktreePath, recordSubtaskWorktree, resolveSubtaskWorktreePath } from './subtask-worktree-paths';
+import { subtaskWorktreeBasePath, pickFreshSubtaskWorktreePath, nextFreeRelocationPath, recordSubtaskWorktree, resolveSubtaskWorktreePath } from './subtask-worktree-paths';
 import { warn } from '../logger';
 import {
   scanWakeupFilesWithRetry, parseWakeupFile, computeNextAttemptCount, isGenuineRelaunch,
@@ -155,8 +155,6 @@ export function preserveUncommittedWork(pipeline: ImplementPipeline, deps: Imple
   } catch { /* best-effort — never block teardown on this */ }
 }
 
-const WORKTREE_RELOCATE_MAX_SUFFIX = 5;
-
 /**
  * Find the first available `<original-dirname>-rN` path (N=2..5) not
  * currently occupied on disk, switch the pipeline to it, and persist the
@@ -181,25 +179,26 @@ export function relocateStuckWorktree(pipeline: ImplementPipeline, deps: Impleme
   const originalDirName = path.basename(pipeline.worktreePath);
   const baseDirName = originalDirName.replace(/-r\d+$/, ''); // don't stack suffixes on repeated relocations
 
-  for (let n = 2; n <= WORKTREE_RELOCATE_MAX_SUFFIX; n++) {
-    const candidateDirName = `${baseDirName}-r${n}`;
-    const candidatePath = path.join(worktreeBase, candidateDirName);
-    if (existsSync(candidatePath)) continue;
-
-    logToOutput(pipeline.specPath,
-      `[WORKTREE] ${originalDirName} still locked after cleanup retries — relocating to ${candidateDirName} instead of failing the task\n`
+  let candidatePath: string;
+  try {
+    candidatePath = nextFreeRelocationPath(path.join(worktreeBase, baseDirName));
+  } catch (err) {
+    // Thousands of abandoned directories means something is creating them in a
+    // loop — not a transient lock — so surface it rather than papering over it.
+    throw new WorktreeError(
+      `Worktree directory at ${pipeline.worktreePath} could not be removed, and no free relocation ` +
+      `slot is left for "${baseDirName}" under ${worktreeBase} (${err instanceof Error ? err.message : String(err)}). ` +
+      `Clear out stale "${baseDirName}-r*" directories and retry the task.`,
+      'WORKTREE_LOCKED',
     );
-    pipeline.worktreePath = candidatePath;
-    deps.taskStore.update(pipeline.taskId, { worktreeDirName: candidateDirName });
-    return;
   }
+  const candidateDirName = path.basename(candidatePath);
 
-  throw new WorktreeError(
-    `Worktree directory at ${pipeline.worktreePath} could not be removed, and every relocation ` +
-    `slot up to ${baseDirName}-r${WORKTREE_RELOCATE_MAX_SUFFIX} is also occupied. Manually clear out ` +
-    `stale "${baseDirName}-r*" directories under ${worktreeBase} and retry the task.`,
-    'WORKTREE_LOCKED',
+  logToOutput(pipeline.specPath,
+    `[WORKTREE] ${originalDirName} still locked after cleanup retries — relocating to ${candidateDirName} instead of failing the task\n`
   );
+  pipeline.worktreePath = candidatePath;
+  deps.taskStore.update(pipeline.taskId, { worktreeDirName: candidateDirName });
 }
 
 /**
@@ -238,7 +237,7 @@ export function sweepAbandonedWorktreeRelocations(pipeline: ImplementPipeline, d
       if (!/^\d+$/.test(entry.name.slice(baseDirName.length + 2))) continue;
       const candidatePath = path.join(worktreeBase, entry.name);
       if (registered.has(path.resolve(candidatePath))) continue; // live worktree — leave it
-      try { rmSync(candidatePath, { recursive: true, force: true }); } catch { /* still locked — try again next run */ }
+      removeDirBestEffort(candidatePath, `abandoned relocation of task ${pipeline.taskId}'s worktree`, (m) => logToOutput(pipeline.specPath, `[WORKTREE] ${m}\n`));
     }
   } catch { /* best-effort */ }
 }
@@ -1733,9 +1732,7 @@ export async function integrateGroup(
     for (const [id, stWorktreePath] of subtaskWorktrees.entries()) {
       if (id === pipeline.wakeupSubtaskId) continue;
       try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch {
-        removeDirBestEffort(stWorktreePath, `subtask ${id} worktree, after integration`, (m) => logToOutput(pipeline.specPath, `
-[WORKTREE] ${m}
-`));
+        removeDirBestEffort(stWorktreePath, `subtask ${id} worktree, after integration`, (m) => logToOutput(pipeline.specPath, `\n[WORKTREE] ${m}\n`));
         removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
       }
       try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }

@@ -32,7 +32,18 @@ export function pickFreshSubtaskWorktreePath(
   basePath: string,
   exists: (p: string) => boolean = existsSync,
 ): string {
-  if (!exists(basePath)) return basePath;
+  return exists(basePath) ? nextFreeRelocationPath(basePath, exists) : basePath;
+}
+
+/**
+ * The first free `<basePath>-r<N>` (N >= 2), whether or not `basePath` itself
+ * is occupied. Used for the task's own worktree too (relocateStuckWorktree),
+ * so neither kind of worktree has a small fixed number of relocation slots.
+ */
+export function nextFreeRelocationPath(
+  basePath: string,
+  exists: (p: string) => boolean = existsSync,
+): string {
   for (let n = 2; n <= MAX_RELOCATION_SUFFIX; n++) {
     const candidate = `${basePath}-r${n}`;
     if (!exists(candidate)) return candidate;
