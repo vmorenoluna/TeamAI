@@ -173,6 +173,42 @@ describe('runImplement — no-op subtask detection', () => {
     }
   });
 
+  it('accepts a no-edit session when the assigned files are already changed on the branch', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 1, title: 'Fix Parser.parseHeader', description: 'Header parsing rewrite',
+        files: ['src/Parser.scala'], acceptance_criteria: ['Parses every header form'],
+      }],
+    }));
+
+    // This session's diff is empty, but base...HEAD already holds the edit.
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'diff') {
+        return args.some(a => a.endsWith('...HEAD')) ? 'src/Parser.scala\n' : '';
+      }
+      if (Array.isArray(args) && args[0] === 'status') return '';
+      return 'abc123\n';
+    });
+    mockCreateSession.mockResolvedValue('sess-already-done');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      fireEvent('event', { sessionId: 'sess-already-done', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks[0].completed).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   it('does not reject a subtask that declares files_to_create even if its edit-files diff is empty, as long as the deliverable was committed this session', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
