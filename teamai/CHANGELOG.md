@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Session stall detection now honours the per-project `idleStallMinutes` and `toolStallMinutes` thresholds. A second, hardcoded 10-minute sweep used to ignore them and kill every session at the 10-minute mark, including legitimate long-running tool calls. A session killed for stalling now gets a stall-recovery retry instead of failing the task outright
 - Workspace trust is now recorded as the devcontainer's `remoteUser`, the user agent sessions run as. It was written as the container's default user (root), so sessions still reported "this workspace has not been trusted" and ignored `permissions.allow`.
 - Container sessions no longer silently lose the project's `permissions.allow` entries. Claude Code ignores them in a workspace it has not been told to trust, and nobody can answer the trust dialog in an unattended session, so the container now records trust for its workspace folder in its own `~/.claude.json` (the host's configuration is untouched) as part of starting, and again when TeamAI picks up an already-running container (after a server restart, or after a start whose trust write failed). If that cannot be recorded, the container is not handed out and the error names the cause, instead of running agents without their allowlist
 - Retrying a task that the orchestrator itself failed (incomplete-subtask cap, deliverable cap, push failure, wakeup cap) no longer turns that failure note into QA feedback. Previously the retry synthesized a rework subtask that re-checked the same artifacts instead of resuming the incomplete subtasks
