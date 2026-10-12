@@ -371,6 +371,27 @@ describe('squashWithMessage', () => {
     expect(git(['status', '--porcelain'], worktreePath).trim()).toBe('');
     expect(git(['diff', 'master', 'HEAD'], worktreePath).trim()).toBe('');
   });
+
+  it('restores HEAD when the squash commit fails, so the branch is not left at the base with its work staged', () => {
+    // Regression: a rejecting pre-commit hook made the post-reset `git commit`
+    // fail after `git reset --soft <merge-base>` had already moved HEAD. The
+    // work stayed staged on top of the base, so the branch looked empty and
+    // `gh pr create` failed with "No commits between <base> and <branch>".
+    writeFileSync(join(worktreePath, 'feature.txt'), 'feature work\n');
+    git(['add', '.'], worktreePath);
+    git(['commit', '-m', 'feature work'], worktreePath);
+    const headBefore = git(['rev-parse', 'HEAD'], worktreePath).trim();
+
+    const hook = join(worktreePath, '.git', 'hooks', 'pre-commit');
+    writeFileSync(hook, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+
+    const result = squashWithMessage(worktreePath, 'feat: test squash\n\nTask-ID: t\n', 'master', specPath, noopDeps);
+
+    expect(result).toBe(false);
+    expect(git(['rev-parse', 'HEAD'], worktreePath).trim()).toBe(headBefore);
+    expect(git(['rev-list', '--count', 'master..HEAD'], worktreePath).trim()).toBe('1');
+    expect(git(['status', '--porcelain'], worktreePath).trim()).toBe('');
+  });
 });
 
 // ── hasCommitsBeyondBase ──

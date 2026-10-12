@@ -359,6 +359,15 @@ export function squashWithMessage(
     return true;
   } catch (err) {
     warn('artifacts', `squashWithMessage failed in ${worktreePath}`, err);
+    // The reset above already moved HEAD back to the merge-base, leaving the
+    // branch's work staged but uncommitted — which every later step reads as
+    // "no commits beyond the base" (the PR then fails with "No commits
+    // between <base> and <branch>"). Put HEAD back where it was.
+    try {
+      execFileSync('git', ['reset', '--soft', head], gitOpts);
+    } catch (restoreErr) {
+      warn('artifacts', `squashWithMessage: could not restore HEAD ${head} in ${worktreePath}`, restoreErr);
+    }
     return false;
   } finally {
     try { unlinkSync(msgFile); } catch { /* best-effort */ }
