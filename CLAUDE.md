@@ -107,6 +107,8 @@ Core engine. Extends `EventEmitter` and manages a `Map<string, AgentSession>`. E
 
 Key methods: `createSession(taskId, role, cwd)`, `writeToSession(id, data)`, `terminateSession(id)` (SIGTERM).
 
+Sessions are removed from the map when their process closes (30 s fallback after exit).
+
 ### Multi-Agent Pipeline
 Defined in `defaults/roles/` (analyst, planner, coder, qa-reviewer, merger) and `defaults/commands/` (spec, spec-revise, spec-summary, plan, plan-revise, implement, implement-fix, qa-review, merge, resolve-cherry-pick, roadmap, ideation, changelog, create-task, role-refinement-analysis). Each session gets its role persona injected as a system prompt (`--append-system-prompt` in `process-manager.ts`) before the first turn; the command template for the session's work mode supplies the task instructions.
 
