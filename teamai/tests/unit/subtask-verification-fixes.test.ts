@@ -173,6 +173,42 @@ describe('runImplement — no-op subtask detection', () => {
     }
   });
 
+  it('accepts a no-edit session when the assigned files are already changed on the branch', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 1, title: 'Fix Parser.parseHeader', description: 'Header parsing rewrite',
+        files: ['src/Parser.scala'], acceptance_criteria: ['Parses every header form'],
+      }],
+    }));
+
+    // This session's diff is empty, but base...HEAD already holds the edit.
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'diff') {
+        return args.some(a => a.endsWith('...HEAD')) ? 'src/Parser.scala\n' : '';
+      }
+      if (Array.isArray(args) && args[0] === 'status') return '';
+      return 'abc123\n';
+    });
+    mockCreateSession.mockResolvedValue('sess-already-done');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      fireEvent('event', { sessionId: 'sess-already-done', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks[0].completed).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   it('does not reject a subtask that declares files_to_create even if its edit-files diff is empty, as long as the deliverable was committed this session', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
@@ -216,7 +252,7 @@ describe('runImplement — no-op subtask detection', () => {
     }
   });
 
-  it('rejects a files_to_create deliverable that exists but is stale from an earlier round, instead of marking it completed', async () => {
+  it('rejects a QA-rework files_to_create deliverable last committed before the feedback, instead of marking it completed', async () => {
     // Regression test for task a-later-demo-task:
     // subtask 15's five files_to_create had existed on disk since a stale
     // commit from an EARLIER, QA-rejected round. This session's coder only
@@ -239,6 +275,7 @@ describe('runImplement — no-op subtask detection', () => {
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (Array.isArray(args) && args[0] === 'diff') return '';
       if (Array.isArray(args) && args[0] === 'status') return '';
+      if (Array.isArray(args) && args[0] === 'log') return '1\n'; // last committed long before the QA feedback
       return 'abc123\n';
     });
     mockCreateSession.mockResolvedValue('sess-stale-deliverable');
@@ -269,6 +306,48 @@ describe('runImplement — no-op subtask detection', () => {
       expect(plan.subtasks[0].completed).not.toBe(true);
       // The stale file itself is left untouched — this check only flags completion.
       expect(existsSync(join(worktreeDir, 'results', 'gate-report.txt'))).toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('accepts a first-pass subtask whose deliverable was committed by an EARLIER session — the branch is the source of truth', async () => {
+    // Regression: subtask 10 started a detached job; the session limit hit and
+    // the work was committed by a prior session. Every later session correctly
+    // found nothing left to do (empty diff) and was failed as "stale" until the
+    // retry cap sank the whole task.
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 10, title: 'Produce probe cells', description: 'Run the probe',
+        files_to_create: ['results/cells.jsonl'], acceptance_criteria: ['Cells exist'],
+      }],
+    }));
+
+    const worktreeDir = join(project.root, 'worktrees', 'test-task');
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === 'diff') return ''; // this session committed nothing
+      if (Array.isArray(args) && args[0] === 'status') return ''; // clean tree: deliverable is committed
+      return 'abc123\n';
+    });
+    mockCreateSession.mockResolvedValue('sess-earlier-commit');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, { worktreePath: worktreeDir });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      mkdirSync(join(worktreeDir, 'results'), { recursive: true });
+      writeFileSync(join(worktreeDir, 'results', 'cells.jsonl'), '{}\n');
+
+      fireEvent('event', { sessionId: 'sess-earlier-commit', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks[0].completed).toBe(true);
     } finally {
       executeSpy.mockRestore();
     }

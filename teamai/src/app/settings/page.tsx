@@ -2,7 +2,7 @@ import { getRoles } from '@/app/actions/roles';
 import { getActiveProject } from '@/app/actions/projects';
 import { getPipelineConfig } from '@/app/actions/pipeline';
 import { getProvidersConfig, getProvidersMigrationHint } from '@/app/actions/providers';
-import { getContainerConfig, getContainerState } from '@/app/actions/containers';
+import { getContainerConfig, getContainerState, getValidationStatus } from '@/app/actions/containers';
 import { RoleEditor } from '@/components/role-editor';
 import { PipelineConfigEditor } from '@/components/pipeline-config';
 import { ProviderConfigEditor } from '@/components/provider-config';
@@ -20,8 +20,8 @@ export default async function SettingsPage() {
     return <div className="p-6 text-sm text-slate-400">No active project selected.</div>;
   }
 
-  const [roles, pipelineConfig, providersConfig, containerConfig, containerState, tools, refinementConfig, refinementSuggestions, allTasks, providersMigrationHint] = await Promise.all([
-    getRoles(), getPipelineConfig(), getProvidersConfig(), getContainerConfig(), getContainerState(), checkTools(),
+  const [roles, pipelineConfig, providersConfig, containerConfig, containerState, containerValidation, tools, refinementConfig, refinementSuggestions, allTasks, providersMigrationHint] = await Promise.all([
+    getRoles(), getPipelineConfig(), getProvidersConfig(), getContainerConfig(), getContainerState(), getValidationStatus(), checkTools(),
     getRoleRefinementConfigAction(),
     getRefinementSuggestions(),
     getAllTasks(),
@@ -47,6 +47,7 @@ export default async function SettingsPage() {
           <ContainerConfigEditor
             config={containerConfig}
             initialState={containerState}
+            initialValidation={containerValidation}
             projectPath={activeProject.path}
           />
         </section>

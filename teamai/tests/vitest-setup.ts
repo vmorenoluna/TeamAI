@@ -15,3 +15,14 @@ configure({ testIdAttribute: 'data-component' });
 for (const key of ['GIT_INDEX_FILE', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_PREFIX']) {
   delete process.env[key];
 }
+
+// Never let a test touch the real ~/.teamai: tests/global-setup.ts points every
+// run at a private temp config dir. A missing value means global setup did not
+// run or did not propagate to this worker — fail loudly instead of falling back
+// to the real home directory.
+if (!process.env.TEAMAI_CONFIG_DIR || !process.env.TEAMAI_TEST_FORBIDDEN_CONFIG) {
+  throw new Error(
+    'TEAMAI_CONFIG_DIR is not set: tests/global-setup.ts must give the run a temp config dir ' +
+    '(refusing to run against the real ~/.teamai).',
+  );
+}

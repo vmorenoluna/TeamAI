@@ -13,7 +13,9 @@ import { computePipelineConfig } from './orchestrator/helpers';
 import { buildTicketMessageForPipeline } from './orchestrator/artifact-commit';
 import { isAutoModeEnabled, getAutoModeState, countSlotOccupyingTasks } from './auto-mode-state';
 import { recordAutoProcessed } from './auto-review-store';
-import { ContainerDockerMissingError } from './orchestrator/errors';
+import { ContainerDockerMissingError, OrchestratorError } from './orchestrator/errors';
+import { readContainerConfig } from './container-manager';
+import { isContainerBlocked } from './container-validation';
 import { getAwaitingReviewReason } from './task-utils';
 
 // Async (non-blocking) execFile — see the comment on _startCIPolling for why
@@ -39,6 +41,8 @@ interface AutoProjectState {
   /** Task IDs currently being started (between resumeTask call and phase change) — prevents duplicate picks. */
   startingIds: Set<string>;
   tickTimer: ReturnType<typeof setInterval> | null;
+  /** Whether the "container invalid" pause has been logged (avoids a line every tick). */
+  containerBlockLogged?: boolean;
   ciPollTimers: Map<string, ReturnType<typeof setInterval>>;
   eventCleanup: (() => void) | null;
 }
@@ -341,6 +345,18 @@ function _tick(projectRoot: string, state: AutoProjectState): void {
     log('auto-mode', `Deleted superseded ticket ${id}`);
   }
 
+  // An invalid container setup blocks picking up new work. Checked from the
+  // persisted result (no Docker call) so the 5s tick never re-runs validation;
+  // editing .devcontainer/devcontainer.json or "Re-validate" lifts it.
+  if (readContainerConfig(projectRoot).enabled && isContainerBlocked(projectRoot)) {
+    if (!state.containerBlockLogged) {
+      state.containerBlockLogged = true;
+      log('auto-mode', `Paused — ${projectRoot}'s container failed validation; fix it (or Re-validate) to resume`);
+    }
+    return;
+  }
+  state.containerBlockLogged = false;
+
   const allTasks = taskStore.getAll();
 
   // Paused tasks (awaiting-review, create-pr, pr-open) hold their slot until
@@ -386,6 +402,13 @@ function _tick(projectRoot: string, state: AutoProjectState): void {
         // the container-docker-missing event will notify the UI to show a dialog.
         // Don't log as error (it's an expected gate, not a failure).
         log('auto-mode', `Task ${task.id} blocked — container mode enabled but Docker not running`);
+        state.startingIds.delete(task.id);
+        return;
+      }
+      if (err instanceof OrchestratorError && err.code === 'CONTAINER_INVALID') {
+        // Container failed validation — a gate, not a task failure. The task
+        // stays in the backlog; the persisted result now pauses the tick.
+        log('auto-mode', `Task ${task.id} blocked — container failed validation`);
         state.startingIds.delete(task.id);
         return;
       }

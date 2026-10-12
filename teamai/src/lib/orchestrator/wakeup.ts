@@ -54,6 +54,7 @@ import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileS
 import path from 'path';
 import { logToOutput } from './helpers';
 import type { TaskPipeline } from './types';
+import { ORCHESTRATOR_FAIL_TYPE } from './types';
 import type { FailureReason } from './qa-feedback';
 
 // ── Wakeup file contract ─────────────────────────────────────────────────
@@ -587,6 +588,7 @@ export async function resolvePhaseWakeup(opts: ResolvePhaseWakeupOptions): Promi
     try {
       writeFileSync(path.join(opts.specDir, 'qa_report.json'), JSON.stringify({
         overall: 'FAIL',
+        fail_type: ORCHESTRATOR_FAIL_TYPE,
         criteria: [{
           criterion: 'Wakeup attempt limit exceeded',
           name: 'Wakeup attempt limit exceeded',

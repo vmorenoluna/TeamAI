@@ -18,7 +18,7 @@ import { gitPush } from './orchestrator/git-push';
 import { RateLimitError, waitForCompletion, handleRateLimit as handleRateLimitFn } from './orchestrator/rate-limit';
 import { TaskNotFoundError, TaskAlreadyRunningError, PhaseTransitionError, OrchestratorError, SessionKilledError, ContainerDockerMissingError } from './orchestrator/errors';
 import { NO_RESUME_PHASES } from '@/constants/phases';
-import { runImplement, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow } from './orchestrator/implement';
+import { runImplement, _recoverStBranchCommits } from './orchestrator/implement';
 import { runQaReview } from './orchestrator/qa-review';
 import { CLEANUP_ARTIFACTS, MAX_REVISION_SNAPSHOTS } from './orchestrator/artifacts';
 import { approveTask as approveTaskFn, rejectTask as rejectTaskFn, autoReviseSpec, prepareSpecRevisionArtifacts, buildSpecRevisionFeedback } from './orchestrator/review-actions';
@@ -27,6 +27,7 @@ import { warn as logWarn, log, error as logError } from './logger';
 import type { PhaseContext } from './orchestrator/phase-context';
 import type { PipelinePhase } from '@/constants/phases';
 import type { TaskPipeline, MergeStrategy, QaReport } from './orchestrator/types';
+import { ORCHESTRATOR_FAIL_TYPE } from './orchestrator/types';
 import type { FeedbackTarget } from './orchestrator/feedback-target';
 
 export class Orchestrator {
@@ -90,7 +91,6 @@ export class Orchestrator {
         cleanStaleSubtaskWorktrees(pipeline, {
           execGit: (a, c) => this._execGit(a, c),
           projectRoot,
-          clearWorktreeDirectory: clearWorktreeDirectoryOrThrow,
         }),
       removeWorktree: (taskId) =>
         removeWorktreeFn(taskId, { execGit: (a, c) => this._execGit(a, c), projectRoot, taskStore }),
@@ -279,7 +279,12 @@ export class Orchestrator {
     // file anyway (only spec_revision_feedback.md) — writing it back here
     // would leave stale QA artifacts on disk a genuine QA-driven bounce to
     // the analyst would never produce.
-    if (clearsQaArtifacts && priorQaReport?.overall === 'FAIL' && !enteredSpecRevisionMode) {
+    // A report the orchestrator wrote when it gave up (implement gate, deliverable
+    // cap, push failure…) holds no QA findings. Carrying it forward as
+    // qa_feedback.md made implement synthesize a rework subtask (9999) that
+    // re-checked the same artifacts, instead of resuming the incomplete subtasks.
+    if (clearsQaArtifacts && priorQaReport?.overall === 'FAIL' && priorQaReport.fail_type !== ORCHESTRATOR_FAIL_TYPE
+      && !enteredSpecRevisionMode) {
       writeQaFeedback(dir, priorQaReport);
     }
 
@@ -353,6 +358,9 @@ export class Orchestrator {
         throw new ContainerDockerMissingError(this.projectRoot);
       }
     }
+    // Only await when container mode is on: with it off this must stay synchronous,
+    // since callers observe the freshly registered pipeline right after runTask().
+    if (containerCfg.enabled) await this._requireValidContainer();
 
     // Prevent concurrent runs of the same task
     if (this.activeTasks.has(taskId)) {
@@ -538,6 +546,26 @@ export class Orchestrator {
     return 'failed';
   }
 
+  /**
+   * Container-validity gate: an invalid container setup always blocks. With
+   * container mode on, make sure the container is up and has passed validation
+   * (ensureContainer runs it when this exact setup hasn't been validated yet)
+   * BEFORE a task starts or advances, so nothing runs in — and no tokens are
+   * spent on — an environment that cannot build the project. Other container
+   * start-up errors are left to the pipeline's own start-up path, which reports
+   * them with full context.
+   */
+  private async _requireValidContainer(): Promise<void> {
+    try {
+      await containerManager.ensureContainer(this.projectRoot);
+    } catch (err) {
+      if (err instanceof OrchestratorError && err.code === 'CONTAINER_INVALID') {
+        processManager.emit('container-validation-failed', { projectRoot: this.projectRoot, message: err.message });
+        throw err;
+      }
+    }
+  }
+
   private async executePhase(pipeline: TaskPipeline): Promise<void> {
     // Cooperative pause/cancellation check: cancelPipeline deletes the
     // pipeline from this.pipelines, and a restart/move creates a fresh
@@ -572,6 +600,7 @@ export class Orchestrator {
           throw new ContainerDockerMissingError(this.projectRoot);
         }
       }
+      if (containerCfg.enabled) await this._requireValidContainer();
     }
 
     switch (pipeline.phase) {

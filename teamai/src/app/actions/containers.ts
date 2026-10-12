@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
-import { containerManager, dockerAvailable, _resetDockerAvailableCache, type ContainerState, type ValidationStep } from '@/lib/container-manager';
+import { containerManager, dockerAvailable, _resetDockerAvailableCache, type ContainerState, type ValidationStep, type ValidationStatus } from '@/lib/container-manager';
 
 export interface ContainerConfig {
   enabled: boolean;
@@ -34,9 +34,12 @@ export async function saveContainerConfig(config: ContainerConfig): Promise<Cont
   writeFileSync(join(dir, 'container.json'), JSON.stringify(config, null, 2));
   revalidatePath('/settings');
 
-  // When enabling containers and no devcontainer.json exists, bootstrap one asynchronously
+  // Enabling containers always (re)validates the setup — generating a
+  // devcontainer.json first only when none exists. An invalid setup blocks the
+  // pipeline, so a hand-written devcontainer.json must be checked too.
   const devCfgPath = join(projectPath, '.devcontainer', 'devcontainer.json');
-  if (config.enabled && !existsSync(devCfgPath)) {
+  if (config.enabled) {
+    const needsGeneration = !existsSync(devCfgPath);
     // Detect project type synchronously so the UI can show it immediately
     let projectType = 'unknown';
     try {
@@ -44,15 +47,32 @@ export async function saveContainerConfig(config: ContainerConfig): Promise<Cont
       projectType = analyzeProject(projectPath).type;
     } catch { /* ignore */ }
 
-    // Fire-and-forget: generate + start + validate in the background
+    // Fire-and-forget: (generate +) start + validate in the background
     containerManager.bootstrapContainer(projectPath).catch(err => {
       console.error('[container] Bootstrap failed:', err);
     });
 
-    return { enabled: config.enabled, dockerAvailable: dockerAvailable(), generated: true, projectType };
+    return needsGeneration
+      ? { enabled: config.enabled, dockerAvailable: dockerAvailable(), generated: true, projectType }
+      : { enabled: config.enabled, dockerAvailable: dockerAvailable() };
   }
 
   return { enabled: config.enabled, dockerAvailable: dockerAvailable() };
+}
+
+/** Re-run container validation on demand (clears a "container invalid" block once fixed). */
+export async function revalidateContainer(): Promise<void> {
+  const projectPath = await getActiveProjectPath();
+  // Fire-and-forget: progress streams over the container-validation channel.
+  containerManager.revalidate(projectPath).catch(err => {
+    console.error('[container] Re-validation failed:', err);
+  });
+}
+
+/** The last persisted validation result for the active project. */
+export async function getValidationStatus(): Promise<ValidationStatus> {
+  const projectPath = await getActiveProjectPath();
+  return containerManager.getValidationStatus(projectPath);
 }
 
 export async function getContainerState(): Promise<ContainerState> {

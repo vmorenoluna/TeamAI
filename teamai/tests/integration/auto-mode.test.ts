@@ -2026,6 +2026,73 @@ describe('Auto Mode Integration', () => {
     });
   });
 
+  // ── Container validation gate ─────────────────────────────────────────────
+
+  describe('invalid container setup', () => {
+    let autoMode: any;
+    let taskId: string;
+
+    const writeValidation = (status: 'passed' | 'failed') => {
+      mkdirSync(join(testDir, '.teamai'), { recursive: true });
+      writeFileSync(join(testDir, '.teamai', 'container-validation.json'), JSON.stringify({
+        status, fingerprint: 'f', validatedAt: new Date().toISOString(), failedStep: 'Native modules', error: 'win32 only',
+      }));
+    };
+
+    beforeEach(async () => {
+      setupTestProject();
+      autoMode = await setupAutoMode();
+      const { readContainerConfig } = await import('@/lib/container-manager');
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+
+      taskId = randomUUID();
+      const taskDir = join(testDir, '.teamai', taskId);
+      mkdirSync(taskDir, { recursive: true });
+      createTaskFile(taskDir, {
+        id: taskId, title: 'Container Gate Test', description: 'container-gate-test',
+        phase: 'backlog', createdAt: '2024-01-01T00:00:00.000Z',
+      });
+    });
+
+    afterEach(async () => {
+      const { readContainerConfig } = await import('@/lib/container-manager');
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
+      cleanup();
+    });
+
+    it('does not pick up backlog work while the container failed validation', async () => {
+      writeValidation('failed');
+      mockOrch.resumeTask.mockClear();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(mockOrch.resumeTask).not.toHaveBeenCalled();
+      expect(autoMode.isAutoModeEnabled(testDir)).toBe(true); // paused, not switched off
+    });
+
+    it('picks work up normally when the container passed validation', async () => {
+      writeValidation('passed');
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId));
+    });
+
+    it('treats CONTAINER_INVALID from resumeTask as a gate, not a task failure', async () => {
+      const { OrchestratorError } = await import('@/lib/orchestrator/errors');
+      mockOrch.resumeTask.mockRejectedValue(new OrchestratorError('container failed validation', 'CONTAINER_INVALID'));
+      mockError.mockClear();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+      await vi.waitFor(() => expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId));
+      await new Promise(r => setTimeout(r, 20));
+
+      expect(mockError).not.toHaveBeenCalledWith('auto-mode', expect.stringContaining('Failed to start task'), expect.anything());
+      expect(autoMode.isAutoModeEnabled(testDir)).toBe(true);
+    });
+  });
+
   // ── ContainerDockerMissingError handling ──────────────────────────────────
 
   describe('ContainerDockerMissingError handling in tick loop', () => {

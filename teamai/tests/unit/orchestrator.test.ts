@@ -82,7 +82,7 @@ import { Orchestrator, getOrchestrator } from '../../src/lib/orchestrator';
 import { getToolPath } from '../../src/lib/tool-checker';
 import { processManager } from '../../src/lib/process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache, readContainerRemoteUser } from '../../src/lib/container-manager';
-import { ContainerDockerMissingError } from '../../src/lib/orchestrator/errors';
+import { ContainerDockerMissingError, OrchestratorError } from '../../src/lib/orchestrator/errors';
 import { renderCommand } from '../../src/lib/command-templates';
 
 const fireEvent = createFireEvent(onHandlers);
@@ -219,6 +219,40 @@ describe('Orchestrator', () => {
       expect(mockEmit).toHaveBeenCalledWith('container-docker-missing', {
         projectRoot: testData.root,
       });
+    });
+
+    it('refuses to start when the container fails validation, emits the event, and starts no session', async () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(dockerAvailable).mockReturnValue(true);
+      vi.mocked(containerManager.ensureContainer).mockRejectedValue(
+        new OrchestratorError('container failed validation at "Native modules"', 'CONTAINER_INVALID'),
+      );
+      mockEmit.mockClear();
+      mockCreateSession.mockClear();
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      await expect(orch.runTask(testData.taskId, 'test', 'spec')).rejects.toMatchObject({ code: 'CONTAINER_INVALID' });
+      expect(mockEmit).toHaveBeenCalledWith('container-validation-failed', expect.objectContaining({
+        projectRoot: testData.root,
+        message: expect.stringContaining('Native modules'),
+      }));
+      expect(mockCreateSession).not.toHaveBeenCalled();
+      expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(false);
+    });
+
+    it('leaves other container start-up errors to the pipeline instead of blocking in the pre-flight', async () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(dockerAvailable).mockReturnValue(true);
+      vi.mocked(containerManager.ensureContainer).mockRejectedValue(new Error('devcontainer up failed'));
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      await orch.runTask(testData.taskId, 'test', 'spec').catch(() => { /* best-effort */ });
+      expect(mockCreateSession).toHaveBeenCalled();
     });
 
     it('does not throw in runTask when Docker is available', async () => {
@@ -1881,6 +1915,29 @@ describe('Orchestrator', () => {
 
     it('does not write qa_feedback.md when there is no qa_report.json to carry forward', async () => {
       testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+      try {
+        await orch.moveTaskToPhase(testData.taskId, 'implement');
+      } finally {
+        executeSpy.mockRestore();
+      }
+
+      expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
+    });
+
+    it('does not write qa_feedback.md from a failure the orchestrator itself recorded (no QA findings to carry)', async () => {
+      // An implement-gate / deliverable-cap / push failure is written as a FAIL
+      // qa_report.json by the orchestrator. Turning it into qa_feedback.md made
+      // the retry synthesize a pointless rework subtask (9999) instead of
+      // resuming the subtasks that were still incomplete.
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'FAIL',
+        fail_type: 'orchestrator',
+        criteria: [{ criterion: 'Implement completeness gate', name: 'Implement completeness gate', status: 'FAIL', notes: 'Subtask(s) 10, 11 remained incomplete' }],
+      }));
       const orch = makeOrch(testData.root, getOrchestrator);
 
       const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);

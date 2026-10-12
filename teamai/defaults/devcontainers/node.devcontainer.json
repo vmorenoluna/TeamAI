@@ -6,7 +6,8 @@
   "mounts": [
     "source=${localEnv:USERPROFILE}\\.claude,target=/home/node/.claude,type=bind",
     "source=${localEnv:USERPROFILE}\\.gitconfig,target=/home/node/.gitconfig,type=bind",
-    "source=${localEnv:USERPROFILE}\\.ssh,target=/home/node/.ssh,type=bind,readonly"
+    "source=${localEnv:USERPROFILE}\\.ssh,target=/home/node/.ssh,type=bind,readonly",
+    "source=${devcontainerId}-node-modules,target=${containerWorkspaceFolder}/{{PROJECT_PREFIX}}node_modules,type=volume"
   ],
 
   "features": {
@@ -14,7 +15,7 @@
     {{EXTRA_FEATURES}}
   },
 
-  "postCreateCommand": "npm install -g @anthropic-ai/claude-code && sudo apt-get update -q && sudo apt-get install -y -q gh{{EXTRA_APT}} && sudo git config --system --add safe.directory '*'",
+  "postCreateCommand": "npm install -g @anthropic-ai/claude-code && sudo apt-get update -q && sudo apt-get install -y -q gh python3-setuptools{{EXTRA_APT}} && sudo git config --system --add safe.directory '*' && sudo chown node:node {{PROJECT_PREFIX}}node_modules && (cd {{PROJECT_DIR}} && {{INSTALL_COMMAND}})",
   "postStartCommand": "npm install -g @anthropic-ai/claude-code@latest || echo 'claude-code update skipped (offline?)'",
 
   "remoteEnv": {

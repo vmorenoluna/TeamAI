@@ -759,6 +759,31 @@ describe('generateDevcontainer with real templates', () => {
     });
   });
 
+  describe('Node template', () => {
+    it('shadows node_modules with a container-local volume and installs into it', () => {
+      const info: ProjectInfo = {
+        type: 'node',
+        nodeVersion: '20',
+        installCommand: 'npm ci',
+        buildCommand: 'npm run build',
+        testCommand: 'npm test',
+      };
+
+      const parsed = assertValidDevcontainer(
+        generateDevcontainer('/test/project', info),
+        'mcr.microsoft.com/devcontainers/javascript-node:',
+        'node'
+      );
+
+      // A bind-mounted workspace shares node_modules with a Windows/macOS host, whose
+      // native optional deps (rollup, esbuild, ...) don't run on Linux.
+      const mountStr = JSON.stringify(parsed.mounts);
+      expect(mountStr).toContain('target=${containerWorkspaceFolder}/node_modules,type=volume');
+      expect(parsed.postCreateCommand).toContain('chown node:node node_modules');
+      expect(parsed.postCreateCommand).toContain('npm ci');
+    });
+  });
+
   describe('Python template', () => {
     it('generates valid devcontainer JSON with detected version', () => {
       const info: ProjectInfo = {

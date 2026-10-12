@@ -459,11 +459,14 @@ describe('ContainerManager — ensureContainer existing via scan', () => {
   });
 
   it('finds existing running container when in-memory record is missing', async () => {
-    mockExecFileSync
-      .mockReturnValueOnce('existing-container')
-      .mockReturnValueOnce(JSON.stringify([
-        { Source: '/test/project', Destination: '/workspaces/test' },
-      ]));
+    // Adopting a running container also records workspace trust in it (a
+    // third docker call), so answer by subcommand rather than by call order.
+    mockExecFileSync.mockReset();
+    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === 'ps') return 'existing-container';
+      if (args[0] === 'inspect') return JSON.stringify([{ Source: '/test/project', Destination: '/workspaces/test' }]);
+      return '';
+    });
 
     const proc = new EventEmitter() as any;
     proc.stdout = new EventEmitter() as any;

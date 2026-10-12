@@ -314,6 +314,87 @@ describe('ContainerManager lifecycle — ensureContainer with new container star
     });
   });
 
+  describe('_trustWorkspaceInContainer (via _doStart)', () => {
+    const start = async (projectRoot: string, containerId: string) => {
+      const mockProc = createMockSpawnProcess();
+      mockCrossSpawn.mockReturnValue(mockProc);
+      mockSpawn.mockReturnValue(createMockSpawnProcess());
+      const promise = cm.ensureContainer(projectRoot);
+      mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+        outcome: 'success', containerId, remoteWorkspaceFolder: '/workspaces/project',
+      }) + '\n'));
+      mockProc.emit('exit', 0);
+      return promise;
+    };
+
+    it('records trust for the remote workspace folder in the container\'s own ~/.claude.json', async () => {
+      mockExecFileSync.mockReturnValue('');
+      await start('/test/project-trust', 'devcontainer-trust-test');
+
+      const call = mockExecFileSync.mock.calls.find(
+        ([, args]: [string, string[]]) => args[0] === 'exec' && args.includes('node'),
+      );
+      expect(call).toBeDefined();
+      const args = call![1] as string[];
+      expect(args.slice(0, 5)).toEqual(['exec', '-u', 'node', 'devcontainer-trust-test', 'node']);
+      expect(args[args.length - 1]).toBe('/workspaces/project');
+      expect(args.join(' ')).toContain('hasTrustDialogAccepted');
+    });
+
+    it('fails container startup, with the cause, when trust cannot be recorded', async () => {
+      mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+        if (args.includes('node')) throw new Error('exec failed: node not found');
+        return '';
+      });
+
+      await expect(start('/test/project-trust-fail', 'devcontainer-trust-fail')).rejects.toThrow(
+        /Failed to record workspace trust for \/workspaces\/project.*node not found/,
+      );
+      expect((cm as any).records.get('/test/project-trust-fail').state).toBe('stopped');
+    });
+  });
+
+  describe('workspace trust on an adopted (already running) container', () => {
+    const root = '/test/project-adopt';
+    const mockScan = (trustFails: boolean) => {
+      mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+        if (args[0] === 'ps') return 'adopted-container\n';
+        if (args[0] === 'inspect') return JSON.stringify([{ Source: root, Destination: '/workspaces/project' }]);
+        if (args.includes('node') && trustFails) throw new Error('exec failed: node not found');
+        return '';
+      });
+      mockSpawn.mockReturnValue(createMockSpawnProcess()); // docker events watcher
+    };
+    const trustCalls = () => mockExecFileSync.mock.calls.filter(
+      ([, args]: [string, string[]]) => args[0] === 'exec' && args.includes('node'),
+    );
+
+    it('records trust when it adopts a running container found by the Docker scan', async () => {
+      mockScan(false);
+      const info = await cm.ensureContainer(root);
+
+      expect(info).toEqual({ containerId: 'adopted-container', remoteWorkspaceFolder: '/workspaces/project' });
+      expect(trustCalls()).toHaveLength(1);
+      expect((trustCalls()[0][1] as string[]).slice(0, 5)).toEqual(['exec', '-u', 'node', 'adopted-container', 'node']);
+    });
+
+    it('records trust only once per container, not on every ensureContainer call', async () => {
+      mockScan(false);
+      await cm.ensureContainer(root);
+      await cm.ensureContainer(root);
+
+      expect(trustCalls()).toHaveLength(1);
+    });
+
+    it('refuses to hand out an adopted container whose trust cannot be recorded, and retries next call', async () => {
+      mockScan(true);
+      await expect(cm.ensureContainer(root)).rejects.toThrow(/Failed to record workspace trust/);
+      await expect(cm.ensureContainer(root)).rejects.toThrow(/Failed to record workspace trust/);
+
+      expect(trustCalls()).toHaveLength(2);
+    });
+  });
+
   describe('ensureContainer guard — non-running state', () => {
     it('throws when container state is starting with a resolved startPromise', async () => {
       mockExecFileSync.mockReturnValue('');

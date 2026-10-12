@@ -1,4 +1,4 @@
-import { spawn, execFileSync, ChildProcess } from 'child_process';
+import { spawn, execFile, execFileSync, ChildProcess } from 'child_process';
 import crossSpawn from 'cross-spawn';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { EventEmitter } from 'events';
@@ -6,6 +6,13 @@ import path from 'path';
 import { warn as logWarn, log } from './logger';
 import { getToolPath } from './tool-checker';
 import { logToOutput } from './orchestrator/helpers';
+
+const execFileAsync = (file: string, args: string[]) =>
+  new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    execFile(file, args, { encoding: 'utf-8', timeout: 300_000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) reject(Object.assign(err, { stdout, stderr })); else resolve({ stdout, stderr });
+    });
+  });
 
 export type ContainerState = 'stopped' | 'starting' | 'running' | 'restarting' | 'generating' | 'validating';
 
@@ -26,6 +33,17 @@ interface ContainerRecord {
   eventWatcher: ChildProcess | null;
   validationSteps: ValidationStep[];
   validationPromise: Promise<boolean> | null;
+  /** Workspace trust has been recorded in this container (see _trustWorkspaceInContainer). */
+  trusted: boolean;
+}
+
+/** What the pipeline needs to know about a project's container validation. */
+export interface ValidationStatus {
+  /** 'unknown' = never validated (or the definition has changed since). */
+  status: 'passed' | 'failed' | 'unknown';
+  failedStep?: string;
+  error?: string;
+  validatedAt?: string;
 }
 
 export interface ContainerInfo {
@@ -123,16 +141,33 @@ export function hostToContainerPath(
 export class ContainerManager extends EventEmitter {
   private records = new Map<string, ContainerRecord>();
 
+  /**
+   * When true, ensureContainer() only hands out a container whose current
+   * setup has passed validation (running it first if needed) and throws
+   * ContainerValidationError otherwise. Off by default so the lifecycle can be
+   * exercised in isolation; the shared singleton turns it on.
+   */
+  constructor(private readonly options: { enforceValidation?: boolean } = {}) {
+    super();
+  }
+
   private _newRecord(projectRoot: string, state: ContainerState): ContainerRecord {
     return {
       projectRoot, state,
       containerId: null, remoteWorkspaceFolder: null,
       startPromise: null, eventWatcher: null,
       validationSteps: [], validationPromise: null,
+      trusted: false,
     };
   }
 
   async ensureContainer(projectRoot: string, logFile?: string): Promise<ContainerInfo> {
+    const info = await this._ensureRunning(projectRoot, logFile);
+    if (this.options.enforceValidation) await this._requireValid(projectRoot, info);
+    return info;
+  }
+
+  private async _ensureRunning(projectRoot: string, logFile?: string): Promise<ContainerInfo> {
     let record = this.records.get(projectRoot);
 
     if (!record || record.state === 'stopped') {
@@ -145,13 +180,12 @@ export class ContainerManager extends EventEmitter {
         record.remoteWorkspaceFolder = existing.remoteWorkspaceFolder;
         this.records.set(projectRoot, record);
         this._watchEvents(record);
-        return existing;
+      } else {
+        record = this._newRecord(projectRoot, 'starting');
+        this.records.set(projectRoot, record);
+        this._emit(record, 'starting');
+        record.startPromise = this._doStart(record, logFile);
       }
-
-      record = this._newRecord(projectRoot, 'starting');
-      this.records.set(projectRoot, record);
-      this._emit(record, 'starting');
-      record.startPromise = this._doStart(record, logFile);
     }
 
     if (record.state === 'starting' || record.state === 'restarting') {
@@ -160,6 +194,16 @@ export class ContainerManager extends EventEmitter {
 
     if (record.state !== 'running' || !record.containerId || !record.remoteWorkspaceFolder) {
       throw new Error(`Container for ${projectRoot} is not available (state: ${record.state})`);
+    }
+
+    // A container reached without going through _doStart (adopted from a Docker
+    // scan after a server restart, or by getRunningContainer) has not had its
+    // workspace trusted by us, and a start whose trust write failed never set
+    // the flag. Record trust now; a failure throws and leaves the flag unset,
+    // so every later call retries instead of handing out an untrusted container.
+    if (!record.trusted) {
+      this._trustWorkspaceInContainer(record.containerId, record.projectRoot, record.remoteWorkspaceFolder, logFile);
+      record.trusted = true;
     }
 
     return { containerId: record.containerId, remoteWorkspaceFolder: record.remoteWorkspaceFolder };
@@ -276,6 +320,8 @@ export class ContainerManager extends EventEmitter {
       record.startPromise = null;
       log('container', `Started — id=${containerId} workspace=${remoteWorkspaceFolder}`);
       this._logContainerClaudeVersion(containerId, record.projectRoot, logFile);
+      this._trustWorkspaceInContainer(containerId, record.projectRoot, remoteWorkspaceFolder, logFile);
+      record.trusted = true;
       this._emit(record, 'running');
       this._watchEvents(record);
     } catch (err) {
@@ -317,6 +363,47 @@ export class ContainerManager extends EventEmitter {
       const message = '⚠ Could not determine the container\'s claude-code version (docker exec failed)\n';
       if (logFile) logToOutput(path.dirname(logFile), message);
       logWarn('container', `Failed to check claude-code version in container ${containerId}`, err);
+    }
+  }
+
+  /**
+   * Pre-accept Claude Code's workspace-trust dialog inside the container.
+   *
+   * Agent sessions run non-interactively, so nobody can answer the trust
+   * dialog. Without a recorded acceptance, Claude Code ignores the project's
+   * `permissions.allow` entries from `.claude/settings.local.json` ("Ignoring N
+   * permissions.allow entries … this workspace has not been trusted") and every
+   * session silently loses its allowlist. Trust is inherited by subdirectories,
+   * so marking the remote workspace folder covers the task worktrees under it.
+   * `~/.claude.json` lives in the container's own home (only `~/.claude` is
+   * bind-mounted), so this never touches the host's configuration.
+   * The write runs as the devcontainer's remoteUser, the user agent sessions run
+   * as: a plain `docker exec` runs as the image's default user (often root) and
+   * would trust a home directory no session ever reads.
+   *
+   * Not best-effort: a container whose workspace cannot be trusted would run
+   * every session without its allowlist, so a failure here fails container
+   * startup (the caller's catch marks the container stopped and rethrows). A
+   * missing `~/.claude.json` is created; an unreadable or invalid one is an
+   * error, never silently overwritten.
+   */
+  private _trustWorkspaceInContainer(containerId: string, projectRoot: string, workspaceFolder: string, logFile?: string): void {
+    const script =
+      'const fs=require("fs"),p=require("os").homedir()+"/.claude.json";' +
+      'let j={};' +
+      'try{j=JSON.parse(fs.readFileSync(p,"utf8"))}catch(e){if(e.code!=="ENOENT")throw e}' +
+      'if(!j.projects||typeof j.projects!=="object")j.projects={};' +
+      'const w=process.argv[1];j.projects[w]=Object.assign({},j.projects[w],{hasTrustDialogAccepted:true});' +
+      'fs.writeFileSync(p,JSON.stringify(j,null,2))';
+    try {
+      execFileSync(getToolPath('docker'), [
+        'exec', '-u', readContainerRemoteUser(projectRoot), containerId, 'node', '-e', script, workspaceFolder,
+      ], { encoding: 'utf-8', timeout: 10000 });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const message = `✗ Could not record workspace trust for ${workspaceFolder} in the container: ${detail}\n`;
+      if (logFile) logToOutput(path.dirname(logFile), message);
+      throw new Error(`Failed to record workspace trust for ${workspaceFolder} in container ${containerId}: ${detail}`, { cause: err });
     }
   }
 
@@ -462,13 +549,17 @@ export class ContainerManager extends EventEmitter {
     }
 
     // ── Step 3: Validate ─────────────────────────────────────────────────
-    await this.validateContainer(projectRoot);
+    // With enforcement on, ensureContainer() above already validated (and threw
+    // on failure), so this only covers the non-enforcing configuration.
+    if (!this.options.enforceValidation) await this.validateContainer(projectRoot);
   }
 
   /**
-   * Validate a running container by executing install, build, and test
-   * commands inside it via docker exec. Progress streams via container-log
-   * events. If validation fails, the UI can retry with an agent.
+   * Validate a running container by executing agent-tooling, native-module,
+   * install, build, and test checks inside it via docker exec. Progress streams
+   * via container-log events and the result is persisted (see
+   * container-validation.ts); with enforcement on, a failure blocks the
+   * pipeline from using the container until it is fixed.
    */
   async validateContainer(projectRoot: string): Promise<boolean> {
     const record = this.records.get(projectRoot);
@@ -476,36 +567,100 @@ export class ContainerManager extends EventEmitter {
       logWarn('container', 'Cannot validate — container not running');
       return false;
     }
+    // One validation at a time per project: concurrent callers share the result.
+    if (record.validationPromise) return record.validationPromise;
+    record.validationPromise = this._runValidation(record).finally(() => { record.validationPromise = null; });
+    return record.validationPromise;
+  }
+
+  /** Re-run validation on demand (Settings → Container → Re-validate). */
+  async revalidate(projectRoot: string): Promise<boolean> {
+    await this._ensureRunning(projectRoot);
+    return this.validateContainer(projectRoot);
+  }
+
+  /** The last persisted validation result for a project, without touching Docker. */
+  async getValidationStatus(projectRoot: string): Promise<ValidationStatus> {
+    const { readValidationRecord } = await import('./container-validation');
+    const saved = readValidationRecord(projectRoot);
+    if (!saved) return { status: 'unknown' };
+    return { status: saved.status, failedStep: saved.failedStep, error: saved.error, validatedAt: saved.validatedAt };
+  }
+
+  /**
+   * Throw ContainerValidationError unless the container's current setup has
+   * passed validation — running validation first when it has not been done for
+   * this exact devcontainer definition, lockfile and container (or last failed).
+   */
+  private async _requireValid(projectRoot: string, info: ContainerInfo): Promise<void> {
+    const validation = await import('./container-validation');
+    const record = this.records.get(projectRoot);
+    if (record?.validationPromise) await record.validationPromise;
+
+    const projectDir = validation.findProjectDir(projectRoot);
+    const steps = await this._buildValidationSteps(projectRoot, projectDir);
+    const fingerprint = validation.computeFingerprint(projectRoot, projectDir, info.containerId, steps.map(s => s.command));
+    const saved = validation.readValidationRecord(projectRoot);
+    if (saved?.status === 'passed' && saved.fingerprint === fingerprint) return;
+
+    const passed = await this.validateContainer(projectRoot);
+    if (passed) return;
+    const failure = validation.readValidationRecord(projectRoot);
+    throw new validation.ContainerValidationError(
+      validation.describeFailure(failure ?? {}),
+      failure?.failedStep,
+    );
+  }
+
+  private async _buildValidationSteps(projectRoot: string, projectDir: string): Promise<ValidationStep[]> {
+    const { nativeModulesCheckCommand } = await import('./container-validation');
+    const info = await this._getValidationCommands(projectRoot, projectDir);
+    const steps: ValidationStep[] = [
+      { name: 'Agent tooling', command: 'claude --version && gh --version && git --version', status: 'pending' },
+    ];
+    // Before install on purpose: agents run builds and tests against the tree as
+    // it is and never run install themselves.
+    if (info.type === 'node') {
+      steps.push({ name: 'Native modules', command: nativeModulesCheckCommand(), status: 'pending' });
+    }
+    steps.push(
+      { name: 'Install dependencies', command: info.installCommand, status: 'pending' },
+      { name: 'Build', command: info.buildCommand, status: 'pending' },
+      { name: 'Tests', command: info.testCommand, status: 'pending' },
+    );
+    return steps;
+  }
+
+  private async _runValidation(record: ContainerRecord): Promise<boolean> {
+    const projectRoot = record.projectRoot;
+    const validation = await import('./container-validation');
 
     record.state = 'validating';
     this._emit(record, 'validating');
     this._emitLog(projectRoot, 'Validating container — running build and tests…');
 
-    // Discover commands from the generated devcontainer or docs
-    const info = await this._getValidationCommands(projectRoot);
-
-    const steps: ValidationStep[] = [
-      { name: 'Agent tooling', command: 'claude --version && gh --version && git --version', status: 'pending' },
-      { name: 'Install dependencies', command: info.installCommand, status: 'pending' },
-      { name: 'Build', command: info.buildCommand, status: 'pending' },
-      { name: 'Tests', command: info.testCommand, status: 'pending' },
-    ];
+    const projectDir = validation.findProjectDir(projectRoot);
+    if (projectDir) this._emitLog(projectRoot, `Project found in ./${projectDir}`);
+    const steps = await this._buildValidationSteps(projectRoot, projectDir);
     record.validationSteps = steps;
+    const fingerprint = validation.computeFingerprint(projectRoot, projectDir, record.containerId!, steps.map(s => s.command));
+    const workdir = projectDir ? `${record.remoteWorkspaceFolder}/${projectDir}` : record.remoteWorkspaceFolder!;
 
-    let allPassed = true;
+    let failed: ValidationStep | null = null;
     for (const step of steps) {
       step.status = 'running';
       this._emitValidation(projectRoot, step);
       this._emitLog(projectRoot, `  ▶ ${step.name}…`);
 
       try {
-        const output = execFileSync(getToolPath('docker'), [
-          'exec', '-i', '-w', record.remoteWorkspaceFolder!,
-          record.containerId,
-          'sh', '-c', step.command,
-        ], { encoding: 'utf-8', timeout: 300_000, maxBuffer: 10 * 1024 * 1024 });
+        const { stdout } = await execFileAsync(getToolPath('docker'), [
+          // As the devcontainer's remoteUser, like agent sessions: running as root
+          // leaves root-owned files in node_modules/build output that the real user
+          // (and the next install) then cannot touch.
+          'exec', '-i', '-u', readContainerRemoteUser(projectRoot), '-w', workdir, record.containerId!, 'sh', '-c', step.command,
+        ]);
         step.status = 'passed';
-        step.output = output.slice(-2000); // keep last 2KB for display
+        step.output = stdout.slice(-2000); // keep last 2KB for display
         this._emitValidation(projectRoot, step);
         this._emitLog(projectRoot, `  ✓ ${step.name} passed`);
       } catch (err: unknown) {
@@ -515,22 +670,29 @@ export class ContainerManager extends EventEmitter {
         step.output = execErr.stdout?.slice(-2000) || '';
         this._emitValidation(projectRoot, step);
         this._emitLog(projectRoot, `  ✗ ${step.name} FAILED`);
-        allPassed = false;
+        failed = step;
         break; // stop on first failure
       }
     }
 
-    if (allPassed) {
-      record.state = 'running';
-      this._emit(record, 'running');
-      this._emitLog(projectRoot, '✓ Container validation complete — all steps passed');
-    } else {
-      record.state = 'running'; // container is still usable even if validation fails
-      this._emit(record, 'running');
-      this._emitLog(projectRoot, '✗ Container validation failed — check the logs above for details. The container is running and can be used, but you may need to adjust .devcontainer/devcontainer.json.');
-    }
+    validation.writeValidationRecord(projectRoot, {
+      status: failed ? 'failed' : 'passed',
+      fingerprint,
+      validatedAt: new Date().toISOString(),
+      failedStep: failed?.name,
+      error: failed?.error?.slice(-2000),
+    });
 
-    return allPassed;
+    record.state = 'running'; // the container itself is up either way
+    this._emit(record, 'running');
+    if (!failed) {
+      this._emitLog(projectRoot, '✓ Container validation complete — all steps passed');
+      return true;
+    }
+    this._emitLog(projectRoot, this.options.enforceValidation
+      ? `✗ Container validation failed at "${failed.name}" — agents will not run in this container until it passes. Fix .devcontainer/devcontainer.json (or the project setup), then Re-validate.`
+      : '✗ Container validation failed — check the logs above for details. The container is running and can be used, but you may need to adjust .devcontainer/devcontainer.json.');
+    return false;
   }
 
   /** Get validation state for the UI to display */
@@ -538,17 +700,22 @@ export class ContainerManager extends EventEmitter {
     return this.records.get(projectRoot)?.validationSteps ?? [];
   }
 
-  private async _getValidationCommands(projectRoot: string): Promise<{ installCommand: string; buildCommand: string; testCommand: string }> {
+  private async _getValidationCommands(
+    projectRoot: string,
+    projectDir: string,
+  ): Promise<{ type: string; installCommand: string; buildCommand: string; testCommand: string }> {
     try {
       const { analyzeProject } = await import('./devcontainer-generator');
-      const info = analyzeProject(projectRoot);
+      const info = analyzeProject(path.join(projectRoot, projectDir));
       return {
+        type: info.type,
         installCommand: info.installCommand,
         buildCommand: info.buildCommand,
         testCommand: info.testCommand,
       };
     } catch {
       return {
+        type: 'node',
         installCommand: 'npm install',
         buildCommand: 'npm run build',
         testCommand: 'npm test',
@@ -576,4 +743,4 @@ declare global {
 }
 
 export const containerManager: ContainerManager =
-  global.__containerManager ?? (global.__containerManager = new ContainerManager());
+  global.__containerManager ?? (global.__containerManager = new ContainerManager({ enforceValidation: true }));

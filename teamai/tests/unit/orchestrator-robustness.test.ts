@@ -6568,13 +6568,23 @@ describe('relocateStuckWorktree', () => {
     expect(pipeline.worktreePath).toBe(join(worktreeBase, 'my-task-r3'));
   });
 
-  it('throws WorktreeError when every relocation slot is occupied', () => {
-    for (let n = 2; n <= 5; n++) mkdirSync(join(worktreeBase, `my-task-r${n}`));
+  it('keeps finding a free slot past the old five-slot limit', () => {
+    for (let n = 2; n <= 12; n++) mkdirSync(join(worktreeBase, `my-task-r${n}`));
     const stuckPath = join(worktreeBase, 'my-task');
     const deps = { taskStore: { update: vi.fn() } } as unknown as ImplementDeps;
     const pipeline = minimalImplPipeline({ specPath: project.taskDir, worktreePath: stuckPath });
 
-    expect(() => relocateStuckWorktree(pipeline, deps)).toThrow(/every relocation.*slot.*occupied/i);
+    relocateStuckWorktree(pipeline, deps);
+
+    expect(pipeline.worktreePath).toBe(join(worktreeBase, 'my-task-r13'));
+  });
+
+  it('throws a WorktreeError once every one of the 100 slots is occupied', () => {
+    for (let n = 2; n <= 100; n++) mkdirSync(join(worktreeBase, `my-task-r${n}`));
+    const deps = { taskStore: { update: vi.fn() } } as unknown as ImplementDeps;
+    const pipeline = minimalImplPipeline({ specPath: project.taskDir, worktreePath: join(worktreeBase, 'my-task') });
+
+    expect(() => relocateStuckWorktree(pipeline, deps)).toThrow(/no free relocation slot/i);
   });
 
   it('does not stack suffixes when relocating an already-relocated worktree', () => {
@@ -7689,35 +7699,35 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
     expect(subtasks[0].completed).toBe(true);
   });
 
-  it('leaves a subtask incomplete when its files_to_create exist but are stale — untouched since before this pass started', () => {
-    // Regression test for task a-later-demo-task:
-    // subtask 15's five files_to_create survived on disk from a commit two
-    // rounds back. No subtask in the CURRENT pass touched them — the git
-    // diff against the pass's start HEAD is empty — yet existence alone used
-    // to mark it completed anyway.
+  it('leaves a QA-rework subtask incomplete when its files_to_create were last committed before the rework feedback was written', () => {
+    // Regression test for task a-later-demo-task: subtask 15's files_to_create
+    // survived from a commit two rounds back and the rework never touched them.
     mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
     writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'stale evidence');
     writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'b.log'), 'stale evidence');
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nRe-run the job.\n');
 
     const subtasks = [
       {
         id: 5, title: 'Run job', description: '', files: [], acceptance_criteria: [],
         files_to_create: ['scripts/job_logs/a.log', 'scripts/job_logs/b.log'],
-        completed: false,
+        completed: false, qa_flagged: true,
       },
     ] as any[];
 
-    const execGitCapture = vi.fn(() => ''); // empty diff — nothing changed this pass
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
+    const execGitCapture = vi.fn((args: string[]) => (args[0] === 'log' ? '1\n' : '')); // clean tree, ancient commit
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
 
     expect(changed).toBe(false);
     expect(subtasks[0].completed).toBeFalsy();
   });
 
-  it('marks a subtask completed when its files_to_create exist AND were (re)committed during this pass', () => {
+  it('marks a subtask completed when its files_to_create are committed on the branch, whichever earlier session committed them', () => {
+    // Regression: a subtask spans several sessions (session limit, retries). A
+    // deliverable committed by an earlier one is on the branch and counts.
     mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
-    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'fresh evidence');
-    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'b.log'), 'fresh evidence');
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'evidence');
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'b.log'), 'evidence');
 
     const subtasks = [
       {
@@ -7727,11 +7737,29 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
       },
     ] as any[];
 
-    const execGitCapture = vi.fn(() => 'scripts/job_logs/a.log\nscripts/job_logs/b.log\n');
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
+    const execGitCapture = vi.fn(() => ''); // clean tree: everything committed
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
 
     expect(changed).toBe(true);
     expect(subtasks[0].completed).toBe(true);
+  });
+
+  it('leaves a subtask incomplete when a deliverable exists in the worktree but is not committed', () => {
+    mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'evidence');
+
+    const subtasks = [
+      {
+        id: 5, title: 'Run job', description: '', files: [], acceptance_criteria: [],
+        files_to_create: ['scripts/job_logs/a.log'], completed: false,
+      },
+    ] as any[];
+
+    const execGitCapture = vi.fn((args: string[]) => (args[0] === 'status' ? '?? scripts/job_logs/a.log\n' : ''));
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
+
+    expect(changed).toBe(false);
+    expect(subtasks[0].completed).toBeFalsy();
   });
 
   it('marks a rework subtask completed when only the deliverable QA listed in files_to_fix was re-committed this pass', () => {
@@ -7751,28 +7779,36 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
     ] as any[];
     writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\n<!-- teamai:files_to_fix ["scripts/job_logs/a.log"] -->\n');
 
-    const execGitCapture = vi.fn(() => 'scripts/job_logs/a.log\n');
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
+    // a.log was recommitted after the feedback; b/c stay as committed long ago.
+    const execGitCapture = vi.fn((args: string[]) => {
+      if (args[0] !== 'log') return '';
+      return args[args.length - 1] === 'scripts/job_logs/a.log' ? String(Math.floor(Date.now() / 1000) + 100) : '1';
+    });
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
 
     expect(changed).toBe(true);
     expect(subtasks[0].completed).toBe(true);
   });
 
-  it('requires ALL files_to_create to be fresh when no feedback narrows the dispatch (first pass)', () => {
+  it('requires ALL files_to_create of a QA-rework subtask to be recommitted when no feedback narrows the dispatch', () => {
     mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
     writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'x');
     writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'b.log'), 'x');
+    writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\nFix it.\n');
 
     const subtasks = [
       {
         id: 4, title: 'Run job', description: '', files: [], acceptance_criteria: [],
         files_to_create: ['scripts/job_logs/a.log', 'scripts/job_logs/b.log'],
-        completed: false,
+        completed: false, qa_flagged: true,
       },
     ] as any[];
 
-    const execGitCapture = vi.fn(() => 'scripts/job_logs/a.log\n');
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, 'pass-start-sha', execGitCapture);
+    const execGitCapture = vi.fn((args: string[]) => {
+      if (args[0] !== 'log') return '';
+      return args[args.length - 1] === 'scripts/job_logs/a.log' ? String(Math.floor(Date.now() / 1000) + 100) : '1';
+    });
+    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
 
     expect(changed).toBe(false);
     expect(subtasks[0].completed).toBeFalsy();

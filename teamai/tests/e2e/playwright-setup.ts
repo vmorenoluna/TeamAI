@@ -26,8 +26,6 @@ const WORKER_COUNT = Math.max(MAX_WORKERS, 1);
 
 async function globalSetup() {
   const cwd = process.cwd();
-  const seedDir = join(cwd, '.teamai-e2e-seed');
-
   // TEAMAI_CONFIG_DIR must be set by playwright.config.ts webServer.env
   // (also inherited by globalSetup via process.env passthrough).
   const tempConfigDir = process.env.TEAMAI_CONFIG_DIR;
@@ -38,6 +36,9 @@ async function globalSetup() {
       'resolves the correct config dir at module-load time.'
     );
   }
+
+  // Seeds live inside the temp config dir, never in the checkout.
+  const seedDir = join(tempConfigDir, '.teamai-e2e-seed');
 
   // Always clean before seeding for a fresh, deterministic baseline
   if (existsSync(seedDir)) {
@@ -52,7 +53,7 @@ async function globalSetup() {
   // ── Seed the test project ────────────────────────────────────────────
   console.log('[playwright-setup] Seeding E2E test project…');
   try {
-    execFileSync('npx', ['tsx', 'tests/e2e/seed.ts', '--with-plans', '--with-qa-report', '--yes'], {
+    execFileSync('npx', ['tsx', 'tests/e2e/seed.ts', '--with-plans', '--with-qa-report'], {
       cwd,
       stdio: 'inherit',
       timeout: 30_000,
@@ -80,7 +81,7 @@ async function globalSetup() {
   const projects = JSON.parse(readFileSync(projectsPath, 'utf-8')) as Array<{ name: string; path: string }>;
 
   for (let w = 0; w < WORKER_COUNT; w++) {
-    const workerSeedDir = join(cwd, `.teamai-e2e-seed-w${w}`);
+    const workerSeedDir = join(tempConfigDir, `.teamai-e2e-seed-w${w}`);
     if (w === 0) {
       // Worker 0 reuses the base seed (already at .teamai-e2e-seed)
       if (seedDir !== workerSeedDir) {

@@ -21,6 +21,7 @@ import { startRoleRefinementWatcher } from './src/lib/role-refinement-watcher';
 import { error as logError } from './src/lib/logger';
 import { checkAllTools } from './src/lib/tool-checker';
 import { projectStore } from './src/lib/project-store';
+import { sweepAbandonedWorktreeRemnants } from './src/lib/orchestrator/worktree-ops';
 import { prewarmModelsCache } from './src/app/actions/providers';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
@@ -150,6 +151,12 @@ app.prepare().then(async () => {
   // Broadcast container-docker-missing events so the UI can show a warning dialog
   processManager.on('container-docker-missing', (data: { projectRoot: string }) => {
     const msg = JSON.stringify({ type: 'container-docker-missing', projectRoot: data.projectRoot });
+    broadcastToProject(data, msg);
+  });
+
+  // Broadcast container-validation-failed so the UI can show why work is blocked
+  processManager.on('container-validation-failed', (data: { projectRoot: string; message: string }) => {
+    const msg = JSON.stringify({ type: 'container-validation-failed', projectRoot: data.projectRoot, message: data.message });
     broadcastToProject(data, msg);
   });
 
@@ -388,6 +395,22 @@ app.prepare().then(async () => {
       }).catch(err => {
         logError('auto-resume', 'Failed to auto-resume interrupted tasks', err);
       });
+    }
+
+    // ── Reclaim worktree directories abandoned while locked ─────────────
+    // A subtask worktree path held open by a scanner or orphaned process is
+    // never waited on or renamed: the run takes a fresh path instead and
+    // leaves the old directory behind. By the time we are starting up the
+    // lock has usually gone, so this is where those leftovers are deleted.
+    try {
+      for (const project of projectStore.getAll()) {
+        const removed = sweepAbandonedWorktreeRemnants(project.path);
+        if (removed.length > 0) {
+          console.log(`[worktree-sweep] Removed ${removed.length} abandoned worktree remnant(s) in ${project.path}`);
+        }
+      }
+    } catch (err) {
+      logError('worktree-sweep', 'Failed to sweep abandoned worktree remnants', err);
     }
 
     // ── Restore auto-mode state from disk (Bug 1) ──────────────────────

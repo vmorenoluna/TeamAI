@@ -27,13 +27,19 @@ function retryOnLock(fn: () => void, maxRetries = 5, baseDelay = 50): void {
 }
 
 // ── Mock homedir to a temp directory so tests NEVER touch the real ~/.teamai ──
+// This file isolates by mocking homedir(); the run-wide TEAMAI_CONFIG_DIR (set by
+// tests/global-setup.ts) would take precedence, so clear it here. Resolving to the real
+// ~/.teamai still throws (see project-store.ts), so a missing mock cannot leak.
+vi.stubEnv('TEAMAI_CONFIG_DIR', '');
+
 // vi.hoisted() runs before vi.mock factories, so TEST_HOME is initialized first.
 const TEST_HOME = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const path = require('path');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const crypto = require('crypto');
-  return path.join(process.cwd(), '.teamai-test-home-' + crypto.randomUUID().slice(0, 8));
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return path.join(require('os').tmpdir(), '.teamai-test-home-' + crypto.randomUUID().slice(0, 8));
 });
 vi.mock('os', () => ({
   homedir: () => TEST_HOME,
@@ -48,7 +54,9 @@ vi.mock('os', () => ({
 // against its own copy: a private root holding `defaults/`, with cwd pointed
 // at it for the duration of the file.
 const REAL_CWD = process.cwd();
-const ISOLATED_ROOT = join(REAL_CWD, '.teamai-test-defaults-' + randomUUID().slice(0, 8));
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const REAL_TMP = vi.hoisted(() => require('os').tmpdir() as string); // 'os' is mocked below
+const ISOLATED_ROOT = join(REAL_TMP, '.teamai-test-defaults-' + randomUUID().slice(0, 8));
 
 describe('ProjectStore', () => {
   let store: ProjectStore;
@@ -71,7 +79,7 @@ describe('ProjectStore', () => {
   });
 
   beforeEach(() => {
-    projectDir = join(process.cwd(), '.teamai-test-' + randomUUID().slice(0, 8));
+    projectDir = join(REAL_TMP, '.teamai-test-' + randomUUID().slice(0, 8));
     mkdirSync(projectDir, { recursive: true });
     store = new ProjectStore();
     clean = () => {
@@ -645,7 +653,7 @@ describe('ProjectStore', () => {
     // Add two projects
     store.add(projectDir, 'Project A');
 
-    const projectB = join(process.cwd(), '.teamai-test-b-' + randomUUID().slice(0, 8));
+    const projectB = join(REAL_TMP, '.teamai-test-b-' + randomUUID().slice(0, 8));
     mkdirSync(projectB, { recursive: true });
     store.add(projectB, 'Project B');
 
@@ -706,7 +714,7 @@ describe('ProjectStore', () => {
     for (const p of store.getAll()) store.remove(p.path);
     store.add(projectDir, 'Project A');
 
-    const projectB = join(process.cwd(), '.teamai-test-b-' + randomUUID().slice(0, 8));
+    const projectB = join(REAL_TMP, '.teamai-test-b-' + randomUUID().slice(0, 8));
     mkdirSync(projectB, { recursive: true });
     store.add(projectB, 'Project B');
 
