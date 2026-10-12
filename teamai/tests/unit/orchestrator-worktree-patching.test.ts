@@ -698,6 +698,21 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       expect(mockExecFileSync).toHaveBeenCalledWith(
         getToolPath('docker'),
         expect.arrayContaining(['-u', 'customuser']),
+        expect.anything(),
+      );
+    });
+
+    it('pipes git stderr so an expected failure does not spill into the parent output', () => {
+      env = setupTestEnv();
+      const orch = makeOrch(env.root);
+      mockExecFileSync.mockReturnValue('');
+
+      (orch as AnyOrch)._execGit(['status'], env.worktreePath);
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        getToolPath('docker'),
+        expect.any(Array),
+        expect.objectContaining({ stdio: ['ignore', 'pipe', 'pipe'] }),
       );
     });
 
