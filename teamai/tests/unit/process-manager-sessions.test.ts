@@ -8,6 +8,7 @@
  *   - Global singleton pattern
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EventEmitter } from 'events';
 
 // ── Module-level mocks (must be before any imports from the file under test) ──
 
@@ -62,7 +63,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 
 // ── Import after mocks ──
 
-import { ProcessManager } from '../../src/lib/process-manager';
+import { ProcessManager, SESSION_PRUNE_FALLBACK_MS } from '../../src/lib/process-manager';
 
 // ── Helpers ──
 
@@ -85,12 +86,16 @@ interface MockProcess {
   _emitStdout: (chunk: string) => void;
   _emitStderr: (chunk: string) => void;
   _emitExit: (code: number | null) => void;
+  _emitClose: () => void;
+  _emitError: (err: Error) => void;
 }
 
 function mockChildProcess(): MockProcess {
   const stdoutHandlers: Map<string, (...args: any[]) => void> = new Map();
   const stderrHandlers: Map<string, (...args: any[]) => void> = new Map();
   const exitHandlers: Array<(code: number | null) => void> = [];
+  const closeHandlers: Array<(...args: any[]) => void> = [];
+  const errorHandlers: Array<(...args: any[]) => void> = [];
 
   const proc = {
     kill: vi.fn(),
@@ -110,6 +115,10 @@ function mockChildProcess(): MockProcess {
     on: (event: string, handler: (...args: any[]) => void) => {
       if (event === 'exit') {
         exitHandlers.push(handler);
+      } else if (event === 'close') {
+        closeHandlers.push(handler);
+      } else if (event === 'error') {
+        errorHandlers.push(handler);
       }
     },
     // Test helpers to simulate events
@@ -123,6 +132,12 @@ function mockChildProcess(): MockProcess {
     },
     _emitExit: (code: number | null) => {
       for (const h of exitHandlers) h(code);
+    },
+    _emitClose: () => {
+      for (const h of closeHandlers) h(0, null);
+    },
+    _emitError: (err: Error) => {
+      for (const h of errorHandlers) h(err);
     },
   };
 
@@ -1033,6 +1048,160 @@ describe('ProcessManager — Full Coverage', () => {
 
       const args = mockSpawn.mock.calls[0][1];
       expect(args).not.toContain('--append-system-prompt');
+    });
+  });
+  // ── Session pruning ──────────────────────────────────────────────────────
+
+  describe('session pruning', () => {
+    const create = () => pm.createSession({ taskId: 't', role: 'coder', cwd: '/test' });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('prunes after exit 0 then close', async () => {
+      const proc = mockChildProcess();
+      const id = await create();
+      proc._emitExit(0);
+      proc._emitClose();
+      expect(pm.getSession(id)).toBeUndefined();
+      expect(pm.getSessionEmitter(id)).toBeUndefined();
+      expect(pm.getAllSessions().map(s => s.id)).not.toContain(id);
+    });
+
+    it('prunes after error exit then close', async () => {
+      const proc = mockChildProcess();
+      const id = await create();
+      proc._emitExit(1);
+      expect(pm.getSession(id)?.status).toBe('error');
+      proc._emitClose();
+      expect(pm.getSession(id)).toBeUndefined();
+    });
+
+    it('keeps the session readable inside exit listeners after killSession', async () => {
+      const proc = mockChildProcess();
+      const id = await create();
+      const seen: Array<unknown> = [];
+      const read = () => {
+        const s = pm.getSession(id);
+        seen.push([s?.wasExplicitlyKilled, s?.killReason, s?.stallKind]);
+      };
+      pm.getSessionEmitter(id)!.on('exit', read);
+      pm.on('exit', read);
+      pm.killSession(id, 'stalled', 'tool');
+      proc._emitExit(null);
+      expect(seen).toEqual([[true, 'stalled', 'tool'], [true, 'stalled', 'tool']]);
+    });
+
+    it('does not prune on exit alone, even just before the fallback', async () => {
+      vi.useFakeTimers();
+      const proc = mockChildProcess();
+      const id = await create();
+      proc._emitExit(0);
+      expect(pm.getSession(id)).toBeDefined();
+      vi.advanceTimersByTime(SESSION_PRUNE_FALLBACK_MS - 1);
+      expect(pm.getSession(id)).toBeDefined();
+    });
+
+    it('prunes via the unref\'d fallback timer when close never fires', async () => {
+      vi.useFakeTimers();
+      const unrefSpy = vi.spyOn(global, 'setTimeout');
+      const proc = mockChildProcess();
+      const id = await create();
+      proc._emitExit(0);
+      const handle = unrefSpy.mock.results
+        .map(r => r.value as { hasRef?: () => boolean })
+        .filter(h => h && typeof h.hasRef === 'function')
+        .pop();
+      expect(handle?.hasRef?.()).toBe(false);
+      vi.advanceTimersByTime(SESSION_PRUNE_FALLBACK_MS);
+      expect(pm.getSession(id)).toBeUndefined();
+      unrefSpy.mockRestore();
+    });
+
+    it('close cancels the fallback timer without warning', async () => {
+      vi.useFakeTimers();
+      const proc = mockChildProcess();
+      const id = await create();
+      proc._emitExit(0);
+      proc._emitClose();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(() => vi.advanceTimersByTime(SESSION_PRUNE_FALLBACK_MS)).not.toThrow();
+      expect(pm.getSession(id)).toBeUndefined();
+      expect(mockWarn).not.toHaveBeenCalled();
+    });
+
+    it('spawn failure: error then close keeps error behaviour and prunes', async () => {
+      const proc = mockChildProcess();
+      const id = await create();
+      const errSpy = vi.fn();
+      pm.on('error', errSpy);
+      proc._emitError(new Error('spawn claude ENOENT'));
+      expect(errSpy).toHaveBeenCalledWith({ sessionId: id, error: 'spawn claude ENOENT' });
+      expect(mockWarn).toHaveBeenCalledWith('process-manager', expect.stringContaining('spawn failed'));
+      expect(pm.getSession(id)?.status).toBe('error');
+      proc._emitClose();
+      expect(pm.getSession(id)).toBeUndefined();
+    });
+
+    it('keeps a running session when another is pruned', async () => {
+      const procA = mockChildProcess();
+      const a = await create();
+      mockChildProcess();
+      const b = await create();
+      procA._emitExit(0);
+      procA._emitClose();
+      expect(pm.getSession(a)).toBeUndefined();
+      expect(pm.getSession(b)?.status).toBe('running');
+    });
+
+    it('killSession without process end keeps the entry with status done', async () => {
+      mockChildProcess();
+      const id = await create();
+      pm.killSession(id);
+      expect(pm.getSession(id)?.status).toBe('done');
+    });
+
+    it('killSession after prune is a no-op and SIGKILL fallback does not fire', async () => {
+      vi.useFakeTimers();
+      const proc = mockChildProcess();
+      const id = await create();
+      proc._emitExit(0);
+      proc._emitClose();
+      expect(() => pm.killSession(id)).not.toThrow();
+      vi.advanceTimersByTime(5_000);
+      expect(proc.kill).not.toHaveBeenCalled();
+    });
+
+    it('releases per-session emitter listeners on prune', async () => {
+      const proc = mockChildProcess();
+      const id = await create();
+      const emitter = pm.getSessionEmitter(id)!;
+      emitter.on('event', () => {});
+      expect(emitter.listenerCount('event')).toBe(1);
+      proc._emitExit(0);
+      proc._emitClose();
+      expect(emitter.listenerCount('event')).toBe(0);
+    });
+
+    it('does not remove a replaced map entry', async () => {
+      const proc = mockChildProcess();
+      const id = await create();
+      const other = { id, status: 'running', events: new EventEmitter() };
+      (pm as unknown as AnyPM).sessions.set(id, other);
+      proc._emitExit(0);
+      proc._emitClose();
+      expect(pm.getSession(id)).toBe(other);
+    });
+
+    it('leaves no sessions after 100 sequential completions', async () => {
+      for (let i = 0; i < 100; i++) {
+        const proc = mockChildProcess();
+        await create();
+        proc._emitExit(0);
+        proc._emitClose();
+      }
+      expect(pm.getAllSessions().length).toBe(0);
     });
   });
 });

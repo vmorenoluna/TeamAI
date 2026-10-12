@@ -24,6 +24,13 @@ export interface TerminalSession {
 export const TERMINAL_OUTPUT_BUFFER_LIMIT = 200_000;
 
 /**
+ * How long after a session's process 'exit' the session is pruned if 'close'
+ * (stdio fully drained) has not fired. 'close' normally prunes sooner; this is
+ * the safety net for a stdio pipe held open by a grandchild process.
+ */
+export const SESSION_PRUNE_FALLBACK_MS = 30_000;
+
+/**
  * node-pty's Windows backend (ConPTY) calls CreateProcess directly on `file`
  * with no PATH/PATHEXT resolution and no ability to launch .cmd/.bat scripts
  * at all. getToolPath('claude') normally returns the bare string "claude"
@@ -305,6 +312,26 @@ export class ProcessManager extends EventEmitter {
     });
 
     }
+    // The entry this call registers, so pruning never removes a replacement.
+    const created: AgentSession = {
+      id,
+      process: proc,
+      taskId: opts.taskId,
+      role: opts.role,
+      cwd: opts.cwd,
+      projectRoot: opts.projectRoot,
+      status: 'running',
+      lastOutputAt: now,
+      toolInFlight: false,
+      events: sessionEvents,
+    };
+    let pruneTimer: ReturnType<typeof setTimeout> | undefined;
+    // 'close' fires once the process has ended and its stdio is drained (also
+    // after 'error' on spawn failure), so no late stdout is lost by pruning.
+    proc.on('close', () => {
+      if (pruneTimer) clearTimeout(pruneTimer);
+      this._pruneSession(id, created);
+    });
     proc.on('exit', (code, signal) => {
       if (buffer.trim()) {
         try {
@@ -320,22 +347,25 @@ export class ProcessManager extends EventEmitter {
       if (session) session.status = code === 0 ? 'done' : 'error';
       this.emit('exit', { sessionId: id, code, signal });
       sessionEvents.emit('exit', { sessionId: id, code, signal });
+      // Never prune synchronously here: 'exit' listeners (waitForCompletion)
+      // read the session via getSession(). 'close' normally prunes first.
+      pruneTimer = setTimeout(() => this._pruneSession(id, created), SESSION_PRUNE_FALLBACK_MS);
+      pruneTimer.unref();
     });
 
-    this.sessions.set(id, {
-      id,
-      process: proc,
-      taskId: opts.taskId,
-      role: opts.role,
-      cwd: opts.cwd,
-      projectRoot: opts.projectRoot,
-      status: 'running',
-      lastOutputAt: now,
-      toolInFlight: false,
-      events: sessionEvents,
-    });
+    this.sessions.set(id, created);
 
     return id;
+  }
+
+  /**
+   * Drop a finished session from the map and release its per-session
+   * listeners. No-op when the map entry is no longer this session.
+   */
+  private _pruneSession(id: string, session: AgentSession): void {
+    if (this.sessions.get(id) !== session) return;
+    this.sessions.delete(id);
+    session.events.removeAllListeners();
   }
 
   private _appendToLog(logFile: string, event: Record<string, unknown>): void {
@@ -439,8 +469,10 @@ export class ProcessManager extends EventEmitter {
 
   /**
    * Return sessions whose child process has exited (exitCode !== null) or was
-   * killed (process.killed === true).  These represent stale references left
-   * after a server crash or unexpected shutdown.
+   * killed (process.killed === true).  Sessions are pruned when their process
+   * closes, so this only returns sessions whose process ended but whose
+   * 'close' has not fired yet (within SESSION_PRUNE_FALLBACK_MS), or stale
+   * references left after a server crash or unexpected shutdown.
    */
   getStaleSessions(): AgentSession[] {
     const stale: AgentSession[] = [];
