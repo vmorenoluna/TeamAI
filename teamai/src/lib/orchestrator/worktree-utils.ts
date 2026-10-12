@@ -1,4 +1,4 @@
-import { execFileSync } from 'child_process';
+import { execFileSync, type StdioOptions } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync, rmSync } from 'fs';
 import path from 'path';
 import { readContainerConfig, readContainerRemoteUser, containerManager, hostToContainerPath } from '../container-manager';
@@ -245,6 +245,14 @@ export function worktreeGitEnv(hostCwd: string, projectRoot: string, containerWs
 }
 
 /**
+ * execFileSync forwards the child's stderr to this process unless `stdio` is
+ * set, so an expected failure (a rebase that stops on a conflict) spilled git's
+ * "Could not apply …" hints into the server log and the test runner. Piping it
+ * keeps the text on the thrown error's message, where callers already read it.
+ */
+const GIT_QUIET_STDIO: { stdio: StdioOptions } = { stdio: ['ignore', 'pipe', 'pipe'] };
+
+/**
  * Run a git command either directly on the host or via docker exec inside the container.
  */
 export function execGit(args: string[], hostCwd: string, projectRoot: string): void {
@@ -260,12 +268,12 @@ export function execGit(args: string[], hostCwd: string, projectRoot: string): v
       const remoteUser = readContainerRemoteUser(projectRoot);
       const gitEnv = worktreeGitEnv(hostCwd, projectRoot, info.remoteWorkspaceFolder);
       const envFlags = Object.entries(gitEnv).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-      execFileSync(getToolPath('docker'), ['exec', '-u', remoteUser, ...envFlags, '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
+      execFileSync(getToolPath('docker'), ['exec', '-u', remoteUser, ...envFlags, '-w', containerCwd, info.containerId, 'git', ...mappedArgs], GIT_QUIET_STDIO);
       return;
     }
   }
   const gitEnv = args[0] !== 'worktree' ? worktreeGitEnv(hostCwd, projectRoot) : {};
-  execFileSync('git', args, { cwd: hostCwd, ...(Object.keys(gitEnv).length ? { env: { ...process.env, ...gitEnv } } : {}) });
+  execFileSync('git', args, { cwd: hostCwd, ...GIT_QUIET_STDIO, ...(Object.keys(gitEnv).length ? { env: { ...process.env, ...gitEnv } } : {}) });
 }
 
 /**

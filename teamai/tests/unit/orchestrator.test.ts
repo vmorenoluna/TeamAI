@@ -1249,7 +1249,7 @@ describe('Orchestrator', () => {
       mockExecFileSync.mockReturnValue('');
       (orch as AnyOrch)._execGit(['status'], testData.root);
 
-      expect(mockExecFileSync).toHaveBeenCalledWith('git', ['status'], { cwd: testData.root });
+      expect(mockExecFileSync).toHaveBeenCalledWith('git', ['status'], { cwd: testData.root, stdio: ['ignore', 'pipe', 'pipe'] });
     });
 
     it('calls docker exec when container is enabled and running', () => {
@@ -1271,6 +1271,7 @@ describe('Orchestrator', () => {
       expect(mockExecFileSync).toHaveBeenCalledWith(
         getToolPath('docker'),
         expect.arrayContaining(['exec', '-u', 'node', 'cont-abc', 'git', 'status']),
+        expect.anything(),
       );
     });
 
@@ -1299,6 +1300,7 @@ describe('Orchestrator', () => {
       expect(mockExecFileSync).toHaveBeenCalledWith(
         getToolPath('docker'),
         expect.arrayContaining(['git', 'add', '/workspace/some/file']),
+        expect.anything(),
       );
     });
 
@@ -1322,6 +1324,7 @@ describe('Orchestrator', () => {
       expect(mockExecFileSync).toHaveBeenCalledWith(
         getToolPath('docker'),
         expect.arrayContaining(['git', 'add', '/tmp/external-file']),
+        expect.anything(),
       );
     });
 
@@ -1337,7 +1340,7 @@ describe('Orchestrator', () => {
       (orch as AnyOrch)._execGit(['status'], testData.root);
 
       // Falls back to host git
-      expect(mockExecFileSync).toHaveBeenCalledWith('git', ['status'], { cwd: testData.root });
+      expect(mockExecFileSync).toHaveBeenCalledWith('git', ['status'], { cwd: testData.root, stdio: ['ignore', 'pipe', 'pipe'] });
     });
   });
 
