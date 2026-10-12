@@ -1376,6 +1376,9 @@ export function failIfSubtaskBlocked(
  * (and flag a no-op session). The check is skipped when there is no
  * `preSessionHead` (or subtask 9999) or `git diff` fails.
  *
+ * Returns the files changed since `preSessionHead` (`git diff --name-only`), or
+ * `[]` when the check is skipped or `git diff` fails.
+ *
  * Adds `subtask.id` to the `scopeViolations` set on a violation. Reads the
  * subtask's session log (`subtaskLogFile`); writes `output.log` (via
  * logToOutput). Mutates no `pipeline` fields and deletes no files.
@@ -1390,7 +1393,7 @@ export function checkSubtaskScope(
   preSessionHead: string,
   subtaskLogFile: string,
   scopeViolations: Set<number>,
-): void {
+): string[] {
   // Post-session scope check: verify agent only modified assigned files.
   // Exempt the QA-fallback synthetic subtask (id 9999, see selectSubtasks) —
   // its `files` array is only a best-effort union seeded from the real
@@ -1484,11 +1487,14 @@ export function checkSubtaskScope(
           );
         }
       }
+      return changedFiles;
     } catch (scopeErr) {
       const scopeMsg = scopeErr instanceof Error ? scopeErr.message : String(scopeErr);
       logToOutput(pipeline.specPath, '\n[SCOPE] Could not verify file scope (git diff failed: ' + scopeMsg + ')\n');
+      return [];
     }
   }
+  return [];
 }
 
 /**

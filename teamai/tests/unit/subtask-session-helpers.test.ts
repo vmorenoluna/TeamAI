@@ -254,21 +254,35 @@ describe('checkSubtaskScope', () => {
   it('flags files outside files ∪ files_to_create', () => {
     execGitCapture.mockReturnValue('src/a.ts\nnew.ts\nstray.ts\n');
     const violations = new Set<number>();
-    checkSubtaskScope(
+    const changed = checkSubtaskScope(
       makePipeline(), makeDeps(), makeSubtask({ id: 3, files: ['src/a.ts'], files_to_create: ['new.ts'] }),
       cwd, 'abc123', join(specDir, 'st3.log'), violations,
     );
     expect(violations.has(3)).toBe(true);
     expect(outputLog()).toContain('stray.ts');
+    expect(changed).toEqual(['src/a.ts', 'new.ts', 'stray.ts']);
   });
 
   it('skips the check for the QA-fallback subtask 9999', () => {
     const violations = new Set<number>();
-    checkSubtaskScope(
+    const changed = checkSubtaskScope(
       makePipeline(), makeDeps(), makeSubtask({ id: 9999, files: ['a.ts'] }),
       cwd, 'abc123', join(specDir, 'st9999.log'), violations,
     );
     expect(execGitCapture).not.toHaveBeenCalled();
     expect(violations.size).toBe(0);
+    expect(changed).toEqual([]);
+  });
+
+  it('returns [] when git diff fails', () => {
+    execGitCapture.mockImplementation(() => { throw new Error('boom'); });
+    const violations = new Set<number>();
+    const changed = checkSubtaskScope(
+      makePipeline(), makeDeps(), makeSubtask({ id: 4, files: ['a.ts'] }),
+      cwd, 'abc123', join(specDir, 'st4.log'), violations,
+    );
+    expect(changed).toEqual([]);
+    expect(violations.size).toBe(0);
+    expect(outputLog()).toContain('git diff failed: boom');
   });
 });
