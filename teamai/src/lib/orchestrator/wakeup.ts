@@ -196,7 +196,7 @@ export function checkArtifactProgress(
   mtimeAtSchedule: number | null | undefined,
 ): { producedThisCycle: boolean; currentMtime: number | null } {
   if (!relArtifact) return { producedThisCycle: false, currentMtime: null };
-  const currentMtime = snapshotMtime(path.join(cwd, relArtifact));
+  const currentMtime = snapshotMtime(path.resolve(cwd, relArtifact));
   const producedThisCycle = currentMtime != null && (mtimeAtSchedule == null || currentMtime > mtimeAtSchedule);
   return { producedThisCycle, currentMtime };
 }
@@ -393,7 +393,7 @@ export async function checkForPhaseWakeup(opts: PhaseWakeupCheckOptions): Promis
       opts.pipeline.wakeupArtifact = wd.expected_artifact;
       opts.pipeline.wakeupProgressPath = wd.progress_log_path;
       opts.pipeline.wakeupArtifactMtimeAtSchedule = wd.expected_artifact
-        ? snapshotMtime(path.join(opts.cwd, wd.expected_artifact))
+        ? snapshotMtime(path.resolve(opts.cwd, wd.expected_artifact))
         : null;
       opts.pipeline.wakeupAttemptCount = computeNextAttemptCount(
         previousCommand, wd, opts.pipeline.wakeupAttemptCount || 0,
