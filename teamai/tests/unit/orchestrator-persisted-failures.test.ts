@@ -960,7 +960,7 @@ describe('QA mixed spec concerns and recurring additional issues', () => {
 
   afterEach(() => project.clean());
 
-  it('surfaces recurring additional issues with spec concerns and fails at the global QA budget', async () => {
+  it('surfaces recurring additional issues with spec concerns and fails once the stall budget is spent', async () => {
     const previous = {
       overall: 'FAIL',
       additional_issues: [{ description: 'Duplicate test block', file: 'src/feature.test.ts' }],
@@ -980,6 +980,13 @@ describe('QA mixed spec concerns and recurring additional issues', () => {
       qaAttempt: 0,
       qaRoundCount: 2,
       maxQaAttempts: 3,
+      // The same failure set already appeared in round 2, so this round is
+      // no progress and tips the stall counter over maxQaAttempts.
+      qaStallCount: 2,
+      qaRoundHistory: [{
+        round: 2, failedCriteria: [], passedCriteria: [],
+        failedIssues: ['issue:src/feature.test.ts::duplicate test block'],
+      }],
     });
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
 

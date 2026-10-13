@@ -306,14 +306,14 @@ describe('Orchestrator pipeline — full flow through implement phase', () => {
     expect(existsSync(summaryPath)).toBe(true);
     const summaryContent = readFileSync(summaryPath, 'utf-8');
     expect(summaryContent).toContain('Completion Summary');
-    expect(summaryContent).toContain('2 QA attempts');
+    expect(summaryContent).toContain('2 consecutive QA rounds without progress');
     expect(summaryContent).toContain('Add feature');
 
     // verify task is marked as failed
     const task = JSON.parse(readFileSync(join(project.taskDir, 'task.json'), 'utf-8'));
     expect(task.phase).toBe('failed');
     expect(task.completionSummary).toBeDefined();
-    expect(task.completionSummary).toContain('2 QA attempts');
+    expect(task.completionSummary).toContain('2 consecutive QA rounds without progress');
   }, 10000);
 
   it('handles moveTaskToPhase for backlog phase without sessions', async () => {

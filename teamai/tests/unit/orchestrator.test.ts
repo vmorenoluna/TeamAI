@@ -4962,7 +4962,7 @@ describe('Orchestrator', () => {
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
-        qaAttempt: 2,
+        qaStallCount: 2,
         maxQaAttempts: 3,
       });
 
@@ -5057,7 +5057,7 @@ describe('Orchestrator', () => {
       const pipeline = makePipeline({
         taskId: testData.taskId,
         specPath: testData.taskDir,
-        qaAttempt: 2,
+        qaStallCount: 2,
         maxQaAttempts: 3,
       });
 
