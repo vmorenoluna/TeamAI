@@ -25,7 +25,13 @@ export interface TaskPipeline {
   qaAttempt: number;
   /** Total completed QA round-trips for this task, preserved across spec revisions. */
   qaRoundCount?: number;
+  /** Consecutive QA rounds without progress (see qa-progress.ts). Capped by maxQaAttempts. */
+  qaStallCount?: number;
+  /** Agent-verdict QA rounds since the last reset, used to judge progress. */
+  qaRoundHistory?: QaRoundRecord[];
   maxQaAttempts: number;
+  /** Hard cap on total QA rounds; defaults to 3 * maxQaAttempts when absent. */
+  maxQaRounds?: number;
   specRevision: number;
   qaRevision: number;
   mergeStrategy?: MergeStrategy;
@@ -99,6 +105,8 @@ export interface TaskPipeline {
 // ── QA report types ───────────────────────────────────────────────────────
 
 export interface QaCriterion {
+  /** Stable acceptance-criterion ID (e.g. "AC3"), used to match criteria across QA rounds. */
+  id?: string;
   status?: string;
   criterion?: string;
   name?: string;
@@ -117,6 +125,14 @@ export interface QaCriterion {
    *  file needs to change (e.g. re-running produces identical output); absent
    *  = QA didn't say. See collectFilesToFix in qa-feedback.ts. */
   files_to_fix?: string[];
+}
+
+/** One agent-verdict QA round, reduced to the keys needed to judge progress. */
+export interface QaRoundRecord {
+  round: number;
+  failedCriteria: string[];
+  passedCriteria: string[];
+  failedIssues: string[];
 }
 
 export interface QaIssue {
