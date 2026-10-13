@@ -57,7 +57,24 @@ Single-subtask groups run directly in the main worktree — no isolation needed.
    - All subtasks spawn Claude agent sessions simultaneously (`Promise.allSettled`)
    - Each agent works in its own isolated worktree, unaware of other subtasks
 
-3. **Post-session scope check**: For each subtask, the orchestrator snapshots HEAD before the session starts, then runs `git diff --name-only <pre-session-HEAD>..HEAD` after. Any changed file not in the subtask's `files` array is a scope violation — the subtask is rejected and must re-run.
+3. **Post-session scope check**: For each subtask, the orchestrator snapshots HEAD before the session starts, then runs `git diff --name-only <pre-session-HEAD>..HEAD` after. A changed file not in the subtask's `files` array is only logged as a warning (and surfaced in QA feedback) — it never rejects the subtask, because `files` is a coordination hint, not a permission boundary. The remaining post-session rejection is the no-op check: a session that ended without touching any of its assigned files is rejected and must re-run. See the 2026-10-13 note below.
+
+   > **2026-10-13 addition (scope check is warning-only for unlisted files):**
+   > Found on task `progress-aware-qa-retry-budget-reset-sta` (ticket
+   > `2a0a27ab…`). In the first run, subtask 3 listed
+   > `teamai/defaults/commands/*.md`, but a drift test requires the mirrored
+   > copies in `teamai/.claude/commands/` to stay identical, so the coder
+   > edited them too and was rejected on all 3 passes. In the re-planned run,
+   > subtask 5 was rejected for touching
+   > `teamai/tests/unit/alert-banner-absence.test.tsx`. Both runs failed at
+   > `[IMPLEMENT-GATE] Exceeded incomplete-pass cap (3)`, leaving later
+   > subtasks unrun. Rationale for the change: parallel safety is already
+   > provided at plan time by `serializeSharedFileSubtasks` (subtasks whose
+   > `files` overlap are serialized) and at integration time by the
+   > `resolve-cherry-pick` merger agent, so rejecting a session for a
+   > legitimately needed extra file protected nothing and cost whole tasks.
+   > The planner is now told that `files` is a coordination hint and must list
+   > paired/mirrored files so collisions are serialized at plan time.
 
 4. **Cherry-pick (sequential)**: After all subtasks in a group finish successfully, each subtask's branch is cherry-picked onto the main worktree branch, one at a time:
    ```
@@ -80,7 +97,7 @@ Single-subtask groups run directly in the main worktree — no isolation needed.
 |-----------|------|---------------|
 | Per-subtask worktree creation | `src/lib/orchestrator/implement.ts` | ~25 |
 | Parallel spawn (`Promise.allSettled`) | `src/lib/orchestrator/implement.ts` | ~15 |
-| Scope enforcement | `src/lib/orchestrator/implement.ts` | ~30 |
+| Scope check (warning-only; no-op rejection) | `src/lib/orchestrator/implement.ts` | ~30 |
 | Cherry-pick + merger agent | `src/lib/orchestrator/implement.ts` | ~100 |
 | Stale worktree cleanup | `src/lib/orchestrator/worktree-ops.ts` | ~50 |
 | Worktree lifecycle ops | `src/lib/orchestrator/worktree-ops.ts` | ~70 |
@@ -91,13 +108,13 @@ Because subtasks in a parallel group must not touch the same files (or the cherr
 
 - No two subtasks may list the same file path in their `files` arrays
 - Subtasks that would touch the same file must be merged into one, regardless of logical separation
-- The coder (`defaults/commands/implement.md`) must not modify files outside its assigned `files` array
+- `files` is a coordination hint, not a permission boundary: the coder (`defaults/commands/implement.md`) may touch other files when the work needs it (this is logged as a warning, not a rejection), so the planner must list paired/mirrored files up front
 
 These constraints exist **solely** to prevent cherry-pick conflicts. In sequential mode, they would be unnecessary.
 
 ## Sequential Mode (parallelSubtasks: false)
 
-When `parallelSubtasks` is `false`, each subtask is its own group (no `parallel_group` grouping), so `isMultiGroup` is never true. All agents run sequentially in the main worktree — no per-subtask worktrees, no cherry-pick, no scope enforcement, no merger agent.
+When `parallelSubtasks` is `false`, each subtask is its own group (no `parallel_group` grouping), so `isMultiGroup` is never true. All agents run sequentially in the main worktree — no per-subtask worktrees, no cherry-pick, no merger agent. The post-session scope check (`checkSubtaskScope`) still runs in both modes.
 
 This is already fully supported by the existing code. No new code paths needed.
 
@@ -110,7 +127,7 @@ This is already fully supported by the existing code. No new code paths needed.
 | Orchestrator complexity | ~200 lines of worktree/cherry-pick/scope code |
 | Planner complexity | Must partition work into disjoint file sets |
 | Cherry-pick risk | Conflicts require merger agent or cause pipeline failure |
-| Scope violation risk | Agent modifies an unassigned file → subtask rejected |
+| Scope violation risk | Agent modifies an unassigned file → warning only; a concurrent write to the same file is left to plan-time serialization and the merger agent |
 | Debugging difficulty | Parallel failures are harder to diagnose than sequential ones |
 | Rule proliferation | File-ownership rules in plan.md, implement.md, planner.md (the uncommitted changes) |
 
@@ -126,12 +143,12 @@ This is already fully supported by the existing code. No new code paths needed.
 Parallel mode is most beneficial when:
 - Plans have 3+ subtasks that are genuinely independent
 - Subtasks touch disjoint sets of files (planner gets it right)
-- No agent exceeds its file scope
+- Agents rarely stray beyond their listed files (strays are warned about, not rejected)
 
 Parallel mode provides little benefit when:
 - Plans have only 1–2 subtasks (most common case?)
 - Subtasks naturally share files (e.g., a refactor touches many files)
-- Scope violations cause re-runs, negating the speedup
+- Unlisted-file edits that collide with a sibling subtask cause cherry-pick conflicts and merger-agent runs, negating the speedup
 
 ## Options
 

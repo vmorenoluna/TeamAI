@@ -303,7 +303,7 @@ The command templates in `defaults/commands/` enforce cross-cutting guardrails t
 
 3. **Verification Script Subtask Rule** (`plan.md` Rules): When the spec includes an acceptance criterion that requires running a script to produce empirical evidence (benchmark, integration run, data pipeline), the plan MUST include a dedicated subtask for that script run. Never fold it into a documentation subtask. The subtask must specify: (a) the exact command to run, (b) what output artifact to commit, and (c) the specific check to apply to the output (e.g. "section X shows fewer than N failures"). This makes the criterion independently verifiable by QA without relying on the engineer's self-report.
 
-13. **Plan Coverage** (`plan.md` Rules): Every spec acceptance criterion must map to at least one subtask — no orphaned criteria. If two parallel subtasks modify the same file without coordination, add an explicit `depends_on` between them or merge them. Parallel writes to the same file cause merge conflicts that waste engineer sessions.
+13. **Plan Coverage** (`plan.md` Rules): Every spec acceptance criterion must map to at least one subtask — no orphaned criteria. If two parallel subtasks modify the same file without coordination, add an explicit `depends_on` between them or merge them. Parallel writes to the same file cause merge conflicts that waste engineer sessions. A subtask's `files` is a coordination hint for parallel safety, not a permission boundary, and must include paired/mirrored files (e.g. `defaults/commands` ↔ `.claude/commands`) so collisions are serialized at plan time.
 
 #### Implement Phase (coder)
 
