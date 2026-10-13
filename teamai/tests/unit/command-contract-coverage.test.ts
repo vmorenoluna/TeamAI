@@ -116,6 +116,7 @@ const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
     ...PIPELINE_PREAMBLE, ...PHASE_WAKEUP, ...SPEC_OUTPUTS, ...BACKLOG_CHECK,
     r('acceptance criteria format', 'Given/When/Then'),
     r('self-critique step', 'Self-Critique'),
+    r('stable acceptance-criterion IDs', 'AC1'),
   ],
   'spec-revise': [
     ...PIPELINE_PREAMBLE, ...PHASE_WAKEUP, ...BACKLOG_CHECK,
@@ -128,6 +129,7 @@ const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
     r('never write the archived baseline', 'archived previous version'),
     r('verify the spec actually changed', 'Verify you actually changed something'),
     r('before → after change report', 'before → after'),
+    r('keep acceptance-criterion IDs stable', 'never renumber'),
   ],
   'plan': [...PIPELINE_PREAMBLE, ...PHASE_WAKEUP, ...PLAN_CONTRACT, ...BACKLOG_CHECK],
   'plan-revise': [
@@ -152,6 +154,7 @@ const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
     r('ticket-deferral auto-pass', "[SKIPPED] Ticket creation is the analyst's responsibility"),
     r('implementation summary on PASS', 'implementation_summary.md'),
     r('run verification from the worktree', 'Run from the worktree'),
+    r('stable acceptance-criterion id on every criteria entry', '"id": "AC'),
   ],
   'merge': [
     r('adopt the injected role persona', 'Adopt the role persona'),
