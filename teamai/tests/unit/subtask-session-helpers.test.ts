@@ -251,14 +251,14 @@ describe('verifySubtaskDeliverables', () => {
 });
 
 describe('checkSubtaskScope', () => {
-  it('flags files outside files ∪ files_to_create', () => {
+  it('warns about (but does not reject) files outside files ∪ files_to_create', () => {
     execGitCapture.mockReturnValue('src/a.ts\nnew.ts\nstray.ts\n');
     const violations = new Set<number>();
     const changed = checkSubtaskScope(
       makePipeline(), makeDeps(), makeSubtask({ id: 3, files: ['src/a.ts'], files_to_create: ['new.ts'] }),
       cwd, 'abc123', join(specDir, 'st3.log'), violations,
     );
-    expect(violations.has(3)).toBe(true);
+    expect(violations.has(3)).toBe(false);
     expect(outputLog()).toContain('stray.ts');
     expect(changed).toEqual(['src/a.ts', 'new.ts', 'stray.ts']);
   });

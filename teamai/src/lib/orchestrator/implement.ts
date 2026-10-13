@@ -1302,8 +1302,9 @@ export function autoCommitSubtaskChanges(
   // "commit after every change" is a convention, not an enforcement point).
   // Left uncommitted, this working-tree-only diff is invisible to two things
   // downstream: the scope check just below only diffs COMMITTED history
-  // (preSessionHead..HEAD), so out-of-scope uncommitted edits sail through
-  // unchecked; and squashWithMessage's `git reset --soft <merge-base>` only
+  // (preSessionHead..HEAD), so uncommitted edits would go unseen by its
+  // unlisted-file warning and no-op detection; and squashWithMessage's
+  // `git reset --soft <merge-base>` only
   // restages the tree of the previous commit, so anything never staged is
   // silently dropped from the PR entirely — no error, no warning, the code
   // just never reaches the branch. Found on a real
@@ -1314,7 +1315,7 @@ export function autoCommitSubtaskChanges(
   // shipped with only the unrelated evidence-log commit from a later subtask.
   // Auto-commit here, before the scope check reads git history, so both gaps
   // close at the same point: real work is never silently lost, and the scope
-  // check can now see (and reject) uncommitted out-of-scope edits too.
+  // check can now see uncommitted edits too.
   try {
     const status = deps.execGitCapture(['status', '--porcelain'], cwd);
     if (status.trim()) {
@@ -1372,14 +1373,16 @@ export function failIfSubtaskBlocked(
 }
 
 /**
- * Post-session scope check: verify the agent only modified assigned files
- * (and flag a no-op session). The check is skipped when there is no
+ * Post-session scope check: warn when the agent changed files not listed in the
+ * subtask's `files`/`files_to_create` (warning only — never a rejection), and
+ * reject a no-op session. The check is skipped when there is no
  * `preSessionHead` (or subtask 9999) or `git diff` fails.
  *
  * Returns the files changed since `preSessionHead` (`git diff --name-only`), or
  * `[]` when the check is skipped or `git diff` fails.
  *
- * Adds `subtask.id` to the `scopeViolations` set on a violation. Reads the
+ * Adds `subtask.id` to the `scopeViolations` set only for a rejected no-op
+ * session; unlisted changed files are logged but never rejected. Reads the
  * subtask's session log (`subtaskLogFile`); writes `output.log` (via
  * logToOutput). Mutates no `pipeline` fields and deletes no files.
  *
@@ -1394,44 +1397,38 @@ export function checkSubtaskScope(
   subtaskLogFile: string,
   scopeViolations: Set<number>,
 ): string[] {
-  // Post-session scope check: verify agent only modified assigned files.
+  // Post-session scope check. A subtask's `files` is a coordination hint for
+  // parallel safety (plan-time serializeSharedFileSubtasks + the
+  // resolve-cherry-pick merger handle overlapping parallel writes), not a
+  // permission boundary: agents may edit any file the work needs (e.g. a
+  // mirrored copy a drift test ties to a listed file). So changed files outside
+  // `files` ∪ `files_to_create` are logged as a warning and never rejected.
+  // The no-op detection below is independent of that warning.
+  //
   // Exempt the QA-fallback synthetic subtask (id 9999, see selectSubtasks) —
   // its `files` array is only a best-effort union seeded from the real
   // subtasks' own declared files, not an authoritative scope, because
   // criterion-matching already found nothing to target it against. Its real
   // scope is whatever qa_feedback.md names (implement-fix.md's QA Rework Mode:
-  // "Fix every listed issue. That's the entire scope."), which routinely
-  // includes paths no real subtask's `files`/`files_to_create` ever listed —
-  // e.g. deliverables owned by a subtask QA's criterion-matcher didn't flag.
-  // Rejecting 9999 for touching exactly those paths defeats the fallback
-  // synthesis's entire purpose: it fires precisely when nothing else can be
-  // targeted, so its coder session must be free to fix what QA actually
-  // named. Found on task detect-mechanical-periodic-melodic-loops: 9999
-  // correctly produced the three missing evidence files subtask 5 was
-  // supposed to create, and got rejected for it — the commit itself was
-  // never reverted (this check only marks the subtask incomplete), but the
-  // attempt was burned regardless.
+  // "Fix every listed issue. That's the entire scope."), so it skips the whole
+  // check, warning included.
   if (preSessionHead && subtask.id !== 9999) {
     try {
       const changedFiles = deps.execGitCapture(['diff', '--name-only', preSessionHead + '..HEAD'], cwd).trim().split('\n').filter(Boolean);
 
-      // A subtask's declared scope is files it edits (`files`) plus files it
-      // creates fresh (`files_to_create`) — deliverable verification already
-      // treats both as in-scope (it fails the subtask if a files_to_create
-      // path is MISSING), so the scope check must accept the same set or it
-      // rejects a subtask for doing exactly what it was told to do whenever
-      // its entire deliverable is new files (files: [] + files_to_create-only).
+      // Declared files are `files` (edited) plus `files_to_create` (created fresh).
       const assignedFiles = new Set([...(subtask.files || []), ...(subtask.files_to_create || [])]);
-      const violations = changedFiles.filter(f => !assignedFiles.has(f));
+      const unlisted = changedFiles.filter(f => !assignedFiles.has(f));
 
-      if (violations.length > 0) {
-        scopeViolations.add(subtask.id);
+      if (unlisted.length > 0) {
         logToOutput(pipeline.specPath,
-          '\n[SCOPE] Subtask ' + subtask.id + ' modified files outside its assigned scope:\n' +
-          violations.map(f => '  - ' + f).join('\n') + '\n' +
-          '[SCOPE] Assigned files: ' + ([...assignedFiles].join(', ') || '(none)') + '\n'
+          '\n[SCOPE] Subtask ' + subtask.id + ' changed files not listed in its plan `files` (coordination warning only — not rejected):\n' +
+          unlisted.map(f => '  - ' + f).join('\n') + '\n' +
+          '[SCOPE] Declared files: ' + ([...assignedFiles].join(', ') || '(none)') + '\n'
         );
-      } else if ((subtask.files || []).length > 0 && !(subtask.files_to_create || []).length && changedFiles.length === 0 && !subtask.verify_only) {
+      }
+
+      if ((subtask.files || []).length > 0 && !(subtask.files_to_create || []).length && changedFiles.length === 0 && !subtask.verify_only) {
         // No-op subtask detection: the coder session ended having committed
         // NO changes at all, for a subtask whose only declared scope is
         // EXISTING files to edit. Deterministic and orchestrator-side — does
@@ -1441,11 +1438,8 @@ export function checkSubtaskScope(
         // own circuit breaker) — a subtask that declares BOTH `files` and
         // `files_to_create` is already verified by that check whenever its
         // new files land, regardless of whether the pre-existing ones in
-        // `files` also changed. (Since `violations.length === 0` here,
-        // `changedFiles` can only contain entries from `files`/
-        // `files_to_create` — so once `files_to_create` is excluded,
-        // "changedFiles is empty" and "none of `files` were touched" are the
-        // same condition.) Exempt a deliberate `[SKIPPED]` deferral (ticket
+        // `files` also changed. A session that changed ONLY unlisted files is
+        // not a no-op (changedFiles is non-empty). Exempt a deliberate `[SKIPPED]` deferral (ticket
         // creation, pipeline-artifact management — see plan.md/implement.md)
         // since those subtasks can legitimately make no code changes at all.
         //
@@ -1997,7 +1991,7 @@ export async function runSubtaskSession(
   if (!skipCompletion) {
     if (scopeViolations.has(subtask.id)) {
       skipCompletion = true;
-      logToOutput(pipeline.specPath, '[SCOPE] Subtask ' + subtask.id + ' rejected — will re-run (see the specific reason logged above)\n');
+      logToOutput(pipeline.specPath, '[VERIFY] Subtask ' + subtask.id + ' rejected — will re-run (see the specific reason logged above)\n');
     } else if (!(await completeSubtask(
       pipeline, deps, subtask, cwd, preSessionHead, sessionStartedAt,
       { on: backlogOn, unit: backlogUnit, evidencePatterns }, completedIds,

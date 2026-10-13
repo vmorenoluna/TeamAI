@@ -75,7 +75,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator } from '../../src/lib/orchestrator';
-import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks, reconcileSubtaskCompletionFromDeliverables, relevantDeliverables, repairStuckCherryPick } from '../../src/lib/orchestrator/implement';
+import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks, reconcileSubtaskCompletionFromDeliverables, relevantDeliverables, repairStuckCherryPick, checkSubtaskScope } from '../../src/lib/orchestrator/implement';
 import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
@@ -4956,7 +4956,7 @@ describe('runImplement — scope check honors files_to_create', () => {
 
       const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
       expect(log).not.toContain('[SCOPE]');
-      expect(log).not.toContain('modified files outside its assigned scope');
+      expect(log).not.toContain('changed files not listed in its plan');
 
       const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
       expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(true);
@@ -4965,7 +4965,7 @@ describe('runImplement — scope check honors files_to_create', () => {
     }
   });
 
-  it('still flags a subtask that modifies a file outside both files and files_to_create', async () => {
+  it('warns (without rejecting) a subtask that modifies a file outside both files and files_to_create', async () => {
     writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
       subtasks: [{
         id: 3,
@@ -5006,8 +5006,12 @@ describe('runImplement — scope check honors files_to_create', () => {
       await promise;
 
       const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-      expect(log).toContain('[SCOPE] Subtask 3 modified files outside its assigned scope');
+      expect(log).toContain('[SCOPE] Subtask 3 changed files not listed in its plan');
       expect(log).toContain('src/UnrelatedFile.scala');
+      expect(log).not.toContain('rejected — will re-run');
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 3).completed).toBe(true);
     } finally {
       executeSpy.mockRestore();
     }
@@ -5068,7 +5072,7 @@ describe('runImplement — scope check honors files_to_create', () => {
       await promise;
 
       const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-      expect(log).not.toContain('[SCOPE] Subtask 9999 modified files outside its assigned scope');
+      expect(log).not.toContain('[SCOPE] Subtask 9999 changed files not listed in its plan');
 
       const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
       expect(plan.subtasks.find((s: any) => s.id === 9999).completed).toBe(true);
@@ -5171,7 +5175,7 @@ describe('runImplement — commit guard for sequential subtasks', () => {
       const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
       expect(log).toContain('[COMMIT-GUARD] Subtask 1 left uncommitted changes');
       // No scope violation — the only changed file was already the assigned one.
-      expect(log).not.toContain('[SCOPE] Subtask 1 modified files outside its assigned scope');
+      expect(log).not.toContain('[SCOPE] Subtask 1 changed files not listed in its plan');
 
       const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
       expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(true);
@@ -5884,7 +5888,7 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
     expect(execGit).toHaveBeenCalledWith(['commit', '-m', 'chore: auto-save subtask 2 state before cherry-pick'], stWorktreePath);
   });
 
-  it('does NOT auto-commit a per-subtask worktree that has a wakeup pending or a scope violation', async () => {
+  it('does NOT auto-commit a per-subtask worktree that has a wakeup pending or a rejected subtask', async () => {
     const execGitCapture = vi.fn(() => ' M some-file.txt\n');
     const execGit = vi.fn();
     const deps = {
@@ -7909,4 +7913,64 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
   });
 });
 
+describe('checkSubtaskScope (warning-only unlisted files)', () => {
+  let project: ReturnType<typeof setupProject>;
 
+  beforeEach(() => {
+    vi.clearAllMocks();
+    project = setupProject();
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  function run(subtask: Record<string, any>, diffOutput: string) {
+    const execGitCapture = vi.fn((args: string[]) => (args[0] === 'diff' && args[1] === '--name-only' && args[2] === 'abc123..HEAD' ? diffOutput : ''));
+    const deps = { execGitCapture, execGit: vi.fn(), projectRoot: project.root } as unknown as ImplementDeps;
+    const pipeline = makePipeline(project.taskId, project.taskDir, { phase: 'implement' });
+    const violations = new Set<number>();
+    const changed = checkSubtaskScope(
+      pipeline, deps,
+      { title: 't', description: 'd', acceptance_criteria: [], depends_on: [], ...subtask } as any,
+      join(project.root, 'worktrees', 'test-task'), 'abc123', join(project.taskDir, 'missing-session.log'), violations,
+    );
+    const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+    return { violations, changed, log };
+  }
+
+  beforeEach(() => {
+    writeFileSync(join(project.taskDir, 'output.log'), '');
+  });
+
+  it('does not reject a parallel-group subtask that changed an unlisted file', () => {
+    const { violations, changed, log } = run({ id: 4, files: ['a.ts'], parallel_group: 1 }, 'a.ts\nb.ts\n');
+    expect(violations.has(4)).toBe(false);
+    expect(changed).toEqual(['a.ts', 'b.ts']);
+    expect(log).toContain('[SCOPE] Subtask 4 changed files not listed in its plan');
+    expect(log).toContain('  - b.ts');
+    expect(log).toContain('[SCOPE] Declared files: a.ts');
+    expect(log).not.toContain('(rejected');
+    expect(log).not.toContain('outside its assigned scope');
+  });
+
+  it('does not treat a session that changed only unlisted files as a no-op', () => {
+    const { violations, log } = run({ id: 5, files: ['a.ts'] }, 'b.ts\n');
+    expect(violations.has(5)).toBe(false);
+    expect(log).toContain('[SCOPE] Subtask 5 changed files not listed in its plan');
+    expect(log).not.toContain('ended without touching any of its assigned files');
+  });
+
+  it('rejects a files-only, non-verify_only subtask with no changes as a no-op', () => {
+    const { violations, log } = run({ id: 6, files: ['a.ts'] }, '');
+    expect(violations.has(6)).toBe(true);
+    expect(log).toContain('[VERIFY] Subtask 6 ended without touching any of its assigned files');
+    expect(log).not.toContain('changed files not listed in its plan');
+  });
+
+  it('logs no warning and rejects nothing for subtask 9999', () => {
+    const { violations, log } = run({ id: 9999, files: ['a.ts'] }, 'b.ts\n');
+    expect(violations.size).toBe(0);
+    expect(log).not.toContain('[SCOPE] Subtask 9999');
+  });
+});
