@@ -135,12 +135,11 @@ re-read a file to verify an `Edit` that returned success.
 9. Print a summary of what was changed and the test results.
 
 ## Rules
-- **You may ONLY modify files explicitly listed in the subtask's `files` array.** This is a hard limit. If a change strictly requires touching unlisted files (e.g. implicitly affected tests), STOP and report the missing dependency rather than expanding your scope. The subtask must be replanned to include those files.
-  - **Exception — the QA-fallback rework subtask (id 9999):** when criterion-matching can't target any real subtask, the orchestrator synthesizes subtask 9999 with a `files` array auto-derived from other subtasks' declared files, not an authoritative scope — the QA rework "fix every listed issue" rule is what actually governs its scope. The orchestrator does not scope-enforce subtask 9999's `files` array for this reason; you are free to touch whatever `qa_feedback.md` names, even paths no subtask's `files`/`files_to_create` ever listed.
-- Do NOT modify files belonging to other subtasks.
+- **The subtask's `files` list is the planner's coordination hint, not a permission boundary.** Edit any file or folder the work genuinely needs (a mirrored copy a drift test keeps identical, a test your change broke, a caller of a changed signature) without stopping to ask for a replan. List every changed file that is not in `files` in your summary, with one line on why. In a parallel group a sibling may be editing an unlisted file concurrently, so keep unlisted edits to what the work needs: overlaps are resolved at cherry-pick, but each one costs a merge session.
+- Do not do another subtask's work. Touching a shared file to keep your own change consistent is allowed.
 - **CRITICAL: Do NOT create, modify, delete, stage, or commit pipeline artifacts** (spec.md, plan.json, qa_report.json, qa_feedback.md, human_feedback.md, completion_summary.md) — they are managed by the pipeline orchestrator and QA agent; treat them as read-only. If a subtask instructs you to write to these files, skip that instruction entirely and include in your summary: `[SKIPPED] Pipeline artifact management is the orchestrator's responsibility.`
 - **Out-of-scope findings: report, don't fix inline.** If you discover a bug, missing
-  feature, or refactor opportunity outside your assigned subtask scope, do NOT fix it.
+  feature, or refactor opportunity unrelated to this subtask's goal, do NOT fix it.
   Record it in your backlog check (**Backlog check** below), together with your verdict on
   every open ticket.
 - Apply your role's spec-authority and evidence discipline here too — it governs normal
@@ -352,8 +351,8 @@ Do steps 1–3 below back to back, immediately after you launch the job — not 
 step you'll get to once you're done waiting. Your turn can end at any point without
 warning once a long job is running; if that happens before you've written
 `subtask_wakeup-st<ID>.json`, the orchestrator has no way to tell your in-progress job
-apart from a subtask that made no progress, and your commits for it are discarded as a
-scope violation however far the job got.
+apart from a subtask that made no progress, and your commits for it are rejected as a
+subtask that made no progress however far the job got.
 
 1. **Detach the job** so it keeps running after your session ends:
    `nohup <command> > "$TEAMAI_SPEC_DIR/job-st<ID>.log" 2>&1 & disown`. A bare `&` only
@@ -367,7 +366,7 @@ scope violation however far the job got.
    worktree and gitignored) unless the artifact belongs in an already-gitignored project
    path. Gitignored matters: an untracked file elsewhere in the tree makes
    `git status --porcelain` dirty, which fails any clean-tree check in the project's
-   own tooling or the scope check. `/tmp` is only for scratch nothing outside this
+   own tooling or gets swept into the orchestrator's auto-commit. `/tmp` is only for scratch nothing outside this
    turn will read again.
 2. **If you're managing more than one job at once** (e.g. a server plus its
    client, or several parallel runs), stop or relaunch each one by its own PID

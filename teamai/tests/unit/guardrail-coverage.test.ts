@@ -27,7 +27,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { expandCommandIncludes } from '../../src/lib/command-templates';
+import { expandCommandIncludes, readCommandTemplate } from '../../src/lib/command-templates';
 
 /** Read an agent-facing file as agents receive it: command templates with
  *  their `_shared/` includes expanded (see src/lib/command-templates.ts). */
@@ -395,4 +395,20 @@ describe('Contract placement — commands, not roles', () => {
       });
     }
   }
+});
+
+describe('Scope wording — files is a hint, not a hard limit', () => {
+  const root = join(__dirname, '..', '..');
+
+  for (const cmd of ['implement', 'implement-fix']) {
+    it(`rendered ${cmd}.md does not forbid editing unlisted files`, () => {
+      const rendered = readCommandTemplate(cmd, join(root, 'defaults', 'commands'));
+      expect(rendered).not.toContain('You may ONLY modify files explicitly listed');
+      expect(rendered).not.toContain('This is a hard limit');
+    });
+  }
+
+  it('defaults/roles/coder.md has no STRICT BOUNDARY rule', () => {
+    expect(readAgentFile(join(root, 'defaults', 'roles', 'coder.md'))).not.toContain('STRICT BOUNDARY');
+  });
 });
