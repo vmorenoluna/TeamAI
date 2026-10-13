@@ -18,7 +18,10 @@ import type { PipelinePhase } from '@/constants/phases';
 // ── Types ─────────────────────────────────────────────────────────────────
 
 export interface PipelineConfig {
+  /** Consecutive no-progress QA rounds tolerated before failing (resets on progress). */
   maxQaAttempts: number;
+  /** Never-resetting hard cap on QA rounds; always >= maxQaAttempts. Default 3x maxQaAttempts. */
+  maxQaRounds: number;
   parallelSubtasks: boolean;
   sensors?: SensorsConfig;
   /** Single cap governing every retry-and-give-up circuit breaker inside
@@ -283,8 +286,17 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
     try {
       const raw = JSON.parse(readFileSync(cfgPath, 'utf-8'));
       const sensors = readPipelineSensors(raw);
+      const maxQaAttempts = typeof raw.maxQaAttempts === 'number' ? raw.maxQaAttempts : 3;
+      let maxQaRounds = 3 * maxQaAttempts;
+      if (Number.isInteger(raw.maxQaRounds) && raw.maxQaRounds > 0) {
+        maxQaRounds = Math.max(raw.maxQaRounds, maxQaAttempts);
+        if (maxQaRounds !== raw.maxQaRounds) {
+          logWarn('orchestrator', `maxQaRounds (${raw.maxQaRounds}) is below maxQaAttempts (${maxQaAttempts}); using ${maxQaRounds}`);
+        }
+      }
       return {
-        maxQaAttempts: typeof raw.maxQaAttempts === 'number' ? raw.maxQaAttempts : 3,
+        maxQaAttempts,
+        maxQaRounds,
         parallelSubtasks: typeof raw.parallelSubtasks === 'boolean' ? raw.parallelSubtasks : true,
         maxImplementRetries: typeof raw.maxImplementRetries === 'number' ? raw.maxImplementRetries : 3,
         maxStallRecoveries: typeof raw.maxStallRecoveries === 'number' ? raw.maxStallRecoveries : 3,
@@ -303,7 +315,7 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
   }
-  return { maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true, wakeupScanRetryDelayMs: defaultWakeupScanRetryDelayMs, backlogCheck: defaultBacklogCheck, backlogCheckEvidencePaths: [] };
+  return { maxQaAttempts: 3, maxQaRounds: 9, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true, wakeupScanRetryDelayMs: defaultWakeupScanRetryDelayMs, backlogCheck: defaultBacklogCheck, backlogCheckEvidencePaths: [] };
 }
 
 // ── Session map ───────────────────────────────────────────────────────────
