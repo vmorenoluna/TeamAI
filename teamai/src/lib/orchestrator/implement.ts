@@ -1588,7 +1588,7 @@ export async function consumeSubtaskWakeupFiles(
         // ends without writing another wakeup file can be verified — see
         // the freshness check below and the field's doc in types.ts.
         pipeline.wakeupArtifactMtimeAtSchedule = wd.expected_artifact
-          ? snapshotMtime(path.join(cwd, wd.expected_artifact))
+          ? snapshotMtime(path.resolve(cwd, wd.expected_artifact))
           : null;
         try {
           pipeline.wakeupHeadAtSchedule = deps.execGitCapture(['rev-parse', 'HEAD'], pipeline.worktreePath).trim() || undefined;
