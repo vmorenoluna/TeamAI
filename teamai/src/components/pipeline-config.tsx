@@ -4,9 +4,16 @@ import { useState, useTransition } from 'react';
 import { savePipelineConfig } from '@/app/actions/pipeline';
 import type { PipelineConfig } from '@/app/actions/pipeline';
 import { formatActionError } from '@/lib/error-format';
+import { BudgetPairInputs } from '@/components/budget-pair-inputs';
+
+const QA_ATTEMPTS_TOOLTIP =
+  "Consecutive QA rounds without progress before the task fails. A round makes progress when something that failed in the previous round now passes, nothing that passed before now fails, and the set of failures hasn't been seen before; a progressing round resets this count to 0, as does a spec revision. Default: 3.";
+const QA_ROUNDS_TOOLTIP =
+  'Hard cap on the total number of QA rounds for a task, whether or not the rounds make progress. Bounds fix/undo oscillation, QA finding new issues every round, and token spend. Spec revisions do not reset it; Retry and human Request Changes (other than to the Analyst) do. Must be at least Max QA attempts. Default: 3 × Max QA attempts (9).';
 
 export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
   const [maxQa, setMaxQa] = useState(config.maxQaAttempts);
+  const [maxQaRounds, setMaxQaRounds] = useState(config.maxQaRounds);
   const [parallel, setParallel] = useState(config.parallelSubtasks);
   const [autoParallel, setAutoParallel] = useState(config.autoModeMaxParallel);
   const [idleStall, setIdleStall] = useState(config.idleStallMinutes);
@@ -21,9 +28,13 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
 
   function handleSave() {
     setError(null);
+    if (maxQaRounds < maxQa) {
+      setError(formatActionError('save pipeline config', new Error(`Max QA rounds (${maxQaRounds}) must be at least Max QA attempts (${maxQa})`)));
+      return;
+    }
     startTransition(async () => {
       try {
-        await savePipelineConfig({ maxQaAttempts: maxQa, parallelSubtasks: parallel, autoModeMaxParallel: autoParallel, idleStallMinutes: idleStall, toolStallMinutes: toolStall, maxImplementRetries, recordHistoryInGit: recordHistory, includePhasesTrailer: phasesTrailer });
+        await savePipelineConfig({ maxQaAttempts: maxQa, maxQaRounds,parallelSubtasks: parallel, autoModeMaxParallel: autoParallel, idleStallMinutes: idleStall, toolStallMinutes: toolStall, maxImplementRetries, recordHistoryInGit: recordHistory, includePhasesTrailer: phasesTrailer });
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       } catch (err) {
@@ -51,19 +62,24 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
         </div>
       )}
       <div className="flex items-center gap-4 flex-wrap">
-        <div>
-          <label className="text-xs font-medium text-slate-400 block mb-1">
-            Max QA attempts
-          </label>
-          <input
-            type="number"
-            min={1}
-            max={10}
-            value={maxQa}
-            onChange={e => setMaxQa(Number(e.target.value))}
-            className="w-20 px-2 py-1 text-sm border border-[#334155] rounded bg-[#11131b] text-white focus:outline-none focus:ring-2 focus:ring-[#2563eb]"
-          />
-        </div>
+        <BudgetPairInputs
+          stall={{
+            label: 'Max QA attempts',
+            tooltip: QA_ATTEMPTS_TOOLTIP,
+            value: maxQa,
+            min: 1,
+            max: 10,
+            onChange: setMaxQa,
+          }}
+          rounds={{
+            label: 'Max QA rounds',
+            tooltip: QA_ROUNDS_TOOLTIP,
+            value: maxQaRounds,
+            min: 1,
+            max: 30,
+            onChange: setMaxQaRounds,
+          }}
+        />
         <div title="Single cap governing every retry-and-give-up circuit breaker inside the implement phase: a subtask's declared deliverable still missing after its session ends, a wakeup-pending subtask's background job never producing its artifact, or a full implement pass ending with any subtask still incomplete. All bypass QA entirely and fail the task once exceeded, rather than pushing to an expensive QA review that would only confirm what plan.json already shows. Default: 3.">
           <label className="text-xs font-medium text-slate-400 block mb-1">
             Max implement retries
