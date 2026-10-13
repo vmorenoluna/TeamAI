@@ -57,7 +57,7 @@ Single-subtask groups run directly in the main worktree — no isolation needed.
    - All subtasks spawn Claude agent sessions simultaneously (`Promise.allSettled`)
    - Each agent works in its own isolated worktree, unaware of other subtasks
 
-3. **Post-session scope check**: For each subtask, the orchestrator snapshots HEAD before the session starts, then runs `git diff --name-only <pre-session-HEAD>..HEAD` after. A changed file not in the subtask's `files` array is only logged as a warning (and surfaced in QA feedback) — it never rejects the subtask, because `files` is a coordination hint, not a permission boundary. The remaining post-session rejection is the no-op check: a session that ended without touching any of its assigned files is rejected and must re-run. See the 2026-10-13 note below.
+3. **Post-session scope check**: For each subtask, the orchestrator snapshots HEAD before the session starts, then runs `git diff --name-only <pre-session-HEAD>..HEAD` after. A changed file not in the subtask's `files` array is only logged as a warning in `output.log` — it never rejects the subtask, because `files` is a coordination hint, not a permission boundary. The remaining post-session rejection is the no-op check: a session that ended without touching any of its assigned files is rejected and must re-run. See the 2026-10-13 note below.
 
    > **2026-10-13 addition (scope check is warning-only for unlisted files):**
    > Found on task `progress-aware-qa-retry-budget-reset-sta` (ticket
