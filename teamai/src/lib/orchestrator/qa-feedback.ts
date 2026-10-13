@@ -319,7 +319,14 @@ export function writeCompletionSummary(
   taskId: string,
   taskStore: TaskStore,
   reason: FailureReason,
-  counters: { qaAttempt: number; qaRoundCount?: number; specRevision?: number },
+  counters: {
+    qaAttempt: number;
+    qaRoundCount?: number;
+    qaStallCount?: number;
+    maxQaAttempts?: number;
+    maxQaRounds?: number;
+    specRevision?: number;
+  },
   detail?: string,
 ): void {
   const summaryPath = path.join(specPath, 'completion_summary.md');
@@ -375,6 +382,14 @@ export function writeCompletionSummary(
       `finishing every acceptance criterion. **This is not a report of code defects** — ` +
       `no criterion actually failed; QA simply didn't finish reviewing. See the QA tab ` +
       `for whichever criteria it did verify before running out of budget.\n\n`;
+  } else if (reason === 'qa-attempts-exhausted' && detail === 'stall') {
+    const rounds = counters.qaRoundCount ?? counters.qaAttempt;
+    content += `Task failed after ${counters.qaStallCount ?? counters.maxQaAttempts ?? counters.qaAttempt} ` +
+      `consecutive QA rounds without progress (${rounds} QA rounds in total).\n\n`;
+  } else if (reason === 'qa-attempts-exhausted' && detail === 'rounds') {
+    const rounds = counters.qaRoundCount ?? counters.qaAttempt;
+    content += `Task failed after ${rounds} QA rounds — the hard cap of ` +
+      `${counters.maxQaRounds ?? rounds} total QA rounds was reached.\n\n`;
   } else {
     content += `Task failed after ${counters.qaAttempt} QA attempts.\n\n`;
   }

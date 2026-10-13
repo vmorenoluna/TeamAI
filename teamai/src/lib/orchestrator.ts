@@ -109,7 +109,14 @@ export class Orchestrator {
         pipeline.taskId,
         taskStore,
         reason,
-        { qaAttempt: pipeline.qaAttempt, qaRoundCount: pipeline.qaRoundCount, specRevision: pipeline.specRevision },
+        {
+          qaAttempt: pipeline.qaAttempt,
+          qaRoundCount: pipeline.qaRoundCount,
+          qaStallCount: pipeline.qaStallCount,
+          maxQaAttempts: pipeline.maxQaAttempts,
+          maxQaRounds: pipeline.maxQaRounds,
+          specRevision: pipeline.specRevision,
+        },
         detail,
       ),
       autoReviseSpec: (pipeline) => this._autoReviseSpec(pipeline),
@@ -391,6 +398,7 @@ export class Orchestrator {
       branch,
       qaAttempt: 0,
       maxQaAttempts: config.maxQaAttempts,
+      maxQaRounds: config.maxQaRounds,
       // Restore from disk (not hardcoded 1) — moveTaskToPhase can re-enter
       // runTask on a task that already has spec_v*.md history (e.g. reset to
       // 'plan' keeps prior spec revisions on disk). Under the rename-at-
@@ -426,6 +434,10 @@ export class Orchestrator {
       if (savedState.persistedCriterionFailCounts !== undefined) pipeline.persistedCriterionFailCounts = savedState.persistedCriterionFailCounts;
       if (savedState.persistedAdditionalIssueCounts !== undefined) pipeline.persistedAdditionalIssueCounts = savedState.persistedAdditionalIssueCounts;
       if (savedState.qaRoundCount !== undefined) pipeline.qaRoundCount = savedState.qaRoundCount;
+      // Migration: state saved before the stall counter existed carries only
+      // qaAttempt, which was the old consecutive budget — seed the stall count from it.
+      pipeline.qaStallCount = savedState.qaStallCount ?? savedState.qaAttempt ?? 0;
+      pipeline.qaRoundHistory = savedState.qaRoundHistory ?? [];
       if (savedState.specRevision !== undefined) pipeline.specRevision = savedState.specRevision;
       if (savedState.qaRevision !== undefined) pipeline.qaRevision = savedState.qaRevision;
       if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;
@@ -789,6 +801,7 @@ export class Orchestrator {
       branch,
       qaAttempt: 0,
       maxQaAttempts: this.getPipelineConfig().maxQaAttempts,
+      maxQaRounds: this.getPipelineConfig().maxQaRounds,
       specRevision: this._restoreSpecRevision(taskId),
       qaRevision: this._restoreQaRevision(taskId),
     };

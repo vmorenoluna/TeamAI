@@ -392,6 +392,43 @@ describe('Crash Recovery Integration', () => {
       expect(restored!.branch).toBe('feat/crash-test');
     });
 
+    it('persists and restores qaStallCount and qaRoundHistory (AC16)', async () => {
+      const history = [{ round: 1, failedCriteria: ['AC1'], passedCriteria: ['AC2'], failedIssues: [] }];
+      (orch as AnyOrch)._ctx.savePipelineState({
+        taskId,
+        description: 'crash test',
+        phase: 'qa-review' as const,
+        specPath,
+        worktreePath: join(testDir, 'worktrees', 'crash-test'),
+        branch: 'feat/crash-test',
+        qaAttempt: 1,
+        qaRoundCount: 4,
+        qaStallCount: 2,
+        qaRoundHistory: history,
+        maxQaAttempts: 3,
+      });
+
+      vi.resetModules();
+      onHandlers.clear();
+      const { getOrchestrator } = await import('@/lib/orchestrator');
+      const restored = (getOrchestrator(testDir) as AnyOrch)._restorePipelineState(taskId, specPath);
+
+      expect(restored!.qaRoundCount).toBe(4);
+      expect(restored!.qaStallCount).toBe(2);
+      expect(restored!.qaRoundHistory).toEqual(history);
+    });
+
+    it('legacy state without the new fields restores without them (runTask migrates)', async () => {
+      writeFileSync(join(specPath, '.pipeline_state.json'), JSON.stringify({ taskId, phase: 'qa-review', qaAttempt: 2, qaRoundCount: 2 }));
+      const restored = (orch as AnyOrch)._restorePipelineState(taskId, specPath);
+
+      expect(restored!.qaStallCount).toBeUndefined();
+      expect(restored!.qaRoundHistory).toBeUndefined();
+      // Same expression runTask applies to saved state.
+      expect(restored!.qaStallCount ?? restored!.qaAttempt ?? 0).toBe(2);
+      expect(restored!.qaRoundHistory ?? []).toEqual([]);
+    });
+
     it('cleans up pipeline state file after successful restore', async () => {
       const pipeline = {
         taskId,

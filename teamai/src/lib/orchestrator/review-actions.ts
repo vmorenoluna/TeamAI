@@ -41,12 +41,17 @@ export interface ReviewActionsDeps {
  *  or the task is rejected, giving the next attempt a clean failure budget. */
 function resetAllCounters(pipeline: TaskPipeline, preserveQaHistory = false): void {
   pipeline.qaAttempt = 0;
+  // Both modes restart the no-progress budget: a revised spec / new directive is a fresh
+  // attempt, and round history compared across it would be meaningless.
+  pipeline.qaStallCount = 0;
+  pipeline.qaRoundHistory = [];
   pipeline.deliverableFailCounts = {};
   pipeline.stallRecoveryCounts = {};
   pipeline.incompleteImplementPassCount = 0;
   if (!preserveQaHistory) {
     pipeline.persistedCriterionFailCounts = {};
     pipeline.persistedAdditionalIssueCounts = {};
+    // The hard cap (maxQaRounds) only resets on a full reset.
     pipeline.qaRoundCount = 0;
   }
   // Wakeup state — counters AND identity fields MUST reset together.
@@ -246,7 +251,8 @@ async function beginSpecRevision(
 
   // A spec revision restarts the per-revision attempt counter, but QA
   // history must survive so repeated code defects remain visible/escalated
-  // and the task still consumes the global maxQaAttempts budget.
+  // and the task still consumes the never-resetting maxQaRounds hard cap
+  // (the stall counter, maxQaAttempts, does restart).
   resetAllCounters(pipeline, true);
   deps.savePipelineState(pipeline);
   deps.advancePhase(pipeline, 'spec');

@@ -43,7 +43,7 @@
 // by number: the on-disk fallback scans in orchestrator.ts
 // (_restoreSpecRevision / _restoreQaRevision), the spec-version merge in
 // getTaskFull (tasks.ts), and the PHASE_ARTIFACTS['spec'] list below.
-// autoReviseSpec caps QA-driven revisions at 3 (spec) / maxQaAttempts (QA),
+// autoReviseSpec caps QA-driven revisions at 3 (spec) / the maxQaAttempts QA cap (QA),
 // but routeHumanFeedback's human-driven "Request Changes → Analyst" path is
 // uncapped — a human can keep revising past v4, so every one of the above
 // must scan/clear far enough that a revision never silently falls outside
