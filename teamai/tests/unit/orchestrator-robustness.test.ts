@@ -5017,6 +5017,54 @@ describe('runImplement — scope check honors files_to_create', () => {
     }
   });
 
+  it('logs the [VERIFY] no-op rejection and re-run line when a files-only subtask makes no changes', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 4,
+        title: 'Edit a file',
+        description: 'Edit the listed file',
+        files: ['src/a.ts'],
+        acceptance_criteria: ['File edited'],
+      }],
+    }));
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'diff') return '';
+      }
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-noop');
+    const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
+
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath,
+    });
+
+    try {
+      const promise = (orch as AnyOrch).runImplement(pipeline);
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+      fireEvent('event', { sessionId: 'sess-noop', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
+      await promise;
+
+      const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+      expect(log).toContain('[VERIFY] Subtask 4 ended without touching any of its assigned files');
+      expect(log).toContain('[VERIFY] Subtask 4 rejected — will re-run');
+      expect(log).not.toContain('[SCOPE] Subtask 4 rejected');
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 4).completed).not.toBe(true);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   // Regression: task detect-mechanical-periodic-melodic-loops. The
   // QA-fallback synthetic subtask (id 9999)'s `files` array is only a
   // best-effort union of the real subtasks' own `files`, seeded because
