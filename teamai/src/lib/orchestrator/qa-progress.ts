@@ -2,6 +2,7 @@
  * QA progress assessment — pure helpers (no I/O) that decide whether a QA
  * round moved the task forward, and whether the stall / round budgets are spent.
  */
+import { assessProgress, budgetExhausted, type RoundRecord } from './progress-budget';
 import type { QaIssue, QaReport, QaRoundRecord, TaskPipeline } from './types';
 
 /** Normalised `file::description` key for an additional issue. */
@@ -47,44 +48,32 @@ export function buildQaRoundRecord(report: QaReport, round: number): QaRoundReco
   };
 }
 
-function failureSet(record: QaRoundRecord): string[] {
-  return sortedUnique([...record.failedCriteria, ...record.failedIssues]);
-}
-
-function sameSet(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
+function toRoundRecord(record: QaRoundRecord): RoundRecord {
+  return {
+    round: record.round,
+    failed: [...record.failedCriteria, ...record.failedIssues],
+    passed: record.passedCriteria,
+  };
 }
 
 export function assessQaProgress(
   history: QaRoundRecord[],
   current: QaRoundRecord,
 ): { progress: boolean; reason: string } {
-  if (history.length === 0) return { progress: false, reason: 'no earlier round to compare' };
-  const prev = history[history.length - 1];
-
-  const everPassed = new Set(history.flatMap(r => r.passedCriteria));
-  const regressed = current.failedCriteria.filter(k => everPassed.has(k));
-  if (regressed.length > 0) return { progress: false, reason: `regression: ${regressed.join(', ')}` };
-
-  const currentSet = failureSet(current);
-  const repeated = history.find(r => sameSet(failureSet(r), currentSet));
-  if (repeated) return { progress: false, reason: `failure set repeats round ${repeated.round}` };
-
-  const currentPassed = new Set(current.passedCriteria);
-  const currentIssues = new Set(current.failedIssues);
-  const resolved = [
-    ...prev.failedCriteria.filter(k => currentPassed.has(k)),
-    ...prev.failedIssues.filter(k => !currentIssues.has(k)),
-  ];
-  if (resolved.length === 0) return { progress: false, reason: 'nothing that failed last round is resolved' };
-
-  return { progress: true, reason: `resolved: ${resolved.join(', ')}` };
+  // A criterion missing from the current report is not resolved; only an explicit PASS is.
+  // Issues have no pass list, so an issue that stops being reported is resolved.
+  return assessProgress(history.map(toRoundRecord), toRoundRecord(current), {
+    requiresExplicitPass: key => !key.startsWith('issue:'),
+  });
 }
 
 export function qaBudgetExhausted(
   pipeline: Pick<TaskPipeline, 'qaStallCount' | 'qaRoundCount' | 'maxQaAttempts' | 'maxQaRounds'>,
 ): 'stall' | 'rounds' | null {
-  if ((pipeline.qaStallCount ?? 0) >= pipeline.maxQaAttempts) return 'stall';
-  if ((pipeline.qaRoundCount ?? 0) >= (pipeline.maxQaRounds ?? 3 * pipeline.maxQaAttempts)) return 'rounds';
-  return null;
+  return budgetExhausted({
+    stall: pipeline.qaStallCount ?? 0,
+    rounds: pipeline.qaRoundCount ?? 0,
+    maxStall: pipeline.maxQaAttempts,
+    maxRounds: pipeline.maxQaRounds ?? 3 * pipeline.maxQaAttempts,
+  });
 }

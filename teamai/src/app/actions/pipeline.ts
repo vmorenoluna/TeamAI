@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
+import { resolveRoundsCap } from '@/lib/orchestrator/progress-budget';
 
 export interface PipelineConfig {
   /** Consecutive no-progress QA rounds tolerated before failing (resets on progress). */
@@ -49,9 +50,7 @@ export async function getPipelineConfig(): Promise<PipelineConfig> {
     const merged = { ...DEFAULT_CONFIG, ...raw };
     // Derive explicitly: a file with maxQaAttempts but no maxQaRounds must not
     // inherit the default 9 (it would be wrong for any maxQaAttempts != 3).
-    const maxQaRounds = Number.isInteger(raw.maxQaRounds) && raw.maxQaRounds > 0
-      ? Math.max(raw.maxQaRounds, merged.maxQaAttempts)
-      : 3 * merged.maxQaAttempts;
+    const { value: maxQaRounds } = resolveRoundsCap(raw.maxQaRounds, merged.maxQaAttempts);
     return { ...merged, maxQaRounds };
   } catch {
     return DEFAULT_CONFIG;

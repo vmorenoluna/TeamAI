@@ -7,6 +7,7 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from 'fs';
 import path from 'path';
 import { warn as logWarn } from '../logger';
+import { resolveRoundsCap } from './progress-budget';
 import { slugify } from '../utils';
 import { readContainerConfig } from '../container-manager';
 import { resolveProvider, providerToSessionOpts } from '../providers';
@@ -287,12 +288,9 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
       const raw = JSON.parse(readFileSync(cfgPath, 'utf-8'));
       const sensors = readPipelineSensors(raw);
       const maxQaAttempts = typeof raw.maxQaAttempts === 'number' ? raw.maxQaAttempts : 3;
-      let maxQaRounds = 3 * maxQaAttempts;
-      if (Number.isInteger(raw.maxQaRounds) && raw.maxQaRounds > 0) {
-        maxQaRounds = Math.max(raw.maxQaRounds, maxQaAttempts);
-        if (maxQaRounds !== raw.maxQaRounds) {
-          logWarn('orchestrator', `maxQaRounds (${raw.maxQaRounds}) is below maxQaAttempts (${maxQaAttempts}); using ${maxQaRounds}`);
-        }
+      const { value: maxQaRounds, clamped } = resolveRoundsCap(raw.maxQaRounds, maxQaAttempts);
+      if (clamped) {
+        logWarn('orchestrator', `maxQaRounds (${raw.maxQaRounds}) is below maxQaAttempts (${maxQaAttempts}); using ${maxQaRounds}`);
       }
       return {
         maxQaAttempts,
