@@ -369,10 +369,10 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
       return '';
     });
 
-    // qaAttempt starts at 2, runQaReview increments to 3 which equals maxQaAttempts (3),
+    // qaStallCount starts at 2, the pipeline-written round makes it 3 which equals maxQaAttempts (3),
     // so it goes directly to 'failed' without bouncing back to implement.
     // This avoids the cascade into runImplement which would need plan.json and subtask sessions.
-    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 2 });
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaStallCount: 2 });
 
     await (orch as AnyOrch).runQaReview(pipeline);
 
@@ -427,7 +427,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
       return '';
     });
 
-    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 3, maxQaAttempts: 3 });
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaStallCount: 2, maxQaAttempts: 3 });
 
     await (orch as AnyOrch).runQaReview(pipeline);
 
@@ -627,10 +627,10 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     // Merger session itself fails to even start
     mockCreateSession.mockRejectedValue(new Error('session creation failed'));
 
-    // qaAttempt starts at 2, runQaReview increments to 3 which equals maxQaAttempts (3),
+    // qaStallCount starts at 2, the pipeline-written round makes it 3 which equals maxQaAttempts (3),
     // so it goes directly to 'failed' without bouncing back to implement — same pattern
     // as the pre-existing "writes FAIL report..." test above.
-    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 2 });
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaStallCount: 2 });
 
     await (orch as AnyOrch).runQaReview(pipeline);
 
@@ -670,9 +670,9 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
 
     mockCreateSession.mockResolvedValueOnce('sess-merge-push-fails');
 
-    // qaAttempt starts at 2, runQaReview increments to 3 which equals maxQaAttempts (3),
+    // qaStallCount starts at 2, the pipeline-written round makes it 3 which equals maxQaAttempts (3),
     // so it goes directly to 'failed' without bouncing back to implement.
-    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 2 });
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaStallCount: 2 });
 
     const promise = (orch as AnyOrch).runQaReview(pipeline);
 
@@ -755,7 +755,7 @@ describe('runQaReview — unreadable QA report precheck', () => {
   it('advances to failed and still writes qa_feedback.md when the QA report is unreadable, max QA attempts reached', async () => {
     mockCreateSession.mockResolvedValueOnce('sess-qa-unreadable-exhausted');
 
-    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 3, maxQaAttempts: 3 });
+    const pipeline = makePipeline(project.taskId, project.taskDir, { qaStallCount: 2, maxQaAttempts: 3 });
 
     const promise = (orch as AnyOrch).runQaReview(pipeline);
     await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
@@ -917,7 +917,12 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
 
     mockCreateSession.mockResolvedValue('sess-qa-max-fail');
 
-    const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 3, maxQaAttempts: 3 });
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      // Same failure set as the previous round, with the stall budget one short.
+      qaStallCount: 2,
+      maxQaAttempts: 3,
+      qaRoundHistory: [{ round: 1, failedCriteria: ['text:login flow'], passedCriteria: [], failedIssues: [] }],
+    });
 
     const promise = (orch as AnyOrch).runQaReview(pipeline);
     // Wait for sendMessage (synchronous call right before waitForCompletion)

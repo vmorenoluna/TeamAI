@@ -4,9 +4,13 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
+import { resolveRoundsCap } from '@/lib/orchestrator/progress-budget';
 
 export interface PipelineConfig {
+  /** Consecutive no-progress QA rounds tolerated before failing (resets on progress). */
   maxQaAttempts: number;
+  /** Never-resetting hard cap on QA rounds; always >= maxQaAttempts. */
+  maxQaRounds: number;
   parallelSubtasks: boolean;
   autoModeMaxParallel: number;
   idleStallMinutes: number;
@@ -27,6 +31,7 @@ export interface PipelineConfig {
 
 const DEFAULT_CONFIG: PipelineConfig = {
   maxQaAttempts: 3,
+  maxQaRounds: 9,
   parallelSubtasks: true,
   autoModeMaxParallel: 1,
   idleStallMinutes: 15,
@@ -41,13 +46,22 @@ export async function getPipelineConfig(): Promise<PipelineConfig> {
   const cfgPath = join(projectPath, '.teamai', 'pipeline.json');
   if (!existsSync(cfgPath)) return DEFAULT_CONFIG;
   try {
-    return { ...DEFAULT_CONFIG, ...JSON.parse(readFileSync(cfgPath, 'utf-8')) };
+    const raw = JSON.parse(readFileSync(cfgPath, 'utf-8'));
+    const merged = { ...DEFAULT_CONFIG, ...raw };
+    // Derive explicitly: a file with maxQaAttempts but no maxQaRounds must not
+    // inherit the default 9 (it would be wrong for any maxQaAttempts != 3).
+    const { value: maxQaRounds } = resolveRoundsCap(raw.maxQaRounds, merged.maxQaAttempts);
+    return { ...merged, maxQaRounds };
   } catch {
     return DEFAULT_CONFIG;
   }
 }
 
 export async function savePipelineConfig(config: PipelineConfig): Promise<void> {
+  const { maxQaAttempts, maxQaRounds } = config;
+  if (!Number.isInteger(maxQaRounds) || maxQaRounds < maxQaAttempts) {
+    throw new Error(`Max QA rounds (${maxQaRounds}) must be at least Max QA attempts (${maxQaAttempts})`);
+  }
   const projectPath = await getActiveProjectPath();
   const cfgPath = join(projectPath, '.teamai', 'pipeline.json');
   // Merge with existing config to preserve orchestrator-only fields

@@ -595,6 +595,22 @@ describe('_writeCompletionSummary', () => {
     expect(task.failureReason).toBe('qa-attempts-exhausted');
   });
 
+  it('writes the stall-budget header for qa-attempts-exhausted with detail "stall"', () => {
+    const p = { ...pipeline(project.taskId, project.taskDir), qaRoundCount: 7, qaStallCount: 3, maxQaAttempts: 3, maxQaRounds: 9 };
+    (orch as AnyOrch)._ctx.writeCompletionSummary(p, 'qa-attempts-exhausted', 'stall');
+
+    const content = readFileSync(join(project.taskDir, 'completion_summary.md'), 'utf-8');
+    expect(content).toContain('Task failed after 3 consecutive QA rounds without progress (7 QA rounds in total).');
+  });
+
+  it('writes the hard-cap header for qa-attempts-exhausted with detail "rounds"', () => {
+    const p = { ...pipeline(project.taskId, project.taskDir), qaRoundCount: 9, qaStallCount: 1, maxQaAttempts: 3, maxQaRounds: 9 };
+    (orch as AnyOrch)._ctx.writeCompletionSummary(p, 'qa-attempts-exhausted', 'rounds');
+
+    const content = readFileSync(join(project.taskDir, 'completion_summary.md'), 'utf-8');
+    expect(content).toContain('Task failed after 9 QA rounds — the hard cap of 9 total QA rounds was reached.');
+  });
+
   it("writes a spec-revision-exhausted header distinct from the QA-attempts one, and stores that failureReason", () => {
     const p = { ...pipeline(project.taskId, project.taskDir), qaRoundCount: 7, specRevision: 5 };
     (orch as AnyOrch)._ctx.writeCompletionSummary(p, 'spec-revision-exhausted');

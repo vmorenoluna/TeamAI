@@ -109,7 +109,14 @@ export class Orchestrator {
         pipeline.taskId,
         taskStore,
         reason,
-        { qaAttempt: pipeline.qaAttempt, qaRoundCount: pipeline.qaRoundCount, specRevision: pipeline.specRevision },
+        {
+          qaAttempt: pipeline.qaAttempt,
+          qaRoundCount: pipeline.qaRoundCount,
+          qaStallCount: pipeline.qaStallCount,
+          maxQaAttempts: pipeline.maxQaAttempts,
+          maxQaRounds: pipeline.maxQaRounds,
+          specRevision: pipeline.specRevision,
+        },
         detail,
       ),
       autoReviseSpec: (pipeline) => this._autoReviseSpec(pipeline),
@@ -391,6 +398,7 @@ export class Orchestrator {
       branch,
       qaAttempt: 0,
       maxQaAttempts: config.maxQaAttempts,
+      maxQaRounds: config.maxQaRounds,
       // Restore from disk (not hardcoded 1) — moveTaskToPhase can re-enter
       // runTask on a task that already has spec_v*.md history (e.g. reset to
       // 'plan' keeps prior spec revisions on disk). Under the rename-at-
@@ -411,28 +419,35 @@ export class Orchestrator {
 
     // Restore pipeline state from a previous crash if available (#7)
     const savedState = this._restorePipelineState(taskId, specPath);
-    if (savedState) {
-      if (savedState.mergeStrategy) pipeline.mergeStrategy = savedState.mergeStrategy;
-      if (savedState.qaAttempt !== undefined) pipeline.qaAttempt = savedState.qaAttempt;
-      if (savedState.deliverableFailCounts !== undefined) pipeline.deliverableFailCounts = savedState.deliverableFailCounts;
-      if (savedState.stallRecoveryCounts !== undefined) pipeline.stallRecoveryCounts = savedState.stallRecoveryCounts;
-      if (savedState.wakeupUntil !== undefined) pipeline.wakeupUntil = savedState.wakeupUntil;
-      if (savedState.wakeupSubtaskId !== undefined) pipeline.wakeupSubtaskId = savedState.wakeupSubtaskId;
-      if (savedState.wakeupCommand !== undefined) pipeline.wakeupCommand = savedState.wakeupCommand;
-      if (savedState.wakeupArtifact !== undefined) pipeline.wakeupArtifact = savedState.wakeupArtifact;
-      if (savedState.wakeupProgressPath !== undefined) pipeline.wakeupProgressPath = savedState.wakeupProgressPath;
-      if (savedState.wakeupAttemptCount !== undefined) pipeline.wakeupAttemptCount = savedState.wakeupAttemptCount;
-      if (savedState.wakeupHeadAtSchedule !== undefined) pipeline.wakeupHeadAtSchedule = savedState.wakeupHeadAtSchedule;
-      if (savedState.persistedCriterionFailCounts !== undefined) pipeline.persistedCriterionFailCounts = savedState.persistedCriterionFailCounts;
-      if (savedState.persistedAdditionalIssueCounts !== undefined) pipeline.persistedAdditionalIssueCounts = savedState.persistedAdditionalIssueCounts;
-      if (savedState.qaRoundCount !== undefined) pipeline.qaRoundCount = savedState.qaRoundCount;
-      if (savedState.specRevision !== undefined) pipeline.specRevision = savedState.specRevision;
-      if (savedState.qaRevision !== undefined) pipeline.qaRevision = savedState.qaRevision;
-      if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;
-    }
+    if (savedState) this._applySavedPipelineState(pipeline, savedState);
 
     this._ctx.savePipelineState(pipeline);
     await this._runPipeline(pipeline);
+  }
+
+  /** Apply crash-recovery state saved in `.pipeline_state.json` onto a fresh pipeline. */
+  private _applySavedPipelineState(pipeline: TaskPipeline, savedState: Partial<TaskPipeline>): void {
+    if (savedState.mergeStrategy) pipeline.mergeStrategy = savedState.mergeStrategy;
+    if (savedState.qaAttempt !== undefined) pipeline.qaAttempt = savedState.qaAttempt;
+    if (savedState.deliverableFailCounts !== undefined) pipeline.deliverableFailCounts = savedState.deliverableFailCounts;
+    if (savedState.stallRecoveryCounts !== undefined) pipeline.stallRecoveryCounts = savedState.stallRecoveryCounts;
+    if (savedState.wakeupUntil !== undefined) pipeline.wakeupUntil = savedState.wakeupUntil;
+    if (savedState.wakeupSubtaskId !== undefined) pipeline.wakeupSubtaskId = savedState.wakeupSubtaskId;
+    if (savedState.wakeupCommand !== undefined) pipeline.wakeupCommand = savedState.wakeupCommand;
+    if (savedState.wakeupArtifact !== undefined) pipeline.wakeupArtifact = savedState.wakeupArtifact;
+    if (savedState.wakeupProgressPath !== undefined) pipeline.wakeupProgressPath = savedState.wakeupProgressPath;
+    if (savedState.wakeupAttemptCount !== undefined) pipeline.wakeupAttemptCount = savedState.wakeupAttemptCount;
+    if (savedState.wakeupHeadAtSchedule !== undefined) pipeline.wakeupHeadAtSchedule = savedState.wakeupHeadAtSchedule;
+    if (savedState.persistedCriterionFailCounts !== undefined) pipeline.persistedCriterionFailCounts = savedState.persistedCriterionFailCounts;
+    if (savedState.persistedAdditionalIssueCounts !== undefined) pipeline.persistedAdditionalIssueCounts = savedState.persistedAdditionalIssueCounts;
+    if (savedState.qaRoundCount !== undefined) pipeline.qaRoundCount = savedState.qaRoundCount;
+    // Migration: state saved before the stall counter existed carries only
+    // qaAttempt, which was the old consecutive budget — seed the stall count from it.
+    pipeline.qaStallCount = savedState.qaStallCount ?? savedState.qaAttempt ?? 0;
+    pipeline.qaRoundHistory = savedState.qaRoundHistory ?? [];
+    if (savedState.specRevision !== undefined) pipeline.specRevision = savedState.specRevision;
+    if (savedState.qaRevision !== undefined) pipeline.qaRevision = savedState.qaRevision;
+    if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;
   }
 
   /**
@@ -789,6 +804,7 @@ export class Orchestrator {
       branch,
       qaAttempt: 0,
       maxQaAttempts: this.getPipelineConfig().maxQaAttempts,
+      maxQaRounds: this.getPipelineConfig().maxQaRounds,
       specRevision: this._restoreSpecRevision(taskId),
       qaRevision: this._restoreQaRevision(taskId),
     };

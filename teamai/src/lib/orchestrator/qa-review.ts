@@ -20,14 +20,9 @@ import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } f
 import { renderCommand } from '../command-templates';
 import { warn } from '../logger';
 import type { PipelinePhase } from '@/constants/phases';
-import type { TaskPipeline, QaReport, QaIssue, SessionOptsResult } from './types';
+import type { TaskPipeline, QaReport, SessionOptsResult } from './types';
 import type { FailureReason } from './qa-feedback';
-
-function additionalIssueKey(issue: QaIssue): string {
-  const file = (issue.file || '').trim().replace(/\\/g, '/').toLowerCase();
-  const description = (issue.description || issue.message || '').trim().replace(/\\s+/g, ' ').toLowerCase();
-  return `${file}::${description}`;
-}
+import { additionalIssueKey, assessQaProgress, buildQaRoundRecord, qaBudgetExhausted } from './qa-progress';
 
 function additionalIssueKeys(report: QaReport): Set<string> {
   return new Set((report.additional_issues || report.issues || [])
@@ -215,6 +210,24 @@ async function reconcileDivergedBranch(
   }
 }
 
+function maxQaRoundsOf(pipeline: TaskPipeline): number {
+  return pipeline.maxQaRounds ?? 3 * pipeline.maxQaAttempts;
+}
+
+/**
+ * A round whose report the pipeline wrote itself (unpushed-commits precheck,
+ * unreadable report, no verdict) never counts as progress, and is not added to
+ * the failure-set history — it says nothing about the work. State is saved
+ * before the budget is evaluated so a crash cannot lose the increment.
+ */
+function recordPipelineWrittenRound(pipeline: TaskPipeline, deps: QaReviewDeps, what: string): void {
+  pipeline.qaStallCount = (pipeline.qaStallCount ?? 0) + 1;
+  logToOutput(pipeline.specPath,
+    `[QA-BUDGET] round ${pipeline.qaRoundCount ?? 0}/${maxQaRoundsOf(pipeline)}: no progress (pipeline-written report (${what})); ` +
+    `stall ${pipeline.qaStallCount}/${pipeline.maxQaAttempts}\n`);
+  deps.savePipelineState(pipeline);
+}
+
 // ── Main function ─────────────────────────────────────────────────────────
 
 /**
@@ -285,9 +298,17 @@ export function failBudgetExhausted(
   deps: QaReviewDeps,
   report: QaReport,
   reason: FailureReason = 'qa-attempts-exhausted',
+  exhausted: 'stall' | 'rounds' | null = qaBudgetExhausted(pipeline),
 ): void {
+  if (exhausted === 'stall') {
+    logToOutput(pipeline.specPath,
+      `[QA-BUDGET] stall budget exhausted (${pipeline.qaStallCount ?? 0}/${pipeline.maxQaAttempts} consecutive rounds without progress)\n`);
+  } else if (exhausted === 'rounds') {
+    logToOutput(pipeline.specPath,
+      `[QA-BUDGET] round cap reached (${pipeline.qaRoundCount ?? 0}/${maxQaRoundsOf(pipeline)})\n`);
+  }
   deps.writeQaFeedback(pipeline, report);
-  deps.writeCompletionSummary(pipeline, reason);
+  deps.writeCompletionSummary(pipeline, reason, exhausted ?? undefined);
   deps.advancePhase(pipeline, 'failed');
 }
 
@@ -337,9 +358,34 @@ export function snapshotQaReportVersioned(pipeline: TaskPipeline): void {
   }
 }
 
+/**
+ * Rate-limited rounds are free: if a RateLimitError escapes before this
+ * invocation's budget outcome was recorded, undo the increments this
+ * invocation made (a wakeup re-entry made none). The stall counter and
+ * failure-set history are only touched once the outcome is known, so they
+ * need no undo.
+ */
 export async function runQaReview(
   pipeline: TaskPipeline,
   deps: QaReviewDeps,
+): Promise<void> {
+  const round = { incremented: false, settled: false };
+  try {
+    await runQaReviewRound(pipeline, deps, round);
+  } catch (err) {
+    if (err instanceof RateLimitError && round.incremented && !round.settled) {
+      pipeline.qaAttempt--;
+      pipeline.qaRoundCount = Math.max(0, (pipeline.qaRoundCount || 0) - 1);
+      deps.savePipelineState(pipeline);
+    }
+    throw err;
+  }
+}
+
+async function runQaReviewRound(
+  pipeline: TaskPipeline,
+  deps: QaReviewDeps,
+  round: { incremented: boolean; settled: boolean },
 ): Promise<void> {
   deps.persistAndEmitPhase(pipeline);
   // ADR 002 (generalized — see wakeup.ts): a wakeup re-entry continues THIS
@@ -350,6 +396,7 @@ export async function runQaReview(
   if (!isWakeupReentry) {
     pipeline.qaAttempt++;
     pipeline.qaRoundCount = (pipeline.qaRoundCount || 0) + 1;
+    round.incremented = true;
   }
   deps.savePipelineState(pipeline);
   const logFile = path.join(pipeline.specPath, 'output.log'); // kept for deps.phaseHeader and deps.gitPush
@@ -460,7 +507,9 @@ export async function runQaReview(
     snapshotQaReportBeforeBounce(pipeline);
     logToOutput(pipeline.specPath, '[QA-PRECHECK] FAIL — unpushed commits detected, engineer must push first\n');
 
-    if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts) {
+    recordPipelineWrittenRound(pipeline, deps, 'unpushed commits');
+    round.settled = true;
+    if (qaBudgetExhausted(pipeline)) {
       failBudgetExhausted(pipeline, deps, failReport);
     } else {
       await bounceToImplement(pipeline, deps, failReport);
@@ -508,14 +557,7 @@ export async function runQaReview(
   updateSessionMap(pipeline.specPath, 'qa', sessionId);
   processManager.sendMessage(sessionId, message);
 
-  try {
-    await deps.waitForCompletion(sessionId);
-  } catch (err) {
-    if (err instanceof RateLimitError) {
-      pipeline.qaAttempt--; // rate limits are free retries — don't count against the failure budget
-    }
-    throw err;
-  }
+  await deps.waitForCompletion(sessionId);
   processManager.killSession(sessionId);
 
   // ADR 002 (generalized — see wakeup.ts): a QA reviewer re-running a
@@ -559,7 +601,9 @@ export async function runQaReview(
       }],
     };
     writeFailReport(pipeline, failReport, 'unreadable-report');
-    if (Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts) {
+    recordPipelineWrittenRound(pipeline, deps, 'unreadable');
+    round.settled = true;
+    if (qaBudgetExhausted(pipeline)) {
       failBudgetExhausted(pipeline, deps, failReport);
     } else {
       await bounceToImplement(pipeline, deps, failReport);
@@ -597,7 +641,26 @@ export async function runQaReview(
   // Preserve the completed report for the next QA round, regardless of routing.
   snapshotQaReportBeforeBounce(pipeline);
 
-  const budgetExhausted = Math.max(pipeline.qaRoundCount || 0, pipeline.qaAttempt) >= pipeline.maxQaAttempts;
+  // Record this round's outcome against the stall / round budgets, then
+  // persist before evaluating exhaustion.
+  if (report.overall === 'PASS' || report.overall === 'FAIL') {
+    const history = pipeline.qaRoundHistory ?? [];
+    const record = buildQaRoundRecord(report, pipeline.qaRoundCount ?? 0);
+    if (report.overall === 'FAIL') {
+      const assessment = assessQaProgress(history, record);
+      pipeline.qaStallCount = assessment.progress ? 0 : (pipeline.qaStallCount ?? 0) + 1;
+      logToOutput(pipeline.specPath,
+        `[QA-BUDGET] round ${pipeline.qaRoundCount ?? 0}/${maxQaRoundsOf(pipeline)}: ` +
+        `${assessment.progress ? 'progress' : 'no progress'} (${assessment.reason}); ` +
+        `stall ${pipeline.qaStallCount}/${pipeline.maxQaAttempts}\n`);
+    }
+    pipeline.qaRoundHistory = [...history, record];
+    deps.savePipelineState(pipeline);
+  } else {
+    recordPipelineWrittenRound(pipeline, deps, 'no verdict');
+  }
+  round.settled = true;
+  const exhausted = qaBudgetExhausted(pipeline);
 
   // An `overall` that's neither PASS nor FAIL (almost always "IN_PROGRESS")
   // means the reviewer never reached a verdict. Per qa-review.md Step 5,
@@ -613,7 +676,7 @@ export async function runQaReview(
     logToOutput(pipeline.specPath,
       `\n[QA-ROUTER] overall="${report.overall}" — QA review did not reach a verdict; ` +
       `re-running QA instead of treating this as a FAIL\n`);
-    if (budgetExhausted) {
+    if (exhausted) {
       failBudgetExhausted(pipeline, deps, report, 'qa-incomplete');
       return;
     }
@@ -622,18 +685,17 @@ export async function runQaReview(
     return;
   }
 
-  // The QA budget is global across spec revisions. Check it before
+  // The round cap is global across spec revisions. Check it before
   // spec-concern routing so a task cannot loop through unlimited real
   // implement→QA rounds merely because every report also has spec_concerns.
-  if (budgetExhausted && report.overall !== 'PASS') {
+  if (exhausted && report.overall !== 'PASS') {
     failBudgetExhausted(pipeline, deps, report);
     return;
   }
 
-  // Budget is confirmed NOT exhausted past this point (the check above
-  // already returned otherwise, and qaAttempt <= Math.max(qaRoundCount,
-  // qaAttempt) means qaAttempt < maxQaAttempts here too) — every branch
-  // below bounces back to implement rather than failing.
+  // Budget is confirmed NOT exhausted past this point for FAIL reports (the
+  // check above already returned otherwise) — every branch below bounces back
+  // rather than failing. A PASS never fails on budget.
   if (hasSpecConcerns) {
     // Keep the coder's QA feedback alongside the analyst's spec revision
     // feedback; spec concerns must not discard concrete code defects.

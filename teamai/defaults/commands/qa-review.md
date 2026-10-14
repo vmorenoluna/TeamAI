@@ -37,7 +37,7 @@ Check whether a previous `qa_report.json` already exists in `.teamai/{slug}/`.
    - If NONE of the criterion's relevant files appear in the changed-files list → carry forward the PASS with the original evidence. Do NOT re-verify.
    - If any relevant file DID change → re-verify from scratch.
 5. For each criterion that previously **FAILed** → always re-verify from scratch.
-6. Skip Steps 1–4 of the Review Process for carry-forward criteria (they are already verified).
+6. Skip Steps 1–4 of the Review Process for carry-forward criteria (they are already verified). Keep each carried-forward criterion's `id` unchanged.
 
 This means on a rework pass where only one criterion failed and its file was changed, QA only needs to re-verify that one criterion — not all of them.
 
@@ -275,12 +275,15 @@ If no explicit path is provided (fallback), resolve the main repository root fir
 Set to `"code"` when any failure requires changing source code, tests, or configuration. Set to `null` on PASS.
 The orchestrator uses this to route cleanup failures directly without spawning a coder session.
 
+`id` is required on every `criteria` entry, PASS and FAIL. It is the spec's acceptance-criterion ID (e.g. `AC3`); if the spec does not label its criteria, use `AC<n>` by 1-based order in the spec's Acceptance Criteria section. The same criterion MUST carry the same `id` in every QA round: the orchestrator matches criteria across rounds by `id` to decide whether a rework round made progress.
+
 ```json
 {
   "overall": "PASS" | "FAIL",
   "fail_type": "code" | "cleanup" | null,
   "criteria": [
     {
+      "id": "AC1",
       "criterion": "text from spec",
       "status": "PASS" | "FAIL",
       "evidence": "what you found",
