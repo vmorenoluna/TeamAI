@@ -309,7 +309,7 @@ export function squashWithMessage(
     const status = execFileSync('git', ['status', '--porcelain'], gitOpts).toString();
     if (status.trim()) {
       execFileSync('git', ['add', '-A', '--', '.', ':!.teamai'], gitOpts);
-      execFileSync('git', ['commit', '-m', 'WIP: auto-commit uncommitted changes before squash'], gitOpts);
+      execFileSync('git', ['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before squash'], gitOpts);
       warn('artifacts', `squashWithMessage: worktree ${worktreePath} had uncommitted changes — auto-committed before squashing`);
     }
   } catch (err) {

@@ -140,7 +140,7 @@ export async function rebaseOntoLatestDefault(
     const status = deps.execGitCapture(['status', '--porcelain'], worktreePath).trim();
     if (status) {
       deps.execGit(['add', '-A', '--', '.', ':!.teamai'], worktreePath);
-      deps.execGit(['commit', '-m', 'WIP: auto-commit uncommitted changes before rebase'], worktreePath);
+      deps.execGit(['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before rebase'], worktreePath);
       logToOutput(path.dirname(logFile), `\n[INFO] Worktree had uncommitted changes — auto-committed before rebasing onto ${deps.baseBranch}\n`);
     }
   } catch (guardErr) {

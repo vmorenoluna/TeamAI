@@ -766,7 +766,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     expect(result).toBe(true);
     const commitCalls = execGit.mock.calls.filter((c: any[]) => c[0]?.[0] === 'commit');
     expect(commitCalls).toHaveLength(1);
-    expect(commitCalls[0][0]).toEqual(['commit', '-m', 'WIP: auto-commit uncommitted changes before rebase']);
+    expect(commitCalls[0][0]).toEqual(['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before rebase']);
     const addCalls = execGit.mock.calls.filter((c: any[]) => c[0]?.[0] === 'add');
     expect(addCalls).toHaveLength(1);
     // The commit happened before the real rebase attempt (not the
