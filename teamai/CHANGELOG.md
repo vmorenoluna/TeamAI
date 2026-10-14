@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.2.1] — 2026-10-14
+## [0.3.0] — 2026-10-14
 
 - **Subtask `files` no longer fail a ticket when a coder touches other files.** Previously a subtask that changed files outside its plan `files` was rejected. Now the subtask's commits are held on their own branch and the planner decides, once per implement pass, whether to approve or reject each extra file (optionally serializing the subtask against others). Approved work is integrated without a re-run; if files were rejected, the subtask re-runs once with the rejected paths shown to the coder. This is bounded by two new pipeline settings, `maxScopeStall` (default 2) and `maxScopeReplans` (default 6); exhausting either fails the task. A session that touched none of its assigned files is still rejected as a no-op
 - **QA retries are now progress-aware.** The QA stall counter resets when a QA round fixes criteria or issues that failed in an earlier round, so a ticket that is converging is no longer failed by the attempt cap. A new `maxQaRounds` setting (Settings → Pipeline, default 3× `maxQaAttempts`) caps the total number of rounds. To make rounds comparable, spec, spec-revise and qa-review now require a stable ID on every acceptance criterion
