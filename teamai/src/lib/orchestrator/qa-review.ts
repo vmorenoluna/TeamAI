@@ -20,15 +20,9 @@ import { resolvePhaseWakeup, buildWakeupReentryHeader, PHASE_WAKEUP_FILENAME } f
 import { renderCommand } from '../command-templates';
 import { warn } from '../logger';
 import type { PipelinePhase } from '@/constants/phases';
-import type { TaskPipeline, QaReport, QaIssue, SessionOptsResult } from './types';
+import type { TaskPipeline, QaReport, SessionOptsResult } from './types';
 import type { FailureReason } from './qa-feedback';
-import { assessQaProgress, buildQaRoundRecord, qaBudgetExhausted } from './qa-progress';
-
-function additionalIssueKey(issue: QaIssue): string {
-  const file = (issue.file || '').trim().replace(/\\/g, '/').toLowerCase();
-  const description = (issue.description || issue.message || '').trim().replace(/\\s+/g, ' ').toLowerCase();
-  return `${file}::${description}`;
-}
+import { additionalIssueKey, assessQaProgress, buildQaRoundRecord, qaBudgetExhausted } from './qa-progress';
 
 function additionalIssueKeys(report: QaReport): Set<string> {
   return new Set((report.additional_issues || report.issues || [])
