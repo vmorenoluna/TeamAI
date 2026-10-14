@@ -255,10 +255,10 @@ describe('verifySubtaskDeliverables', () => {
 });
 
 describe('checkSubtaskScope', () => {
-  it('returns files outside files ∪ files_to_create as unlisted without rejecting', () => {
+  it('returns files outside files ∪ files_to_create as unlisted without rejecting', async () => {
     execGitCapture.mockReturnValue('src/a.ts\nnew.ts\nstray.ts\n');
     const violations = new Set<number>();
-    const result = checkSubtaskScope(
+    const result = await checkSubtaskScope(
       makePipeline(), makeDeps(), makeSubtask({ id: 3, files: ['src/a.ts'], files_to_create: ['new.ts'] }),
       cwd, 'abc123', join(specDir, 'st3.log'), violations,
     );
@@ -267,9 +267,9 @@ describe('checkSubtaskScope', () => {
     expect(result.unlistedFiles).toEqual(['stray.ts']);
   });
 
-  it('skips the check for the QA-fallback subtask 9999', () => {
+  it('skips the check for the QA-fallback subtask 9999', async () => {
     const violations = new Set<number>();
-    const result = checkSubtaskScope(
+    const result = await checkSubtaskScope(
       makePipeline(), makeDeps(), makeSubtask({ id: 9999, files: ['a.ts'] }),
       cwd, 'abc123', join(specDir, 'st9999.log'), violations,
     );
@@ -278,16 +278,27 @@ describe('checkSubtaskScope', () => {
     expect(result).toEqual({ changedFiles: [], unlistedFiles: [] });
   });
 
-  it('returns empty lists and holds nothing when git diff fails', () => {
+  it('returns empty lists and holds nothing when git diff fails', async () => {
     execGitCapture.mockImplementation(() => { throw new Error('boom'); });
     const violations = new Set<number>();
-    const result = checkSubtaskScope(
+    const result = await checkSubtaskScope(
       makePipeline(), makeDeps(), makeSubtask({ id: 4, files: ['a.ts'] }),
       cwd, 'abc123', join(specDir, 'st4.log'), violations,
     );
     expect(result).toEqual({ changedFiles: [], unlistedFiles: [] });
     expect(violations.size).toBe(0);
     expect(outputLog()).toContain('[SCOPE] Could not verify file scope (git diff failed: boom)');
+  });
+  it('accepts a no-edit session when every assigned file already differs from the base branch (AC11)', async () => {
+    execGitCapture.mockImplementation((args: string[]) => (args[0] === 'diff' && args[2].includes('...HEAD') ? 'src/a.ts\n' : ''));
+    const violations = new Set<number>();
+    const deps = { ...makeDeps(), projectRoot: cwd } as unknown as ImplementDeps;
+    await checkSubtaskScope(
+      makePipeline(), deps, makeSubtask({ id: 5, files: ['src/a.ts'] }),
+      cwd, 'abc123', join(specDir, 'st5.log'), violations,
+    );
+    expect(violations.has(5)).toBe(false);
+    expect(outputLog()).toContain('made no edit this session, but its assigned files are already changed on the branch — accepting');
   });
 });
 
@@ -395,14 +406,14 @@ describe('scope hold and arbitration (real git)', () => {
   });
 
   describe('sequential hold (main worktree)', () => {
-    it('moves the session commits to <branch>-st<id>, resets the feature branch and writes the report', () => {
+    it('moves the session commits to <branch>-st<id>, resets the feature branch and writes the report', async () => {
       const base = git(repo, 'rev-parse', 'HEAD');
       commit(repo, { 'a.ts': 'a\na2\n', 'b.ts': 'b\nb2\n' });
       const sessionHead = git(repo, 'rev-parse', 'HEAD');
       const scopeViolations = new Set<number>();
 
       const subtask = st(1, ['a.ts']);
-      const { unlistedFiles } = checkSubtaskScope(pipelineFor(), realDeps(), subtask, repo, base, join(specDir, 'st1.log'), scopeViolations);
+      const { unlistedFiles } = await checkSubtaskScope(pipelineFor(), realDeps(), subtask, repo, base, join(specDir, 'st1.log'), scopeViolations);
       expect(unlistedFiles).toEqual(['b.ts']);
       holdSubtaskForArbitration(pipelineFor(), realDeps(), subtask, repo, base, unlistedFiles);
 

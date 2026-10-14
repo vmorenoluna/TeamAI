@@ -63,7 +63,7 @@ export interface ScopeArbitrationDeps {
   execGitCapture: (args: string[], hostCwd: string) => string;
   tryCherryPickWithRecovery: (pipeline: ScopePipeline, logFile: string, stBranch: string, subtaskId: number) => Promise<boolean>;
   verifySubtaskDeliverables: (pipeline: ScopePipeline, subtask: PlanSubtask, cwd: string) => 'ok' | 'incomplete' | 'failed';
-  filesAlreadyChangedOnBranch: (cwd: string, files: string[]) => boolean;
+  filesAlreadyChangedOnBranch: (cwd: string, files: string[]) => Promise<boolean>;
   completeSubtask: (
     pipeline: ScopePipeline, subtask: PlanSubtask, cwd: string, preSessionHead: string, completedIds: number[],
   ) => Promise<boolean>;
@@ -562,7 +562,7 @@ export async function integrateHeldSubtasks(
       } catch { /* treated as untouched */ }
       let skipped = false;
       try { skipped = readFileSync(path.join(specPath, `output-st${id}.log`), 'utf-8').includes('[SKIPPED]'); } catch { /* no log */ }
-      if (!touched && !deps.filesAlreadyChangedOnBranch(cwd, subtask.files) && !skipped) {
+      if (!touched && !(await deps.filesAlreadyChangedOnBranch(cwd, subtask.files)) && !skipped) {
         accept = false;
         logToOutput(specPath,
           `\n[VERIFY] Subtask ${id} ended without touching any of its assigned files — no edit was made:\n` +

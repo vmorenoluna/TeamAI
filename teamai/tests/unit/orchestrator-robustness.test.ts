@@ -8036,12 +8036,12 @@ describe('checkSubtaskScope (hold-and-arbitrate)', () => {
     project.clean();
   });
 
-  function run(subtask: Record<string, any>, diffOutput: string) {
+  async function run(subtask: Record<string, any>, diffOutput: string) {
     const execGitCapture = vi.fn((args: string[]) => (args[0] === 'diff' && args[1] === '--name-only' && args[2] === 'abc123..HEAD' ? diffOutput : ''));
     const deps = { execGitCapture, execGit: vi.fn(), projectRoot: project.root } as unknown as ImplementDeps;
     const pipeline = makePipeline(project.taskId, project.taskDir, { phase: 'implement' });
     const violations = new Set<number>();
-    const result = checkSubtaskScope(
+    const result = await checkSubtaskScope(
       pipeline, deps,
       { title: 't', description: 'd', acceptance_criteria: [], depends_on: [], ...subtask } as any,
       join(project.root, 'worktrees', 'test-task'), 'abc123', join(project.taskDir, 'missing-session.log'), violations,
@@ -8054,35 +8054,35 @@ describe('checkSubtaskScope (hold-and-arbitrate)', () => {
     writeFileSync(join(project.taskDir, 'output.log'), '');
   });
 
-  it('returns the unlisted files without rejecting a parallel-group subtask', () => {
-    const { violations, result, log } = run({ id: 4, files: ['a.ts'], parallel_group: 1 }, 'a.ts\nb.ts\n');
+  it('returns the unlisted files without rejecting a parallel-group subtask', async () => {
+    const { violations, result, log } = await run({ id: 4, files: ['a.ts'], parallel_group: 1 }, 'a.ts\nb.ts\n');
     expect(violations.has(4)).toBe(false);
     expect(result).toEqual({ changedFiles: ['a.ts', 'b.ts'], unlistedFiles: ['b.ts'] });
     expect(log).not.toContain('[SCOPE]');
   });
 
-  it('treats files_to_create as declared', () => {
-    const { result } = run({ id: 4, files: ['a.ts'], files_to_create: ['n.ts'] }, 'a.ts\nn.ts\n');
+  it('treats files_to_create as declared', async () => {
+    const { result } = await run({ id: 4, files: ['a.ts'], files_to_create: ['n.ts'] }, 'a.ts\nn.ts\n');
     expect(result.unlistedFiles).toEqual([]);
   });
 
-  it('does not treat a session that changed only unlisted files as a no-op', () => {
-    const { violations, result, log } = run({ id: 5, files: ['a.ts'] }, 'b.ts\n');
+  it('does not treat a session that changed only unlisted files as a no-op', async () => {
+    const { violations, result, log } = await run({ id: 5, files: ['a.ts'] }, 'b.ts\n');
     expect(violations.has(5)).toBe(false);
     expect(result.unlistedFiles).toEqual(['b.ts']);
     expect(log).not.toContain('ended without touching any of its assigned files');
   });
 
-  it('rejects a rejected subtask: a files-only, non-verify_only subtask with no changes is a no-op', () => {
-    const { violations, result, log } = run({ id: 6, files: ['a.ts'] }, '');
+  it('rejects a rejected subtask: a files-only, non-verify_only subtask with no changes is a no-op', async () => {
+    const { violations, result, log } = await run({ id: 6, files: ['a.ts'] }, '');
     expect(violations.has(6)).toBe(true);
     expect(result.unlistedFiles).toEqual([]);
     expect(log).toContain('[VERIFY] Subtask 6 ended without touching any of its assigned files');
     expect(log).not.toContain('[SCOPE] Subtask 6 rejected');
   });
 
-  it('skips the whole check for subtask 9999', () => {
-    const { violations, result, log } = run({ id: 9999, files: ['a.ts'] }, 'b.ts\n');
+  it('skips the whole check for subtask 9999', async () => {
+    const { violations, result, log } = await run({ id: 9999, files: ['a.ts'] }, 'b.ts\n');
     expect(violations.size).toBe(0);
     expect(result).toEqual({ changedFiles: [], unlistedFiles: [] });
     expect(log).not.toContain('[SCOPE] Subtask 9999');
