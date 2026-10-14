@@ -39,6 +39,9 @@ function makeCtx() {
     qaRoundCount: 5,
     qaStallCount: 2,
     qaRoundHistory: structuredClone(HISTORY),
+    scopeReplanCount: 3,
+    scopeStallCounts: { 3: 1 } as Record<number, number>,
+    scopeRoundHistory: { 3: [{ round: 1, failed: ['3:a.ts'], passed: [], approved: [] }] } as Record<number, unknown[]>,
     maxQaAttempts: 3,
     maxQaRounds: 9,
     specRevision: 1,
@@ -130,6 +133,46 @@ describe('QA budget resets', () => {
     });
   });
 
+  describe('AC24 — scope arbitration counters', () => {
+    it('round-trips through savePipelineState and _applySavedPipelineState', async () => {
+      savePipelineState(ctx.pipeline as never);
+      const saved = readState(ctx.specPath);
+      const { Orchestrator } = await import('../../src/lib/orchestrator');
+      const fresh: Record<string, unknown> = { taskId: 'task-1', qaAttempt: 0 };
+      (Orchestrator.prototype as never as { _applySavedPipelineState: (p: unknown, s: unknown) => void })
+        ._applySavedPipelineState.call({}, fresh, saved);
+
+      expect(fresh.scopeReplanCount).toBe(3);
+      expect(fresh.scopeStallCounts).toEqual({ 3: 1 });
+      expect(fresh.scopeRoundHistory).toEqual(ctx.pipeline.scopeRoundHistory);
+      expect((fresh.scopeRoundHistory as Record<number, unknown[]>)[3]).toHaveLength(1);
+    });
+
+    it('legacy state restores to 0 / {}', async () => {
+      const { Orchestrator } = await import('../../src/lib/orchestrator');
+      const fresh: Record<string, unknown> = { taskId: 'task-1', qaAttempt: 0 };
+      (Orchestrator.prototype as never as { _applySavedPipelineState: (p: unknown, s: unknown) => void })
+        ._applySavedPipelineState.call({}, fresh, { taskId: 'task-1' });
+      expect(fresh.scopeReplanCount).toBe(0);
+      expect(fresh.scopeStallCounts).toEqual({});
+      expect(fresh.scopeRoundHistory).toEqual({});
+    });
+
+    it('a full reset (resetAllCounters) zeroes all three', async () => {
+      await routeHumanFeedback(ctx.pipeline as never, ctx.deps as never, { target: 'coder', message: 'fix it' });
+      expect(ctx.pipeline.scopeReplanCount).toBe(0);
+      expect(ctx.pipeline.scopeStallCounts).toEqual({});
+      expect(ctx.pipeline.scopeRoundHistory).toEqual({});
+    });
+
+    it('a spec revision (preserveQaHistory) clears stall + history but keeps scopeReplanCount', async () => {
+      await routeHumanFeedback(ctx.pipeline as never, ctx.deps as never, { target: 'analyst', message: 'fix spec' });
+      expect(ctx.pipeline.scopeReplanCount).toBe(3);
+      expect(ctx.pipeline.scopeStallCounts).toEqual({});
+      expect(ctx.pipeline.scopeRoundHistory).toEqual({});
+    });
+  });
+
   describe('Retry', () => {
     it('removes .pipeline_state.json so the next run starts with fresh budgets', async () => {
       savePipelineState(ctx.pipeline as never);
@@ -139,6 +182,14 @@ describe('QA budget resets', () => {
       Orchestrator.prototype.clearPipelineStateFile.call({}, ctx.specPath);
 
       expect(existsSync(join(ctx.specPath, '.pipeline_state.json'))).toBe(false);
+
+      // With no saved state, a fresh pipeline gets zero/empty scope counters.
+      const fresh: Record<string, unknown> = { taskId: 'task-1', qaAttempt: 0 };
+      (Orchestrator.prototype as never as { _applySavedPipelineState: (p: unknown, s: unknown) => void })
+        ._applySavedPipelineState.call({}, fresh, {});
+      expect(fresh.scopeReplanCount).toBe(0);
+      expect(fresh.scopeStallCounts).toEqual({});
+      expect(fresh.scopeRoundHistory).toEqual({});
     });
   });
 });

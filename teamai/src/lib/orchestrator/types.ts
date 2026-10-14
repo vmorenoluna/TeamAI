@@ -29,6 +29,12 @@ export interface TaskPipeline {
   qaStallCount?: number;
   /** Agent-verdict QA rounds since the last reset, used to judge progress. */
   qaRoundHistory?: QaRoundRecord[];
+  /** Scope-arbitration re-plans this task has used (hard cap maxScopeReplans; see scope-progress.ts). */
+  scopeReplanCount?: number;
+  /** Per-subtask consecutive scope-arbitration rounds without progress. Key = subtask ID. */
+  scopeStallCounts?: Record<number, number>;
+  /** Per-subtask scope-arbitration rounds since the last reset, used to judge progress. Key = subtask ID. */
+  scopeRoundHistory?: Record<number, ScopeRoundRecord[]>;
   maxQaAttempts: number;
   /** Hard cap on total QA rounds; defaults to 3 * maxQaAttempts when absent. */
   maxQaRounds?: number;
@@ -194,7 +200,8 @@ export interface PlanSubtask {
   /** Run-only gate (full test suite, benchmark, build): `files` lists what the
    *  subtask MAY edit if the run turns up a failure, not what it is expected
    *  to edit. Exempts the subtask from the "ended without touching any of its
-   *  assigned files" no-op check; the out-of-scope check still applies. */
+   *  assigned files" no-op check. Files outside the subtask's `files` are held and
+   *  arbitrated by the planner, as for any other subtask. */
   verify_only?: boolean;
 }
 
@@ -210,3 +217,14 @@ export type SessionOptsResult = {
 
 /** `QaReport.fail_type` of a failure the orchestrator synthesized rather than QA found. */
 export const ORCHESTRATOR_FAIL_TYPE = 'orchestrator';
+
+/** One scope-arbitration round for a subtask (keys are "<subtaskId>:<path>"). */
+export interface ScopeRoundRecord {
+  round: number;
+  /** Unlisted files the subtask touched this round. */
+  failed: string[];
+  /** Files rejected in an earlier round that are no longer touched. */
+  passed: string[];
+  /** Files the planner approved (recorded once the verdict is applied). */
+  approved: string[];
+}
