@@ -153,9 +153,9 @@ const GUARDRAILS: GuardrailCheck[] = [
   {
     id: 17,
     name: 'Uncommitted Scope Verification',
-    description: 'implement.md Instructions — final-step git status check restricted to the subtask\'s own files/files_to_create; a single-subtask parallel_group edits the feature branch directly and gets no cherry-pick auto-commit safety net',
+    description: 'implement.md Instructions — final-step git status check restricted to the subtask\'s own files/files_to_create; commit your own work; the orchestrator commit guard after every coder session is a backstop that bypasses project hooks',
     file: 'defaults/commands/implement.md',
-    signatures: ['Verify nothing in your scope is left uncommitted', 'auto-commit safety net'],
+    signatures: ['Verify nothing in your scope is left uncommitted', 'commit guard'],
   },
   {
     id: 18,
@@ -410,6 +410,17 @@ describe('Scope wording — files is a hint, not a hard limit', () => {
       expect(rendered).not.toContain('This is a hard limit');
       expect(rendered).not.toContain('STOP and report the missing dependency');
       expect(rendered).not.toContain('coordination hint, not a permission boundary');
+    });
+  }
+
+  for (const cmd of ['implement', 'implement-fix']) {
+    it(`rendered ${cmd}.md does not claim the orchestrator has no commit safety net`, () => {
+      const rendered = readCommandTemplate(cmd, join(root, 'defaults', 'commands'));
+      expect(rendered).not.toContain('no orchestrator auto-commit safety net');
+      expect(rendered).not.toContain('nothing downstream will catch it');
+      expect(rendered).not.toContain('the way multi-member groups do at cherry-pick time');
+      expect(rendered).not.toContain('no downstream commit safety net');
+      expect(rendered).not.toContain('never actually lands');
     });
   }
 
