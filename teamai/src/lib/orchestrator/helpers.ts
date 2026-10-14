@@ -23,6 +23,10 @@ export interface PipelineConfig {
   maxQaAttempts: number;
   /** Never-resetting hard cap on QA rounds; always >= maxQaAttempts. Default 3x maxQaAttempts. */
   maxQaRounds: number;
+  /** Consecutive scope-arbitration rounds in which a subtask's unlisted-file set fails to shrink before the task fails. */
+  maxScopeStall: number;
+  /** Never-resetting hard cap on scope-arbitration sessions per task; always >= maxScopeStall. Default 3x maxScopeStall. */
+  maxScopeReplans: number;
   parallelSubtasks: boolean;
   sensors?: SensorsConfig;
   /** Single cap governing every retry-and-give-up circuit breaker inside
@@ -292,9 +296,16 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
       if (clamped) {
         logWarn('orchestrator', `maxQaRounds (${raw.maxQaRounds}) is below maxQaAttempts (${maxQaAttempts}); using ${maxQaRounds}`);
       }
+      const maxScopeStall = typeof raw.maxScopeStall === 'number' ? raw.maxScopeStall : 2;
+      const { value: maxScopeReplans, clamped: scopeClamped } = resolveRoundsCap(raw.maxScopeReplans, maxScopeStall);
+      if (scopeClamped) {
+        logWarn('orchestrator', `maxScopeReplans (${raw.maxScopeReplans}) is below maxScopeStall (${maxScopeStall}); using ${maxScopeReplans}`);
+      }
       return {
         maxQaAttempts,
         maxQaRounds,
+        maxScopeStall,
+        maxScopeReplans,
         parallelSubtasks: typeof raw.parallelSubtasks === 'boolean' ? raw.parallelSubtasks : true,
         maxImplementRetries: typeof raw.maxImplementRetries === 'number' ? raw.maxImplementRetries : 3,
         maxStallRecoveries: typeof raw.maxStallRecoveries === 'number' ? raw.maxStallRecoveries : 3,
@@ -313,7 +324,7 @@ export function computePipelineConfig(projectRoot: string): PipelineConfig {
       };
     } catch (err) { logWarn('orchestrator', 'Failed to parse pipeline config, using defaults', err); }
   }
-  return { maxQaAttempts: 3, maxQaRounds: 9, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true, wakeupScanRetryDelayMs: defaultWakeupScanRetryDelayMs, backlogCheck: defaultBacklogCheck, backlogCheckEvidencePaths: [] };
+  return { maxQaAttempts: 3, maxQaRounds: 9, maxScopeStall: 2, maxScopeReplans: 6, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 3, idleStallMinutes: 15, toolStallMinutes: 30, autoMergeMethod: 'merge', recordHistoryInGit: true, includePhasesTrailer: true, wakeupScanRetryDelayMs: defaultWakeupScanRetryDelayMs, backlogCheck: defaultBacklogCheck, backlogCheckEvidencePaths: [] };
 }
 
 // ── Session map ───────────────────────────────────────────────────────────
