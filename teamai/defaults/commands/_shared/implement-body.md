@@ -31,11 +31,20 @@ re-read a file to verify an `Edit` that returned success.
 7. **Verify nothing in your scope is left uncommitted.** Run `git status --porcelain --
    <path1> <path2> ...` restricted to exactly the paths in this subtask's `files`
    and `files_to_create` arrays. Any non-empty output is a blocking failure — stage
-   and commit it before ending the session. This step exists because a `parallel_group`
-   containing exactly one subtask edits the feature branch directly (see plan.md) and
-   gets no orchestrator auto-commit safety net the way multi-member groups do at
-   cherry-pick time — if you forget to commit here, nothing downstream will catch it,
-   and QA will fail the criteria for that uncommitted diff.
+   and commit it before ending the session. Committing your own work with a descriptive
+   message is the norm. After every coder session, whatever the subtask's `parallel_group`
+   size, the orchestrator runs a **commit guard** that commits anything you left
+   uncommitted, and that commit bypasses project git hooks (`--no-verify`). It is a
+   backstop, not a substitute: it records your work under a generic `WIP:` message, it
+   sweeps every uncommitted file in the worktree (files outside your `files` then go to
+   planner arbitration), and if its own commit fails it only logs a warning.
+   **Hook rule:** if your own commit is rejected by a project git hook (e.g. pre-commit
+   typecheck/lint) ONLY because of files outside this subtask's `files`/`files_to_create`
+   (typically another subtask's in-progress work), do not spend turns working around the
+   hook and do not edit those files to satisfy it — leave your changes in the working
+   tree, note the hook failure in your summary, and end the session; the commit guard
+   commits them. A hook failure caused by this subtask's own files is a real failure and
+   must be fixed.
 8. **Do NOT push.** The orchestrator pushes all commits at the end of the implement phase. Pushing from the agent sandbox will fail for lack of credentials and wastes calls. Commit your changes — the orchestrator handles the rest.
 9. Print a summary of what was changed and the test results.
 

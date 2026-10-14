@@ -79,9 +79,8 @@ If `fail_type` is `"code"` or absent, proceed with the standard QA rework steps 
    step 8 below). Then verify nothing is left uncommitted: run
    `git status --porcelain -- <path1> <path2> ...` restricted to this subtask's `files`
    array. Any non-empty output is a blocking failure — stage and commit it now, before
-   running the test suite. QA rework edits the feature branch directly with no
-   downstream commit safety net; skipping this step ships a QA-approved fix that never
-   actually lands.
+   running the test suite. The orchestrator's commit guard (see Instructions step 7) is
+   a backstop, not a substitute for committing the fix, and the step 7 hook rule applies.
 10. **Run the full test suite** after all fixes are committed to catch regressions
     on already-passed subtasks that shouldn't be affected by your changes. Follow the
     test-running guidance in the Instructions section below (run once, wait, capture
