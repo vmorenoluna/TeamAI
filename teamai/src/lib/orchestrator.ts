@@ -445,6 +445,9 @@ export class Orchestrator {
     // qaAttempt, which was the old consecutive budget — seed the stall count from it.
     pipeline.qaStallCount = savedState.qaStallCount ?? savedState.qaAttempt ?? 0;
     pipeline.qaRoundHistory = savedState.qaRoundHistory ?? [];
+    pipeline.scopeReplanCount = savedState.scopeReplanCount ?? 0;
+    pipeline.scopeStallCounts = savedState.scopeStallCounts ?? {};
+    pipeline.scopeRoundHistory = savedState.scopeRoundHistory ?? {};
     if (savedState.specRevision !== undefined) pipeline.specRevision = savedState.specRevision;
     if (savedState.qaRevision !== undefined) pipeline.qaRevision = savedState.qaRevision;
     if (savedState.sessionId) pipeline.sessionId = savedState.sessionId;

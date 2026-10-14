@@ -58,6 +58,8 @@ import { PipelineConfigEditor } from '@/components/pipeline-config';
 const defaultConfig: PipelineConfig = {
   maxQaAttempts: 3,
   maxQaRounds: 9,
+  maxScopeStall: 2,
+  maxScopeReplans: 6,
   parallelSubtasks: true,
   autoModeMaxParallel: 1,
   idleStallMinutes: 15,
@@ -97,7 +99,7 @@ describe('PipelineConfigEditor', () => {
     it('renders the Max implement retries label and input', () => {
       renderComponent();
       expect(screen.getByText('Max implement retries')).toBeInTheDocument();
-      const input = screen.getAllByRole('spinbutton')[2];
+      const input = screen.getAllByRole('spinbutton')[4];
       expect(input).toBeInTheDocument();
       expect(input).toHaveValue(3);
     });
@@ -118,7 +120,7 @@ describe('PipelineConfigEditor', () => {
     });
 
     it('renders with custom config values from props', () => {
-      renderComponent({ maxQaAttempts: 5, maxQaRounds: 30, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true });
+      renderComponent({ maxQaAttempts: 5, maxQaRounds: 30, maxScopeStall: 2, maxScopeReplans: 6, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true });
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(5);
       expect(screen.getAllByRole('checkbox')[0]).not.toBeChecked();
     });
@@ -142,13 +144,13 @@ describe('PipelineConfigEditor', () => {
 
     it('updates maxImplementRetries when the number input changes', () => {
       renderComponent();
-      const input = screen.getAllByRole('spinbutton')[2];
+      const input = screen.getAllByRole('spinbutton')[4];
       fireEvent.change(input, { target: { value: '5' } });
       expect(input).toHaveValue(5);
     });
 
     it('toggles parallelSubtasks when the checkbox is clicked', () => {
-      renderComponent({ maxQaAttempts: 3, maxQaRounds: 30, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true });
+      renderComponent({ maxQaAttempts: 3, maxQaRounds: 30, maxScopeStall: 2, maxScopeReplans: 6, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true });
       const checkbox = screen.getAllByRole('checkbox')[0];
       fireEvent.click(checkbox);
       expect(checkbox).not.toBeChecked();
@@ -157,7 +159,7 @@ describe('PipelineConfigEditor', () => {
     });
 
     it('defaults parallelSubtasks to unchecked when config says false', () => {
-      renderComponent({ maxQaAttempts: 3, maxQaRounds: 30, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true });
+      renderComponent({ maxQaAttempts: 3, maxQaRounds: 30, maxScopeStall: 2, maxScopeReplans: 6, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true });
       expect(screen.getAllByRole('checkbox')[0]).not.toBeChecked();
     });
   });
@@ -168,7 +170,7 @@ describe('PipelineConfigEditor', () => {
     it('includes a changed maxImplementRetries in the saved config', async () => {
       renderComponent();
 
-      fireEvent.change(screen.getAllByRole('spinbutton')[2], { target: { value: '5' } });
+      fireEvent.change(screen.getAllByRole('spinbutton')[4], { target: { value: '5' } });
 
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: 'Save Pipeline Config' }));
@@ -193,6 +195,8 @@ describe('PipelineConfigEditor', () => {
       expect(mockSavePipelineConfig).toHaveBeenCalledWith({
         maxQaAttempts: 4,
         maxQaRounds: 9,
+        maxScopeStall: 2,
+        maxScopeReplans: 6,
         parallelSubtasks: false,
         autoModeMaxParallel: 1,
         idleStallMinutes: 15,
@@ -339,7 +343,7 @@ describe('PipelineConfigEditor', () => {
     it('initializes state from props on first render', () => {
       // Render with non-default values
       const { rerender } = render(
-        <PipelineConfigEditor config={{ maxQaAttempts: 1, maxQaRounds: 30, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true }} />
+        <PipelineConfigEditor config={{ maxQaAttempts: 1, maxQaRounds: 30, maxScopeStall: 2, maxScopeReplans: 6, parallelSubtasks: false, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true }} />
       );
 
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(1);
@@ -349,7 +353,7 @@ describe('PipelineConfigEditor', () => {
       // a useEffect to re-sync, so prop changes after initial render don't
       // update the input values — this is the expected behaviour.
       rerender(
-        <PipelineConfigEditor config={{ maxQaAttempts: 8, maxQaRounds: 30, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true }} />
+        <PipelineConfigEditor config={{ maxQaAttempts: 8, maxQaRounds: 30, maxScopeStall: 2, maxScopeReplans: 6, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true }} />
       );
 
       // Values remain at the initial render values, not the new props.
@@ -362,17 +366,17 @@ describe('PipelineConfigEditor', () => {
 
   describe('edge cases', () => {
     it('handles maxQaAttempts at the minimum boundary (1)', () => {
-      renderComponent({ maxQaAttempts: 1, maxQaRounds: 30, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true });
+      renderComponent({ maxQaAttempts: 1, maxQaRounds: 30, maxScopeStall: 2, maxScopeReplans: 6, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true });
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(1);
     });
 
     it('handles maxQaAttempts at the maximum boundary (10)', () => {
-      renderComponent({ maxQaAttempts: 10, maxQaRounds: 30, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true });
+      renderComponent({ maxQaAttempts: 10, maxQaRounds: 30, maxScopeStall: 2, maxScopeReplans: 6, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true });
       expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(10);
     });
 
     it('saves immediately after toggling parallelSubtasks', async () => {
-      renderComponent({ maxQaAttempts: 2, maxQaRounds: 30, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true });
+      renderComponent({ maxQaAttempts: 2, maxQaRounds: 30, maxScopeStall: 2, maxScopeReplans: 6, parallelSubtasks: true, autoModeMaxParallel: 1, idleStallMinutes: 15, toolStallMinutes: 30, maxImplementRetries: 3, recordHistoryInGit: true, includePhasesTrailer: true });
 
       fireEvent.click(screen.getAllByRole('checkbox')[0]);
 
@@ -383,6 +387,8 @@ describe('PipelineConfigEditor', () => {
       expect(mockSavePipelineConfig).toHaveBeenCalledWith({
         maxQaAttempts: 2,
         maxQaRounds: 30,
+        maxScopeStall: 2,
+        maxScopeReplans: 6,
         parallelSubtasks: false,
         autoModeMaxParallel: 1,
         idleStallMinutes: 15,
@@ -473,6 +479,29 @@ describe('PipelineConfigEditor', () => {
         'Failed to save pipeline config: Max QA rounds (2) must be at least Max QA attempts (3)',
       );
       expect(screen.queryByText('Saved!')).not.toBeInTheDocument();
+    });
+
+    it('renders the scope budget inputs and saves them', async () => {
+      renderComponent();
+      expect(screen.getByText('Max scope stall')).toBeInTheDocument();
+      expect(screen.getByText('Max scope replans')).toBeInTheDocument();
+      fireEvent.change(screen.getAllByRole('spinbutton')[3], { target: { value: '8' } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save Pipeline Config' }));
+      });
+      expect(mockSavePipelineConfig).toHaveBeenCalledWith(expect.objectContaining({ maxScopeStall: 2, maxScopeReplans: 8 }));
+    });
+
+    it('rejects maxScopeReplans < maxScopeStall client-side without calling savePipelineConfig', async () => {
+      renderComponent();
+      fireEvent.change(screen.getAllByRole('spinbutton')[3], { target: { value: '1' } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save Pipeline Config' }));
+      });
+      expect(mockSavePipelineConfig).not.toHaveBeenCalled();
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Failed to save pipeline config: Max scope replans (1) must be at least Max scope stall (2)',
+      );
     });
 
     it('allows maxQaRounds equal to maxQaAttempts', async () => {

@@ -75,7 +75,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator } from '../../src/lib/orchestrator';
-import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks, reconcileSubtaskCompletionFromDeliverables, relevantDeliverables, repairStuckCherryPick } from '../../src/lib/orchestrator/implement';
+import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks, reconcileSubtaskCompletionFromDeliverables, relevantDeliverables, repairStuckCherryPick, checkSubtaskScope } from '../../src/lib/orchestrator/implement';
 import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
@@ -108,6 +108,12 @@ function setupProject() {
   }));
 
   return { root, taskId, taskDir, clean };
+}
+
+/** Every git call answers 'abc123', except `git diff` which reports a change to the subtask's assigned file. */
+function mockGitReportingChange(file: string) {
+  mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) =>
+    (Array.isArray(args) && args[0] === 'diff' ? file + '\n' : 'abc123\n'));
 }
 
 function makePipeline(taskId: string, specPath: string, overrides: Record<string, any> = {}): any {
@@ -1107,7 +1113,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     });
     writeFileSync(join(project.taskDir, 'qa_report_before_failed.json'), snapshotContent);
 
-    mockExecFileSync.mockReturnValue('abc123\n'); // for git push/rev-parse
+    mockGitReportingChange('src/test.ts'); // for git push/rev-parse
     mockCreateSession.mockResolvedValue('sess-impl-restore');
 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
@@ -1159,7 +1165,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     });
     writeFileSync(join(project.taskDir, 'qa_report_before_bounce.json'), snapshotContent);
 
-    mockExecFileSync.mockReturnValue('abc123\n');
+    mockGitReportingChange('src/test.ts');
     mockCreateSession.mockResolvedValue('sess-impl-bounce-snap');
 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
@@ -1198,7 +1204,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
 
   it('does nothing when neither qa_report.json nor snapshot exists', async () => {
     // Neither file exists — should proceed normally
-    mockExecFileSync.mockReturnValue('abc123\n');
+    mockGitReportingChange('src/test.ts');
     mockCreateSession.mockResolvedValue('sess-impl-no-snap');
 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
@@ -1242,7 +1248,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     });
     writeFileSync(join(project.taskDir, 'qa_report_before_failed.json'), snapshotContent);
 
-    mockExecFileSync.mockReturnValue('abc123\n');
+    mockGitReportingChange('src/test.ts');
     mockCreateSession.mockResolvedValue('sess-impl-exists');
 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
@@ -1280,7 +1286,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     // Malformed content is still restored so the engineer can see what was there.
     writeFileSync(join(project.taskDir, 'qa_report_before_failed.json'), 'not valid json {{{');
 
-    mockExecFileSync.mockReturnValue('abc123\n');
+    mockGitReportingChange('src/test.ts');
     mockCreateSession.mockResolvedValue('sess-impl-malformed');
 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
@@ -1331,7 +1337,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
     });
     writeFileSync(join(project.taskDir, 'qa_report_before_failed.json'), snapshotContent);
 
-    mockExecFileSync.mockReturnValue('abc123\n');
+    mockGitReportingChange('src/test.ts');
     mockCreateSession.mockResolvedValue('sess-impl-complex');
 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
@@ -1516,7 +1522,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       mockCreateSession.mockReset();
       mockSendMessage.mockClear();
       onHandlers.clear(); // prevent stale event handlers from Phase 1 leaking into Phase 2
-      mockExecFileSync.mockReturnValue('abc123\n'); // for git push/rev-parse
+      mockGitReportingChange('src/feature.ts'); // for git push/rev-parse
       mockCreateSession.mockResolvedValue('sess-e2e-impl');
 
       pipeline.phase = 'implement';
@@ -1803,7 +1809,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
     // ── Phase 1: runImplement — Gap 4b restores locked report ──
     mockExecFileSync.mockReset();
     mockCreateSession.mockReset();
-    mockExecFileSync.mockReturnValue('abc123\n');
+    mockGitReportingChange('src/feature.ts');
     mockCreateSession.mockResolvedValue('sess-e2e-locked-impl');
 
     const pipeline = makePipeline(project.taskId, project.taskDir, {
@@ -4956,7 +4962,7 @@ describe('runImplement — scope check honors files_to_create', () => {
 
       const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
       expect(log).not.toContain('[SCOPE]');
-      expect(log).not.toContain('modified files outside its assigned scope');
+      expect(log).not.toContain('changed files not listed in its plan');
 
       const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
       expect(plan.subtasks.find((s: any) => s.id === 2).completed).toBe(true);
@@ -4965,17 +4971,17 @@ describe('runImplement — scope check honors files_to_create', () => {
     }
   });
 
-  it('still flags a subtask that modifies a file outside both files and files_to_create', async () => {
-    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
-      subtasks: [{
-        id: 3,
-        title: 'Capture evidence',
-        description: 'Capture evidence into a new file',
-        files: [],
-        files_to_create: ['scripts/job_logs/evidence.txt'],
-        acceptance_criteria: ['Evidence captured'],
-      }],
-    }));
+  it('holds a subtask that modifies a file outside both files and files_to_create for planner arbitration', async () => {
+    const subtask: PlanSubtask = {
+      id: 3,
+      title: 'Capture evidence',
+      description: 'Capture evidence into a new file',
+      files: [],
+      files_to_create: ['scripts/job_logs/evidence.txt'],
+      acceptance_criteria: ['Evidence captured'],
+      depends_on: [],
+    };
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({ subtasks: [subtask] }));
 
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (Array.isArray(args)) {
@@ -4986,7 +4992,113 @@ describe('runImplement — scope check honors files_to_create', () => {
       return '';
     });
 
-    mockCreateSession.mockResolvedValue('sess-scope-violated');
+    mockCreateSession.mockResolvedValue('sess-scope-held');
+
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath, branch: 'feat/x',
+    });
+    const completedIds: number[] = [];
+    const scopeViolations = new Set<number>();
+
+    const promise = runSubtaskSession(
+      pipeline, (orch as AnyOrch)._ctx, subtask, worktreePath,
+      join(project.taskDir, 'output.log'),
+      false, false, join(project.taskDir, 'human_feedback.md'),
+      completedIds, scopeViolations, { current: Promise.resolve() },
+    );
+    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+    mkdirSync(join(worktreePath, 'scripts/job_logs'), { recursive: true });
+    writeFileSync(join(worktreePath, 'scripts/job_logs/evidence.txt'), 'evidence');
+
+    fireEvent('event', { sessionId: 'sess-scope-held', event: { type: 'result' } });
+    await vi.advanceTimersByTimeAsync(50);
+    await promise;
+
+    const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+    expect(log).toContain('[SCOPE] Subtask 3 changed files not listed in its plan `files` — holding its work for planner arbitration:');
+    expect(log).toContain('  - src/UnrelatedFile.scala');
+    expect(log).toContain('[SCOPE] Declared files: scripts/job_logs/evidence.txt');
+    expect(log).not.toContain('rejected — will re-run');
+
+    // Held, not rejected and not completed: the planner decides in Phase 4.
+    expect(scopeViolations.has(3)).toBe(false);
+    expect(completedIds).toEqual([]);
+    const report = JSON.parse(readFileSync(join(project.taskDir, 'scope_report-st3.json'), 'utf-8'));
+    expect(report.subtask_id).toBe(3);
+    expect(report.unlisted.map((u: any) => u.path)).toEqual(['src/UnrelatedFile.scala']);
+  });
+
+  it('does not hold a subtask that scheduled a wakeup even though it changed unlisted files', async () => {
+    const subtask: PlanSubtask = {
+      id: 4,
+      title: 'Run benchmark job',
+      description: 'Execute benchmark and save results',
+      files: ['src/bench.ts'],
+      acceptance_criteria: ['Benchmark completes'],
+      depends_on: [],
+    };
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({ subtasks: [subtask] }));
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'diff') return 'src/bench.ts\nsrc/other.ts\n';
+      }
+      return '';
+    });
+    mockCreateSession.mockResolvedValue('sess-scope-wakeup');
+
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement', qaAttempt: 0, worktreePath, branch: 'feat/x',
+    });
+    const promise = runSubtaskSession(
+      pipeline, (orch as AnyOrch)._ctx, subtask, worktreePath,
+      join(project.taskDir, 'output.log'),
+      false, false, join(project.taskDir, 'human_feedback.md'),
+      [], new Set<number>(), { current: Promise.resolve() },
+    );
+    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+
+    writeFileSync(join(project.taskDir, 'subtask_wakeup-st4.json'), JSON.stringify({
+      subtask_id: 4, wakeup_at: '2026-07-04T12:00:00Z',
+      background_command: 'python long_job.py', expected_artifact: 'results/summary.jsonl',
+    }));
+    fireEvent('event', { sessionId: 'sess-scope-wakeup', event: { type: 'result' } });
+    await vi.advanceTimersByTimeAsync(50);
+    await promise;
+
+    const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+    expect(log).toContain('[SCOPE] Subtask 4 changed unlisted files but scheduled a wakeup — not held this session');
+    expect(log).toContain('  - src/other.ts');
+    expect(log).not.toContain('holding its work for planner arbitration');
+    expect(existsSync(join(project.taskDir, 'scope_report-st4.json'))).toBe(false);
+    expect(pipeline.wakeupSubtaskId).toBe(4);
+  });
+
+  it('logs the [VERIFY] no-op rejection and re-run line when a files-only subtask makes no changes', async () => {
+    writeFileSync(join(project.taskDir, 'plan.json'), JSON.stringify({
+      subtasks: [{
+        id: 4,
+        title: 'Edit a file',
+        description: 'Edit the listed file',
+        files: ['src/a.ts'],
+        acceptance_criteria: ['File edited'],
+      }],
+    }));
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'push' || args[0] === 'fetch' || args[0] === 'pull') return '';
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'diff') return '';
+      }
+      return '';
+    });
+
+    mockCreateSession.mockResolvedValue('sess-noop');
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
 
     const worktreePath = join(project.root, 'worktrees', 'test-task');
@@ -4998,16 +5110,17 @@ describe('runImplement — scope check honors files_to_create', () => {
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
 
-      mkdirSync(join(worktreePath, 'scripts/job_logs'), { recursive: true });
-      writeFileSync(join(worktreePath, 'scripts/job_logs/evidence.txt'), 'evidence');
-
-      fireEvent('event', { sessionId: 'sess-scope-violated', event: { type: 'result' } });
+      fireEvent('event', { sessionId: 'sess-noop', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
       await promise;
 
       const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-      expect(log).toContain('[SCOPE] Subtask 3 modified files outside its assigned scope');
-      expect(log).toContain('src/UnrelatedFile.scala');
+      expect(log).toContain('[VERIFY] Subtask 4 ended without touching any of its assigned files');
+      expect(log).toContain('[VERIFY] Subtask 4 rejected — will re-run');
+      expect(log).not.toContain('[SCOPE] Subtask 4 rejected');
+
+      const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
+      expect(plan.subtasks.find((s: any) => s.id === 4).completed).not.toBe(true);
     } finally {
       executeSpy.mockRestore();
     }
@@ -5068,7 +5181,8 @@ describe('runImplement — scope check honors files_to_create', () => {
       await promise;
 
       const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
-      expect(log).not.toContain('[SCOPE] Subtask 9999 modified files outside its assigned scope');
+      expect(log).not.toContain('[SCOPE] Subtask 9999');
+      expect(existsSync(join(project.taskDir, 'scope_report-st9999.json'))).toBe(false);
 
       const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
       expect(plan.subtasks.find((s: any) => s.id === 9999).completed).toBe(true);
@@ -5171,7 +5285,7 @@ describe('runImplement — commit guard for sequential subtasks', () => {
       const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
       expect(log).toContain('[COMMIT-GUARD] Subtask 1 left uncommitted changes');
       // No scope violation — the only changed file was already the assigned one.
-      expect(log).not.toContain('[SCOPE] Subtask 1 modified files outside its assigned scope');
+      expect(log).not.toContain('[SCOPE] Subtask 1 changed files not listed in its plan');
 
       const plan = JSON.parse(readFileSync(join(project.taskDir, 'plan.json'), 'utf-8'));
       expect(plan.subtasks.find((s: any) => s.id === 1).completed).toBe(true);
@@ -5884,7 +5998,7 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
     expect(execGit).toHaveBeenCalledWith(['commit', '-m', 'chore: auto-save subtask 2 state before cherry-pick'], stWorktreePath);
   });
 
-  it('does NOT auto-commit a per-subtask worktree that has a wakeup pending or a scope violation', async () => {
+  it('does NOT auto-commit a per-subtask worktree that has a wakeup pending or a rejected subtask', async () => {
     const execGitCapture = vi.fn(() => ' M some-file.txt\n');
     const execGit = vi.fn();
     const deps = {
@@ -7909,4 +8023,67 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
   });
 });
 
+describe('checkSubtaskScope (hold-and-arbitrate)', () => {
+  let project: ReturnType<typeof setupProject>;
 
+  beforeEach(() => {
+    vi.clearAllMocks();
+    project = setupProject();
+  });
+
+  afterEach(() => {
+    project.clean();
+  });
+
+  function run(subtask: Record<string, any>, diffOutput: string) {
+    const execGitCapture = vi.fn((args: string[]) => (args[0] === 'diff' && args[1] === '--name-only' && args[2] === 'abc123..HEAD' ? diffOutput : ''));
+    const deps = { execGitCapture, execGit: vi.fn(), projectRoot: project.root } as unknown as ImplementDeps;
+    const pipeline = makePipeline(project.taskId, project.taskDir, { phase: 'implement' });
+    const violations = new Set<number>();
+    const result = checkSubtaskScope(
+      pipeline, deps,
+      { title: 't', description: 'd', acceptance_criteria: [], depends_on: [], ...subtask } as any,
+      join(project.root, 'worktrees', 'test-task'), 'abc123', join(project.taskDir, 'missing-session.log'), violations,
+    );
+    const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
+    return { violations, result, log };
+  }
+
+  beforeEach(() => {
+    writeFileSync(join(project.taskDir, 'output.log'), '');
+  });
+
+  it('returns the unlisted files without rejecting a parallel-group subtask', () => {
+    const { violations, result, log } = run({ id: 4, files: ['a.ts'], parallel_group: 1 }, 'a.ts\nb.ts\n');
+    expect(violations.has(4)).toBe(false);
+    expect(result).toEqual({ changedFiles: ['a.ts', 'b.ts'], unlistedFiles: ['b.ts'] });
+    expect(log).not.toContain('[SCOPE]');
+  });
+
+  it('treats files_to_create as declared', () => {
+    const { result } = run({ id: 4, files: ['a.ts'], files_to_create: ['n.ts'] }, 'a.ts\nn.ts\n');
+    expect(result.unlistedFiles).toEqual([]);
+  });
+
+  it('does not treat a session that changed only unlisted files as a no-op', () => {
+    const { violations, result, log } = run({ id: 5, files: ['a.ts'] }, 'b.ts\n');
+    expect(violations.has(5)).toBe(false);
+    expect(result.unlistedFiles).toEqual(['b.ts']);
+    expect(log).not.toContain('ended without touching any of its assigned files');
+  });
+
+  it('rejects a rejected subtask: a files-only, non-verify_only subtask with no changes is a no-op', () => {
+    const { violations, result, log } = run({ id: 6, files: ['a.ts'] }, '');
+    expect(violations.has(6)).toBe(true);
+    expect(result.unlistedFiles).toEqual([]);
+    expect(log).toContain('[VERIFY] Subtask 6 ended without touching any of its assigned files');
+    expect(log).not.toContain('[SCOPE] Subtask 6 rejected');
+  });
+
+  it('skips the whole check for subtask 9999', () => {
+    const { violations, result, log } = run({ id: 9999, files: ['a.ts'] }, 'b.ts\n');
+    expect(violations.size).toBe(0);
+    expect(result).toEqual({ changedFiles: [], unlistedFiles: [] });
+    expect(log).not.toContain('[SCOPE] Subtask 9999');
+  });
+});

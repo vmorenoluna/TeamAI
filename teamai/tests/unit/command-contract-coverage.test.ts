@@ -74,6 +74,8 @@ const PLAN_CONTRACT: Rule[] = [
   r('depends_on enforced across groups', '`depends_on` IS enforced'),
   r('gitignored artifacts need git add -f', 'git add -f'),
   r('no forward references between subtasks', 'never refers to a later subtask'),
+  r('files is the unit the planner arbitrates', 'the unit the planner arbitrates'),
+  r('list paired/mirrored files together', 'mirrored'),
 ];
 
 const CODER_CONTRACT: Rule[] = [
@@ -81,7 +83,8 @@ const CODER_CONTRACT: Rule[] = [
   r('run verification from the worktree', 'Run from the worktree'),
   r('dynamic ports', 'Use dynamic ports'),
   r("never kill other agents' processes", "Never kill what you didn't start"),
-  r('scope limited to the subtask files', 'You may ONLY modify files explicitly listed'),
+  r('files is the unit the planner arbitrates', 'the unit the planner arbitrates'),
+  r('coder may note reasons for unlisted files', 'scope_notes-st'),
   r('pipeline artifacts are read-only', 'Do NOT create, modify, delete, stage, or commit pipeline artifacts'),
   r('files_to_create deliverables', 'files_to_create'),
   r('verify nothing in scope is left uncommitted', 'git status --porcelain'),
@@ -95,9 +98,9 @@ const QA_REWORK: Rule[] = [
   r('cleanup-only rework mode', 'Cleanup-Only Rework Mode'),
   r('persisted failures first', 'PERSISTED FAILURE'),
   r('QA criteria markers', '[QA CORRECTION]'),
-  r('QA-fallback rework subtask scope', '(id 9999)'),
   r('fix_needed is the required change', 'fix_needed'),
   r('formula changes escalate as spec concerns', 'escalate it as a spec concern'),
+  r('QA-fallback rework subtask scope', '(id 9999)'),
 ];
 
 // Every mode whose agent can file tickets judges the whole open board
@@ -138,6 +141,8 @@ const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
     r('re-run only invalidated subtasks, dropping stale qa_flagged', 'qa_flagged'),
     r('rewrite plan.json in place', 'Rewrite `plan.json` in place'),
     r('scoped replan preserves unlisted subtasks byte-for-byte', 'byte-for-byte'),
+    r('scope arbitration verdict file', 'scope_verdicts.json'),
+    r('serialize instead of merging', 'serialize'),
   ],
   'implement': [...PIPELINE_PREAMBLE, ...SUBTASK_WAKEUP, ...CODER_CONTRACT, ...BACKLOG_CHECK],
   'implement-fix': [...PIPELINE_PREAMBLE, ...SUBTASK_WAKEUP, ...CODER_CONTRACT, ...QA_REWORK, ...BACKLOG_CHECK],

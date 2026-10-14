@@ -10,10 +10,16 @@ const QA_ATTEMPTS_TOOLTIP =
   "Consecutive QA rounds without progress before the task fails. A round makes progress when something that failed in the previous round now passes, nothing that passed before now fails, and the set of failures hasn't been seen before; a progressing round resets this count to 0, as does a spec revision. Default: 3.";
 const QA_ROUNDS_TOOLTIP =
   'Hard cap on the total number of QA rounds for a task, whether or not the rounds make progress. Bounds fix/undo oscillation, QA finding new issues every round, and token spend. Spec revisions do not reset it; Retry and human Request Changes (other than to the Analyst) do. Must be at least Max QA attempts. Default: 3 × Max QA attempts (9).';
+const SCOPE_STALL_TOOLTIP =
+  "Consecutive scope-arbitration rounds in which a subtask's set of files changed outside its listed files stops shrinking before the task fails. A round makes progress when that set gets smaller. Default: 2.";
+const SCOPE_REPLANS_TOOLTIP =
+  'Hard cap on the total number of scope-arbitration sessions per task, whether or not the rounds make progress; exhausting it fails the task. Must be at least Max scope stall. Default: 3 × Max scope stall (6).';
 
 export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
   const [maxQa, setMaxQa] = useState(config.maxQaAttempts);
   const [maxQaRounds, setMaxQaRounds] = useState(config.maxQaRounds);
+  const [maxScopeStall, setMaxScopeStall] = useState(config.maxScopeStall);
+  const [maxScopeReplans, setMaxScopeReplans] = useState(config.maxScopeReplans);
   const [parallel, setParallel] = useState(config.parallelSubtasks);
   const [autoParallel, setAutoParallel] = useState(config.autoModeMaxParallel);
   const [idleStall, setIdleStall] = useState(config.idleStallMinutes);
@@ -32,9 +38,13 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
       setError(formatActionError('save pipeline config', new Error(`Max QA rounds (${maxQaRounds}) must be at least Max QA attempts (${maxQa})`)));
       return;
     }
+    if (maxScopeReplans < maxScopeStall) {
+      setError(formatActionError('save pipeline config', new Error(`Max scope replans (${maxScopeReplans}) must be at least Max scope stall (${maxScopeStall})`)));
+      return;
+    }
     startTransition(async () => {
       try {
-        await savePipelineConfig({ maxQaAttempts: maxQa, maxQaRounds,parallelSubtasks: parallel, autoModeMaxParallel: autoParallel, idleStallMinutes: idleStall, toolStallMinutes: toolStall, maxImplementRetries, recordHistoryInGit: recordHistory, includePhasesTrailer: phasesTrailer });
+        await savePipelineConfig({ maxQaAttempts: maxQa, maxQaRounds, maxScopeStall, maxScopeReplans, parallelSubtasks: parallel, autoModeMaxParallel: autoParallel, idleStallMinutes: idleStall, toolStallMinutes: toolStall, maxImplementRetries, recordHistoryInGit: recordHistory, includePhasesTrailer: phasesTrailer });
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       } catch (err) {
@@ -78,6 +88,24 @@ export function PipelineConfigEditor({ config }: { config: PipelineConfig }) {
             min: 1,
             max: 30,
             onChange: setMaxQaRounds,
+          }}
+        />
+        <BudgetPairInputs
+          stall={{
+            label: 'Max scope stall',
+            tooltip: SCOPE_STALL_TOOLTIP,
+            value: maxScopeStall,
+            min: 1,
+            max: 10,
+            onChange: setMaxScopeStall,
+          }}
+          rounds={{
+            label: 'Max scope replans',
+            tooltip: SCOPE_REPLANS_TOOLTIP,
+            value: maxScopeReplans,
+            min: 1,
+            max: 30,
+            onChange: setMaxScopeReplans,
           }}
         />
         <div title="Single cap governing every retry-and-give-up circuit breaker inside the implement phase: a subtask's declared deliverable still missing after its session ends, a wakeup-pending subtask's background job never producing its artifact, or a full implement pass ending with any subtask still incomplete. All bypass QA entirely and fail the task once exceeded, rather than pushing to an expensive QA review that would only confirm what plan.json already shows. Default: 3.">

@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import type { execFileSync as ExecFileSyncFn } from 'child_process';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -50,8 +51,11 @@ vi.mock('../../src/lib/sensors', () => ({
 import {
   filterSubtaskCriteria, runPreSubtaskSensors, runPostSubtaskSensors, buildStallRecoveryHeader,
   consumeSubtaskWakeupFiles, verifySubtaskDeliverables, checkSubtaskScope,
+  holdSubtaskForArbitration, integrateGroup, selectSubtasks, buildSubtaskRequest, runImplement,
   type ImplementPipeline, type ImplementDeps,
 } from '../../src/lib/orchestrator/implement';
+import { processManager } from '../../src/lib/process-manager';
+import { ORCHESTRATOR_FAIL_TYPE } from '../../src/lib/orchestrator/types';
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 
 let specDir: string;
@@ -251,38 +255,419 @@ describe('verifySubtaskDeliverables', () => {
 });
 
 describe('checkSubtaskScope', () => {
-  it('flags files outside files ∪ files_to_create', () => {
+  it('returns files outside files ∪ files_to_create as unlisted without rejecting', () => {
     execGitCapture.mockReturnValue('src/a.ts\nnew.ts\nstray.ts\n');
     const violations = new Set<number>();
-    const changed = checkSubtaskScope(
+    const result = checkSubtaskScope(
       makePipeline(), makeDeps(), makeSubtask({ id: 3, files: ['src/a.ts'], files_to_create: ['new.ts'] }),
       cwd, 'abc123', join(specDir, 'st3.log'), violations,
     );
-    expect(violations.has(3)).toBe(true);
-    expect(outputLog()).toContain('stray.ts');
-    expect(changed).toEqual(['src/a.ts', 'new.ts', 'stray.ts']);
+    expect(violations.has(3)).toBe(false);
+    expect(result.changedFiles).toEqual(['src/a.ts', 'new.ts', 'stray.ts']);
+    expect(result.unlistedFiles).toEqual(['stray.ts']);
   });
 
   it('skips the check for the QA-fallback subtask 9999', () => {
     const violations = new Set<number>();
-    const changed = checkSubtaskScope(
+    const result = checkSubtaskScope(
       makePipeline(), makeDeps(), makeSubtask({ id: 9999, files: ['a.ts'] }),
       cwd, 'abc123', join(specDir, 'st9999.log'), violations,
     );
     expect(execGitCapture).not.toHaveBeenCalled();
     expect(violations.size).toBe(0);
-    expect(changed).toEqual([]);
+    expect(result).toEqual({ changedFiles: [], unlistedFiles: [] });
   });
 
-  it('returns [] when git diff fails', () => {
+  it('returns empty lists and holds nothing when git diff fails', () => {
     execGitCapture.mockImplementation(() => { throw new Error('boom'); });
     const violations = new Set<number>();
-    const changed = checkSubtaskScope(
+    const result = checkSubtaskScope(
       makePipeline(), makeDeps(), makeSubtask({ id: 4, files: ['a.ts'] }),
       cwd, 'abc123', join(specDir, 'st4.log'), violations,
     );
-    expect(changed).toEqual([]);
+    expect(result).toEqual({ changedFiles: [], unlistedFiles: [] });
     expect(violations.size).toBe(0);
-    expect(outputLog()).toContain('git diff failed: boom');
+    expect(outputLog()).toContain('[SCOPE] Could not verify file scope (git diff failed: boom)');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Hold-and-arbitrate — real git
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('scope hold and arbitration (real git)', () => {
+  let realExec: typeof ExecFileSyncFn;
+  let repo: string;
+  let sessionCount: number;
+  let verdictsWriter: (() => unknown) | undefined;
+  let cfgOverrides: Record<string, unknown>;
+
+  const git = (dir: string, ...args: string[]) => realExec('git', args, { cwd: dir, encoding: 'utf-8', stdio: 'pipe' }).trim();
+  const read = (rel: string) => readFileSync(join(repo, rel), 'utf-8');
+  const readJson = (file: string) => JSON.parse(readFileSync(join(specDir, file), 'utf-8'));
+  const sentMessages = () => (processManager.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls.map(c => String(c[1]));
+
+  function commit(dir: string, files: Record<string, string>, msg = 'work') {
+    for (const [f, c] of Object.entries(files)) {
+      mkdirSync(join(dir, f, '..'), { recursive: true });
+      writeFileSync(join(dir, f), c);
+    }
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', msg);
+  }
+
+  function writePlan(subtasks: unknown[]) {
+    writeFileSync(join(specDir, 'plan.json'), JSON.stringify({ subtasks }, null, 2));
+  }
+  const st = (id: number, files: string[], extra: Record<string, unknown> = {}) =>
+    ({ id, title: 't' + id, description: 'd', files, acceptance_criteria: [], ...extra }) as PlanSubtask;
+
+  function pipelineFor(over: Record<string, unknown> = {}): ImplementPipeline {
+    return {
+      taskId: 't1', specPath: specDir, worktreePath: repo, branch: 'feat', phase: 'implement', ...over,
+    } as unknown as ImplementPipeline;
+  }
+
+  function realDeps(): ImplementDeps {
+    return {
+      projectRoot: repo,
+      execGit: (args: string[], dir: string) => { realExec('git', args, { cwd: dir, stdio: 'pipe' }); },
+      execGitCapture: (args: string[], dir: string) => realExec('git', args, { cwd: dir, encoding: 'utf-8', stdio: 'pipe' }) as string,
+      advancePhase: vi.fn((p: ImplementPipeline, phase: string) => { (p as any).phase = phase; }),
+      executePhase: vi.fn(async () => undefined),
+      persistAndEmitPhase: vi.fn(),
+      restoreQaReportFromSnapshot: vi.fn(),
+      restoreHumanFeedbackFromSnapshot: vi.fn(),
+      cleanStaleSubtaskWorktrees: vi.fn(async () => undefined),
+      gitPush: vi.fn(),
+      isWorktreeHealthy: () => true,
+      phaseHeader: vi.fn(),
+      scheduleWakeup: vi.fn(),
+      savePipelineState: vi.fn(),
+      writeCompletionSummary,
+      planWriteLock: { current: Promise.resolve() },
+      sessionOpts: (role: string, cwd: string, taskId: string) => ({ taskId, role, cwd }),
+      waitForCompletion: async () => {
+        sessionCount++;
+        const w = verdictsWriter?.();
+        if (w !== undefined && w !== null) writeFileSync(join(specDir, 'scope_verdicts.json'), JSON.stringify(w));
+      },
+      getPipelineConfig: () => ({
+        maxQaAttempts: 3, parallelSubtasks: true, maxImplementRetries: 3, maxStallRecoveries: 2,
+        idleStallMinutes: 5, toolStallMinutes: 30, backlogCheck: false, ...cfgOverrides,
+      }),
+    } as unknown as ImplementDeps;
+  }
+
+  /** A subtask worked in an isolated worktree on `feat-st<id>`; its commits are held there. */
+  function holdParallel(subtask: PlanSubtask, edits: Record<string, string>, unlisted: string[], deps = realDeps()) {
+    const wt = join(specDir, '..', 'wt-st' + subtask.id);
+    const base = git(repo, 'rev-parse', 'HEAD');
+    git(repo, 'worktree', 'add', '-q', wt, '-b', 'feat-st' + subtask.id, 'feat');
+    commit(wt, edits);
+    holdSubtaskForArbitration(pipelineFor(), deps, subtask, wt, base, unlisted);
+    git(repo, 'worktree', 'remove', '--force', wt);
+    return base;
+  }
+
+  beforeEach(async () => {
+    const actual = await vi.importActual<typeof import('child_process')>('child_process');
+    realExec = actual.execFileSync as typeof ExecFileSyncFn;
+    mockExecFileSync.mockImplementation((...a: unknown[]) => (realExec as (...x: unknown[]) => unknown)(...a));
+    repo = join(specDir, '..', 'repo');
+    mkdirSync(repo, { recursive: true });
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'config', 'user.email', 't@t');
+    git(repo, 'config', 'user.name', 't');
+    git(repo, 'config', 'commit.gpgsign', 'false');
+    commit(repo, { 'a.ts': 'a\n', 'b.ts': 'b\n' }, 'init');
+    git(repo, 'checkout', '-q', '-b', 'feat');
+    sessionCount = 0;
+    verdictsWriter = undefined;
+    cfgOverrides = {};
+    (processManager.sendMessage as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (processManager.createSession as unknown as ReturnType<typeof vi.fn>).mockClear();
+    writeCompletionSummary.mockClear();
+  });
+
+  afterEach(() => {
+    mockExecFileSync.mockReset();
+  });
+
+  describe('sequential hold (main worktree)', () => {
+    it('moves the session commits to <branch>-st<id>, resets the feature branch and writes the report', () => {
+      const base = git(repo, 'rev-parse', 'HEAD');
+      commit(repo, { 'a.ts': 'a\na2\n', 'b.ts': 'b\nb2\n' });
+      const sessionHead = git(repo, 'rev-parse', 'HEAD');
+      const scopeViolations = new Set<number>();
+
+      const subtask = st(1, ['a.ts']);
+      const { unlistedFiles } = checkSubtaskScope(pipelineFor(), realDeps(), subtask, repo, base, join(specDir, 'st1.log'), scopeViolations);
+      expect(unlistedFiles).toEqual(['b.ts']);
+      holdSubtaskForArbitration(pipelineFor(), realDeps(), subtask, repo, base, unlistedFiles);
+
+      expect(scopeViolations.has(1)).toBe(false);
+      expect(git(repo, 'rev-parse', 'HEAD')).toBe(base);
+      expect(git(repo, 'rev-parse', 'feat-st1')).toBe(sessionHead);
+      const report = readJson('scope_report-st1.json');
+      expect(report).toMatchObject({
+        subtask_id: 1, base, session_head: sessionHead, held_ref: 'feat-st1', declared_files: ['a.ts'],
+        unlisted: [{ path: 'b.ts', insertions: 1, deletions: 0, coder_reason: null }],
+      });
+      const log = outputLog();
+      expect(log).toContain('holding its work for planner arbitration');
+      expect(log).toContain('  - b.ts');
+      expect(log).toContain('[SCOPE] Declared files: a.ts');
+      expect(log).toContain("[SCOPE-HOLD] Holding subtask 1's commits on feat-st1 pending scope arbitration");
+    });
+
+    it('leaves the commits in place (held_ref null) and never resets when the worktree is dirty', () => {
+      const base = git(repo, 'rev-parse', 'HEAD');
+      commit(repo, { 'b.ts': 'b\nb2\n' });
+      const sessionHead = git(repo, 'rev-parse', 'HEAD');
+      writeFileSync(join(repo, 'a.ts'), 'dirty\n');
+      const deps = realDeps();
+      const execGit = vi.fn(deps.execGit);
+      deps.execGit = execGit;
+
+      holdSubtaskForArbitration(pipelineFor(), deps, st(1, ['a.ts']), repo, base, ['b.ts']);
+
+      expect(execGit.mock.calls.some(c => c[0][0] === 'reset')).toBe(false);
+      expect(git(repo, 'rev-parse', 'HEAD')).toBe(sessionHead);
+      expect(readJson('scope_report-st1.json').held_ref).toBeNull();
+      expect(outputLog()).toContain('[SCOPE-HOLD] Subtask 1 held in place (worktree has uncommitted changes)');
+    });
+
+    it('attaches the coder reason from scope_notes, ignores unknown paths and deletes the notes file', () => {
+      const base = git(repo, 'rev-parse', 'HEAD');
+      commit(repo, { 'b.ts': 'b\nb2\n' });
+      const notes = join(specDir, 'scope_notes-st1.json');
+      writeFileSync(notes, JSON.stringify({ files: [{ path: 'b.ts', reason: 'X' }, { path: 'zzz.ts', reason: 'ignored' }] }));
+
+      holdSubtaskForArbitration(pipelineFor(), realDeps(), st(1, ['a.ts']), repo, base, ['b.ts']);
+
+      const report = readJson('scope_report-st1.json');
+      expect(report.unlisted).toHaveLength(1);
+      expect(report.unlisted[0]).toMatchObject({ path: 'b.ts', coder_reason: 'X' });
+      expect(existsSync(notes)).toBe(false);
+    });
+  });
+
+  describe('parallel hold (integrateGroup)', () => {
+    it('cherry-picks the sibling, skips the held subtask, removes its worktree but keeps its branch', async () => {
+      const pipeline = pipelineFor();
+      const deps = realDeps();
+      const s1 = st(1, ['a.ts']);
+      const s2 = st(2, ['b.ts']);
+      const wt1 = join(specDir, '..', 'wt-st1');
+      const wt2 = join(specDir, '..', 'wt-st2');
+      const base = git(repo, 'rev-parse', 'HEAD');
+      git(repo, 'worktree', 'add', '-q', wt1, '-b', 'feat-st1', 'feat');
+      git(repo, 'worktree', 'add', '-q', wt2, '-b', 'feat-st2', 'feat');
+      commit(wt1, { 'a.ts': 'a\na1\n', 'extra.ts': 'x\n' });
+      commit(wt2, { 'b.ts': 'b\nb2\n' });
+      holdSubtaskForArbitration(pipeline, deps, s1, wt1, base, ['extra.ts']);
+
+      const ok = await integrateGroup(
+        pipeline, deps, [s1, s2],
+        [{ status: 'fulfilled', value: undefined }, { status: 'fulfilled', value: undefined }],
+        new Set<number>(), new Map([[1, wt1], [2, wt2]]), join(specDir, 'output.log'),
+      );
+
+      expect(ok).toBe(true);
+      expect(read('b.ts')).toBe('b\nb2\n');
+      expect(read('a.ts')).toBe('a\n');
+      expect(existsSync(join(repo, 'extra.ts'))).toBe(false);
+      expect(outputLog()).toContain("[SCOPE-HOLD] Holding subtask 1's commits on feat-st1 pending scope arbitration");
+      expect(outputLog()).not.toContain('[GROUP-BARRIER]');
+      expect(existsSync(wt1)).toBe(false);
+      expect(() => git(repo, 'rev-parse', '--verify', 'feat-st1')).not.toThrow();
+      expect(() => git(repo, 'rev-parse', '--verify', 'feat-st2')).toThrow();
+    });
+  });
+
+  describe('selection', () => {
+    it('excludes a subtask with a pending scope report and logs it', () => {
+      writePlan([st(4, ['a.ts']), st(5, ['b.ts'])]);
+      writeFileSync(join(specDir, 'scope_report-st4.json'), JSON.stringify({
+        subtask_id: 4, base: 'x', session_head: 'y', held_ref: null, declared_files: [], unlisted: [], created_at: '',
+      }));
+      const selection = selectSubtasks(pipelineFor());
+      expect(selection.effectiveSubtasks.map(s => s.id)).toEqual([5]);
+      expect(outputLog()).toContain('[SCOPE-HOLD] Subtask 4 awaiting scope arbitration — not dispatched');
+    });
+
+    it('does not take the all-completed skip while a report is pending: arbitration runs instead', async () => {
+      writePlan([st(4, ['a.ts'], { completed: false })]);
+      const base = git(repo, 'rev-parse', 'HEAD');
+      commit(repo, { 'b.ts': 'b\nb2\n' });
+      holdSubtaskForArbitration(pipelineFor(), realDeps(), st(4, ['a.ts']), repo, base, ['b.ts']);
+      verdictsWriter = () => ({ verdicts: [{ subtask_id: 4, path: 'b.ts', verdict: 'approve', reason: 'needed' }] });
+
+      await runImplement(pipelineFor(), realDeps());
+
+      expect(outputLog()).not.toContain('[SKIP] All subtasks already completed');
+      expect(sessionCount).toBe(1);
+    });
+  });
+
+  describe('Phase 4 arbitration', () => {
+    it('runs ONE planner session for two held subtasks and integrates both on approval', async () => {
+      const s1 = st(1, ['a.ts']);
+      const s2 = st(2, ['b.ts']);
+      writePlan([s1, s2]);
+      holdParallel(s1, { 'a.ts': 'a\na1\n', 'x1.ts': 'x1\n' }, ['x1.ts']);
+      holdParallel(s2, { 'b.ts': 'b\nb1\n', 'x2.ts': 'x2\n' }, ['x2.ts']);
+      verdictsWriter = () => ({ verdicts: [
+        { subtask_id: 1, path: 'x1.ts', verdict: 'approve', reason: 'needed' },
+        { subtask_id: 2, path: 'x2.ts', verdict: 'approve', reason: 'needed' },
+      ] });
+      const deps = realDeps();
+      const sessionOpts = vi.fn(deps.sessionOpts);
+      deps.sessionOpts = sessionOpts;
+      const pipeline = pipelineFor();
+
+      await runImplement(pipeline, deps);
+
+      expect(sessionCount).toBe(1);
+      expect(sessionOpts.mock.calls.filter(c => c[0] === 'planner')).toHaveLength(1);
+      const message = sentMessages().find(m => m.includes('ℹ️ SCOPE ARBITRATION'));
+      expect(message).toBeDefined();
+      expect(message).toContain('scope_report-st1.json');
+      expect(message).toContain('scope_report-st2.json');
+      expect(pipeline.scopeReplanCount).toBe(1);
+      const plan = readJson('plan.json');
+      expect(plan.subtasks.find((s: any) => s.id === 1).files).toContain('x1.ts');
+      expect(plan.subtasks.find((s: any) => s.id === 2).files).toContain('x2.ts');
+      expect(plan.subtasks.every((s: any) => s.completed === true)).toBe(true);
+      for (const f of ['a.ts', 'x1.ts', 'b.ts', 'x2.ts']) expect(existsSync(join(repo, f))).toBe(true);
+      expect(existsSync(join(specDir, 'scope_report-st1.json'))).toBe(false);
+      expect(existsSync(join(specDir, 'scope_report-st2.json'))).toBe(false);
+      expect(() => git(repo, 'rev-parse', '--verify', 'feat-st1')).toThrow();
+      expect(() => git(repo, 'rev-parse', '--verify', 'feat-st2')).toThrow();
+    });
+
+    it('drops a rejected path, completes the subtask without a re-run and records the rejection', async () => {
+      const s1 = st(1, ['a.ts']);
+      writePlan([s1]);
+      holdParallel(s1, { 'a.ts': 'a\na1\n', 'b.ts': 'b\nb2\n' }, ['b.ts']);
+      verdictsWriter = () => ({ verdicts: [{ subtask_id: 1, path: 'b.ts', verdict: 'reject', reason: 'R' }] });
+
+      await runImplement(pipelineFor(), realDeps());
+
+      expect(read('b.ts')).toBe('b\n');
+      expect(read('a.ts')).toBe('a\na1\n');
+      expect(readJson('plan.json').subtasks[0].completed).toBe(true);
+      expect(readJson('scope_rejections.json')).toEqual({ '1': [{ path: 'b.ts', reason: 'R' }] });
+      expect(sessionCount).toBe(1);
+    });
+
+    it('re-runs a subtask whose only change was rejected, without spending an incomplete pass, and tells the coder', async () => {
+      const s1 = st(1, ['a.ts']);
+      writePlan([s1]);
+      holdParallel(s1, { 'b.ts': 'b\nb2\n' }, ['b.ts']);
+      verdictsWriter = () => ({ verdicts: [{ subtask_id: 1, path: 'b.ts', verdict: 'reject', reason: 'R' }] });
+      const deps = realDeps();
+      const pipeline = pipelineFor({ incompleteImplementPassCount: 0 });
+
+      await runImplement(pipeline, deps);
+
+      expect(readJson('plan.json').subtasks[0].completed).not.toBe(true);
+      const log = outputLog();
+      expect(log).toContain('[VERIFY] Subtask 1 rejected — will re-run');
+      expect(pipeline.incompleteImplementPassCount).toBe(0);
+      expect(deps.executePhase).toHaveBeenCalled();
+      expect(pipeline.phase).toBe('implement');
+
+      const { request } = buildSubtaskRequest(pipeline, deps, s1, repo, false, false, join(specDir, 'human_feedback.md'));
+      expect(request).toContain('⚠️ SCOPE DECISIONS');
+      expect(request).toContain('b.ts — R');
+    });
+
+    it('starts a second session after an invalid verdict file when maxScopeStall allows it', async () => {
+      const s1 = st(1, ['a.ts']);
+      writePlan([s1]);
+      holdParallel(s1, { 'a.ts': 'a\na1\n', 'x.ts': 'x\n' }, ['x.ts']);
+      let n = 0;
+      verdictsWriter = () => (++n === 1 ? null : { verdicts: [{ subtask_id: 1, path: 'x.ts', verdict: 'approve', reason: 'ok' }] });
+      cfgOverrides = { maxScopeStall: 3 };
+      const pipeline = pipelineFor();
+
+      await runImplement(pipeline, realDeps());
+
+      expect(sessionCount).toBe(2);
+      expect(pipeline.scopeReplanCount).toBe(2);
+      expect(readJson('plan.json').subtasks[0].completed).toBe(true);
+    });
+
+    it('fails the task when the default stall budget is spent by an invalid verdict file', async () => {
+      const s1 = st(1, ['a.ts']);
+      writePlan([s1]);
+      holdParallel(s1, { 'a.ts': 'a\na1\n', 'x.ts': 'x\n' }, ['x.ts']);
+      verdictsWriter = () => null;
+      const pipeline = pipelineFor();
+
+      await runImplement(pipeline, realDeps());
+
+      expect(sessionCount).toBe(1);
+      expect(pipeline.phase).toBe('failed');
+      const qa = readJson('qa_report.json');
+      expect(qa.fail_type).toBe(ORCHESTRATOR_FAIL_TYPE);
+      expect(qa.criteria[0].criterion).toBe('Scope arbitration budget');
+      expect(outputLog()).toContain('[SCOPE-BUDGET]');
+      expect(writeCompletionSummary).toHaveBeenCalledWith(pipeline, 'implement-failure');
+      expect(existsSync(join(specDir, 'scope_report-st1.json'))).toBe(true);
+      expect(() => git(repo, 'rev-parse', '--verify', 'feat-st1')).not.toThrow();
+    });
+
+    it('fails without a second session when the next round repeats the first report', async () => {
+      const s1 = st(1, ['a.ts']);
+      writePlan([s1]);
+      holdParallel(s1, { 'b.ts': 'b\nb2\n' }, ['b.ts']);
+      verdictsWriter = () => ({ verdicts: [{ subtask_id: 1, path: 'b.ts', verdict: 'reject', reason: 'R' }] });
+      const pipeline = pipelineFor();
+
+      await runImplement(pipeline, realDeps());
+      expect(sessionCount).toBe(1);
+
+      // The coder redoes the same out-of-scope change: a second report with the same unlisted file.
+      holdParallel(s1, { 'b.ts': 'b\nb3\n' }, ['b.ts']);
+      writePlan([{ ...s1, completed: false }]);
+      await runImplement(pipeline, realDeps());
+
+      expect(sessionCount).toBe(1);
+      expect(pipeline.phase).toBe('failed');
+      expect(readJson('qa_report.json').criteria[0].criterion).toBe('Scope arbitration budget');
+      expect(existsSync(join(specDir, 'scope_report-st1.json'))).toBe(true);
+      expect(() => git(repo, 'rev-parse', '--verify', 'feat-st1')).not.toThrow();
+    });
+
+    it('fails without a session when the total re-plan budget is already spent', async () => {
+      const s1 = st(1, ['a.ts']);
+      writePlan([s1]);
+      holdParallel(s1, { 'a.ts': 'a\na1\n', 'x.ts': 'x\n' }, ['x.ts']);
+      const pipeline = pipelineFor({ scopeReplanCount: 6 });
+
+      await runImplement(pipeline, realDeps());
+
+      expect(sessionCount).toBe(0);
+      expect(pipeline.phase).toBe('failed');
+      expect(readJson('qa_report.json').criteria[0].criterion).toBe('Scope arbitration budget');
+      expect(existsSync(join(specDir, 'scope_report-st1.json'))).toBe(true);
+    });
+
+    it('does not arbitrate while a wakeup is pending', async () => {
+      const s1 = st(1, ['a.ts']);
+      writePlan([s1]);
+      holdParallel(s1, { 'a.ts': 'a\na1\n', 'x.ts': 'x\n' }, ['x.ts']);
+      const deps = realDeps();
+      const pipeline = pipelineFor({ wakeupUntil: '2030-01-01T00:00:00Z', wakeupSubtaskId: 9 });
+
+      await runImplement(pipeline, deps);
+
+      expect(sessionCount).toBe(0);
+      expect(deps.scheduleWakeup).toHaveBeenCalled();
+      expect(existsSync(join(specDir, 'scope_report-st1.json'))).toBe(true);
+    });
   });
 });

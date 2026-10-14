@@ -30,7 +30,7 @@ function allFilesIn(record: Record<string, string[]>): Set<string> {
 // an actual numbered filename to its family template (e.g.
 // 'spec_v12.md' -> 'spec_v{N}.md') so it can be looked up against that
 // single entry; non-numbered filenames pass through unchanged.
-const NUMBERED_FAMILY_RE = /^(.*_v)\d+(\.\w+)$/;
+const NUMBERED_FAMILY_RE = /^(.*(?:_v|-st))\d+(\.\w+)$/;
 function toFamilyTemplate(file: string): string {
   const m = file.match(NUMBERED_FAMILY_RE);
   return m ? `${m[1]}{N}${m[2]}` : file;
@@ -232,6 +232,15 @@ const REGISTRY_COVERAGE: RegistryExpectation[] = [
     inRequiredArtifacts: false,
     inRevisionCleanup: true,
   },
+  // ── Scope arbitration artifacts (cleared together with plan.json) ───────
+  ...['scope_report-st{N}.json', 'scope_notes-st{N}.json', 'scope_verdicts.json', 'scope_rejections.json'].map(file => ({
+    file,
+    usedIn: ['implement.ts / scope-arbitration.ts (scope arbitration)'],
+    inPhaseArtifacts: true,
+    inCleanupArtifacts: true,
+    inRequiredArtifacts: false,
+    inRevisionCleanup: false,
+  })),
   // ── Scoped planner replan preserve-list snapshot ────────────────────────
   {
     file: 'plan_preserve_snapshot.json',

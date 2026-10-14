@@ -45,6 +45,9 @@ function resetAllCounters(pipeline: TaskPipeline, preserveQaHistory = false): vo
   // attempt, and round history compared across it would be meaningless.
   pipeline.qaStallCount = 0;
   pipeline.qaRoundHistory = [];
+  // Same split for scope arbitration: stall + history always restart, the re-plan hard cap only on a full reset.
+  pipeline.scopeStallCounts = {};
+  pipeline.scopeRoundHistory = {};
   pipeline.deliverableFailCounts = {};
   pipeline.stallRecoveryCounts = {};
   pipeline.incompleteImplementPassCount = 0;
@@ -53,6 +56,7 @@ function resetAllCounters(pipeline: TaskPipeline, preserveQaHistory = false): vo
     pipeline.persistedAdditionalIssueCounts = {};
     // The hard cap (maxQaRounds) only resets on a full reset.
     pipeline.qaRoundCount = 0;
+    pipeline.scopeReplanCount = 0;
   }
   // Wakeup state — counters AND identity fields MUST reset together.
   // Leaving wakeupSubtaskId set would cause incorrect subtask isolation

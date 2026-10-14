@@ -11,6 +11,10 @@ export interface PipelineConfig {
   maxQaAttempts: number;
   /** Never-resetting hard cap on QA rounds; always >= maxQaAttempts. */
   maxQaRounds: number;
+  /** Consecutive scope-arbitration rounds without the unlisted-file set shrinking before the task fails. */
+  maxScopeStall: number;
+  /** Never-resetting hard cap on scope-arbitration sessions per task; always >= maxScopeStall. */
+  maxScopeReplans: number;
   parallelSubtasks: boolean;
   autoModeMaxParallel: number;
   idleStallMinutes: number;
@@ -32,6 +36,8 @@ export interface PipelineConfig {
 const DEFAULT_CONFIG: PipelineConfig = {
   maxQaAttempts: 3,
   maxQaRounds: 9,
+  maxScopeStall: 2,
+  maxScopeReplans: 6,
   parallelSubtasks: true,
   autoModeMaxParallel: 1,
   idleStallMinutes: 15,
@@ -51,7 +57,8 @@ export async function getPipelineConfig(): Promise<PipelineConfig> {
     // Derive explicitly: a file with maxQaAttempts but no maxQaRounds must not
     // inherit the default 9 (it would be wrong for any maxQaAttempts != 3).
     const { value: maxQaRounds } = resolveRoundsCap(raw.maxQaRounds, merged.maxQaAttempts);
-    return { ...merged, maxQaRounds };
+    const { value: maxScopeReplans } = resolveRoundsCap(raw.maxScopeReplans, merged.maxScopeStall);
+    return { ...merged, maxQaRounds, maxScopeReplans };
   } catch {
     return DEFAULT_CONFIG;
   }
@@ -61,6 +68,10 @@ export async function savePipelineConfig(config: PipelineConfig): Promise<void> 
   const { maxQaAttempts, maxQaRounds } = config;
   if (!Number.isInteger(maxQaRounds) || maxQaRounds < maxQaAttempts) {
     throw new Error(`Max QA rounds (${maxQaRounds}) must be at least Max QA attempts (${maxQaAttempts})`);
+  }
+  const { maxScopeStall, maxScopeReplans } = config;
+  if (!Number.isInteger(maxScopeReplans) || maxScopeReplans < maxScopeStall) {
+    throw new Error(`Max scope replans (${maxScopeReplans}) must be at least Max scope stall (${maxScopeStall})`);
   }
   const projectPath = await getActiveProjectPath();
   const cfgPath = join(projectPath, '.teamai', 'pipeline.json');

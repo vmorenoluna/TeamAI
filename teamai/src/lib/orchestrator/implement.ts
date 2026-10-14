@@ -37,6 +37,10 @@ import type { TaskPipeline, QaReport, PlanSubtask, SessionOptsResult } from './t
 import { ORCHESTRATOR_FAIL_TYPE } from './types';
 import type { FailureReason } from './qa-feedback';
 import { readFilesToFix } from './qa-feedback';
+import {
+  listPendingScopeReports, readScopeRejections, writeScopeReport, runScopeArbitration, integrateHeldSubtasks,
+  writeScopeBudgetFailReport, type ScopeArbitrationDeps,
+} from './scope-arbitration';
 
 export interface ImplementPipeline extends TaskPipeline {
   /** Internal flag: set when wakeup completes during this run so post-groups code re-enters (ADR 002) */
@@ -71,7 +75,9 @@ export interface ImplementDeps {
    *  directly (bypassing QA) must call this so the UI reflects the actual
    *  cause instead of a stale summary from a prior QA-driven failure. */
   writeCompletionSummary: (pipeline: ImplementPipeline, reason: FailureReason, detail?: string) => void;
-  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxImplementRetries: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number; wakeupScanRetryDelayMs?: number; backlogCheck?: boolean; backlogCheckEvidencePaths?: string[] };
+  getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxImplementRetries: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number; wakeupScanRetryDelayMs?: number; backlogCheck?: boolean; backlogCheckEvidencePaths?: string[]; maxScopeStall?: number; maxScopeReplans?: number };
+  /** Maps a host path to the path the agent sees (container mode). */
+  toAgentPath?: (hostPath: string) => string;
   phaseHeader: (logFile: string, phase: string) => void;
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
@@ -508,14 +514,23 @@ export function selectSubtasks(
   // completed on pass 1, then looped as a false rejection on passes 2–3
   // while subtask 12 — in a later group, deferred by the barrier each time —
   // never got a chance to run again.
-  const subtasksToRun = humanReworkIds
+  const candidates = humanReworkIds
     ? realSubtasks.filter((s: PlanSubtask) => humanReworkIds!.has(s.id))
     : hasQaFeedback
       ? realSubtasks.filter((s: PlanSubtask) => s.qa_flagged && !s.completed)
       : realSubtasks.filter((s: PlanSubtask) => !s.completed);
 
+  // A subtask whose commits are held for scope arbitration must not be
+  // dispatched again until the planner has ruled (Phase 4 of runImplement).
+  const heldScopeIds = new Set(listPendingScopeReports(pipeline.specPath).map(r => r.subtask_id));
+  const subtasksToRun = candidates.filter((s: PlanSubtask) => !heldScopeIds.has(s.id));
+  const heldExcluded = candidates.filter((s: PlanSubtask) => heldScopeIds.has(s.id));
+  for (const s of heldExcluded) {
+    logToOutput(pipeline.specPath, '\n[SCOPE-HOLD] Subtask ' + s.id + ' awaiting scope arbitration — not dispatched\n');
+  }
+
   let effectiveSubtasks: PlanSubtask[];
-  if (!humanReworkIds && hasQaFeedback && subtasksToRun.length === 0) {
+  if (!humanReworkIds && hasQaFeedback && subtasksToRun.length === 0 && heldExcluded.length === 0) {
     const allFiles: string[] = [...new Set<string>(
       realSubtasks.flatMap((s: PlanSubtask) => s.files ?? [])
     )];
@@ -1114,11 +1129,20 @@ export function buildSubtaskRequest(
 
   const resumeContext = buildSubtaskResumeContext(pipeline, subtask, cwd);
 
+  // Planner scope decisions for this subtask (scope_rejections.json): changes
+  // it already made and the planner refused must not come back on a re-run.
+  const rejected = readScopeRejections(pipeline.specPath)[String(subtask.id)] ?? [];
+  const scopeDecisions = rejected.length
+    ? '⚠️ SCOPE DECISIONS — the planner rejected these changes for this subtask; do not reintroduce them:\n' +
+      rejected.map(r => '  - ' + r.path + ' — ' + r.reason).join('\n') + '\n\n'
+    : '';
+
   // QA rework is its own command (implement-fix) — the orchestrator already
   // knows which mode this is, so the agent never has to infer it.
   const command = hasQaFeedback ? 'implement-fix' : 'implement';
   const request =
     humanDirectiveFor(pipeline.specPath, 'coder') +
+    scopeDecisions +
     promptHeader +
     resumeContext +
     (subtaskFeedback ? subtaskFeedback + '\n---\n' : '') +
@@ -1302,8 +1326,9 @@ export function autoCommitSubtaskChanges(
   // "commit after every change" is a convention, not an enforcement point).
   // Left uncommitted, this working-tree-only diff is invisible to two things
   // downstream: the scope check just below only diffs COMMITTED history
-  // (preSessionHead..HEAD), so out-of-scope uncommitted edits sail through
-  // unchecked; and squashWithMessage's `git reset --soft <merge-base>` only
+  // (preSessionHead..HEAD), so uncommitted edits would go unseen by its
+  // unlisted-file detection (hold-and-arbitrate) and no-op detection; and squashWithMessage's
+  // `git reset --soft <merge-base>` only
   // restages the tree of the previous commit, so anything never staged is
   // silently dropped from the PR entirely — no error, no warning, the code
   // just never reaches the branch. Found on a real
@@ -1314,7 +1339,9 @@ export function autoCommitSubtaskChanges(
   // shipped with only the unrelated evidence-log commit from a later subtask.
   // Auto-commit here, before the scope check reads git history, so both gaps
   // close at the same point: real work is never silently lost, and the scope
-  // check can now see (and reject) uncommitted out-of-scope edits too.
+  // check can now see uncommitted edits too — an uncommitted edit to an
+  // unlisted file is held for planner arbitration like a committed one, never
+  // discarded.
   try {
     const status = deps.execGitCapture(['status', '--porcelain'], cwd);
     if (status.trim()) {
@@ -1372,16 +1399,18 @@ export function failIfSubtaskBlocked(
 }
 
 /**
- * Post-session scope check: verify the agent only modified assigned files
- * (and flag a no-op session). The check is skipped when there is no
- * `preSessionHead` (or subtask 9999) or `git diff` fails.
+ * Post-session scope check (hold-and-arbitrate). Computes the files changed
+ * since `preSessionHead` (`git diff --name-only`) and the subset not listed in
+ * the subtask's `files`/`files_to_create` (`unlistedFiles`). Unlisted files are
+ * never a rejection: the caller (runSubtaskSession) holds the subtask's commits
+ * and writes a scope report for the planner to arbitrate. This check also
+ * rejects a no-op session. It is skipped (both lists empty) when there is no
+ * `preSessionHead`, for subtask 9999, or when `git diff` fails.
  *
- * Returns the files changed since `preSessionHead` (`git diff --name-only`), or
- * `[]` when the check is skipped or `git diff` fails.
- *
- * Adds `subtask.id` to the `scopeViolations` set on a violation. Reads the
- * subtask's session log (`subtaskLogFile`); writes `output.log` (via
- * logToOutput). Mutates no `pipeline` fields and deletes no files.
+ * Adds `subtask.id` to the `scopeViolations` set only for a rejected no-op
+ * session. Reads the subtask's session log (`subtaskLogFile`); writes
+ * `output.log` (via logToOutput). Mutates no `pipeline` fields and deletes no
+ * files.
  *
  * @internal — exported for unit tests only. Not part of the public API.
  */
@@ -1393,45 +1422,29 @@ export function checkSubtaskScope(
   preSessionHead: string,
   subtaskLogFile: string,
   scopeViolations: Set<number>,
-): string[] {
-  // Post-session scope check: verify agent only modified assigned files.
+): { changedFiles: string[]; unlistedFiles: string[] } {
+  // Post-session scope check. A subtask's `files` is a coordination hint for
+  // parallel safety, not a permission boundary: agents may edit any file the
+  // work needs (e.g. a mirrored copy a drift test ties to a listed file). But
+  // an unlisted edit may collide with a parallel sibling, so its commits are
+  // held and the planner arbitrates once per implement pass (see
+  // scope-arbitration.ts). The no-op detection below is independent of that.
+  //
   // Exempt the QA-fallback synthetic subtask (id 9999, see selectSubtasks) —
   // its `files` array is only a best-effort union seeded from the real
   // subtasks' own declared files, not an authoritative scope, because
   // criterion-matching already found nothing to target it against. Its real
   // scope is whatever qa_feedback.md names (implement-fix.md's QA Rework Mode:
-  // "Fix every listed issue. That's the entire scope."), which routinely
-  // includes paths no real subtask's `files`/`files_to_create` ever listed —
-  // e.g. deliverables owned by a subtask QA's criterion-matcher didn't flag.
-  // Rejecting 9999 for touching exactly those paths defeats the fallback
-  // synthesis's entire purpose: it fires precisely when nothing else can be
-  // targeted, so its coder session must be free to fix what QA actually
-  // named. Found on task detect-mechanical-periodic-melodic-loops: 9999
-  // correctly produced the three missing evidence files subtask 5 was
-  // supposed to create, and got rejected for it — the commit itself was
-  // never reverted (this check only marks the subtask incomplete), but the
-  // attempt was burned regardless.
+  // "Fix every listed issue. That's the entire scope."), so it skips the whole
+  // check — no report, no hold.
   if (preSessionHead && subtask.id !== 9999) {
     try {
       const changedFiles = deps.execGitCapture(['diff', '--name-only', preSessionHead + '..HEAD'], cwd).trim().split('\n').filter(Boolean);
 
-      // A subtask's declared scope is files it edits (`files`) plus files it
-      // creates fresh (`files_to_create`) — deliverable verification already
-      // treats both as in-scope (it fails the subtask if a files_to_create
-      // path is MISSING), so the scope check must accept the same set or it
-      // rejects a subtask for doing exactly what it was told to do whenever
-      // its entire deliverable is new files (files: [] + files_to_create-only).
+      // Declared files are `files` (edited) plus `files_to_create` (created fresh).
       const assignedFiles = new Set([...(subtask.files || []), ...(subtask.files_to_create || [])]);
-      const violations = changedFiles.filter(f => !assignedFiles.has(f));
-
-      if (violations.length > 0) {
-        scopeViolations.add(subtask.id);
-        logToOutput(pipeline.specPath,
-          '\n[SCOPE] Subtask ' + subtask.id + ' modified files outside its assigned scope:\n' +
-          violations.map(f => '  - ' + f).join('\n') + '\n' +
-          '[SCOPE] Assigned files: ' + ([...assignedFiles].join(', ') || '(none)') + '\n'
-        );
-      } else if ((subtask.files || []).length > 0 && !(subtask.files_to_create || []).length && changedFiles.length === 0 && !subtask.verify_only) {
+      const unlistedFiles = changedFiles.filter(f => !assignedFiles.has(f));
+      if ((subtask.files || []).length > 0 && !(subtask.files_to_create || []).length && changedFiles.length === 0 && !subtask.verify_only) {
         // No-op subtask detection: the coder session ended having committed
         // NO changes at all, for a subtask whose only declared scope is
         // EXISTING files to edit. Deterministic and orchestrator-side — does
@@ -1441,11 +1454,8 @@ export function checkSubtaskScope(
         // own circuit breaker) — a subtask that declares BOTH `files` and
         // `files_to_create` is already verified by that check whenever its
         // new files land, regardless of whether the pre-existing ones in
-        // `files` also changed. (Since `violations.length === 0` here,
-        // `changedFiles` can only contain entries from `files`/
-        // `files_to_create` — so once `files_to_create` is excluded,
-        // "changedFiles is empty" and "none of `files` were touched" are the
-        // same condition.) Exempt a deliberate `[SKIPPED]` deferral (ticket
+        // `files` also changed. A session that changed ONLY unlisted files is
+        // not a no-op (changedFiles is non-empty). Exempt a deliberate `[SKIPPED]` deferral (ticket
         // creation, pipeline-artifact management — see plan.md/implement.md)
         // since those subtasks can legitimately make no code changes at all.
         //
@@ -1487,14 +1497,108 @@ export function checkSubtaskScope(
           );
         }
       }
-      return changedFiles;
+      return { changedFiles, unlistedFiles };
     } catch (scopeErr) {
       const scopeMsg = scopeErr instanceof Error ? scopeErr.message : String(scopeErr);
       logToOutput(pipeline.specPath, '\n[SCOPE] Could not verify file scope (git diff failed: ' + scopeMsg + ')\n');
-      return [];
+      return { changedFiles: [], unlistedFiles: [] };
     }
   }
-  return [];
+  return { changedFiles: [], unlistedFiles: [] };
+}
+
+/**
+ * Hold a subtask whose session changed files outside its plan `files` and
+ * write its `scope_report-st<N>.json` for planner arbitration.
+ *
+ * Isolated worktree (`cwd !== pipeline.worktreePath`): the hold is the
+ * subtask's own branch `<branch>-st<N>`; integrateGroup skips its cherry-pick.
+ * Main worktree (sequential): the commits are moved onto that branch and the
+ * feature branch is reset to `preSessionHead`; if the worktree is dirty or git
+ * fails they stay in place (`held_ref: null`).
+ *
+ * Reads and deletes `scope_notes-st<N>.json`; writes `scope_report-st<N>.json`
+ * and `output.log`.
+ *
+ * @internal — exported for unit tests only. Not part of the public API.
+ */
+export function holdSubtaskForArbitration(
+  pipeline: ImplementPipeline,
+  deps: ImplementDeps,
+  subtask: PlanSubtask,
+  cwd: string,
+  preSessionHead: string,
+  unlistedFiles: string[],
+): void {
+  const specPath = pipeline.specPath;
+  const stBranch = pipeline.branch + '-st' + subtask.id;
+  const declared = [...new Set([...(subtask.files || []), ...(subtask.files_to_create || [])])];
+  let sessionHead = preSessionHead;
+  try { sessionHead = deps.execGitCapture(['rev-parse', 'HEAD'], cwd).trim(); } catch { /* keep the pre-session head */ }
+
+  let heldRef: string | null = null;
+  if (cwd !== pipeline.worktreePath) {
+    heldRef = stBranch;
+  } else {
+    let reason = '';
+    try {
+      if (deps.execGitCapture(['status', '--porcelain'], cwd).trim()) {
+        reason = 'worktree has uncommitted changes';
+      } else {
+        deps.execGit(['branch', '-f', stBranch, 'HEAD'], cwd);
+        try {
+          deps.execGit(['reset', '--hard', preSessionHead], cwd);
+          heldRef = stBranch;
+        } catch (resetErr) {
+          try { deps.execGit(['branch', '-D', stBranch], cwd); } catch { /* best-effort */ }
+          throw resetErr;
+        }
+      }
+    } catch (holdErr) {
+      reason = 'git failed: ' + (holdErr instanceof Error ? holdErr.message : String(holdErr));
+    }
+    if (!heldRef) {
+      logToOutput(specPath, '\n[SCOPE-HOLD] Subtask ' + subtask.id + ' held in place (' + reason + ') — its commits stay on the feature branch until arbitration\n');
+    }
+  }
+  if (heldRef && cwd === pipeline.worktreePath) {
+    logToOutput(specPath, '\n[SCOPE-HOLD] Holding subtask ' + subtask.id + '\'s commits on ' + stBranch + ' pending scope arbitration\n');
+  }
+
+  writeScopeReport(deps, {
+    specPath, cwd, subtaskId: subtask.id, base: preSessionHead, sessionHead,
+    heldRef, declaredFiles: declared, unlistedPaths: unlistedFiles,
+  });
+  logToOutput(specPath,
+    '\n[SCOPE] Subtask ' + subtask.id + ' changed files not listed in its plan `files` — holding its work for planner arbitration:\n' +
+    unlistedFiles.map(f => '  - ' + f).join('\n') + '\n' +
+    '[SCOPE] Declared files: ' + (declared.join(', ') || '(none)') + '\n');
+}
+
+/** Adapter exposing this module's helpers to scope-arbitration.ts. */
+function scopeArbitrationDeps(deps: ImplementDeps): ScopeArbitrationDeps {
+  const cfg = deps.getPipelineConfig;
+  return {
+    projectRoot: deps.projectRoot,
+    sessionOpts: deps.sessionOpts,
+    waitForCompletion: deps.waitForCompletion,
+    toAgentPath: deps.toAgentPath ?? ((hostPath: string) => hostPath),
+    planWriteLock: deps.planWriteLock,
+    savePipelineState: (p) => deps.savePipelineState(p as ImplementPipeline),
+    execGit: deps.execGit,
+    execGitCapture: deps.execGitCapture,
+    tryCherryPickWithRecovery: (p, logFile, stBranch, id) => tryCherryPickWithRecovery(p as ImplementPipeline, deps, logFile, stBranch, id),
+    verifySubtaskDeliverables: (p, st, cwd) => verifySubtaskDeliverables(p as ImplementPipeline, deps, st, cwd),
+    filesAlreadyChangedOnBranch: (cwd, files) => filesAlreadyChangedOnBranch(deps, cwd, files),
+    completeSubtask: (p, st, cwd, pre, ids) => completeSubtask(
+      p as ImplementPipeline, deps, st, cwd, pre, Date.now(),
+      {
+        on: backlogCheckEnabled(cfg), unit: 'st' + st.id,
+        evidencePatterns: backlogCheckEnabled(cfg) ? (cfg().backlogCheckEvidencePaths ?? []) : [],
+      },
+      ids,
+    ),
+  };
 }
 
 /**
@@ -1940,7 +2044,7 @@ export async function runSubtaskSession(
 
   if (failIfSubtaskBlocked(pipeline, deps, subtask)) return;
 
-  checkSubtaskScope(pipeline, deps, subtask, cwd, preSessionHead, subtaskLogFile, scopeViolations);
+  const { unlistedFiles } = checkSubtaskScope(pipeline, deps, subtask, cwd, preSessionHead, subtaskLogFile, scopeViolations);
 
   let wakeupDetected = await consumeSubtaskWakeupFiles(pipeline, deps, subtask, cwd, wasWakeupReentry);
 
@@ -1975,6 +2079,23 @@ export async function runSubtaskSession(
     if (scheduleOrphanedJobWakeup(pipeline, subtask, sessionStartedAt)) wakeupDetected = true;
   }
 
+  // Unlisted files: hold the subtask for planner arbitration instead of
+  // completing it. A session that scheduled a wakeup is not held — it is not
+  // finishing this session, and the wakeup re-entry diff still contains the
+  // unlisted files, so the check runs again when it does.
+  if (unlistedFiles.length > 0 && !wakeupDetected) {
+    holdSubtaskForArbitration(pipeline, deps, subtask, cwd, preSessionHead, unlistedFiles);
+    return;
+  }
+  if (unlistedFiles.length > 0) {
+    logToOutput(pipeline.specPath,
+      '\n[SCOPE] Subtask ' + subtask.id + ' changed unlisted files but scheduled a wakeup — not held this session:\n' +
+      unlistedFiles.map(f => '  - ' + f).join('\n') + '\n');
+  } else {
+    // No report is written, so the coder's scope notes (if any) have no reader.
+    try { unlinkSync(path.join(pipeline.specPath, 'scope_notes-st' + subtask.id + '.json')); } catch { /* none to consume */ }
+  }
+
   // Verify deliverable files exist before marking subtask complete.
   // Gated on wakeupDetected (THIS session scheduled a fresh wakeup), not on
   // pipeline.wakeupSubtaskId (which stays set across every re-entry cycle
@@ -1997,7 +2118,7 @@ export async function runSubtaskSession(
   if (!skipCompletion) {
     if (scopeViolations.has(subtask.id)) {
       skipCompletion = true;
-      logToOutput(pipeline.specPath, '[SCOPE] Subtask ' + subtask.id + ' rejected — will re-run (see the specific reason logged above)\n');
+      logToOutput(pipeline.specPath, '[VERIFY] Subtask ' + subtask.id + ' rejected — will re-run (see the specific reason logged above)\n');
     } else if (!(await completeSubtask(
       pipeline, deps, subtask, cwd, preSessionHead, sessionStartedAt,
       { on: backlogOn, unit: backlogUnit, evidencePatterns }, completedIds,
@@ -2021,6 +2142,22 @@ export async function runSubtaskSession(
 //  Helper 4 — integrateGroup
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Auto-commit uncommitted edits in a subtask's isolated worktree so cherry-picking or removing it can't lose them. */
+function autoSaveSubtaskWorktree(pipeline: ImplementPipeline, deps: ImplementDeps, id: number, stWorktreePath: string): void {
+  try {
+    const stStatusOut = deps.execGitCapture(['status', '--porcelain'], stWorktreePath).trim();
+    if (stStatusOut) {
+      logToOutput(pipeline.specPath, '\n[WORKTREE] Subtask ' + id + ' worktree has uncommitted changes — auto-committing before cherry-pick:\n' + stStatusOut + '\n');
+      deps.execGit(['add', '-A', '--', '.', ':!.teamai'], stWorktreePath);
+      deps.execGit(['commit', '-m', 'chore: auto-save subtask ' + id + ' state before cherry-pick'], stWorktreePath);
+      logToOutput(pipeline.specPath, '[WORKTREE] Auto-committed uncommitted changes for subtask ' + id + '\n');
+    }
+  } catch (stStatusErr) {
+    const stErrMsg = stStatusErr instanceof Error ? stStatusErr.message : String(stStatusErr);
+    logToOutput(pipeline.specPath, '\n[WORKTREE] Could not check/commit subtask ' + id + ' worktree status (git failed: ' + stErrMsg + '), proceeding with cherry-pick\n');
+  }
+}
+
 /**
  * After parallel subtask sessions complete: auto-commit stray changes in the
  * main worktree, cherry-pick each subtask branch, and clean up per-subtask
@@ -2040,6 +2177,10 @@ export async function integrateGroup(
   subtaskWorktrees: Map<number, string>,
   logFile: string,
 ): Promise<boolean> {
+  // Subtasks held for scope arbitration keep their commits on their own
+  // branch: no cherry-pick now, and the branch survives worktree cleanup.
+  const heldIds = new Set(listPendingScopeReports(pipeline.specPath).map(r => r.subtask_id));
+
   // Cherry-pick successful commits back to main worktree. subtaskWorktrees
   // is the source of truth for "this subtask worked in an isolated
   // worktree this round" — true both for a genuine multi-subtask group and
@@ -2085,6 +2226,12 @@ export async function integrateGroup(
         logToOutput(pipeline.specPath, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' — wakeup pending\n');
         continue;
       }
+      if (heldIds.has(subtasks[i].id)) {
+        // The pre-cherry-pick auto-save below still runs so no edit is lost with the worktree.
+        autoSaveSubtaskWorktree(pipeline, deps, subtasks[i].id, subtaskWorktrees.get(subtasks[i].id)!);
+        logToOutput(pipeline.specPath, '\n[SCOPE-HOLD] Holding subtask ' + subtasks[i].id + '\'s commits on ' + pipeline.branch + '-st' + subtasks[i].id + ' pending scope arbitration\n');
+        continue;
+      }
       if (scopeViolations.has(subtasks[i].id)) {
         logToOutput(pipeline.specPath, '\n[WORKTREE] Skipping cherry-pick for subtask ' + subtasks[i].id + ' (rejected — see the specific reason logged above)\n');
         continue;
@@ -2100,19 +2247,7 @@ export async function integrateGroup(
       // forensic trace: a verbatim Scaladoc edit subtask 2's session made
       // and reported as done was lost this way — the auto-save commit that
       // ran afterward only touched the MAIN worktree, never this one.
-      const stWorktreePath = subtaskWorktrees.get(subtasks[i].id)!;
-      try {
-        const stStatusOut = deps.execGitCapture(['status', '--porcelain'], stWorktreePath).trim();
-        if (stStatusOut) {
-          logToOutput(pipeline.specPath, '\n[WORKTREE] Subtask ' + subtasks[i].id + ' worktree has uncommitted changes — auto-committing before cherry-pick:\n' + stStatusOut + '\n');
-          deps.execGit(['add', '-A', '--', '.', ':!.teamai'], stWorktreePath);
-          deps.execGit(['commit', '-m', 'chore: auto-save subtask ' + subtasks[i].id + ' state before cherry-pick'], stWorktreePath);
-          logToOutput(pipeline.specPath, '[WORKTREE] Auto-committed uncommitted changes for subtask ' + subtasks[i].id + '\n');
-        }
-      } catch (stStatusErr) {
-        const stErrMsg = stStatusErr instanceof Error ? stStatusErr.message : String(stStatusErr);
-        logToOutput(pipeline.specPath, '\n[WORKTREE] Could not check/commit subtask ' + subtasks[i].id + ' worktree status (git failed: ' + stErrMsg + '), proceeding with cherry-pick\n');
-      }
+      autoSaveSubtaskWorktree(pipeline, deps, subtasks[i].id, subtaskWorktrees.get(subtasks[i].id)!);
 
       const stBranch = pipeline.branch + '-st' + subtasks[i].id;
       const cherrySuccess = await tryCherryPickWithRecovery(
@@ -2137,7 +2272,9 @@ export async function integrateGroup(
         removeDirBestEffort(stWorktreePath, `subtask ${id} worktree, after integration`, (m) => logToOutput(pipeline.specPath, `\n[WORKTREE] ${m}\n`));
         removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
       }
-      try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+      if (!heldIds.has(id)) {
+        try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+      }
       cleanedCount++;
     }
     if (cleanedCount > 0) {
@@ -2296,7 +2433,8 @@ export async function runImplement(
   const humanFeedbackPath = path.join(pipeline.specPath, 'human_feedback.md');
 
   // Skip implement if all subtasks complete and not in QA rework
-  if (!hasQaFeedback && effectiveSubtasks.length === 0 && plan.subtasks.length > 0) {
+  if (!hasQaFeedback && effectiveSubtasks.length === 0 && plan.subtasks.length > 0
+    && listPendingScopeReports(pipeline.specPath).length === 0) {
     logToOutput(pipeline.specPath, '\n[SKIP] All subtasks already completed — skipping implement, advancing to QA review\n');
     deps.advancePhase(pipeline, 'qa-review');
     await deps.executePhase(pipeline);
@@ -2550,8 +2688,10 @@ export async function runImplement(
     // retries the incomplete subtask — but only after every later group
     // has already been attempted; breaking here gets there one group
     // sooner, before the wasted work happens.
-    if (completedIds.length < subtasks.length) {
-      const stillIncomplete = subtasks.filter(s => !completedIds.includes(s.id)).map(s => s.id);
+    // A subtask held for scope arbitration is waiting on the planner, not failing: it must not defer later groups.
+    const heldNow = new Set(listPendingScopeReports(pipeline.specPath).map(r => r.subtask_id));
+    const stillIncomplete = subtasks.filter(s => !completedIds.includes(s.id) && !heldNow.has(s.id)).map(s => s.id);
+    if (stillIncomplete.length > 0) {
       logToOutput(pipeline.specPath,
         '\n[GROUP-BARRIER] ' + stillIncomplete.length + ' subtask(s) in this group did not complete (id' +
         (stillIncomplete.length > 1 ? 's' : '') + ' ' + stillIncomplete.join(', ') + ') — deferring all ' +
@@ -2600,6 +2740,29 @@ export async function runImplement(
     deps.savePipelineState(pipeline);
     deps.scheduleWakeup(pipeline);
     return;
+  }
+
+  // Scope arbitration: one planner action over every subtask held this pass.
+  let arbitrationStarted = false;
+  if (listPendingScopeReports(pipeline.specPath).length > 0) {
+    const scopeCfg = deps.getPipelineConfig();
+    const outcome = await runScopeArbitration(pipeline, scopeArbitrationDeps(deps), {
+      maxScopeStall: scopeCfg.maxScopeStall ?? 2, maxScopeReplans: scopeCfg.maxScopeReplans ?? 6,
+    });
+    arbitrationStarted = outcome.actionStarted;
+    if (outcome.status === 'exhausted') {
+      writeScopeBudgetFailReport(pipeline.specPath, outcome);
+      logToOutput(pipeline.specPath,
+        '\n[SCOPE-BUDGET] Scope arbitration ' + outcome.budget + ' budget exhausted for subtask(s) ' +
+        outcome.subtaskIds.join(', ') + ' — advancing to failed\n');
+      deps.writeCompletionSummary(pipeline, 'implement-failure');
+      deps.advancePhase(pipeline, 'failed');
+      return;
+    }
+    if (outcome.status === 'applied') {
+      const integrated = await integrateHeldSubtasks(pipeline, scopeArbitrationDeps(deps), outcome, []);
+      if (integrated.failed || (pipeline.phase as string) === 'failed') return;
+    }
   }
 
   // Structural completeness gate: don't push to QA when plan.json already
@@ -2670,7 +2833,9 @@ export async function runImplement(
 
   const incompleteSubtasks = finalSubtasks.filter(s => !s.completed);
   if (incompleteSubtasks.length > 0) {
-    const attemptCount = (pipeline.incompleteImplementPassCount || 0) + 1;
+    // A pass that ran a scope arbitration made progress the planner paid for;
+    // it does not count against the incomplete-pass cap (the scope budgets bound it).
+    const attemptCount = (pipeline.incompleteImplementPassCount || 0) + (arbitrationStarted ? 0 : 1);
     pipeline.incompleteImplementPassCount = attemptCount;
     const maxPasses = deps.getPipelineConfig().maxImplementRetries;
     const ids = incompleteSubtasks.map(s => s.id).join(', ');

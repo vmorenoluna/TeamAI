@@ -50,6 +50,17 @@
 // the tracked range. 20 is generous headroom for that uncapped path.
 export const MAX_REVISION_SNAPSHOTS = 20;
 
+/** Highest subtask id covered by the per-subtask scope artifact families. */
+export const MAX_SCOPE_ARTIFACT_SUBTASKS = 50;
+
+/** Scope-arbitration artifacts — tied to the plan they were produced for, so cleared wherever plan.json is. */
+export const SCOPE_ARTIFACTS: string[] = [
+  ...Array.from({ length: MAX_SCOPE_ARTIFACT_SUBTASKS }, (_, i) => `scope_report-st${i + 1}.json`),
+  ...Array.from({ length: MAX_SCOPE_ARTIFACT_SUBTASKS }, (_, i) => `scope_notes-st${i + 1}.json`),
+  'scope_verdicts.json',
+  'scope_rejections.json',
+];
+
 // ── Artifacts to clear per level (cumulative) ─────────────────────────────
 // Used by TaskStore.clearArtifacts(level).  Each level lists every
 // file produced at that stage or later, so clearing "spec" wipes
@@ -70,9 +81,11 @@ export const PHASE_ARTIFACTS: Record<string, string[]> = {
     ...Array.from({ length: MAX_REVISION_SNAPSHOTS }, (_, i) => `spec_v${i + 1}.md`),
     ...Array.from({ length: MAX_REVISION_SNAPSHOTS }, (_, i) => `qa_report_v${i + 1}.json`),
     'plan_preserve_snapshot.json',
+    ...SCOPE_ARTIFACTS,
   ],
   plan: [
     'plan.json',
+    ...SCOPE_ARTIFACTS,
     'qa_report.json',
     'qa_feedback.md',
     'completion_summary.md',
@@ -95,8 +108,8 @@ export const PHASE_ARTIFACTS: Record<string, string[]> = {
 // pipeline order.
 
 export const CLEANUP_ARTIFACTS: Record<string, string[]> = {
-  spec: ['spec.md', 'spec_summary.md', 'plan.json'],
-  plan: ['plan.json'],
+  spec: ['spec.md', 'spec_summary.md', 'plan.json', ...SCOPE_ARTIFACTS],
+  plan: ['plan.json', ...SCOPE_ARTIFACTS],
   implement: [],
   'qa-review': [
     'qa_report.json',

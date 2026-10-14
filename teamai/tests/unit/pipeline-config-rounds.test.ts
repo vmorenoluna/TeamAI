@@ -87,6 +87,8 @@ describe('maxQaRounds config', () => {
     const base: PipelineConfig = {
       maxQaAttempts: 3,
       maxQaRounds: 9,
+      maxScopeStall: 2,
+      maxScopeReplans: 6,
       parallelSubtasks: true,
       autoModeMaxParallel: 1,
       idleStallMinutes: 15,
@@ -120,6 +122,49 @@ describe('maxQaRounds config', () => {
       expect(saved.maxQaAttempts).toBe(4);
       expect(saved.maxStallRecoveries).toBe(7);
       expect(saved.autoMergeMethod).toBe('squash');
+    });
+  });
+
+  describe('AC25 — scope budget', () => {
+    const scopeBase: PipelineConfig = {
+      maxQaAttempts: 3,
+      maxQaRounds: 9,
+      maxScopeStall: 2,
+      maxScopeReplans: 6,
+      parallelSubtasks: true,
+      autoModeMaxParallel: 1,
+      idleStallMinutes: 15,
+      toolStallMinutes: 30,
+      maxImplementRetries: 3,
+      recordHistoryInGit: true,
+      includePhasesTrailer: true,
+    };
+
+    it('both readers default to 2 / 6 with no file', async () => {
+      const c = computePipelineConfig(projectDir);
+      expect([c.maxScopeStall, c.maxScopeReplans]).toEqual([2, 6]);
+      const a = await getPipelineConfig();
+      expect([a.maxScopeStall, a.maxScopeReplans]).toEqual([2, 6]);
+    });
+
+    it('derives replans as 3x stall when only stall is set', async () => {
+      writeCfg({ maxScopeStall: 3 });
+      expect(computePipelineConfig(projectDir).maxScopeReplans).toBe(9);
+      expect((await getPipelineConfig()).maxScopeReplans).toBe(9);
+    });
+
+    it('clamps replans below stall and warns in helpers', async () => {
+      writeCfg({ maxScopeStall: 2, maxScopeReplans: 1 });
+      expect(computePipelineConfig(projectDir).maxScopeReplans).toBe(2);
+      expect(warnMock).toHaveBeenCalledTimes(1);
+      expect((await getPipelineConfig()).maxScopeReplans).toBe(2);
+    });
+
+    it('rejects replans below stall on save and writes nothing', async () => {
+      await expect(savePipelineConfig({ ...scopeBase, maxScopeStall: 3, maxScopeReplans: 2 })).rejects.toThrow(
+        'Max scope replans (2) must be at least Max scope stall (3)',
+      );
+      expect(existsSync(join(projectDir, '.teamai', 'pipeline.json'))).toBe(false);
     });
   });
 });
