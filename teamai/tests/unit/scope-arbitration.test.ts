@@ -76,6 +76,8 @@ function makeDeps(): ScopeArbitrationDeps {
   };
 }
 
+/** Files in the temp repo may be checked out with CRLF (core.autocrlf); compare LF-normalised. */
+const readRepoFile = (name: string) => readFileSync(path.join(repo, name), 'utf-8').split(String.fromCharCode(13, 10)).join(String.fromCharCode(10));
 const log = () => readFileSync(path.join(spec, 'output.log'), 'utf-8');
 const cfg = { maxScopeStall: 2, maxScopeReplans: 6 };
 
@@ -165,7 +167,7 @@ describe('runScopeArbitration', () => {
 
     const out = await integrateHeldSubtasks(pipeline, deps, res as never, []);
     expect(out.completed).toEqual([1]);
-    expect(readFileSync(path.join(repo, 'b.ts'), 'utf-8')).toBe('b2\n');
+    expect(readRepoFile('b.ts')).toBe('b2\n');
     expect(log()).toContain('[SCOPE-REPLAN] Subtask 1 integrated without a re-run');
     expect(existsSync(scopeReportPath(spec, 1))).toBe(false);
     expect(git(repo, 'branch', '--list', 'feat-st1')).toBe('');
@@ -180,7 +182,7 @@ describe('runScopeArbitration', () => {
     const res = await runScopeArbitration(pipeline, deps, cfg);
     const out = await integrateHeldSubtasks(pipeline, deps, res as never, []);
     expect(out.completed).toEqual([]);
-    expect(readFileSync(path.join(repo, 'b.ts'), 'utf-8')).toBe('b\n');
+    expect(readRepoFile('b.ts')).toBe('b\n');
     expect(readScopeRejections(spec)).toEqual({ '1': [{ path: 'b.ts', reason: 'unrelated' }] });
     expect(log()).toContain('[VERIFY] Subtask 1 ended without touching any of its assigned files — no edit was made:');
     expect(log()).toContain('[VERIFY] Subtask 1 rejected — will re-run');
@@ -200,9 +202,9 @@ describe('runScopeArbitration', () => {
     const pipeline = makePipeline(); const deps = makeDeps();
     const res = await runScopeArbitration(pipeline, deps, cfg);
     const out = await integrateHeldSubtasks(pipeline, deps, res as never, []);
-    expect(readFileSync(path.join(repo, 'b.ts'), 'utf-8')).toBe('b\n');
+    expect(readRepoFile('b.ts')).toBe('b\n');
     expect(existsSync(path.join(repo, 'new.ts'))).toBe(false);
-    expect(readFileSync(path.join(repo, 'a.ts'), 'utf-8')).toBe('a2\n');
+    expect(readRepoFile('a.ts')).toBe('a2\n');
     expect(git(repo, 'log', '-1', '--format=%s')).toBe('chore(scope): drop changes rejected by the planner for subtask 1');
     expect(out.completed).toEqual([1]);
   });

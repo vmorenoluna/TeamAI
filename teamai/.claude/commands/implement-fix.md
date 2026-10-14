@@ -410,7 +410,12 @@ do nothing but write another wakeup file.
 - `subtask_id`: your current subtask ID
 - `wakeup_at`: ISO 8601 timestamp when the process should be done
 - `background_command`: the command you ran (informational)
-- `expected_artifact`: the file you expect the process to produce (inside the worktree)
+- `expected_artifact`: the file you expect the process to produce, as a path relative to
+  the worktree root (`results/summary.jsonl`). For a file under `$TEAMAI_SPEC_DIR` write
+  `.teamai/<slug>/<file>`. Never write an absolute path such as `/workspaces/...` or the
+  expanded value of `$TEAMAI_SPEC_DIR`: the orchestrator checks the file from the host,
+  where a container-absolute path does not exist, so the artifact would read as
+  never-updated and your wakeup attempts would be spent without a result.
 - `progress_log_path`: the job's own log file, relative to the worktree root.
   Include it whenever the job writes one — the orchestrator periodically
   checks this file's freshness while you're asleep and re-enters you early if

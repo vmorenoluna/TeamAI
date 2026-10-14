@@ -171,6 +171,68 @@ export function computeNextAttemptCount(previousCommand: string | undefined, wd:
   return isGenuineRelaunch(previousCommand, wd.background_command) ? 1 : currentCount + 1;
 }
 
+/**
+ * Normalise an agent-declared `expected_artifact` to a path relative to `cwd`
+ * (the directory {@link checkArtifactProgress} resolves it against), so the
+ * freshness check stats the file the agent really meant.
+ *
+ * The wakeup contract asks for a worktree-relative path, but an agent running
+ * in a container can write the container-absolute path it sees
+ * (`/workspaces/<project>/.teamai/<slug>/out.jsonl`). The orchestrator runs on
+ * the host, where that path does not exist: resolving it verbatim stats a
+ * file that is never found, so every re-entry reads as "artifact not updated"
+ * and spends a wakeup attempt until the cap fails a finished subtask.
+ *
+ * - relative path: kept as declared.
+ * - absolute path that is inside `cwd` or the project root on this host:
+ *   rewritten relative to `cwd`.
+ * - absolute container-only path: mapped through its `.worktrees/<name>/` or
+ *   `.teamai/` segment onto the host worktree / project root, then rewritten
+ *   relative to `cwd`.
+ * - anything else: `artifact` is undefined and `warning` says why, so the
+ *   caller falls back to the deliverables / orphaned-job checks instead of
+ *   counting a path it can never see as "not updated".
+ *
+ * `specDir` is the host `.teamai/<slug>` directory; its grandparent is the
+ * project root.
+ */
+export function normalizeWakeupArtifact(
+  artifact: string | undefined,
+  cwd: string,
+  specDir: string,
+): { artifact: string | undefined; warning?: string } {
+  if (!artifact) return { artifact: undefined };
+  const isAbs = artifact.startsWith('/') || artifact.startsWith('\\') || /^[A-Za-z]:[\\/]/.test(artifact);
+  const projectRoot = path.resolve(specDir, '..', '..');
+  const toRel = (abs: string) => path.relative(cwd, abs).split(path.sep).join('/');
+  // The spec directory lives under the project root, not inside a task
+  // worktree, so a `.teamai/<slug>/…` path is anchored there.
+  if (!isAbs) {
+    return /^(\.\/)?\.teamai\//.test(artifact)
+      ? { artifact: toRel(path.join(projectRoot, artifact)) }
+      : { artifact };
+  }
+  const inside = (root: string, abs: string) => {
+    const rel = path.relative(root, abs);
+    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  };
+
+  const hostAbs = path.resolve(artifact);
+  if (inside(cwd, hostAbs) || inside(projectRoot, hostAbs)) return { artifact: toRel(hostAbs) };
+
+  const segs = artifact.replace(/\\/g, '/').split('/').filter(Boolean);
+  const wt = segs.indexOf('.worktrees');
+  if (wt >= 0 && segs.length > wt + 2) return { artifact: toRel(path.join(cwd, ...segs.slice(wt + 2))) };
+  const spec = segs.indexOf('.teamai');
+  if (spec >= 0 && segs.length > spec + 1) return { artifact: toRel(path.join(projectRoot, ...segs.slice(spec))) };
+
+  return {
+    artifact: undefined,
+    warning: 'expected_artifact "' + artifact + '" is an absolute path outside the worktree and project root, ' +
+      'so it cannot be checked from the host — ignoring it (declare it relative to the worktree)',
+  };
+}
+
 /** Safe mtime lookup — null if the file doesn't exist or can't be stat'd. */
 export function snapshotMtime(absPath: string): number | null {
   try {
@@ -390,10 +452,12 @@ export async function checkForPhaseWakeup(opts: PhaseWakeupCheckOptions): Promis
       const previousCommand = opts.pipeline.wakeupCommand;
       opts.pipeline.wakeupUntil = wd.wakeup_at;
       opts.pipeline.wakeupCommand = wd.background_command;
-      opts.pipeline.wakeupArtifact = wd.expected_artifact;
+      const normalized = normalizeWakeupArtifact(wd.expected_artifact, opts.cwd, opts.specDir);
+      if (normalized.warning) logToOutput(opts.pipeline.specPath, '[WAKEUP] ' + normalized.warning + '\n');
+      opts.pipeline.wakeupArtifact = normalized.artifact;
       opts.pipeline.wakeupProgressPath = wd.progress_log_path;
-      opts.pipeline.wakeupArtifactMtimeAtSchedule = wd.expected_artifact
-        ? snapshotMtime(path.resolve(opts.cwd, wd.expected_artifact))
+      opts.pipeline.wakeupArtifactMtimeAtSchedule = normalized.artifact
+        ? snapshotMtime(path.resolve(opts.cwd, normalized.artifact))
         : null;
       opts.pipeline.wakeupAttemptCount = computeNextAttemptCount(
         previousCommand, wd, opts.pipeline.wakeupAttemptCount || 0,

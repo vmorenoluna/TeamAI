@@ -28,7 +28,7 @@ import { subtaskWorktreeBasePath, pickFreshSubtaskWorktreePath, nextFreeRelocati
 import { warn } from '../logger';
 import {
   scanWakeupFilesWithRetry, parseWakeupFile, computeNextAttemptCount, isGenuineRelaunch,
-  snapshotMtime, checkStaleWakeupReentry, clearWakeupState, wakeupAttemptsExceeded, buildWakeupReentryHeader,
+  snapshotMtime, normalizeWakeupArtifact, checkStaleWakeupReentry, clearWakeupState, wakeupAttemptsExceeded, buildWakeupReentryHeader,
   findLiveOrphanedJob,
 } from './wakeup';
 import type { TaskStore } from '../task-store';
@@ -1688,13 +1688,15 @@ export async function consumeSubtaskWakeupFiles(
         pipeline.wakeupSubtaskId = wd.subtask_id;
         pipeline.wakeupUntil = wd.wakeup_at;
         pipeline.wakeupCommand = wd.background_command;
-        pipeline.wakeupArtifact = wd.expected_artifact;
+        const normalized = normalizeWakeupArtifact(wd.expected_artifact, cwd, pipeline.specPath);
+        if (normalized.warning) logToOutput(pipeline.specPath, '[WAKEUP] Subtask ' + wd.subtask_id + ': ' + normalized.warning + '\n');
+        pipeline.wakeupArtifact = normalized.artifact;
         pipeline.wakeupProgressPath = wd.progress_log_path;
         // Snapshot the artifact's current mtime so a FUTURE re-entry that
         // ends without writing another wakeup file can be verified — see
         // the freshness check below and the field's doc in types.ts.
-        pipeline.wakeupArtifactMtimeAtSchedule = wd.expected_artifact
-          ? snapshotMtime(path.resolve(cwd, wd.expected_artifact))
+        pipeline.wakeupArtifactMtimeAtSchedule = normalized.artifact
+          ? snapshotMtime(path.resolve(cwd, normalized.artifact))
           : null;
         try {
           pipeline.wakeupHeadAtSchedule = deps.execGitCapture(['rev-parse', 'HEAD'], pipeline.worktreePath).trim() || undefined;

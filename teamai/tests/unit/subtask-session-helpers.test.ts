@@ -303,7 +303,7 @@ describe('scope hold and arbitration (real git)', () => {
   let cfgOverrides: Record<string, unknown>;
 
   const git = (dir: string, ...args: string[]) => realExec('git', args, { cwd: dir, encoding: 'utf-8', stdio: 'pipe' }).trim();
-  const read = (rel: string) => readFileSync(join(repo, rel), 'utf-8');
+  const read = (rel: string) => readFileSync(join(repo, rel), 'utf-8').split(String.fromCharCode(13, 10)).join(String.fromCharCode(10));
   const readJson = (file: string) => JSON.parse(readFileSync(join(specDir, file), 'utf-8'));
   const sentMessages = () => (processManager.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls.map(c => String(c[1]));
 
