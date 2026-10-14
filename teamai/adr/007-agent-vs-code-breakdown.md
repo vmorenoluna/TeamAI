@@ -82,7 +82,7 @@ This document catalogs, for each pipeline phase, exactly what is handled by code
 - Plan.json parsing and subtask filtering (QA-flagged only on bounce-back)
 - Per-subtask worktree isolation (multi-subtask groups)
 - Pre/post subtask sensors
-- Scope violation detection: snapshots HEAD before session, runs `git diff --name-only` after, rejects subtask if unassigned files modified
+- Scope detection and arbitration: snapshots HEAD before session, runs `git diff --name-only` after; files outside the subtask's `files` are held on the subtask's own branch while the planner arbitrates once per pass (approve/reject per file, optional serialize) — see ADR 006 item 3
 - Deliverable verification: checks `files_to_create` exist on disk, circuit-breaker at `maxImplementRetries`
 - Cherry-pick from st-branches to main worktree (Tier-1: direct, Tier-2: merger agent)
 - Wakeup scheduling for long-running background scripts
