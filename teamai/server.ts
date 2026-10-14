@@ -272,17 +272,24 @@ app.prepare().then(async () => {
     console.log(`[server] PID ${process.pid} written to ${PID_FILE}`);
 
     // ── Prerequisite tool check ────────────────────────────────────────
-    const tools = checkAllTools();
-    const missing = tools.filter(t => !t.found);
-    if (missing.length > 0) {
-      console.warn('[tools] Missing external tools detected:');
-      for (const t of missing) {
-        console.warn(`  • ${t.label}: ${t.error}`);
-      }
-      console.warn('[tools] Configure custom paths in Settings → Tool Paths.');
-    } else {
-      console.log('[tools] All prerequisite tools found');
-    }
+    // Fire-and-forget: the probes spawn child processes and must not delay
+    // the rest of startup; a rejection is logged, never thrown.
+    void checkAllTools()
+      .then(tools => {
+        const missing = tools.filter(t => !t.found);
+        if (missing.length > 0) {
+          console.warn('[tools] Missing external tools detected:');
+          for (const t of missing) {
+            console.warn(`  • ${t.label}: ${t.error}`);
+          }
+          console.warn('[tools] Configure custom paths in Settings → Tool Paths.');
+        } else {
+          console.log('[tools] All prerequisite tools found');
+        }
+      })
+      .catch(err => {
+        console.warn('[tools] Prerequisite tool check failed:', err);
+      });
 
     // ── Model list prefetch (warms the Settings model dropdowns) ────────
     // Fetch the Anthropic model list once at boot into an in-memory prewarm
