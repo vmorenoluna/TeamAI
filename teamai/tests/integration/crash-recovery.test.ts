@@ -418,15 +418,19 @@ describe('Crash Recovery Integration', () => {
       expect(restored!.qaRoundHistory).toEqual(history);
     });
 
-    it('legacy state without the new fields restores without them (runTask migrates)', async () => {
+    it('legacy state without the new fields is migrated by the runTask restore path', async () => {
       writeFileSync(join(specPath, '.pipeline_state.json'), JSON.stringify({ taskId, phase: 'qa-review', qaAttempt: 2, qaRoundCount: 2 }));
       const restored = (orch as AnyOrch)._restorePipelineState(taskId, specPath);
-
       expect(restored!.qaStallCount).toBeUndefined();
       expect(restored!.qaRoundHistory).toBeUndefined();
-      // Same expression runTask applies to saved state.
-      expect(restored!.qaStallCount ?? restored!.qaAttempt ?? 0).toBe(2);
-      expect(restored!.qaRoundHistory ?? []).toEqual([]);
+
+      // The same method runTask uses to apply saved state onto the fresh pipeline.
+      const pipeline: Record<string, unknown> = { taskId, qaAttempt: 0, qaStallCount: 0, qaRoundHistory: [{ round: 9 }] };
+      (orch as AnyOrch)._applySavedPipelineState(pipeline, restored);
+
+      expect(pipeline.qaStallCount).toBe(2);
+      expect(pipeline.qaRoundHistory).toEqual([]);
+      expect(pipeline.qaRoundCount).toBe(2);
     });
 
     it('cleans up pipeline state file after successful restore', async () => {
