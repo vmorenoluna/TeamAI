@@ -504,7 +504,7 @@ function dropRejectedPaths(
     }
   }
   if (ok && sh(deps, cwd, ['status', '--porcelain', '--untracked-files=no'])) {
-    deps.execGit(['commit', '-m', `chore(scope): drop changes rejected by the planner for subtask ${report.subtask_id}`], cwd);
+    deps.execGit(['commit', '--no-verify', '-m', `chore(scope): drop changes rejected by the planner for subtask ${report.subtask_id}`], cwd);
   }
   return ok;
 }

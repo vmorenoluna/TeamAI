@@ -154,7 +154,7 @@ async function reconcileDivergedBranch(
     const status = deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath).trim();
     if (status) {
       deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
-      deps.execGit(['commit', '-m', 'WIP: auto-commit uncommitted changes before rebase'], pipeline.worktreePath);
+      deps.execGit(['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before rebase'], pipeline.worktreePath);
       logToOutput(pipeline.specPath, `[QA-PRECHECK] Worktree had uncommitted changes — auto-committed before rebasing onto ${targetRef}\n`);
     }
   } catch (guardErr) {

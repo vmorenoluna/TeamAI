@@ -5281,6 +5281,7 @@ describe('runImplement — commit guard for sequential subtasks', () => {
       expect(addCalls.length).toBeGreaterThan(0);
       expect(addCalls[0]).toContain(':!.teamai');
       expect(commitCalls.some(c => c.join(' ').includes('auto-commit subtask 1'))).toBe(true);
+      expect(commitCalls.some(c => c[1] === '--no-verify' && c[2] === '-m' && c.join(' ').includes('auto-commit subtask 1'))).toBe(true);
 
       const log = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
       expect(log).toContain('[COMMIT-GUARD] Subtask 1 left uncommitted changes');
@@ -5957,7 +5958,7 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
     // A dirty status must result in an auto-commit via execGit (also
     // container-aware) before cherry-picking proceeds.
     expect(execGit).toHaveBeenCalledWith(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
-    expect(execGit).toHaveBeenCalledWith(['commit', '-m', 'chore: auto-save worktree state before cherry-pick'], pipeline.worktreePath);
+    expect(execGit).toHaveBeenCalledWith(['commit', '--no-verify', '-m', 'chore: auto-save worktree state before cherry-pick'], pipeline.worktreePath);
   });
 
   // Regression coverage for a real production failure (task 585a32e0, found
@@ -5995,7 +5996,7 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
 
     expect(execGitCapture).toHaveBeenCalledWith(['status', '--porcelain'], stWorktreePath);
     expect(execGit).toHaveBeenCalledWith(['add', '-A', '--', '.', ':!.teamai'], stWorktreePath);
-    expect(execGit).toHaveBeenCalledWith(['commit', '-m', 'chore: auto-save subtask 2 state before cherry-pick'], stWorktreePath);
+    expect(execGit).toHaveBeenCalledWith(['commit', '--no-verify', '-m', 'chore: auto-save subtask 2 state before cherry-pick'], stWorktreePath);
   });
 
   it('does NOT auto-commit a per-subtask worktree that has a wakeup pending or a rejected subtask', async () => {
@@ -6635,7 +6636,7 @@ describe('preserveUncommittedWork', () => {
     preserveUncommittedWork(pipeline, deps);
 
     expect(execGit).toHaveBeenNthCalledWith(1, ['add', '-A'], '/test/wt');
-    expect(execGit).toHaveBeenNthCalledWith(2, ['commit', '-m', expect.stringContaining('WIP')], '/test/wt');
+    expect(execGit).toHaveBeenNthCalledWith(2, ['commit', '--no-verify', '-m', expect.stringContaining('WIP')], '/test/wt');
   });
 
   it('is best-effort — swallows errors instead of throwing', () => {
@@ -7029,7 +7030,7 @@ describe('repairStuckCherryPick', () => {
     expect(deps.execGit).toHaveBeenCalledWith(['cherry-pick', '--quit'], pipeline.worktreePath);
     expect(deps.execGit).toHaveBeenCalledWith(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
     expect(deps.execGit).toHaveBeenCalledWith(
-      ['commit', '-m', 'chore: finish cherry-pick left in progress by an interrupted session'],
+      ['commit', '--no-verify', '-m', 'chore: finish cherry-pick left in progress by an interrupted session'],
       pipeline.worktreePath,
     );
     // Never discards a clean, preservable cherry-pick — that would throw
