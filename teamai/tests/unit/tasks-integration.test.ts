@@ -11,12 +11,22 @@ const { mockExecFileSync } = vi.hoisted(() => ({
   mockExecFileSync: vi.fn(),
 }));
 
-vi.mock('child_process', () => ({
-  execFile: vi.fn(),
-  execFileSync: mockExecFileSync,
-  spawn: vi.fn(),
-  ChildProcess: class MockCP {},
-}));
+vi.mock('child_process', async () => {
+  const { promisify } = await import('util');
+  // git-platform's detectDefaultBranch uses promisify(execFile); route it to the
+  // same mockExecFileSync implementation so symbolic-ref responses stay scripted.
+  const execFile: any = vi.fn();
+  execFile[promisify.custom] = async (cmd: string, args?: string[]) => ({
+    stdout: mockExecFileSync(cmd, args) as string,
+    stderr: '',
+  });
+  return {
+    execFile,
+    execFileSync: mockExecFileSync,
+    spawn: vi.fn(),
+    ChildProcess: class MockCP {},
+  };
+});
 
 let mockProjectPath = '/test/project';
 

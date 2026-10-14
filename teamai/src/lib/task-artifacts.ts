@@ -26,11 +26,11 @@ function readHumanFeedback(dir: string): string | null {
  * @param projectPath  The project root (used for git diff).
  * @param branch       Optional git branch name for computing the diff.
  */
-export function readCommonArtifacts(
+export async function readCommonArtifacts(
   dir: string,
   projectPath: string,
   branch?: string | null,
-): CommonArtifacts {
+): Promise<CommonArtifacts> {
   // ── spec ──
   const specPath = join(dir, 'spec.md');
   const spec = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
@@ -54,7 +54,7 @@ export function readCommonArtifacts(
   let diff: string | null = null;
   if (branch) {
     try {
-      const base = detectDefaultBranch(projectPath);
+      const base = await detectDefaultBranch(projectPath);
       diff = execFileSync('git', ['diff', `${base}...${branch}`], {
         cwd: projectPath,
         encoding: 'utf-8',

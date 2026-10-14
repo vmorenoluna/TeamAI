@@ -339,7 +339,7 @@ export async function getTaskArtifacts(taskId: string) {
   if (!task) throw new Error(`Task ${taskId} not found`);
 
   const dir = taskStore.getDirById(taskId);
-  return readCommonArtifacts(dir, projectPath, task.branch);
+  return await readCommonArtifacts(dir, projectPath, task.branch);
 }
 
 export async function getTaskFull(taskId: string) {
@@ -356,7 +356,7 @@ export async function getTaskFull(taskId: string) {
   const dir = taskStore.getDirById(taskId);
 
   // ── Common artifacts (spec, qa, feedback, diff) ──
-  const { spec, qaReport, humanFeedback, diff } = readCommonArtifacts(
+  const { spec, qaReport, humanFeedback, diff } = await readCommonArtifacts(
     dir,
     projectPath,
     task.branch,

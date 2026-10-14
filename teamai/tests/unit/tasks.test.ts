@@ -27,7 +27,7 @@ vi.mock('child_process', () => ({
 
 // mock detectDefaultBranch
 vi.mock('@/lib/orchestrator', () => ({
-  detectDefaultBranch: () => 'main',
+  detectDefaultBranch: async () => 'main',
 }));
 
 // ── Dynamic import (after mocks are set up) ───────────────────────────
@@ -43,7 +43,7 @@ describe('readCommonArtifacts', () => {
 
   // ── human_feedback.md ──
 
-  it('returns null for humanFeedback when file does not exist', () => {
+  it('returns null for humanFeedback when file does not exist', async () => {
     // Only spec.md exists
     mockExistsSync.mockImplementation((path: string) => {
       if (path.includes('human_feedback.md')) return false;
@@ -53,12 +53,12 @@ describe('readCommonArtifacts', () => {
       return '';
     });
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.humanFeedback).toBeNull();
   });
 
-  it('strips the header and returns trimmed human feedback', () => {
+  it('strips the header and returns trimmed human feedback', async () => {
     mockExistsSync.mockImplementation((path: string) => {
       if (path.includes('human_feedback.md')) return true;
       return false;
@@ -70,12 +70,12 @@ describe('readCommonArtifacts', () => {
       return '';
     });
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.humanFeedback).toBe('Fix the header alignment on mobile');
   });
 
-  it('trims whitespace from human feedback', () => {
+  it('trims whitespace from human feedback', async () => {
     mockExistsSync.mockImplementation((path: string) => {
       if (path.includes('human_feedback.md')) return true;
       return false;
@@ -87,12 +87,12 @@ describe('readCommonArtifacts', () => {
       return '';
     });
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.humanFeedback).toBe('Fix the button color');
   });
 
-  it('returns null when humanFeedback is only the header', () => {
+  it('returns null when humanFeedback is only the header', async () => {
     mockExistsSync.mockImplementation((path: string) => {
       if (path.includes('human_feedback.md')) return true;
       return false;
@@ -104,12 +104,12 @@ describe('readCommonArtifacts', () => {
       return '';
     });
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.humanFeedback).toBeNull();
   });
 
-  it('returns null when humanFeedback is whitespace-only after header', () => {
+  it('returns null when humanFeedback is whitespace-only after header', async () => {
     mockExistsSync.mockImplementation((path: string) => {
       if (path.includes('human_feedback.md')) return true;
       return false;
@@ -121,12 +121,12 @@ describe('readCommonArtifacts', () => {
       return '';
     });
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.humanFeedback).toBeNull();
   });
 
-  it('returns null when humanFeedback file is empty', () => {
+  it('returns null when humanFeedback file is empty', async () => {
     mockExistsSync.mockImplementation((path: string) => {
       if (path.includes('human_feedback.md')) return true;
       return false;
@@ -136,12 +136,12 @@ describe('readCommonArtifacts', () => {
       return '';
     });
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.humanFeedback).toBeNull();
   });
 
-  it('handles plain text without header', () => {
+  it('handles plain text without header', async () => {
     mockExistsSync.mockImplementation((path: string) => {
       if (path.includes('human_feedback.md')) return true;
       return false;
@@ -153,14 +153,14 @@ describe('readCommonArtifacts', () => {
       return '';
     });
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.humanFeedback).toBe('Just some plain feedback text');
   });
 
   // ── spec.md ──
 
-  it('returns spec when spec.md exists', () => {
+  it('returns spec when spec.md exists', async () => {
     mockExistsSync.mockImplementation((path: string) => {
       return path.includes('spec.md');
     });
@@ -169,22 +169,22 @@ describe('readCommonArtifacts', () => {
       return '';
     });
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.spec).toBe('# Feature spec\n\nAdd dark mode');
   });
 
-  it('returns null spec when spec.md does not exist', () => {
+  it('returns null spec when spec.md does not exist', async () => {
     mockExistsSync.mockReturnValue(false);
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.spec).toBeNull();
   });
 
   // ── qa_report.json ──
 
-  it('returns parsed qaReport when valid JSON exists', () => {
+  it('returns parsed qaReport when valid JSON exists', async () => {
     mockExistsSync.mockImplementation((path: string) => {
       if (path.includes('qa_report.json')) return true;
       return false;
@@ -196,12 +196,12 @@ describe('readCommonArtifacts', () => {
       return '';
     });
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.qaReport).toEqual({ overall: 'PASS', criteria: [] });
   });
 
-  it('returns null qaReport when JSON is invalid (silently catches parse error)', () => {
+  it('returns null qaReport when JSON is invalid (silently catches parse error)', async () => {
     mockExistsSync.mockImplementation((path: string) => {
       if (path.includes('qa_report.json')) return true;
       return false;
@@ -211,26 +211,26 @@ describe('readCommonArtifacts', () => {
       return '';
     });
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.qaReport).toBeNull();
   });
 
-  it('returns null qaReport when file does not exist', () => {
+  it('returns null qaReport when file does not exist', async () => {
     mockExistsSync.mockReturnValue(false);
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.qaReport).toBeNull();
   });
 
   // ── git diff ──
 
-  it('computes git diff when branch is provided', () => {
+  it('computes git diff when branch is provided', async () => {
     mockExistsSync.mockReturnValue(false);
     mockExecFileSync.mockReturnValue('diff --git a/file.ts b/file.ts\n+new line');
 
-    const result = readCommonArtifacts('/test/dir', '/project', 'feature-branch');
+    const result = await readCommonArtifacts('/test/dir', '/project', 'feature-branch');
 
     expect(result.diff).toBe('diff --git a/file.ts b/file.ts\n+new line');
     expect(mockExecFileSync).toHaveBeenCalledWith('git', ['diff', 'main...feature-branch'], {
@@ -239,7 +239,7 @@ describe('readCommonArtifacts', () => {
     });
   });
 
-  it('falls back to diff.txt when branch is null', () => {
+  it('falls back to diff.txt when branch is null', async () => {
     mockExistsSync.mockImplementation((path: string) => {
       return path.includes('diff.txt');
     });
@@ -248,15 +248,15 @@ describe('readCommonArtifacts', () => {
       return '';
     });
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.diff).toBe('canned diff content');
   });
 
-  it('returns null diff when no branch and no diff.txt', () => {
+  it('returns null diff when no branch and no diff.txt', async () => {
     mockExistsSync.mockReturnValue(false);
 
-    const result = readCommonArtifacts('/test/dir', '/project', null);
+    const result = await readCommonArtifacts('/test/dir', '/project', null);
 
     expect(result.diff).toBeNull();
   });
