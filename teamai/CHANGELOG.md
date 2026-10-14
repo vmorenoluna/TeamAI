@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-10-14
+
+- **Subtask `files` no longer fail a ticket when a coder touches other files.** Previously a subtask that changed files outside its plan `files` was rejected. Now the subtask's commits are held on their own branch and the planner decides, once per implement pass, whether to approve or reject each extra file (optionally serializing the subtask against others). Approved work is integrated without a re-run; if files were rejected, the subtask re-runs once with the rejected paths shown to the coder. This is bounded by two new pipeline settings, `maxScopeStall` (default 2) and `maxScopeReplans` (default 6); exhausting either fails the task. A session that touched none of its assigned files is still rejected as a no-op
+- **QA retries are now progress-aware.** The QA stall counter resets when a QA round fixes criteria or issues that failed in an earlier round, so a ticket that is converging is no longer failed by the attempt cap. A new `maxQaRounds` setting (Settings → Pipeline, default 3× `maxQaAttempts`) caps the total number of rounds. To make rounds comparable, spec, spec-revise and qa-review now require a stable ID on every acceptance criterion
+- The orchestrator's safety-net commits (the COMMIT-GUARD WIP auto-commit and the others) now bypass the project's git hooks, so a pre-commit hook rejecting a deliberately partial state no longer makes real subtask work look like a no-op. The final squash commit still runs hooks
+- A session running in a container can declare its wakeup `expected_artifact` as a container-absolute path, or a host-absolute one. Both are now mapped to a path under the checked directory. Previously the freshness check reported "artifact not updated" for a finished job on every re-entry until the attempt cap failed the subtask. An unmappable absolute path is ignored with a warning and the deliverables fallback applies
+- Issue keys used to match QA `additional_issues` across rounds now collapse whitespace correctly. A bad regex made descriptions that differed only in spacing or newlines produce different keys. Issues in a task already in flight get a one-time key change
+- `execGit` pipes git's stderr instead of inheriting it
+- The coder instructions now describe the real commit guard (the orchestrator auto-commits after every coder session) and tell coders not to fight project hooks
+
 ## [0.2.0] — 2026-10-12
 
 - **Upgrading with tickets in flight:** you can update from 0.1.x without finishing or restarting your tickets. Task state under `.teamai/` (spec, plan, QA report, events) is read as-is, no migration step is needed, and a stopped task resumes or retries from its last phase. What changes for them:
