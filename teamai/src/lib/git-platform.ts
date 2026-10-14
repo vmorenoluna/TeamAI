@@ -1,4 +1,5 @@
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { writeFileSync, unlinkSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { warn as logWarn } from './logger';
@@ -7,15 +8,20 @@ import { logToOutput } from './orchestrator/helpers';
 import { truncate } from './utils';
 import path from 'path';
 
+// Async (non-blocking) execFile — the sync variant froze the shared Node server
+// event loop for the duration of each git/gh call (up to 30 s for `gh pr create`).
+const execFileAsync = promisify(execFile);
+
 /**
  * Detect the Git hosting platform from the remote origin URL.
  * @returns 'github' or 'unknown'
  */
-export function detectGitPlatform(projectRoot: string): 'github' | 'unknown' {
+export async function detectGitPlatform(projectRoot: string): Promise<'github' | 'unknown'> {
   try {
-    const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+    const { stdout } = await execFileAsync('git', ['remote', 'get-url', 'origin'], {
       cwd: projectRoot, encoding: 'utf-8', timeout: 5000,
-    }).trim().toLowerCase();
+    });
+    const url = stdout.trim().toLowerCase();
     if (url.includes('github.com') || url.includes('github.')) return 'github';
   } catch (err) { logWarn('orchestrator', 'Failed to detect git remote platform', err); }
   return 'unknown';
@@ -25,11 +31,12 @@ export function detectGitPlatform(projectRoot: string): 'github' | 'unknown' {
  * Detect the default branch name from the remote HEAD reference.
  * Falls back to 'main' if detection fails.
  */
-export function detectDefaultBranch(projectRoot: string): string {
+export async function detectDefaultBranch(projectRoot: string): Promise<string> {
   try {
-    const ref = execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+    const { stdout } = await execFileAsync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
       cwd: projectRoot, encoding: 'utf-8', timeout: 3000,
-    }).trim();
+    });
+    const ref = stdout.trim();
     // Extract branch name from refs/remotes/origin/main → main
     const parts = ref.split('/');
     return parts[parts.length - 1] || 'main';
@@ -42,16 +49,19 @@ export function detectDefaultBranch(projectRoot: string): string {
 /**
  * Resolve the repository's default branch name with in-memory caching.
  * Calls detectDefaultBranch on first invocation per projectRoot; subsequent
- * calls return the cached value. Callers can pass invalidate=true to force
+ * (including concurrent) calls return the same cached Promise. Callers can pass invalidate=true to force
  * a re-detection (e.g. after a remote rename).
  */
-const _baseBranchCache = new Map<string, string>();
-export function resolveBaseBranch(projectRoot: string, invalidate?: boolean): string {
+const _baseBranchCache = new Map<string, Promise<string>>();
+export function resolveBaseBranch(projectRoot: string, invalidate?: boolean): Promise<string> {
   if (invalidate) _baseBranchCache.delete(projectRoot);
-  if (!_baseBranchCache.has(projectRoot)) {
-    _baseBranchCache.set(projectRoot, detectDefaultBranch(projectRoot));
+  let pending = _baseBranchCache.get(projectRoot);
+  if (!pending) {
+    // Cache the in-flight promise so concurrent callers share one git spawn.
+    pending = detectDefaultBranch(projectRoot);
+    _baseBranchCache.set(projectRoot, pending);
   }
-  return _baseBranchCache.get(projectRoot)!;
+  return pending;
 }
 
 /**
@@ -124,21 +134,21 @@ export function buildPRBody(
  * Check whether an open PR/MR already exists for the given branch.
  * Returns the PR URL if one exists, or null otherwise.
  */
-export function checkExistingPRViaCLI(
+export async function checkExistingPRViaCLI(
   platform: 'github' | 'unknown',
   branch: string,
   projectRoot: string,
-): string | null {
+): Promise<string | null> {
   if (platform === 'github') {
     try {
-      const result = execFileSync(getToolPath('gh'), [
+      const { stdout } = await execFileAsync(getToolPath('gh'), [
         'pr', 'list',
         '--head', branch,
         '--state', 'open',
         '--json', 'url',
         '--jq', '.[0].url',
-      ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 });
-      const url = result.trim();
+      ], { cwd: projectRoot, encoding: 'utf-8', timeout: 10_000 });
+      const url = stdout.trim();
       return url || null;
     } catch (err) {
       logWarn('git-platform', 'Failed to check existing PR via gh CLI', err);
@@ -160,18 +170,18 @@ export function checkExistingPRViaCLI(
  * verify non-GitHub platforms, and refusing to proceed there would be
  * a pure regression for projects that never had this check.
  */
-export function isPrMerged(
+export async function isPrMerged(
   platform: 'github' | 'unknown',
   prUrl: string,
   projectRoot: string,
-): boolean | null {
+): Promise<boolean | null> {
   if (platform === 'github') {
     try {
-      const result = execFileSync(getToolPath('gh'), [
+      const { stdout } = await execFileAsync(getToolPath('gh'), [
         'pr', 'view', prUrl,
         '--json', 'state',
-      ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 });
-      return JSON.parse(result).state === 'MERGED';
+      ], { cwd: projectRoot, encoding: 'utf-8', timeout: 10_000 });
+      return JSON.parse(stdout).state === 'MERGED';
     } catch (err) {
       logWarn('git-platform', `Failed to check PR merge state via gh CLI for ${prUrl}`, err);
       return null;
@@ -188,15 +198,15 @@ export function isPrMerged(
  * For non-GitHub platforms where no standard CLI exists, returns null
  * — the caller should fall back to constructing the create URL manually.
  */
-export function createPRViaCLI(
+export async function createPRViaCLI(
   platform: 'github' | 'unknown',
   branch: string,
   title: string,
   body: string,
   projectRoot: string,
   logFile: string,
-): string | null {
-  const defaultBranch = detectDefaultBranch(projectRoot);
+): Promise<string | null> {
+  const defaultBranch = await detectDefaultBranch(projectRoot);
   const specPath = path.dirname(logFile);
 
   if (platform === 'github') {
@@ -218,14 +228,14 @@ export function createPRViaCLI(
       const MAX_PR_TITLE = 255;
       const safeTitle = truncate(title, MAX_PR_TITLE);
       logToOutput(specPath, `[PR] Creating GitHub PR via gh CLI: ${branch} → ${defaultBranch}\n`);
-      const result = execFileSync(getToolPath('gh'), [
+      const { stdout } = await execFileAsync(getToolPath('gh'), [
         'pr', 'create',
         '--title', safeTitle,
         '--body-file', bodyFile,
         '--base', defaultBranch,
         '--head', branch,
-      ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 30_000 });
-      const url = result.trim();
+      ], { cwd: projectRoot, encoding: 'utf-8', timeout: 30_000 });
+      const url = stdout.trim();
       logToOutput(specPath, `[PR] Created: ${url}\n`);
       return url;
     } catch (err) {
@@ -254,14 +264,14 @@ export function createPRViaCLI(
  * @deprecated Used only by the old agent-based PR creation path. Kept for
  * backward compatibility (re-exported from orchestrator.ts).
  */
-export function buildPlatformPrompt(
+export async function buildPlatformPrompt(
   platform: 'github' | 'unknown',
   branch: string,
   description: string,
   specContent: string,
   projectRoot: string,
-): string {
-  const defaultBranch = detectDefaultBranch(projectRoot);
+): Promise<string> {
+  const defaultBranch = await detectDefaultBranch(projectRoot);
   const base = `Create a Pull Request for branch "${branch}" targeting the ${defaultBranch} branch.\n\n` +
     `IMPORTANT: First check whether an open PR already exists for branch "${branch}".\n` +
     `- If an open PR exists: report its URL and stop — do not create a duplicate.\n` +
