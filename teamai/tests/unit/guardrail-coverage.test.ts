@@ -300,6 +300,9 @@ const CONTRACT_LOCATIONS: ContractLocationCheck[] = [
       'backlog_check-<unit>.json',
       'claim, not an order',
       "description is a claim",
+      'scope_verdicts',
+      'scope_notes-st',
+      'SCOPE ARBITRATION',
     ],
   },
 ];
@@ -405,6 +408,8 @@ describe('Scope wording — files is a hint, not a hard limit', () => {
       const rendered = readCommandTemplate(cmd, join(root, 'defaults', 'commands'));
       expect(rendered).not.toContain('You may ONLY modify files explicitly listed');
       expect(rendered).not.toContain('This is a hard limit');
+      expect(rendered).not.toContain('STOP and report the missing dependency');
+      expect(rendered).not.toContain('coordination hint, not a permission boundary');
     });
   }
 

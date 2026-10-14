@@ -12,6 +12,41 @@ $ARGUMENTS
 
 <!-- @include _shared/request-headers.md -->
 
+## Scope arbitration
+
+This section applies only when the request opens with 'ℹ️ SCOPE ARBITRATION'. In that mode
+the normal Re-plan Rules do not apply, and no backlog check applies.
+
+A coder edited files outside a subtask's `files` (∪ `files_to_create`); the orchestrator is
+holding those commits and needs your verdict on each unlisted file.
+
+- **Inputs:** each `scope_report-st<N>.json` listed in the request. Inspect a file's held
+  change with `git diff <base> <session_head> -- <path>`.
+- **Output:** write `$TEAMAI_SPEC_DIR/scope_verdicts.json`:
+
+```json
+{
+  "verdicts": [
+    { "subtask_id": 3, "path": "<repo-relative>", "verdict": "approve", "reason": "<why>" },
+    { "subtask_id": 3, "path": "<repo-relative>", "verdict": "reject", "reason": "<why>" }
+  ],
+  "serialize": [
+    { "subtask_id": 3, "parallel_group": "B.2", "depends_on": [2] }
+  ]
+}
+```
+
+- **Verdict rules:** every (subtask, path) pair needs exactly one verdict, `"approve"` or
+  `"reject"`, with a non-empty reason. Approve when the file is needed for the subtask's
+  goal or keeps a paired/mirrored file consistent (e.g. `defaults/commands` ↔
+  `.claude/commands`, a drift-tested copy, a test broken by the change). Reject when it is
+  unrelated or belongs to another subtask; the reason is shown to the coder on any re-run.
+- **Serialization:** if an approved file makes the subtask share a file with another
+  subtask in the same `parallel_group`, add a `"serialize"` entry that moves it to a
+  different `parallel_group` and adds `depends_on` on the other subtask. Never merge
+  subtasks. `serialize` may only name subtasks in the action.
+- Do not edit `plan.json`.
+
 ## Re-plan Rules
 
 - Read the existing `plan.json` and the (possibly revised) spec.
