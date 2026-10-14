@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assessQaProgress, buildQaRoundRecord, qaBudgetExhausted } from '../../src/lib/orchestrator/qa-progress';
+import { additionalIssueKey, assessQaProgress, buildQaRoundRecord, qaBudgetExhausted } from '../../src/lib/orchestrator/qa-progress';
 import type { QaRoundRecord } from '../../src/lib/orchestrator/types';
 
 function rec(round: number, p: Partial<QaRoundRecord> = {}): QaRoundRecord {
@@ -94,6 +94,37 @@ describe('buildQaRoundRecord', () => {
   it('falls back to issues when additional_issues is absent', () => {
     const record = buildQaRoundRecord({ issues: [{ message: 'Oops', file: 'f.ts' }] }, 1);
     expect(record.failedIssues).toEqual(['issue:f.ts::oops']);
+  });
+
+  it('dedupes same-file issues whose descriptions differ only in whitespace and case', () => {
+    const record = buildQaRoundRecord({
+      additional_issues: [
+        { file: 'src/x.ts', description: 'Dup  test\nblock' },
+        { file: 'src/x.ts', description: 'dup test block' },
+      ],
+    }, 1);
+    expect(record.failedIssues).toEqual(['issue:src/x.ts::dup test block']);
+  });
+});
+
+describe('additionalIssueKey', () => {
+  it('maps descriptions differing only in spaces to the same key', () => {
+    expect(additionalIssueKey({ file: 'src/x.ts', description: 'Broke  here' })).toBe('src/x.ts::broke here');
+    expect(additionalIssueKey({ file: 'src/x.ts', description: 'Broke here' })).toBe('src/x.ts::broke here');
+  });
+
+  it('collapses tabs, newlines and CRLF runs into a single space', () => {
+    expect(additionalIssueKey({ file: 'src/x.ts', description: 'Broke\n\there\r\n  now' })).toBe('src/x.ts::broke here now');
+  });
+
+  it('does not treat a literal backslash followed by s as whitespace', () => {
+    const key = additionalIssueKey({ file: 'src/x.ts', description: 'a\\sb' });
+    expect(key).toBe('src/x.ts::a\\sb');
+    expect(key).not.toBe(additionalIssueKey({ file: 'src/x.ts', description: 'a b' }));
+  });
+
+  it('normalises the file path without collapsing its internal whitespace', () => {
+    expect(additionalIssueKey({ file: '  A\\Dir  Name\\b.ts ', description: 'x' })).toBe('a/dir  name/b.ts::x');
   });
 });
 
