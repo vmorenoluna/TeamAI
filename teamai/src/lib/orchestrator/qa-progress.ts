@@ -8,7 +8,7 @@ import type { QaIssue, QaReport, QaRoundRecord, TaskPipeline } from './types';
 /** Normalised `file::description` key for an additional issue. */
 export function additionalIssueKey(issue: QaIssue): string {
   const file = (issue.file || '').trim().replace(/\\/g, '/').toLowerCase();
-  const description = (issue.description || issue.message || '').trim().replace(/\\s+/g, ' ').toLowerCase();
+  const description = (issue.description || issue.message || '').trim().replace(/\s+/g, ' ').toLowerCase();
   return `${file}::${description}`;
 }
 
