@@ -670,8 +670,8 @@ export class Orchestrator {
     // the board while the code it describes never actually shipped.
     if (task.mergeStrategy === 'pull-request' && task.prUrl) {
       const platform = (task.platform as 'github' | 'unknown' | undefined)
-        ?? detectGitPlatform(this.projectRoot);
-      const merged = isPrMerged(platform, task.prUrl, this.projectRoot);
+        ?? await detectGitPlatform(this.projectRoot);
+      const merged = await isPrMerged(platform, task.prUrl, this.projectRoot);
       if (merged === false) {
         throw new Error(
           `Cannot mark task done: PR ${task.prUrl} has not been merged yet.`

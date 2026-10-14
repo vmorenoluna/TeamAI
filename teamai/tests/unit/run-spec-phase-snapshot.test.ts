@@ -48,7 +48,7 @@ vi.mock('../../src/lib/logger', () => ({
 // unrelated "Failed to detect default branch" warn that has nothing to do
 // with what this file is testing (spec version snapshotting).
 vi.mock('../../src/lib/git-platform', () => ({
-  resolveBaseBranch: () => 'main',
+  resolveBaseBranch: async () => 'main',
 }));
 
 vi.mock('../../src/lib/process-manager', () => ({
