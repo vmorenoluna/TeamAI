@@ -1577,8 +1577,8 @@ export function holdSubtaskForArbitration(
     '[SCOPE] Declared files: ' + (declared.join(', ') || '(none)') + '\n');
 }
 
-/** Adapter exposing this module's helpers to scope-arbitration.ts. */
-function scopeArbitrationDeps(deps: ImplementDeps): ScopeArbitrationDeps {
+/** Adapter exposing this module's helpers to scope-arbitration.ts. @internal — exported for unit tests. */
+export function scopeArbitrationDeps(deps: ImplementDeps): ScopeArbitrationDeps {
   const cfg = deps.getPipelineConfig;
   return {
     projectRoot: deps.projectRoot,
@@ -1589,7 +1589,14 @@ function scopeArbitrationDeps(deps: ImplementDeps): ScopeArbitrationDeps {
     savePipelineState: (p) => deps.savePipelineState(p as ImplementPipeline),
     execGit: deps.execGit,
     execGitCapture: deps.execGitCapture,
-    tryCherryPickWithRecovery: (p, logFile, stBranch, id) => tryCherryPickWithRecovery(p as ImplementPipeline, deps, logFile, stBranch, id),
+    // Scope arbitration cherry-picks held branches without going through
+    // integrateGroup, so it must repair cherry-pick state left on the main
+    // worktree (e.g. by an earlier merger session) itself — otherwise git
+    // refuses with "cherry-pick is already in progress" and the task fails.
+    tryCherryPickWithRecovery: async (p, logFile, stBranch, id) => {
+      await repairStuckCherryPick(p as ImplementPipeline, deps);
+      return tryCherryPickWithRecovery(p as ImplementPipeline, deps, logFile, stBranch, id);
+    },
     verifySubtaskDeliverables: (p, st, cwd) => verifySubtaskDeliverables(p as ImplementPipeline, deps, st, cwd),
     filesAlreadyChangedOnBranch: (cwd, files) => filesAlreadyChangedOnBranch(deps, cwd, files),
     completeSubtask: (p, st, cwd, pre, ids) => completeSubtask(

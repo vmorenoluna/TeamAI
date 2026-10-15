@@ -84,7 +84,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 // ── Imports after mocks ──
 
 import { Orchestrator } from '../../src/lib/orchestrator';
-import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks, reconcileSubtaskCompletionFromDeliverables, relevantDeliverables, repairStuckCherryPick, checkSubtaskScope } from '../../src/lib/orchestrator/implement';
+import { buildSyntheticReworkDescription, isInfraError, tryCherryPickWithRecovery, _recoverSubtaskBranchBeforeDelete, _recoverStBranchCommits, clearWorktreeDirectoryOrThrow, preserveUncommittedWork, relocateStuckWorktree, sweepAbandonedWorktreeRelocations, integrateGroup, runSubtaskSession, persistCompletedSubtasks, reconcileSubtaskCompletionFromDeliverables, relevantDeliverables, repairStuckCherryPick, checkSubtaskScope, scopeArbitrationDeps } from '../../src/lib/orchestrator/implement';
 import type { ImplementDeps, ImplementPipeline } from '../../src/lib/orchestrator/implement';
 import type { PlanSubtask } from '../../src/lib/orchestrator/types';
 import { resolveWorktreeDirName } from '../../src/lib/orchestrator/helpers';
@@ -7027,6 +7027,25 @@ describe('repairStuckCherryPick', () => {
     // Nothing pending (status --porcelain returns '') — no commit, no reset.
     expect(execGit).not.toHaveBeenCalledWith(expect.arrayContaining(['commit']), expect.anything());
     expect(execGit).not.toHaveBeenCalledWith(['reset', '--hard', 'HEAD'], pipeline.worktreePath);
+  });
+
+  it('scope arbitration repairs a stuck cherry-pick before cherry-picking a held branch', async () => {
+    // Regression: integrateHeldSubtasks cherry-picks via this adapter, bypassing
+    // integrateGroup, so leftover cherry-pick state failed it with
+    // "cherry-pick is already in progress" (CHERRY_PICK_RECOVERY_EXHAUSTED).
+    const calls: string[][] = [];
+    const execGit = vi.fn((args: string[]) => { calls.push(args); });
+    const deps = makeDeps({ execGit, execGitCapture: vi.fn(() => '') });
+    const pipeline = makeImplPipeline();
+
+    await scopeArbitrationDeps(deps).tryCherryPickWithRecovery(
+      pipeline as any, join(project.root, 'output.log'), 'feat/cherry-pick-repair-test-st3', 3,
+    );
+
+    const quitAt = calls.findIndex(a => a[0] === 'cherry-pick' && a[1] === '--quit');
+    const pickAt = calls.findIndex(a => a[0] === 'cherry-pick' && a[1]?.includes('..'));
+    expect(quitAt).toBeGreaterThanOrEqual(0);
+    expect(pickAt).toBeGreaterThan(quitAt);
   });
 
   it('commits pending changes to finish a clean stuck cherry-pick (no conflicts)', async () => {
