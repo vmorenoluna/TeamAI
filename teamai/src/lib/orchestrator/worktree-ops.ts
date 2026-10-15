@@ -4,7 +4,8 @@
  * Each function receives its dependencies explicitly so tests can
  * spy on orchestrator methods via the delegate pattern.
  */
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { existsSync, readdirSync, appendFileSync } from 'fs';
 import path from 'path';
 import { TaskStore } from '../task-store';
@@ -14,11 +15,20 @@ import { removeStaleWorktreeRegistration, removeDirBestEffort } from './worktree
 import { clearSubtaskWorktreeRecord } from './subtask-worktree-paths';
 import type { TaskPipeline } from './types';
 
+const execFileAsync = promisify(execFile);
+
+/** Run `git` on the host with stdin closed; rejects with execFile's Error. */
+async function runHostGit(args: string[], cwd: string): Promise<string> {
+  const promise = execFileAsync('git', args, { cwd, encoding: 'utf-8' });
+  promise.child?.stdin?.end();
+  return (await promise).stdout;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────
 
 export interface WorktreeOpsDeps {
   /** Execute a git command — may be host-side or container-side. */
-  execGit: (args: string[], hostCwd: string) => void;
+  execGit: (args: string[], hostCwd: string) => Promise<void>;
   /** The project root for git operations and path resolution. */
   projectRoot: string;
 }
@@ -38,14 +48,12 @@ type SubtaskWorktreePipeline = Pick<TaskPipeline, 'worktreePath' | 'branch'> & {
  * remote-tracking branch.  Returns the `git log --oneline` output (empty
  * string = clean) or null if the remote branch doesn't exist yet.
  */
-export function getUnpushedCommits(
+export async function getUnpushedCommits(
   projectRoot: string,
   branch: string,
-): string | null {
+): Promise<string | null> {
   try {
-    return execFileSync('git', ['log', `origin/${branch}..${branch}`, '--oneline'], {
-      cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe',
-    }).trim() || null;
+    return (await runHostGit(['log', `origin/${branch}..${branch}`, '--oneline'], projectRoot)).trim() || null;
   } catch {
     // Remote branch doesn't exist yet — nothing to compare against
     return null;
@@ -104,17 +112,17 @@ export async function cleanStaleSubtaskWorktrees(
     const stBranch = pipeline.branch + '-st' + suffix.replace(/-r\d+$/, '');
 
     try {
-      deps.execGit(['worktree', 'remove', '--force', stPath], deps.projectRoot);
+      await deps.execGit(['worktree', 'remove', '--force', stPath], deps.projectRoot);
     } catch { /* fall through to direct removal below */ }
     // git can deregister a worktree yet leave the directory behind (a locked
     // file), so check the directory itself rather than trusting git's result.
     if (existsSync(stPath)) removeDirBestEffort(stPath, 'stale subtask worktree from an earlier run');
     // Unconditional: deregisters the worktree even when the directory itself
     // couldn't be deleted, so the branch below is no longer "checked out".
-    removeStaleWorktreeRegistration(deps.projectRoot, stPath);
+    await removeStaleWorktreeRegistration(deps.projectRoot, stPath);
 
     try {
-      execFileSync('git', ['branch', '-D', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
+      await runHostGit(['branch', '-D', stBranch], deps.projectRoot);
     } catch { /* best-effort */ }
   }
 
@@ -134,7 +142,7 @@ const REMNANT_NAME = /-(?:st\d+(?:-r\d+)?|r\d+)$/;
  *
  * @returns the paths that were removed
  */
-export function sweepAbandonedWorktreeRemnants(projectRoot: string): string[] {
+export async function sweepAbandonedWorktreeRemnants(projectRoot: string): Promise<string[]> {
   const removed: string[] = [];
   try {
     const worktreeBase = getWorktreeBase(projectRoot);
@@ -144,7 +152,7 @@ export function sweepAbandonedWorktreeRemnants(projectRoot: string): string[] {
       const dir = path.join(worktreeBase, entry.name);
       if (existsSync(path.join(dir, '.git'))) continue; // live worktree — leave it
       if (removeDirBestEffort(dir, 'abandoned worktree remnant, startup sweep')) removed.push(dir);
-      removeStaleWorktreeRegistration(projectRoot, dir);
+      await removeStaleWorktreeRegistration(projectRoot, dir);
     }
   } catch (err) {
     logWarn('worktree', 'Startup sweep of abandoned worktree remnants failed', err);
@@ -159,10 +167,10 @@ export function sweepAbandonedWorktreeRemnants(projectRoot: string): string[] {
  * Tries normal remove first; falls back to --force; then manual cleanup.
  * Always cleans up the branch and clears the task's branch record.
  */
-export function removeWorktree(
+export async function removeWorktree(
   taskId: string,
   deps: RemoveWorktreeDeps,
-): void {
+): Promise<void> {
   const worktreeBase = getWorktreeBase(deps.projectRoot);
   const wtPath = getWorktreePath(taskId, deps.taskStore, worktreeBase);
   if (!wtPath || !existsSync(wtPath)) return;
@@ -176,7 +184,7 @@ export function removeWorktree(
   const task = deps.taskStore.getById(taskId);
   if (task?.branch) {
     try {
-      const unpushed = getUnpushedCommits(deps.projectRoot, task.branch);
+      const unpushed = await getUnpushedCommits(deps.projectRoot, task.branch);
       if (unpushed) {
         const taskDir = deps.taskStore.getDirById(taskId);
         const outputLog = path.join(taskDir, 'output.log');
@@ -205,20 +213,20 @@ export function removeWorktree(
   }
 
   try {
-    deps.execGit(['worktree', 'remove', wtPath], deps.projectRoot);
+    await deps.execGit(['worktree', 'remove', wtPath], deps.projectRoot);
   } catch {
     // Normal remove failed (e.g. uncommitted changes) — force it
     try {
-      deps.execGit(['worktree', 'remove', '--force', wtPath], deps.projectRoot);
+      await deps.execGit(['worktree', 'remove', '--force', wtPath], deps.projectRoot);
     } catch {
       // Worktree is stuck (files locked) — delete manually + prune
       removeDirBestEffort(wtPath, `task ${taskId} worktree`);
-      removeStaleWorktreeRegistration(deps.projectRoot, wtPath);
+      await removeStaleWorktreeRegistration(deps.projectRoot, wtPath);
     }
   }
 
   if (task?.branch) {
-    try { execFileSync('git', ['branch', '-D', task.branch], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+    try { await runHostGit(['branch', '-D', task.branch], deps.projectRoot); } catch { /* best-effort */ }
   }
   deps.taskStore.update(taskId, { branch: undefined });
 }
@@ -226,14 +234,14 @@ export function removeWorktree(
 // ── Worktree cleaning ─────────────────────────────────────────────────────
 
 /** Discard all uncommitted changes in the worktree. */
-export function cleanWorktree(
+export async function cleanWorktree(
   taskId: string,
   deps: WorktreeOpsDeps & { taskStore: TaskStore },
-): void {
+): Promise<void> {
   const worktreeBase = getWorktreeBase(deps.projectRoot);
   const wtPath = getWorktreePath(taskId, deps.taskStore, worktreeBase);
   if (!wtPath || !existsSync(wtPath)) return;
   try {
-    deps.execGit(['checkout', 'HEAD', '--', '.'], wtPath);
+    await deps.execGit(['checkout', 'HEAD', '--', '.'], wtPath);
   } catch { /* best-effort */ }
 }

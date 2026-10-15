@@ -1,8 +1,11 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { detectDefaultBranch } from '@/lib/orchestrator';
 import type { QAReportData } from '@/lib/stream-types';
+
+const execFileAsync = promisify(execFile);
 
 export interface CommonArtifacts {
   spec: string | null;
@@ -26,11 +29,11 @@ function readHumanFeedback(dir: string): string | null {
  * @param projectPath  The project root (used for git diff).
  * @param branch       Optional git branch name for computing the diff.
  */
-export function readCommonArtifacts(
+export async function readCommonArtifacts(
   dir: string,
   projectPath: string,
   branch?: string | null,
-): CommonArtifacts {
+): Promise<CommonArtifacts> {
   // ── spec ──
   const specPath = join(dir, 'spec.md');
   const spec = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
@@ -55,10 +58,12 @@ export function readCommonArtifacts(
   if (branch) {
     try {
       const base = detectDefaultBranch(projectPath);
-      diff = execFileSync('git', ['diff', `${base}...${branch}`], {
+      const promise = execFileAsync('git', ['diff', `${base}...${branch}`], {
         cwd: projectPath,
         encoding: 'utf-8',
       });
+      promise.child?.stdin?.end();
+      diff = (await promise).stdout;
     } catch {
       diff = null;
     }
