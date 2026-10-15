@@ -521,7 +521,10 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
         log('auto-mode', `All CI checks passed for PR #${prNumber} — auto-merging`);
 
         try {
-          const method = computePipelineConfig(projectRoot).autoMergeMethod ?? 'merge';
+          const method = await _resolveMergeMethod(
+            projectRoot,
+            computePipelineConfig(projectRoot).autoMergeMethod ?? 'merge',
+          );
           // Ticket-history refactor (§3h): 'squash' is the only merge method
           // that always synthesizes a brand-new commit message, so the
           // trailer-bearing message prepared by the pre-merge squash (§3b)
@@ -591,6 +594,40 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
   }, 30_000); // poll every 30 seconds
 
   state.ciPollTimers.set(taskId, timer);
+}
+
+type MergeMethod = 'merge' | 'squash' | 'rebase';
+
+/**
+ * Pick the merge method `gh pr merge` should use. The configured method is
+ * honoured when the repository allows it; otherwise fall back to an allowed
+ * one (squash, then rebase, then merge). Without this, a repo that disables
+ * merge commits — while `autoMergeMethod` is unset and defaults to 'merge' —
+ * fails every attempt, exhausts MAX_MERGE_FAILURES, and strands a green PR in
+ * pr-open. Best-effort: if the repo settings can't be read, use the configured
+ * method unchanged.
+ */
+async function _resolveMergeMethod(projectRoot: string, configured: MergeMethod): Promise<MergeMethod> {
+  try {
+    const { stdout } = await execFileAsync(getToolPath('gh'), [
+      'repo', 'view', '--json', 'mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed',
+    ], { cwd: projectRoot, encoding: 'utf-8', timeout: 10_000 });
+    const repo = JSON.parse(stdout) as Record<string, unknown>;
+    const allowed: Record<MergeMethod, boolean> = {
+      merge: repo.mergeCommitAllowed !== false,
+      squash: repo.squashMergeAllowed !== false,
+      rebase: repo.rebaseMergeAllowed !== false,
+    };
+    if (allowed[configured]) return configured;
+    const fallback = (['squash', 'rebase', 'merge'] as const).find(m => allowed[m]);
+    if (fallback) {
+      log('auto-mode', `Merge method '${configured}' is not allowed by the repository — using '${fallback}'`);
+      return fallback;
+    }
+  } catch (err) {
+    logWarn('auto-mode', 'Could not read repository merge settings — using configured merge method', err);
+  }
+  return configured;
 }
 
 /**
