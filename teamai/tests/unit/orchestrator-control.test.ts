@@ -328,7 +328,7 @@ describe('Orchestrator Pipeline Integration', () => {
       await vi.waitFor(() => {
         expect(pipelines.has(taskId)).toBe(false);
         expect(active.has(taskId)).toBe(false);
-      }, { timeout: 10_000 });
+      });
 
       await promise.catch(() => { /* best-effort */ });
     });

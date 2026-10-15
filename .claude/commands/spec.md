@@ -37,7 +37,7 @@ Use Glob and Grep to find:
 Create the file `.teamai/{feature-slug}/spec.md` containing:
 - **Overview**: One paragraph describing the feature and its motivation
 - **Requirements**: Numbered list of specific, unambiguous requirements
-- **Acceptance Criteria**: Testable conditions (Given/When/Then format), each labelled with a stable ID: `AC1`, `AC2`, ... QA reports results per ID, so IDs must stay unique and never change once written
+- **Acceptance Criteria**: Testable conditions (Given/When/Then format)
 - **Files to Modify**: List each file with a one-line rationale
 - **New Files to Create**: List with purpose
 - **Dependencies & Risks**: External dependencies, breaking changes, migration needs

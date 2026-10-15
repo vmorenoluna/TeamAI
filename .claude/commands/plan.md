@@ -64,17 +64,6 @@ Rules:
   no orphaned criteria. After writing the plan, verify that each criterion from the
   spec appears in a subtask's `acceptance_criteria` array. If a criterion has no
   matching subtask, add one.
-- **`files` is the unit the planner arbitrates, not a place where work is lost.** The
-  orchestrator uses `files` (∪ `files_to_create`) to keep parallel subtasks off the same
-  file and the coder uses it to know where to work. A coder may edit unlisted files; the
-  orchestrator then holds that work and asks the planner (scope arbitration in
-  plan-revise) to approve or reject each file, and listing files up front avoids that
-  round-trip. So list every file a subtask will predictably change, INCLUDING
-  paired/mirrored files that must change together — `defaults/commands/*.md` ↔
-  `.claude/commands/*.md`, `defaults/roles/*.md` ↔ `.claude/roles/*.md`, anything a
-  drift/mirror test ties together, and tests that type-check against an interface the
-  subtask changes. Search for drift/mirror tests when a subtask edits a file that may
-  have a mirrored copy.
 - **Shared files across `parallel_group`s.** Subtasks in the SAME `parallel_group` run
   concurrently — each in its own isolated worktree branched from the same base, then
   cherry-picked back as one batch — so two subtasks in the same group that touch the

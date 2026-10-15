@@ -178,8 +178,7 @@ const CONTRACT: Partial<Record<AgentMode, Rule[]>> = {
     r('tests run before the cherry-pick is completed', 'Do NOT run `git cherry-pick --continue` yet'),
     r('remaining test failures are reported, never hidden', 'state clearly in your summary which tests fail'),
     r('only an unresolvable conflict is left unfinished', 'Leave the cherry-pick unfinished only if'),
-    r('non-interactive continue', 'GIT_EDITOR=true git -c core.hooksPath=/dev/null cherry-pick --continue'),
-    r('a failing project hook never leaves the pick unfinished', 'Do NOT leave the'),
+    r('non-interactive continue', 'GIT_EDITOR=true git cherry-pick --continue'),
   ],
 };
 
