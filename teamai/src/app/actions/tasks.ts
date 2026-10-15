@@ -589,7 +589,7 @@ export async function deleteTaskWorktree(taskId: string): Promise<{ success: boo
       // --force also failed (e.g. files locked) — delete manually and prune
       try {
         rmSync(wtPath, { recursive: true, force: true });
-        removeStaleWorktreeRegistration(projectPath, wtPath);
+        await removeStaleWorktreeRegistration(projectPath, wtPath);
         taskStore.update(taskId, { branch: undefined });
         revalidatePath('/');
         revalidatePath(`/task/${taskId}`);

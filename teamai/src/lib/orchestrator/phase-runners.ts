@@ -754,7 +754,7 @@ export async function runPlanPhase(
       // invisible to existsSync on the host but still blocks the -b
       // creation above (and would block it again on the no-`-b` retry
       // below too, since the branch would still read as checked out).
-      removeStaleWorktreeRegistration(deps.projectRoot, pipeline.worktreePath);
+      await removeStaleWorktreeRegistration(deps.projectRoot, pipeline.worktreePath);
       await deps.execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], deps.projectRoot);
     }
   }

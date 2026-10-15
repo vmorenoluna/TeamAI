@@ -906,7 +906,7 @@ export class Orchestrator {
       this._ctx.removeWorktree(taskId);
     } else if (currentPhase === 'implement') {
       // Worktree has partial changes — discard them
-      this._cleanWorktree(taskId);
+      await this._cleanWorktree(taskId);
     }
   }
 
@@ -1104,8 +1104,8 @@ export class Orchestrator {
     return path.join(worktreeBase, resolveWorktreeDirName(task));
   }
 
-  private _cleanWorktree(taskId: string): void {
-    cleanWorktreeFn(taskId, {
+  private async _cleanWorktree(taskId: string): Promise<void> {
+    await cleanWorktreeFn(taskId, {
       execGit: (args, hostCwd) => this._execGit(args, hostCwd),
       projectRoot: this.projectRoot,
       taskStore: this.taskStore,

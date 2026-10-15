@@ -27,9 +27,11 @@ import { prewarmModelsCache } from './src/app/actions/providers';
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
 const handle = app.getRequestHandler();
 
-app.prepare().then(async () => {
+void app.prepare().then(async () => {
   const server = createServer((req, res) => {
-    handle(req, res, parse(req.url!, true));
+    handle(req, res, parse(req.url!, true)).catch(err => {
+      logError('server', 'Request handler failed', err);
+    });
   });
 
   // noServer: true so we handle upgrades manually and don't block Next.js HMR
