@@ -313,29 +313,31 @@ describe('Orchestrator Pipeline Integration', () => {
 
   describe('Error Recovery', () => {
     it('should clean up pipelines after session error', async () => {
-      mockCreateSession.mockResolvedValue('err-sess');
-
-      // Fire error exit after a tick
-      setTimeout(() => fireExitEvent('err-sess', 1), 5);
+      // Fire the error exit once the session exists: runTask's real (async)
+      // git calls run first, so a fixed timer from here can fire too early.
+      mockCreateSession.mockImplementation(async () => {
+        setTimeout(() => fireExitEvent('err-sess', 1), 5);
+        return 'err-sess';
+      });
 
       const promise = (orch as AnyOrch).runTask(taskId, 'error test');
 
-      await new Promise((r) => setTimeout(r, 80));
-
-      // Pipeline should be cleaned up
+      // Pipeline and active task should be cleaned up
       const pipelines = (orch as AnyOrch).pipelines as Map<string, unknown>;
-      expect(pipelines.has(taskId)).toBe(false);
-
-      // Active tasks should be cleaned too
       const active = (orch as AnyOrch).activeTasks as Set<string>;
-      expect(active.has(taskId)).toBe(false);
+      await vi.waitFor(() => {
+        expect(pipelines.has(taskId)).toBe(false);
+        expect(active.has(taskId)).toBe(false);
+      });
 
       await promise.catch(() => { /* best-effort */ });
     });
 
     it('should advance to failed phase on session error', async () => {
-      mockCreateSession.mockResolvedValue('fail-sess');
-      setTimeout(() => fireExitEvent('fail-sess', 1), 5);
+      mockCreateSession.mockImplementation(async () => {
+        setTimeout(() => fireExitEvent('fail-sess', 1), 5);
+        return 'fail-sess';
+      });
 
       await (orch as AnyOrch).runTask(taskId, 'failure').catch(() => { /* best-effort */ });
 

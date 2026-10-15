@@ -28,7 +28,16 @@ const { onHandlers, mockCreateSession, mockSendMessage, mockKillSession, mockEmi
 const mockExecFileSync = vi.hoisted(() => vi.fn());
 
 vi.mock('child_process', () => ({
-  execFile: vi.fn(),
+  // Callback-form execFile (promisified by git-platform): delegate to the sync mock so existing stubs apply.
+  execFile: (cmd: string, args: unknown[], opts: unknown, cb?: (...a: unknown[]) => void) => {
+    const done = typeof opts === "function" ? opts as (...a: unknown[]) => void : cb;
+    try {
+      const out = mockExecFileSync(cmd, args, opts);
+      done?.(null, { stdout: out == null ? "" : String(out), stderr: "" });
+    } catch (e) {
+      done?.(e);
+    }
+  },
   execFileSync: mockExecFileSync,
 }));
 
@@ -5869,7 +5878,11 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
         progress_log_path: 'job_progress.log',
       }));
 
+      // Let subtask 1 consume its wakeup file before subtask 2 ends: the scan
+      // matches ANY subtask_wakeup-st<N>.json, and the async scope check no
+      // longer keeps the two sessions' post-processing in lockstep.
       fireEvent('event', { sessionId: 'sess-group-st1', event: { type: 'result' } });
+      await vi.advanceTimersByTimeAsync(50);
       fireEvent('event', { sessionId: 'sess-group-st2', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
 
