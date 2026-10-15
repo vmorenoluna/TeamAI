@@ -40,6 +40,40 @@ export interface RebaseDeps {
 }
 
 /**
+ * A merger session can end with its resolution staged but uncommitted — the
+ * pre-commit hook rejects the commit when the branch already fails typecheck
+ * or tests, which is the normal state mid-task. Pushing then publishes the
+ * pre-merge HEAD and later subtasks branch from it, silently losing the
+ * resolved work. Finish the merge here (hook bypassed, as repairStuckCherryPick
+ * does) or report failure when conflicts remain unresolved.
+ *
+ * @internal — exported for unit tests only.
+ */
+export function finishUnfinishedMerge(
+  deps: Pick<RebaseDeps, 'execGit' | 'execGitCapture'>,
+  worktreePath: string,
+  logDir: string,
+): boolean {
+  try {
+    const unmerged = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], worktreePath).trim();
+    if (unmerged) {
+      logToOutput(logDir, `\n[WARN] Merger left ${unmerged.split('\n').length} file(s) unmerged — not pushing\n`);
+      return false;
+    }
+    const status = deps.execGitCapture(['status', '--porcelain', '--', '.', ':!.teamai'], worktreePath).trim();
+    if (!status) return true;
+    logToOutput(logDir, `\n[WORKTREE] Merger left its resolution uncommitted — committing it before pushing:\n${status}\n`);
+    deps.execGit(['add', '-A', '--', '.', ':!.teamai'], worktreePath);
+    deps.execGit(['commit', '--no-verify', '--no-edit', '-m', 'chore: complete merge left uncommitted by merger'], worktreePath);
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToOutput(logDir, `\n[WARN] Could not finish merger's merge: ${msg}\n`);
+    return false;
+  }
+}
+
+/**
  * Rebase the feature branch onto the latest origin/master before merge/PR,
  * then push the result ourselves.
  *
@@ -190,6 +224,7 @@ export async function rebaseOntoLatestDefault(
       processManager.sendMessage(mergeSessionId, mergeMessage);
       await deps.waitForCompletion(mergeSessionId);
       processManager.killSession(mergeSessionId);
+      if (!finishUnfinishedMerge(deps, worktreePath, path.dirname(logFile))) return false;
       logToOutput(path.dirname(logFile), '\n[INFO] Merger resolved rebase conflicts — pushing its result\n');
       return pushRebased();
     } catch (mergeErr) {
