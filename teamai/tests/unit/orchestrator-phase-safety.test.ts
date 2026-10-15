@@ -673,6 +673,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     });
 
     const gitPush = vi.fn();
+    let mergerDone = false;
     const deps = {
       projectRoot: project.root,
       execGit: vi.fn(async (args: string[]) => {
@@ -681,11 +682,11 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       // Non-empty output confirms a genuine conflict — required for the
       // merger-spawn path to trigger at all (see rebaseOntoLatestDefault's
       // unmerged-file check, which skips the merger for a non-conflict
-      // rebase failure).
-      execGitCapture: vi.fn(async () => 'src/conflicted-file.ts\n'),
+      // rebase failure). Reported once; the merger session then resolves it.
+      execGitCapture: vi.fn(async () => (mergerDone ? '' : 'src/conflicted-file.ts\n')),
       gitPush,
       sessionOpts: vi.fn(),
-      waitForCompletion: vi.fn(async () => undefined),
+      waitForCompletion: vi.fn(async () => { mergerDone = true; }),
       baseBranch: 'master',
     };
 

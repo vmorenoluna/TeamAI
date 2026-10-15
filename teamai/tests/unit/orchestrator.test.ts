@@ -2841,6 +2841,7 @@ describe('Orchestrator', () => {
 
       // One session = merger for rebase (no merge session needed)
       mockCreateSession.mockResolvedValue('sess-merge-rebase');
+      let mergerDone = false;
 
       // Simulate rebase conflict, but merge succeeds
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
@@ -2850,7 +2851,8 @@ describe('Orchestrator', () => {
             throw new Error('Rebase conflict');
           }
           // Confirms a genuine conflict — required for the merger-spawn path.
-          if (argStr.includes('diff') && argStr.includes('diff-filter=U')) return 'src/conflicted-file.ts\n';
+          // Gone once the merger has resolved it.
+          if (argStr.includes('diff') && argStr.includes('diff-filter=U') && !mergerDone) return 'src/conflicted-file.ts\n';
         }
         return '';
       });
@@ -2862,6 +2864,7 @@ describe('Orchestrator', () => {
       expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', renderCommand('merge', 'origin/main'));
 
       // Complete the merger session
+      mergerDone = true;
       fireEvent('event', { sessionId: 'sess-merge-rebase', event: { type: 'result' } });
       await promise;
 
