@@ -13,8 +13,8 @@ import { DepPicker, TaskPill } from './dep-picker';
 import { PlanSubtasks } from './plan-subtasks';
 import { QAReportView } from './qa-report-view';
 import { CopyButton } from './copy-button';
-import { addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTaskWithOptions, restartCurrentPhase } from '@/app/actions/tasks';
-import { markAutoReviewed, retryAutoMerge } from '@/app/actions/auto-mode';
+import { addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTask, retryTaskWithOptions, restartCurrentPhase } from '@/app/actions/tasks';
+import { markAutoReviewed } from '@/app/actions/auto-mode';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, QAReportData } from '@/lib/stream-types';
 import { formatActionError } from '@/lib/error-format';
@@ -23,7 +23,7 @@ import { SpecDiffView } from './spec-diff-view';
 import { RoleRefinementCard } from './role-refinement-card';
 import type { RoleRefinementMode, RoleRefinementSuggestion } from '@/lib/role-refinement';
 import { RetryPhaseDialog } from './retry-phase-dialog';
-import { getRetryPhaseOptions } from '@/lib/orchestrator/artifacts';
+import { getRetryPhaseOptions, RESUME_AUTO } from '@/lib/orchestrator/artifacts';
 
 // Re-export sub-components for external consumers
 export { PlanSubtasks } from './plan-subtasks';
@@ -221,7 +221,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
     setError(null);
     run(async () => {
       try {
-        const result = await retryAutoMerge(task.id);
+        const result = await retryTask(task.id);
         if (!result.success) throw new Error(result.error || 'Unknown error');
       } catch (err) {
         setError(formatActionError('retry auto-merge', err));
@@ -252,18 +252,9 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   const dependencyIds = dependencies.map(t => t.id);
   const dependentIds = dependents.map(t => t.id);
 
-  // A retry defaults to 'spec' when the failure needed a spec fix (mirrors
-  // task-utils.ts's getResumePhaseForFailedTask, which the retryTask/
-  // retryFailedTask server paths use for a phase-less retry) — this page has
-  // qaReport already loaded, so it can make that same call client-side
-  // instead of task-card.tsx's fixed 'implement' fallback.
-  const defaultRetryPhase =
-    task.failureReason === 'spec-revision-exhausted' ||
-    (task.failureReason === 'qa-attempts-exhausted' && !!qaReport?.spec_concerns?.length)
-      ? 'spec'
-      : (task.failedPhase === 'create-pr' || task.failedPhase === 'merge')
-        ? task.failedPhase
-        : 'implement';
+  // The default retry choice is "resume where it failed": retryTask picks the
+  // phase server-side (including the spec-vs-implement call on spec concerns).
+  const defaultRetryPhase = RESUME_AUTO;
 
   const failedCriteria = qaReport?.criteria?.filter(c => c.status === 'FAIL') ?? [];
   // A report whose `overall` is neither PASS nor FAIL (almost always

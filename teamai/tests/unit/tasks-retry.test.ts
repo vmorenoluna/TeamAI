@@ -9,9 +9,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockRevalidatePath = vi.fn();
 
-const { mockMoveTaskToPhase } = vi.hoisted(() => ({
+const { mockMoveTaskToPhase, mockRetryAutoMerge } = vi.hoisted(() => ({
   mockMoveTaskToPhase: vi.fn().mockResolvedValue(undefined),
+  mockRetryAutoMerge: vi.fn(),
 }));
+
+vi.mock('@/lib/auto-mode', () => ({ retryAutoMerge: mockRetryAutoMerge }));
 
 let mockProjectPath = '/test/project';
 
@@ -641,5 +644,71 @@ describe('retryTaskWithOptions', () => {
     expect(existsSync(reportPath)).toBe(true);
     const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
     expect(report.criteria[0].name).toBe('Auth check');
+  });
+});
+
+describe('retryTask — one retry entry point', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockProjectPath = TEST_DIR;
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  /** Seed a task directly in `phase` with an optional autoMergeStalled marker. */
+  function seedTask(slug: string, phase: string, extra: Record<string, unknown> = {}) {
+    const taskDir = join(TEST_DIR, '.teamai', slug);
+    mkdirSync(taskDir, { recursive: true });
+    const taskId = `task-${slug}`;
+    writeFileSync(join(taskDir, 'task.json'), JSON.stringify({
+      id: taskId, title: slug, description: 'd', phase, branch: `feat/${slug}`,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...extra,
+    }, null, 2));
+    writeFileSync(join(taskDir, 'events.jsonl'), '');
+    return taskId;
+  }
+
+  it('hands a pr-open task whose auto-merge stalled back to the CI poller', async () => {
+    const taskId = seedTask('stalled', 'pr-open', { autoMergeStalled: 'Auto-merge failed 5 times' });
+    const { retryTask } = await import('@/app/actions/tasks');
+
+    const result = await retryTask(taskId);
+
+    expect(result.success).toBe(true);
+    expect(mockRetryAutoMerge).toHaveBeenCalledWith(TEST_DIR, taskId);
+    expect(mockMoveTaskToPhase).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the poller error (e.g. auto mode off) instead of throwing', async () => {
+    const taskId = seedTask('stalled-off', 'pr-open', { autoMergeStalled: 'x' });
+    mockRetryAutoMerge.mockImplementationOnce(() => { throw new Error('Auto mode is not enabled for this project'); });
+    const { retryTask } = await import('@/app/actions/tasks');
+
+    const result = await retryTask(taskId);
+
+    expect(result).toEqual({ success: false, error: 'Auto mode is not enabled for this project' });
+  });
+
+  it('still rejects a pr-open task that has not stalled', async () => {
+    const taskId = seedTask('open-ok', 'pr-open');
+    const { retryTask } = await import('@/app/actions/tasks');
+
+    const result = await retryTask(taskId);
+
+    expect(result.success).toBe(false);
+    expect(mockRetryAutoMerge).not.toHaveBeenCalled();
+  });
+
+  it('treats the "auto" dialog choice as a phase-less retry (resumes at the failed phase)', async () => {
+    const { taskId } = seedFailedTask(TEST_DIR, 'auto-choice');
+    const { retryTaskWithOptions } = await import('@/app/actions/tasks');
+
+    const result = await retryTaskWithOptions(taskId, 'auto');
+
+    expect(result.success).toBe(true);
+    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'qa-review');
   });
 });

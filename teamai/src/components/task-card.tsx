@@ -6,19 +6,8 @@ import { checkTaskWorktree, deleteTaskWorktree, retryTaskWithOptions, stopTask, 
 import type { Task } from '@/lib/task-store';
 import { formatActionError } from '@/lib/error-format';
 import { PHASE_BADGE, PHASE_LABELS } from '@/constants/phases';
-import { RetryPhaseDialog, type DialogPhaseOption } from './retry-phase-dialog';
-import { getRetryPhaseOptions } from '@/lib/orchestrator/artifacts';
-
-// ── Phase options for the Retry button (full list) ──
-// Default phase is 'implement' — the most common failure point is qa-review,
-// which maps to implement-level artifact clearing (keep spec+plan, clear QA).
-// This is a reasonable default since getResumePhaseForFailedTask() requires
-// events.jsonl (server-side) and can't be computed client-side.
-const RETRY_PHASE_OPTIONS: DialogPhaseOption[] = [
-  { phase: 'spec', label: 'Spec' },
-  { phase: 'plan', label: 'Plan' },
-  { phase: 'implement', label: 'Implement' },
-];
+import { RetryPhaseDialog } from './retry-phase-dialog';
+import { getRetryPhaseOptions, RESUME_AUTO } from '@/lib/orchestrator/artifacts';
 
 const DESCRIPTION_LIMIT = 80;
 
@@ -455,8 +444,8 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
     {showRetryDialog && (
       <RetryPhaseDialog
         taskTitle={task.title}
-        phases={task.failedPhase === 'create-pr' || task.failedPhase === 'merge' ? getRetryPhaseOptions(task.failedPhase) : RETRY_PHASE_OPTIONS}
-        defaultPhase={task.failedPhase === 'create-pr' || task.failedPhase === 'merge' ? task.failedPhase : 'implement'}
+        phases={getRetryPhaseOptions(task.failedPhase)}
+        defaultPhase={RESUME_AUTO}
         onCancel={() => setShowRetryDialog(false)}
         onConfirm={handleRetryConfirm}
       />

@@ -160,17 +160,20 @@ export interface PhaseClearDescription {
   label: string;
 }
 
+/** Sentinel retry target: let the orchestrator pick where to resume. */
+export const RESUME_AUTO = 'auto';
+
 /**
- * Phases the Retry dialog offers for a failed task. A task that failed while
- * creating its PR or merging has nothing wrong with its code or QA verdict, so
- * resuming at that phase (no agent re-run) is offered first; the agent phases
- * stay available.
+ * Options for the Retry dialog. The first — and default — is "resume where it
+ * failed", decided server-side by `retryTask` from the task's recorded failure
+ * point, so a failure in any phase (including a transient `gh`/git error
+ * while creating the PR or merging) is recoverable with one choice and
+ * without re-running agents that already finished. The explicit phases remain
+ * for deliberately rewinding the pipeline.
  */
 export function getRetryPhaseOptions(failedPhase?: string): PhaseClearDescription[] {
-  const base = getPhaseClearDescriptions();
-  if (failedPhase === 'create-pr') return [{ phase: 'create-pr', label: 'Create PR' }, ...base];
-  if (failedPhase === 'merge') return [{ phase: 'merge', label: 'Merge' }, ...base];
-  return base;
+  const where = failedPhase && failedPhase !== 'failed' ? ` (${failedPhase})` : '';
+  return [{ phase: RESUME_AUTO, label: `where it failed${where}` }, ...getPhaseClearDescriptions()];
 }
 
 /** Return the list of phases the retry-phase dialog can offer. */
@@ -222,15 +225,10 @@ export function getPhaseClearDescription(
         'Keep the existing spec and plan. Only QA history is cleared. ' +
         'Re-runs implementation followed by QA review.'
       );
-    case 'create-pr':
+    case RESUME_AUTO:
       return (
-        'Push the branch and open the pull request again. No agent runs and nothing is cleared. ' +
-        'An already-open PR for the branch is reused. Falls back to Implement if the worktree is gone.'
-      );
-    case 'merge':
-      return (
-        'Retry the merge. No agent runs and nothing is cleared. ' +
-        'Falls back to Implement if the worktree is gone.'
+        'TeamAI picks the resume point from where the task failed. Work that already completed is kept; ' +
+        'a failure while creating the PR or merging re-runs only that step, with no agent involved.'
       );
     default:
       return 'Artifacts will be cleared according to the pipeline phase.';
