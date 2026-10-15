@@ -571,7 +571,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
 
     const deps = {
       projectRoot: project.root,
-      execGit: vi.fn(),
+      execGit: vi.fn(async () => undefined),
       execGitCapture: vi.fn(async () => ''),
       gitPush: vi.fn(),
       sessionOpts: vi.fn(),
@@ -607,7 +607,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       return '';
     });
 
-    const execGit = vi.fn();
+    const execGit = vi.fn(async () => undefined);
     const gitPush = vi.fn();
     const deps = {
       projectRoot: project.root,
@@ -646,7 +646,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
 
     const deps = {
       projectRoot: project.root,
-      execGit: vi.fn(),
+      execGit: vi.fn(async () => undefined),
       execGitCapture: vi.fn(async () => ''),
       gitPush: vi.fn((args: string[]) => {
         if (args[0] === 'push') throw new Error('offline');
@@ -757,7 +757,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       return '';
     });
 
-    const execGit = vi.fn();
+    const execGit = vi.fn(async (_args: string[], _cwd: string): Promise<void> => undefined);
     const gitPush = vi.fn();
     const deps = {
       projectRoot: project.root,
@@ -807,7 +807,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       return '';
     });
 
-    const execGit = vi.fn();
+    const execGit = vi.fn(async () => undefined);
     const gitPush = vi.fn();
     const deps = {
       projectRoot: project.root,
@@ -861,7 +861,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'implement', branch: 'feat/test' };
 
     const gitPush = vi.fn();
-    const execGit = vi.fn();
+    const execGit = vi.fn(async () => undefined);
     const execGitCapture = vi.fn(async () => '');
     const deps = { projectRoot: project.root, gitPush, execGit, execGitCapture, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
 
@@ -880,7 +880,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'spec', branch: 'feat/test' };
 
     const gitPush = vi.fn();
-    const execGit = vi.fn();
+    const execGit = vi.fn(async () => undefined);
     const execGitCapture = vi.fn(async () => '');
     const deps = { projectRoot: project.root, gitPush, execGit, execGitCapture, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
 
@@ -899,7 +899,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     const deps = {
       projectRoot: project.root,
       gitPush: vi.fn(() => { throw new Error('offline'); }),
-      execGit: vi.fn(), execGitCapture: vi.fn(async () => ''), sessionOpts: vi.fn(), waitForCompletion: vi.fn(),
+      execGit: vi.fn(async () => undefined), execGitCapture: vi.fn(async () => ''), sessionOpts: vi.fn(), waitForCompletion: vi.fn(),
     };
 
     await expect(syncPhaseBaseline(pipeline, deps)).resolves.toBeUndefined();
@@ -976,7 +976,7 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
       toAgentPath: vi.fn((p: string) => p),
       executePhase: vi.fn().mockResolvedValue(undefined),
       gitPush: vi.fn(),
-      execGit: vi.fn(),
+      execGit: vi.fn(async () => undefined),
       getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
       scheduleWakeup: vi.fn(),
       writeCompletionSummary: vi.fn(),
@@ -1027,7 +1027,7 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
       toAgentPath: vi.fn((p: string) => p),
       executePhase: vi.fn().mockResolvedValue(undefined),
       gitPush: vi.fn(),
-      execGit: vi.fn(),
+      execGit: vi.fn(async () => undefined),
       getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
       scheduleWakeup: vi.fn(),
       writeCompletionSummary: vi.fn(),
@@ -1072,7 +1072,7 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
       toAgentPath: vi.fn((p: string) => p),
       executePhase: vi.fn().mockResolvedValue(undefined),
       gitPush: vi.fn(),
-      execGit: vi.fn(),
+      execGit: vi.fn(async () => undefined),
       getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
       scheduleWakeup: vi.fn(),
       writeCompletionSummary: vi.fn(),
@@ -1125,7 +1125,7 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
       toAgentPath: vi.fn((p: string) => p),
       executePhase: vi.fn().mockResolvedValue(undefined),
       gitPush: vi.fn(),
-      execGit: vi.fn(),
+      execGit: vi.fn(async () => undefined),
       getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
       scheduleWakeup: vi.fn(),
       writeCompletionSummary: vi.fn(),

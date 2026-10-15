@@ -6,7 +6,7 @@
  * resolveBaseBranch dedupe).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, chmodSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, chmodSync, readdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -37,6 +37,14 @@ vi.mock('child_process', async (importOriginal) => {
   return { ...actual, execFile };
 });
 
+// Per-test tool path overrides. Never persisted through setToolPath: that writes the
+// shared <cwd>/tools.json, which other test files read concurrently in the full suite.
+const { toolOverrides } = vi.hoisted(() => ({ toolOverrides: new Map<string, string>() }));
+vi.mock('../../src/lib/tool-checker', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/lib/tool-checker')>();
+  return { ...actual, getToolPath: (name: Parameters<typeof actual.getToolPath>[0]) => toolOverrides.get(name) ?? actual.getToolPath(name) };
+});
+
 const { mockWarn } = vi.hoisted(() => ({ mockWarn: vi.fn() }));
 vi.mock('../../src/lib/logger', () => ({
   log: vi.fn(), warn: mockWarn, error: vi.fn(),
@@ -50,7 +58,6 @@ import {
   isPrMerged,
   createPRViaCLI,
 } from '../../src/lib/git-platform';
-import { setToolPath, loadToolsConfig } from '../../src/lib/tool-checker';
 
 /** Make mockExecFile answer the next call(s) in callback form. */
 function ok(stdout: string, delayMs = 0) {
@@ -90,16 +97,12 @@ describe('AC1 — no sync subprocess APIs', () => {
 
 describe('AC2 — gh call does not block the event loop', () => {
   let dir: string;
-  let toolsJson: string | null = null;
-  const toolsPath = join(process.cwd(), 'tools.json');
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'gh-stub-'));
-    toolsJson = existsSync(toolsPath) ? readFileSync(toolsPath, 'utf-8') : null;
   });
   afterEach(() => {
-    if (toolsJson === null) rmSync(toolsPath, { force: true });
-    else writeFileSync(toolsPath, toolsJson);
+    toolOverrides.clear();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -108,8 +111,7 @@ describe('AC2 — gh call does not block the event loop', () => {
     const stub = join(dir, 'gh');
     writeFileSync(stub, '#!/bin/sh\nsleep 1\necho https://github.com/o/r/pull/1\n');
     chmodSync(stub, 0o755);
-    setToolPath('gh', stub);
-    expect(loadToolsConfig().gh).toBe(stub);
+    toolOverrides.set('gh', stub);
 
     let timerAt = 0;
     setTimeout(() => { timerAt = Date.now(); }, 50);

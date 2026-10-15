@@ -238,27 +238,27 @@ describe('consumeSubtaskWakeupFiles', () => {
 });
 
 describe('verifySubtaskDeliverables', () => {
-  it('returns incomplete and counts the first failure', () => {
+  it('returns incomplete and counts the first failure', async () => {
     const pipeline = makePipeline();
-    const r = verifySubtaskDeliverables(pipeline, makeDeps(), makeSubtask({ id: 6, files_to_create: ['out/a.txt'] }), cwd);
+    const r = await verifySubtaskDeliverables(pipeline, makeDeps(), makeSubtask({ id: 6, files_to_create: ['out/a.txt'] }), cwd);
     expect(r).toBe('incomplete');
     expect(pipeline.deliverableFailCounts?.[6]).toBe(1);
     expect(advancePhase).not.toHaveBeenCalled();
   });
 
-  it('fails the task once the retry cap is reached', () => {
+  it('fails the task once the retry cap is reached', async () => {
     const pipeline = makePipeline({ deliverableFailCounts: { 6: 2 } });
-    const r = verifySubtaskDeliverables(pipeline, makeDeps(), makeSubtask({ id: 6, files_to_create: ['out/a.txt'] }), cwd);
+    const r = await verifySubtaskDeliverables(pipeline, makeDeps(), makeSubtask({ id: 6, files_to_create: ['out/a.txt'] }), cwd);
     expect(r).toBe('failed');
     const report = JSON.parse(readFileSync(join(specDir, 'qa_report.json'), 'utf-8'));
     expect(report.overall).toBe('FAIL');
     expect(advancePhase).toHaveBeenCalledWith(pipeline, 'failed');
   });
 
-  it('returns ok when every deliverable is committed', () => {
+  it('returns ok when every deliverable is committed', async () => {
     mkdirSync(join(cwd, 'out'));
     writeFileSync(join(cwd, 'out/a.txt'), 'x');
-    const r = verifySubtaskDeliverables(makePipeline(), makeDeps(), makeSubtask({ files_to_create: ['out/a.txt'] }), cwd);
+    const r = await verifySubtaskDeliverables(makePipeline(), makeDeps(), makeSubtask({ files_to_create: ['out/a.txt'] }), cwd);
     expect(r).toBe('ok');
   });
 });
@@ -315,7 +315,7 @@ describe('checkSubtaskScope', () => {
 //  Hold-and-arbitrate — real git
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('scope hold and arbitration (real git)', () => {
+describe('scope hold and arbitration (real git)', async () => {
   let realExec: typeof ExecFileSyncFn;
   let repo: string;
   let sessionCount: number;
@@ -380,12 +380,12 @@ describe('scope hold and arbitration (real git)', () => {
   }
 
   /** A subtask worked in an isolated worktree on `feat-st<id>`; its commits are held there. */
-  function holdParallel(subtask: PlanSubtask, edits: Record<string, string>, unlisted: string[], deps = realDeps()) {
+  async function holdParallel(subtask: PlanSubtask, edits: Record<string, string>, unlisted: string[], deps = realDeps()) {
     const wt = join(specDir, '..', 'wt-st' + subtask.id);
     const base = git(repo, 'rev-parse', 'HEAD');
     git(repo, 'worktree', 'add', '-q', wt, '-b', 'feat-st' + subtask.id, 'feat');
     commit(wt, edits);
-    holdSubtaskForArbitration(pipelineFor(), deps, subtask, wt, base, unlisted);
+    await holdSubtaskForArbitration(pipelineFor(), deps, subtask, wt, base, unlisted);
     git(repo, 'worktree', 'remove', '--force', wt);
     return base;
   }
@@ -424,7 +424,7 @@ describe('scope hold and arbitration (real git)', () => {
       const subtask = st(1, ['a.ts']);
       const { unlistedFiles } = await checkSubtaskScope(pipelineFor(), realDeps(), subtask, repo, base, join(specDir, 'st1.log'), scopeViolations);
       expect(unlistedFiles).toEqual(['b.ts']);
-      holdSubtaskForArbitration(pipelineFor(), realDeps(), subtask, repo, base, unlistedFiles);
+      await holdSubtaskForArbitration(pipelineFor(), realDeps(), subtask, repo, base, unlistedFiles);
 
       expect(scopeViolations.has(1)).toBe(false);
       expect(git(repo, 'rev-parse', 'HEAD')).toBe(base);
@@ -441,7 +441,7 @@ describe('scope hold and arbitration (real git)', () => {
       expect(log).toContain("[SCOPE-HOLD] Holding subtask 1's commits on feat-st1 pending scope arbitration");
     });
 
-    it('leaves the commits in place (held_ref null) and never resets when the worktree is dirty', () => {
+    it('leaves the commits in place (held_ref null) and never resets when the worktree is dirty', async () => {
       const base = git(repo, 'rev-parse', 'HEAD');
       commit(repo, { 'b.ts': 'b\nb2\n' });
       const sessionHead = git(repo, 'rev-parse', 'HEAD');
@@ -450,7 +450,7 @@ describe('scope hold and arbitration (real git)', () => {
       const execGit = vi.fn(deps.execGit);
       deps.execGit = execGit;
 
-      holdSubtaskForArbitration(pipelineFor(), deps, st(1, ['a.ts']), repo, base, ['b.ts']);
+      await holdSubtaskForArbitration(pipelineFor(), deps, st(1, ['a.ts']), repo, base, ['b.ts']);
 
       expect(execGit.mock.calls.some(c => c[0][0] === 'reset')).toBe(false);
       expect(git(repo, 'rev-parse', 'HEAD')).toBe(sessionHead);
@@ -458,13 +458,13 @@ describe('scope hold and arbitration (real git)', () => {
       expect(outputLog()).toContain('[SCOPE-HOLD] Subtask 1 held in place (worktree has uncommitted changes)');
     });
 
-    it('attaches the coder reason from scope_notes, ignores unknown paths and deletes the notes file', () => {
+    it('attaches the coder reason from scope_notes, ignores unknown paths and deletes the notes file', async () => {
       const base = git(repo, 'rev-parse', 'HEAD');
       commit(repo, { 'b.ts': 'b\nb2\n' });
       const notes = join(specDir, 'scope_notes-st1.json');
       writeFileSync(notes, JSON.stringify({ files: [{ path: 'b.ts', reason: 'X' }, { path: 'zzz.ts', reason: 'ignored' }] }));
 
-      holdSubtaskForArbitration(pipelineFor(), realDeps(), st(1, ['a.ts']), repo, base, ['b.ts']);
+      await holdSubtaskForArbitration(pipelineFor(), realDeps(), st(1, ['a.ts']), repo, base, ['b.ts']);
 
       const report = readJson('scope_report-st1.json');
       expect(report.unlisted).toHaveLength(1);
@@ -486,7 +486,7 @@ describe('scope hold and arbitration (real git)', () => {
       git(repo, 'worktree', 'add', '-q', wt2, '-b', 'feat-st2', 'feat');
       commit(wt1, { 'a.ts': 'a\na1\n', 'extra.ts': 'x\n' });
       commit(wt2, { 'b.ts': 'b\nb2\n' });
-      holdSubtaskForArbitration(pipeline, deps, s1, wt1, base, ['extra.ts']);
+      await holdSubtaskForArbitration(pipeline, deps, s1, wt1, base, ['extra.ts']);
 
       const ok = await integrateGroup(
         pipeline, deps, [s1, s2],
@@ -521,7 +521,7 @@ describe('scope hold and arbitration (real git)', () => {
       writePlan([st(4, ['a.ts'], { completed: false })]);
       const base = git(repo, 'rev-parse', 'HEAD');
       commit(repo, { 'b.ts': 'b\nb2\n' });
-      holdSubtaskForArbitration(pipelineFor(), realDeps(), st(4, ['a.ts']), repo, base, ['b.ts']);
+      await holdSubtaskForArbitration(pipelineFor(), realDeps(), st(4, ['a.ts']), repo, base, ['b.ts']);
       verdictsWriter = () => ({ verdicts: [{ subtask_id: 4, path: 'b.ts', verdict: 'approve', reason: 'needed' }] });
 
       await runImplement(pipelineFor(), realDeps());
@@ -536,8 +536,8 @@ describe('scope hold and arbitration (real git)', () => {
       const s1 = st(1, ['a.ts']);
       const s2 = st(2, ['b.ts']);
       writePlan([s1, s2]);
-      holdParallel(s1, { 'a.ts': 'a\na1\n', 'x1.ts': 'x1\n' }, ['x1.ts']);
-      holdParallel(s2, { 'b.ts': 'b\nb1\n', 'x2.ts': 'x2\n' }, ['x2.ts']);
+      await holdParallel(s1, { 'a.ts': 'a\na1\n', 'x1.ts': 'x1\n' }, ['x1.ts']);
+      await holdParallel(s2, { 'b.ts': 'b\nb1\n', 'x2.ts': 'x2\n' }, ['x2.ts']);
       verdictsWriter = () => ({ verdicts: [
         { subtask_id: 1, path: 'x1.ts', verdict: 'approve', reason: 'needed' },
         { subtask_id: 2, path: 'x2.ts', verdict: 'approve', reason: 'needed' },
@@ -570,7 +570,7 @@ describe('scope hold and arbitration (real git)', () => {
     it('drops a rejected path, completes the subtask without a re-run and records the rejection', async () => {
       const s1 = st(1, ['a.ts']);
       writePlan([s1]);
-      holdParallel(s1, { 'a.ts': 'a\na1\n', 'b.ts': 'b\nb2\n' }, ['b.ts']);
+      await holdParallel(s1, { 'a.ts': 'a\na1\n', 'b.ts': 'b\nb2\n' }, ['b.ts']);
       verdictsWriter = () => ({ verdicts: [{ subtask_id: 1, path: 'b.ts', verdict: 'reject', reason: 'R' }] });
 
       await runImplement(pipelineFor(), realDeps());
@@ -585,7 +585,7 @@ describe('scope hold and arbitration (real git)', () => {
     it('re-runs a subtask whose only change was rejected, without spending an incomplete pass, and tells the coder', async () => {
       const s1 = st(1, ['a.ts']);
       writePlan([s1]);
-      holdParallel(s1, { 'b.ts': 'b\nb2\n' }, ['b.ts']);
+      await holdParallel(s1, { 'b.ts': 'b\nb2\n' }, ['b.ts']);
       verdictsWriter = () => ({ verdicts: [{ subtask_id: 1, path: 'b.ts', verdict: 'reject', reason: 'R' }] });
       const deps = realDeps();
       const pipeline = pipelineFor({ incompleteImplementPassCount: 0 });
@@ -607,7 +607,7 @@ describe('scope hold and arbitration (real git)', () => {
     it('starts a second session after an invalid verdict file when maxScopeStall allows it', async () => {
       const s1 = st(1, ['a.ts']);
       writePlan([s1]);
-      holdParallel(s1, { 'a.ts': 'a\na1\n', 'x.ts': 'x\n' }, ['x.ts']);
+      await holdParallel(s1, { 'a.ts': 'a\na1\n', 'x.ts': 'x\n' }, ['x.ts']);
       let n = 0;
       verdictsWriter = () => (++n === 1 ? null : { verdicts: [{ subtask_id: 1, path: 'x.ts', verdict: 'approve', reason: 'ok' }] });
       cfgOverrides = { maxScopeStall: 3 };
@@ -623,7 +623,7 @@ describe('scope hold and arbitration (real git)', () => {
     it('fails the task when the default stall budget is spent by an invalid verdict file', async () => {
       const s1 = st(1, ['a.ts']);
       writePlan([s1]);
-      holdParallel(s1, { 'a.ts': 'a\na1\n', 'x.ts': 'x\n' }, ['x.ts']);
+      await holdParallel(s1, { 'a.ts': 'a\na1\n', 'x.ts': 'x\n' }, ['x.ts']);
       verdictsWriter = () => null;
       const pipeline = pipelineFor();
 
@@ -643,7 +643,7 @@ describe('scope hold and arbitration (real git)', () => {
     it('fails without a second session when the next round repeats the first report', async () => {
       const s1 = st(1, ['a.ts']);
       writePlan([s1]);
-      holdParallel(s1, { 'b.ts': 'b\nb2\n' }, ['b.ts']);
+      await holdParallel(s1, { 'b.ts': 'b\nb2\n' }, ['b.ts']);
       verdictsWriter = () => ({ verdicts: [{ subtask_id: 1, path: 'b.ts', verdict: 'reject', reason: 'R' }] });
       const pipeline = pipelineFor();
 
@@ -651,7 +651,7 @@ describe('scope hold and arbitration (real git)', () => {
       expect(sessionCount).toBe(1);
 
       // The coder redoes the same out-of-scope change: a second report with the same unlisted file.
-      holdParallel(s1, { 'b.ts': 'b\nb3\n' }, ['b.ts']);
+      await holdParallel(s1, { 'b.ts': 'b\nb3\n' }, ['b.ts']);
       writePlan([{ ...s1, completed: false }]);
       await runImplement(pipeline, realDeps());
 
@@ -665,7 +665,7 @@ describe('scope hold and arbitration (real git)', () => {
     it('fails without a session when the total re-plan budget is already spent', async () => {
       const s1 = st(1, ['a.ts']);
       writePlan([s1]);
-      holdParallel(s1, { 'a.ts': 'a\na1\n', 'x.ts': 'x\n' }, ['x.ts']);
+      await holdParallel(s1, { 'a.ts': 'a\na1\n', 'x.ts': 'x\n' }, ['x.ts']);
       const pipeline = pipelineFor({ scopeReplanCount: 6 });
 
       await runImplement(pipeline, realDeps());
@@ -679,7 +679,7 @@ describe('scope hold and arbitration (real git)', () => {
     it('does not arbitrate while a wakeup is pending', async () => {
       const s1 = st(1, ['a.ts']);
       writePlan([s1]);
-      holdParallel(s1, { 'a.ts': 'a\na1\n', 'x.ts': 'x\n' }, ['x.ts']);
+      await holdParallel(s1, { 'a.ts': 'a\na1\n', 'x.ts': 'x\n' }, ['x.ts']);
       const deps = realDeps();
       const pipeline = pipelineFor({ wakeupUntil: '2030-01-01T00:00:00Z', wakeupSubtaskId: 9 });
 

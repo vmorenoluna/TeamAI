@@ -65,7 +65,7 @@ export interface PhaseContext {
   worktreeGitEnv: (hostCwd: string, containerWs?: string) => Record<string, string>;
   isWorktreeHealthy: (worktreePath: string) => boolean;
   cleanStaleSubtaskWorktrees: (pipeline: TaskPipeline) => Promise<void>;
-  removeWorktree: (taskId: string) => void;
+  removeWorktree: (taskId: string) => Promise<void>;
 
   // ── Snapshots ──
   restoreQaReportFromSnapshot: (specPath: string) => void;

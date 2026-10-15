@@ -180,7 +180,7 @@ export class Orchestrator {
     if (NO_RESUME_PHASES.has(targetPhase)) {
       // Auto-delete the git worktree when moving to 'done', 'backlog', or 'failed'
       if (targetPhase === 'done' || targetPhase === 'backlog' || targetPhase === 'failed') {
-        this._ctx.removeWorktree(taskId);
+        await this._ctx.removeWorktree(taskId);
       }
       this.taskStore.updatePhase(taskId, targetPhase);
       processManager.emit('phase-change', { taskId, phase: targetPhase, projectRoot: this.projectRoot });
@@ -682,7 +682,7 @@ export class Orchestrator {
       // rest of the codebase treats unverifiable platforms.
     }
 
-    this._ctx.removeWorktree(taskId);
+    await this._ctx.removeWorktree(taskId);
 
     // Ticket-history refactor (§3d): no committed artifact snapshot exists
     // anymore (the folder-commit mechanism was replaced by the
@@ -903,7 +903,7 @@ export class Orchestrator {
     // Clean the worktree for plan/implement phases so the next run starts with a clean slate
     if (currentPhase === 'plan') {
       // Worktree was created during plan — remove it so it gets recreated fresh
-      this._ctx.removeWorktree(taskId);
+      await this._ctx.removeWorktree(taskId);
     } else if (currentPhase === 'implement') {
       // Worktree has partial changes — discard them
       await this._cleanWorktree(taskId);

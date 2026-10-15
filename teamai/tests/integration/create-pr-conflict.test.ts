@@ -243,8 +243,8 @@ describe('CreatePR Conflict Resolution Integration', () => {
     };
     // PR creation via gh CLI may fail in test env (gh not installed) — catch the error
     const promise = (orch as AnyOrch).runCreatePR(pipeline).catch(() => { /* best-effort */ });
-    // Allow async work to reach the merger session creation
-    await new Promise(r => setTimeout(r, 100));
+    // Wait (condition-driven) for the async rebase to reach the merger session
+    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, { timeout: 10_000 });
 
     // Verify the merger agent was spawned
     expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('merge', 'origin/master'));
@@ -301,7 +301,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
     };
     // gh pr create will fail in test env — catch the error
     const promise = (orch as AnyOrch).runCreatePR(pipeline).catch(() => { /* best-effort */ });
-    await new Promise(r => setTimeout(r, 100));
+    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, { timeout: 10_000 });
 
     // Verify merger was spawned
     expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('merge', 'origin/master'));

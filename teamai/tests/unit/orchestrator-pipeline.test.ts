@@ -45,13 +45,16 @@ vi.mock('../../src/lib/container-manager', () => ({
   hostToContainerPath: vi.fn((hostPath: string) => hostPath),
 }));
 
+const mockExecFileSync = vi.hoisted(() => vi.fn((..._a: unknown[]): unknown => ''));
+// execFile calls back (and is promisify-aware) so the async git helpers resolve; it delegates to the sync stub so existing scripted responses apply.
+const mockExecFile = await vi.hoisted(async () => {
+  const { createExecFileMock } = await import('../utils/mock-child-process');
+  return createExecFileMock({ resetSafe: true, execFileSync: (...a) => mockExecFileSync(...a) });
+});
+
 vi.mock('child_process', () => ({
-  // Callback-form execFile (promisified by git-platform): fail/succeed like the sync stub.
-  execFile: (_cmd: string, _args: unknown[], opts: unknown, cb?: (...a: unknown[]) => void) => {
-    const done = typeof opts === "function" ? opts as (...a: unknown[]) => void : cb;
-    done?.(null, { stdout: "", stderr: "" });
-  },
-  execFileSync: vi.fn(() => ''),
+  execFile: mockExecFile,
+  execFileSync: mockExecFileSync,
   spawn: vi.fn(),
   ChildProcess: class MockCP {},
 }));

@@ -46,6 +46,13 @@ export interface ExecFileMockOptions {
    * still sync elsewhere): its return value becomes stdout, a throw a failure.
    */
   execFileSync?: (file: string, args: string[], options: Record<string, unknown>) => unknown;
+  /**
+   * Return a plain function instead of a `vi.fn`, so `vi.resetAllMocks()` /
+   * `mockReset()` in a test's `beforeEach` cannot wipe its implementation (a
+   * reset `vi.fn` never calls back, which hangs every awaited git call).
+   * Pair with an `execFileSync` delegate that is itself a `vi.fn` to assert calls.
+   */
+  resetSafe?: boolean;
 }
 
 export type ExecFileMock = Mock;
@@ -72,21 +79,23 @@ function normalise(r: ExecFileResult | string | void): { stdout: string; stderr:
 export function createExecFileMock(options: ExecFileMockOptions = {}): ExecFileMock {
   const run = async (file: string, args: string[], opts: Record<string, unknown>) => {
     if (options.execFileSync) {
-      const out = options.execFileSync(file, args, opts);
+      const out = await options.execFileSync(file, args, opts);
+      if (out && typeof out === 'object' && 'stdout' in out) return normalise(out as ExecFileResult);
       return normalise(typeof out === 'string' ? out : out == null ? '' : String(out));
     }
     return normalise(await options.handler?.(file, args, opts));
   };
 
-  const mock = vi.fn((file: string, args: string[], ...rest: unknown[]) => {
+  const impl = (file: string, args: string[], ...rest: unknown[]) => {
     const cb = rest[rest.length - 1] as ((e: Error | null, stdout?: string, stderr?: string) => void) | undefined;
     const opts = (rest.length > 1 ? rest[0] : {}) as Record<string, unknown>;
     run(file, args, opts).then(
       r => cb?.(null, r.stdout, r.stderr),
       (e: unknown) => cb?.(e instanceof Error ? e : new Error(String(e))),
     );
-    return { stdin: { end: vi.fn() } };
-  });
+    return { stdin: { end: options.resetSafe ? () => undefined : vi.fn() } };
+  };
+  const mock = (options.resetSafe ? impl : vi.fn(impl)) as typeof impl;
 
   // promisify(execFile) must resolve { stdout, stderr } with a `.child`; route it
   // through the callback form so each call is recorded and run exactly once.

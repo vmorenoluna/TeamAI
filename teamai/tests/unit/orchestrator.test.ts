@@ -23,20 +23,16 @@ const mockCreateSession = vi.hoisted(() => vi.fn());
 const mockSendMessage = vi.hoisted(() => vi.fn());
 const mockKillSession = vi.hoisted(() => vi.fn());
 const mockExecFileSync = vi.hoisted(() => vi.fn());
+// Callback-form execFile (promisified by the async git helpers and git-platform): delegates to the sync mock so existing stubs apply.
+const mockExecFile = await vi.hoisted(async () => {
+  const { createExecFileMock } = await import('../utils/mock-child-process');
+  return createExecFileMock({ resetSafe: true, execFileSync: (...a) => mockExecFileSync(...a) });
+});
 
-vi.mock('child_process', () => ({
-  // Callback-form execFile (promisified by git-platform): delegate to the sync mock so existing stubs apply.
-  execFile: (cmd: string, args: unknown[], opts: unknown, cb?: (...a: unknown[]) => void) => {
-    const done = typeof opts === "function" ? opts as (...a: unknown[]) => void : cb;
-    try {
-      const out = mockExecFileSync(cmd, args, opts);
-      done?.(null, { stdout: out == null ? "" : String(out), stderr: "" });
-    } catch (e) {
-      done?.(e);
-    }
-  },
-  execFileSync: mockExecFileSync,
-}));
+vi.mock('child_process', async (orig) => {
+  const { buildChildProcessMock } = await import('../utils/mock-child-process');
+  return { ...buildChildProcessMock(await orig(), mockExecFile), execFileSync: mockExecFileSync };
+});
 
 vi.mock('../../src/lib/logger', () => ({
   log: vi.fn(), warn: mockWarn, error: vi.fn(),
@@ -1251,17 +1247,17 @@ describe('Orchestrator', () => {
   // ── _execGit ───────────────────────────────────────────────────────
 
   describe('_execGit', () => {
-    it('calls git on host when container is disabled', () => {
+    it('calls git on host when container is disabled', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
       mockExecFileSync.mockReturnValue('');
-      (orch as AnyOrch)._execGit(['status'], testData.root);
+      await (orch as AnyOrch)._execGit(['status'], testData.root);
 
-      expect(mockExecFileSync).toHaveBeenCalledWith('git', ['status'], { cwd: testData.root, stdio: ['ignore', 'pipe', 'pipe'] });
+      expect(mockExecFileSync).toHaveBeenCalledWith('git', ['status'], expect.objectContaining({ cwd: testData.root }));
     });
 
-    it('calls docker exec when container is enabled and running', () => {
+    it('calls docker exec when container is enabled and running', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       vi.mocked(containerManager.getRunningContainer).mockReturnValue({
@@ -1275,7 +1271,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       mockExecFileSync.mockReturnValue('');
-      (orch as AnyOrch)._execGit(['status'], testData.root);
+      await (orch as AnyOrch)._execGit(['status'], testData.root);
 
       expect(mockExecFileSync).toHaveBeenCalledWith(
         getToolPath('docker'),
@@ -1285,7 +1281,7 @@ describe('Orchestrator', () => {
     });
 
     // Coverage: line 540 — absolute project path mapped through hostToContainerPath
-    it('maps absolute project paths via hostToContainerPath in container mode', () => {
+    it('maps absolute project paths via hostToContainerPath in container mode', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       vi.mocked(containerManager.getRunningContainer).mockReturnValue({
@@ -1299,7 +1295,7 @@ describe('Orchestrator', () => {
       mockExecFileSync.mockReturnValue('');
       // Pass an absolute path starting with projectRoot — should be mapped
       const absolutePath = join(testData.root, 'some', 'file');
-      (orch as AnyOrch)._execGit(['add', absolutePath], testData.root);
+      await (orch as AnyOrch)._execGit(['add', absolutePath], testData.root);
 
       expect(mapSpy).toHaveBeenCalledWith(
         absolutePath,
@@ -1313,7 +1309,7 @@ describe('Orchestrator', () => {
       );
     });
 
-    it('leaves non-project absolute paths unchanged in container mode', () => {
+    it('leaves non-project absolute paths unchanged in container mode', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       vi.mocked(containerManager.getRunningContainer).mockReturnValue({
@@ -1326,7 +1322,7 @@ describe('Orchestrator', () => {
 
       mockExecFileSync.mockReturnValue('');
       // Path outside project root — should NOT be mapped
-      (orch as AnyOrch)._execGit(['add', '/tmp/external-file'], testData.root);
+      await (orch as AnyOrch)._execGit(['add', '/tmp/external-file'], testData.root);
 
       // hostToContainerPath should not have been called with this path
       // The path won't startWith projectRoot, so it passes through as-is
@@ -1337,7 +1333,7 @@ describe('Orchestrator', () => {
       );
     });
 
-    it('falls back to host git when container is enabled but not running', () => {
+    it('falls back to host git when container is enabled but not running', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       // No running container
@@ -1346,10 +1342,10 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       mockExecFileSync.mockReturnValue('');
-      (orch as AnyOrch)._execGit(['status'], testData.root);
+      await (orch as AnyOrch)._execGit(['status'], testData.root);
 
       // Falls back to host git
-      expect(mockExecFileSync).toHaveBeenCalledWith('git', ['status'], { cwd: testData.root, stdio: ['ignore', 'pipe', 'pipe'] });
+      expect(mockExecFileSync).toHaveBeenCalledWith('git', ['status'], expect.objectContaining({ cwd: testData.root }));
     });
   });
 
@@ -1472,16 +1468,16 @@ describe('Orchestrator', () => {
   // ── removeWorktree ────────────────────────────────────────────────
 
   describe('removeWorktree (private, via public getWorktreePath)', () => {
-    it('does not throw when worktree path does not exist on disk', () => {
+    it('does not throw when worktree path does not exist on disk', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
       // No branch → getWorktreePath returns null → removeWorktree returns early
-      expect(() => (orch as AnyOrch)._ctx.removeWorktree(testData.taskId)).not.toThrow();
+      await expect((orch as AnyOrch)._ctx.removeWorktree(testData.taskId)).resolves.toBeUndefined();
     });
 
     // Coverage: lines 568-573 — _execGit throws, catch block handles gracefully
-    it('handles _execGit failure gracefully in catch block', () => {
+    it('handles _execGit failure gracefully in catch block', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -1500,7 +1496,7 @@ describe('Orchestrator', () => {
       });
 
       // Should not throw — the catch block at 571-573 handles it silently
-      expect(() => (orch as AnyOrch)._ctx.removeWorktree(testData.taskId)).not.toThrow();
+      await expect((orch as AnyOrch)._ctx.removeWorktree(testData.taskId)).resolves.toBeUndefined();
 
       // Verify _execGit was actually called (the git worktree remove command)
       expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -1513,7 +1509,7 @@ describe('Orchestrator', () => {
     // ── container mode ───────────────────────────────────────────
 
     describe('container mode', () => {
-      it('removes worktree via docker exec, then cleans up branch on host', () => {
+      it('removes worktree via docker exec, then cleans up branch on host', async () => {
         testData = setupTestProject();
         vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
         vi.mocked(containerManager.getRunningContainer).mockReturnValue({
@@ -1535,7 +1531,7 @@ describe('Orchestrator', () => {
         mkdirSync(wtPath, { recursive: true });
 
         mockExecFileSync.mockReturnValue('');
-        (orch as AnyOrch)._ctx.removeWorktree(testData.taskId);
+        await (orch as AnyOrch)._ctx.removeWorktree(testData.taskId);
 
         // _execGit skips container routing for worktree commands — runs on host
         expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -1554,7 +1550,7 @@ describe('Orchestrator', () => {
         expect(updated?.branch).toBeUndefined();
       });
 
-      it('falls back to --force via docker exec when normal remove fails', () => {
+      it('falls back to --force via docker exec when normal remove fails', async () => {
         testData = setupTestProject();
         vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
         vi.mocked(containerManager.getRunningContainer).mockReturnValue({
@@ -1582,7 +1578,7 @@ describe('Orchestrator', () => {
           return '';
         });
 
-        (orch as AnyOrch)._ctx.removeWorktree(testData.taskId);
+        await (orch as AnyOrch)._ctx.removeWorktree(testData.taskId);
 
         // _execGit skips container routing for worktree commands — runs on host
         expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -1606,7 +1602,7 @@ describe('Orchestrator', () => {
         expect(updated?.branch).toBeUndefined();
       });
 
-      it('falls back to rmSync + a scoped worktree-remove retry when docker exec remove and --force both fail', () => {
+      it('falls back to rmSync + a scoped worktree-remove retry when docker exec remove and --force both fail', async () => {
         testData = setupTestProject();
         vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
         vi.mocked(containerManager.getRunningContainer).mockReturnValue({
@@ -1636,7 +1632,7 @@ describe('Orchestrator', () => {
           return '';
         });
 
-        (orch as AnyOrch)._ctx.removeWorktree(testData.taskId);
+        await (orch as AnyOrch)._ctx.removeWorktree(testData.taskId);
 
         // rmSync was called — the worktree directory should be gone
         expect(existsSync(wtPath)).toBe(false);
@@ -4263,7 +4259,7 @@ describe('Orchestrator', () => {
   // ── _removeWorktreeForce ──────────────────────────────────────────
 
   describe('_removeWorktreeForce', () => {
-    it('force-removes the git worktree', () => {
+    it('force-removes the git worktree', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -4274,7 +4270,7 @@ describe('Orchestrator', () => {
       if (wtPath) mkdirSync(wtPath, { recursive: true });
 
       mockExecFileSync.mockReturnValue('');
-      (orch as AnyOrch)._ctx.removeWorktree(testData.taskId);
+      await (orch as AnyOrch)._ctx.removeWorktree(testData.taskId);
 
       // Now delegates to removeWorktree which tries normal remove first,
       // then git branch -D, then updates taskStore
@@ -4290,14 +4286,14 @@ describe('Orchestrator', () => {
       );
     });
 
-    it('no-ops when worktree does not exist', () => {
+    it('no-ops when worktree does not exist', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
-      expect(() => (orch as AnyOrch)._ctx.removeWorktree('nonexistent')).not.toThrow();
+      await expect((orch as AnyOrch)._ctx.removeWorktree('nonexistent')).resolves.toBeUndefined();
     });
 
-    it('handles git failure gracefully', () => {
+    it('handles git failure gracefully', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -4308,7 +4304,7 @@ describe('Orchestrator', () => {
       if (wtPath) mkdirSync(wtPath, { recursive: true });
 
       mockExecFileSync.mockImplementation(() => { throw new Error('git error'); });
-      expect(() => (orch as AnyOrch)._ctx.removeWorktree(testData.taskId)).not.toThrow();
+      await expect((orch as AnyOrch)._ctx.removeWorktree(testData.taskId)).resolves.toBeUndefined();
     });
   });
 
@@ -4684,7 +4680,7 @@ describe('Orchestrator', () => {
 
   // ── runQaReview PASS/Failure paths ────────────────────────────────
 
-  describe('runImplement — rebase onto latest master', () => {
+  describe('runImplement — rebase onto latest master', async () => {
     it('runs rebase before subtask processing (fast path)', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);

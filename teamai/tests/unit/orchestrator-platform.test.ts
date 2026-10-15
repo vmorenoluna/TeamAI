@@ -32,19 +32,18 @@ const { mockLogToOutput } = vi.hoisted(() => ({
 // now the async execFile mock: it is invoked with (cmd, args, opts) and its
 // return value (or thrown error) becomes the resolved { stdout, stderr } / rejection,
 // via the util.promisify.custom hook real execFile exposes.
-vi.mock('child_process', async () => {
-  const { promisify } = await import('util');
-  const execFile: any = (...args: unknown[]) => mockExecFileSync(...args);
-  execFile[promisify.custom] = async (...args: unknown[]) => {
-    const out = await mockExecFileSync(...args);
-    return { stdout: out ?? '', stderr: '' };
-  };
-  return {
-    execFile,
-    spawn: vi.fn(),
-    ChildProcess: class MockCP {},
-  };
+// execFile calls back (and is promisify-aware) so the async git helpers resolve; it delegates to the sync stub so existing scripted responses apply.
+const mockExecFile = await vi.hoisted(async () => {
+  const { createExecFileMock } = await import('../utils/mock-child-process');
+  return createExecFileMock({ resetSafe: true, execFileSync: (...a) => mockExecFileSync(...a) });
 });
+
+vi.mock('child_process', () => ({
+  execFile: mockExecFile,
+  execFileSync: mockExecFileSync,
+  spawn: vi.fn(),
+  ChildProcess: class MockCP {},
+}));
 
 // Mock fs write/unlink so createPRViaCLI's --body-file temp file is a no-op
 // in tests, while preserving the real fs for every other consumer in this file.

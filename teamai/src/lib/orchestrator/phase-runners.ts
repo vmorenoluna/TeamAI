@@ -252,7 +252,7 @@ interface BasePhaseDeps {
 /** Shared callbacks for spec and plan — phases that cascade to the next phase. */
 interface CascadePhaseDeps extends BasePhaseDeps {
   /** Remove the task's worktree (spec phase: a rejected ticket is deleted). */
-  removeWorktree?: (taskId: string) => void;
+  removeWorktree?: (taskId: string) => Promise<void>;
   rotateOutputLog: (logFile: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
   savePipelineState: (pipeline: TaskPipeline) => void;
@@ -570,7 +570,7 @@ export async function runSpecPhase(
   if (selfVerdict?.verdict === 'reject') {
     const reason = selfVerdict.reason;
     logInfo('spec', `Ticket "${pipeline.title}" (${pipeline.taskId}) deleted — the analyst rejected its premise: ${reason}`);
-    try { deps.removeWorktree?.(pipeline.taskId); } catch { /* no worktree yet */ }
+    try { await deps.removeWorktree?.(pipeline.taskId); } catch { /* no worktree yet */ }
     specStore.delete(pipeline.taskId);
     return;
   }
@@ -773,7 +773,7 @@ interface MergePhaseDeps extends BasePhaseDeps {
   gitPush: (pushArgs: string[], logFile: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
   getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig };
-  removeWorktree: (taskId: string) => void;
+  removeWorktree: (taskId: string) => Promise<void>;
   /** Build the trailer-bearing commit message for this task (null when recordHistoryInGit is off). */
   buildTicketMessage: (pipeline: TaskPipeline) => import('./artifact-commit').TicketMessageResult | null;
 }
@@ -829,7 +829,7 @@ export async function runMergePhase(
     logToOutput(pipeline.specPath,
       `[MERGE] No commits between ${baseBranch} and ${pipeline.branch} — this task's implementation required ` +
       `no changes beyond what's already on ${baseBranch}. Nothing to merge; marking done directly.\n`);
-    deps.removeWorktree(pipeline.taskId);
+    await deps.removeWorktree(pipeline.taskId);
     deps.advancePhase(pipeline, 'done');
     return;
   }
@@ -897,7 +897,7 @@ export async function runMergePhase(
     processManager.killSession(sessionId);
   }
 
-  deps.removeWorktree(pipeline.taskId);
+  await deps.removeWorktree(pipeline.taskId);
   deps.advancePhase(pipeline, 'done');
 }
 
@@ -913,7 +913,7 @@ interface CreatePRDeps extends BasePhaseDeps {
   extractPrUrl: (logFile: string) => string | null;
   /** Build the trailer-bearing commit message for this task (null when recordHistoryInGit is off). */
   buildTicketMessage: (pipeline: TaskPipeline) => import('./artifact-commit').TicketMessageResult | null;
-  removeWorktree: (taskId: string) => void;
+  removeWorktree: (taskId: string) => Promise<void>;
 }
 
 export async function runCreatePRPhase(
@@ -976,7 +976,7 @@ export async function runCreatePRPhase(
     logToOutput(pipeline.specPath,
       `[PR] No commits between ${baseBranch} and ${pipeline.branch} — this task's implementation required ` +
       `no changes beyond what's already on ${baseBranch}. Nothing to open a PR for; marking done directly.\n`);
-    deps.removeWorktree(pipeline.taskId);
+    await deps.removeWorktree(pipeline.taskId);
     deps.advancePhase(pipeline, 'done');
     return;
   }

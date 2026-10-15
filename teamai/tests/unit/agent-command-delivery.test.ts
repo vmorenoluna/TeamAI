@@ -105,8 +105,8 @@ const deps = () => ({
   toAgentPath: (p: string) => p,
   executePhase: vi.fn(),
   gitPush: vi.fn(),
-  execGit: vi.fn(),
-  execGitCapture: vi.fn(() => ''),
+  execGit: vi.fn(async () => undefined),
+  execGitCapture: vi.fn(async () => ''),
   getPipelineConfig: () => ({
     wakeupScanRetryDelayMs: 0, maxImplementRetries: 3, maxQaAttempts: 3, parallelSubtasks: true,
     maxStallRecoveries: 3, idleStallMinutes: 10, toolStallMinutes: 30,

@@ -243,10 +243,10 @@ describe('readCommonArtifacts', () => {
     const result = await readCommonArtifacts('/test/dir', '/project', 'feature-branch');
 
     expect(result.diff).toBe('diff --git a/file.ts b/file.ts\n+new line');
-    expect(mockExecFile).toHaveBeenCalledWith('git', ['diff', 'main...feature-branch'], {
+    expect(mockExecFile).toHaveBeenCalledWith('git', ['diff', 'main...feature-branch'], expect.objectContaining({
       cwd: '/project',
       encoding: 'utf-8',
-    });
+    }));
   });
 
   it('falls back to diff.txt when branch is null', async () => {

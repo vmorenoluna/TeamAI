@@ -1677,7 +1677,17 @@ export async function consumeSubtaskWakeupFiles(
 
   for (const wakeupPath of wakeupPaths) {
     let rawWakeup = '';
-    try { rawWakeup = readFileSync(wakeupPath, 'utf-8'); } catch { /* treated as malformed below */ }
+    try {
+      rawWakeup = readFileSync(wakeupPath, 'utf-8');
+    } catch (err) {
+      // Already claimed by a sibling subtask's handler that scanned the same files
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      /* otherwise treated as malformed below */
+    }
+    // Claim the file before the first await below: parallel subtasks' handlers
+    // all scan every wakeup file, and an await between read and delete would
+    // let a sibling consume the same file and double-count the attempt.
+    try { unlinkSync(wakeupPath); } catch { /* best-effort */ }
     const wd = parseWakeupFile(rawWakeup);
     if (wd && wd.subtask_id != null) {
       // Snapshot the previous command for the same subtask BEFORE it's
@@ -1738,7 +1748,6 @@ export async function consumeSubtaskWakeupFiles(
     } else if (!wd) {
       logToOutput(pipeline.specPath, '[WAKEUP] Malformed ' + path.basename(wakeupPath) + ' — treating as missing\n');
     }
-    try { unlinkSync(wakeupPath); } catch { /* best-effort */ }
   }
   return wakeupDetected;
 }
