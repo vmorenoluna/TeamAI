@@ -81,10 +81,7 @@ describe('AC1 — no sync subprocess APIs', () => {
     expect(src).toMatch(/import \{ execFile \} from 'child_process'/);
   });
 
-  // NOTE: this half only passes once the tool-checker async subtask has landed.
-  // Until then tool-checker.ts still uses execFileSync, so skip rather than
-  // break the pre-commit run; the skip disappears on its own once it is migrated.
-  it.skipIf(/execFileSync|execSync|spawnSync/.test(read('tool-checker.ts')))('tool-checker.ts has no execFileSync/execSync/spawnSync and imports execFile', () => {
+  it('tool-checker.ts has no execFileSync/execSync/spawnSync and imports execFile', () => {
     const src = read('tool-checker.ts');
     expect(src).not.toMatch(/execFileSync|execSync|spawnSync/);
     expect(src).toMatch(/import \{[^}]*\bexecFile\b[^}]*\} from 'child_process'/);
