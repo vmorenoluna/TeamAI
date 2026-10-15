@@ -6634,7 +6634,7 @@ describe('resolveWorktreeDirName', () => {
 describe('preserveUncommittedWork', () => {
   it('does nothing when the worktree is already clean', () => {
     const execGit = vi.fn();
-    const deps = { execGitCapture: vi.fn(() => ''), execGit } as unknown as ImplementDeps;
+    const deps = { execGitCapture: vi.fn(async () => ''), execGit } as unknown as ImplementDeps;
 
     preserveUncommittedWork(minimalImplPipeline(), deps);
 
@@ -6851,7 +6851,7 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
       projectRoot: project.root,
       taskStore: { update: vi.fn() } as any,
       execGit: vi.fn(),
-      execGitCapture: vi.fn(() => ''),
+      execGitCapture: vi.fn(async () => ''),
       gitPush: vi.fn(),
       persistAndEmitPhase: vi.fn(),
       advancePhase: vi.fn(),
@@ -6919,7 +6919,7 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
 
     // CHERRY_PICK_HEAD exists → infra path guard "!checkCherryPickInProgress" is false.
     // Goes through deps.execGitCapture (container-aware), not raw execFileSync.
-    deps.execGitCapture = vi.fn(() => 'abc123\n');
+    deps.execGitCapture = vi.fn(async () => 'abc123\n');
     mockExecFileSync.mockReturnValue('abc123\n');
 
     const { readContainerConfig, containerManager } = await import('../../src/lib/container-manager');
@@ -6976,7 +6976,7 @@ describe('repairStuckCherryPick', () => {
       projectRoot: project.root,
       taskStore: { update: vi.fn() } as any,
       execGit: vi.fn(),
-      execGitCapture: vi.fn(() => ''),
+      execGitCapture: vi.fn(async () => ''),
       gitPush: vi.fn(),
       persistAndEmitPhase: vi.fn(),
       advancePhase: vi.fn(),
@@ -7018,7 +7018,7 @@ describe('repairStuckCherryPick', () => {
 
   it('always runs cherry-pick --quit first, even when nothing is in progress', async () => {
     const execGit = vi.fn();
-    const deps = makeDeps({ execGit, execGitCapture: vi.fn(() => '') });
+    const deps = makeDeps({ execGit, execGitCapture: vi.fn(async () => '') });
     const pipeline = makeImplPipeline();
 
     await repairStuckCherryPick(pipeline, deps);
@@ -7034,8 +7034,8 @@ describe('repairStuckCherryPick', () => {
     // integrateGroup, so leftover cherry-pick state failed it with
     // "cherry-pick is already in progress" (CHERRY_PICK_RECOVERY_EXHAUSTED).
     const calls: string[][] = [];
-    const execGit = vi.fn((args: string[]) => { calls.push(args); });
-    const deps = makeDeps({ execGit, execGitCapture: vi.fn(() => '') });
+    const execGit = vi.fn(async (args: string[]) => { calls.push(args); });
+    const deps = makeDeps({ execGit, execGitCapture: vi.fn(async () => '') });
     const pipeline = makeImplPipeline();
 
     await scopeArbitrationDeps(deps).tryCherryPickWithRecovery(
@@ -7127,7 +7127,7 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
       projectRoot: project.root,
       taskStore: { update: vi.fn() } as any,
       execGit: vi.fn(),
-      execGitCapture: vi.fn(() => ''),
+      execGitCapture: vi.fn(async () => ''),
       gitPush: vi.fn(),
       persistAndEmitPhase: vi.fn(),
       advancePhase: vi.fn(),
@@ -7616,7 +7616,7 @@ describe('_recoverStBranchCommits (shared helper)', () => {
       });
 
       let cherryPickAttempt = 0;
-      const execGitFn = vi.fn((args: string[]) => {
+      const execGitFn = vi.fn(async (args: string[]) => {
         if (args[0] === 'cherry-pick' && args[1] !== '--abort') {
           cherryPickAttempt++;
           if (cherryPickAttempt === 1) {
@@ -7655,7 +7655,7 @@ describe('_recoverStBranchCommits (shared helper)', () => {
         containerId: 'cont-still-broken', remoteWorkspaceFolder: '/workspaces/project',
       });
 
-      const execGitFn = vi.fn((args: string[]) => {
+      const execGitFn = vi.fn(async (args: string[]) => {
         if (args[0] === 'cherry-pick' && args[1] !== '--abort') {
           throw new Error('fatal: not a git repository: (null)'); // always fails
         }

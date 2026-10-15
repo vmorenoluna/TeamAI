@@ -784,8 +784,8 @@ export class Orchestrator {
 
   private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void { pipelineAdvancePhase(pipeline, phase, this.taskStore, this.projectRoot, eventExtra); }
 
-  private _execGit(args: string[], hostCwd: string): void { execGit(args, hostCwd, this.projectRoot); }
-  private _execGitCapture(args: string[], hostCwd: string): string { return execGitCapture(args, hostCwd, this.projectRoot); }
+  private _execGit(args: string[], hostCwd: string): Promise<void> { return execGit(args, hostCwd, this.projectRoot); }
+  private _execGitCapture(args: string[], hostCwd: string): Promise<string> { return execGitCapture(args, hostCwd, this.projectRoot); }
 
   private handleRateLimit(pipeline: TaskPipeline, resetsAt: number): void {
     handleRateLimitFn(pipeline, resetsAt, this._ctx);

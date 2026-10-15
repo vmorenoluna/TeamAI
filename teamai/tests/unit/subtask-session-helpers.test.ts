@@ -599,7 +599,7 @@ describe('scope hold and arbitration (real git)', () => {
       expect(deps.executePhase).toHaveBeenCalled();
       expect(pipeline.phase).toBe('implement');
 
-      const { request } = buildSubtaskRequest(pipeline, deps, s1, repo, false, false, join(specDir, 'human_feedback.md'));
+      const { request } = await buildSubtaskRequest(pipeline, deps, s1, repo, false, false, join(specDir, 'human_feedback.md'));
       expect(request).toContain('⚠️ SCOPE DECISIONS');
       expect(request).toContain('b.ts — R');
     });

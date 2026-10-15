@@ -411,10 +411,13 @@ app.prepare().then(async () => {
     // lock has usually gone, so this is where those leftovers are deleted.
     try {
       for (const project of projectStore.getAll()) {
-        const removed = sweepAbandonedWorktreeRemnants(project.path);
-        if (removed.length > 0) {
-          console.log(`[worktree-sweep] Removed ${removed.length} abandoned worktree remnant(s) in ${project.path}`);
-        }
+        sweepAbandonedWorktreeRemnants(project.path).then(removed => {
+          if (removed.length > 0) {
+            console.log(`[worktree-sweep] Removed ${removed.length} abandoned worktree remnant(s) in ${project.path}`);
+          }
+        }).catch(err => {
+          logError('worktree-sweep', 'Failed to sweep abandoned worktree remnants', err);
+        });
       }
     } catch (err) {
       logError('worktree-sweep', 'Failed to sweep abandoned worktree remnants', err);
