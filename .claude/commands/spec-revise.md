@@ -23,7 +23,7 @@ workflow below.
    - If the concern points to a wrong assumption, correct it in the spec
    - If the concern identifies missing requirements, add them
    - If the concern identifies contradictory criteria, resolve the contradiction
-4. Preserve valid parts of the spec that the feedback doesn't challenge — only change what needs changing.
+4. Preserve valid parts of the spec that the feedback doesn't challenge — only change what needs changing. Keep existing acceptance-criterion IDs (`AC1`, `AC2`, ...) unchanged — never renumber. New criteria get the next unused number; never reuse a removed criterion's ID. QA matches criteria across rounds by ID.
 5. Validate the revised spec against the original feature description — does the revised spec still satisfy the feature request, corrected for the discovered issues?
 6. Re-run codebase research (Glob/Grep for related code, adjacent tests, configuration, and
    relevant types) scoped to the feedback's scope. Research only the

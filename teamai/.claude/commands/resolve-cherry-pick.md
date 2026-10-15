@@ -27,8 +27,13 @@ $ARGUMENTS
      cherry-pick (step 6), and state clearly in your summary which tests fail and why —
      QA reviews the integrated branch and routes the failure back for a fix. Never
      report the resolution as clean when tests fail.
-6. Complete the cherry-pick non-interactively: `GIT_EDITOR=true git cherry-pick --continue`.
-   If it stops on another conflicting commit from the same range, repeat steps 1–6 for
+6. Complete the cherry-pick non-interactively, with project git hooks disabled:
+   `GIT_EDITOR=true git -c core.hooksPath=/dev/null cherry-pick --continue`. This is an
+   intermediate integration commit of a multi-subtask branch, not a deliverable: the
+   branch can legitimately fail the pre-commit hook (typecheck/tests) until later
+   subtasks land, and QA is the quality gate for the integrated result. Do NOT leave the
+   cherry-pick unfinished because a hook would reject it — an unfinished pick is aborted
+   and fails the task. If it stops on another conflicting commit from the same range, repeat steps 1–6 for
    that commit. Leave the cherry-pick unfinished only if you could not resolve the
    conflicts at all — the orchestrator then aborts it and preserves both branches for
    manual recovery.
