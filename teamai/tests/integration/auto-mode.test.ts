@@ -1121,6 +1121,54 @@ describe('Auto Mode Integration', () => {
       );
     });
 
+    it('records a stalled auto-merge after repeated failures and retryAutoMerge resumes it', async () => {
+      vi.useFakeTimers();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      let mergeWorks = false;
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({ state: 'OPEN', statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'merge') {
+          if (!mergeWorks) throw new Error('Merge commits are not allowed on this repository');
+          return 'Merged pull request #42';
+        }
+        return '';
+      });
+
+      const { TaskStore: TSs } = await import('@/lib/task-store');
+      new TSs(testDir).updatePhase(taskId, 'pr-open');
+      fireEvent('phase-change', { taskId, phase: 'pr-open', projectRoot: testDir });
+
+      // MAX_MERGE_FAILURES is 5 — the poller gives up after the 5th failure.
+      for (let i = 0; i < 5; i++) {
+        await vi.advanceTimersByTimeAsync(31_000);
+      }
+      await vi.waitFor(() => {
+        expect(new TSs(testDir).getById(taskId)!.autoMergeStalled).toContain('Auto-merge failed 5 times');
+      });
+      expect(mockOrch.markTaskDone).not.toHaveBeenCalled();
+
+      mergeWorks = true;
+      autoMode.retryAutoMerge(testDir, taskId);
+      expect(new TSs(testDir).getById(taskId)!.autoMergeStalled).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(31_000);
+      await vi.waitFor(() => {
+        expect(mockOrch.markTaskDone).toHaveBeenCalledWith(taskId);
+      });
+    });
+
+    it('retryAutoMerge refuses when auto mode is off', () => {
+      expect(() => autoMode.retryAutoMerge(testDir, taskId)).toThrow(/not enabled/);
+    });
+
     it('persists autoProcessed: true to task.json after CI auto-merge', async () => {
       vi.useFakeTimers();
 

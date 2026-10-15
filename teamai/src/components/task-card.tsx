@@ -7,6 +7,7 @@ import type { Task } from '@/lib/task-store';
 import { formatActionError } from '@/lib/error-format';
 import { PHASE_BADGE, PHASE_LABELS } from '@/constants/phases';
 import { RetryPhaseDialog, type DialogPhaseOption } from './retry-phase-dialog';
+import { getRetryPhaseOptions } from '@/lib/orchestrator/artifacts';
 
 // ── Phase options for the Retry button (full list) ──
 // Default phase is 'implement' — the most common failure point is qa-review,
@@ -454,8 +455,8 @@ export function TaskCard({ task, onSelect, isMoving }: Props) {
     {showRetryDialog && (
       <RetryPhaseDialog
         taskTitle={task.title}
-        phases={RETRY_PHASE_OPTIONS}
-        defaultPhase="implement"
+        phases={task.failedPhase === 'create-pr' || task.failedPhase === 'merge' ? getRetryPhaseOptions(task.failedPhase) : RETRY_PHASE_OPTIONS}
+        defaultPhase={task.failedPhase === 'create-pr' || task.failedPhase === 'merge' ? task.failedPhase : 'implement'}
         onCancel={() => setShowRetryDialog(false)}
         onConfirm={handleRetryConfirm}
       />

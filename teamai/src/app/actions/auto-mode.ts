@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
 import { getPipelineConfig } from './pipeline';
-import { setAutoModeState } from '@/lib/auto-mode';
+import { setAutoModeState, retryAutoMerge as retryAutoMergeForTask } from '@/lib/auto-mode';
 import { TaskStore } from '@/lib/task-store';
 import { processManager } from '@/lib/process-manager';
 import { markAutoReviewed as markAutoReviewedRecord } from '@/lib/auto-review-store';
@@ -13,6 +13,19 @@ export async function toggleAutoMode(enabled: boolean): Promise<void> {
   const config = await getPipelineConfig();
   setAutoModeState(projectPath, enabled, config.autoModeMaxParallel);
   revalidatePath('/');
+}
+
+/** Restart auto-merge for a pr-open task whose poller gave up. */
+export async function retryAutoMerge(taskId: string): Promise<{ success: boolean; error?: string }> {
+  if (!taskId?.trim()) return { success: false, error: 'Invalid taskId' };
+  try {
+    retryAutoMergeForTask(await getActiveProjectPath(), taskId);
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  revalidatePath('/');
+  revalidatePath(`/task/${taskId}`);
+  return { success: true };
 }
 
 export async function markAutoReviewed(taskId: string): Promise<void> {

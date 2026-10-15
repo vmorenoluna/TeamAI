@@ -14,7 +14,7 @@ import { PlanSubtasks } from './plan-subtasks';
 import { QAReportView } from './qa-report-view';
 import { CopyButton } from './copy-button';
 import { addDependency, removeDependency, addBlock, removeBlock, deleteTask, retryTaskWithOptions, restartCurrentPhase } from '@/app/actions/tasks';
-import { markAutoReviewed } from '@/app/actions/auto-mode';
+import { markAutoReviewed, retryAutoMerge } from '@/app/actions/auto-mode';
 import type { Task } from '@/lib/task-store';
 import type { PlanData, QAReportData } from '@/lib/stream-types';
 import { formatActionError } from '@/lib/error-format';
@@ -23,7 +23,7 @@ import { SpecDiffView } from './spec-diff-view';
 import { RoleRefinementCard } from './role-refinement-card';
 import type { RoleRefinementMode, RoleRefinementSuggestion } from '@/lib/role-refinement';
 import { RetryPhaseDialog } from './retry-phase-dialog';
-import { getPhaseClearDescriptions } from '@/lib/orchestrator/artifacts';
+import { getRetryPhaseOptions } from '@/lib/orchestrator/artifacts';
 
 // Re-export sub-components for external consumers
 export { PlanSubtasks } from './plan-subtasks';
@@ -217,6 +217,19 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
     });
   }
 
+  function handleRetryAutoMerge() {
+    setError(null);
+    run(async () => {
+      try {
+        const result = await retryAutoMerge(task.id);
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+      } catch (err) {
+        setError(formatActionError('retry auto-merge', err));
+        throw err;
+      }
+    });
+  }
+
   function handleInlineRetry() {
     setShowRetryDialog(true);
   }
@@ -248,7 +261,9 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
     task.failureReason === 'spec-revision-exhausted' ||
     (task.failureReason === 'qa-attempts-exhausted' && !!qaReport?.spec_concerns?.length)
       ? 'spec'
-      : 'implement';
+      : (task.failedPhase === 'create-pr' || task.failedPhase === 'merge')
+        ? task.failedPhase
+        : 'implement';
 
   const failedCriteria = qaReport?.criteria?.filter(c => c.status === 'FAIL') ?? [];
   // A report whose `overall` is neither PASS nor FAIL (almost always
@@ -568,6 +583,26 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
               />
             )}
 
+            {/* Auto mode gave up merging a green PR — say so and offer a retry */}
+            {!readonly && isPrOpen && task.autoMergeStalled && (
+              <div
+                data-component="auto-merge-stalled-banner"
+                className="flex items-center justify-between gap-3 rounded-lg border border-amber-700/50 bg-amber-900/20 px-4 py-3"
+              >
+                <div className="text-xs text-amber-200">
+                  <span className="font-semibold block">Auto mode stopped trying to merge this PR</span>
+                  <span className="text-amber-300/80">{task.autoMergeStalled}</span>
+                </div>
+                <button
+                  onClick={handleRetryAutoMerge}
+                  disabled={isPending}
+                  className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-md bg-amber-800/50 text-amber-100 hover:bg-amber-700/60 transition-colors disabled:opacity-50"
+                >
+                  Retry merge
+                </button>
+              </div>
+            )}
+
             {/* Review panel */}
             {(isAwaiting || isPrOpen) && (
               <ReviewPanel
@@ -769,7 +804,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
     {showRetryDialog && (
       <RetryPhaseDialog
         taskTitle={task.title}
-        phases={getPhaseClearDescriptions()}
+        phases={getRetryPhaseOptions(task.failedPhase)}
         defaultPhase={defaultRetryPhase}
         hasSpecConcerns={!!qaReport?.spec_concerns?.length}
         hasSpec={!!spec}
