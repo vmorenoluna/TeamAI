@@ -58,11 +58,11 @@ export interface ImplementDeps {
   executePhase: (pipeline: ImplementPipeline) => Promise<void>;
   sessionOpts: (role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) => SessionOptsResult;
   waitForCompletion: (sessionId: string) => Promise<void>;
-  execGit: (args: string[], hostCwd: string) => void;
+  execGit: (args: string[], hostCwd: string) => Promise<void>;
   /** Same routing as execGit, but returns captured stdout — needed to read
    *  `git status --porcelain` etc. against a worktree that may be
    *  container-patched and thus unresolvable via a plain host execFileSync. */
-  execGitCapture: (args: string[], hostCwd: string) => string;
+  execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   gitPush: (pushArgs: string[], logFile: string) => void;
   patchWorktreeGitFile: (hostWorktreePath: string, containerWorkspace: string) => void;
   isWorktreeHealthy: (worktreePath: string) => boolean;
@@ -98,7 +98,7 @@ const WORKTREE_CLEANUP_RETRY_MS = 1000;
 export interface ClearWorktreeDirDeps {
   exists: (path: string) => boolean;
   rm: (path: string) => void;
-  pruneWorktrees: () => void;
+  pruneWorktrees: () => Promise<void>;
 }
 
 /**
@@ -123,7 +123,7 @@ export async function clearWorktreeDirectoryOrThrow(
 ): Promise<void> {
   for (let attempt = 0; attempt < WORKTREE_CLEANUP_MAX_ATTEMPTS && deps.exists(worktreePath); attempt++) {
     try { deps.rm(worktreePath); } catch { /* best-effort */ }
-    try { deps.pruneWorktrees(); } catch { /* best-effort */ }
+    try { await deps.pruneWorktrees(); } catch { /* best-effort */ }
     if (deps.exists(worktreePath) && attempt < WORKTREE_CLEANUP_MAX_ATTEMPTS - 1) {
       await new Promise(resolve => setTimeout(resolve, WORKTREE_CLEANUP_RETRY_MS));
     }
@@ -152,12 +152,12 @@ export async function clearWorktreeDirectoryOrThrow(
  * — including a relocated one — with no copying needed. Best-effort: a
  * failure here must never block the teardown/relocation it's protecting.
  */
-export function preserveUncommittedWork(pipeline: ImplementPipeline, deps: ImplementDeps): void {
+export async function preserveUncommittedWork(pipeline: ImplementPipeline, deps: ImplementDeps): Promise<void> {
   try {
-    const status = deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath);
+    const status = await deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath);
     if (!status.trim()) return;
-    deps.execGit(['add', '-A'], pipeline.worktreePath);
-    deps.execGit(['commit', '--no-verify', '-m', 'WIP: auto-preserved before worktree teardown/relocation'], pipeline.worktreePath);
+    await deps.execGit(['add', '-A'], pipeline.worktreePath);
+    await deps.execGit(['commit', '--no-verify', '-m', 'WIP: auto-preserved before worktree teardown/relocation'], pipeline.worktreePath);
     logToOutput(pipeline.specPath, '[WORKTREE] Committed uncommitted changes before teardown (WIP auto-preserve)\n');
   } catch { /* best-effort — never block teardown on this */ }
 }
@@ -298,7 +298,7 @@ export async function ensureWorktree(
       // push steps (e.g. a manual session after PR creation) would be
       // silently lost — the worktree gets force-removed and recreated below.
       try {
-        const unpushed = getUnpushedCommits(deps.projectRoot, pipeline.branch);
+        const unpushed = await getUnpushedCommits(deps.projectRoot, pipeline.branch);
         if (unpushed) {
           logToOutput(pipeline.specPath,
             `\n[WORKTREE] ⚠ WARNING: Removing unhealthy worktree at ${pipeline.worktreePath}\n` +
@@ -321,14 +321,14 @@ export async function ensureWorktree(
       } catch { /* best-effort — unpushed check must not block worktree repair */ }
       // Commits are protected by the push above; uncommitted/untracked
       // changes are not — capture those too before anything is torn down.
-      preserveUncommittedWork(pipeline, deps);
+      await preserveUncommittedWork(pipeline, deps);
       try {
-        deps.execGit(['worktree', 'remove', '--force', pipeline.worktreePath], deps.projectRoot);
+        await deps.execGit(['worktree', 'remove', '--force', pipeline.worktreePath], deps.projectRoot);
       } catch { /* best-effort */ }
       // Unconditional, like the per-subtask cleanup above — a container-
       // patched worktree's registration is invisible to existsSync on the
       // host but still blocks a subsequent worktree add/branch -D.
-      removeStaleWorktreeRegistration(deps.projectRoot, pipeline.worktreePath);
+      await removeStaleWorktreeRegistration(deps.projectRoot, pipeline.worktreePath);
       if (existsSync(pipeline.worktreePath)) {
         try {
           await clearWorktreeDirectoryOrThrow(pipeline.worktreePath, {
@@ -351,9 +351,9 @@ export async function ensureWorktree(
       }
     }
     try {
-      deps.execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], deps.projectRoot);
+      await deps.execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], deps.projectRoot);
     } catch {
-      deps.execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], deps.projectRoot);
+      await deps.execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], deps.projectRoot);
     }
   }
 
@@ -739,20 +739,20 @@ export function relevantDeliverables(filesToCreate: string[], filesToFix: string
  */
 export type DeliverableState = 'missing' | 'uncommitted' | 'stale' | 'ok';
 
-export function deliverableState(
+export async function deliverableState(
   cwd: string,
   file: string,
   execGitCapture: ImplementDeps['execGitCapture'],
   reworkFloorSec: number | null,
-): DeliverableState {
+): Promise<DeliverableState> {
   if (!existsSync(path.join(cwd, file))) return 'missing';
   try {
-    const status = execGitCapture(['status', '--porcelain', '--untracked-files=all', '--', file], cwd).trim();
+    const status = (await execGitCapture(['status', '--porcelain', '--untracked-files=all', '--', file], cwd)).trim();
     if (status) return 'uncommitted';
   } catch { return 'ok'; }
   if (reworkFloorSec === null) return 'ok';
   try {
-    const authored = Number(execGitCapture(['log', '-1', '--format=%at', '--', file], cwd).trim());
+    const authored = Number((await execGitCapture(['log', '-1', '--format=%at', '--', file], cwd)).trim());
     // No commit history for the path (gitignored) or unparseable: nothing to compare.
     if (!Number.isFinite(authored) || authored <= 0) return 'ok';
     return authored >= reworkFloorSec ? 'ok' : 'stale';
@@ -776,7 +776,7 @@ export async function filesAlreadyChangedOnBranch(
   for (const ref of [base, 'origin/' + base]) {
     try {
       const changed = new Set(
-        deps.execGitCapture(['diff', '--name-only', ref + '...HEAD', '--', ...files], cwd)
+        (await deps.execGitCapture(['diff', '--name-only', ref + '...HEAD', '--', ...files], cwd))
           .trim().split('\n').filter(Boolean),
       );
       return files.every(f => changed.has(f));
@@ -847,12 +847,12 @@ function reworkFilesToFix(specPath: string): string[] | null {
  *
  * @internal — exported for unit tests only. Not part of the public API.
  */
-export function reconcileSubtaskCompletionFromDeliverables(
+export async function reconcileSubtaskCompletionFromDeliverables(
   subtasks: PlanSubtask[],
   cwd: string,
   specPath: string,
   execGitCapture?: ImplementDeps['execGitCapture'],
-): boolean {
+): Promise<boolean> {
   let changed = false;
   const newlyCompletedIds: number[] = [];
 
@@ -864,12 +864,13 @@ export function reconcileSubtaskCompletionFromDeliverables(
     // Only a subtask QA re-dispatched must show fresh work; everything else is
     // done as soon as its deliverables are committed on the branch.
     const mustBeFresh = new Set(s.qa_flagged ? relevantDeliverables(s.files_to_create, filesToFix) : []);
-    const allDone = s.files_to_create.every(f => {
+    let allDone = true;
+    for (const f of s.files_to_create) {
       const state = execGitCapture
-        ? deliverableState(cwd, f, execGitCapture, mustBeFresh.has(f) ? floor : null)
+        ? await deliverableState(cwd, f, execGitCapture, mustBeFresh.has(f) ? floor : null)
         : (existsSync(path.join(cwd, f)) ? 'ok' : 'missing');
-      return state === 'ok';
-    });
+      if (state !== 'ok') { allDone = false; break; }
+    }
     if (allDone) {
       s.completed = true;
       changed = true;
@@ -1088,7 +1089,7 @@ export function buildSubtaskResumeContext(
  *
  * @internal — exported for unit tests only. Not part of the public API.
  */
-export function buildSubtaskRequest(
+export async function buildSubtaskRequest(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
   subtask: PlanSubtask,
@@ -1096,7 +1097,7 @@ export function buildSubtaskRequest(
   hasQaFeedback: boolean,
   hasHumanFeedback: boolean,
   humanFeedbackPath: string,
-): { command: 'implement' | 'implement-fix'; request: string; wasWakeupReentry: boolean } {
+): Promise<{ command: 'implement' | 'implement-fix'; request: string; wasWakeupReentry: boolean }> {
   const { qaOnlyCriteria, criteriaLine } = filterSubtaskCriteria(subtask, hasQaFeedback);
 
   const subtaskFeedback = buildSubtaskFeedback(hasQaFeedback, qaOnlyCriteria, subtask, pipeline.specPath, humanFeedbackPath, hasHumanFeedback);
@@ -1116,8 +1117,8 @@ export function buildSubtaskRequest(
       artifact: pipeline.wakeupArtifact,
       worktreeNote: true,
       headAtSchedule: pipeline.wakeupHeadAtSchedule,
-      currentHead: (() => {
-        try { return deps.execGitCapture(['rev-parse', 'HEAD'], pipeline.worktreePath).trim(); } catch { return undefined; }
+      currentHead: await (async () => {
+        try { return (await deps.execGitCapture(['rev-parse', 'HEAD'], pipeline.worktreePath)).trim(); } catch { return undefined; }
       })(),
     });
   }
@@ -1314,12 +1315,12 @@ export async function runCoderSessionWithStallRecovery(
  *
  * @internal — exported for unit tests only. Not part of the public API.
  */
-export function autoCommitSubtaskChanges(
+export async function autoCommitSubtaskChanges(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
   subtask: PlanSubtask,
   cwd: string,
-): void {
+): Promise<void> {
   // Commit guard: a coder session can legitimately finish its edits, run
   // tests, and report success without ever running `git add`/`git commit` —
   // nothing in its prompt is verified, only suggested (teamai-workflow.md's
@@ -1345,10 +1346,10 @@ export function autoCommitSubtaskChanges(
   // hooks would run on a deliberately partial intermediate state and reject it (task
   // 2a0a27ab subtask 3: husky typecheck failed on other subtasks' files), so the guard bypasses them.
   try {
-    const status = deps.execGitCapture(['status', '--porcelain'], cwd);
+    const status = await deps.execGitCapture(['status', '--porcelain'], cwd);
     if (status.trim()) {
-      deps.execGit(['add', '-A', '--', '.', ':!.teamai'], cwd);
-      deps.execGit(['commit', '--no-verify', '-m', `WIP: auto-commit subtask ${subtask.id} changes (coder session ended without committing)`], cwd);
+      await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], cwd);
+      await deps.execGit(['commit', '--no-verify', '-m', `WIP: auto-commit subtask ${subtask.id} changes (coder session ended without committing)`], cwd);
       logToOutput(pipeline.specPath,
         '\n[COMMIT-GUARD] Subtask ' + subtask.id + ' left uncommitted changes — auto-committed before scope/QA handoff\n');
     }
@@ -1441,7 +1442,7 @@ export async function checkSubtaskScope(
   // check — no report, no hold.
   if (preSessionHead && subtask.id !== 9999) {
     try {
-      const changedFiles = deps.execGitCapture(['diff', '--name-only', preSessionHead + '..HEAD'], cwd).trim().split('\n').filter(Boolean);
+      const changedFiles = (await deps.execGitCapture(['diff', '--name-only', preSessionHead + '..HEAD'], cwd)).trim().split('\n').filter(Boolean);
 
       // Declared files are `files` (edited) plus `files_to_create` (created fresh).
       const assignedFiles = new Set([...(subtask.files || []), ...(subtask.files_to_create || [])]);
@@ -1524,19 +1525,19 @@ export async function checkSubtaskScope(
  *
  * @internal — exported for unit tests only. Not part of the public API.
  */
-export function holdSubtaskForArbitration(
+export async function holdSubtaskForArbitration(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
   subtask: PlanSubtask,
   cwd: string,
   preSessionHead: string,
   unlistedFiles: string[],
-): void {
+): Promise<void> {
   const specPath = pipeline.specPath;
   const stBranch = pipeline.branch + '-st' + subtask.id;
   const declared = [...new Set([...(subtask.files || []), ...(subtask.files_to_create || [])])];
   let sessionHead = preSessionHead;
-  try { sessionHead = deps.execGitCapture(['rev-parse', 'HEAD'], cwd).trim(); } catch { /* keep the pre-session head */ }
+  try { sessionHead = (await deps.execGitCapture(['rev-parse', 'HEAD'], cwd)).trim(); } catch { /* keep the pre-session head */ }
 
   let heldRef: string | null = null;
   if (cwd !== pipeline.worktreePath) {
@@ -1544,15 +1545,15 @@ export function holdSubtaskForArbitration(
   } else {
     let reason = '';
     try {
-      if (deps.execGitCapture(['status', '--porcelain'], cwd).trim()) {
+      if ((await deps.execGitCapture(['status', '--porcelain'], cwd)).trim()) {
         reason = 'worktree has uncommitted changes';
       } else {
-        deps.execGit(['branch', '-f', stBranch, 'HEAD'], cwd);
+        await deps.execGit(['branch', '-f', stBranch, 'HEAD'], cwd);
         try {
-          deps.execGit(['reset', '--hard', preSessionHead], cwd);
+          await deps.execGit(['reset', '--hard', preSessionHead], cwd);
           heldRef = stBranch;
         } catch (resetErr) {
-          try { deps.execGit(['branch', '-D', stBranch], cwd); } catch { /* best-effort */ }
+          try { await deps.execGit(['branch', '-D', stBranch], cwd); } catch { /* best-effort */ }
           throw resetErr;
         }
       }
@@ -1567,7 +1568,7 @@ export function holdSubtaskForArbitration(
     logToOutput(specPath, '\n[SCOPE-HOLD] Holding subtask ' + subtask.id + '\'s commits on ' + stBranch + ' pending scope arbitration\n');
   }
 
-  writeScopeReport(deps, {
+  await writeScopeReport(deps, {
     specPath, cwd, subtaskId: subtask.id, base: preSessionHead, sessionHead,
     heldRef, declaredFiles: declared, unlistedPaths: unlistedFiles,
   });
@@ -1706,7 +1707,7 @@ export async function consumeSubtaskWakeupFiles(
           ? snapshotMtime(path.resolve(cwd, normalized.artifact))
           : null;
         try {
-          pipeline.wakeupHeadAtSchedule = deps.execGitCapture(['rev-parse', 'HEAD'], pipeline.worktreePath).trim() || undefined;
+          pipeline.wakeupHeadAtSchedule = (await deps.execGitCapture(['rev-parse', 'HEAD'], pipeline.worktreePath)).trim() || undefined;
         } catch { pipeline.wakeupHeadAtSchedule = undefined; }
       }
 
@@ -1792,12 +1793,12 @@ export function scheduleOrphanedJobWakeup(
  *
  * @internal — exported for unit tests only. Not part of the public API.
  */
-export function verifySubtaskDeliverables(
+export async function verifySubtaskDeliverables(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
   subtask: PlanSubtask,
   cwd: string,
-): 'ok' | 'incomplete' | 'failed' {
+): Promise<'ok' | 'incomplete' | 'failed'> {
   const filesToCreate = subtask.files_to_create ?? [];
   // The branch is the source of truth (see deliverableState): a deliverable
   // committed by ANY earlier session counts — a subtask routinely spans
@@ -1814,7 +1815,7 @@ export function verifySubtaskDeliverables(
   const stateOf = (f: string) => deliverableState(cwd, f, deps.execGitCapture, mustBeFresh.has(f) ? floor : null);
   let skipCompletion = false;
   for (const file of filesToCreate) {
-    const state = stateOf(file);
+    const state = await stateOf(file);
     if (state === 'ok') continue;
     skipCompletion = true;
     logToOutput(pipeline.specPath, '\n[VERIFY] Subtask ' + subtask.id + ': ' + (
@@ -1828,9 +1829,11 @@ export function verifySubtaskDeliverables(
   const maxFails = deps.getPipelineConfig().maxImplementRetries;
   const count = (pipeline.deliverableFailCounts[subtask.id] || 0) + 1;
   pipeline.deliverableFailCounts[subtask.id] = count;
-  const missingFiles = filesToCreate
-    .filter(f => stateOf(f) !== 'ok')
-    .join(', ');
+  const missingList: string[] = [];
+  for (const f of filesToCreate) {
+    if (await stateOf(f) !== 'ok') missingList.push(f);
+  }
+  const missingFiles = missingList.join(', ');
   logToOutput(pipeline.specPath, '[VERIFY] Subtask ' + subtask.id + ' failed deliverable verification (attempt ' + count + '/' + maxFails + ') — missing, uncommitted or stale: ' + missingFiles + '\n');
   if (count >= maxFails) {
     const reportPath = path.join(pipeline.specPath, 'qa_report.json');
@@ -1895,10 +1898,10 @@ export async function completeSubtask(
     let changed: string[] = [];
     try {
       if (preSessionHead) {
-        changed = deps.execGitCapture(['diff', '--name-only', preSessionHead + '..HEAD'], cwd).trim().split('\n').filter(Boolean);
+        changed = (await deps.execGitCapture(['diff', '--name-only', preSessionHead + '..HEAD'], cwd)).trim().split('\n').filter(Boolean);
       }
       // Uncommitted evidence counts too (the commit guard may not have run on it).
-      changed.push(...deps.execGitCapture(['status', '--porcelain', '--untracked-files=all'], cwd)
+      changed.push(...(await deps.execGitCapture(['status', '--porcelain', '--untracked-files=all'], cwd))
         .split('\n').filter(Boolean).map(l => l.slice(3).replace(/^"|"$/g, '')));
     } catch { /* git unavailable — spec-dir patterns still apply */ }
     evidence = evidenceProduced({
@@ -2020,7 +2023,7 @@ export async function runSubtaskSession(
 
   const subtaskLogFile = path.join(pipeline.specPath, `output-st${subtask.id}.log`);
 
-  const { command, request, wasWakeupReentry } = buildSubtaskRequest(
+  const { command, request, wasWakeupReentry } = await buildSubtaskRequest(
     pipeline, deps, subtask, cwd, hasQaFeedback, hasHumanFeedback, humanFeedbackPath,
   );
 
@@ -2030,7 +2033,7 @@ export async function runSubtaskSession(
   // not just the last one.
   let preSessionHead = '';
   try {
-    preSessionHead = deps.execGitCapture(['rev-parse', 'HEAD'], cwd).trim();
+    preSessionHead = (await deps.execGitCapture(['rev-parse', 'HEAD'], cwd)).trim();
   } catch { /* best-effort — scope check is skipped if snapshot fails */ }
 
   // Every ticket-capable session judges the whole open board (backlog-check.ts).
@@ -2051,7 +2054,7 @@ export async function runSubtaskSession(
   if (session.status === 'failed') return;
   const { sessionStartedAt } = session;
 
-  autoCommitSubtaskChanges(pipeline, deps, subtask, cwd);
+  await autoCommitSubtaskChanges(pipeline, deps, subtask, cwd);
 
   if (failIfSubtaskBlocked(pipeline, deps, subtask)) return;
 
@@ -2095,7 +2098,7 @@ export async function runSubtaskSession(
   // finishing this session, and the wakeup re-entry diff still contains the
   // unlisted files, so the check runs again when it does.
   if (unlistedFiles.length > 0 && !wakeupDetected) {
-    holdSubtaskForArbitration(pipeline, deps, subtask, cwd, preSessionHead, unlistedFiles);
+    await holdSubtaskForArbitration(pipeline, deps, subtask, cwd, preSessionHead, unlistedFiles);
     return;
   }
   if (unlistedFiles.length > 0) {
@@ -2117,7 +2120,7 @@ export async function runSubtaskSession(
   // EARLIER, legitimate wakeup on the same subtask.
   let skipCompletion = false;
   if (!wakeupDetected && subtask.files_to_create?.length) {
-    const verdict = verifySubtaskDeliverables(pipeline, deps, subtask, cwd);
+    const verdict = await verifySubtaskDeliverables(pipeline, deps, subtask, cwd);
     if (verdict === 'failed') return;
     skipCompletion = verdict === 'incomplete';
   }
@@ -2154,13 +2157,13 @@ export async function runSubtaskSession(
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Auto-commit uncommitted edits in a subtask's isolated worktree so cherry-picking or removing it can't lose them. */
-function autoSaveSubtaskWorktree(pipeline: ImplementPipeline, deps: ImplementDeps, id: number, stWorktreePath: string): void {
+async function autoSaveSubtaskWorktree(pipeline: ImplementPipeline, deps: ImplementDeps, id: number, stWorktreePath: string): Promise<void> {
   try {
-    const stStatusOut = deps.execGitCapture(['status', '--porcelain'], stWorktreePath).trim();
+    const stStatusOut = (await deps.execGitCapture(['status', '--porcelain'], stWorktreePath)).trim();
     if (stStatusOut) {
       logToOutput(pipeline.specPath, '\n[WORKTREE] Subtask ' + id + ' worktree has uncommitted changes — auto-committing before cherry-pick:\n' + stStatusOut + '\n');
-      deps.execGit(['add', '-A', '--', '.', ':!.teamai'], stWorktreePath);
-      deps.execGit(['commit', '--no-verify', '-m', 'chore: auto-save subtask ' + id + ' state before cherry-pick'], stWorktreePath);
+      await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], stWorktreePath);
+      await deps.execGit(['commit', '--no-verify', '-m', 'chore: auto-save subtask ' + id + ' state before cherry-pick'], stWorktreePath);
       logToOutput(pipeline.specPath, '[WORKTREE] Auto-committed uncommitted changes for subtask ' + id + '\n');
     }
   } catch (stStatusErr) {
@@ -2218,11 +2221,11 @@ export async function integrateGroup(
     // fails instead with "local changes would be overwritten by merge",
     // which reads as a completely different problem.
     try {
-      const statusOut = deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath).trim();
+      const statusOut = (await deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath)).trim();
       if (statusOut) {
         logToOutput(pipeline.specPath, '\n[WORKTREE] Main worktree has uncommitted changes — auto-committing before cherry-pick:\n' + statusOut + '\n');
-        deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
-        deps.execGit(['commit', '--no-verify', '-m', 'chore: auto-save worktree state before cherry-pick'], pipeline.worktreePath);
+        await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
+        await deps.execGit(['commit', '--no-verify', '-m', 'chore: auto-save worktree state before cherry-pick'], pipeline.worktreePath);
         logToOutput(pipeline.specPath, '[WORKTREE] Auto-committed uncommitted changes\n');
       }
     } catch (statusErr) {
@@ -2239,7 +2242,7 @@ export async function integrateGroup(
       }
       if (heldIds.has(subtasks[i].id)) {
         // The pre-cherry-pick auto-save below still runs so no edit is lost with the worktree.
-        autoSaveSubtaskWorktree(pipeline, deps, subtasks[i].id, subtaskWorktrees.get(subtasks[i].id)!);
+        await autoSaveSubtaskWorktree(pipeline, deps, subtasks[i].id, subtaskWorktrees.get(subtasks[i].id)!);
         logToOutput(pipeline.specPath, '\n[SCOPE-HOLD] Holding subtask ' + subtasks[i].id + '\'s commits on ' + pipeline.branch + '-st' + subtasks[i].id + ' pending scope arbitration\n');
         continue;
       }
@@ -2258,7 +2261,7 @@ export async function integrateGroup(
       // forensic trace: a verbatim Scaladoc edit subtask 2's session made
       // and reported as done was lost this way — the auto-save commit that
       // ran afterward only touched the MAIN worktree, never this one.
-      autoSaveSubtaskWorktree(pipeline, deps, subtasks[i].id, subtaskWorktrees.get(subtasks[i].id)!);
+      await autoSaveSubtaskWorktree(pipeline, deps, subtasks[i].id, subtaskWorktrees.get(subtasks[i].id)!);
 
       const stBranch = pipeline.branch + '-st' + subtasks[i].id;
       const cherrySuccess = await tryCherryPickWithRecovery(
@@ -2279,9 +2282,9 @@ export async function integrateGroup(
     let cleanedCount = 0;
     for (const [id, stWorktreePath] of subtaskWorktrees.entries()) {
       if (id === pipeline.wakeupSubtaskId) continue;
-      try { deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch {
+      try { await deps.execGit(['worktree', 'remove', '--force', stWorktreePath], deps.projectRoot); } catch {
         removeDirBestEffort(stWorktreePath, `subtask ${id} worktree, after integration`, (m) => logToOutput(pipeline.specPath, `\n[WORKTREE] ${m}\n`));
-        removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
+        await removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
       }
       if (!heldIds.has(id)) {
         try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
@@ -2526,7 +2529,7 @@ export async function runImplement(
         // nothing is ever visible here via existsSync, yet git still
         // considers the branch checked out (and refuses `branch -D`) until
         // that registration is cleared.
-        try { deps.execGit(['worktree', 'remove', '--force', stCanonicalPath], deps.projectRoot); }
+        try { await deps.execGit(['worktree', 'remove', '--force', stCanonicalPath], deps.projectRoot); }
         catch (err) {
           // Log rather than swallow: a failed worktree removal is the root
           // cause of the "branch still checked out" failures downstream, and
@@ -2540,7 +2543,7 @@ export async function runImplement(
             logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to rmSync per-subtask worktree ${stCanonicalPath}: ${err instanceof Error ? err.message : String(err)}\n`);
           }
         }
-        removeStaleWorktreeRegistration(deps.projectRoot, stCanonicalPath);
+        await removeStaleWorktreeRegistration(deps.projectRoot, stCanonicalPath);
 
         // Never depend on the old directory actually going away: if something
         // (a scanner, an orphaned process — on any OS) still holds it, take the
@@ -2572,7 +2575,7 @@ export async function runImplement(
           }
 
           if (!branchStillExists) {
-            deps.execGit(['worktree', 'add', stWorktreePath, '-b', stBranch, pipeline.branch], deps.projectRoot);
+            await deps.execGit(['worktree', 'add', stWorktreePath, '-b', stBranch, pipeline.branch], deps.projectRoot);
           } else {
             // Branch deletion failed — fall back to checking out the existing
             // branch. Log this distinctly from the canRecreate=false case
@@ -2581,13 +2584,13 @@ export async function runImplement(
             // actually free the branch, likely because a file lock prevented
             // full directory removal.
             logToOutput(pipeline.specPath, '\n[WORKTREE] Branch ' + stBranch + ' still exists after deletion attempt (worktree removal likely incomplete due to a file lock) — checking out existing branch instead of recreating\n');
-            deps.execGit(['worktree', 'add', stWorktreePath, stBranch], deps.projectRoot);
+            await deps.execGit(['worktree', 'add', stWorktreePath, stBranch], deps.projectRoot);
           }
         } else {
           // Branch preserved — create worktree from existing branch (no -b).
           // The merger agent in integrateGroup will handle conflicts when
           // cherry-picking back onto pipeline.branch.
-          deps.execGit(['worktree', 'add', stWorktreePath, stBranch], deps.projectRoot);
+          await deps.execGit(['worktree', 'add', stWorktreePath, stBranch], deps.projectRoot);
           logToOutput(pipeline.specPath, '\n[WORKTREE] Created worktree from preserved branch ' + stBranch + ' (conflict resolution deferred to merger agent)\n');
         }
 
@@ -2798,7 +2801,7 @@ export async function runImplement(
   // Reconcile before checking — see reconcileSubtaskCompletionFromDeliverables's
   // doc comment for why a real subtask's `completed` flag can go stale when a
   // QA-fallback synthetic subtask (id 9999) fixes its deliverables instead.
-  if (reconcileSubtaskCompletionFromDeliverables(finalSubtasks, pipeline.worktreePath, pipeline.specPath, deps.execGitCapture)) {
+  if (await reconcileSubtaskCompletionFromDeliverables(finalSubtasks, pipeline.worktreePath, pipeline.specPath, deps.execGitCapture)) {
     try {
       const tmpPath = finalPlanPath + '.tmp';
       writeFileSync(tmpPath, JSON.stringify(finalPlanResult.data, null, 2));
@@ -2949,7 +2952,7 @@ export interface StBranchRecoveryResult {
  */
 export async function _recoverStBranchCommits(
   projectRoot: string,
-  execGitFn: (args: string[], hostCwd: string) => void,
+  execGitFn: (args: string[], hostCwd: string) => Promise<void>,
   logFile: string,
   pipelineBranch: string,
   stBranch: string,
@@ -2990,7 +2993,7 @@ export async function _recoverStBranchCommits(
 
   // Attempt to cherry-pick the commits into the main worktree
   try {
-    execGitFn(['cherry-pick', pipelineBranch + '..' + stBranch], worktreePath);
+    await execGitFn(['cherry-pick', pipelineBranch + '..' + stBranch], worktreePath);
     logToOutput(specPath,
       '[WORKTREE] Auto-recovered ' + commits.length + ' commit(s) from ' + stBranch +
       ' onto ' + pipelineBranch + '\n'
@@ -2999,7 +3002,7 @@ export async function _recoverStBranchCommits(
   } catch (cpErr) {
     const cpMsg = cpErr instanceof Error ? cpErr.message : String(cpErr);
     // Abort any in-progress cherry-pick before deciding how to handle the failure
-    try { execGitFn(['cherry-pick', '--abort'], worktreePath); } catch { /* best-effort */ }
+    try { await execGitFn(['cherry-pick', '--abort'], worktreePath); } catch { /* best-effort */ }
 
     // Defect 3 parity: a dead-container/infra error here is trivially
     // retryable once the container is back — don't treat it the same as a
@@ -3012,7 +3015,7 @@ export async function _recoverStBranchCommits(
         try {
           await containerManager.ensureContainer(projectRoot, logFile);
           await new Promise(r => setTimeout(r, 1000)); // brief backoff for container stabilisation
-          execGitFn(['cherry-pick', pipelineBranch + '..' + stBranch], worktreePath);
+          await execGitFn(['cherry-pick', pipelineBranch + '..' + stBranch], worktreePath);
           logToOutput(specPath,
             '[WORKTREE] Auto-recovered ' + commits.length + ' commit(s) from ' + stBranch +
             ' onto ' + pipelineBranch + ' after infra retry\n'
@@ -3021,7 +3024,7 @@ export async function _recoverStBranchCommits(
         } catch (retryErr) {
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           logToOutput(specPath, '[WORKTREE] Recovery retry ' + (retry + 1) + ' for ' + stBranch + ' failed: ' + retryMsg + '\n');
-          try { execGitFn(['cherry-pick', '--abort'], worktreePath); } catch { /* best-effort */ }
+          try { await execGitFn(['cherry-pick', '--abort'], worktreePath); } catch { /* best-effort */ }
         }
       }
       logToOutput(specPath, '[WORKTREE] Infra retries exhausted for ' + stBranch + ' — cannot auto-recover\n');
@@ -3074,7 +3077,7 @@ export async function _recoverSubtaskBranchBeforeDelete(
  * pipeline run is active, and a raw host-side git call against it fails
  * outright instead of reporting "not in progress".
  */
-function checkCherryPickInProgress(worktreePath: string, execGitCapture: ImplementDeps['execGitCapture']): boolean {
+async function checkCherryPickInProgress(worktreePath: string, execGitCapture: ImplementDeps['execGitCapture']): Promise<boolean> {
   try {
     // Require non-empty output, not just "didn't throw": a real `git
     // rev-parse --verify` either throws (ref doesn't exist) or prints the
@@ -3084,7 +3087,7 @@ function checkCherryPickInProgress(worktreePath: string, execGitCapture: Impleme
     // suite for calls a given test doesn't care about) from being misread
     // as "a cherry-pick is in progress" for every other execGitCapture
     // call the test makes too.
-    return execGitCapture(['rev-parse', '--verify', 'CHERRY_PICK_HEAD'], worktreePath).trim().length > 0;
+    return (await execGitCapture(['rev-parse', '--verify', 'CHERRY_PICK_HEAD'], worktreePath)).trim().length > 0;
   } catch {
     return false;
   }
@@ -3132,11 +3135,11 @@ export async function repairStuckCherryPick(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
 ): Promise<void> {
-  try { deps.execGit(['cherry-pick', '--quit'], pipeline.worktreePath); } catch { /* best-effort */ }
+  try { await deps.execGit(['cherry-pick', '--quit'], pipeline.worktreePath); } catch { /* best-effort */ }
 
   let unmergedFiles = '';
   try {
-    unmergedFiles = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath).trim();
+    unmergedFiles = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath)).trim();
   } catch { /* best-effort — treat as no conflicts, fall through to the clean-pending path */ }
 
   if (unmergedFiles) {
@@ -3144,19 +3147,19 @@ export async function repairStuckCherryPick(
       '\n[WORKTREE] Main worktree has conflict markers left by an interrupted ' +
       'cherry-pick in ' + unmergedFiles.split('\n').length +
       ' file(s) — discarding so a fresh cherry-pick can run cleanly\n');
-    try { deps.execGit(['reset', '--hard', 'HEAD'], pipeline.worktreePath); } catch { /* best-effort */ }
+    try { await deps.execGit(['reset', '--hard', 'HEAD'], pipeline.worktreePath); } catch { /* best-effort */ }
     return;
   }
 
   try {
-    const statusOut = deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath).trim();
+    const statusOut = (await deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath)).trim();
     if (statusOut) {
       logToOutput(pipeline.specPath,
         '\n[WORKTREE] Main worktree has pending changes left by an interrupted ' +
         'cherry-pick with no conflicts — committing them to finish it instead of ' +
         'discarding them:\n' + statusOut + '\n');
-      deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
-      deps.execGit(['commit', '--no-verify', '-m', 'chore: finish cherry-pick left in progress by an interrupted session'], pipeline.worktreePath);
+      await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
+      await deps.execGit(['commit', '--no-verify', '-m', 'chore: finish cherry-pick left in progress by an interrupted session'], pipeline.worktreePath);
       logToOutput(pipeline.specPath, '[WORKTREE] Finished the stuck cherry-pick\n');
     }
   } catch (err) {
@@ -3225,7 +3228,7 @@ export async function tryCherryPickWithRecovery(
   // Tier 1: Normal cherry-pick
   try {
     logToOutput(pipeline.specPath, '\n[WORKTREE] Cherry-picking commits from ' + stBranch + ' onto ' + pipeline.branch + '\n');
-    deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
+    await deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
     logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick succeeded for subtask ' + subtaskId + '\n');
     return true;
   } catch (firstErr) {
@@ -3235,8 +3238,8 @@ export async function tryCherryPickWithRecovery(
     // Defect 3: detect infra-class errors (dead container, Docker unreachable)
     // and retry after reprovisioning before giving up. These are trivially
     // retryable once the container is back, unlike genuine git conflicts.
-    if (!checkCherryPickInProgress(pipeline.worktreePath, deps.execGitCapture) && isInfraError(firstMsg)) {
-      try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+    if (!(await checkCherryPickInProgress(pipeline.worktreePath, deps.execGitCapture)) && isInfraError(firstMsg)) {
+      try { await deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
 
       // Check if container mode is active and attempt reprovision
       if (readContainerConfig(deps.projectRoot).enabled) {
@@ -3245,13 +3248,13 @@ export async function tryCherryPickWithRecovery(
           try {
             await containerManager.ensureContainer(deps.projectRoot, logFile);
             await new Promise(r => setTimeout(r, 1000)); // brief backoff for container stabilisation
-            deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
+            await deps.execGit(['cherry-pick', pipeline.branch + '..' + stBranch], pipeline.worktreePath);
             logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick recovered after infra retry for subtask ' + subtaskId + '\n');
             return true;
           } catch (retryErr) {
             const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
             logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick retry ' + (retry + 1) + ' failed: ' + retryMsg + '\n');
-            try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+            try { await deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
           }
         }
         logToOutput(pipeline.specPath, '[WORKTREE] Infra retries exhausted for subtask ' + subtaskId + ' — cannot auto-recover\n');
@@ -3265,15 +3268,15 @@ export async function tryCherryPickWithRecovery(
   }
 
   // Check whether this is a recoverable conflict or a hard failure
-  if (!checkCherryPickInProgress(pipeline.worktreePath, deps.execGitCapture)) {
-    try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+  if (!(await checkCherryPickInProgress(pipeline.worktreePath, deps.execGitCapture))) {
+    try { await deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
     logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick hard-failed (not a conflict) — cannot auto-recover subtask ' + subtaskId + '\n');
     return false;
   }
 
   // Tier 2: Spawn merger agent to resolve conflicts semantically
   try {
-    const conflictedFiles = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath).trim();
+    const conflictedFiles = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath)).trim();
     logToOutput(pipeline.specPath, '[WORKTREE] Conflicted files: ' + (conflictedFiles || '(none listed)') + '\n');
   } catch { /* best-effort — proceed with merger */ }
   logToOutput(pipeline.specPath, '[WORKTREE] Cherry-pick has conflicts — spawning merger agent for subtask ' + subtaskId + '\n');
@@ -3296,9 +3299,9 @@ export async function tryCherryPickWithRecovery(
     await deps.waitForCompletion(mergeSessionId);
     processManager.killSession(mergeSessionId);
 
-    if (checkCherryPickInProgress(pipeline.worktreePath, deps.execGitCapture)) {
+    if (await checkCherryPickInProgress(pipeline.worktreePath, deps.execGitCapture)) {
       logToOutput(pipeline.specPath, '[WORKTREE] Merger finished but cherry-pick still in progress for subtask ' + subtaskId + ' — aborting\n');
-      try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+      try { await deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
       return false;
     }
 
@@ -3307,7 +3310,7 @@ export async function tryCherryPickWithRecovery(
   } catch (mergeErr) {
     const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
     logToOutput(pipeline.specPath, '[WORKTREE] Merger agent failed for subtask ' + subtaskId + ': ' + mergeMsg + '\n');
-    try { deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
+    try { await deps.execGit(['cherry-pick', '--abort'], pipeline.worktreePath); } catch { /* best-effort */ }
     return false;
   }
 }
