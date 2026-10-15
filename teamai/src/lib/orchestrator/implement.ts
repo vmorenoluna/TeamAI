@@ -278,7 +278,7 @@ export async function ensureWorktree(
   deps.restoreHumanFeedbackFromSnapshot(pipeline.specPath);
 
   // Pull latest default branch (token-authed)
-  const baseBranch = resolveBaseBranch(deps.projectRoot);
+  const baseBranch = await resolveBaseBranch(deps.projectRoot);
   try {
     deps.gitPush(['pull', '--ff-only', 'origin', baseBranch], path.join(pipeline.specPath, 'output.log'));
   } catch { /* non-fast-forward or offline */ }
@@ -375,7 +375,7 @@ export async function ensureWorktree(
       gitPush: deps.gitPush,
       sessionOpts: deps.sessionOpts,
       waitForCompletion: deps.waitForCompletion,
-      baseBranch: resolveBaseBranch(deps.projectRoot),
+      baseBranch: await resolveBaseBranch(deps.projectRoot),
     },
   );
 
@@ -766,13 +766,13 @@ export function deliverableState(
  *
  * @internal — exported for unit tests only. Not part of the public API.
  */
-export function filesAlreadyChangedOnBranch(
+export async function filesAlreadyChangedOnBranch(
   deps: Pick<ImplementDeps, 'execGitCapture' | 'projectRoot'>,
   cwd: string,
   files: string[],
-): boolean {
+): Promise<boolean> {
   if (files.length === 0) return false;
-  const base = resolveBaseBranch(deps.projectRoot);
+  const base = await resolveBaseBranch(deps.projectRoot);
   for (const ref of [base, 'origin/' + base]) {
     try {
       const changed = new Set(
@@ -1416,7 +1416,7 @@ export function failIfSubtaskBlocked(
  *
  * @internal — exported for unit tests only. Not part of the public API.
  */
-export function checkSubtaskScope(
+export async function checkSubtaskScope(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
   subtask: PlanSubtask,
@@ -1424,7 +1424,7 @@ export function checkSubtaskScope(
   preSessionHead: string,
   subtaskLogFile: string,
   scopeViolations: Set<number>,
-): { changedFiles: string[]; unlistedFiles: string[] } {
+): Promise<{ changedFiles: string[]; unlistedFiles: string[] }> {
   // Post-session scope check. A subtask's `files` is a coordination hint for
   // parallel safety, not a permission boundary: agents may edit any file the
   // work needs (e.g. a mirrored copy a drift test ties to a listed file). But
@@ -1486,7 +1486,7 @@ export function checkSubtaskScope(
         // finds the work done correctly edits nothing, so the branch — not
         // this session's diff — decides: every assigned file must already
         // differ from the base branch.
-        const alreadyOnBranch = filesAlreadyChangedOnBranch(deps, cwd, subtask.files || []);
+        const alreadyOnBranch = await filesAlreadyChangedOnBranch(deps, cwd, subtask.files || []);
         if (alreadyOnBranch) {
           logToOutput(pipeline.specPath,
             '\n[VERIFY] Subtask ' + subtask.id + ' made no edit this session, but its assigned files are already changed on the branch — accepting\n'
@@ -2048,7 +2048,7 @@ export async function runSubtaskSession(
 
   if (failIfSubtaskBlocked(pipeline, deps, subtask)) return;
 
-  const { unlistedFiles } = checkSubtaskScope(pipeline, deps, subtask, cwd, preSessionHead, subtaskLogFile, scopeViolations);
+  const { unlistedFiles } = await checkSubtaskScope(pipeline, deps, subtask, cwd, preSessionHead, subtaskLogFile, scopeViolations);
 
   let wakeupDetected = await consumeSubtaskWakeupFiles(pipeline, deps, subtask, cwd, wasWakeupReentry);
 

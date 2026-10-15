@@ -71,7 +71,7 @@ function makeDeps(): ScopeArbitrationDeps {
       try { git(repo, 'cherry-pick', `feat..${ref}`); return true; } catch { return false; }
     },
     verifySubtaskDeliverables: () => 'ok',
-    filesAlreadyChangedOnBranch: () => false,
+    filesAlreadyChangedOnBranch: async () => false,
     completeSubtask: async (_p, s, _c, _pre, ids) => { ids.push(s.id); completed.push(s.id); return true; },
   };
 }

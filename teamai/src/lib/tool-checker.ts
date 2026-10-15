@@ -7,10 +7,13 @@
  *
  * Caches detection results per process lifetime so repeated lookups are cheap.
  */
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { warn } from './logger';
+
+const execFileAsync = promisify(execFile);
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -45,16 +48,22 @@ const ALL_TOOLS: ToolName[] = ['claude', 'git', 'gh', 'docker', 'devcontainer'];
 
 // ── findExecutable (inlined copy — avoids circular import from process-manager) ──
 
-function findExecutable(name: string): string | null {
+async function findExecutable(name: string): Promise<string | null> {
   try {
     if (process.platform === 'win32') {
-      return execFileSync('where', [name], { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 })
-        .trim().split(/\r?\n/)[0].trim();
+      const { stdout } = await execFileAsync('where', [name], { encoding: 'utf-8', timeout: 5000 });
+      return stdout.trim().split(/\r?\n/)[0].trim();
     }
-    return execFileSync('which', [name], { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 }).trim();
+    const { stdout } = await execFileAsync('which', [name], { encoding: 'utf-8', timeout: 5000 });
+    return stdout.trim();
   } catch {
     return null;
   }
+}
+
+async function readVersion(bin: string, versionFlag: string): Promise<string> {
+  const { stdout } = await execFileAsync(bin, [versionFlag], { encoding: 'utf-8', timeout: 5000 });
+  return stdout.trim().split('\n')[0].slice(0, 120);
 }
 
 // ── Path resolution ─────────────────────────────────────────────────────────
@@ -96,22 +105,20 @@ const TOOL_CHECK_NEGATIVE_TTL_MS = 60_000;
 const _detectionCache = new Map<ToolName, ToolStatus>();
 const _detectionTimestamps = new Map<ToolName, number>();
 
+// In-flight detections, so concurrent callers share one set of spawns. Dropping
+// an entry (set/clear path, cache reset) also marks that detection stale: it
+// only writes the cache while it is still the registered entry for its tool.
+const _inFlight = new Map<ToolName, Promise<ToolStatus>>();
+
 export function _resetToolCheckCache(): void {
   _detectionCache.clear();
   _detectionTimestamps.clear();
+  _inFlight.clear();
 }
 
 // ── Single tool check ───────────────────────────────────────────────────────
 
-export function checkTool(name: ToolName): ToolStatus {
-  const cached = _detectionCache.get(name);
-  if (cached) {
-    if (cached.found) return cached;
-    // Negative result — check TTL before returning cached failure
-    const checkedAt = _detectionTimestamps.get(name) || 0;
-    if ((Date.now() - checkedAt) < TOOL_CHECK_NEGATIVE_TTL_MS) return cached;
-  }
-
+async function detectTool(name: ToolName): Promise<ToolStatus> {
   const def = TOOL_DEFAULTS[name];
   const config = loadToolsConfig();
   const customPath: string | null = config[name] ?? null;
@@ -131,9 +138,7 @@ export function checkTool(name: ToolName): ToolStatus {
       if (!existsSync(candidate)) continue;
       resolvedPath = candidate;
       try {
-        version = execFileSync(candidate, [def.versionFlag], {
-          encoding: 'utf-8', stdio: 'pipe', timeout: 5000,
-        }).trim().split('\n')[0].slice(0, 120);
+        version = await readVersion(candidate, def.versionFlag);
         found = true;
         break;
       } catch {
@@ -143,13 +148,11 @@ export function checkTool(name: ToolName): ToolStatus {
     }
 
     // Try to resolve via PATH (which/where)
-    const resolved = findExecutable(candidate);
+    const resolved = await findExecutable(candidate);
     if (resolved) {
       resolvedPath = resolved;
       try {
-        version = execFileSync(resolved, [def.versionFlag], {
-          encoding: 'utf-8', stdio: 'pipe', timeout: 5000,
-        }).trim().split('\n')[0].slice(0, 120);
+        version = await readVersion(resolved, def.versionFlag);
         found = true;
         break;
       } catch {
@@ -166,7 +169,7 @@ export function checkTool(name: ToolName): ToolStatus {
       : `"${name}" not found on PATH`;
   }
 
-  const status: ToolStatus = {
+  return {
     name,
     label: def.label,
     found,
@@ -176,13 +179,42 @@ export function checkTool(name: ToolName): ToolStatus {
     customPath: !!customPath,
   };
 
-  _detectionCache.set(name, status);
-  _detectionTimestamps.set(name, Date.now());
-  return status;
 }
 
-export function checkAllTools(): ToolStatus[] {
-  return ALL_TOOLS.map(name => checkTool(name));
+export function checkTool(name: ToolName): Promise<ToolStatus> {
+  const cached = _detectionCache.get(name);
+  if (cached) {
+    if (cached.found) return Promise.resolve(cached);
+    // Negative result — check TTL before returning cached failure
+    const checkedAt = _detectionTimestamps.get(name) || 0;
+    if ((Date.now() - checkedAt) < TOOL_CHECK_NEGATIVE_TTL_MS) return Promise.resolve(cached);
+  }
+
+  const existing = _inFlight.get(name);
+  if (existing) return existing;
+
+  const self: { promise?: Promise<ToolStatus> } = {};
+  const promise = (async () => {
+    try {
+      const status = await detectTool(name);
+      // Only cache while still the registered detection; otherwise the config
+      // changed mid-flight and this result is stale (the caller still gets it).
+      if (_inFlight.get(name) === self.promise) {
+        _detectionCache.set(name, status);
+        _detectionTimestamps.set(name, Date.now());
+      }
+      return status;
+    } finally {
+      if (_inFlight.get(name) === self.promise) _inFlight.delete(name);
+    }
+  })();
+  self.promise = promise;
+  _inFlight.set(name, promise);
+  return promise;
+}
+
+export function checkAllTools(): Promise<ToolStatus[]> {
+  return Promise.all(ALL_TOOLS.map(name => checkTool(name)));
 }
 
 // ── Path configuration ──────────────────────────────────────────────────────
@@ -196,6 +228,7 @@ export function setToolPath(name: ToolName, binaryPath: string): void {
   }
   saveToolsConfig(config);
   _detectionCache.delete(name);
+  _inFlight.delete(name);
 }
 
 export function getToolPath(name: ToolName): string {

@@ -272,7 +272,7 @@ export async function syncPhaseBaseline(
   pipeline: Pick<TaskPipeline, 'taskId' | 'specPath' | 'worktreePath' | 'phase' | 'branch'>,
   deps: RebaseDeps,
 ): Promise<void> {
-  const baseBranch = resolveBaseBranch(deps.projectRoot);
+  const baseBranch = await resolveBaseBranch(deps.projectRoot);
   const logFile = path.join(pipeline.specPath, 'output.log');
 
   try {
@@ -700,7 +700,7 @@ export async function runPlanPhase(
   // detectUndeclaredSubtaskReferences for the incident this catches.
   logUndeclaredSubtaskReferences(pipeline.specPath);
 
-  const baseBranch = resolveBaseBranch(deps.projectRoot);
+  const baseBranch = await resolveBaseBranch(deps.projectRoot);
   try {
     deps.gitPush(['pull', '--ff-only', 'origin', baseBranch], path.join(pipeline.specPath, 'output.log'));
   } catch { /* non-fast-forward or offline — proceed with local branch */ }
@@ -753,7 +753,7 @@ export async function runMergePhase(
 
   // Rebase onto latest default branch before merging so the diff only contains the
   // ticket's actual changes, not drift from an old worktree snapshot.
-  const baseBranch = resolveBaseBranch(deps.projectRoot);
+  const baseBranch = await resolveBaseBranch(deps.projectRoot);
   const rebaseOk = await rebaseOntoLatestDefault(
     pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile,
     { projectRoot: deps.projectRoot, execGit: deps.execGit, execGitCapture: deps.execGitCapture, gitPush: deps.gitPush, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
@@ -903,7 +903,7 @@ export async function runCreatePRPhase(
   }
 
   // Rebase onto latest default branch so the PR diff only contains the ticket's actual changes.
-  const baseBranch = resolveBaseBranch(deps.projectRoot);
+  const baseBranch = await resolveBaseBranch(deps.projectRoot);
   const rebaseOk = await rebaseOntoLatestDefault(
     pipeline.worktreePath, pipeline.taskId, pipeline.branch, logFile,
     { projectRoot: deps.projectRoot, execGit: deps.execGit, execGitCapture: deps.execGitCapture, gitPush: deps.gitPush, sessionOpts: deps.sessionOpts, waitForCompletion: deps.waitForCompletion, baseBranch },
@@ -962,10 +962,10 @@ export async function runCreatePRPhase(
   }
   deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
 
-  const platform = detectGitPlatform(deps.projectRoot);
+  const platform = await detectGitPlatform(deps.projectRoot);
 
   // Check for existing open PR first — avoid creating duplicates
-  let prUrl: string | null = checkExistingPRViaCLI(platform, pipeline.branch, deps.projectRoot);
+  let prUrl: string | null = await checkExistingPRViaCLI(platform, pipeline.branch, deps.projectRoot);
   if (prUrl) {
     logToOutput(pipeline.specPath, `[PR] Open PR already exists for branch ${pipeline.branch}: ${prUrl}\n`);
   } else {
@@ -980,7 +980,7 @@ export async function runCreatePRPhase(
       ticketMessage?.trailerLines ?? [],
       readImplementationSummary(pipeline.specPath),
     );
-    prUrl = createPRViaCLI(platform, pipeline.branch, pipeline.title, body, deps.projectRoot, logFile);
+    prUrl = await createPRViaCLI(platform, pipeline.branch, pipeline.title, body, deps.projectRoot, logFile);
     // Fallback: scan log for PR URL (handles unknown platforms where CLI returns null)
     if (!prUrl) {
       prUrl = deps.extractPrUrl(logFile);
