@@ -1087,6 +1087,40 @@ describe('Auto Mode Integration', () => {
       );
     });
 
+    it('falls back to an allowed merge method when the repo disallows merge commits', async () => {
+      vi.useFakeTimers();
+
+      autoMode.setAutoModeState(testDir, true, 1);
+
+      await vi.waitFor(() => {
+        expect(mockOrch.resumeTask).toHaveBeenCalledWith(taskId);
+      });
+
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({ state: 'OPEN', statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
+        }
+        if (cmd === 'gh' && args[0] === 'repo' && args[1] === 'view') {
+          return JSON.stringify({ mergeCommitAllowed: false, squashMergeAllowed: false, rebaseMergeAllowed: true });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'merge') {
+          return 'Merged pull request #42';
+        }
+        return '';
+      });
+
+      const { TaskStore: TSf } = await import('@/lib/task-store');
+      new TSf(testDir).updatePhase(taskId, 'pr-open');
+      fireEvent('phase-change', { taskId, phase: 'pr-open', projectRoot: testDir });
+
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'gh', ['pr', 'merge', '42', '--rebase'],
+        expect.objectContaining({ cwd: testDir }),
+      );
+    });
+
     it('persists autoProcessed: true to task.json after CI auto-merge', async () => {
       vi.useFakeTimers();
 
