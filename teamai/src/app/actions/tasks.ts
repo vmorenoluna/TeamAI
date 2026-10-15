@@ -2,7 +2,8 @@
 
 import { TaskStore } from '@/lib/task-store';
 import { getOrchestrator } from '@/lib/orchestrator';
-import { MAX_REVISION_SNAPSHOTS } from '@/lib/orchestrator/artifacts';
+import { MAX_REVISION_SNAPSHOTS, RESUME_AUTO } from '@/lib/orchestrator/artifacts';
+import { retryAutoMerge } from '@/lib/auto-mode';
 import { readCommonArtifacts } from '@/lib/task-artifacts';
 import { getActiveProjectPath } from './projects';
 import { processManager } from '@/lib/process-manager';
@@ -66,9 +67,20 @@ export async function bulkDeleteTasks(taskIds: string[]) {
 }
 
 export async function retryTask(taskId: string): Promise<{ success: boolean; error?: string }> {
-  const { taskStore, orchestrator } = await getStores();
+  const { taskStore, orchestrator, projectPath } = await getStores();
   const task = taskStore.getById(taskId);
   if (!task) return { success: false, error: 'Task not found' };
+  // Auto mode gave up merging a green PR: the task is still pr-open, and
+  // "retry" means handing it back to the CI poller.
+  if (task.phase === 'pr-open' && task.autoMergeStalled) {
+    try {
+      retryAutoMerge(projectPath, taskId);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+    revalidatePath('/');
+    return { success: true };
+  }
   if (task.phase !== 'failed') return { success: false, error: `Task is in phase "${task.phase}", not "failed"` };
 
   // Determine the phase the task was in when it failed — read from events
@@ -111,6 +123,9 @@ export async function retryTaskWithOptions(
   taskId: string,
   phase: string,
 ): Promise<{ success: boolean; error?: string }> {
+  // "Resume where it failed" is the same operation as a phase-less retry.
+  if (phase === RESUME_AUTO) return retryTask(taskId);
+
   const { taskStore, orchestrator } = await getStores();
   const task = taskStore.getById(taskId);
   if (!task) return { success: false, error: 'Task not found' };

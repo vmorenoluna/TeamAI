@@ -238,16 +238,15 @@ describe('TaskDetail mutation handlers', () => {
 
       fireEvent.click(screen.getByTestId('detail-retry-button'));
 
-      // Dialog is open with the phase selector (no failureReason/qaReport
-      // here, so it defaults to 'implement' per task-detail.tsx's
-      // defaultRetryPhase).
+      // Dialog is open with the phase selector, defaulting to "resume where
+      // it failed" (the server picks the phase).
       expect(screen.getByText('Choose Resume Phase')).toBeInTheDocument();
 
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
       });
 
-      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('retry-1', 'implement');
+      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('retry-1', 'auto');
       await waitFor(() => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('Failed to retry task: inline retry raw throw: bad pipeline state');
@@ -255,11 +254,9 @@ describe('TaskDetail mutation handlers', () => {
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
-    // Regression coverage: the dialog's default phase should follow the
-    // failure's spec-concerns status, same as the server-side
-    // getResumePhaseForFailedTask fallback for a phase-less retry — instead
-    // of always defaulting to 'implement' regardless of why it failed.
-    it('handleInlineRetry: defaults the dialog to spec when the QA report flagged spec concerns', async () => {
+    // The default is always "resume where it failed": retryTask makes the
+    // spec-vs-implement call server-side, so the dialog no longer has to.
+    it('handleInlineRetry: defaults the dialog to "resume where it failed", even with spec concerns', async () => {
       renderDetail(
         makeTask({
           id: 'retry-2',
@@ -274,25 +271,24 @@ describe('TaskDetail mutation handlers', () => {
 
       fireEvent.click(screen.getByTestId('detail-retry-button'));
 
-      expect(screen.getByRole('radio', { name: /Resume from Spec/ })).toBeChecked();
+      expect(screen.getByRole('radio', { name: /Resume from where it failed/ })).toBeChecked();
     });
 
-    it('handleInlineRetry: defaults the dialog to implement when the QA report has no spec concerns', async () => {
+    it('handleInlineRetry: names the failed phase in the default option', async () => {
       renderDetail(
         makeTask({
           id: 'retry-3',
           phase: 'failed',
-          failureReason: 'qa-attempts-exhausted',
-          completionSummary: 'QA exceeded max attempts while validating',
-          title: 'Failed task without spec concerns',
+          failedPhase: 'create-pr',
+          failureReason: 'run-error',
+          completionSummary: 'create-pr phase: gh timed out',
+          title: 'Failed creating PR',
         }),
-        [],
-        { overall: 'FAIL' },
       );
 
       fireEvent.click(screen.getByTestId('detail-retry-button'));
 
-      expect(screen.getByRole('radio', { name: /Resume from Implement/ })).toBeChecked();
+      expect(screen.getByRole('radio', { name: /Resume from where it failed \(create-pr\)/ })).toBeChecked();
     });
 
     it('handleDelete: role=alert banner surfaces when deleteTask throws (and router.push is skipped)', async () => {
