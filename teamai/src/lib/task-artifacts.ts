@@ -61,6 +61,7 @@ export async function readCommonArtifacts(
       const promise = execFileAsync('git', ['diff', `${base}...${branch}`], {
         cwd: projectPath,
         encoding: 'utf-8',
+        maxBuffer: 32 * 1024 * 1024,
       });
       promise.child?.stdin?.end();
       diff = (await promise).stdout;

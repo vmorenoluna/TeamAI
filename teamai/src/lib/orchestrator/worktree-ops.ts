@@ -11,7 +11,7 @@ import path from 'path';
 import { TaskStore } from '../task-store';
 import { warn as logWarn } from '../logger';
 import { getWorktreeBase, resolveWorktreeDirName } from './helpers';
-import { removeStaleWorktreeRegistration, removeDirBestEffort } from './worktree-utils';
+import { removeStaleWorktreeRegistration, removeDirBestEffort, execGitQueued } from './worktree-utils';
 import { clearSubtaskWorktreeRecord } from './subtask-worktree-paths';
 import type { TaskPipeline } from './types';
 
@@ -19,7 +19,7 @@ const execFileAsync = promisify(execFile);
 
 /** Run `git` on the host with stdin closed; rejects with execFile's Error. */
 async function runHostGit(args: string[], cwd: string): Promise<string> {
-  const promise = execFileAsync('git', args, { cwd, encoding: 'utf-8' });
+  const promise = execFileAsync('git', args, { cwd, encoding: 'utf-8', maxBuffer: 32 * 1024 * 1024 });
   promise.child?.stdin?.end();
   return (await promise).stdout;
 }
@@ -122,7 +122,7 @@ export async function cleanStaleSubtaskWorktrees(
     await removeStaleWorktreeRegistration(deps.projectRoot, stPath);
 
     try {
-      await runHostGit(['branch', '-D', stBranch], deps.projectRoot);
+      await execGitQueued(['branch', '-D', stBranch], deps.projectRoot, deps.projectRoot);
     } catch { /* best-effort */ }
   }
 
@@ -226,7 +226,7 @@ export async function removeWorktree(
   }
 
   if (task?.branch) {
-    try { await runHostGit(['branch', '-D', task.branch], deps.projectRoot); } catch { /* best-effort */ }
+    try { await execGitQueued(['branch', '-D', task.branch], deps.projectRoot, deps.projectRoot); } catch { /* best-effort */ }
   }
   deps.taskStore.update(taskId, { branch: undefined });
 }
