@@ -160,6 +160,22 @@ export interface PhaseClearDescription {
   label: string;
 }
 
+/** Sentinel retry target: let the orchestrator pick where to resume. */
+export const RESUME_AUTO = 'auto';
+
+/**
+ * Options for the Retry dialog. The first — and default — is "resume where it
+ * failed", decided server-side by `retryTask` from the task's recorded failure
+ * point, so a failure in any phase (including a transient `gh`/git error
+ * while creating the PR or merging) is recoverable with one choice and
+ * without re-running agents that already finished. The explicit phases remain
+ * for deliberately rewinding the pipeline.
+ */
+export function getRetryPhaseOptions(failedPhase?: string): PhaseClearDescription[] {
+  const where = failedPhase && failedPhase !== 'failed' ? ` (${failedPhase})` : '';
+  return [{ phase: RESUME_AUTO, label: `where it failed${where}` }, ...getPhaseClearDescriptions()];
+}
+
 /** Return the list of phases the retry-phase dialog can offer. */
 export function getPhaseClearDescriptions(): PhaseClearDescription[] {
   return [
@@ -208,6 +224,11 @@ export function getPhaseClearDescription(
       return (
         'Keep the existing spec and plan. Only QA history is cleared. ' +
         'Re-runs implementation followed by QA review.'
+      );
+    case RESUME_AUTO:
+      return (
+        'TeamAI picks the resume point from where the task failed. Work that already completed is kept; ' +
+        'a failure while creating the PR or merging re-runs only that step, with no agent involved.'
       );
     default:
       return 'Artifacts will be cleared according to the pipeline phase.';

@@ -376,6 +376,29 @@ describe('TaskStore', () => {
       expect(store.isTaskCompleted(dep.id)).toBe(true);
     });
 
+    it('records the phase a task failed in, and clears it when the task leaves failed', () => {
+      const task = createTask();
+      store.updatePhase(task.id, 'create-pr');
+      store.updatePhase(task.id, 'failed');
+      expect(store.getById(task.id)!.failedPhase).toBe('create-pr');
+
+      // a repeated failed write must not overwrite it with 'failed'
+      store.updatePhase(task.id, 'failed');
+      expect(store.getById(task.id)!.failedPhase).toBe('create-pr');
+
+      store.updatePhase(task.id, 'create-pr');
+      expect(store.getById(task.id)!.failedPhase).toBeUndefined();
+    });
+
+    it('clears autoMergeStalled when the task leaves pr-open', () => {
+      const task = createTask();
+      store.updatePhase(task.id, 'pr-open');
+      store.update(task.id, { autoMergeStalled: 'merge failed' });
+      expect(store.getById(task.id)!.autoMergeStalled).toBe('merge failed');
+      store.updatePhase(task.id, 'done');
+      expect(store.getById(task.id)!.autoMergeStalled).toBeUndefined();
+    });
+
     it('persists awaitingReviewReason on the task when parking on awaiting-review with a reason', () => {
       const task = createTask('Failure park', 'desc');
       store.updatePhase(task.id, 'awaiting-review', {

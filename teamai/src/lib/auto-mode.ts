@@ -304,6 +304,22 @@ function _adoptStalledTasks(projectRoot: string, state: AutoProjectState): void 
   }
 }
 
+/**
+ * Restart CI polling / auto-merge for a `pr-open` task whose poller gave up
+ * (see Task.autoMergeStalled). Throws when auto mode is off for the project —
+ * with it off nothing would poll, and the PR has to be merged by hand.
+ */
+export function retryAutoMerge(projectRoot: string, taskId: string): void {
+  const state = projectStates.get(projectRoot);
+  if (!state?.enabled) throw new Error('Auto mode is not enabled for this project');
+  const task = new TaskStore(projectRoot).getById(taskId);
+  if (!task || task.phase !== 'pr-open') throw new Error('Task is not in pr-open');
+  const existing = state.ciPollTimers.get(taskId);
+  if (existing) clearInterval(existing);
+  state.ciPollTimers.delete(taskId);
+  _startCIPolling(taskId, projectRoot, state);
+}
+
 function _stop(state: AutoProjectState): void {
   state.enabled = false;
 
@@ -434,6 +450,17 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
   const prNumber = prMatch[1];
 
   log('auto-mode', `Starting CI polling for PR #${prNumber} (task ${taskId})`);
+  if (task.autoMergeStalled) taskStore.update(taskId, { autoMergeStalled: undefined });
+
+  /** Persist why polling stopped without merging, so the UI can say so and
+   *  offer "Retry merge" instead of leaving a green PR silently in pr-open. */
+  const markStalled = (reason: string) => {
+    try {
+      new TaskStore(projectRoot).update(taskId, { autoMergeStalled: reason });
+    } catch (err) {
+      logWarn('auto-mode', `Failed to record stalled auto-merge for task ${taskId}`, err);
+    }
+  };
 
   let mergeFailures = 0;
   const MAX_MERGE_FAILURES = 5;
@@ -556,6 +583,7 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
             clearInterval(timer);
             state.ciPollTimers.delete(taskId);
             log('auto-mode', `PR #${prNumber} merge failed after ${MAX_MERGE_FAILURES} attempts — stopping poll, awaiting manual review`);
+            markStalled(`Auto-merge failed ${MAX_MERGE_FAILURES} times: ${msg.slice(0, 300)}`);
           }
         }
       } else if (failedChecks.length > 0) {
@@ -563,6 +591,7 @@ function _startCIPolling(taskId: string, projectRoot: string, state: AutoProject
           clearInterval(timer);
           state.ciPollTimers.delete(taskId);
           log('auto-mode', `PR #${prNumber} still has failing CI check(s) after ${MAX_CI_RERUN_ATTEMPTS} rerun attempts — stopping poll, awaiting manual review`);
+          markStalled(`CI still failing after ${MAX_CI_RERUN_ATTEMPTS} re-runs`);
           return;
         }
         const runId = failedChecks[0].detailsUrl?.match(/\/actions\/runs\/(\d+)/)?.[1];

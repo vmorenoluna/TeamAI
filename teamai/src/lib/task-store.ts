@@ -115,6 +115,17 @@ export interface Task {
    *  a genuine "QA passed, pick a merge strategy" landing, or once the task
    *  leaves `awaiting-review`. */
   awaitingReviewReason?: string;
+  /** The phase the task was in when it moved to `failed`. Persisted so the
+   *  Retry dialog can offer to resume exactly there (e.g. `create-pr`,
+   *  `merge`) instead of only the agent phases — re-running Implement/QA to
+   *  recover from a `gh` timeout wastes tokens. Set by updatePhase() on the
+   *  transition into `failed`; cleared on any transition out of it. */
+  failedPhase?: string;
+  /** Set while auto mode has given up auto-merging this `pr-open` task (the
+   *  merge failed MAX_MERGE_FAILURES times); holds the last error. Drives the
+   *  "Retry merge" affordance. Cleared when polling restarts or the task
+   *  leaves `pr-open`. */
+  autoMergeStalled?: string;
   subtaskProgress?: { completed: number; total: number } | null;  // computed at load time from plan.json
   autoProcessed?: boolean;      // set to true when auto mode marks the task as done (PR auto-merged)
   autoReviewed?: boolean;       // set to true when user marks the auto-done task as manually reviewed
@@ -257,8 +268,17 @@ export class TaskStore {
     const task = this.getById(id);
     if (!task) throw new Error(`Task ${id} not found`);
 
+    const previousPhase = task.phase;
     task.phase = phase;
     task.updatedAt = new Date().toISOString();
+
+    if (phase === 'failed') {
+      // Keep the earlier value on a repeated failed→failed write.
+      if (previousPhase !== 'failed') task.failedPhase = previousPhase;
+    } else {
+      task.failedPhase = undefined;
+    }
+    if (phase !== 'pr-open') task.autoMergeStalled = undefined;
 
     // Mirror failureReason's pattern for a failure-parked awaiting-review:
     // persist it on the task record itself (not just the event) so the

@@ -112,7 +112,7 @@ describe('TaskCard mutation handlers', () => {
         fireEvent.click(screen.getByText('Resume'));
       });
 
-      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('failed-1', 'implement');
+      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('failed-1', 'auto');
       expect(mockRouterRefresh).toHaveBeenCalled();
       expect(window.alert).not.toHaveBeenCalled();
     });
@@ -636,7 +636,7 @@ describe('TaskCard mutation handlers', () => {
         fireEvent.click(screen.getByText('Resume'));
       });
 
-      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('failed-r', 'implement');
+      expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('failed-r', 'auto');
       expect(window.alert).toHaveBeenCalledWith('Failed to retry task: network dropped');
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
