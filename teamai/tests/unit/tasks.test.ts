@@ -37,7 +37,7 @@ vi.mock('child_process', () => ({
 
 // mock detectDefaultBranch
 vi.mock('@/lib/orchestrator', () => ({
-  detectDefaultBranch: () => 'main',
+  detectDefaultBranch: async () => 'main',
 }));
 
 // ── Dynamic import (after mocks are set up) ───────────────────────────

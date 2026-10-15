@@ -46,7 +46,11 @@ vi.mock('../../src/lib/container-manager', () => ({
 }));
 
 vi.mock('child_process', () => ({
-  execFile: vi.fn(),
+  // Callback-form execFile (promisified by git-platform): fail/succeed like the sync stub.
+  execFile: (_cmd: string, _args: unknown[], opts: unknown, cb?: (...a: unknown[]) => void) => {
+    const done = typeof opts === "function" ? opts as (...a: unknown[]) => void : cb;
+    done?.(null, { stdout: "", stderr: "" });
+  },
   execFileSync: vi.fn(() => ''),
   spawn: vi.fn(),
   ChildProcess: class MockCP {},

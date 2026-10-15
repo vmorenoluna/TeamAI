@@ -45,7 +45,16 @@ vi.mock('../../src/lib/process-manager', () => ({
 }));
 
 vi.mock('child_process', () => ({
-  execFile: vi.fn(),
+  // Callback-form execFile (promisified by git-platform): delegate to the sync mock so existing stubs apply.
+  execFile: (cmd: string, args: unknown[], opts: unknown, cb?: (...a: unknown[]) => void) => {
+    const done = typeof opts === "function" ? opts as (...a: unknown[]) => void : cb;
+    try {
+      const out = mockExecFileSync(cmd, args, opts);
+      done?.(null, { stdout: out == null ? "" : String(out), stderr: "" });
+    } catch (e) {
+      done?.(e);
+    }
+  },
   execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
 }));
 

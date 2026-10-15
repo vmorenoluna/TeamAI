@@ -37,7 +37,7 @@ vi.mock('@/lib/orchestrator', () => ({
     moveTaskToPhase: mockMoveTaskToPhase,
     clearPipelineStateFile: mockClearPipelineStateFile,
   })),
-  detectDefaultBranch: vi.fn(() => 'main'),
+  detectDefaultBranch: vi.fn(async () => 'main'),
 }));
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';

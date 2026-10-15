@@ -251,9 +251,9 @@ async function setupAutoMode(): Promise<any> {
   vi.doMock('@/lib/orchestrator', () => ({
     getOrchestrator: (_projectRoot: string) => mockOrch,
     Orchestrator: class {},
-    detectGitPlatform: vi.fn(() => 'unknown'),
-    detectDefaultBranch: vi.fn(() => 'master'),
-    buildPlatformPrompt: vi.fn(() => ''),
+    detectGitPlatform: vi.fn(async () => 'unknown'),
+    detectDefaultBranch: vi.fn(async () => 'master'),
+    buildPlatformPrompt: vi.fn(async () => ''),
   }));
 
   const autoMode = await import('@/lib/auto-mode');

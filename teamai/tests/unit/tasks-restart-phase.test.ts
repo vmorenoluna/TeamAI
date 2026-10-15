@@ -69,7 +69,7 @@ vi.mock('@/lib/orchestrator', () => ({
     rejectTask: vi.fn(),
     getWorktreePath: vi.fn(),
   })),
-  detectDefaultBranch: vi.fn(() => 'main'),
+  detectDefaultBranch: vi.fn(async () => 'main'),
 }));
 
 // ── Real imports ──

@@ -38,12 +38,18 @@ const mockOn = vi.hoisted(() => vi.fn());
 const mockOff = vi.hoisted(() => vi.fn());
 const mockEmit = vi.hoisted(() => vi.fn());
 const mockExecFileSync = vi.hoisted(() => vi.fn());
+const mockIsPrMerged = vi.hoisted(() => vi.fn());
 
 const onHandlers = vi.hoisted(() => new Map<string, Array<(...args: unknown[]) => void>>());
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
   execFileSync: mockExecFileSync,
+}));
+
+vi.mock('@/lib/git-platform', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/git-platform')>()),
+  isPrMerged: (...args: unknown[]) => mockIsPrMerged(...args),
 }));
 
 vi.mock('@/lib/process-manager', () => ({
@@ -269,15 +275,13 @@ describe('markTaskDone Integration', () => {
 
     it('refuses to mark done when the PR is still open, leaving the folder untouched', async () => {
       writeTaskJsonWithPr(taskDir, taskId);
-      mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
-        if (args.includes('view') && args.includes('state')) {
-          return JSON.stringify({ state: 'OPEN' });
-        }
-        return '';
-      });
+      mockIsPrMerged.mockResolvedValue(false);
 
       mockEmit.mockClear();
-      await expect(orch.markTaskDone(taskId)).rejects.toThrow(/has not been merged yet/);
+      await expect(orch.markTaskDone(taskId)).rejects.toThrow(
+        'Cannot mark task done: PR https://github.com/example/repo/pull/42 has not been merged yet.',
+      );
+      expect(mockIsPrMerged).toHaveBeenCalledWith('github', 'https://github.com/example/repo/pull/42', testDir);
 
       // Nothing destructive happened — folder intact, no phase-change.
       expect(existsSync(taskDir)).toBe(true);
@@ -287,12 +291,7 @@ describe('markTaskDone Integration', () => {
 
     it('proceeds when the PR is confirmed merged', async () => {
       writeTaskJsonWithPr(taskDir, taskId);
-      mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
-        if (args.includes('view') && args.includes('state')) {
-          return JSON.stringify({ state: 'MERGED' });
-        }
-        return '';
-      });
+      mockIsPrMerged.mockResolvedValue(true);
 
       mockEmit.mockClear();
       await orch.markTaskDone(taskId);
@@ -308,12 +307,7 @@ describe('markTaskDone Integration', () => {
 
     it('proceeds when merge state cannot be determined (CLI failure) rather than blocking indefinitely', async () => {
       writeTaskJsonWithPr(taskDir, taskId);
-      mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
-        if (args.includes('view') && args.includes('state')) {
-          throw new Error('gh: command not found');
-        }
-        return '';
-      });
+      mockIsPrMerged.mockResolvedValue(null);
 
       mockEmit.mockClear();
       await orch.markTaskDone(taskId);

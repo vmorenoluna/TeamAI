@@ -27,13 +27,24 @@ const { mockLogToOutput } = vi.hoisted(() => ({
   mockLogToOutput: vi.fn(),
 }));
 
-// Mock child_process globally so all modules see the mock execFileSync
-vi.mock('child_process', () => ({
-  execFile: vi.fn(),
-  execFileSync: mockExecFileSync,
-  spawn: vi.fn(),
-  ChildProcess: class MockCP {},
-}));
+// Mock child_process globally so all modules see the mock execFile
+// git-platform uses promisify(execFile). `mockExecFileSync` keeps its name but is
+// now the async execFile mock: it is invoked with (cmd, args, opts) and its
+// return value (or thrown error) becomes the resolved { stdout, stderr } / rejection,
+// via the util.promisify.custom hook real execFile exposes.
+vi.mock('child_process', async () => {
+  const { promisify } = await import('util');
+  const execFile: any = (...args: unknown[]) => mockExecFileSync(...args);
+  execFile[promisify.custom] = async (...args: unknown[]) => {
+    const out = await mockExecFileSync(...args);
+    return { stdout: out ?? '', stderr: '' };
+  };
+  return {
+    execFile,
+    spawn: vi.fn(),
+    ChildProcess: class MockCP {},
+  };
+});
 
 // Mock fs write/unlink so createPRViaCLI's --body-file temp file is a no-op
 // in tests, while preserving the real fs for every other consumer in this file.
@@ -78,35 +89,35 @@ describe('detectGitPlatform', () => {
     vi.clearAllMocks();
   });
 
-  it('detects github from remote URL', () => {
+  it('detects github from remote URL', async () => {
     mockExecFileSync.mockReturnValue('https://github.com/user/repo.git\n');
-    expect(detectGitPlatform('/test')).toBe('github');
+    expect(await detectGitPlatform('/test')).toBe('github');
   });
 
-  it('returns unknown for unmatched remote URL', () => {
+  it('returns unknown for unmatched remote URL', async () => {
     mockExecFileSync.mockReturnValue('https://dev.azure.com/user/repo\n');
-    expect(detectGitPlatform('/test')).toBe('unknown');
+    expect(await detectGitPlatform('/test')).toBe('unknown');
   });
 
-  it('returns unknown and logs warning when git command fails', () => {
+  it('returns unknown and logs warning when git command fails', async () => {
     mockExecFileSync.mockImplementation(() => { throw new Error('Not a git repository'); });
-    expect(detectGitPlatform('/test')).toBe('unknown');
+    expect(await detectGitPlatform('/test')).toBe('unknown');
     expect(mockWarn).toHaveBeenCalledWith('orchestrator', 'Failed to detect git remote platform', expect.any(Error));
   });
 
-  it('detects github with custom domain (github.mycompany.com)', () => {
+  it('detects github with custom domain (github.mycompany.com)', async () => {
     mockExecFileSync.mockReturnValue('https://github.mycompany.com/user/repo.git\n');
-    expect(detectGitPlatform('/test')).toBe('github');
+    expect(await detectGitPlatform('/test')).toBe('github');
   });
 
-  it('handles git@ SSH URLs for github', () => {
+  it('handles git@ SSH URLs for github', async () => {
     mockExecFileSync.mockReturnValue('git@github.com:user/repo.git\n');
-    expect(detectGitPlatform('/test')).toBe('github');
+    expect(await detectGitPlatform('/test')).toBe('github');
   });
 
-  it('is case-insensitive when detecting platforms', () => {
+  it('is case-insensitive when detecting platforms', async () => {
     mockExecFileSync.mockReturnValue('https://GITHUB.COM/user/repo.git\n');
-    expect(detectGitPlatform('/test')).toBe('github');
+    expect(await detectGitPlatform('/test')).toBe('github');
   });
 });
 
@@ -115,26 +126,26 @@ describe('detectDefaultBranch', () => {
     vi.clearAllMocks();
   });
 
-  it('returns the branch name from symbolic-ref', () => {
+  it('returns the branch name from symbolic-ref', async () => {
     mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
-    expect(detectDefaultBranch('/test')).toBe('main');
+    expect(await detectDefaultBranch('/test')).toBe('main');
   });
 
-  it('returns the leaf branch name even when ref has multiple path segments', () => {
+  it('returns the leaf branch name even when ref has multiple path segments', async () => {
     mockExecFileSync.mockReturnValue('refs/remotes/origin/feature/main\n');
     // detectDefaultBranch splits by '/' and takes the last element
-    expect(detectDefaultBranch('/test')).toBe('main');
+    expect(await detectDefaultBranch('/test')).toBe('main');
   });
 
-  it('falls back to main when git command fails', () => {
+  it('falls back to main when git command fails', async () => {
     mockExecFileSync.mockImplementation(() => { throw new Error('No upstream'); });
-    expect(detectDefaultBranch('/test')).toBe('main');
+    expect(await detectDefaultBranch('/test')).toBe('main');
     expect(mockWarn).toHaveBeenCalledWith('orchestrator', 'Failed to detect default branch, falling back to main', expect.any(Error));
   });
 
-  it('falls back to main when ref is empty', () => {
+  it('falls back to main when ref is empty', async () => {
     mockExecFileSync.mockReturnValue('');
-    expect(detectDefaultBranch('/test')).toBe('main');
+    expect(await detectDefaultBranch('/test')).toBe('main');
   });
 });
 
@@ -152,9 +163,9 @@ describe('resolveBaseBranch', () => {
     root = `/test-${randomUUID().slice(0, 8)}`;
   });
 
-  it('returns the detected default branch from detectDefaultBranch', () => {
+  it('returns the detected default branch from detectDefaultBranch', async () => {
     mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
-    expect(resolveBaseBranch(root)).toBe('main');
+    expect(await resolveBaseBranch(root)).toBe('main');
     // detectDefaultBranch was called via execFileSync
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
@@ -163,74 +174,74 @@ describe('resolveBaseBranch', () => {
     );
   });
 
-  it('returns main when detectDefaultBranch falls back to main', () => {
+  it('returns main when detectDefaultBranch falls back to main', async () => {
     mockExecFileSync.mockImplementation(() => { throw new Error('No upstream'); });
-    expect(resolveBaseBranch(root)).toBe('main');
+    expect(await resolveBaseBranch(root)).toBe('main');
   });
 
-  it('returns master when the default branch is master', () => {
+  it('returns master when the default branch is master', async () => {
     mockExecFileSync.mockReturnValue('refs/remotes/origin/master\n');
-    expect(resolveBaseBranch(root)).toBe('master');
+    expect(await resolveBaseBranch(root)).toBe('master');
   });
 
-  it('returns develop when the default branch is develop', () => {
+  it('returns develop when the default branch is develop', async () => {
     mockExecFileSync.mockReturnValue('refs/remotes/origin/develop\n');
-    expect(resolveBaseBranch(root)).toBe('develop');
+    expect(await resolveBaseBranch(root)).toBe('develop');
   });
 
-  it('caches the result \u2014 second call does not re-exec git', () => {
+  it('caches the result \u2014 second call does not re-exec git', async () => {
     mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
-    expect(resolveBaseBranch(root)).toBe('main');
+    expect(await resolveBaseBranch(root)).toBe('main');
     expect(mockExecFileSync).toHaveBeenCalledTimes(1);
 
     // Second call returns cached value without re-execing git
     mockExecFileSync.mockClear();
-    expect(resolveBaseBranch(root)).toBe('main');
+    expect(await resolveBaseBranch(root)).toBe('main');
     expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 
-  it('invalidates cache when invalidate=true, forcing re-detection', () => {
+  it('invalidates cache when invalidate=true, forcing re-detection', async () => {
     mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
-    expect(resolveBaseBranch(root)).toBe('main');
+    expect(await resolveBaseBranch(root)).toBe('main');
     expect(mockExecFileSync).toHaveBeenCalledTimes(1);
 
     // Invalidate and re-detect
     mockExecFileSync.mockClear();
     mockExecFileSync.mockReturnValue('refs/remotes/origin/develop\n');
-    expect(resolveBaseBranch(root, true)).toBe('develop');
+    expect(await resolveBaseBranch(root, true)).toBe('develop');
     expect(mockExecFileSync).toHaveBeenCalledTimes(1);
   });
 
-  it('caches per projectRoot \u2014 different roots get independent cache entries', () => {
+  it('caches per projectRoot \u2014 different roots get independent cache entries', async () => {
     const rootA = `/proj-a-${randomUUID().slice(0, 8)}`;
     const rootB = `/proj-b-${randomUUID().slice(0, 8)}`;
 
     mockExecFileSync.mockReturnValueOnce('refs/remotes/origin/main\n');
     mockExecFileSync.mockReturnValueOnce('refs/remotes/origin/master\n');
 
-    expect(resolveBaseBranch(rootA)).toBe('main');
-    expect(resolveBaseBranch(rootB)).toBe('master');
+    expect(await resolveBaseBranch(rootA)).toBe('main');
+    expect(await resolveBaseBranch(rootB)).toBe('master');
 
     expect(mockExecFileSync).toHaveBeenCalledTimes(2);
   });
 
-  it('does not share cache between project roots', () => {
+  it('does not share cache between project roots', async () => {
     const rootA = `/cache-a-${randomUUID().slice(0, 8)}`;
     const rootB = `/cache-b-${randomUUID().slice(0, 8)}`;
 
     mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
-    expect(resolveBaseBranch(rootA)).toBe('main');
+    expect(await resolveBaseBranch(rootA)).toBe('main');
 
     mockExecFileSync.mockReturnValue('refs/remotes/origin/develop\n');
-    expect(resolveBaseBranch(rootB)).toBe('develop');
+    expect(await resolveBaseBranch(rootB)).toBe('develop');
 
     // rootA is still cached as main
     mockExecFileSync.mockClear();
-    expect(resolveBaseBranch(rootA)).toBe('main');
+    expect(await resolveBaseBranch(rootA)).toBe('main');
     expect(mockExecFileSync).not.toHaveBeenCalled();
 
     // rootB is still cached as develop
-    expect(resolveBaseBranch(rootB)).toBe('develop');
+    expect(await resolveBaseBranch(rootB)).toBe('develop');
     expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 });
@@ -241,9 +252,9 @@ describe('buildPlatformPrompt', () => {
   const description = 'Add new feature';
   const specContent = '# Feature: New Feature\n\nThis adds a new feature.';
 
-  it('builds github PR prompt', () => {
+  it('builds github PR prompt', async () => {
     mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
-    const prompt = buildPlatformPrompt('github', branch, description, specContent, '/test');
+    const prompt = await buildPlatformPrompt('github', branch, description, specContent, '/test');
     expect(prompt).toContain('GitHub');
     expect(prompt).toContain('create_pull_request');
     expect(prompt).toContain(branch);
@@ -252,9 +263,9 @@ describe('buildPlatformPrompt', () => {
     expect(prompt).toContain(defaultBranch);
   });
 
-  it('builds unknown platform prompt', () => {
+  it('builds unknown platform prompt', async () => {
     mockExecFileSync.mockReturnValue('refs/remotes/origin/main\n');
-    const prompt = buildPlatformPrompt('unknown', branch, description, specContent, '/test');
+    const prompt = await buildPlatformPrompt('unknown', branch, description, specContent, '/test');
     expect(prompt).toContain('Unknown');
     expect(prompt).toContain('whatever tools are available');
     expect(prompt).toContain(branch);
@@ -286,11 +297,11 @@ describe('Orchestrator \u2014 remaining edge cases', () => {
   });
 
   describe('isTaskActive / cancelPipeline', () => {
-    it('returns false for a task that was never started', () => {
+    it('returns false for a task that was never started', async () => {
       expect(orch.isTaskActive('nonexistent')).toBe(false);
     });
 
-    it('cancelPipeline does nothing for a nonexistent task', () => {
+    it('cancelPipeline does nothing for a nonexistent task', async () => {
       // Should not throw
       (orch as any).cancelPipeline('nonexistent');
     });
@@ -298,7 +309,7 @@ describe('Orchestrator \u2014 remaining edge cases', () => {
 });
 
 describe('buildPRBody', () => {
-  it('includes description and spec summary in output', () => {
+  it('includes description and spec summary in output', async () => {
     const result = buildPRBody('Add login feature', 'Chose signed tokens over sessions for statelessness.');
     expect(result).toContain('## Summary');
     expect(result).toContain('Add login feature');
@@ -306,13 +317,13 @@ describe('buildPRBody', () => {
     expect(result).toContain('Chose signed tokens over sessions for statelessness.');
   });
 
-  it('includes QA testing section', () => {
+  it('includes QA testing section', async () => {
     const result = buildPRBody('Fix bug', 'Spec summary text.');
     expect(result).toContain('## Testing');
     expect(result).toContain('QA review passed.');
   });
 
-  it('always includes the Specification Summary section — required, not best-effort', () => {
+  it('always includes the Specification Summary section — required, not best-effort', async () => {
     // buildPRBody trusts the caller to have already confirmed spec_summary.md
     // exists (runCreatePRPhase throws before calling this otherwise) — it
     // does not itself special-case a missing/empty summary.
@@ -321,7 +332,7 @@ describe('buildPRBody', () => {
     expect(result).toContain('Chose X because of Y.');
   });
 
-  it('includes a "What Was Implemented" section when an implementation summary is given', () => {
+  it('includes a "What Was Implemented" section when an implementation summary is given', async () => {
     const result = buildPRBody('Add login feature', 'Spec summary text.', [], 'Added login via signed tokens.');
     expect(result).toContain('## What Was Implemented');
     expect(result).toContain('Added login via signed tokens.');
@@ -331,12 +342,12 @@ describe('buildPRBody', () => {
     expect(result.indexOf('## What Was Implemented')).toBeLessThan(result.indexOf('## Specification Summary'));
   });
 
-  it('omits the "What Was Implemented" section when no implementation summary is given', () => {
+  it('omits the "What Was Implemented" section when no implementation summary is given', async () => {
     const result = buildPRBody('Add login feature', 'Spec summary text.');
     expect(result).not.toContain('## What Was Implemented');
   });
 
-  it('omits the "What Was Implemented" section for an empty/null implementation summary', () => {
+  it('omits the "What Was Implemented" section for an empty/null implementation summary', async () => {
     expect(buildPRBody('Add login feature', 'Spec summary text.', [], null)).not.toContain('## What Was Implemented');
     expect(buildPRBody('Add login feature', 'Spec summary text.', [], '')).not.toContain('## What Was Implemented');
   });
@@ -347,9 +358,9 @@ describe('checkExistingPRViaCLI', () => {
     vi.clearAllMocks();
   });
 
-  it('returns PR URL when gh pr list finds an open PR', () => {
+  it('returns PR URL when gh pr list finds an open PR', async () => {
     mockExecFileSync.mockReturnValue('https://github.com/owner/repo/pull/42\n');
-    const result = checkExistingPRViaCLI('github', 'feat/test', '/test');
+    const result = await checkExistingPRViaCLI('github', 'feat/test', '/test');
     expect(result).toBe('https://github.com/owner/repo/pull/42');
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'gh',
@@ -358,21 +369,21 @@ describe('checkExistingPRViaCLI', () => {
     );
   });
 
-  it('returns null when gh pr list returns empty', () => {
+  it('returns null when gh pr list returns empty', async () => {
     mockExecFileSync.mockReturnValue('\n');
-    const result = checkExistingPRViaCLI('github', 'feat/test', '/test');
+    const result = await checkExistingPRViaCLI('github', 'feat/test', '/test');
     expect(result).toBeNull();
   });
 
-  it('returns null when gh CLI fails, logs warning', () => {
+  it('returns null when gh CLI fails, logs warning', async () => {
     mockExecFileSync.mockImplementation(() => { throw new Error('gh not found'); });
-    const result = checkExistingPRViaCLI('github', 'feat/test', '/test');
+    const result = await checkExistingPRViaCLI('github', 'feat/test', '/test');
     expect(result).toBeNull();
     expect(mockWarn).toHaveBeenCalledWith('git-platform', 'Failed to check existing PR via gh CLI', expect.any(Error));
   });
 
-  it('returns null for unknown platform', () => {
-    const result = checkExistingPRViaCLI('unknown', 'feat/test', '/test');
+  it('returns null for unknown platform', async () => {
+    const result = await checkExistingPRViaCLI('unknown', 'feat/test', '/test');
     expect(result).toBeNull();
   });
 });
@@ -384,11 +395,11 @@ describe('createPRViaCLI', () => {
     vi.clearAllMocks();
   });
 
-  it('creates GitHub PR via gh CLI with correct args', () => {
+  it('creates GitHub PR via gh CLI with correct args', async () => {
     mockExecFileSync
       .mockReturnValueOnce('refs/remotes/origin/main\n')  // detectDefaultBranch
       .mockReturnValueOnce('https://github.com/owner/repo/pull/42\n');
-    const result = createPRViaCLI('github', 'feat/test', 'Test PR', 'PR body', '/test', logFile);
+    const result = await createPRViaCLI('github', 'feat/test', 'Test PR', 'PR body', '/test', logFile);
     expect(result).toBe('https://github.com/owner/repo/pull/42');
 
     // Body is written to a temp file and passed via --body-file, never argv
@@ -405,12 +416,12 @@ describe('createPRViaCLI', () => {
     expect(mockUnlinkSync).toHaveBeenCalledWith(bodyFile);
   });
 
-  it('truncates an oversized PR title to stay within GitHub and argv limits', () => {
+  it('truncates an oversized PR title to stay within GitHub and argv limits', async () => {
     mockExecFileSync
       .mockReturnValueOnce('refs/remotes/origin/main\n')
       .mockReturnValueOnce('https://github.com/owner/repo/pull/42\n');
     const oversizedTitle = 'A'.repeat(40_000);
-    const result = createPRViaCLI('github', 'feat/test', oversizedTitle, 'PR body', '/test', logFile);
+    const result = await createPRViaCLI('github', 'feat/test', oversizedTitle, 'PR body', '/test', logFile);
     expect(result).toBe('https://github.com/owner/repo/pull/42');
 
     const ghCall = mockExecFileSync.mock.calls.find((c) => c[0] === 'gh');
@@ -423,13 +434,13 @@ describe('createPRViaCLI', () => {
     expect(args).not.toContain(oversizedTitle);
   });
 
-  it('passes an oversized body via --body-file without hitting argv limits', () => {
+  it('passes an oversized body via --body-file without hitting argv limits', async () => {
     mockExecFileSync
       .mockReturnValueOnce('refs/remotes/origin/main\n')
       .mockReturnValueOnce('https://github.com/owner/repo/pull/42\n');
     // ~40KB body, above Windows' ~32KB CreateProcess command-line ceiling
     const oversizedBody = '# Spec\n\n' + 'x'.repeat(40_000);
-    const result = createPRViaCLI('github', 'feat/test', 'Test PR', oversizedBody, '/test', logFile);
+    const result = await createPRViaCLI('github', 'feat/test', 'Test PR', oversizedBody, '/test', logFile);
     expect(result).toBe('https://github.com/owner/repo/pull/42');
 
     // Body was written to disk, not passed as a CLI argument
@@ -441,7 +452,7 @@ describe('createPRViaCLI', () => {
     expect(args).not.toContain(oversizedBody);
   });
 
-  it('logs gh failures to output.log and re-throws', () => {
+  it('logs gh failures to output.log and re-throws', async () => {
     mockExecFileSync
       .mockReturnValueOnce('refs/remotes/origin/main\n')  // detectDefaultBranch
       .mockImplementationOnce(() => {
@@ -450,9 +461,9 @@ describe('createPRViaCLI', () => {
         });
       });
 
-    expect(() =>
+    await expect(
       createPRViaCLI('github', 'feat/test', 'Test PR', 'PR body', '/test', logFile),
-    ).toThrow();
+    ).rejects.toThrow();
 
     expect(mockLogToOutput).toHaveBeenCalledWith(
       dirname(logFile),
@@ -464,22 +475,22 @@ describe('createPRViaCLI', () => {
     );
   });
 
-  it('returns null for unknown platform', () => {
+  it('returns null for unknown platform', async () => {
     mockExecFileSync.mockReturnValueOnce('refs/remotes/origin/main\n');
-    const result = createPRViaCLI('unknown', 'feat/test', 'Test', 'Body', '/test', logFile);
+    const result = await createPRViaCLI('unknown', 'feat/test', 'Test', 'Body', '/test', logFile);
     expect(result).toBeNull();
   });
 });
 
 describe('getOrchestrator singleton', () => {
-  it('returns the same instance for the same project path', () => {
+  it('returns the same instance for the same project path', async () => {
     const p = join(tmpdir(), `teamai-sing-${randomUUID().slice(0, 8)}`);
     const o1 = getOrchestrator(p);
     const o2 = getOrchestrator(p);
     expect(o1).toBe(o2);
   });
 
-  it('returns different instances for different project paths', () => {
+  it('returns different instances for different project paths', async () => {
     const p1 = join(tmpdir(), `teamai-sing-${randomUUID().slice(0, 8)}`);
     const p2 = join(tmpdir(), `teamai-sing-${randomUUID().slice(0, 8)}`);
     const o1 = getOrchestrator(p1);

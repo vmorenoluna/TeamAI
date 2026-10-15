@@ -13,7 +13,7 @@ import { tmpdir } from 'os';
 const { mockCreateSession } = vi.hoisted(() => ({ mockCreateSession: vi.fn() }));
 
 vi.mock('../../src/lib/logger', () => ({ log: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn() }));
-vi.mock('../../src/lib/git-platform', () => ({ resolveBaseBranch: () => 'main' }));
+vi.mock('../../src/lib/git-platform', () => ({ resolveBaseBranch: async () => 'main' }));
 vi.mock('../../src/lib/process-manager', () => ({
   processManager: {
     on: vi.fn(), off: vi.fn(), emit: vi.fn(),

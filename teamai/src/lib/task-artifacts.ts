@@ -57,7 +57,7 @@ export async function readCommonArtifacts(
   let diff: string | null = null;
   if (branch) {
     try {
-      const base = detectDefaultBranch(projectPath);
+      const base = await detectDefaultBranch(projectPath);
       const promise = execFileAsync('git', ['diff', `${base}...${branch}`], {
         cwd: projectPath,
         encoding: 'utf-8',
