@@ -104,6 +104,21 @@ describe('auto-mode server actions', () => {
       expect(mockSetAutoModeState).toHaveBeenCalledWith(root, false, 4);
     });
 
+    it('toggles when expectedProjectPath matches the active project', async () => {
+      const { toggleAutoMode } = await import('@/app/actions/auto-mode');
+      await toggleAutoMode(true, root);
+
+      expect(mockSetAutoModeState).toHaveBeenCalledWith(root, true, 4);
+    });
+
+    it('refuses to toggle when expectedProjectPath differs from the active project', async () => {
+      const { toggleAutoMode } = await import('@/app/actions/auto-mode');
+      mockSetAutoModeState.mockClear();
+
+      await expect(toggleAutoMode(false, join(root, 'other-project'))).rejects.toThrow('Active project changed');
+      expect(mockSetAutoModeState).not.toHaveBeenCalled();
+    });
+
     it('revalidates the root path after toggling', async () => {
       const { toggleAutoMode } = await import('@/app/actions/auto-mode');
       mockRevalidatePath.mockClear();
