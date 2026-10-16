@@ -175,7 +175,7 @@ describe('AutoModeButton', () => {
       fireEvent.click(screen.getByRole('button'));
 
       await waitFor(() => {
-        expect(mockToggleAutoMode).toHaveBeenCalledWith(true);
+        expect(mockToggleAutoMode).toHaveBeenCalledWith(true, undefined);
       });
     });
 
@@ -185,7 +185,7 @@ describe('AutoModeButton', () => {
       fireEvent.click(screen.getByRole('button'));
 
       await waitFor(() => {
-        expect(mockToggleAutoMode).toHaveBeenCalledWith(false);
+        expect(mockToggleAutoMode).toHaveBeenCalledWith(false, undefined);
       });
     });
 
@@ -328,6 +328,28 @@ describe('AutoModeButton', () => {
       await waitFor(() => {
         expect(screen.getByRole('button')).not.toBeDisabled();
       });
+    });
+  });
+
+  // ── Project switching ────────────────────────────────────────────────
+
+  describe('project switching', () => {
+    it('passes the displayed project path to toggleAutoMode', async () => {
+      render(<AutoModeButton activeProjectPath="/p/a" initialEnabled={false} />);
+
+      fireEvent.click(screen.getByRole('button'));
+
+      await waitFor(() => {
+        expect(mockToggleAutoMode).toHaveBeenCalledWith(true, '/p/a');
+      });
+    });
+
+    it('shows the new project state when remounted under a new key (layout keys on project path)', () => {
+      const { rerender } = render(<AutoModeButton key="/p/a" activeProjectPath="/p/a" initialEnabled={true} />);
+      expect(screen.getByTitle('Stop Auto mode')).toBeInTheDocument();
+
+      rerender(<AutoModeButton key="/p/b" activeProjectPath="/p/b" initialEnabled={false} />);
+      expect(screen.getByTitle('Start Auto mode')).toBeInTheDocument();
     });
   });
 

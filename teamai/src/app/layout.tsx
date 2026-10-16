@@ -86,7 +86,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <ProjectSelector projects={projects} activeProjectPath={activeProject?.path ?? null} />
             </div>
             <div className="pr-4 shrink-0">
-              <AutoModeButton activeProjectPath={activeProject?.path ?? null} initialEnabled={autoModeState.enabled} />
+              <AutoModeButton key={activeProject?.path ?? 'none'} activeProjectPath={activeProject?.path ?? null} initialEnabled={autoModeState.enabled} />
             </div>
           </div>
           {/* Defaults auto-sync banner — informs which commands were force-synced at startup */}

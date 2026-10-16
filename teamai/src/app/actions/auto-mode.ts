@@ -8,8 +8,16 @@ import { TaskStore } from '@/lib/task-store';
 import { processManager } from '@/lib/process-manager';
 import { markAutoReviewed as markAutoReviewedRecord } from '@/lib/auto-review-store';
 
-export async function toggleAutoMode(enabled: boolean): Promise<void> {
+/**
+ * @param expectedProjectPath The project the caller's button displays. When given,
+ * the toggle is refused if the active project differs, so a stale UI can never
+ * start or stop auto mode on a project other than the one it shows.
+ */
+export async function toggleAutoMode(enabled: boolean, expectedProjectPath?: string): Promise<void> {
   const projectPath = await getActiveProjectPath();
+  if (expectedProjectPath !== undefined && expectedProjectPath !== projectPath) {
+    throw new Error('Active project changed — refresh the page and try again');
+  }
   const config = await getPipelineConfig();
   setAutoModeState(projectPath, enabled, config.autoModeMaxParallel);
   revalidatePath('/');

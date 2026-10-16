@@ -24,7 +24,7 @@ export function AutoModeButton({ activeProjectPath, initialEnabled }: Props) {
     setError(null);
     run(async () => {
       try {
-        await toggleAutoMode(next);
+        await toggleAutoMode(next, activeProjectPath ?? undefined);
       } catch (e) {
         setEnabled(!next); // revert
         setError(e instanceof Error ? e.message : 'Failed to toggle auto mode');
