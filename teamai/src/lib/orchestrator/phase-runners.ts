@@ -146,12 +146,12 @@ export async function rebaseOntoLatestDefault(
   // --force-with-lease; refreshing the remote-tracking ref immediately
   // before the push keeps the lease check honest instead of comparing
   // against a possibly-stale cached ref.
-  const pushRebased = (): boolean => {
+  const pushRebased = async (): Promise<boolean> => {
     try {
-      deps.gitPush(['fetch', 'origin', branch], logFile);
+      await deps.gitPush(['fetch', 'origin', branch], logFile);
     } catch { /* best-effort — the lease check below still runs */ }
     try {
-      deps.gitPush(['push', '--force-with-lease', 'origin', branch], logFile);
+      await deps.gitPush(['push', '--force-with-lease', 'origin', branch], logFile);
       logToOutput(path.dirname(logFile), `\n[INFO] Pushed ${branch} after rebasing onto ${deps.baseBranch}\n`);
       return true;
     } catch (pushErr) {
@@ -185,7 +185,7 @@ export async function rebaseOntoLatestDefault(
   try {
     await deps.execGit(['rebase', `origin/${deps.baseBranch}`], worktreePath);
     logToOutput(path.dirname(logFile), `\n[INFO] Feature branch rebased onto latest ${deps.baseBranch}\n`);
-    return pushRebased();
+    return await pushRebased();
   } catch (rebaseErr) {
     // A failed `git rebase` is NOT necessarily a real conflict — the dirty-
     // worktree case is handled deterministically above, but a stale git
@@ -226,7 +226,7 @@ export async function rebaseOntoLatestDefault(
       processManager.killSession(mergeSessionId);
       if (!await finishUnfinishedMerge(deps, worktreePath, path.dirname(logFile))) return false;
       logToOutput(path.dirname(logFile), '\n[INFO] Merger resolved rebase conflicts — pushing its result\n');
-      return pushRebased();
+      return await pushRebased();
     } catch (mergeErr) {
       const mergeMsg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr);
       logToOutput(path.dirname(logFile), `\n[WARN] Merger could not resolve rebase conflicts: ${mergeMsg}\n`);
@@ -311,7 +311,7 @@ export async function syncPhaseBaseline(
   const logFile = path.join(pipeline.specPath, 'output.log');
 
   try {
-    deps.gitPush(['pull', '--ff-only', 'origin', baseBranch], logFile);
+    await deps.gitPush(['pull', '--ff-only', 'origin', baseBranch], logFile);
   } catch { /* non-fast-forward or offline — best-effort */ }
 
   if (!existsSync(pipeline.worktreePath)) return;
@@ -737,7 +737,7 @@ export async function runPlanPhase(
 
   const baseBranch = await resolveBaseBranch(deps.projectRoot);
   try {
-    deps.gitPush(['pull', '--ff-only', 'origin', baseBranch], path.join(pipeline.specPath, 'output.log'));
+    await deps.gitPush(['pull', '--ff-only', 'origin', baseBranch], path.join(pipeline.specPath, 'output.log'));
   } catch { /* non-fast-forward or offline — proceed with local branch */ }
 
   if (!existsSync(pipeline.worktreePath)) {
@@ -995,7 +995,7 @@ export async function runCreatePRPhase(
       ? '[PR] Feature branch squashed to a single trailer-bearing commit\n'
       : '[PR] Squash skipped (nothing to collapse or a git error) — proceeding with the branch as-is\n');
   }
-  deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
+  await deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
 
   const platform = await detectGitPlatform(deps.projectRoot);
 
