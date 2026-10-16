@@ -138,6 +138,8 @@ describe('async toAgentPath in agent prompts', () => {
   });
 
   it('runPlanPhase embeds container paths for spec.md and plan.json', async () => {
+    // plan.json is only named in the prompt in re-plan mode (an existing plan).
+    writeFileSync(join(specPath, 'plan.json'), '{}');
     await run(() => runPlanPhase(pipeline('plan') as never, deps() as never));
     expect(mockSendMessage).toHaveBeenCalledTimes(1);
     const msg = sentMessage();

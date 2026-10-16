@@ -126,7 +126,9 @@ describe('async git primitives', () => {
     function recorder() {
       const events: string[] = [];
       const releases: Array<() => void> = [];
-      h.state.handler = (_f, args) => new Promise((resolve, reject) => {
+      h.state.handler = (file, args) => new Promise((resolve, reject) => {
+        // The background `docker info` availability probe is not a git command.
+        if (file !== 'git') { resolve(''); return; }
         const id = args.join(' ');
         events.push(`start ${id}`);
         releases.push(() => {
