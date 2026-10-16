@@ -15,9 +15,8 @@ import { getResumePhaseForFailedTask, getAwaitingReviewReason } from '@/lib/task
 import { getRoleRefinementConfig, suggestionsForTask, type RoleRefinementMode, type RoleRefinementSuggestion } from '@/lib/role-refinement';
 import { join, resolve } from 'path';
 import { readdirSync } from 'fs';
-import { execFileSync } from 'child_process';
 import { NO_STOP_PHASES, RESTARTABLE_PHASES } from '@/constants/phases';
-import { removeStaleWorktreeRegistration } from '@/lib/orchestrator/worktree-utils';
+import { execGitQueued, removeStaleWorktreeRegistration } from '@/lib/orchestrator/worktree-utils';
 import { isFeedbackTarget, type FeedbackTarget } from '@/lib/orchestrator/feedback-target';
 import { error as logError } from '@/lib/logger';
 import { preRestoreFailedTask, taskHasSpecConcerns } from '@/lib/task-retry';
@@ -572,7 +571,7 @@ export async function deleteTaskWorktree(taskId: string): Promise<{ success: boo
     return { success: false, error: 'Refusing to delete worktree at project root — this would destroy the repository' };
   }
   try {
-    execFileSync('git', ['worktree', 'remove', wtPath], { cwd: projectPath, encoding: 'utf-8' });
+    await execGitQueued(['worktree', 'remove', wtPath], projectPath, projectPath);
     taskStore.update(taskId, { branch: undefined });
     revalidatePath('/');
     revalidatePath(`/task/${taskId}`);
@@ -580,7 +579,7 @@ export async function deleteTaskWorktree(taskId: string): Promise<{ success: boo
   } catch {
     // Normal remove failed (e.g. uncommitted changes) — try --force
     try {
-      execFileSync('git', ['worktree', 'remove', '--force', wtPath], { cwd: projectPath, encoding: 'utf-8' });
+      await execGitQueued(['worktree', 'remove', '--force', wtPath], projectPath, projectPath);
       taskStore.update(taskId, { branch: undefined });
       revalidatePath('/');
       revalidatePath(`/task/${taskId}`);
