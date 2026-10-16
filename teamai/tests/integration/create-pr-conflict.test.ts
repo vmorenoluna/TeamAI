@@ -63,7 +63,8 @@ vi.mock('@/lib/container-manager', () => ({
     ensureContainer: vi.fn(),
   },
   hostToContainerPath: vi.fn((p: string) => p),
-  dockerAvailable: vi.fn(() => true),
+  checkDockerAvailable: vi.fn(async () => true),
+  getCachedDockerAvailable: vi.fn(() => true),
   _resetDockerAvailableCache: vi.fn(),
 }));
 

@@ -44,7 +44,8 @@ vi.mock('../../src/lib/container-manager', () => ({
   readContainerRemoteUser: vi.fn(() => 'node'),
   containerManager: { ensureContainer: vi.fn(), getRunningContainer: vi.fn(() => null) },
   hostToContainerPath: vi.fn((p: string) => p),
-  dockerAvailable: vi.fn(() => true),
+  checkDockerAvailable: vi.fn(async () => true),
+  getCachedDockerAvailable: vi.fn(() => true),
   _resetDockerAvailableCache: vi.fn(),
 }));
 vi.mock('../../src/lib/command-templates', () => ({
@@ -83,7 +84,7 @@ const deps = () => ({
   savePipelineState: vi.fn(), executePhase: vi.fn(), writeCompletionSummary: vi.fn(), scheduleWakeup: vi.fn(),
   sessionOpts: (role: string, cwd: string, taskId: string) => ({ role, cwd, taskId }),
   waitForCompletion: vi.fn(async () => undefined),
-  toAgentPath: (p: string) => p,
+  toAgentPath: async (p: string) => p,
   gitPush: vi.fn(),
   execGit: vi.fn((args: string[]) => { if (args[0] === 'merge' && args[1] !== '--abort') throw new Error('CONFLICT'); }),
   execGitCapture: vi.fn(async () => ''),

@@ -50,7 +50,7 @@ function makeCtx(agent: (specPath: string) => void) {
     waitForCompletion: vi.fn(async () => agent(specPath)),
     advancePhase: (p: typeof pipeline, phase: string) => { p.phase = phase; },
     rotateOutputLog: vi.fn(), phaseHeader: vi.fn(), savePipelineState: vi.fn(),
-    toAgentPath: (p: string) => p,
+    toAgentPath: async (p: string) => p,
     executePhase: vi.fn(async () => undefined),
     gitPush: vi.fn(), execGit: vi.fn(async () => undefined),
     getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3, backlogCheck: true }),

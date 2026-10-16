@@ -117,7 +117,7 @@ describe('runQaReview — stall counter and hard cap', () => {
       writeQaFeedback: vi.fn(),
       writeCompletionSummary: vi.fn(),
       phaseHeader: vi.fn(),
-      toAgentPath: (p: string) => p,
+      toAgentPath: async (p: string) => p,
       autoReviseSpec: vi.fn(async () => undefined),
       planWriteLock: { current: Promise.resolve() },
       getPipelineConfig: () => ({ maxImplementRetries: 3 }),
