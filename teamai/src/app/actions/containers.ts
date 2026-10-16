@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
-import { containerManager, dockerAvailable, _resetDockerAvailableCache, type ContainerState, type ValidationStep, type ValidationStatus } from '@/lib/container-manager';
+import { containerManager, checkDockerAvailable, type ContainerState, type ValidationStep, type ValidationStatus } from '@/lib/container-manager';
 
 export interface ContainerConfig {
   enabled: boolean;
@@ -21,10 +21,11 @@ export interface ContainerConfigResult extends ContainerConfig {
 export async function getContainerConfig(): Promise<ContainerConfigResult> {
   const projectPath = await getActiveProjectPath();
   const cfgPath = join(projectPath, '.teamai', 'container.json');
+  const available = await checkDockerAvailable();
   if (existsSync(cfgPath)) {
-    try { return { ...JSON.parse(readFileSync(cfgPath, 'utf-8')), dockerAvailable: dockerAvailable() }; } catch { /* fall through */ }
+    try { return { ...JSON.parse(readFileSync(cfgPath, 'utf-8')), dockerAvailable: available }; } catch { /* fall through */ }
   }
-  return { enabled: dockerAvailable(), dockerAvailable: dockerAvailable() };
+  return { enabled: available, dockerAvailable: available };
 }
 
 export async function saveContainerConfig(config: ContainerConfig): Promise<ContainerConfigResult> {
@@ -33,6 +34,7 @@ export async function saveContainerConfig(config: ContainerConfig): Promise<Cont
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'container.json'), JSON.stringify(config, null, 2));
   revalidatePath('/settings');
+  const available = await checkDockerAvailable();
 
   // Enabling containers always (re)validates the setup — generating a
   // devcontainer.json first only when none exists. An invalid setup blocks the
@@ -53,11 +55,11 @@ export async function saveContainerConfig(config: ContainerConfig): Promise<Cont
     });
 
     return needsGeneration
-      ? { enabled: config.enabled, dockerAvailable: dockerAvailable(), generated: true, projectType }
-      : { enabled: config.enabled, dockerAvailable: dockerAvailable() };
+      ? { enabled: config.enabled, dockerAvailable: available, generated: true, projectType }
+      : { enabled: config.enabled, dockerAvailable: available };
   }
 
-  return { enabled: config.enabled, dockerAvailable: dockerAvailable() };
+  return { enabled: config.enabled, dockerAvailable: available };
 }
 
 /** Re-run container validation on demand (clears a "container invalid" block once fixed). */
@@ -77,7 +79,7 @@ export async function getValidationStatus(): Promise<ValidationStatus> {
 
 export async function getContainerState(): Promise<ContainerState> {
   const projectPath = await getActiveProjectPath();
-  return containerManager.getState(projectPath);
+  return await containerManager.getState(projectPath);
 }
 
 export async function getValidationSteps(): Promise<ValidationStep[]> {
@@ -86,12 +88,12 @@ export async function getValidationSteps(): Promise<ValidationStep[]> {
 }
 
 export async function isDockerAvailable(): Promise<boolean> {
-  return dockerAvailable();
+  return checkDockerAvailable();
 }
 
 /** Reset the dockerAvailable cache so the next check probes Docker fresh.
  *  Called from the UI when the user starts Docker after seeing the
  *  container-docker-missing dialog. */
 export async function resetDockerAvailability(): Promise<void> {
-  _resetDockerAvailableCache();
+  await checkDockerAvailable({ force: true });
 }
