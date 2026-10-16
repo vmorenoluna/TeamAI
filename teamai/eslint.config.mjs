@@ -522,6 +522,28 @@ const eslintConfig = defineConfig([
       }],
     },
   },
+  // Floating promises in the orchestrator's git/worktree paths silently drop
+  // errors (the helpers are async) - require every promise to be awaited or
+  // explicitly handled with `void promise.catch(...)`.
+  {
+    files: [
+      "src/lib/orchestrator.ts",
+      "src/lib/orchestrator/**/*.ts",
+      "src/lib/task-artifacts.ts",
+      "src/app/actions/tasks.ts",
+      "server.ts",
+    ],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": ["error", { checksVoidReturn: false }],
+    },
+  },
   // Warn when useTransition + useRouter are used together in the same component —
   // they should be replaced with the useServerMutation hook.
   // Also warn when router.refresh() is called outside of useServerMutation.

@@ -98,8 +98,8 @@ export interface QaReviewDeps {
   sessionOpts: (role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) => SessionOptsResult;
   waitForCompletion: (sessionId: string) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
-  execGit: (args: string[], hostCwd: string) => void;
-  execGitCapture: (args: string[], hostCwd: string) => string;
+  execGit: (args: string[], hostCwd: string) => Promise<void>;
+  execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   writeQaFeedback: (pipeline: TaskPipeline, report: QaReport) => void;
   writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
@@ -143,18 +143,18 @@ async function reconcileDivergedBranch(
   // killed mid-`git merge` by recovery.ts's stall sweep, most concretely) —
   // see rebaseOntoLatestDefault's matching guard (phase-runners.ts) for the
   // full rationale. Safe unconditional no-ops when nothing is in progress.
-  try { deps.execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
-  try { deps.execGit(['merge', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
+  try { await deps.execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
+  try { await deps.execGit(['merge', '--abort'], pipeline.worktreePath); } catch { /* nothing to abort */ }
 
   // `git rebase` refuses to start against a dirty worktree — not a content
   // conflict, just an uncommitted leftover. Deterministically fixable
   // without an agent: auto-commit it first. See rebaseOntoLatestDefault's
   // matching guard (phase-runners.ts) for the full rationale.
   try {
-    const status = deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath).trim();
+    const status = (await deps.execGitCapture(['status', '--porcelain'], pipeline.worktreePath)).trim();
     if (status) {
-      deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
-      deps.execGit(['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before rebase'], pipeline.worktreePath);
+      await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], pipeline.worktreePath);
+      await deps.execGit(['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before rebase'], pipeline.worktreePath);
       logToOutput(pipeline.specPath, `[QA-PRECHECK] Worktree had uncommitted changes — auto-committed before rebasing onto ${targetRef}\n`);
     }
   } catch (guardErr) {
@@ -177,7 +177,7 @@ async function reconcileDivergedBranch(
     // the same check for the same reason.
     let unmergedFiles = '';
     try {
-      unmergedFiles = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath).trim();
+      unmergedFiles = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath)).trim();
     } catch { /* best-effort — treat as unknown, fall through to the conflict path below */ }
     try { execFileSync('git', ['rebase', '--abort'], { cwd: pipeline.worktreePath, stdio: 'pipe' }); } catch { /* ignore */ }
 

@@ -59,10 +59,10 @@ export interface ScopeArbitrationDeps {
   toAgentPath: (hostPath: string) => string;
   planWriteLock: { current: Promise<void> };
   savePipelineState: (pipeline: ScopePipeline) => void;
-  execGit: (args: string[], hostCwd: string) => void;
-  execGitCapture: (args: string[], hostCwd: string) => string;
+  execGit: (args: string[], hostCwd: string) => Promise<void>;
+  execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   tryCherryPickWithRecovery: (pipeline: ScopePipeline, logFile: string, stBranch: string, subtaskId: number) => Promise<boolean>;
-  verifySubtaskDeliverables: (pipeline: ScopePipeline, subtask: PlanSubtask, cwd: string) => 'ok' | 'incomplete' | 'failed';
+  verifySubtaskDeliverables: (pipeline: ScopePipeline, subtask: PlanSubtask, cwd: string) => Promise<'ok' | 'incomplete' | 'failed'>;
   filesAlreadyChangedOnBranch: (cwd: string, files: string[]) => Promise<boolean>;
   completeSubtask: (
     pipeline: ScopePipeline, subtask: PlanSubtask, cwd: string, preSessionHead: string, completedIds: number[],
@@ -110,11 +110,11 @@ function readScopeNotes(specPath: string, subtaskId: number): Map<string, string
   return notes;
 }
 
-function numstatFor(
+async function numstatFor(
   deps: Pick<ScopeArbitrationDeps, 'execGitCapture'>, cwd: string, base: string, head: string, file: string,
-): { insertions: number | null; deletions: number | null } {
+): Promise<{ insertions: number | null; deletions: number | null }> {
   try {
-    const line = deps.execGitCapture(['diff', '--numstat', base, head, '--', file], cwd).trim().split('\n')[0] ?? '';
+    const line = (await deps.execGitCapture(['diff', '--numstat', base, head, '--', file], cwd)).trim().split('\n')[0] ?? '';
     const [ins, del] = line.split('\t');
     const toNum = (v: string | undefined) => (v === undefined || v === '-' || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
     return { insertions: toNum(ins), deletions: toNum(del) };
@@ -124,25 +124,29 @@ function numstatFor(
 }
 
 /** Write `scope_report-st<N>.json` for a held subtask and consume its `scope_notes-st<N>.json`. */
-export function writeScopeReport(
+export async function writeScopeReport(
   deps: Pick<ScopeArbitrationDeps, 'execGitCapture'>,
   opts: {
     specPath: string; cwd: string; subtaskId: number; base: string; sessionHead: string;
     heldRef: string | null; declaredFiles: string[]; unlistedPaths: string[];
   },
-): ScopeReport {
+): Promise<ScopeReport> {
   const notes = readScopeNotes(opts.specPath, opts.subtaskId);
+  const unlisted: ScopeReport['unlisted'] = [];
+  for (const p of opts.unlistedPaths) {
+    unlisted.push({
+      path: p,
+      ...(await numstatFor(deps, opts.cwd, opts.base, opts.sessionHead, p)),
+      coder_reason: notes.get(p) ?? null,
+    });
+  }
   const report: ScopeReport = {
     subtask_id: opts.subtaskId,
     base: opts.base,
     session_head: opts.sessionHead,
     held_ref: opts.heldRef,
     declared_files: opts.declaredFiles,
-    unlisted: opts.unlistedPaths.map(p => ({
-      path: p,
-      ...numstatFor(deps, opts.cwd, opts.base, opts.sessionHead, p),
-      coder_reason: notes.get(p) ?? null,
-    })),
+    unlisted,
     created_at: new Date().toISOString(),
   };
   atomicWriteJson(scopeReportPath(opts.specPath, opts.subtaskId), report);
@@ -472,28 +476,28 @@ export async function runScopeArbitration(
 
 // ── Integration ───────────────────────────────────────────────────────────
 
-function sh(deps: Pick<ScopeArbitrationDeps, 'execGitCapture'>, cwd: string, args: string[]): string {
-  return deps.execGitCapture(args, cwd).trim();
+async function sh(deps: Pick<ScopeArbitrationDeps, 'execGitCapture'>, cwd: string, args: string[]): Promise<string> {
+  return (await deps.execGitCapture(args, cwd)).trim();
 }
 
-function dropRejectedPaths(
+async function dropRejectedPaths(
   deps: ScopeArbitrationDeps, pipeline: ScopePipeline, report: ScopeReport, pre: string, rejected: ScopeRejection[],
-): boolean {
+): Promise<boolean> {
   const cwd = pipeline.worktreePath;
   let ok = true;
   for (const { path: p } of rejected) {
     try {
       if (report.held_ref) {
         let atPre = true;
-        try { sh(deps, cwd, ['cat-file', '-e', `${pre}:${p}`]); } catch { atPre = false; }
-        if (atPre) deps.execGit(['checkout', pre, '--', p], cwd);
-        else if (sh(deps, cwd, ['ls-files', '--', p])) deps.execGit(['rm', '-f', '--', p], cwd);
+        try { await sh(deps, cwd, ['cat-file', '-e', `${pre}:${p}`]); } catch { atPre = false; }
+        if (atPre) await deps.execGit(['checkout', pre, '--', p], cwd);
+        else if (await sh(deps, cwd, ['ls-files', '--', p])) await deps.execGit(['rm', '-f', '--', p], cwd);
       } else {
-        const patch = deps.execGitCapture(['diff', report.base, report.session_head, '--', p], cwd);
+        const patch = await deps.execGitCapture(['diff', report.base, report.session_head, '--', p], cwd);
         if (!patch.trim()) continue;
         const patchFile = path.join(pipeline.specPath, `scope_drop-st${report.subtask_id}.patch`);
         writeFileSync(patchFile, patch.endsWith('\n') ? patch : patch + '\n');
-        try { deps.execGit(['apply', '-R', '--index', patchFile], cwd); } finally {
+        try { await deps.execGit(['apply', '-R', '--index', patchFile], cwd); } finally {
           try { unlinkSync(patchFile); } catch { /* best-effort */ }
         }
       }
@@ -503,8 +507,8 @@ function dropRejectedPaths(
         `[SCOPE-DROP] Could not drop rejected changes to ${p} for subtask ${report.subtask_id}: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
-  if (ok && sh(deps, cwd, ['status', '--porcelain', '--untracked-files=no'])) {
-    deps.execGit(['commit', '--no-verify', '-m', `chore(scope): drop changes rejected by the planner for subtask ${report.subtask_id}`], cwd);
+  if (ok && await sh(deps, cwd, ['status', '--porcelain', '--untracked-files=no'])) {
+    await deps.execGit(['commit', '--no-verify', '-m', `chore(scope): drop changes rejected by the planner for subtask ${report.subtask_id}`], cwd);
   }
   return ok;
 }
@@ -536,7 +540,7 @@ export async function integrateHeldSubtasks(
     if (!subtask) continue;
     const id = subtask.id;
     const rejected = applied.apply.rejections[id] ?? [];
-    const pre = sh(deps, cwd, ['rev-parse', 'HEAD']);
+    const pre = await sh(deps, cwd, ['rev-parse', 'HEAD']);
 
     if (report.held_ref) {
       if (!(await deps.tryCherryPickWithRecovery(pipeline, logFile, report.held_ref, id))) {
@@ -546,18 +550,18 @@ export async function integrateHeldSubtasks(
         );
       }
     }
-    const dropped = dropRejectedPaths(deps, pipeline, report, pre, rejected);
+    const dropped = await dropRejectedPaths(deps, pipeline, report, pre, rejected);
     if (rejected.length) appendScopeRejections(specPath, { [id]: rejected });
 
     let accept = dropped;
     if (accept && subtask.files_to_create?.length) {
-      const verdict = deps.verifySubtaskDeliverables(pipeline, subtask, cwd);
+      const verdict = await deps.verifySubtaskDeliverables(pipeline, subtask, cwd);
       if (verdict === 'failed') { result.failed = true; return result; }
       accept = verdict === 'ok';
     } else if (accept && (subtask.files ?? []).length > 0 && !subtask.verify_only) {
       let touched = false;
       try {
-        const changed = sh(deps, cwd, ['diff', '--name-only', report.held_ref ? pre : report.base, 'HEAD']).split('\n').filter(Boolean);
+        const changed = (await sh(deps, cwd, ['diff', '--name-only', report.held_ref ? pre : report.base, 'HEAD'])).split('\n').filter(Boolean);
         touched = changed.some(f => subtask.files.includes(f));
       } catch { /* treated as untouched */ }
       let skipped = false;
@@ -578,7 +582,7 @@ export async function integrateHeldSubtasks(
     }
 
     if (report.held_ref) {
-      try { deps.execGit(['branch', '-D', report.held_ref], deps.projectRoot); } catch { /* best-effort */ }
+      try { await deps.execGit(['branch', '-D', report.held_ref], deps.projectRoot); } catch { /* best-effort */ }
     }
     try { unlinkSync(scopeReportPath(specPath, id)); } catch { /* best-effort */ }
   }

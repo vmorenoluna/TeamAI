@@ -204,8 +204,8 @@ describe('Orchestrator Pipeline Integration', () => {
   // ── moveTaskToPhase ────────────────────────────────────────────────
 
   describe('moveTaskToPhase', () => {
-    it('should move task to a terminal phase (done)', () => {
-      (orch as AnyOrch).moveTaskToPhase(taskId, 'done');
+    it('should move task to a terminal phase (done)', async () => {
+      await (orch as AnyOrch).moveTaskToPhase(taskId, 'done');
 
       const taskPath = join(testDir, '.teamai', taskId, 'task.json');
       if (existsSync(taskPath)) {
@@ -214,8 +214,8 @@ describe('Orchestrator Pipeline Integration', () => {
       }
     });
 
-    it('should move task to backlog', () => {
-      (orch as AnyOrch).moveTaskToPhase(taskId, 'backlog');
+    it('should move task to backlog', async () => {
+      await (orch as AnyOrch).moveTaskToPhase(taskId, 'backlog');
 
       const taskPath = join(testDir, '.teamai', taskId, 'task.json');
       if (existsSync(taskPath)) {
@@ -224,25 +224,27 @@ describe('Orchestrator Pipeline Integration', () => {
       }
     });
 
-    it('should cancel running pipeline when moving phase', () => {
+    it('should cancel running pipeline when moving phase', async () => {
       const pipeline = makePipeline({ phase: 'spec', sessionId: 'sess-1' });
       (orch as AnyOrch).pipelines.set(taskId, pipeline);
 
-      (orch as AnyOrch).moveTaskToPhase(taskId, 'done');
+      await (orch as AnyOrch).moveTaskToPhase(taskId, 'done');
 
       expect(mockKillSession).toHaveBeenCalledWith('sess-1');
     });
 
-    it('should persist and emit the resolved start phase, not the raw target, when required artifacts are missing', () => {
+    it('should persist and emit the resolved start phase, not the raw target, when required artifacts are missing', async () => {
       // No spec.md exists on disk, so moveTaskToPhase(taskId, 'plan') actually
       // resumes at 'spec'. runTask reaches the authoritative persistAndEmitPhase
-      // synchronously (no I/O-bound await precedes it here), so this is
-      // observable without awaiting the returned promise — it must reflect
-      // the resolved startPhase, not the raw 'plan' target.
+      // before the pipeline runs; wait for that emit (not the returned promise,
+      // which may reject in this minimal mock setup) instead of assuming it is
+      // synchronous — the worktree/git setup ahead of it is async.
       const result = (orch as AnyOrch).moveTaskToPhase(taskId, 'plan');
       result.catch(() => { /* best-effort: runTask may reject in this minimal mock setup */ });
 
-      expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({ taskId, phase: 'spec' }));
+      await vi.waitFor(() => {
+        expect(mockEmit).toHaveBeenCalledWith('phase-change', expect.objectContaining({ taskId, phase: 'spec' }));
+      }, { timeout: 10_000 });
       expect(mockEmit).not.toHaveBeenCalledWith('phase-change', expect.objectContaining({ taskId, phase: 'plan' }));
 
       const taskPath = join(testDir, '.teamai', taskId, 'task.json');

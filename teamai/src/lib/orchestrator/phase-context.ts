@@ -45,11 +45,11 @@ export interface PhaseContext {
   waitForCompletion: (sessionId: string) => Promise<void>;
 
   // ── Git operations ──
-  execGit: (args: string[], hostCwd: string) => void;
+  execGit: (args: string[], hostCwd: string) => Promise<void>;
   /** Same routing as execGit, but returns captured stdout — for read
    *  commands (status, log, diff) against a worktree that may be
    *  container-patched and thus unresolvable via a plain host execFileSync. */
-  execGitCapture: (args: string[], hostCwd: string) => string;
+  execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   gitPush: (pushArgs: string[], logFile: string) => void;
 
   // ── Logging / output ──
@@ -65,7 +65,7 @@ export interface PhaseContext {
   worktreeGitEnv: (hostCwd: string, containerWs?: string) => Record<string, string>;
   isWorktreeHealthy: (worktreePath: string) => boolean;
   cleanStaleSubtaskWorktrees: (pipeline: TaskPipeline) => Promise<void>;
-  removeWorktree: (taskId: string) => void;
+  removeWorktree: (taskId: string) => Promise<void>;
 
   // ── Snapshots ──
   restoreQaReportFromSnapshot: (specPath: string) => void;

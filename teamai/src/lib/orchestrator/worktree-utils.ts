@@ -1,9 +1,67 @@
-import { execFileSync, type StdioOptions } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync, rmSync } from 'fs';
 import path from 'path';
 import { readContainerConfig, readContainerRemoteUser, containerManager, hostToContainerPath } from '../container-manager';
 import { getToolPath } from '../tool-checker';
 import { warn as logWarn } from '../logger';
+
+const execFileAsync = promisify(execFile);
+
+const GIT_MAX_BUFFER = 32 * 1024 * 1024;
+
+/**
+ * Promise-based execFile that never blocks the event loop. stdin is closed
+ * immediately (a git/docker child waiting on input would otherwise hang), and
+ * stdout/stderr are captured; a failure rejects with execFile's own Error, whose
+ * message ("Command failed: <cmd>\n<stderr>") carries git's stderr and which also
+ * has `stdout` / `stderr` properties. No timeout: a long clone/checkout must not
+ * be killed.
+ */
+async function runFile(
+  file: string,
+  args: string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<string> {
+  const promise = execFileAsync(file, args, { ...options, encoding: 'utf-8', maxBuffer: GIT_MAX_BUFFER });
+  promise.child?.stdin?.end();
+  const { stdout } = await promise;
+  return stdout;
+}
+
+/**
+ * Per-project FIFO tail of `worktree` / `branch` git commands. They mutate
+ * shared .git metadata (worktrees/, refs, config lock), so concurrent runs for
+ * one project collide on index/ref locks; everything else runs unqueued.
+ */
+const gitQueues = new Map<string, Promise<unknown>>();
+
+function enqueueGit<T>(projectRoot: string, task: () => Promise<T>): Promise<T> {
+  const key = path.resolve(projectRoot);
+  const prev = gitQueues.get(key) ?? Promise.resolve();
+  // A rejected predecessor must not stall the queue.
+  const run = prev.then(task, task);
+  const tail = run.catch(() => undefined);
+  gitQueues.set(key, tail);
+  void tail.then(() => {
+    if (gitQueues.get(key) === tail) gitQueues.delete(key);
+  });
+  return run;
+}
+
+function isQueuedGitCommand(args: string[]): boolean {
+  return args[0] === 'worktree' || args[0] === 'branch';
+}
+
+/**
+ * Run a host-side git command; `worktree` / `branch` commands are serialised
+ * per project root, others run immediately. Rejects like execGit; resolves
+ * stdout.
+ */
+export function execGitQueued(args: string[], cwd: string, projectRoot: string): Promise<string> {
+  const run = () => runFile('git', args, { cwd });
+  return isQueuedGitCommand(args) ? enqueueGit(projectRoot, run) : run();
+}
 
 /**
  * Verify the worktree is a valid git worktree (#4).
@@ -180,9 +238,9 @@ export function patchWorktreeGitFile(hostWorktreePath: string, containerWorkspac
  * resolve to the basename here rather than trusting the caller's path to
  * still match git's records.
  */
-export function removeStaleWorktreeRegistration(projectRoot: string, worktreePath: string): void {
+export async function removeStaleWorktreeRegistration(projectRoot: string, worktreePath: string): Promise<void> {
   try {
-    execFileSync('git', ['worktree', 'remove', '--force', path.basename(worktreePath)], { cwd: projectRoot, stdio: 'pipe' });
+    await execGitQueued(['worktree', 'remove', '--force', path.basename(worktreePath)], projectRoot, projectRoot);
   } catch { /* best-effort */ }
 }
 
@@ -245,17 +303,14 @@ export function worktreeGitEnv(hostCwd: string, projectRoot: string, containerWs
 }
 
 /**
- * execFileSync forwards the child's stderr to this process unless `stdio` is
- * set, so an expected failure (a rebase that stops on a conflict) spilled git's
- * "Could not apply …" hints into the server log and the test runner. Piping it
- * keeps the text on the thrown error's message, where callers already read it.
- */
-const GIT_QUIET_STDIO: { stdio: StdioOptions } = { stdio: ['ignore', 'pipe', 'pipe'] };
-
-/**
  * Run a git command either directly on the host or via docker exec inside the container.
  */
-export function execGit(args: string[], hostCwd: string, projectRoot: string): void {
+export function execGit(args: string[], hostCwd: string, projectRoot: string): Promise<void> {
+  const run = async (): Promise<void> => { await execGitUnqueued(args, hostCwd, projectRoot); };
+  return isQueuedGitCommand(args) ? enqueueGit(projectRoot, run) : run();
+}
+
+async function execGitUnqueued(args: string[], hostCwd: string, projectRoot: string): Promise<string> {
   if (readContainerConfig(projectRoot).enabled && args[0] !== 'worktree') {
     const info = containerManager.getRunningContainer(projectRoot);
     if (info) {
@@ -268,36 +323,21 @@ export function execGit(args: string[], hostCwd: string, projectRoot: string): v
       const remoteUser = readContainerRemoteUser(projectRoot);
       const gitEnv = worktreeGitEnv(hostCwd, projectRoot, info.remoteWorkspaceFolder);
       const envFlags = Object.entries(gitEnv).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-      execFileSync(getToolPath('docker'), ['exec', '-u', remoteUser, ...envFlags, '-w', containerCwd, info.containerId, 'git', ...mappedArgs], GIT_QUIET_STDIO);
-      return;
+      return await runFile(getToolPath('docker'), ['exec', '-u', remoteUser, ...envFlags, '-w', containerCwd, info.containerId, 'git', ...mappedArgs]);
     }
   }
   const gitEnv = args[0] !== 'worktree' ? worktreeGitEnv(hostCwd, projectRoot) : {};
-  execFileSync('git', args, { cwd: hostCwd, ...GIT_QUIET_STDIO, ...(Object.keys(gitEnv).length ? { env: { ...process.env, ...gitEnv } } : {}) });
+  return await runFile('git', args, { cwd: hostCwd, ...(Object.keys(gitEnv).length ? { env: { ...process.env, ...gitEnv } } : {}) });
 }
 
 /**
  * Same routing as execGit, but captures and returns stdout instead of
  * discarding it — for read commands (status, log, diff) run against a
  * worktree that may be container-patched, where a plain host-side
- * execFileSync would fail to resolve the worktree's .git linkage at all.
+ * git would fail to resolve the worktree's .git linkage at all.
  */
-export function execGitCapture(args: string[], hostCwd: string, projectRoot: string): string {
-  if (readContainerConfig(projectRoot).enabled && args[0] !== 'worktree') {
-    const info = containerManager.getRunningContainer(projectRoot);
-    if (info) {
-      const containerCwd = hostToContainerPath(hostCwd, projectRoot, info.remoteWorkspaceFolder);
-      const mappedArgs = args.map(a =>
-        path.isAbsolute(a) && a.startsWith(projectRoot)
-          ? hostToContainerPath(a, projectRoot, info.remoteWorkspaceFolder)
-          : a
-      );
-      const remoteUser = readContainerRemoteUser(projectRoot);
-      const gitEnv = worktreeGitEnv(hostCwd, projectRoot, info.remoteWorkspaceFolder);
-      const envFlags = Object.entries(gitEnv).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-      return execFileSync(getToolPath('docker'), ['exec', '-u', remoteUser, ...envFlags, '-w', containerCwd, info.containerId, 'git', ...mappedArgs], { encoding: 'utf-8' });
-    }
-  }
-  const gitEnv = args[0] !== 'worktree' ? worktreeGitEnv(hostCwd, projectRoot) : {};
-  return execFileSync('git', args, { cwd: hostCwd, encoding: 'utf-8', ...(Object.keys(gitEnv).length ? { env: { ...process.env, ...gitEnv } } : {}) });
+export function execGitCapture(args: string[], hostCwd: string, projectRoot: string): Promise<string> {
+  return isQueuedGitCommand(args)
+    ? enqueueGit(projectRoot, () => execGitUnqueued(args, hostCwd, projectRoot))
+    : execGitUnqueued(args, hostCwd, projectRoot);
 }

@@ -27,14 +27,18 @@ vi.mock('../../src/lib/process-manager', () => ({
   },
   containerSessionOpts: (projectRoot: string) => ({ projectRoot }),
 }));
+const mockExecFileSync = vi.hoisted(() => vi.fn((..._a: unknown[]): unknown => { throw new Error('not a git repo'); }));
+// execFile calls back (and is promisify-aware) so the async git helpers resolve; it delegates to the sync stub so existing scripted responses apply.
+const mockExecFile = await vi.hoisted(async () => {
+  const { createExecFileMock } = await import('../utils/mock-child-process');
+  return createExecFileMock({ resetSafe: true, execFileSync: (...a) => mockExecFileSync(...a) });
+});
+
 vi.mock('child_process', () => ({
-  // Callback-form execFile (promisified by git-platform): fail/succeed like the sync stub.
-  execFile: (_cmd: string, _args: unknown[], opts: unknown, cb?: (...a: unknown[]) => void) => {
-    const done = typeof opts === "function" ? opts as (...a: unknown[]) => void : cb;
-    done?.(new Error('not a git repo'));
-  },
-  execFileSync: vi.fn(() => { throw new Error('not a git repo'); }),
+  execFile: mockExecFile,
+  execFileSync: mockExecFileSync,
 }));
+
 vi.mock('../../src/lib/container-manager', () => ({
   readContainerConfig: vi.fn(() => ({ enabled: false, explicit: false })),
   readContainerRemoteUser: vi.fn(() => 'node'),
@@ -82,7 +86,7 @@ const deps = () => ({
   toAgentPath: (p: string) => p,
   gitPush: vi.fn(),
   execGit: vi.fn((args: string[]) => { if (args[0] === 'merge' && args[1] !== '--abort') throw new Error('CONFLICT'); }),
-  execGitCapture: vi.fn(() => ''),
+  execGitCapture: vi.fn(async () => ''),
   getPipelineConfig: () => ({
     wakeupScanRetryDelayMs: 0, maxImplementRetries: 3, maxQaAttempts: 3, parallelSubtasks: true,
     maxStallRecoveries: 3, idleStallMinutes: 10, toolStallMinutes: 30,

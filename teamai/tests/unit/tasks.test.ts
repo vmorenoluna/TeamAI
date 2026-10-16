@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Hoisted mocks ─────────────────────────────────────────────────────
 
-const { mockExistsSync, mockReadFileSync, mockExecFileSync } = vi.hoisted(() => ({
+const { mockExistsSync, mockReadFileSync, mockExecFile } = vi.hoisted(() => ({
   mockExistsSync: vi.fn(),
   mockReadFileSync: vi.fn(),
-  mockExecFileSync: vi.fn(),
+  mockExecFile: vi.fn(),
 }));
 
 vi.mock('fs', async () => {
@@ -21,8 +21,18 @@ vi.mock('path', () => ({
   join: (...args: string[]) => args.join('/'),
 }));
 
+// readCommonArtifacts uses promisify(execFile): resolve via the node-style callback.
 vi.mock('child_process', () => ({
-  execFileSync: mockExecFileSync,
+  execFile: (...a: unknown[]) => {
+    const cb = a[a.length - 1] as (e: Error | null, out?: { stdout: string; stderr: string }) => void;
+    try {
+      const stdout = mockExecFile(...a.slice(0, -1));
+      setImmediate(() => cb(null, { stdout, stderr: '' }));
+    } catch (e) {
+      setImmediate(() => cb(e as Error));
+    }
+    return { stdin: { end: () => {} } };
+  },
 }));
 
 // mock detectDefaultBranch
@@ -228,15 +238,15 @@ describe('readCommonArtifacts', () => {
 
   it('computes git diff when branch is provided', async () => {
     mockExistsSync.mockReturnValue(false);
-    mockExecFileSync.mockReturnValue('diff --git a/file.ts b/file.ts\n+new line');
+    mockExecFile.mockReturnValue('diff --git a/file.ts b/file.ts\n+new line');
 
     const result = await readCommonArtifacts('/test/dir', '/project', 'feature-branch');
 
     expect(result.diff).toBe('diff --git a/file.ts b/file.ts\n+new line');
-    expect(mockExecFileSync).toHaveBeenCalledWith('git', ['diff', 'main...feature-branch'], {
+    expect(mockExecFile).toHaveBeenCalledWith('git', ['diff', 'main...feature-branch'], expect.objectContaining({
       cwd: '/project',
       encoding: 'utf-8',
-    });
+    }));
   });
 
   it('falls back to diff.txt when branch is null', async () => {

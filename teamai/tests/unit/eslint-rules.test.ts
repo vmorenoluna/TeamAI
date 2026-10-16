@@ -1,4 +1,5 @@
-import { RuleTester } from 'eslint';
+import { describe, it, expect } from 'vitest';
+import { ESLint, RuleTester } from 'eslint';
 import { localPlugin } from '../../eslint.config.mjs';
 import tsParser from '@typescript-eslint/parser';
 
@@ -794,3 +795,30 @@ ruleTester.run(
     ],
   },
 );
+
+// ---------------------------------------------------------------------------
+// no-floating-promises on the orchestrator's git paths (type-aware block)
+// ---------------------------------------------------------------------------
+
+describe('floating promises in orchestrator files', () => {
+  // filePath must be a real project file (the type-aware parser resolves it
+  // through the tsconfig); lintText substitutes the fixture source for it.
+  const lint = async (line: string, filePath: string) => {
+    const eslint = new ESLint({ cwd: process.cwd() });
+    const [result] = await eslint.lintText(
+      `import { execGit } from './worktree-utils';\nexport async function f(cwd: string, root: string): Promise<void> {\n  ${line}\n}\n`,
+      { filePath },
+    );
+    return result.messages.map(m => m.ruleId);
+  };
+
+  it('reports an un-awaited execGit call under src/lib/orchestrator/', async () => {
+    const rules = await lint("execGit(['worktree', 'prune'], cwd, root);", 'src/lib/orchestrator/phase-context.ts');
+    expect(rules).toContain('@typescript-eslint/no-floating-promises');
+  }, 60_000);
+
+  it('accepts the awaited variant', async () => {
+    const rules = await lint("await execGit(['worktree', 'prune'], cwd, root);", 'src/lib/orchestrator/phase-context.ts');
+    expect(rules).not.toContain('@typescript-eslint/no-floating-promises');
+  }, 60_000);
+});

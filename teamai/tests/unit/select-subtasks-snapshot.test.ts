@@ -16,8 +16,14 @@ const { mockWarn, mockWriteFileSync, mockExecFileSync } = vi.hoisted(() => ({
   mockExecFileSync: vi.fn(),
 }));
 
+// execFile calls back (and is promisify-aware) so the async git helpers resolve; it delegates to the sync stub so existing scripted responses apply.
+const mockExecFile = await vi.hoisted(async () => {
+  const { createExecFileMock } = await import('../utils/mock-child-process');
+  return createExecFileMock({ resetSafe: true, execFileSync: (...a) => mockExecFileSync(...a) });
+});
+
 vi.mock('child_process', () => ({
-  execFile: vi.fn(),
+  execFile: mockExecFile,
   execFileSync: mockExecFileSync,
 }));
 

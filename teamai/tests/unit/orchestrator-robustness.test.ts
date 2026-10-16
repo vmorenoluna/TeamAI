@@ -27,17 +27,14 @@ const { onHandlers, mockCreateSession, mockSendMessage, mockKillSession, mockEmi
 
 const mockExecFileSync = vi.hoisted(() => vi.fn());
 
+// execFile calls back (and is promisify-aware) so the async git helpers resolve; it delegates to the sync stub so existing scripted responses apply.
+const mockExecFile = await vi.hoisted(async () => {
+  const { createExecFileMock } = await import('../utils/mock-child-process');
+  return createExecFileMock({ resetSafe: true, execFileSync: (...a) => mockExecFileSync(...a) });
+});
+
 vi.mock('child_process', () => ({
-  // Callback-form execFile (promisified by git-platform): delegate to the sync mock so existing stubs apply.
-  execFile: (cmd: string, args: unknown[], opts: unknown, cb?: (...a: unknown[]) => void) => {
-    const done = typeof opts === "function" ? opts as (...a: unknown[]) => void : cb;
-    try {
-      const out = mockExecFileSync(cmd, args, opts);
-      done?.(null, { stdout: out == null ? "" : String(out), stderr: "" });
-    } catch (e) {
-      done?.(e);
-    }
-  },
+  execFile: mockExecFile,
   execFileSync: mockExecFileSync,
 }));
 
@@ -4535,7 +4532,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); }, { timeout: 10_000 });
 
       // Subtask 1 schedules a LATER wakeup; subtask 2 an EARLIER one.
       writeFileSync(join(project.taskDir, 'subtask_wakeup-st1.json'), JSON.stringify({
@@ -4553,7 +4550,8 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
 
       fireEvent('event', { sessionId: 'sess-wake-a', event: { type: 'result' } });
       fireEvent('event', { sessionId: 'sess-wake-b', event: { type: 'result' } });
-      await vi.advanceTimersByTimeAsync(50);
+      // Wait for the phase run itself (not a fixed timer): the wakeup handling now awaits real async fs/git work.
+      await promise;
 
       // Both per-subtask files consumed — neither handler deleted the other's file early
       expect(existsSync(join(project.taskDir, 'subtask_wakeup-st1.json'))).toBe(false);
@@ -5866,7 +5864,7 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); }, { timeout: 10_000 });
 
       // Subtask 1's job hasn't finished — it schedules a wakeup instead of
       // committing anything. Subtask 2 finishes normally.
@@ -5940,11 +5938,11 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
   // container-mode routing path through the real Orchestrator just to prove
   // which of two indistinguishable-in-non-container-mode call styles fired.
   it('auto-commits stray uncommitted changes in the main worktree via execGitCapture, not a raw shell-out', async () => {
-    const execGitCapture = vi.fn((args: string[]) => {
+    const execGitCapture = vi.fn(async (args: string[]) => {
       if (args[0] === 'status') return ' M stray-file.txt\n';
       return '';
     });
-    const execGit = vi.fn();
+    const execGit = vi.fn(async () => undefined);
     const deps = {
       execGit,
       execGitCapture,
@@ -5982,11 +5980,11 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
   // its session ended was invisible to it, and the unconditional
   // `git worktree remove --force` cleanup afterward destroyed it silently.
   it('auto-commits stray uncommitted changes in a per-subtask ISOLATED worktree before cherry-picking from it', async () => {
-    const execGitCapture = vi.fn((args: string[], cwd: string) => {
+    const execGitCapture = vi.fn(async (args: string[], cwd: string) => {
       if (args[0] === 'status' && cwd.endsWith('-st2')) return ' M ScoringRules.scala\n';
       return '';
     });
-    const execGit = vi.fn();
+    const execGit = vi.fn(async () => undefined);
     const deps = {
       execGit,
       execGitCapture,
@@ -6013,8 +6011,8 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
   });
 
   it('does NOT auto-commit a per-subtask worktree that has a wakeup pending or a rejected subtask', async () => {
-    const execGitCapture = vi.fn(() => ' M some-file.txt\n');
-    const execGit = vi.fn();
+    const execGitCapture = vi.fn(async () => ' M some-file.txt\n');
+    const execGit = vi.fn(async () => undefined);
     const deps = {
       execGit,
       execGitCapture,
@@ -6174,7 +6172,7 @@ describe('runImplement — deliverable-verification failure inside a multi-subta
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); }, { timeout: 10_000 });
 
       // Neither subtask writes the declared deliverable file (nothing on
       // disk creates it in this mocked environment) — subtask 2's session
@@ -6632,34 +6630,34 @@ describe('resolveWorktreeDirName', () => {
 });
 
 describe('preserveUncommittedWork', () => {
-  it('does nothing when the worktree is already clean', () => {
-    const execGit = vi.fn();
-    const deps = { execGitCapture: vi.fn(() => ''), execGit } as unknown as ImplementDeps;
+  it('does nothing when the worktree is already clean', async () => {
+    const execGit = vi.fn(async () => undefined);
+    const deps = { execGitCapture: vi.fn(async () => ''), execGit } as unknown as ImplementDeps;
 
-    preserveUncommittedWork(minimalImplPipeline(), deps);
+    await preserveUncommittedWork(minimalImplPipeline(), deps);
 
     expect(execGit).not.toHaveBeenCalled();
   });
 
-  it('commits uncommitted and untracked changes when the worktree is dirty', () => {
-    const execGit = vi.fn();
-    const deps = { execGitCapture: vi.fn(() => ' M tracked.txt\n?? new.txt\n'), execGit } as unknown as ImplementDeps;
+  it('commits uncommitted and untracked changes when the worktree is dirty', async () => {
+    const execGit = vi.fn(async () => undefined);
+    const deps = { execGitCapture: vi.fn(async () => ' M tracked.txt\n?? new.txt\n'), execGit } as unknown as ImplementDeps;
     const pipeline = minimalImplPipeline({ worktreePath: '/test/wt' });
 
-    preserveUncommittedWork(pipeline, deps);
+    await preserveUncommittedWork(pipeline, deps);
 
     expect(execGit).toHaveBeenNthCalledWith(1, ['add', '-A'], '/test/wt');
     expect(execGit).toHaveBeenNthCalledWith(2, ['commit', '--no-verify', '-m', expect.stringContaining('WIP')], '/test/wt');
   });
 
-  it('is best-effort — swallows errors instead of throwing', () => {
-    const execGit = vi.fn();
+  it('is best-effort — swallows errors instead of throwing', async () => {
+    const execGit = vi.fn(async () => undefined);
     const deps = {
-      execGitCapture: vi.fn(() => { throw new Error('git not available'); }),
+      execGitCapture: vi.fn(async () => { throw new Error('git not available'); }),
       execGit,
     } as unknown as ImplementDeps;
 
-    expect(() => preserveUncommittedWork(minimalImplPipeline(), deps)).not.toThrow();
+    await expect(preserveUncommittedWork(minimalImplPipeline(), deps)).resolves.toBeUndefined();
     expect(execGit).not.toHaveBeenCalled();
   });
 });
@@ -6850,8 +6848,8 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
     return {
       projectRoot: project.root,
       taskStore: { update: vi.fn() } as any,
-      execGit: vi.fn(),
-      execGitCapture: vi.fn(() => ''),
+      execGit: vi.fn(async () => undefined),
+      execGitCapture: vi.fn(async () => ''),
       gitPush: vi.fn(),
       persistAndEmitPhase: vi.fn(),
       advancePhase: vi.fn(),
@@ -6893,12 +6891,12 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
 
   it('falls through to hard-fail when infra error detected but not in container mode', async () => {
     const deps = makeDeps();
-    deps.execGit = vi.fn()
+    deps.execGit = vi.fn(async () => undefined)
       .mockImplementationOnce(() => { throw new Error('fatal: not a git repository: (null)'); });
 
     // checkCherryPickInProgress → not in progress (no CHERRY_PICK_HEAD).
     // Goes through deps.execGitCapture (container-aware), not raw execFileSync.
-    deps.execGitCapture = vi.fn(() => { throw new Error('not found'); });
+    deps.execGitCapture = vi.fn(async () => { throw new Error('not found'); });
     mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
 
     // readContainerConfig returns enabled: false (default mock) — not in container mode
@@ -6914,12 +6912,12 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
 
   it('does NOT enter infra retry path for genuine git merge conflicts', async () => {
     const deps = makeDeps();
-    deps.execGit = vi.fn()
+    deps.execGit = vi.fn(async () => undefined)
       .mockImplementationOnce(() => { throw new Error('CONFLICT (content): Merge conflict in file.ts'); });
 
     // CHERRY_PICK_HEAD exists → infra path guard "!checkCherryPickInProgress" is false.
     // Goes through deps.execGitCapture (container-aware), not raw execFileSync.
-    deps.execGitCapture = vi.fn(() => 'abc123\n');
+    deps.execGitCapture = vi.fn(async () => 'abc123\n');
     mockExecFileSync.mockReturnValue('abc123\n');
 
     const { readContainerConfig, containerManager } = await import('../../src/lib/container-manager');
@@ -6945,7 +6943,7 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
     expect(containerManager.ensureContainer).not.toHaveBeenCalled();
 
     // Now simulate merger resolving the conflict
-    deps.execGitCapture = vi.fn(() => { throw new Error('not found'); });
+    deps.execGitCapture = vi.fn(async () => { throw new Error('not found'); });
     mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
     resolveCompletion!();
     const result = await resultPromise;
@@ -6975,8 +6973,8 @@ describe('repairStuckCherryPick', () => {
     return {
       projectRoot: project.root,
       taskStore: { update: vi.fn() } as any,
-      execGit: vi.fn(),
-      execGitCapture: vi.fn(() => ''),
+      execGit: vi.fn(async () => undefined),
+      execGitCapture: vi.fn(async () => ''),
       gitPush: vi.fn(),
       persistAndEmitPhase: vi.fn(),
       advancePhase: vi.fn(),
@@ -7017,8 +7015,8 @@ describe('repairStuckCherryPick', () => {
   }
 
   it('always runs cherry-pick --quit first, even when nothing is in progress', async () => {
-    const execGit = vi.fn();
-    const deps = makeDeps({ execGit, execGitCapture: vi.fn(() => '') });
+    const execGit = vi.fn(async () => undefined);
+    const deps = makeDeps({ execGit, execGitCapture: vi.fn(async () => '') });
     const pipeline = makeImplPipeline();
 
     await repairStuckCherryPick(pipeline, deps);
@@ -7034,8 +7032,8 @@ describe('repairStuckCherryPick', () => {
     // integrateGroup, so leftover cherry-pick state failed it with
     // "cherry-pick is already in progress" (CHERRY_PICK_RECOVERY_EXHAUSTED).
     const calls: string[][] = [];
-    const execGit = vi.fn((args: string[]) => { calls.push(args); });
-    const deps = makeDeps({ execGit, execGitCapture: vi.fn(() => '') });
+    const execGit = vi.fn(async (args: string[]) => { calls.push(args); });
+    const deps = makeDeps({ execGit, execGitCapture: vi.fn(async () => '') });
     const pipeline = makeImplPipeline();
 
     await scopeArbitrationDeps(deps).tryCherryPickWithRecovery(
@@ -7126,8 +7124,8 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
     return {
       projectRoot: project.root,
       taskStore: { update: vi.fn() } as any,
-      execGit: vi.fn(),
-      execGitCapture: vi.fn(() => ''),
+      execGit: vi.fn(async () => undefined),
+      execGitCapture: vi.fn(async () => ''),
       gitPush: vi.fn(),
       persistAndEmitPhase: vi.fn(),
       advancePhase: vi.fn(),
@@ -7215,7 +7213,7 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
       .mockReturnValueOnce('abc123\n') // rev-parse
       .mockReturnValueOnce('abc123 unintegrated commit\n'); // log
 
-    deps.execGit = vi.fn(); // succeeds (doesn't throw)
+    deps.execGit = vi.fn(async () => undefined); // succeeds (doesn't throw)
 
     const result = await _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
 
@@ -7236,7 +7234,7 @@ describe('Defect 4 — _recoverSubtaskBranchBeforeDelete (plain git)', () => {
       .mockReturnValueOnce('abc123\n')
       .mockReturnValueOnce('abc123 unintegrated commit\n');
 
-    deps.execGit = vi.fn()
+    deps.execGit = vi.fn(async () => undefined)
       .mockImplementationOnce(() => { throw new Error('CONFLICT'); }); // cherry-pick fails
 
     const result = await _recoverSubtaskBranchBeforeDelete(pipeline, deps, '/tmp/log', 'feat/recover-test-st1', subtask);
@@ -7348,7 +7346,7 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); }, { timeout: 10_000 });
 
       fireEvent('event', { sessionId: 'sess-br-st1', event: { type: 'result' } });
       fireEvent('event', { sessionId: 'sess-br-st2', event: { type: 'result' } });
@@ -7409,7 +7407,7 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); }, { timeout: 10_000 });
 
       fireEvent('event', { sessionId: 'sess-log-st1', event: { type: 'result' } });
       fireEvent('event', { sessionId: 'sess-log-st2', event: { type: 'result' } });
@@ -7445,7 +7443,7 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); }, { timeout: 10_000 });
 
       fireEvent('event', { sessionId: 'sess-reg-st1', event: { type: 'result' } });
       fireEvent('event', { sessionId: 'sess-reg-st2', event: { type: 'result' } });
@@ -7616,7 +7614,7 @@ describe('_recoverStBranchCommits (shared helper)', () => {
       });
 
       let cherryPickAttempt = 0;
-      const execGitFn = vi.fn((args: string[]) => {
+      const execGitFn = vi.fn(async (args: string[]) => {
         if (args[0] === 'cherry-pick' && args[1] !== '--abort') {
           cherryPickAttempt++;
           if (cherryPickAttempt === 1) {
@@ -7655,7 +7653,7 @@ describe('_recoverStBranchCommits (shared helper)', () => {
         containerId: 'cont-still-broken', remoteWorkspaceFolder: '/workspaces/project',
       });
 
-      const execGitFn = vi.fn((args: string[]) => {
+      const execGitFn = vi.fn(async (args: string[]) => {
         if (args[0] === 'cherry-pick' && args[1] !== '--abort') {
           throw new Error('fatal: not a git repository: (null)'); // always fails
         }
@@ -7832,7 +7830,7 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
     project.clean();
   });
 
-  it('marks a subtask completed when its declared files_to_create all exist, even though it never ran', () => {
+  it('marks a subtask completed when its declared files_to_create all exist, even though it never ran', async () => {
     mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
     writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'x');
     writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'b.log'), 'x');
@@ -7845,13 +7843,13 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
       },
     ] as any[];
 
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+    const changed = await reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
 
     expect(changed).toBe(true);
     expect(subtasks[0].completed).toBe(true);
   });
 
-  it('leaves a QA-rework subtask incomplete when its files_to_create were last committed before the rework feedback was written', () => {
+  it('leaves a QA-rework subtask incomplete when its files_to_create were last committed before the rework feedback was written', async () => {
     // Regression test for task a-later-demo-task: subtask 15's files_to_create
     // survived from a commit two rounds back and the rework never touched them.
     mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
@@ -7867,14 +7865,14 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
       },
     ] as any[];
 
-    const execGitCapture = vi.fn((args: string[]) => (args[0] === 'log' ? '1\n' : '')); // clean tree, ancient commit
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
+    const execGitCapture = vi.fn(async (args: string[]) => (args[0] === 'log' ? '1\n' : '')); // clean tree, ancient commit
+    const changed = await reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
 
     expect(changed).toBe(false);
     expect(subtasks[0].completed).toBeFalsy();
   });
 
-  it('marks a subtask completed when its files_to_create are committed on the branch, whichever earlier session committed them', () => {
+  it('marks a subtask completed when its files_to_create are committed on the branch, whichever earlier session committed them', async () => {
     // Regression: a subtask spans several sessions (session limit, retries). A
     // deliverable committed by an earlier one is on the branch and counts.
     mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
@@ -7889,14 +7887,14 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
       },
     ] as any[];
 
-    const execGitCapture = vi.fn(() => ''); // clean tree: everything committed
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
+    const execGitCapture = vi.fn(async () => ''); // clean tree: everything committed
+    const changed = await reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
 
     expect(changed).toBe(true);
     expect(subtasks[0].completed).toBe(true);
   });
 
-  it('leaves a subtask incomplete when a deliverable exists in the worktree but is not committed', () => {
+  it('leaves a subtask incomplete when a deliverable exists in the worktree but is not committed', async () => {
     mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
     writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'evidence');
 
@@ -7907,14 +7905,14 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
       },
     ] as any[];
 
-    const execGitCapture = vi.fn((args: string[]) => (args[0] === 'status' ? '?? scripts/job_logs/a.log\n' : ''));
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
+    const execGitCapture = vi.fn(async (args: string[]) => (args[0] === 'status' ? '?? scripts/job_logs/a.log\n' : ''));
+    const changed = await reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
 
     expect(changed).toBe(false);
     expect(subtasks[0].completed).toBeFalsy();
   });
 
-  it('marks a rework subtask completed when only the deliverable QA listed in files_to_fix was re-committed this pass', () => {
+  it('marks a rework subtask completed when only the deliverable QA listed in files_to_fix was re-committed this pass', async () => {
     // QA-rework is scoped to the deliverable QA named; the other declared files
     // stay as committed in an earlier pass and must not block completion.
     mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
@@ -7932,17 +7930,17 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
     writeFileSync(join(project.taskDir, 'qa_feedback.md'), '# QA Feedback\n\n<!-- teamai:files_to_fix ["scripts/job_logs/a.log"] -->\n');
 
     // a.log was recommitted after the feedback; b/c stay as committed long ago.
-    const execGitCapture = vi.fn((args: string[]) => {
+    const execGitCapture = vi.fn(async (args: string[]) => {
       if (args[0] !== 'log') return '';
       return args[args.length - 1] === 'scripts/job_logs/a.log' ? String(Math.floor(Date.now() / 1000) + 100) : '1';
     });
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
+    const changed = await reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
 
     expect(changed).toBe(true);
     expect(subtasks[0].completed).toBe(true);
   });
 
-  it('requires ALL files_to_create of a QA-rework subtask to be recommitted when no feedback narrows the dispatch', () => {
+  it('requires ALL files_to_create of a QA-rework subtask to be recommitted when no feedback narrows the dispatch', async () => {
     mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
     writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'x');
     writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'b.log'), 'x');
@@ -7956,17 +7954,17 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
       },
     ] as any[];
 
-    const execGitCapture = vi.fn((args: string[]) => {
+    const execGitCapture = vi.fn(async (args: string[]) => {
       if (args[0] !== 'log') return '';
       return args[args.length - 1] === 'scripts/job_logs/a.log' ? String(Math.floor(Date.now() / 1000) + 100) : '1';
     });
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
+    const changed = await reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir, execGitCapture as any);
 
     expect(changed).toBe(false);
     expect(subtasks[0].completed).toBeFalsy();
   });
 
-  it('leaves a subtask incomplete when only some of its files_to_create exist', () => {
+  it('leaves a subtask incomplete when only some of its files_to_create exist', async () => {
     mkdirSync(join(worktreePath, 'scripts', 'job_logs'), { recursive: true });
     writeFileSync(join(worktreePath, 'scripts', 'job_logs', 'a.log'), 'x');
     // b.log deliberately missing — job still in flight.
@@ -7979,13 +7977,13 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
       },
     ] as any[];
 
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+    const changed = await reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
 
     expect(changed).toBe(false);
     expect(subtasks[0].completed).toBeFalsy();
   });
 
-  it('flags a not-yet-complete dependent whose depends_on just got satisfied by reconciliation', () => {
+  it('flags a not-yet-complete dependent whose depends_on just got satisfied by reconciliation', async () => {
     writeFileSync(join(worktreePath, 'evidence.log'), 'x');
 
     const subtasks = [
@@ -7999,7 +7997,7 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
       },
     ] as any[];
 
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+    const changed = await reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
 
     expect(changed).toBe(true);
     expect(subtasks[0].completed).toBe(true);
@@ -8007,7 +8005,7 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
     expect(subtasks[1].qa_flagged).toBe(true);
   });
 
-  it('does not flag a dependent whose OTHER dependencies are still incomplete', () => {
+  it('does not flag a dependent whose OTHER dependencies are still incomplete', async () => {
     writeFileSync(join(worktreePath, 'evidence.log'), 'x');
 
     const subtasks = [
@@ -8022,13 +8020,13 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
       },
     ] as any[];
 
-    reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+    await reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
 
     expect(subtasks[1].completed).toBe(true);
     expect(subtasks[2].qa_flagged).toBeFalsy();
   });
 
-  it('never marks the synthetic subtask 9999 completed via this path', () => {
+  it('never marks the synthetic subtask 9999 completed via this path', async () => {
     writeFileSync(join(worktreePath, 'evidence.log'), 'x');
 
     const subtasks = [
@@ -8038,19 +8036,19 @@ describe('reconcileSubtaskCompletionFromDeliverables', () => {
       },
     ] as any[];
 
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+    const changed = await reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
 
     expect(changed).toBe(false);
     expect(subtasks[0].completed).toBeFalsy();
   });
 
-  it('returns false and touches nothing when every subtask is already completed or has no files_to_create', () => {
+  it('returns false and touches nothing when every subtask is already completed or has no files_to_create', async () => {
     const subtasks = [
       { id: 1, title: 'Done', description: '', files: [], acceptance_criteria: [], completed: true },
       { id: 2, title: 'No deliverable', description: '', files: ['src/a.ts'], acceptance_criteria: [], completed: false },
     ] as any[];
 
-    const changed = reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
+    const changed = await reconcileSubtaskCompletionFromDeliverables(subtasks, worktreePath, project.taskDir);
 
     expect(changed).toBe(false);
   });
@@ -8069,8 +8067,8 @@ describe('checkSubtaskScope (hold-and-arbitrate)', () => {
   });
 
   async function run(subtask: Record<string, any>, diffOutput: string) {
-    const execGitCapture = vi.fn((args: string[]) => (args[0] === 'diff' && args[1] === '--name-only' && args[2] === 'abc123..HEAD' ? diffOutput : ''));
-    const deps = { execGitCapture, execGit: vi.fn(), projectRoot: project.root } as unknown as ImplementDeps;
+    const execGitCapture = vi.fn(async (args: string[]) => (args[0] === 'diff' && args[1] === '--name-only' && args[2] === 'abc123..HEAD' ? diffOutput : ''));
+    const deps = { execGitCapture, execGit: vi.fn(async () => undefined), projectRoot: project.root } as unknown as ImplementDeps;
     const pipeline = makePipeline(project.taskId, project.taskDir, { phase: 'implement' });
     const violations = new Set<number>();
     const result = await checkSubtaskScope(

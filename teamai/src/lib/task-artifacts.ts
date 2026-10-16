@@ -1,8 +1,11 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { detectDefaultBranch } from '@/lib/orchestrator';
 import type { QAReportData } from '@/lib/stream-types';
+
+const execFileAsync = promisify(execFile);
 
 export interface CommonArtifacts {
   spec: string | null;
@@ -55,10 +58,13 @@ export async function readCommonArtifacts(
   if (branch) {
     try {
       const base = await detectDefaultBranch(projectPath);
-      diff = execFileSync('git', ['diff', `${base}...${branch}`], {
+      const promise = execFileAsync('git', ['diff', `${base}...${branch}`], {
         cwd: projectPath,
         encoding: 'utf-8',
+        maxBuffer: 32 * 1024 * 1024,
       });
+      promise.child?.stdin?.end();
+      diff = (await promise).stdout;
     } catch {
       diff = null;
     }

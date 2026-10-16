@@ -86,7 +86,7 @@ describe('autoCommitSubtaskChanges with failing project hooks (real git)', () =>
     expect(() => git(['commit', '-m', 'x'])).toThrow();
   });
 
-  it('still creates the WIP commit and leaves the tree clean apart from .teamai/', () => {
+  it('still creates the WIP commit and leaves the tree clean apart from .teamai/', async () => {
     writeFileSync(join(repo, 'a.txt'), 'two\n');
     writeFileSync(join(repo, 'b.txt'), 'new\n');
     const before = git(['rev-list', '--count', 'HEAD']).trim();
@@ -98,7 +98,7 @@ describe('autoCommitSubtaskChanges with failing project hooks (real git)', () =>
     const pipeline = { specPath } as unknown as ImplementPipeline;
     const subtask = { id: 3, title: 't', description: 'd', files: ['a.txt'] } as unknown as PlanSubtask;
 
-    autoCommitSubtaskChanges(pipeline, deps, subtask, repo);
+    await autoCommitSubtaskChanges(pipeline, deps, subtask, repo);
 
     expect(Number(git(['rev-list', '--count', 'HEAD']).trim())).toBe(Number(before) + 1);
     expect(git(['log', '-1', '--format=%s']).startsWith('WIP: auto-commit subtask 3 changes')).toBe(true);

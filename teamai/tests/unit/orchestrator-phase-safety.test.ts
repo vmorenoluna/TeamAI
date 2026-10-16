@@ -571,8 +571,8 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
 
     const deps = {
       projectRoot: project.root,
-      execGit: vi.fn(),
-      execGitCapture: vi.fn(() => ''),
+      execGit: vi.fn(async () => undefined),
+      execGitCapture: vi.fn(async () => ''),
       gitPush: vi.fn(),
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
@@ -607,12 +607,12 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       return '';
     });
 
-    const execGit = vi.fn();
+    const execGit = vi.fn(async () => undefined);
     const gitPush = vi.fn();
     const deps = {
       projectRoot: project.root,
       execGit,
-      execGitCapture: vi.fn(() => ''),
+      execGitCapture: vi.fn(async () => ''),
       gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
@@ -646,8 +646,8 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
 
     const deps = {
       projectRoot: project.root,
-      execGit: vi.fn(),
-      execGitCapture: vi.fn(() => ''),
+      execGit: vi.fn(async () => undefined),
+      execGitCapture: vi.fn(async () => ''),
       gitPush: vi.fn((args: string[]) => {
         if (args[0] === 'push') throw new Error('offline');
       }),
@@ -676,14 +676,14 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     let mergerDone = false;
     const deps = {
       projectRoot: project.root,
-      execGit: vi.fn((args: string[]) => {
+      execGit: vi.fn(async (args: string[]) => {
         if (args[0] === 'rebase' && args[1] !== '--abort') throw new Error('CONFLICT');
       }),
       // Non-empty output confirms a genuine conflict — required for the
       // merger-spawn path to trigger at all (see rebaseOntoLatestDefault's
       // unmerged-file check, which skips the merger for a non-conflict
       // rebase failure). Reported once; the merger session then resolves it.
-      execGitCapture: vi.fn(() => (mergerDone ? '' : 'src/conflicted-file.ts\n')),
+      execGitCapture: vi.fn(async () => (mergerDone ? '' : 'src/conflicted-file.ts\n')),
       gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(async () => { mergerDone = true; }),
@@ -718,12 +718,12 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const sessionOpts = vi.fn();
     const deps = {
       projectRoot: project.root,
-      execGit: vi.fn((args: string[]) => {
+      execGit: vi.fn(async (args: string[]) => {
         if (args[0] === 'rebase' && args[1] !== '--abort') throw new Error('fatal: cannot rebase: You have unstaged changes.');
       }),
       // No unmerged files — the rebase failed for a reason other than a
       // real conflict.
-      execGitCapture: vi.fn(() => ''),
+      execGitCapture: vi.fn(async () => ''),
       gitPush,
       sessionOpts,
       waitForCompletion: vi.fn(async () => undefined),
@@ -757,14 +757,14 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       return '';
     });
 
-    const execGit = vi.fn();
+    const execGit = vi.fn(async (_args: string[], _cwd: string): Promise<void> => undefined);
     const gitPush = vi.fn();
     const deps = {
       projectRoot: project.root,
       execGit,
       // Dirty on the first check (before the guard's commit), clean after —
       // mirrors a real `git status --porcelain` going empty once committed.
-      execGitCapture: vi.fn(() => 'M src/feature.ts\n'),
+      execGitCapture: vi.fn(async () => 'M src/feature.ts\n'),
       gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
@@ -807,12 +807,12 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       return '';
     });
 
-    const execGit = vi.fn();
+    const execGit = vi.fn(async () => undefined);
     const gitPush = vi.fn();
     const deps = {
       projectRoot: project.root,
       execGit,
-      execGitCapture: vi.fn(() => ''),
+      execGitCapture: vi.fn(async () => ''),
       gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
@@ -861,8 +861,8 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'implement', branch: 'feat/test' };
 
     const gitPush = vi.fn();
-    const execGit = vi.fn();
-    const execGitCapture = vi.fn(() => '');
+    const execGit = vi.fn(async () => undefined);
+    const execGitCapture = vi.fn(async () => '');
     const deps = { projectRoot: project.root, gitPush, execGit, execGitCapture, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
 
     await syncPhaseBaseline(pipeline, deps);
@@ -880,8 +880,8 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     const pipeline = { taskId: project.taskId, specPath: project.taskDir, worktreePath, phase: 'spec', branch: 'feat/test' };
 
     const gitPush = vi.fn();
-    const execGit = vi.fn();
-    const execGitCapture = vi.fn(() => '');
+    const execGit = vi.fn(async () => undefined);
+    const execGitCapture = vi.fn(async () => '');
     const deps = { projectRoot: project.root, gitPush, execGit, execGitCapture, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
 
     await syncPhaseBaseline(pipeline, deps);
@@ -899,7 +899,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     const deps = {
       projectRoot: project.root,
       gitPush: vi.fn(() => { throw new Error('offline'); }),
-      execGit: vi.fn(), execGitCapture: vi.fn(() => ''), sessionOpts: vi.fn(), waitForCompletion: vi.fn(),
+      execGit: vi.fn(async () => undefined), execGitCapture: vi.fn(async () => ''), sessionOpts: vi.fn(), waitForCompletion: vi.fn(),
     };
 
     await expect(syncPhaseBaseline(pipeline, deps)).resolves.toBeUndefined();
@@ -913,14 +913,14 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     const deps = {
       projectRoot: project.root,
       gitPush: vi.fn(),
-      execGit: vi.fn((args: string[]) => {
+      execGit: vi.fn(async (args: string[]) => {
         if (args.includes('rebase') && !args.includes('--abort')) throw new Error('CONFLICT');
         // tolerate the --abort call
       }),
       // Non-empty output confirms a genuine conflict — required to reach
       // the merger-spawn path at all (see the non-conflict-failure check
       // in rebaseOntoLatestDefault).
-      execGitCapture: vi.fn(() => 'src/conflicted-file.ts\n'),
+      execGitCapture: vi.fn(async () => 'src/conflicted-file.ts\n'),
       sessionOpts: vi.fn(),
       // Merger-fallback session never resolves the conflict.
       waitForCompletion: vi.fn().mockRejectedValue(new Error('merger failed')),
@@ -976,7 +976,7 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
       toAgentPath: vi.fn((p: string) => p),
       executePhase: vi.fn().mockResolvedValue(undefined),
       gitPush: vi.fn(),
-      execGit: vi.fn(),
+      execGit: vi.fn(async () => undefined),
       getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
       scheduleWakeup: vi.fn(),
       writeCompletionSummary: vi.fn(),
@@ -1027,7 +1027,7 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
       toAgentPath: vi.fn((p: string) => p),
       executePhase: vi.fn().mockResolvedValue(undefined),
       gitPush: vi.fn(),
-      execGit: vi.fn(),
+      execGit: vi.fn(async () => undefined),
       getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
       scheduleWakeup: vi.fn(),
       writeCompletionSummary: vi.fn(),
@@ -1072,7 +1072,7 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
       toAgentPath: vi.fn((p: string) => p),
       executePhase: vi.fn().mockResolvedValue(undefined),
       gitPush: vi.fn(),
-      execGit: vi.fn(),
+      execGit: vi.fn(async () => undefined),
       getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
       scheduleWakeup: vi.fn(),
       writeCompletionSummary: vi.fn(),
@@ -1125,7 +1125,7 @@ describe('runPlanPhase — plan_gaps.md gate', () => {
       toAgentPath: vi.fn((p: string) => p),
       executePhase: vi.fn().mockResolvedValue(undefined),
       gitPush: vi.fn(),
-      execGit: vi.fn(),
+      execGit: vi.fn(async () => undefined),
       getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3 }),
       scheduleWakeup: vi.fn(),
       writeCompletionSummary: vi.fn(),

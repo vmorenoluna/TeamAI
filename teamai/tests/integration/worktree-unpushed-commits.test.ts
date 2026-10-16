@@ -135,7 +135,7 @@ function cleanup() {
 }
 
 /** Run getUnpushedCommits directly on a branch */
-function checkUnpushed(projectRoot: string, branch: string): string | null {
+function checkUnpushed(projectRoot: string, branch: string): Promise<string | null> {
   return getUnpushedCommits(projectRoot, branch);
 }
 
@@ -151,16 +151,16 @@ describe('Worktree unpushed-commit detection', () => {
       cleanup();
     });
 
-    it('returns null when the branch has no unpushed commits (clean)', () => {
+    it('returns null when the branch has no unpushed commits (clean)', async () => {
       // Create a branch from main — no new commits
       execFileSync('git', ['checkout', '-b', 'feat/clean'], { cwd: testDir, stdio: 'ignore' });
       execFileSync('git', ['push', '-u', 'origin', 'feat/clean'], { cwd: testDir, stdio: 'ignore' });
 
-      const result = checkUnpushed(testDir, 'feat/clean');
+      const result = await checkUnpushed(testDir, 'feat/clean');
       expect(result).toBeNull();
     });
 
-    it('returns the commit log when local branch is ahead of origin', () => {
+    it('returns the commit log when local branch is ahead of origin', async () => {
       // Push first to establish origin tracking, then add an unpushed commit
       execFileSync('git', ['checkout', '-b', 'feat/unpushed'], { cwd: testDir, stdio: 'ignore' });
       execFileSync('git', ['push', '-u', 'origin', 'feat/unpushed'], { cwd: testDir, stdio: 'ignore' });
@@ -169,24 +169,24 @@ describe('Worktree unpushed-commit detection', () => {
       execFileSync('git', ['add', 'new-file.ts'], { cwd: testDir, stdio: 'ignore' });
       execFileSync('git', ['commit', '-m', 'feat: add new module'], { cwd: testDir, stdio: 'ignore' });
 
-      const result = checkUnpushed(testDir, 'feat/unpushed');
+      const result = await checkUnpushed(testDir, 'feat/unpushed');
       expect(result).not.toBeNull();
       expect(result!).toContain('feat: add new module');
     });
 
-    it('returns null when the remote branch does not exist yet', () => {
+    it('returns null when the remote branch does not exist yet', async () => {
       // Create a branch but never push — origin/<branch> doesn't exist
       execFileSync('git', ['checkout', '-b', 'feat/never-pushed'], { cwd: testDir, stdio: 'ignore' });
       writeFileSync(join(testDir, 'orphan.ts'), '// no remote tracking');
       execFileSync('git', ['add', 'orphan.ts'], { cwd: testDir, stdio: 'ignore' });
       execFileSync('git', ['commit', '-m', 'orphan commit'], { cwd: testDir, stdio: 'ignore' });
 
-      const result = checkUnpushed(testDir, 'feat/never-pushed');
+      const result = await checkUnpushed(testDir, 'feat/never-pushed');
       // origin/feat/never-pushed doesn't exist → null (can't compare)
       expect(result).toBeNull();
     });
 
-    it('detects multiple unpushed commits', () => {
+    it('detects multiple unpushed commits', async () => {
       execFileSync('git', ['checkout', '-b', 'feat/multi'], { cwd: testDir, stdio: 'ignore' });
 
       writeFileSync(join(testDir, 'a.ts'), '1');
@@ -204,7 +204,7 @@ describe('Worktree unpushed-commit detection', () => {
       execFileSync('git', ['add', 'c.ts'], { cwd: testDir, stdio: 'ignore' });
       execFileSync('git', ['commit', '-m', 'commit three — unpushed'], { cwd: testDir, stdio: 'ignore' });
 
-      const result = checkUnpushed(testDir, 'feat/multi');
+      const result = await checkUnpushed(testDir, 'feat/multi');
       expect(result).not.toBeNull();
       expect(result!).toContain('commit three');
       expect(result!).not.toContain('commit two'); // already pushed
@@ -278,20 +278,18 @@ describe('Worktree unpushed-commit detection', () => {
       vi.resetModules();
     });
 
-    it('logs a warning to output.log when removing a worktree with unpushed commits', () => {
+    it('logs a warning to output.log when removing a worktree with unpushed commits', async () => {
       const taskDir = join(testDir, '.teamai', taskId);
       const outputLog = join(taskDir, 'output.log');
 
       // Verify the branch has unpushed commits
       const task = JSON.parse(readFileSync(join(taskDir, 'task.json'), 'utf-8'));
-      const unpushed = checkUnpushed(testDir, task.branch);
+      const unpushed = await checkUnpushed(testDir, task.branch);
       expect(unpushed).not.toBeNull();
       expect(unpushed!).toContain('secret commit');
 
       // Remove the worktree — this should log a warning but not throw
-      expect(() => {
-        orch._ctx.removeWorktree(taskId);
-      }).not.toThrow();
+      await expect(Promise.resolve().then(() => orch._ctx.removeWorktree(taskId))).resolves.not.toThrow();
 
       // output.log should contain the warning
       expect(existsSync(outputLog)).toBe(true);
@@ -301,7 +299,7 @@ describe('Worktree unpushed-commit detection', () => {
       expect(log).toContain('secret commit');
     });
 
-    it('does not log a warning when worktree has no unpushed commits', () => {
+    it('does not log a warning when worktree has no unpushed commits', async () => {
       const taskDir = join(testDir, '.teamai', taskId);
       const outputLog = join(taskDir, 'output.log');
 
@@ -310,9 +308,7 @@ describe('Worktree unpushed-commit detection', () => {
       execFileSync('git', ['push', 'origin', task.branch], { cwd: testDir, stdio: 'ignore' });
 
       // Now removeWorktree should proceed silently
-      expect(() => {
-        orch._ctx.removeWorktree(taskId);
-      }).not.toThrow();
+      await expect(Promise.resolve().then(() => orch._ctx.removeWorktree(taskId))).resolves.not.toThrow();
 
       // If output.log was created, it should NOT contain a warning
       if (existsSync(outputLog)) {

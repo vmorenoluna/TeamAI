@@ -34,17 +34,14 @@ const { onHandlers, mockCreateSession, mockSendMessage, mockKillSession, mockEmi
 
 const mockExecFileSync = vi.hoisted(() => vi.fn());
 
+// execFile calls back (and is promisify-aware) so the async git helpers resolve; it delegates to the sync stub so existing scripted responses apply.
+const mockExecFile = await vi.hoisted(async () => {
+  const { createExecFileMock } = await import('../utils/mock-child-process');
+  return createExecFileMock({ resetSafe: true, execFileSync: (...a) => mockExecFileSync(...a) });
+});
+
 vi.mock('child_process', () => ({
-  // Callback-form execFile (promisified by git-platform): delegate to the sync mock so existing stubs apply.
-  execFile: (cmd: string, args: unknown[], opts: unknown, cb?: (...a: unknown[]) => void) => {
-    const done = typeof opts === "function" ? opts as (...a: unknown[]) => void : cb;
-    try {
-      const out = mockExecFileSync(cmd, args, opts);
-      done?.(null, { stdout: out == null ? "" : String(out), stderr: "" });
-    } catch (e) {
-      done?.(e);
-    }
-  },
+  execFile: mockExecFile,
   execFileSync: mockExecFileSync,
 }));
 

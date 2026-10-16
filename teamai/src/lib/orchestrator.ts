@@ -180,7 +180,7 @@ export class Orchestrator {
     if (NO_RESUME_PHASES.has(targetPhase)) {
       // Auto-delete the git worktree when moving to 'done', 'backlog', or 'failed'
       if (targetPhase === 'done' || targetPhase === 'backlog' || targetPhase === 'failed') {
-        this._ctx.removeWorktree(taskId);
+        await this._ctx.removeWorktree(taskId);
       }
       this.taskStore.updatePhase(taskId, targetPhase);
       processManager.emit('phase-change', { taskId, phase: targetPhase, projectRoot: this.projectRoot });
@@ -682,7 +682,7 @@ export class Orchestrator {
       // rest of the codebase treats unverifiable platforms.
     }
 
-    this._ctx.removeWorktree(taskId);
+    await this._ctx.removeWorktree(taskId);
 
     // Ticket-history refactor (§3d): no committed artifact snapshot exists
     // anymore (the folder-commit mechanism was replaced by the
@@ -784,8 +784,8 @@ export class Orchestrator {
 
   private advancePhase(pipeline: TaskPipeline, phase: PipelinePhase, eventExtra?: Record<string, unknown>): void { pipelineAdvancePhase(pipeline, phase, this.taskStore, this.projectRoot, eventExtra); }
 
-  private _execGit(args: string[], hostCwd: string): void { execGit(args, hostCwd, this.projectRoot); }
-  private _execGitCapture(args: string[], hostCwd: string): string { return execGitCapture(args, hostCwd, this.projectRoot); }
+  private _execGit(args: string[], hostCwd: string): Promise<void> { return execGit(args, hostCwd, this.projectRoot); }
+  private _execGitCapture(args: string[], hostCwd: string): Promise<string> { return execGitCapture(args, hostCwd, this.projectRoot); }
 
   private handleRateLimit(pipeline: TaskPipeline, resetsAt: number): void {
     handleRateLimitFn(pipeline, resetsAt, this._ctx);
@@ -903,10 +903,10 @@ export class Orchestrator {
     // Clean the worktree for plan/implement phases so the next run starts with a clean slate
     if (currentPhase === 'plan') {
       // Worktree was created during plan — remove it so it gets recreated fresh
-      this._ctx.removeWorktree(taskId);
+      await this._ctx.removeWorktree(taskId);
     } else if (currentPhase === 'implement') {
       // Worktree has partial changes — discard them
-      this._cleanWorktree(taskId);
+      await this._cleanWorktree(taskId);
     }
   }
 
@@ -1104,8 +1104,8 @@ export class Orchestrator {
     return path.join(worktreeBase, resolveWorktreeDirName(task));
   }
 
-  private _cleanWorktree(taskId: string): void {
-    cleanWorktreeFn(taskId, {
+  private async _cleanWorktree(taskId: string): Promise<void> {
+    await cleanWorktreeFn(taskId, {
       execGit: (args, hostCwd) => this._execGit(args, hostCwd),
       projectRoot: this.projectRoot,
       taskStore: this.taskStore,

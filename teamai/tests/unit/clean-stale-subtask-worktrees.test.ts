@@ -53,27 +53,27 @@ describe('subtask worktree stale handling', () => {
 
   describe('cleanStaleSubtaskWorktrees', () => {
     it('removes a leftover directory when git removal fails', async () => {
-      const execGit = vi.fn(() => { throw new Error('git failed'); });
+      const execGit = vi.fn(async () => { throw new Error('git failed'); });
       await cleanStaleSubtaskWorktrees(pipeline, { execGit, projectRoot });
       expect(existsSync(path.join(base, 'my-task-st1'))).toBe(false);
     });
 
     it('also removes relocated -r<N> variants', async () => {
       mkdirSync(path.join(base, 'my-task-st1-r2'), { recursive: true });
-      await cleanStaleSubtaskWorktrees(pipeline, { execGit: vi.fn(() => { throw new Error('x'); }), projectRoot });
+      await cleanStaleSubtaskWorktrees(pipeline, { execGit: vi.fn(async () => { throw new Error('x'); }), projectRoot });
       expect(existsSync(path.join(base, 'my-task-st1-r2'))).toBe(false);
     });
 
     it('leaves unrelated directories alone', async () => {
       mkdirSync(path.join(base, 'my-task-stale-notes'), { recursive: true });
       mkdirSync(path.join(base, 'other-task-st1'), { recursive: true });
-      await cleanStaleSubtaskWorktrees(pipeline, { execGit: vi.fn(() => { throw new Error('x'); }), projectRoot });
+      await cleanStaleSubtaskWorktrees(pipeline, { execGit: vi.fn(async () => { throw new Error('x'); }), projectRoot });
       expect(existsSync(path.join(base, 'my-task-stale-notes'))).toBe(true);
       expect(existsSync(path.join(base, 'other-task-st1'))).toBe(true);
     });
 
     it('does not throw or wait when a directory cannot be removed', async () => {
-      const execGit = vi.fn(() => { throw new Error('locked'); });
+      const execGit = vi.fn(async () => { throw new Error('locked'); });
       fsFaults.rmSyncFails = true;
       try {
         await expect(cleanStaleSubtaskWorktrees(pipeline, { execGit, projectRoot })).resolves.toBeUndefined();
@@ -88,7 +88,7 @@ describe('subtask worktree stale handling', () => {
 
     it('forgets the recorded subtask worktree paths', async () => {
       recordSubtaskWorktree(specPath, 1, path.join(base, 'my-task-st1-r2'));
-      await cleanStaleSubtaskWorktrees(pipeline, { execGit: vi.fn(() => { throw new Error('x'); }), projectRoot });
+      await cleanStaleSubtaskWorktrees(pipeline, { execGit: vi.fn(async () => { throw new Error('x'); }), projectRoot });
       expect(resolveSubtaskWorktreePath(specPath, pipeline.worktreePath, 1)).toBeNull();
     });
   });
@@ -144,37 +144,37 @@ describe('subtask worktree stale handling', () => {
   });
 
   describe('sweepAbandonedWorktreeRemnants', () => {
-    it('removes locked-remnant directories that have no .git', () => {
+    it('removes locked-remnant directories that have no .git', async () => {
       mkdirSync(path.join(base, 'my-task-st1-r2', 'teamai', 'node_modules'), { recursive: true });
-      const removed = sweepAbandonedWorktreeRemnants(projectRoot);
+      const removed = await sweepAbandonedWorktreeRemnants(projectRoot);
       expect(removed).toContain(path.join(base, 'my-task-st1-r2'));
       expect(removed).toContain(path.join(base, 'my-task-st1'));
       expect(existsSync(path.join(base, 'my-task-st1'))).toBe(false);
     });
 
-    it('logs, and does not report as removed, a remnant that is still locked', () => {
+    it('logs, and does not report as removed, a remnant that is still locked', async () => {
       fsFaults.rmSyncFails = true;
-      expect(sweepAbandonedWorktreeRemnants(projectRoot)).toEqual([]);
+      expect(await sweepAbandonedWorktreeRemnants(projectRoot)).toEqual([]);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('startup sweep'));
     });
 
-    it('never removes a live worktree (has a .git entry)', () => {
+    it('never removes a live worktree (has a .git entry)', async () => {
       writeFileSync(path.join(base, 'my-task-st1', '.git'), 'gitdir: /somewhere');
-      expect(sweepAbandonedWorktreeRemnants(projectRoot)).toEqual([]);
+      expect(await sweepAbandonedWorktreeRemnants(projectRoot)).toEqual([]);
       expect(existsSync(path.join(base, 'my-task-st1'))).toBe(true);
     });
 
-    it('never removes directories that do not look like remnants', () => {
+    it('never removes directories that do not look like remnants', async () => {
       mkdirSync(path.join(base, 'my-task'), { recursive: true });
       mkdirSync(path.join(base, 'notes'), { recursive: true });
-      sweepAbandonedWorktreeRemnants(projectRoot);
+      await sweepAbandonedWorktreeRemnants(projectRoot);
       expect(existsSync(path.join(base, 'my-task'))).toBe(true);
       expect(existsSync(path.join(base, 'notes'))).toBe(true);
     });
 
-    it('does nothing when the worktree base is missing', () => {
+    it('does nothing when the worktree base is missing', async () => {
       rmSync(base, { recursive: true, force: true });
-      expect(sweepAbandonedWorktreeRemnants(projectRoot)).toEqual([]);
+      expect(await sweepAbandonedWorktreeRemnants(projectRoot)).toEqual([]);
     });
   });
 });

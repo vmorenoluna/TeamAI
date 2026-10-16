@@ -32,8 +32,8 @@ import type { FailureReason } from './qa-feedback';
 
 export interface RebaseDeps {
   projectRoot: string;
-  execGit: (args: string[], hostCwd: string) => void;
-  execGitCapture: (args: string[], hostCwd: string) => string;
+  execGit: (args: string[], hostCwd: string) => Promise<void>;
+  execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   sessionOpts: SessionOptsFn;
   waitForCompletion: (sessionId: string) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
@@ -49,22 +49,22 @@ export interface RebaseDeps {
  *
  * @internal — exported for unit tests only.
  */
-export function finishUnfinishedMerge(
+export async function finishUnfinishedMerge(
   deps: Pick<RebaseDeps, 'execGit' | 'execGitCapture'>,
   worktreePath: string,
   logDir: string,
-): boolean {
+): Promise<boolean> {
   try {
-    const unmerged = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], worktreePath).trim();
+    const unmerged = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], worktreePath)).trim();
     if (unmerged) {
       logToOutput(logDir, `\n[WARN] Merger left ${unmerged.split('\n').length} file(s) unmerged — not pushing\n`);
       return false;
     }
-    const status = deps.execGitCapture(['status', '--porcelain', '--', '.', ':!.teamai'], worktreePath).trim();
+    const status = (await deps.execGitCapture(['status', '--porcelain', '--', '.', ':!.teamai'], worktreePath)).trim();
     if (!status) return true;
     logToOutput(logDir, `\n[WORKTREE] Merger left its resolution uncommitted — committing it before pushing:\n${status}\n`);
-    deps.execGit(['add', '-A', '--', '.', ':!.teamai'], worktreePath);
-    deps.execGit(['commit', '--no-verify', '--no-edit', '-m', 'chore: complete merge left uncommitted by merger'], worktreePath);
+    await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], worktreePath);
+    await deps.execGit(['commit', '--no-verify', '--no-edit', '-m', 'chore: complete merge left uncommitted by merger'], worktreePath);
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -116,8 +116,8 @@ export async function rebaseOntoLatestDefault(
   // recovery.ts's stall sweep, which has no cleanup of its own) getting
   // interrupted before it could finish or abort cleanly. Both are safe
   // unconditional no-ops when nothing is actually in progress.
-  try { deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* nothing to abort */ }
-  try { deps.execGit(['merge', '--abort'], worktreePath); } catch { /* nothing to abort */ }
+  try { await deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* nothing to abort */ }
+  try { await deps.execGit(['merge', '--abort'], worktreePath); } catch { /* nothing to abort */ }
 
   try {
     execFileSync('git', ['fetch', 'origin', deps.baseBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
@@ -171,10 +171,10 @@ export async function rebaseOntoLatestDefault(
   // pipeline artifacts are the orchestrator's responsibility, not a coder
   // commit's, mirroring COMMIT-GUARD's own exclusion.
   try {
-    const status = deps.execGitCapture(['status', '--porcelain'], worktreePath).trim();
+    const status = (await deps.execGitCapture(['status', '--porcelain'], worktreePath)).trim();
     if (status) {
-      deps.execGit(['add', '-A', '--', '.', ':!.teamai'], worktreePath);
-      deps.execGit(['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before rebase'], worktreePath);
+      await deps.execGit(['add', '-A', '--', '.', ':!.teamai'], worktreePath);
+      await deps.execGit(['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before rebase'], worktreePath);
       logToOutput(path.dirname(logFile), `\n[INFO] Worktree had uncommitted changes — auto-committed before rebasing onto ${deps.baseBranch}\n`);
     }
   } catch (guardErr) {
@@ -183,7 +183,7 @@ export async function rebaseOntoLatestDefault(
   }
 
   try {
-    deps.execGit(['rebase', `origin/${deps.baseBranch}`], worktreePath);
+    await deps.execGit(['rebase', `origin/${deps.baseBranch}`], worktreePath);
     logToOutput(path.dirname(logFile), `\n[INFO] Feature branch rebased onto latest ${deps.baseBranch}\n`);
     return pushRebased();
   } catch (rebaseErr) {
@@ -200,9 +200,9 @@ export async function rebaseOntoLatestDefault(
     // content, not for causes it has no more ability to fix than we do.
     let unmergedFiles = '';
     try {
-      unmergedFiles = deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], worktreePath).trim();
+      unmergedFiles = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], worktreePath)).trim();
     } catch { /* best-effort — treat as unknown, fall through to the conflict path below */ }
-    try { deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* ignore */ }
+    try { await deps.execGit(['rebase', '--abort'], worktreePath); } catch { /* ignore */ }
 
     if (!unmergedFiles) {
       const rebaseMsg = rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr);
@@ -224,7 +224,7 @@ export async function rebaseOntoLatestDefault(
       processManager.sendMessage(mergeSessionId, mergeMessage);
       await deps.waitForCompletion(mergeSessionId);
       processManager.killSession(mergeSessionId);
-      if (!finishUnfinishedMerge(deps, worktreePath, path.dirname(logFile))) return false;
+      if (!await finishUnfinishedMerge(deps, worktreePath, path.dirname(logFile))) return false;
       logToOutput(path.dirname(logFile), '\n[INFO] Merger resolved rebase conflicts — pushing its result\n');
       return pushRebased();
     } catch (mergeErr) {
@@ -252,15 +252,15 @@ interface BasePhaseDeps {
 /** Shared callbacks for spec and plan — phases that cascade to the next phase. */
 interface CascadePhaseDeps extends BasePhaseDeps {
   /** Remove the task's worktree (spec phase: a rejected ticket is deleted). */
-  removeWorktree?: (taskId: string) => void;
+  removeWorktree?: (taskId: string) => Promise<void>;
   rotateOutputLog: (logFile: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
   savePipelineState: (pipeline: TaskPipeline) => void;
   toAgentPath: (hostPath: string) => string;
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
-  execGit: (args: string[], hostCwd: string) => void;
-  execGitCapture: (args: string[], hostCwd: string) => string;
+  execGit: (args: string[], hostCwd: string) => Promise<void>;
+  execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   // ── Wakeup (ADR 002, generalized beyond implement — see wakeup.ts) ──
   getPipelineConfig: () => { wakeupScanRetryDelayMs?: number; maxImplementRetries: number; backlogCheck?: boolean };
   scheduleWakeup: (pipeline: TaskPipeline) => void;
@@ -570,7 +570,7 @@ export async function runSpecPhase(
   if (selfVerdict?.verdict === 'reject') {
     const reason = selfVerdict.reason;
     logInfo('spec', `Ticket "${pipeline.title}" (${pipeline.taskId}) deleted — the analyst rejected its premise: ${reason}`);
-    try { deps.removeWorktree?.(pipeline.taskId); } catch { /* no worktree yet */ }
+    try { await deps.removeWorktree?.(pipeline.taskId); } catch { /* no worktree yet */ }
     specStore.delete(pipeline.taskId);
     return;
   }
@@ -585,7 +585,7 @@ export async function runSpecPhase(
 
 interface PlanPhaseDeps extends CascadePhaseDeps {
   gitPush: (pushArgs: string[], logFile: string) => void;
-  execGit: (args: string[], hostCwd: string) => void;
+  execGit: (args: string[], hostCwd: string) => Promise<void>;
 }
 
 export async function runPlanPhase(
@@ -745,7 +745,7 @@ export async function runPlanPhase(
       throw new WorktreeError('Refusing to create worktree at project root — this would destroy the repository', 'WORKTREE_AT_ROOT');
     }
     try {
-      deps.execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], deps.projectRoot);
+      await deps.execGit(['worktree', 'add', pipeline.worktreePath, '-b', pipeline.branch], deps.projectRoot);
     } catch {
       if (existsSync(pipeline.worktreePath)) {
         try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
@@ -754,8 +754,8 @@ export async function runPlanPhase(
       // invisible to existsSync on the host but still blocks the -b
       // creation above (and would block it again on the no-`-b` retry
       // below too, since the branch would still read as checked out).
-      removeStaleWorktreeRegistration(deps.projectRoot, pipeline.worktreePath);
-      deps.execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], deps.projectRoot);
+      await removeStaleWorktreeRegistration(deps.projectRoot, pipeline.worktreePath);
+      await deps.execGit(['worktree', 'add', pipeline.worktreePath, pipeline.branch], deps.projectRoot);
     }
   }
 
@@ -768,12 +768,12 @@ export async function runPlanPhase(
 // ─────────────────────────────────────────────────────────────────────
 
 interface MergePhaseDeps extends BasePhaseDeps {
-  execGit: (args: string[], hostCwd: string) => void;
-  execGitCapture: (args: string[], hostCwd: string) => string;
+  execGit: (args: string[], hostCwd: string) => Promise<void>;
+  execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   gitPush: (pushArgs: string[], logFile: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
   getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig };
-  removeWorktree: (taskId: string) => void;
+  removeWorktree: (taskId: string) => Promise<void>;
   /** Build the trailer-bearing commit message for this task (null when recordHistoryInGit is off). */
   buildTicketMessage: (pipeline: TaskPipeline) => import('./artifact-commit').TicketMessageResult | null;
 }
@@ -829,7 +829,7 @@ export async function runMergePhase(
     logToOutput(pipeline.specPath,
       `[MERGE] No commits between ${baseBranch} and ${pipeline.branch} — this task's implementation required ` +
       `no changes beyond what's already on ${baseBranch}. Nothing to merge; marking done directly.\n`);
-    deps.removeWorktree(pipeline.taskId);
+    await deps.removeWorktree(pipeline.taskId);
     deps.advancePhase(pipeline, 'done');
     return;
   }
@@ -876,11 +876,11 @@ export async function runMergePhase(
   let mergeSucceeded = false;
   try {
     logToOutput(pipeline.specPath, `[MERGE] Attempting direct merge of ${pipeline.branch} into ${baseBranch}\n`);
-    deps.execGit(['merge', pipeline.branch, '--no-edit'], deps.projectRoot);
+    await deps.execGit(['merge', pipeline.branch, '--no-edit'], deps.projectRoot);
     mergeSucceeded = true;
     logToOutput(pipeline.specPath, `[MERGE] Direct merge succeeded — no conflicts\n`);
   } catch {
-    try { deps.execGit(['merge', '--abort'], deps.projectRoot); } catch { /* best-effort */ }
+    try { await deps.execGit(['merge', '--abort'], deps.projectRoot); } catch { /* best-effort */ }
     logToOutput(pipeline.specPath, `[MERGE] Merge had conflicts — spawning merger agent\n`);
   }
 
@@ -897,7 +897,7 @@ export async function runMergePhase(
     processManager.killSession(sessionId);
   }
 
-  deps.removeWorktree(pipeline.taskId);
+  await deps.removeWorktree(pipeline.taskId);
   deps.advancePhase(pipeline, 'done');
 }
 
@@ -907,13 +907,13 @@ export async function runMergePhase(
 
 interface CreatePRDeps extends BasePhaseDeps {
   taskStore: TaskStore;
-  execGit: (args: string[], hostCwd: string) => void;
-  execGitCapture: (args: string[], hostCwd: string) => string;
+  execGit: (args: string[], hostCwd: string) => Promise<void>;
+  execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   gitPush: (pushArgs: string[], logFile: string) => void;
   extractPrUrl: (logFile: string) => string | null;
   /** Build the trailer-bearing commit message for this task (null when recordHistoryInGit is off). */
   buildTicketMessage: (pipeline: TaskPipeline) => import('./artifact-commit').TicketMessageResult | null;
-  removeWorktree: (taskId: string) => void;
+  removeWorktree: (taskId: string) => Promise<void>;
 }
 
 export async function runCreatePRPhase(
@@ -976,7 +976,7 @@ export async function runCreatePRPhase(
     logToOutput(pipeline.specPath,
       `[PR] No commits between ${baseBranch} and ${pipeline.branch} — this task's implementation required ` +
       `no changes beyond what's already on ${baseBranch}. Nothing to open a PR for; marking done directly.\n`);
-    deps.removeWorktree(pipeline.taskId);
+    await deps.removeWorktree(pipeline.taskId);
     deps.advancePhase(pipeline, 'done');
     return;
   }

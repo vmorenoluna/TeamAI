@@ -43,16 +43,14 @@ const { mockLog, mockWarn, mockError } = vi.hoisted(() => ({
 // it just needs to be invoked as if synchronously, then reported back via
 // the callback (as a rejection if the mock throws, mirroring execFileSync's
 // synchronous-throw failure mode).
+// execFile calls back (and is promisify-aware) so the async git helpers resolve; it delegates to the sync stub so existing scripted responses apply.
+const mockExecFile = await vi.hoisted(async () => {
+  const { createExecFileMock } = await import('../utils/mock-child-process');
+  return createExecFileMock({ resetSafe: true, execFileSync: (...a) => mockExecFileSync(...a) });
+});
+
 vi.mock('child_process', () => ({
-  execFile: (...args: unknown[]) => {
-    const callback = args[args.length - 1] as (err: unknown, result?: { stdout: string; stderr: string }) => void;
-    try {
-      const stdout = mockExecFileSync(...args.slice(0, -1));
-      callback(null, { stdout, stderr: '' });
-    } catch (err) {
-      callback(err);
-    }
-  },
+  execFile: mockExecFile,
   execFileSync: mockExecFileSync,
 }));
 

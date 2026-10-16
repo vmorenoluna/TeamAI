@@ -65,12 +65,12 @@ function makeDeps(): ScopeArbitrationDeps {
     toAgentPath: p => p,
     planWriteLock: { current: Promise.resolve() },
     savePipelineState: vi.fn(),
-    execGit: (args, cwd) => { execFileSync('git', args, { cwd, stdio: 'pipe' }); },
-    execGitCapture: (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: 'pipe' }),
+    execGit: async (args, cwd) => { execFileSync('git', args, { cwd, stdio: 'pipe' }); },
+    execGitCapture: async (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: 'pipe' }),
     tryCherryPickWithRecovery: async (_p, _l, ref) => {
       try { git(repo, 'cherry-pick', `feat..${ref}`); return true; } catch { return false; }
     },
-    verifySubtaskDeliverables: () => 'ok',
+    verifySubtaskDeliverables: async () => 'ok',
     filesAlreadyChangedOnBranch: async () => false,
     completeSubtask: async (_p, s, _c, _pre, ids) => { ids.push(s.id); completed.push(s.id); return true; },
   };
@@ -104,7 +104,7 @@ function heldBranch(name: string, edits: Record<string, string | Buffer>): strin
   return head;
 }
 
-function report(id: number, over: Partial<Omit<ScopeReport, 'unlisted'>> & { unlisted: string[] }): ScopeReport {
+async function report(id: number, over: Partial<Omit<ScopeReport, 'unlisted'>> & { unlisted: string[] }): Promise<ScopeReport> {
   const base = git(repo, 'rev-parse', 'feat');
   return writeScopeReport(makeDeps(), {
     specPath: spec, cwd: repo, subtaskId: id, base,
@@ -114,12 +114,12 @@ function report(id: number, over: Partial<Omit<ScopeReport, 'unlisted'>> & { unl
 }
 
 describe('scope report', () => {
-  it('records numstat, null for binary, notes reason; ignores unknown notes and removes notes file', () => {
+  it('records numstat, null for binary, notes reason; ignores unknown notes and removes notes file', async () => {
     const head = heldBranch('feat-st1', { 'b.ts': 'b\nb2\n', 'bin.dat': Buffer.from([0, 1, 2, 0, 255]) });
     writeFileSync(path.join(spec, 'scope_notes-st1.json'), JSON.stringify({
       files: [{ path: 'b.ts', reason: 'X' }, { path: 'zzz.ts', reason: 'ignored' }],
     }));
-    const r = report(1, { unlisted: ['b.ts', 'bin.dat'], session_head: head, held_ref: 'feat-st1' });
+    const r = await report(1, { unlisted: ['b.ts', 'bin.dat'], session_head: head, held_ref: 'feat-st1' });
     expect(r.unlisted[0]).toMatchObject({ path: 'b.ts', insertions: 1, deletions: 0, coder_reason: 'X' });
     expect(r.unlisted[1]).toMatchObject({ path: 'bin.dat', insertions: null, deletions: null, coder_reason: null });
     expect(JSON.stringify(r)).not.toContain('zzz');
@@ -128,9 +128,9 @@ describe('scope report', () => {
     expect(existsSync(scopeReportPath(spec, 1) + '.tmp')).toBe(false);
   });
 
-  it('logs and deletes malformed notes', () => {
+  it('logs and deletes malformed notes', async () => {
     writeFileSync(path.join(spec, 'scope_notes-st2.json'), '{nope');
-    report(2, { unlisted: ['b.ts'] });
+    await report(2, { unlisted: ['b.ts'] });
     expect(log()).toContain('[SCOPE] Ignoring malformed scope_notes-st2.json');
     expect(existsSync(path.join(spec, 'scope_notes-st2.json'))).toBe(false);
   });
@@ -141,14 +141,14 @@ describe('runScopeArbitration', () => {
   const ap = (id: number, p: string) => ({ subtask_id: id, path: p, verdict: 'approve', reason: 'needed' });
   const rj = (id: number, p: string) => ({ subtask_id: id, path: p, verdict: 'reject', reason: 'unrelated' });
 
-  function setupHeld() {
+  async function setupHeld() {
     plan([st(1, ['a.ts'])]);
     const head = heldBranch('feat-st1', { 'a.ts': 'a2\n', 'b.ts': 'b2\n' });
-    report(1, { unlisted: ['b.ts'], session_head: head, held_ref: 'feat-st1' });
+    await report(1, { unlisted: ['b.ts'], session_head: head, held_ref: 'feat-st1' });
   }
 
   it('starts one planner session with the arbitration header, maps it, ignores plan edits (approve -> integrate without re-run)', async () => {
-    setupHeld();
+    await setupHeld();
     verdictsToWrite = verdicts([ap(1, 'b.ts')]);
     const pipeline = makePipeline(); const deps = makeDeps();
     const res = await runScopeArbitration(pipeline, deps, cfg);
@@ -176,7 +176,7 @@ describe('runScopeArbitration', () => {
   it('reject drops the path (held_ref) and records rejections; rejected-only change re-runs', async () => {
     plan([st(1, ['a.ts'])]);
     const head = heldBranch('feat-st1', { 'b.ts': 'b2\n' });
-    report(1, { unlisted: ['b.ts'], session_head: head, held_ref: 'feat-st1' });
+    await report(1, { unlisted: ['b.ts'], session_head: head, held_ref: 'feat-st1' });
     verdictsToWrite = verdicts([rj(1, 'b.ts')]);
     const pipeline = makePipeline(); const deps = makeDeps();
     const res = await runScopeArbitration(pipeline, deps, cfg);
@@ -197,7 +197,7 @@ describe('runScopeArbitration', () => {
     writeFileSync(path.join(repo, 'new.ts'), 'n\n');
     git(repo, 'add', '-A'); git(repo, 'commit', '-m', 'work');
     const head = git(repo, 'rev-parse', 'HEAD');
-    writeScopeReport(makeDeps(), { specPath: spec, cwd: repo, subtaskId: 1, base, sessionHead: head, heldRef: null, declaredFiles: ['a.ts'], unlistedPaths: ['b.ts', 'new.ts'] });
+    await writeScopeReport(makeDeps(), { specPath: spec, cwd: repo, subtaskId: 1, base, sessionHead: head, heldRef: null, declaredFiles: ['a.ts'], unlistedPaths: ['b.ts', 'new.ts'] });
     verdictsToWrite = verdicts([rj(1, 'b.ts'), rj(1, 'new.ts')]);
     const pipeline = makePipeline(); const deps = makeDeps();
     const res = await runScopeArbitration(pipeline, deps, cfg);
@@ -230,7 +230,7 @@ describe('runScopeArbitration', () => {
         st(2, ['x.md'], { parallel_group: 'B', depends_on: name === 'cycle' ? [1] : [] }),
       ]);
       const head = heldBranch('feat-st1', { 'b.ts': 'b2\n', 'x.md': 'x2\n' });
-      report(1, { unlisted: ['b.ts', 'x.md'], session_head: head, held_ref: 'feat-st1' });
+      await report(1, { unlisted: ['b.ts', 'x.md'], session_head: head, held_ref: 'feat-st1' });
       const before = readFileSync(path.join(spec, 'plan.json'), 'utf-8');
       verdictsToWrite = v;
       // plan.json edits by the mock planner must not leak: restore comparison against recorded bytes
@@ -251,7 +251,7 @@ describe('runScopeArbitration', () => {
   it('AC20: approve + serialize puts subtask 3 in group B.2 depending on 2', async () => {
     plan([st(2, ['b.ts'], { parallel_group: 'B' }), st(3, ['a.ts'], { parallel_group: 'B' })]);
     const head = heldBranch('feat-st3', { 'x.md': 'x2\n' });
-    report(3, { unlisted: ['x.md'], session_head: head, held_ref: 'feat-st3' });
+    await report(3, { unlisted: ['x.md'], session_head: head, held_ref: 'feat-st3' });
     verdictsToWrite = verdicts([ap(3, 'x.md')], [{ subtask_id: 3, parallel_group: 'B.2', depends_on: [2] }]);
     const res = await runScopeArbitration(makePipeline(), makeDeps(), cfg);
     expect(res.status).toBe('applied');
@@ -263,7 +263,7 @@ describe('runScopeArbitration', () => {
   });
 
   it('invalid then retry: second session with stall 3, exhausted with default 2', async () => {
-    setupHeld();
+    await setupHeld();
     let n = 0;
     verdictsToWrite = () => (++n === 1 ? null : verdicts([ap(1, 'b.ts')]));
     const pipeline = makePipeline();
@@ -282,7 +282,7 @@ describe('runScopeArbitration', () => {
   it('exhausts on a repeating report (stall) without starting a session, and on the rounds cap', async () => {
     plan([st(1, ['a.ts'])]);
     const head = heldBranch('feat-st1', { 'b.ts': 'b2\n' });
-    report(1, { unlisted: ['b.ts'], session_head: head, held_ref: 'feat-st1' });
+    await report(1, { unlisted: ['b.ts'], session_head: head, held_ref: 'feat-st1' });
     const pipeline = makePipeline();
     pipeline.scopeStallCounts = { 1: 1 };
     pipeline.scopeRoundHistory = { 1: [{ round: 1, failed: ['1:b.ts'], passed: [], approved: [] }] };

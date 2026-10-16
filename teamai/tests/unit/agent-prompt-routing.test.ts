@@ -138,8 +138,8 @@ function cascadeDeps(ctx: Ctx, overrides: Record<string, unknown> = {}) {
     toAgentPath: (p: string) => p,
     executePhase: vi.fn(async () => undefined),
     gitPush: vi.fn(),
-    execGit: vi.fn(),
-    execGitCapture: vi.fn(() => ''),
+    execGit: vi.fn(async () => undefined),
+    execGitCapture: vi.fn(async () => ''),
     getPipelineConfig: () => ({ wakeupScanRetryDelayMs: 0, maxImplementRetries: 3, maxQaAttempts: 3, parallelSubtasks: true }),
     scheduleWakeup: vi.fn(),
     writeCompletionSummary: vi.fn(),
@@ -594,7 +594,7 @@ describe('implement routing', () => {
     const execGit = vi.fn((args: string[]) => {
       if (args[0] === 'cherry-pick' && args[1] !== '--abort') throw new Error('CONFLICT (content): Merge conflict in src/a.ts');
     });
-    const execGitCapture = vi.fn((args: string[]) => {
+    const execGitCapture = vi.fn(async (args: string[]) => {
       if (args.includes('CHERRY_PICK_HEAD')) return 'deadbeef\n';
       if (args.includes('--diff-filter=U')) return 'src/a.ts\n';
       return '';
@@ -652,7 +652,7 @@ describe('merge routing', () => {
     const execGit = vi.fn((args: string[]) => {
       if (args[0] === 'rebase' && args[1] !== '--abort') throw new Error('CONFLICT');
     });
-    const execGitCapture = vi.fn((args: string[]) => (args.includes('--diff-filter=U') ? 'src/a.ts\n' : ''));
+    const execGitCapture = vi.fn(async (args: string[]) => (args.includes('--diff-filter=U') ? 'src/a.ts\n' : ''));
 
     await run(() => rebaseOntoLatestDefault(
       ctx.worktreePath, 'task-1', 'feat/build-the-thing', join(ctx.specPath, 'output.log'),
@@ -677,7 +677,7 @@ describe('merge routing', () => {
     const gitPush = vi.fn((args: string[]) => {
       if (args[0] === 'push') throw new Error('! [rejected] (non-fast-forward)');
     });
-    const execGitCapture = vi.fn((args: string[]) => (args.includes('--diff-filter=U') ? 'src/a.ts\n' : ''));
+    const execGitCapture = vi.fn(async (args: string[]) => (args.includes('--diff-filter=U') ? 'src/a.ts\n' : ''));
 
     await run(() => runQaReview(
       basePipeline(ctx, 'qa-review') as never, cascadeDeps(ctx, { gitPush, execGitCapture }) as never,

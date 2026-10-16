@@ -30,9 +30,10 @@ const mockCreateSession = vi.hoisted(() => vi.fn());
 const mockSendMessage = vi.hoisted(() => vi.fn());
 const mockKillSession = vi.hoisted(() => vi.fn());
 const mockExecFileSync = vi.hoisted(() => vi.fn());
+const mockExecFile = vi.hoisted(() => vi.fn());
 
 vi.mock('child_process', () => ({
-  execFile: vi.fn(),
+  execFile: mockExecFile,
   execFileSync: mockExecFileSync,
 }));
 
@@ -576,6 +577,19 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
     vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
     vi.mocked(readContainerRemoteUser).mockReturnValue('node');
     vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
+    // The async helper goes through promisify(execFile): adapt the callback form
+    // onto mockExecFileSync, which keeps recording (file, args, options) calls.
+    mockExecFile.mockImplementation((...a: unknown[]) => {
+      const cb = a[a.length - 1] as (e: Error | null, out?: { stdout: string; stderr: string }) => void;
+      const [file, args, opts] = a as [string, string[], unknown];
+      try {
+        const stdout = mockExecFileSync(file, args, opts) ?? '';
+        setImmediate(() => cb(null, { stdout: String(stdout), stderr: '' }));
+      } catch (e) {
+        setImmediate(() => cb(e as Error));
+      }
+      return { stdin: { end: vi.fn() } };
+    });
   });
 
   afterEach(() => {
@@ -591,12 +605,12 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       } as any);
     });
 
-    it('passes GIT_DIR and GIT_WORK_TREE as -e flags to docker exec for worktree operations', () => {
+    it('passes GIT_DIR and GIT_WORK_TREE as -e flags to docker exec for worktree operations', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
       mockExecFileSync.mockReturnValue('');
 
-      (orch as AnyOrch)._execGit(['rebase', 'origin/master'], env.worktreePath);
+      await (orch as AnyOrch)._execGit(['rebase', 'origin/master'], env.worktreePath);
 
       const dockerPath = getToolPath('docker');
       const dockerCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === dockerPath);
@@ -606,7 +620,7 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       expect(envVars['GIT_WORK_TREE']).toBeDefined();
     });
 
-    it('does not modify the .git file — git resolves via env vars only', () => {
+    it('does not modify the .git file — git resolves via env vars only', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
       const hostRoot = env.root.replace(/\\/g, '/');
@@ -614,13 +628,13 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       writeFileSync(join(env.worktreePath, '.git'), originalContent);
       mockExecFileSync.mockReturnValue('');
 
-      (orch as AnyOrch)._execGit(['status'], env.worktreePath);
+      await (orch as AnyOrch)._execGit(['status'], env.worktreePath);
 
       // .git file must be completely unchanged
       expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8')).toBe(originalContent);
     });
 
-    it('docker exec error propagates to caller without touching the .git file', () => {
+    it('docker exec error propagates to caller without touching the .git file', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
       const hostRoot = env.root.replace(/\\/g, '/');
@@ -633,19 +647,19 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
         return '';
       });
 
-      expect(() => (orch as AnyOrch)._execGit(['rebase', 'origin/master'], env.worktreePath))
-        .toThrow('rebase conflict');
+      await expect((orch as AnyOrch)._execGit(['rebase', 'origin/master'], env.worktreePath))
+        .rejects.toThrow('rebase conflict');
 
       // .git file must still be unchanged after the error
       expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8')).toBe(originalContent);
     });
 
-    it('does not call docker exec for worktree subcommands (routes to host git)', () => {
+    it('does not call docker exec for worktree subcommands (routes to host git)', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
       mockExecFileSync.mockReturnValue('');
 
-      (orch as AnyOrch)._execGit(['worktree', 'add', env.worktreePath], env.root);
+      await (orch as AnyOrch)._execGit(['worktree', 'add', env.worktreePath], env.root);
 
       expect(mockExecFileSync).toHaveBeenCalledWith(
         'git',
@@ -656,13 +670,13 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       expect(dockerCalls.length).toBe(0);
     });
 
-    it('does not inject GIT_DIR for worktree subcommands on host git', () => {
+    it('does not inject GIT_DIR for worktree subcommands on host git', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
       mockExecFileSync.mockReturnValue('');
 
       // worktree commands fall through to host git — should not have GIT_DIR
-      (orch as AnyOrch)._execGit(['worktree', 'remove', env.worktreePath], env.root);
+      await (orch as AnyOrch)._execGit(['worktree', 'remove', env.worktreePath], env.root);
 
       const gitCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === 'git');
       expect(gitCall).toBeDefined();
@@ -670,7 +684,7 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       expect(opts.env?.GIT_DIR).toBeUndefined();
     });
 
-    it('maps absolute project-root-prefixed args to container paths', () => {
+    it('maps absolute project-root-prefixed args to container paths', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
 
@@ -678,7 +692,7 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       mockExecFileSync.mockReturnValue('');
 
       const absoluteFilePath = join(env.root, 'src', 'main.ts');
-      (orch as AnyOrch)._execGit(['add', absoluteFilePath], env.worktreePath);
+      await (orch as AnyOrch)._execGit(['add', absoluteFilePath], env.worktreePath);
 
       expect(mapSpy).toHaveBeenCalledWith(
         absoluteFilePath,
@@ -687,13 +701,13 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       );
     });
 
-    it('uses readContainerRemoteUser for the docker exec -u flag', () => {
+    it('uses readContainerRemoteUser for the docker exec -u flag', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
       vi.mocked(readContainerRemoteUser).mockReturnValue('customuser');
       mockExecFileSync.mockReturnValue('');
 
-      (orch as AnyOrch)._execGit(['status'], env.worktreePath);
+      await (orch as AnyOrch)._execGit(['status'], env.worktreePath);
 
       expect(mockExecFileSync).toHaveBeenCalledWith(
         getToolPath('docker'),
@@ -702,28 +716,14 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       );
     });
 
-    it('pipes git stderr so an expected failure does not spill into the parent output', () => {
-      env = setupTestEnv();
-      const orch = makeOrch(env.root);
-      mockExecFileSync.mockReturnValue('');
-
-      (orch as AnyOrch)._execGit(['status'], env.worktreePath);
-
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        getToolPath('docker'),
-        expect.any(Array),
-        expect.objectContaining({ stdio: ['ignore', 'pipe', 'pipe'] }),
-      );
-    });
-
-    it('passes no env flags when hostCwd is not a linked worktree (non-worktree docker exec)', () => {
+    it('passes no env flags when hostCwd is not a linked worktree (non-worktree docker exec)', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
       mockExecFileSync.mockReturnValue('');
 
       // env.root has no matching .git/worktrees/<basename> entry
       // (the tmp dir name isn't a registered worktree)
-      (orch as AnyOrch)._execGit(['fetch', 'origin'], env.root);
+      await (orch as AnyOrch)._execGit(['fetch', 'origin'], env.root);
 
       const dockerCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === 'docker');
       if (dockerCall) {
@@ -735,12 +735,12 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
   });
 
   describe('host git fallback path', () => {
-    it('injects GIT_DIR and GIT_WORK_TREE env vars for linked-worktree operations', () => {
+    it('injects GIT_DIR and GIT_WORK_TREE env vars for linked-worktree operations', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
       mockExecFileSync.mockReturnValue('');
 
-      (orch as AnyOrch)._execGit(['status'], env.worktreePath);
+      await (orch as AnyOrch)._execGit(['status'], env.worktreePath);
 
       const gitCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === 'git');
       expect(gitCall).toBeDefined();
@@ -749,7 +749,7 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       expect(opts.env?.GIT_WORK_TREE).toBeDefined();
     });
 
-    it('does not modify the .git file — env vars bypass file lookup', () => {
+    it('does not modify the .git file — env vars bypass file lookup', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
       // Write a container-style gitdir — should NOT be changed by host git path
@@ -757,13 +757,13 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       writeFileSync(join(env.worktreePath, '.git'), containerContent);
       mockExecFileSync.mockReturnValue('');
 
-      (orch as AnyOrch)._execGit(['status'], env.worktreePath);
+      await (orch as AnyOrch)._execGit(['status'], env.worktreePath);
 
       // .git file unchanged
       expect(readFileSync(join(env.worktreePath, '.git'), 'utf-8')).toBe(containerContent);
     });
 
-    it('falls back to host git when container enabled but container not running, with GIT_DIR injected', () => {
+    it('falls back to host git when container enabled but container not running, with GIT_DIR injected', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
 
@@ -772,7 +772,7 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
 
       mockExecFileSync.mockReturnValue('');
 
-      (orch as AnyOrch)._execGit(['status'], env.worktreePath);
+      await (orch as AnyOrch)._execGit(['status'], env.worktreePath);
 
       const gitCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === 'git');
       expect(gitCall).toBeDefined();
@@ -780,13 +780,13 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       expect(opts.env?.GIT_DIR).toContain(`/worktrees/${env.worktreeName}`);
     });
 
-    it('calls host git without env override when cwd is not a linked worktree', () => {
+    it('calls host git without env override when cwd is not a linked worktree', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
       mockExecFileSync.mockReturnValue('');
 
       // env.root is the main project root — no worktree metadata for it
-      (orch as AnyOrch)._execGit(['fetch', 'origin'], env.root);
+      await (orch as AnyOrch)._execGit(['fetch', 'origin'], env.root);
 
       const gitCall = mockExecFileSync.mock.calls.find((c: unknown[]) => c[0] === 'git');
       expect(gitCall).toBeDefined();
@@ -795,7 +795,7 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       expect(opts.env?.GIT_DIR).toBeUndefined();
     });
 
-    it('does not throw when cwd has no .git file (non-worktree directory like projectRoot)', () => {
+    it('does not throw when cwd has no .git file (non-worktree directory like projectRoot)', async () => {
       env = setupTestEnv();
       const orch = makeOrch(env.root);
 
@@ -807,9 +807,9 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
 
       mockExecFileSync.mockReturnValue('');
 
-      expect(() =>
+      await expect(
         (orch as AnyOrch)._execGit(['status'], env.root)
-      ).not.toThrow();
+      ).resolves.not.toThrow();
     });
   });
 });
@@ -985,28 +985,36 @@ describe('removeStaleWorktreeRegistration', () => {
     vi.resetAllMocks();
   });
 
-  it('calls git worktree remove --force by bare worktree name, not the full path', () => {
-    mockExecFileSync.mockReturnValue('');
+  // promisify(execFile) resolves on the node-style callback; the real execFile
+  // also returns a ChildProcess, whose stdin the helper closes.
+  function stubExecFile(error?: Error) {
+    mockExecFile.mockImplementation((...a: unknown[]) => {
+      const cb = a[a.length - 1] as (e: Error | null, out?: { stdout: string; stderr: string }) => void;
+      setImmediate(() => (error ? cb(error) : cb(null, { stdout: '', stderr: '' })));
+      return { stdin: { end: vi.fn() } };
+    });
+  }
 
-    removeStaleWorktreeRegistration(projectRoot, worktreePath);
+  it('calls git worktree remove --force by bare worktree name, not the full path', async () => {
+    stubExecFile();
+
+    await removeStaleWorktreeRegistration(projectRoot, worktreePath);
 
     // Not the full path: a container-patched registration's recorded path
     // no longer matches what the host computed, and only the bare name
     // resolves in that case.
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'git', ['worktree', 'remove', '--force', 'my-task-st2'], { cwd: projectRoot, stdio: 'pipe' },
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'git', ['worktree', 'remove', '--force', 'my-task-st2'], expect.objectContaining({ cwd: projectRoot }), expect.any(Function),
     );
-    expect(mockExecFileSync).not.toHaveBeenCalledWith(
-      'git', ['worktree', 'remove', '--force', worktreePath], expect.anything(),
+    expect(mockExecFile).not.toHaveBeenCalledWith(
+      'git', ['worktree', 'remove', '--force', worktreePath], expect.anything(), expect.anything(),
     );
-    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
   });
 
-  it('does not throw when the command fails (best-effort)', () => {
-    mockExecFileSync.mockImplementation(() => {
-      throw new Error('fatal: not a valid worktree');
-    });
+  it('does not reject when the command fails (best-effort)', async () => {
+    stubExecFile(new Error('fatal: not a valid worktree'));
 
-    expect(() => removeStaleWorktreeRegistration(projectRoot, worktreePath)).not.toThrow();
+    await expect(removeStaleWorktreeRegistration(projectRoot, worktreePath)).resolves.toBeUndefined();
   });
 });
