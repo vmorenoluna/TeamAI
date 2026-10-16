@@ -14,7 +14,7 @@ import { parse } from 'url';
 import next from 'next';
 import { WebSocketServer, WebSocket } from 'ws';
 import { processManager } from './src/lib/process-manager';
-import { containerManager } from './src/lib/container-manager';
+import { containerManager, checkDockerAvailable } from './src/lib/container-manager';
 import { startupCleanup, autoResumeInterruptedTasks, sweepStalledTasks } from './src/lib/recovery';
 import { restoreAutoModeStates } from './src/lib/auto-mode';
 import { startRoleRefinementWatcher } from './src/lib/role-refinement-watcher';
@@ -264,6 +264,9 @@ void app.prepare().then(async () => {
   // SIGBREAK on some Windows shells.  Not all Windows terminals support it,
   // but it's the best shot at catching Playwright's process termination.
   process.on('SIGBREAK', () => shutdown('SIGBREAK'));
+
+  // Warm the Docker availability cache so the first sync readContainerConfig() sees the real value
+  await checkDockerAvailable();
 
   server.listen(port, host, () => {
     console.log(`> Ready on http://${host}:${port}`);
