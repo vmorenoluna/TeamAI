@@ -76,16 +76,15 @@ vi.mock('../../src/lib/container-manager', () => ({
   readContainerRemoteUser: vi.fn(() => 'node'),
   containerManager: {
     ensureContainer: vi.fn(),
-    getRunningContainer: vi.fn(() => null),
+    getRunningContainer: vi.fn(async () => null),
   },
   hostToContainerPath: vi.fn((p: string) => p),
   checkDockerAvailable: vi.fn(async () => true),
   getCachedDockerAvailable: vi.fn(() => true),
-  _resetDockerAvailableCache: vi.fn(),
 }));
 
 import { getOrchestrator } from '../../src/lib/orchestrator';
-import { readContainerConfig, containerManager, hostToContainerPath, checkDockerAvailable, getCachedDockerAvailable, _resetDockerAvailableCache, readContainerRemoteUser } from '../../src/lib/container-manager';
+import { readContainerConfig, containerManager, hostToContainerPath, checkDockerAvailable, getCachedDockerAvailable, readContainerRemoteUser } from '../../src/lib/container-manager';
 
 const fireEvent = createFireEvent(onHandlers);
 
@@ -97,11 +96,10 @@ describe('Workflow Improvements', () => {
     onHandlers.clear();
     vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
     vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
-    vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+    vi.mocked(containerManager.getRunningContainer).mockResolvedValue(null);
     vi.mocked(readContainerRemoteUser).mockReturnValue('node');
     vi.mocked(checkDockerAvailable).mockResolvedValue(true);
     vi.mocked(getCachedDockerAvailable).mockReturnValue(true);
-    vi.mocked(_resetDockerAvailableCache).mockReturnValue(undefined);
   });
 
   afterEach(() => {

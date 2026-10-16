@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, rm
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { processManager } from './process-manager';
-import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache } from './container-manager';
+import { readContainerConfig, containerManager, hostToContainerPath, checkDockerAvailable } from './container-manager';
 import { TaskStore } from './task-store';
 import { slugify } from './utils';
 import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit, execGitCapture } from './orchestrator/worktree-utils';
@@ -73,9 +73,9 @@ export class Orchestrator {
       rotateOutputLog: (logFile) => rotateOutputLog(logFile),
       phaseHeader: (logFile, phase) => phaseHeader(logFile, phase),
 
-      toAgentPath: (hostPath) => {
+      toAgentPath: async (hostPath) => {
         if (readContainerConfig(projectRoot).enabled) {
-          const info = containerManager.getRunningContainer(projectRoot);
+          const info = await containerManager.getRunningContainer(projectRoot);
           if (info) return hostToContainerPath(hostPath, projectRoot, info.remoteWorkspaceFolder);
         }
         return hostPath;
@@ -358,9 +358,8 @@ export class Orchestrator {
     // Emits a container-docker-missing event so the UI can show a dialog prompting
     // the user to start Docker or disable container mode.
     const containerCfg = readContainerConfig(this.projectRoot);
-    if (containerCfg.enabled && !dockerAvailable()) {
-      _resetDockerAvailableCache();
-      if (!dockerAvailable()) {
+    if (containerCfg.enabled) {
+      if (!(await checkDockerAvailable()) && !(await checkDockerAvailable({ force: true }))) {
         processManager.emit('container-docker-missing', { projectRoot: this.projectRoot });
         throw new ContainerDockerMissingError(this.projectRoot);
       }
@@ -611,14 +610,13 @@ export class Orchestrator {
     // No-op phases (awaiting-review, pr-open) skip the check.
     if (pipeline.phase !== 'awaiting-review' && pipeline.phase !== 'pr-open') {
       const containerCfg = readContainerConfig(this.projectRoot);
-      if (containerCfg.enabled && !dockerAvailable()) {
-        _resetDockerAvailableCache();
-        if (!dockerAvailable()) {
+      if (containerCfg.enabled) {
+        if (!(await checkDockerAvailable()) && !(await checkDockerAvailable({ force: true }))) {
           processManager.emit('container-docker-missing', { projectRoot: this.projectRoot });
           throw new ContainerDockerMissingError(this.projectRoot);
         }
+        await this._requireValidContainer();
       }
-      if (containerCfg.enabled) await this._requireValidContainer();
     }
 
     switch (pipeline.phase) {

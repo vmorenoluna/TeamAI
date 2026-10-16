@@ -256,7 +256,7 @@ interface CascadePhaseDeps extends BasePhaseDeps {
   rotateOutputLog: (logFile: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
   savePipelineState: (pipeline: TaskPipeline) => void;
-  toAgentPath: (hostPath: string) => string;
+  toAgentPath: (hostPath: string) => Promise<string>;
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
   gitPush: (pushArgs: string[], logFile: string) => void;
   execGit: (args: string[], hostCwd: string) => Promise<void>;
@@ -339,7 +339,7 @@ export async function runSpecPhase(
   deps.phaseHeader(logFile, 'spec');
   deps.persistAndEmitPhase(pipeline);
   await syncPhaseBaseline(pipeline, deps);
-  const agentSpecPath = deps.toAgentPath(pipeline.specPath);
+  const agentSpecPath = await deps.toAgentPath(pipeline.specPath);
 
   const revisionFeedbackPath = path.join(pipeline.specPath, 'spec_revision_feedback.md');
   const isRevision = existsSync(revisionFeedbackPath);
@@ -602,7 +602,7 @@ export async function runPlanPhase(
   // Re-plan mode: when plan.json already exists (preserved by a spec revision),
   // the planner must re-work it in place, keeping completed subtasks that are
   // still valid — not regenerate from scratch and discard the prior work.
-  const agentSpecPath = deps.toAgentPath(pipeline.specPath);
+  const agentSpecPath = await deps.toAgentPath(pipeline.specPath);
   const isReplan = existsSync(path.join(pipeline.specPath, 'plan.json'));
   const planInstruction = isReplan
     ? `Read the existing plan at \`${agentSpecPath}/plan.json\` and the spec at \`${agentSpecPath}/spec.md\`.\n` +

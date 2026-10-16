@@ -46,11 +46,10 @@ vi.mock('child_process', () => ({
 vi.mock('../../src/lib/container-manager', () => ({
   readContainerConfig: vi.fn(() => ({ enabled: false, explicit: false })),
   readContainerRemoteUser: vi.fn(() => 'node'),
-  containerManager: { ensureContainer: vi.fn(), getRunningContainer: vi.fn(() => null) },
+  containerManager: { ensureContainer: vi.fn(), getRunningContainer: vi.fn(async () => null) },
   hostToContainerPath: vi.fn((p: string) => p),
   checkDockerAvailable: vi.fn(async () => true),
   getCachedDockerAvailable: vi.fn(() => true),
-  _resetDockerAvailableCache: vi.fn(),
 }));
 
 vi.mock('../../src/lib/sensors', () => ({

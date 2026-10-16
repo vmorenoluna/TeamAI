@@ -76,12 +76,11 @@ vi.mock('../../src/lib/container-manager', () => ({
   readContainerRemoteUser: vi.fn(() => 'node'),
   containerManager: {
     ensureContainer: vi.fn(),
-    getRunningContainer: vi.fn(() => null),
+    getRunningContainer: vi.fn(async () => null),
   },
   hostToContainerPath: vi.fn((p: string) => p),
   checkDockerAvailable: vi.fn(async () => true),
   getCachedDockerAvailable: vi.fn(() => true),
-  _resetDockerAvailableCache: vi.fn(),
 }));
 
 // ── Imports after mocks ──
@@ -154,7 +153,7 @@ describe('_restoreWorktreeGitFileToHostPaths', () => {
     vi.resetAllMocks();
     onHandlers.clear();
     vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
-    vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+    vi.mocked(containerManager.getRunningContainer).mockResolvedValue(null);
     vi.mocked(readContainerRemoteUser).mockReturnValue('node');
   });
 
@@ -295,7 +294,7 @@ describe('_patchWorktreeGitFile', () => {
     vi.resetAllMocks();
     onHandlers.clear();
     vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
-    vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+    vi.mocked(containerManager.getRunningContainer).mockResolvedValue(null);
     vi.mocked(readContainerRemoteUser).mockReturnValue('node');
     vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
   });
@@ -479,7 +478,7 @@ describe('_worktreeGitEnv', () => {
     vi.resetAllMocks();
     onHandlers.clear();
     vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
-    vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+    vi.mocked(containerManager.getRunningContainer).mockResolvedValue(null);
     vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
   });
 
@@ -575,7 +574,7 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
     vi.resetAllMocks();
     onHandlers.clear();
     vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
-    vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+    vi.mocked(containerManager.getRunningContainer).mockResolvedValue(null);
     vi.mocked(readContainerRemoteUser).mockReturnValue('node');
     vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
     // The async helper goes through promisify(execFile): adapt the callback form
@@ -600,7 +599,7 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
   describe('container mode — docker exec path', () => {
     beforeEach(() => {
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+      vi.mocked(containerManager.getRunningContainer).mockResolvedValue({
         containerId: 'cont-test',
         remoteWorkspaceFolder: '/workspaces/project',
       } as any);
@@ -769,7 +768,7 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       const orch = makeOrch(env.root);
 
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+      vi.mocked(containerManager.getRunningContainer).mockResolvedValue(null);
 
       mockExecFileSync.mockReturnValue('');
 
@@ -801,7 +800,7 @@ describe('_execGit — GIT_DIR/GIT_WORK_TREE injection', () => {
       const orch = makeOrch(env.root);
 
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+      vi.mocked(containerManager.getRunningContainer).mockResolvedValue({
         containerId: 'cont-test',
         remoteWorkspaceFolder: '/workspaces/project',
       } as any);
@@ -823,7 +822,7 @@ describe('_patchWorktreeGitFile and _restoreWorktreeGitFileToHostPaths — idemp
     vi.resetAllMocks();
     onHandlers.clear();
     vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
-    vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+    vi.mocked(containerManager.getRunningContainer).mockResolvedValue(null);
     vi.mocked(readContainerRemoteUser).mockReturnValue('node');
   });
 
@@ -908,7 +907,7 @@ describe('_isWorktreeHealthy — container-mode path detection', () => {
     vi.resetAllMocks();
     onHandlers.clear();
     vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
-    vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+    vi.mocked(containerManager.getRunningContainer).mockResolvedValue(null);
     vi.mocked(readContainerRemoteUser).mockReturnValue('node');
   });
 

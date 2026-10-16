@@ -74,11 +74,10 @@ vi.mock('../../src/lib/container-manager', () => ({
   readContainerRemoteUser: vi.fn(() => 'node'),
   containerManager: {
     ensureContainer: vi.fn(),
-    getRunningContainer: vi.fn(() => null),
+    getRunningContainer: vi.fn(async () => null),
   },
   hostToContainerPath: vi.fn((p: string) => p),
-  dockerAvailable: vi.fn(() => true),
-  _resetDockerAvailableCache: vi.fn(),
+  checkDockerAvailable: vi.fn(async () => true),
 }));
 
 // ── Imports after mocks ──
@@ -86,7 +85,7 @@ vi.mock('../../src/lib/container-manager', () => ({
 import { Orchestrator, getOrchestrator } from '../../src/lib/orchestrator';
 import { getToolPath } from '../../src/lib/tool-checker';
 import { processManager } from '../../src/lib/process-manager';
-import { readContainerConfig, containerManager, hostToContainerPath, dockerAvailable, _resetDockerAvailableCache, readContainerRemoteUser } from '../../src/lib/container-manager';
+import { readContainerConfig, containerManager, hostToContainerPath, checkDockerAvailable, readContainerRemoteUser } from '../../src/lib/container-manager';
 import { ContainerDockerMissingError, OrchestratorError } from '../../src/lib/orchestrator/errors';
 import { renderCommand } from '../../src/lib/command-templates';
 
@@ -103,11 +102,10 @@ describe('Orchestrator', () => {
     // Default: container not enabled
     vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
     vi.mocked(hostToContainerPath).mockImplementation((p: string) => p);
-    vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+    vi.mocked(containerManager.getRunningContainer).mockResolvedValue(null);
     // Re-establish defaults that vi.resetAllMocks clears from module-level vi.mock()
     vi.mocked(readContainerRemoteUser).mockReturnValue('node');
-    vi.mocked(dockerAvailable).mockReturnValue(true);
-    vi.mocked(_resetDockerAvailableCache).mockReturnValue(undefined);
+    vi.mocked(checkDockerAvailable).mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -204,7 +202,7 @@ describe('Orchestrator', () => {
     it('throws ContainerDockerMissingError when container mode is enabled but Docker is unavailable', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(dockerAvailable).mockReturnValue(false);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(false);
 
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -214,7 +212,7 @@ describe('Orchestrator', () => {
     it('emits container-docker-missing event before throwing in runTask', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(dockerAvailable).mockReturnValue(false);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(false);
       mockEmit.mockClear();
 
       const orch = makeOrch(testData.root, getOrchestrator);
@@ -229,7 +227,7 @@ describe('Orchestrator', () => {
     it('refuses to start when the container fails validation, emits the event, and starts no session', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(dockerAvailable).mockReturnValue(true);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(true);
       vi.mocked(containerManager.ensureContainer).mockRejectedValue(
         new OrchestratorError('container failed validation at "Native modules"', 'CONTAINER_INVALID'),
       );
@@ -250,7 +248,7 @@ describe('Orchestrator', () => {
     it('leaves other container start-up errors to the pipeline instead of blocking in the pre-flight', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(dockerAvailable).mockReturnValue(true);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(true);
       vi.mocked(containerManager.ensureContainer).mockRejectedValue(new Error('devcontainer up failed'));
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
 
@@ -263,7 +261,7 @@ describe('Orchestrator', () => {
     it('does not throw in runTask when Docker is available', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(dockerAvailable).mockReturnValue(true);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(true);
       // Abort pipeline early after gate passes
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
 
@@ -274,6 +272,45 @@ describe('Orchestrator', () => {
       // Proof we got past the gate: createSession was called by runSpec
       expect(mockCreateSession).toHaveBeenCalled();
     });
+
+    it('AC19: with container mode off, never probes Docker and registers the pipeline before runTask\'s first await', async () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
+      mockCreateSession.mockRejectedValue(new Error('simulated abort'));
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const promise = orch.runTask(testData.taskId, 'test', 'spec');
+
+      expect((orch as AnyOrch).pipelines.get(testData.taskId)).toBeDefined();
+      await promise.catch(() => { /* best-effort */ });
+      expect(checkDockerAvailable).not.toHaveBeenCalled();
+    });
+
+    it('AC18: ensureContainer trust failure during ensureWorktree leaves the task failed and the pipeline settles', async () => {
+      testData = setupTestProject();
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(checkDockerAvailable).mockResolvedValue(true);
+      vi.mocked(containerManager.ensureContainer).mockRejectedValue(
+        new Error('Failed to record workspace trust for /workspace'),
+      );
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Task', description: 'Desc', files: [], acceptance_criteria: [] }],
+      }));
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const outcome = await Promise.race([
+        orch.moveTaskToPhase(testData.taskId, 'implement').then(() => 'settled', () => 'settled'),
+        new Promise(r => setTimeout(() => r('hung'), 8000)),
+      ]);
+      expect(outcome).toBe('settled');
+
+      await vi.waitFor(() => {
+        expect((orch as AnyOrch).taskStore.getById(testData.taskId).phase).toBe('failed');
+      }, { timeout: 10_000 });
+      await vi.waitFor(() => {
+        expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(false);
+      }, { timeout: 10_000 });
+    }, 20_000);
 
     it('populates pipeline.title from task.title, not the description argument', async () => {
       testData = setupTestProject();
@@ -305,7 +342,7 @@ describe('Orchestrator', () => {
 
     it('throws ContainerDockerMissingError when container mode is enabled but Docker is unavailable', async () => {
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(dockerAvailable).mockReturnValue(false);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(false);
 
       const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
@@ -319,7 +356,7 @@ describe('Orchestrator', () => {
 
     it('emits container-docker-missing event before throwing', async () => {
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(dockerAvailable).mockReturnValue(false);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(false);
       mockEmit.mockClear();
 
       const orch = makeOrch(testData.root, getOrchestrator);
@@ -333,32 +370,47 @@ describe('Orchestrator', () => {
       });
     });
 
-    it('resets the dockerAvailable cache before checking', async () => {
+    it('forces a re-probe when the cached answer says Docker is unavailable', async () => {
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      // First call returns false (stale cache), second returns true (Docker started)
-      vi.mocked(dockerAvailable)
-        .mockReturnValueOnce(false)
-        .mockReturnValueOnce(true);
-      // Abort early — the gate passes, but we don't need the full pipeline to cascade
+      // Cached answer is false (stale), the forced re-probe finds Docker running
+      vi.mocked(checkDockerAvailable)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
       mockCreateSession.mockRejectedValue(new Error('simulated abort'));
 
       const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
-      // Should NOT throw ContainerDockerMissingError — cache reset + second
-      // dockerAvailable() returns true, so gate lets us through to runSpec
       await (orch as AnyOrch).executePhase(pipeline).catch(() => { /* best-effort */ });
 
-      expect(_resetDockerAvailableCache).toHaveBeenCalled();
-      expect(dockerAvailable).toHaveBeenCalledTimes(2);
+      expect(checkDockerAvailable).toHaveBeenCalledTimes(2);
+      expect(checkDockerAvailable).toHaveBeenNthCalledWith(2, { force: true });
       // Proof we got past the gate: createSession was called by runSpec
       expect(mockCreateSession).toHaveBeenCalled();
     });
 
+    it('AC17: gate failure rejects with ContainerDockerMissingError after a forced re-probe and does not hang', async () => {
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(checkDockerAvailable).mockResolvedValue(false);
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
+      (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+
+      const err = await Promise.race([
+        (orch as AnyOrch).executePhase(pipeline).catch((e: unknown) => e),
+        new Promise(r => setTimeout(() => r('hung'), 5000)),
+      ]);
+
+      expect(err).toBeInstanceOf(ContainerDockerMissingError);
+      expect(checkDockerAvailable).toHaveBeenCalledWith({ force: true });
+      expect(mockCreateSession).not.toHaveBeenCalled();
+    });
+
     it('does not throw when Docker is available', async () => {
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(dockerAvailable).mockReturnValue(true);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(true);
 
       const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
@@ -371,7 +423,7 @@ describe('Orchestrator', () => {
 
     it('does not throw when container mode is disabled', async () => {
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: false, explicit: false });
-      vi.mocked(dockerAvailable).mockReturnValue(false); // Docker unavailable but irrelevant
+      vi.mocked(checkDockerAvailable).mockResolvedValue(false); // Docker unavailable but irrelevant
 
       const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'spec', specPath: testData.taskDir });
@@ -384,7 +436,7 @@ describe('Orchestrator', () => {
 
     it('skips the Docker check for awaiting-review phase', async () => {
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(dockerAvailable).mockReturnValue(false);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(false);
 
       const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'awaiting-review', specPath: testData.taskDir });
@@ -396,7 +448,7 @@ describe('Orchestrator', () => {
 
     it('skips the Docker check for pr-open phase', async () => {
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(dockerAvailable).mockReturnValue(false);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(false);
 
       const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'pr-open', specPath: testData.taskDir });
@@ -408,7 +460,7 @@ describe('Orchestrator', () => {
 
     it('throws for plan phase (simulates autoReviseSpec → spec → advancePhase → plan path)', async () => {
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(dockerAvailable).mockReturnValue(false);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(false);
 
       const orch = makeOrch(testData.root, getOrchestrator);
       const pipeline = makePipeline({ taskId: testData.taskId, phase: 'plan', specPath: testData.taskDir });
@@ -1260,7 +1312,7 @@ describe('Orchestrator', () => {
     it('calls docker exec when container is enabled and running', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+      vi.mocked(containerManager.getRunningContainer).mockResolvedValue({
         containerId: 'cont-abc',
         remoteWorkspaceFolder: '/workspace',
       } as any);
@@ -1284,7 +1336,7 @@ describe('Orchestrator', () => {
     it('maps absolute project paths via hostToContainerPath in container mode', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+      vi.mocked(containerManager.getRunningContainer).mockResolvedValue({
         containerId: 'cont-xyz',
         remoteWorkspaceFolder: '/workspace',
       } as any);
@@ -1312,7 +1364,7 @@ describe('Orchestrator', () => {
     it('leaves non-project absolute paths unchanged in container mode', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+      vi.mocked(containerManager.getRunningContainer).mockResolvedValue({
         containerId: 'cont-xyz',
         remoteWorkspaceFolder: '/workspace',
       } as any);
@@ -1337,7 +1389,7 @@ describe('Orchestrator', () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
       // No running container
-      vi.mocked(containerManager.getRunningContainer).mockReturnValue(null);
+      vi.mocked(containerManager.getRunningContainer).mockResolvedValue(null);
 
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -1352,24 +1404,24 @@ describe('Orchestrator', () => {
   // ── _toAgentPath ───────────────────────────────────────────────────
 
   describe('_toAgentPath', () => {
-    it('returns host path unchanged when container is disabled', () => {
+    it('returns host path unchanged when container is disabled', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
-      expect((orch as AnyOrch)._ctx.toAgentPath('/some/path')).toBe('/some/path');
+      await expect((orch as AnyOrch)._ctx.toAgentPath('/some/path')).resolves.toBe('/some/path');
     });
 
-    it('translates path via hostToContainerPath when container enabled and running', () => {
+    it('translates path via hostToContainerPath when container enabled and running', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+      vi.mocked(containerManager.getRunningContainer).mockResolvedValue({
         containerId: 'abc',
         remoteWorkspaceFolder: '/workspace',
       } as any);
       vi.mocked(hostToContainerPath).mockReturnValue('/workspace/path');
 
       const orch = makeOrch(testData.root, getOrchestrator);
-      const result = (orch as AnyOrch)._ctx.toAgentPath('/some/path');
+      const result = await (orch as AnyOrch)._ctx.toAgentPath('/some/path');
 
       expect(hostToContainerPath).toHaveBeenCalled();
       expect(result).toBe('/workspace/path');
@@ -1512,7 +1564,7 @@ describe('Orchestrator', () => {
       it('removes worktree via docker exec, then cleans up branch on host', async () => {
         testData = setupTestProject();
         vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-        vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+        vi.mocked(containerManager.getRunningContainer).mockResolvedValue({
           containerId: 'cont-abc',
           remoteWorkspaceFolder: '/workspace',
         } as any);
@@ -1553,7 +1605,7 @@ describe('Orchestrator', () => {
       it('falls back to --force via docker exec when normal remove fails', async () => {
         testData = setupTestProject();
         vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-        vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+        vi.mocked(containerManager.getRunningContainer).mockResolvedValue({
           containerId: 'cont-abc',
           remoteWorkspaceFolder: '/workspace',
         } as any);
@@ -1605,7 +1657,7 @@ describe('Orchestrator', () => {
       it('falls back to rmSync + a scoped worktree-remove retry when docker exec remove and --force both fail', async () => {
         testData = setupTestProject();
         vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-        vi.mocked(containerManager.getRunningContainer).mockReturnValue({
+        vi.mocked(containerManager.getRunningContainer).mockResolvedValue({
           containerId: 'cont-abc',
           remoteWorkspaceFolder: '/workspace',
         } as any);
@@ -4361,7 +4413,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: false });
-      vi.mocked(dockerAvailable).mockReturnValue(false);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(false);
 
       const slug = testData.slug;
       const pipeline = makePipeline({
@@ -4385,7 +4437,7 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
 
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
-      vi.mocked(dockerAvailable).mockReturnValue(true);
+      vi.mocked(checkDockerAvailable).mockResolvedValue(true);
       vi.mocked(containerManager.ensureContainer).mockResolvedValue({
         remoteWorkspaceFolder: '/workspace',
         containerName: 'test-container',
@@ -4406,14 +4458,12 @@ describe('Orchestrator', () => {
 
       let sessionCounter = 0;
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
-      vi.mocked(_resetDockerAvailableCache).mockImplementation(() => {});
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
       await new Promise(r => setTimeout(r, 20));
 
       expect(mockCreateSession).toHaveBeenCalled();
-      // _resetDockerAvailableCache is only called when !containerCfg.explicit (the Docker gate).
-      // With explicit: true the gate is skipped, so _resetDockerAvailableCache is NOT called.
+      // The ensureWorktree Docker gate is only applied when !containerCfg.explicit.
 
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
       await new Promise(r => setTimeout(r, 10));
