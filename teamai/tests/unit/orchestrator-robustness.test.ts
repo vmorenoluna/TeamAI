@@ -3167,14 +3167,9 @@ describe('buildSyntheticReworkDescription', () => {
     expect(result).toContain(qaContent);
   });
 
-  it('tells the engineer not to re-read the spec', () => {
+  it('points the engineer at the command section for completed subtasks', () => {
     const result = buildSyntheticReworkDescription('Some issue');
-    expect(result).toContain('Do NOT re-read the spec');
-  });
-
-  it('tells the engineer not to re-implement completed subtasks', () => {
-    const result = buildSyntheticReworkDescription('Some issue');
-    expect(result).toContain('do NOT re-read or re-implement them');
+    expect(result).toContain('Follow "When All Subtasks Are Already Completed" in your instructions.');
   });
 
   it('includes the "source of truth" label for QA feedback', () => {
