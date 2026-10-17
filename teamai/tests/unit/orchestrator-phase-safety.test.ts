@@ -647,7 +647,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       projectRoot: project.root,
       execGit: vi.fn(async () => undefined),
       execGitCapture: vi.fn(async () => ''),
-      gitPush: vi.fn((args: string[]) => {
+      gitPush: vi.fn(async (args: string[]) => {
         if (args[0] === 'push') throw new Error('offline');
       }),
       sessionOpts: vi.fn(),
@@ -897,7 +897,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     };
     const deps = {
       projectRoot: project.root,
-      gitPush: vi.fn(() => { throw new Error('offline'); }),
+      gitPush: vi.fn(async () => { throw new Error('offline'); }),
       execGit: vi.fn(async () => undefined), execGitCapture: vi.fn(async () => ''), sessionOpts: vi.fn(), waitForCompletion: vi.fn(),
     };
 

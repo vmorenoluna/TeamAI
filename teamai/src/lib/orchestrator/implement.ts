@@ -63,7 +63,7 @@ export interface ImplementDeps {
    *  `git status --porcelain` etc. against a worktree that may be
    *  container-patched and thus unresolvable via a plain host execFileSync. */
   execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
-  gitPush: (pushArgs: string[], logFile: string) => void;
+  gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
   patchWorktreeGitFile: (hostWorktreePath: string, containerWorkspace: string) => void;
   isWorktreeHealthy: (worktreePath: string) => boolean;
   cleanStaleSubtaskWorktrees: (pipeline: ImplementPipeline) => Promise<void>;
