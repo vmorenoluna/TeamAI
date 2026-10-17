@@ -107,10 +107,7 @@ export function buildOverrideDirective(feedback: HumanFeedback, scopeNote?: stri
   const parts = [
     '## 🧑 HUMAN DIRECTIVE — OVERRIDES EVERYTHING ELSE',
     '',
-    `The human reviewer sent this instruction for ${label}. It takes precedence over the ` +
-      "spec, the plan, the QA report, and any other agent's directives wherever they conflict. " +
-      'If any of those documents tell you otherwise, follow this directive instead and note the ' +
-      'deviation in your summary.',
+    `The human reviewer sent this instruction for ${label}. Apply it as your instructions' **Human directive override** rule describes.`,
     '',
   ];
   if (scopeNote) {
@@ -126,9 +123,7 @@ export function buildContextNote(feedback: HumanFeedback): string {
   return [
     '## ℹ️ HUMAN DIRECTIVE CONTEXT',
     '',
-    `The human reviewer previously directed ${label} with this request. Verify it was actually ` +
-      "done; do not flag it as a deviation from the spec/plan — treat the human's request as " +
-      'authoritative for this round.',
+    `The human reviewer previously directed ${label} with this request. Handle it as your instructions' **Human directive override** rule describes for a directive aimed at another agent.`,
     '',
     feedback.message,
   ].join('\n');
@@ -155,7 +150,7 @@ export function buildSubtaskScopeNote(
     return [
       'The human reviewer scoped this directive to the following subtasks — re-plan ONLY these, do not regenerate or alter any other subtask:',
       ...subtasks.map(s => `  - #${s.id}: ${s.title}`),
-      'Every subtask NOT listed above must be preserved byte-for-byte (same id, title, description, files, depends_on, acceptance_criteria, completed, qa_flagged).',
+      'Every subtask NOT listed above is on the preserve-list: apply the **Scoped re-plan (human preserve-list)** rule in your instructions.',
     ].join('\n');
   }
   return [

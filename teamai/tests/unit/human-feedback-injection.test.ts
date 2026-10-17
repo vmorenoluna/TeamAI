@@ -279,7 +279,7 @@ describe('runPlanPhase — human directive injection', () => {
     // The directive must carry the preserve-list note.
     const prompt = mockSendMessage.mock.calls[0][1] as string;
     expect(prompt).toContain('re-plan ONLY these');
-    expect(prompt).toContain('byte-for-byte');
+    expect(prompt).toContain('Scoped re-plan (human preserve-list)');
 
     // The guardrail restored the preserved subtasks byte-for-byte.
     const plan = JSON.parse(readFileSync(join(ctx.specPath, 'plan.json'), 'utf-8'));
