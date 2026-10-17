@@ -7330,9 +7330,10 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
       containerId: 'test-container', remoteWorkspaceFolder: '/workspaces/test',
     });
 
-    // rev-parse --verify stBranch:
-    //   odd calls → throw (branch doesn't exist — _recoverStBranchCommits returns recovered:true)
-    //   even calls → return hash (branch still exists — verification after branch -D catches it)
+    // rev-parse --verify stBranch, three calls per subtask:
+    //   1st → throw (branch doesn't exist — _recoverStBranchCommits returns recovered:true)
+    //   2nd → return hash (the pre-delete existence check, so branch -D is attempted)
+    //   3rd → return hash (branch still exists — verification after branch -D catches it)
     let revParseCount = 0;
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (Array.isArray(args)) {
@@ -7341,7 +7342,7 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
         }
         if (args[0] === 'rev-parse' && args[1] === '--verify') {
           revParseCount++;
-          if (revParseCount % 2 === 1) throw new Error('fatal: Needed a single revision');
+          if (revParseCount % 3 === 1) throw new Error('fatal: Needed a single revision');
           return 'abc123\n';
         }
         if (args[0] === 'rev-parse') return 'abc123\n';
@@ -7435,6 +7436,14 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
     // lock), but every other git call behaves as before.
     const baseImpl = mockExecFileSync.getMockImplementation() as ((cmd: string, args?: string[]) => string) | undefined;
     mockExecFileSync.mockImplementation((cmd: string, args?: string[]) => {
+      // The leftover subtask worktrees are still registered with git.
+      if (cmd === 'git' && Array.isArray(args) && args[0] === 'worktree' && args[1] === 'list') {
+        const base = join(project.root, 'worktrees', 'test-task');
+        return `worktree ${base}-st1
+
+worktree ${base}-st2
+`;
+      }
       if (cmd === 'git' && Array.isArray(args) && args[0] === 'worktree' && args[1] === 'remove') {
         throw new Error('fatal: cannot remove worktree (file locked)');
       }
@@ -7463,20 +7472,25 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
     }
   });
 
-  it('does not log first-run "not a working tree" / "branch not found" pre-clean failures', async () => {
+  it('does not try to remove a worktree or delete a branch that does not exist (first run)', async () => {
     mockCreateSession
       .mockResolvedValueOnce('sess-quiet-st1')
       .mockResolvedValueOnce('sess-quiet-st2');
     const executeSpy = vi.spyOn(orch as AnyOrch, 'executePhase').mockResolvedValue(undefined);
 
-    // On a first run nothing exists yet, so git rejects both pre-clean calls.
+    // First run: git knows no per-subtask worktree and no per-subtask branch.
     const baseImpl = mockExecFileSync.getMockImplementation() as ((cmd: string, args?: string[]) => string) | undefined;
     mockExecFileSync.mockImplementation((cmd: string, args?: string[]) => {
-      if (cmd === 'git' && Array.isArray(args) && args[0] === 'worktree' && args[1] === 'remove') {
-        throw new Error("fatal: '" + String(args[3]) + "' is not a working tree");
-      }
-      if (cmd === 'git' && Array.isArray(args) && args[0] === 'branch' && args[1] === '-D') {
-        throw new Error("error: branch '" + String(args[2]) + "' not found");
+      if (cmd === 'git' && Array.isArray(args)) {
+        if (args[0] === 'rev-parse' && args[1] === '--verify' && String(args[args.length - 1]).includes('-st')) {
+          throw new Error('fatal: Needed a single revision');
+        }
+        if (args[0] === 'worktree' && args[1] === 'remove' && String(args[3]).includes('-st')) {
+          throw new Error("fatal: '" + String(args[3]) + "' is not a working tree");
+        }
+        if (args[0] === 'branch' && args[1] === '-D') {
+          throw new Error("error: branch '" + String(args[2]) + "' not found");
+        }
       }
       return baseImpl ? baseImpl(cmd, args) : '';
     });
@@ -7488,11 +7502,21 @@ describe('runImplement — per-subtask branch recreation fallback when deletion 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalledTimes(2); }, { timeout: 10_000 });
+      // Snapshot now: both subtasks are dispatched, so the pre-clean is done and the
+      // post-integration cleanup (which legitimately deletes branches) has not run.
+      const gitCalls = mockExecFileSync.mock.calls
+        .filter((c: any[]) => c[0] === 'git' && Array.isArray(c[1]))
+        .map((c: any[]) => c[1] as string[]);
 
       fireEvent('event', { sessionId: 'sess-quiet-st1', event: { type: 'result' } });
       fireEvent('event', { sessionId: 'sess-quiet-st2', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
 
+      // No pre-clean attempt on the full subtask worktree path (the bare-name registration
+      // clear still runs unconditionally) or on the subtask branches...
+      expect(gitCalls.some(a => a[0] === 'worktree' && a[1] === 'remove' && /[\/]/.test(String(a[3])) && String(a[3]).includes('-st'))).toBe(false);
+      expect(gitCalls.some(a => a[0] === 'branch' && a[1] === '-D')).toBe(false);
+      // ...and consequently nothing is logged as a failure.
       const logContent = readFileSync(join(project.taskDir, 'output.log'), 'utf-8');
       expect(logContent).not.toContain('Failed to remove per-subtask worktree');
       expect(logContent).not.toContain('Failed to delete branch');

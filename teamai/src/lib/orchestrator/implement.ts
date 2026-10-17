@@ -207,6 +207,22 @@ export function relocateStuckWorktree(pipeline: ImplementPipeline, deps: Impleme
 }
 
 /**
+ * True when git lists `worktreePath` as a registered worktree. Returns true if
+ * the list can't be read, so callers err on the side of attempting a removal.
+ */
+async function _isWorktreeRegistered(deps: ImplementDeps, worktreePath: string): Promise<boolean> {
+  try {
+    const list = await execGitQueued(['worktree', 'list', '--porcelain'], deps.projectRoot, deps.projectRoot);
+    const target = path.resolve(worktreePath).toLowerCase();
+    return list.split('\n')
+      .filter(l => l.startsWith('worktree '))
+      .some(l => path.resolve(l.slice('worktree '.length).trim()).toLowerCase() === target);
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Best-effort cleanup of directories left behind by relocateStuckWorktree
  * on an earlier run of this task — the external lock that forced the
  * relocation has often cleared by the time a later run starts, so this
@@ -2524,15 +2540,17 @@ export async function runImplement(
         // nothing is ever visible here via existsSync, yet git still
         // considers the branch checked out (and refuses `branch -D`) until
         // that registration is cleared.
-        try { await deps.execGit(['worktree', 'remove', '--force', stCanonicalPath], deps.projectRoot); }
-        catch (err) {
-          // Log rather than swallow: a failed worktree removal is the root
-          // cause of the "branch still checked out" failures downstream, and
-          // previously it was invisible. A path git doesn't know is the normal
-          // first-run case (nothing to remove), not a failure worth logging.
-          const message = err instanceof Error ? err.message : String(err);
-          if (!/is not a working tree/.test(message)) {
-            logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to remove per-subtask worktree ${stCanonicalPath}: ${message}\n`);
+        // Only attempt the removal when there is something to remove: the
+        // directory exists or git has it registered. On a first run neither is
+        // true and `worktree remove` would just fail with "is not a working
+        // tree". If the registration can't be listed, attempt it anyway.
+        if (existsSync(stCanonicalPath) || await _isWorktreeRegistered(deps, stCanonicalPath)) {
+          try { await deps.execGit(['worktree', 'remove', '--force', stCanonicalPath], deps.projectRoot); }
+          catch (err) {
+            // Log rather than swallow: a failed worktree removal is the root
+            // cause of the "branch still checked out" failures downstream, and
+            // previously it was invisible.
+            logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to remove per-subtask worktree ${stCanonicalPath}: ${err instanceof Error ? err.message : String(err)}\n`);
           }
         }
         if (existsSync(stCanonicalPath)) {
@@ -2554,12 +2572,15 @@ export async function runImplement(
         }
 
         if (canRecreate) {
-          try { await execGitQueued(['branch', '-D', stBranch], deps.projectRoot, deps.projectRoot); }
-          catch (err) {
-            // A missing branch is the normal first-run case, not a failure.
-            const message = err instanceof Error ? err.message : String(err);
-            if (!/branch '.*' not found/.test(message)) {
-              logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to delete branch ${stBranch}: ${message}\n`);
+          // Only delete a branch that exists: on a first run there is nothing
+          // to delete and `branch -D` would just fail with "not found".
+          let branchExists = true;
+          try { await execGitQueued(['rev-parse', '--verify', '--quiet', 'refs/heads/' + stBranch], deps.projectRoot, deps.projectRoot); }
+          catch { branchExists = false; }
+          if (branchExists) {
+            try { await execGitQueued(['branch', '-D', stBranch], deps.projectRoot, deps.projectRoot); }
+            catch (err) {
+              logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to delete branch ${stBranch}: ${err instanceof Error ? err.message : String(err)}\n`);
             }
           }
 
