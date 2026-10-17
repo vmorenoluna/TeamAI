@@ -224,6 +224,28 @@ describe('Orchestrator', () => {
       });
     });
 
+    it('AC17: moveTaskToPhase(plan) rejects with ContainerDockerMissingError, settles, and leaves the phase in backlog (gate, not failure)', async () => {
+      testData = setupTestProject();
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec content');
+      vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
+      vi.mocked(checkDockerAvailable).mockResolvedValue(false);
+      mockEmit.mockClear();
+
+      const orch = makeOrch(testData.root, getOrchestrator);
+      expect((orch as AnyOrch).taskStore.getById(testData.taskId).phase).toBe('backlog');
+
+      const err = await Promise.race([
+        orch.moveTaskToPhase(testData.taskId, 'plan').catch((e: unknown) => e),
+        new Promise(r => setTimeout(() => r('hung'), 8000)),
+      ]);
+
+      expect(err).toBeInstanceOf(ContainerDockerMissingError);
+      expect(mockEmit).toHaveBeenCalledWith('container-docker-missing', { projectRoot: testData.root });
+      expect(checkDockerAvailable).toHaveBeenCalledWith({ force: true });
+      expect((orch as AnyOrch).taskStore.getById(testData.taskId).phase).toBe('backlog');
+      expect(mockCreateSession).not.toHaveBeenCalled();
+    }, 20_000);
+
     it('refuses to start when the container fails validation, emits the event, and starts no session', async () => {
       testData = setupTestProject();
       vi.mocked(readContainerConfig).mockReturnValue({ enabled: true, explicit: true });
