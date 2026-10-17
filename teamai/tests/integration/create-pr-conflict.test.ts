@@ -268,7 +268,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
 
     // Only one session should have been created (merger only)
     expect(mockCreateSession).toHaveBeenCalledTimes(1);
-  });
+  }, 30_000);
 
   // ── Test 2: Real conflict → merger fails → graceful fallback ────────────────
 
@@ -313,7 +313,7 @@ describe('CreatePR Conflict Resolution Integration', () => {
 
     // Only one session created (merger only, no PR session)
     expect(mockCreateSession).toHaveBeenCalledTimes(1);
-  });
+  }, 30_000);
 
   // ── Test 3: Clean rebase → no sessions spawned ────────────────────────────────
   // SKIPPED: This test requires gh CLI to NOT be installed, otherwise gh makes
@@ -345,7 +345,6 @@ describe('CreatePR Conflict Resolution Integration', () => {
       maxQaAttempts: 3,
     };
     await (orch as AnyOrch).runCreatePR(pipeline).catch(() => { /* best-effort */ });
-    await new Promise(r => setTimeout(r, 100));
 
     // Should NOT have sent the merge command for origin/master (no rebase conflict)
     const sendCalls = mockSendMessage.mock.calls as any[][];

@@ -29,8 +29,8 @@ vi.mock('child_process', async (orig) => ({
   execFileSync: vi.fn(() => '0'),
 }));
 vi.mock('../../src/lib/orchestrator/artifact-commit', () => ({
-  squashWithMessage: vi.fn(() => true),
-  hasCommitsBeyondBase: vi.fn(() => true),
+  squashWithMessage: vi.fn(async () => true),
+  hasCommitsBeyondBase: vi.fn(async () => true),
   readImplementationSummary: vi.fn(() => null),
   readSpecSummary: vi.fn(() => 'summary'),
 }));
@@ -73,7 +73,7 @@ describe('runCreatePRPhase', () => {
       taskStore: { update } as never,
       execGit: vi.fn(async () => undefined),
       execGitCapture: vi.fn(async () => ''),
-      gitPush: vi.fn(),
+      gitPush: vi.fn(async () => undefined),
       extractPrUrl: vi.fn(() => null),
       buildTicketMessage: vi.fn(() => null),
       removeWorktree: vi.fn(),

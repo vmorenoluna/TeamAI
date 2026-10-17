@@ -36,7 +36,7 @@ export interface RebaseDeps {
   execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   sessionOpts: SessionOptsFn;
   waitForCompletion: (sessionId: string) => Promise<void>;
-  gitPush: (pushArgs: string[], logFile: string) => void;
+  gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
 }
 
 /**
@@ -258,7 +258,7 @@ interface CascadePhaseDeps extends BasePhaseDeps {
   savePipelineState: (pipeline: TaskPipeline) => void;
   toAgentPath: (hostPath: string) => Promise<string>;
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
-  gitPush: (pushArgs: string[], logFile: string) => void;
+  gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
   execGit: (args: string[], hostCwd: string) => Promise<void>;
   execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   // ── Wakeup (ADR 002, generalized beyond implement — see wakeup.ts) ──
@@ -584,7 +584,7 @@ export async function runSpecPhase(
 // ─────────────────────────────────────────────────────────────────────
 
 interface PlanPhaseDeps extends CascadePhaseDeps {
-  gitPush: (pushArgs: string[], logFile: string) => void;
+  gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
   execGit: (args: string[], hostCwd: string) => Promise<void>;
 }
 
@@ -770,7 +770,7 @@ export async function runPlanPhase(
 interface MergePhaseDeps extends BasePhaseDeps {
   execGit: (args: string[], hostCwd: string) => Promise<void>;
   execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
-  gitPush: (pushArgs: string[], logFile: string) => void;
+  gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
   phaseHeader: (logFile: string, phase: string) => void;
   getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig };
   removeWorktree: (taskId: string) => Promise<void>;
@@ -809,10 +809,10 @@ export async function runMergePhase(
   // commit at all beyond the base. `git merge` of such a branch would just
   // no-op ("Already up to date"), but that's easy to misread as "the merge
   // silently did nothing" — detect it explicitly instead.
-  if (!hasCommitsBeyondBase(pipeline.worktreePath, baseBranch, {
+  if (!(await hasCommitsBeyondBase(pipeline.worktreePath, baseBranch, {
     restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
     worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
-  })) {
+  }))) {
     // A branch with no commit at all is only unsuspicious if the plan never
     // expected one — otherwise this is the signature of an implementation
     // that was lost, skipped, or never finished, and marking it `done`
@@ -840,7 +840,7 @@ export async function runMergePhase(
   // recordHistoryInGit is off or the worktree has nothing to commit.
   const ticketMessage = deps.buildTicketMessage(pipeline);
   if (ticketMessage) {
-    const squashed = squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
+    const squashed = await squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
       restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
       worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
     });
@@ -909,7 +909,7 @@ interface CreatePRDeps extends BasePhaseDeps {
   taskStore: TaskStore;
   execGit: (args: string[], hostCwd: string) => Promise<void>;
   execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
-  gitPush: (pushArgs: string[], logFile: string) => void;
+  gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
   extractPrUrl: (logFile: string) => string | null;
   /** Build the trailer-bearing commit message for this task (null when recordHistoryInGit is off). */
   buildTicketMessage: (pipeline: TaskPipeline) => import('./artifact-commit').TicketMessageResult | null;
@@ -956,10 +956,10 @@ export async function runCreatePRPhase(
   // commit at all beyond the base. Pushing and calling `gh pr create` on
   // such a branch fails with a confusing raw GraphQL error ("No commits
   // between <base> and <branch>") — detect it up front instead.
-  if (!hasCommitsBeyondBase(pipeline.worktreePath, baseBranch, {
+  if (!(await hasCommitsBeyondBase(pipeline.worktreePath, baseBranch, {
     restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
     worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
-  })) {
+  }))) {
     // A branch with no commit at all is only unsuspicious if the plan never
     // expected one — otherwise this is the signature of an implementation
     // that was lost, skipped, or never finished, and marking it `done`
@@ -987,7 +987,7 @@ export async function runCreatePRPhase(
   // recordHistoryInGit is off or the worktree has nothing to commit.
   const ticketMessage = deps.buildTicketMessage(pipeline);
   if (ticketMessage) {
-    const squashed = squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
+    const squashed = await squashWithMessage(pipeline.worktreePath, ticketMessage.message, baseBranch, pipeline.specPath, {
       restoreWorktreeGitFileToHostPaths: (h) => restoreWorktreeGitFileToHostPaths(h, deps.projectRoot),
       worktreeGitEnv: (h, c) => worktreeGitEnv(h, deps.projectRoot, c),
     });
