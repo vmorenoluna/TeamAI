@@ -114,6 +114,19 @@ sessions do not read them.
   survives a restart.
 - Structure within a command follows ADR 003.
 
+### Beyond pipeline phases
+
+The same rule covers every session that is not a pipeline phase:
+
+- Terminal sessions, ideation, roadmap and role-refinement sessions also render from
+  `command-templates.ts`. The ticket-creation instruction a terminal session receives is
+  the rendered `create-task` command, not a hand-written summary of it.
+- Orchestrator headers and agent-read artifacts (such as `qa_feedback.md`) carry facts
+  (what happened, which files, which values) and point to the command for procedure.
+  They do not restate a command's rules, because a restated rule drifts from the command.
+- `tests/unit/no-inline-command-instructions.test.ts` enforces this. It fails when
+  instruction text in `src/` duplicates text owned by a command in `defaults/commands/`.
+
 ## Consequences
 
 ### Positive
@@ -147,6 +160,8 @@ sessions do not read them.
   ignored, and each mode carries only its own workflow.
 - `tests/unit/agent-command-render-failure.test.ts`: no session is spawned when rendering
   fails.
+- `tests/unit/no-inline-command-instructions.test.ts`: no inline instruction text in
+  `src/` duplicates a command in `defaults/commands/`.
 
 `tests/utils/agent-prompts.ts` is the only place in the tests that knows how a mode is
 encoded in the message.
