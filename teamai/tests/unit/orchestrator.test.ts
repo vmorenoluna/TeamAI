@@ -5607,6 +5607,48 @@ describe('Orchestrator', () => {
 
   // ── Spec revision — runSpec revision mode detection ───────────────
 
+  describe('runPlan — re-plan request', () => {
+    it('sends only paths and the IMPORTANT write line when plan.json exists', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({ subtasks: [] }));
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        phase: 'plan',
+        specPath: testData.taskDir,
+      });
+
+      let callCount = 0;
+      mockCreateSession.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve('sess-replan');
+        return Promise.reject(new Error('simulated abort'));
+      });
+
+      const promise = (orch as AnyOrch).runPlan(pipeline).catch(() => { /* best-effort */ });
+      await new Promise(r => setTimeout(r, 20));
+
+      const sendCalls = mockSendMessage.mock.calls.filter(
+        (call: any[]) => call[0] === 'sess-replan'
+      );
+      expect(sendCalls.length).toBeGreaterThanOrEqual(1);
+      const prompt = sendCalls[0][1];
+      // The command body (plan-revise.md) owns the re-plan rules; only the
+      // orchestrator-written "## Request" section must be free of inline copies.
+      const request = prompt.split('## Request')[1].split('\n## ')[0];
+      expect(request).toContain('plan.json');
+      expect(request).toContain('spec.md');
+      expect(request).toContain('IMPORTANT: Write the updated plan');
+      expect(request).not.toContain('PRESERVING work');
+      expect(request).not.toContain('Keep completed subtasks');
+
+      fireEvent('event', { sessionId: 'sess-replan', event: { type: 'result' } });
+      await new Promise(r => setTimeout(r, 50));
+      await promise;
+    });
+  });
+
   describe('runSpec — revision mode', () => {
     it('sends REVISION prompt when spec_revision_feedback.md exists', async () => {
       testData = setupTestProject();
@@ -5640,7 +5682,9 @@ describe('Orchestrator', () => {
       const prompt = sendCalls[0][1];
       expect(prompt.startsWith('<!-- .claude/commands/spec-revise.md -->')).toBe(true);
       expect(prompt).toContain('spec_revision_feedback.md');
-      expect(prompt).toContain('Revise the spec to address ALL concerns');
+      expect(prompt).not.toContain('Revise the spec to address ALL concerns');
+      expect(prompt).toContain('IMPORTANT: Write the revised spec to');
+      expect(prompt).toContain('IMPORTANT: Also update');
 
       // Fire completion
       fireEvent('event', { sessionId: 'sess-spec-rev', event: { type: 'result' } });

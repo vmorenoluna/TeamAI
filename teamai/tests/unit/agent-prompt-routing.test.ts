@@ -327,7 +327,8 @@ describe('plan phase routing', () => {
     expect(s.cwd).toBe(ctx.root);
     expect(s.request).toContain(`${ctx.specPath}/plan.json`);
     expect(s.request).toContain(`${ctx.specPath}/spec.md`);
-    expect(s.request).toContain('PRESERVING');
+    expect(s.request).toContain('IMPORTANT: Write the updated plan');
+    expect(s.request).not.toContain('PRESERVING');
   });
 
   it('scoped replan (planner directive with Subtasks:) → plan-revise mode carrying the override and its scope', async () => {

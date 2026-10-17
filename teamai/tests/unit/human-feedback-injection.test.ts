@@ -217,7 +217,7 @@ describe('runPlanPhase — human directive injection', () => {
 
     const prompt = mockSendMessage.mock.calls[0][1] as string;
     expect(prompt.startsWith('<!-- .claude/commands/plan-revise.md -->')).toBe(true);
-    expect(prompt).toContain('PRESERVING');
+    expect(prompt).toContain('IMPORTANT: Write the updated plan');
   });
 
   it('enforces the preserve-list: restores unselected subtasks a scoped replan clobbered, and clears the persisted snapshot', async () => {

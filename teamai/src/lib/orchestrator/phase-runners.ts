@@ -380,8 +380,6 @@ export async function runSpecPhase(
       `Feature request: ${pipeline.description}\n\n` +
       `Read the existing spec at: \`${agentSpecPath}/${baselineFile}\`\n` +
       `Read the spec revision feedback at: \`${agentSpecPath}/spec_revision_feedback.md\`\n` +
-      `Revise the spec to address ALL concerns in the feedback.\n` +
-      `Preserve parts of the spec that are still valid — only change what the feedback asks for.\n` +
       `IMPORTANT: Write the revised spec to \`${agentSpecPath}/spec.md\` (overwrite the existing file).\n` +
       `IMPORTANT: Also update \`${agentSpecPath}/spec_summary.md\` to reflect the revised spec — this is a required step, not optional. Do not end the session without it.`);
   } else {
@@ -605,11 +603,8 @@ export async function runPlanPhase(
   const agentSpecPath = await deps.toAgentPath(pipeline.specPath);
   const isReplan = existsSync(path.join(pipeline.specPath, 'plan.json'));
   const planInstruction = isReplan
-    ? `Read the existing plan at \`${agentSpecPath}/plan.json\` and the spec at \`${agentSpecPath}/spec.md\`.\n` +
-      `Re-plan to match the spec while PRESERVING work that is still valid:\n` +
-      `- Keep completed subtasks whose files and acceptance criteria are still covered by the spec, and leave their \`completed: true\` flag set so they are NOT re-implemented.\n` +
-      `- Mark only affected/invalidated subtasks \`completed: false\` (and drop any stale \`qa_flagged\`) so they re-run.\n` +
-      `- Rewrite plan.json in place — do NOT delete it.\n` +
+    ? `Existing plan: \`${agentSpecPath}/plan.json\`\n` +
+      `Spec: \`${agentSpecPath}/spec.md\`\n` +
       `IMPORTANT: Write the updated plan to \`${agentSpecPath}/plan.json\` (overwrite the existing file).`
     : `${agentSpecPath}/spec.md`;
 
