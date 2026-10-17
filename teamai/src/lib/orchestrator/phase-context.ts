@@ -48,7 +48,7 @@ export interface PhaseContext {
   execGit: (args: string[], hostCwd: string) => Promise<void>;
   /** Same routing as execGit, but returns captured stdout — for read
    *  commands (status, log, diff) against a worktree that may be
-   *  container-patched and thus unresolvable via a plain host execFileSync. */
+   *  container-patched and thus unresolvable via a plain host-side git call. */
   execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
 

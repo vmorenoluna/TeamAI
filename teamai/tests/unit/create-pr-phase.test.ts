@@ -23,11 +23,15 @@ vi.mock('../../src/lib/process-manager', () => ({
   processManager: { on: vi.fn(), off: vi.fn(), emit: vi.fn() },
   containerSessionOpts: (projectRoot: string) => ({ projectRoot }),
 }));
-// `git rev-list --count` → '0' makes rebaseOntoLatestDefault skip the rebase.
-vi.mock('child_process', async (orig) => ({
-  ...(await orig<typeof import('child_process')>()),
-  execFileSync: vi.fn(() => '0'),
-}));
+// rebaseOntoLatestDefault's `git fetch` goes through the async execFile; succeed without touching the network.
+const mockExecFile = await vi.hoisted(async () => {
+  const { createExecFileMock } = await import('../utils/mock-child-process');
+  return createExecFileMock({ resetSafe: true });
+});
+vi.mock('child_process', async (orig) => {
+  const { buildChildProcessMock } = await import('../utils/mock-child-process');
+  return buildChildProcessMock(await orig(), mockExecFile);
+});
 vi.mock('../../src/lib/orchestrator/artifact-commit', () => ({
   squashWithMessage: vi.fn(async () => true),
   hasCommitsBeyondBase: vi.fn(async () => true),
@@ -72,7 +76,8 @@ describe('runCreatePRPhase', () => {
       advancePhase,
       taskStore: { update } as never,
       execGit: vi.fn(async () => undefined),
-      execGitCapture: vi.fn(async () => ''),
+      // `git rev-list --count` → '0' makes rebaseOntoLatestDefault skip the rebase.
+      execGitCapture: vi.fn(async (args: string[]) => (args[0] === 'rev-list' ? '0\n' : '')),
       gitPush: vi.fn(async () => undefined),
       extractPrUrl: vi.fn(() => null),
       buildTicketMessage: vi.fn(() => null),

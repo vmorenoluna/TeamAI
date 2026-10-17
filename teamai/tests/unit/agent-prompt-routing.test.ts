@@ -695,8 +695,10 @@ describe('merge routing', () => {
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (args[0] === 'fetch') return '';
       if (args[0] === 'log') return 'abc123 local commit\n';
-      if (args[0] === 'rebase' && args[1] !== '--abort') throw new Error('CONFLICT');
       return '';
+    });
+    const execGit = vi.fn(async (args: string[]) => {
+      if (args[0] === 'rebase' && args[1] !== '--abort') throw new Error('CONFLICT');
     });
     const gitPush = vi.fn((args: string[]) => {
       if (args[0] === 'push') throw new Error('! [rejected] (non-fast-forward)');
@@ -704,7 +706,7 @@ describe('merge routing', () => {
     const execGitCapture = vi.fn(async (args: string[]) => (args.includes('--diff-filter=U') ? 'src/a.ts\n' : ''));
 
     await run(() => runQaReview(
-      basePipeline(ctx, 'qa-review') as never, cascadeDeps(ctx, { gitPush, execGitCapture }) as never,
+      basePipeline(ctx, 'qa-review') as never, cascadeDeps(ctx, { gitPush, execGit, execGitCapture }) as never,
     ));
 
     const s = sent();

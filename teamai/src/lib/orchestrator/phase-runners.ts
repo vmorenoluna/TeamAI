@@ -3,14 +3,13 @@
  * runImplement and runQaReview remain inline in orchestrator.ts due to
  * deep test coupling and complex internal state dependencies.
  */
-import { execFileSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, rmSync } from 'fs';
 import path from 'path';
 import { processManager } from '../process-manager';
 import { TaskStore } from '../task-store';
 import { detectGitPlatform, checkExistingPRViaCLI, createPRViaCLI, buildPRBody } from '../git-platform';
 import { squashWithMessage, hasCommitsBeyondBase, readImplementationSummary, readSpecSummary } from './artifact-commit';
-import { restoreWorktreeGitFileToHostPaths, worktreeGitEnv } from './worktree-utils';
+import { restoreWorktreeGitFileToHostPaths, worktreeGitEnv, execGitQueued } from './worktree-utils';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { resolveBaseBranch } from '../git-platform';
 import { updateSessionMap, logToOutput } from './helpers';
@@ -120,7 +119,7 @@ export async function rebaseOntoLatestDefault(
   try { await deps.execGit(['merge', '--abort'], worktreePath); } catch { /* nothing to abort */ }
 
   try {
-    execFileSync('git', ['fetch', 'origin', deps.baseBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
+    await execGitQueued(['fetch', 'origin', deps.baseBranch], deps.projectRoot, deps.projectRoot);
   } catch {
     logToOutput(path.dirname(logFile), `\n[WARN] Could not fetch origin/${deps.baseBranch} — proceeding with rebase anyway\n`);
   }
@@ -129,10 +128,9 @@ export async function rebaseOntoLatestDefault(
   // This avoids spawning a redundant merger + full test suite for a no-op,
   // which was wasting sessions on nearly every phase transition (#3).
   try {
-    const count = execFileSync(
-      'git', ['rev-list', '--count', `HEAD..origin/${deps.baseBranch}`],
-      { cwd: worktreePath, encoding: 'utf-8', stdio: 'pipe' },
-    ).trim();
+    const count = (await deps.execGitCapture(
+      ['rev-list', '--count', `HEAD..origin/${deps.baseBranch}`], worktreePath,
+    )).trim();
     if (count === '0') {
       logToOutput(path.dirname(logFile), `\n[INFO] origin/${deps.baseBranch} has not advanced past HEAD — skipping rebase\n`);
       return true;

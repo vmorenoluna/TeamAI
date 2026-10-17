@@ -188,7 +188,7 @@ describe('persistedCriterionFailCounts — count math', () => {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       // Current QA report has the same FAIL criterion as the previous cycle
       const currentReport = {
@@ -201,7 +201,7 @@ describe('persistedCriterionFailCounts — count math', () => {
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(currentReport));
 
       fireEvent('event', { sessionId: 'sess-qa-count1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await promise;
 
       // The persisted count should be 2: previous cycle (1) + current cycle (1) = 2 total
       expect(pipeline.persistedCriterionFailCounts).toBeDefined();
@@ -246,7 +246,7 @@ describe('persistedCriterionFailCounts — count math', () => {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       const currentReport = {
         overall: 'FAIL',
@@ -257,7 +257,7 @@ describe('persistedCriterionFailCounts — count math', () => {
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(currentReport));
 
       fireEvent('event', { sessionId: 'sess-qa-count2', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await promise;
 
       // Count should increment: previous 2 + current 1 = 3
       expect(pipeline.persistedCriterionFailCounts['Must have 3 positive cases']).toBe(3);
@@ -299,7 +299,7 @@ describe('persistedCriterionFailCounts — count math', () => {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       // "Bug A" is now PASS — it was fixed. "Bug B" still FAILs.
       const currentReport = {
@@ -312,7 +312,7 @@ describe('persistedCriterionFailCounts — count math', () => {
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(currentReport));
 
       fireEvent('event', { sessionId: 'sess-qa-reset', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await promise;
 
       // "Bug A" should be removed from tracking (it passed!)
       expect(pipeline.persistedCriterionFailCounts['Bug A']).toBeUndefined();
@@ -345,7 +345,7 @@ describe('persistedCriterionFailCounts — count math', () => {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       const currentReport = {
         overall: 'FAIL',
@@ -356,7 +356,7 @@ describe('persistedCriterionFailCounts — count math', () => {
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(currentReport));
 
       fireEvent('event', { sessionId: 'sess-qa-first', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await promise;
 
       // No previous snapshot — no escalation should be triggered
       expect(pipeline.persistedCriterionFailCounts).toBeUndefined();
@@ -413,7 +413,7 @@ describe('persistedCriterionFailCounts — snapshot comparison', () => {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       // Same criterion name, different notes — should still match
       const currentReport = {
@@ -425,7 +425,7 @@ describe('persistedCriterionFailCounts — snapshot comparison', () => {
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(currentReport));
 
       fireEvent('event', { sessionId: 'sess-qa-match', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await promise;
 
       expect(pipeline.persistedCriterionFailCounts).toBeDefined();
       expect(pipeline.persistedCriterionFailCounts['Must have 3 positive cases']).toBe(2);
@@ -461,7 +461,7 @@ describe('persistedCriterionFailCounts — snapshot comparison', () => {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       const currentReport = {
         overall: 'FAIL',
@@ -472,7 +472,7 @@ describe('persistedCriterionFailCounts — snapshot comparison', () => {
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(currentReport));
 
       fireEvent('event', { sessionId: 'sess-qa-criterion', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await promise;
 
       expect(pipeline.persistedCriterionFailCounts['No occurrences of X remain']).toBe(2);
 
@@ -507,7 +507,7 @@ describe('persistedCriterionFailCounts — snapshot comparison', () => {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       // Criterion text changed (spec revision) — should NOT match
       const currentReport = {
@@ -519,7 +519,7 @@ describe('persistedCriterionFailCounts — snapshot comparison', () => {
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(currentReport));
 
       fireEvent('event', { sessionId: 'sess-qa-different', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await promise;
 
       // Old criterion should NOT be tracked (text didn't match)
       expect(pipeline.persistedCriterionFailCounts).toBeDefined();
@@ -560,7 +560,7 @@ describe('persistedCriterionFailCounts — snapshot comparison', () => {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       // A still fails, B is now PASS, C is a brand-new FAIL
       const currentReport = {
@@ -574,7 +574,7 @@ describe('persistedCriterionFailCounts — snapshot comparison', () => {
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(currentReport));
 
       fireEvent('event', { sessionId: 'sess-qa-mixed', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await promise;
 
       // A: persisted — should increment from 2 to 3
       expect(pipeline.persistedCriterionFailCounts['Criterion A (persisted)']).toBe(3);
@@ -608,7 +608,7 @@ describe('persistedCriterionFailCounts — snapshot comparison', () => {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       const currentReport = {
         overall: 'FAIL',
@@ -619,7 +619,7 @@ describe('persistedCriterionFailCounts — snapshot comparison', () => {
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(currentReport));
 
       fireEvent('event', { sessionId: 'sess-qa-malformed-snap', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await promise;
 
       // No crash, no false escalation
       expect(pipeline.phase).toBe('implement'); // bounced back normally
@@ -821,7 +821,7 @@ describe('E2E — persisted failures escalation full cycle', () => {
       const qa1Promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       const cycle1Report = {
         overall: 'FAIL',
@@ -835,7 +835,7 @@ describe('E2E — persisted failures escalation full cycle', () => {
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(cycle1Report));
 
       fireEvent('event', { sessionId: 'sess-e2e-cycle1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await qa1Promise;
 
       // Cycle 1: should bounce to implement (no previous snapshot, so no escalation yet)
       expect(pipeline.phase).toBe('implement');
@@ -868,7 +868,7 @@ describe('E2E — persisted failures escalation full cycle', () => {
         const qa2Promise = (orch as AnyOrch).runQaReview(pipeline);
         await vi.waitFor(() => {
           expect(mockSendMessage).toHaveBeenCalled();
-        });
+        }, { timeout: 10_000 });
 
         // Same criterion FAILs again — the coder fixed the warning but not the FAIL
         const cycle2Report = {
@@ -880,7 +880,7 @@ describe('E2E — persisted failures escalation full cycle', () => {
         writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify(cycle2Report));
 
         fireEvent('event', { sessionId: 'sess-e2e-cycle2', event: { type: 'result' } });
-        await new Promise(r => setTimeout(r, 30));
+        await qa2Promise;
 
         // Cycle 2: persistedCriterionFailCounts should be set to 2
         expect(pipeline.persistedCriterionFailCounts).toBeDefined();
@@ -924,7 +924,7 @@ describe('E2E — persisted failures escalation full cycle', () => {
           const qa3Promise = (orch as AnyOrch).runQaReview(pipeline);
           await vi.waitFor(() => {
             expect(mockSendMessage).toHaveBeenCalled();
-          });
+          }, { timeout: 10_000 });
 
           // This time QA passes
           const cycle3Report = {
@@ -1001,7 +1001,7 @@ describe('QA mixed spec concerns and recurring additional issues', () => {
 
     try {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
-      await vi.waitFor(() => expect(mockSendMessage).toHaveBeenCalled());
+      await vi.waitFor(() => expect(mockSendMessage).toHaveBeenCalled(), { timeout: 10_000 });
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'FAIL',
         additional_issues: [{ description: 'Duplicate test block', file: 'src/feature.test.ts' }],
@@ -1040,7 +1040,7 @@ describe('QA mixed spec concerns and recurring additional issues', () => {
       for (const [index, reasoning] of ['First round', 'Second round'].entries()) {
         const promise = (orch as AnyOrch).runQaReview(pipeline);
         const sessionId = `sess-real-${index + 2}`;
-        await vi.waitFor(() => expect(mockSendMessage).toHaveBeenCalledWith(sessionId, expect.any(String)));
+        await vi.waitFor(() => expect(mockSendMessage).toHaveBeenCalledWith(sessionId, expect.any(String)), { timeout: 10_000 });
         writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
           overall: 'FAIL',
           additional_issues: [issue],
@@ -1152,7 +1152,7 @@ describe('resetAllCounters — persistedCriterionFailCounts clearing', () => {
 
       // Reject the task
       await (orch as AnyOrch).rejectTask(project.taskId, 'Please fix the actual FAIL criterion', 'coder');
-      await new Promise(r => setTimeout(r, 20));
+      await vi.waitFor(() => { expect(newPipeline).toBeDefined(); }, { timeout: 10_000 });
 
       // Verify the pipeline was created and persistedCriterionFailCounts was cleared
       expect(newPipeline).toBeDefined();
@@ -1227,11 +1227,11 @@ describe('resetAllCounters — persistedCriterionFailCounts clearing', () => {
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       // Fire result event so waitForCompletion resolves
       fireEvent('event', { sessionId: 'sess-qa-revise', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      // runQaReview settles once the result event has been processed
 
       await promise;
 

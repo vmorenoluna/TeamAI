@@ -25,6 +25,7 @@ const { onHandlers, mockCreateSession, mockSendMessage, mockKillSession, mockEmi
   mockGetSession: vi.fn(),
 }));
 
+const WAIT = { timeout: 10_000 };
 const mockExecFileSync = vi.hoisted(() => vi.fn());
 
 // execFile calls back (and is promisify-aware) so the async git helpers resolve; it delegates to the sync stub so existing scripted responses apply.
@@ -36,6 +37,16 @@ const mockExecFile = await vi.hoisted(async () => {
 vi.mock('child_process', () => ({
   execFile: mockExecFile,
   execFileSync: mockExecFileSync,
+}));
+
+// Real gh calls are replaced by these; default = no platform / no open PR, so push-failure tests fall through to the failure path.
+const mockDetectGitPlatform = vi.hoisted(() => vi.fn());
+const mockCheckExistingPRViaCLI = vi.hoisted(() => vi.fn());
+
+vi.mock('../../src/lib/git-platform', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/lib/git-platform')>()),
+  detectGitPlatform: (...a: unknown[]) => mockDetectGitPlatform(...a),
+  checkExistingPRViaCLI: (...a: unknown[]) => mockCheckExistingPRViaCLI(...a),
 }));
 
 vi.mock('../../src/lib/logger', () => ({
@@ -261,7 +272,7 @@ describe('runQaReview — Gap 3: locked / manual override QA reports', () => {
     // so the event listener is registered before we fire the result event.
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, WAIT);
 
     expect(mockCreateSession).toHaveBeenCalled();
     // Clean up by resolving the session
@@ -284,7 +295,7 @@ describe('runQaReview — Gap 3: locked / manual override QA reports', () => {
     // so the event listener is registered before we fire the result event.
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, WAIT);
 
     // Should still create a QA session (malformed JSON doesn't block)
     expect(mockCreateSession).toHaveBeenCalled();
@@ -418,7 +429,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     // so the event listener is registered before we fire the result event.
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, WAIT);
 
     // QA session should be created since auto-push succeeded
     expect(mockCreateSession).toHaveBeenCalled();
@@ -475,7 +486,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     // so the event listener is registered before we fire the result event.
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, WAIT);
 
     expect(mockCreateSession).toHaveBeenCalled();
 
@@ -502,7 +513,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     // so the event listener is registered before we fire the result event.
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, WAIT);
 
     // Should proceed with QA normally (first push — no remote to compare against)
     expect(mockCreateSession).toHaveBeenCalled();
@@ -545,7 +556,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     const promise = (orch as AnyOrch).runQaReview(pipeline);
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, WAIT);
 
     // Only the QA session should have been created — no merger needed for a clean rebase
     expect(mockCreateSession).toHaveBeenCalledTimes(1);
@@ -599,14 +610,14 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
     // Merger session runs first
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    });
+    }, WAIT);
     expect(mockSendMessage).toHaveBeenCalledWith('sess-merge', renderCommand('merge', 'origin/feat/robustness-test'));
     fireEvent('event', { sessionId: 'sess-merge', event: { type: 'result' } });
 
     // Then the QA session, once the orchestrator has pushed the merger's result
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(2);
-    });
+    }, WAIT);
     expect(mockSendMessage).toHaveBeenCalledWith('sess-qa-after-merge', expect.stringContaining('/qa-review'));
 
     fireEvent('event', { sessionId: 'sess-qa-after-merge', event: { type: 'result' } });
@@ -690,7 +701,7 @@ describe('runQaReview — Gap 1: unpushed commits detection', () => {
 
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    });
+    }, WAIT);
     fireEvent('event', { sessionId: 'sess-merge-push-fails', event: { type: 'result' } });
 
     await promise;
@@ -745,7 +756,7 @@ describe('runQaReview — unreadable QA report precheck', () => {
       const pipeline = makePipeline(project.taskId, project.taskDir, { qaAttempt: 1 });
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
       // No qa_report.json written by the (simulated) QA agent — session
       // completes but leaves nothing readable behind.
       fireEvent('event', { sessionId: 'sess-qa-unreadable', event: { type: 'result' } });
@@ -770,7 +781,7 @@ describe('runQaReview — unreadable QA report precheck', () => {
     const pipeline = makePipeline(project.taskId, project.taskDir, { qaStallCount: 2, maxQaAttempts: 3 });
 
     const promise = (orch as AnyOrch).runQaReview(pipeline);
-    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
     fireEvent('event', { sessionId: 'sess-qa-unreadable-exhausted', event: { type: 'result' } });
     await promise;
 
@@ -830,7 +841,7 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       expect(mockCreateSession).toHaveBeenCalled();
 
@@ -898,7 +909,7 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
     // so the event listener is registered before we fire the result event.
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, WAIT);
 
     expect(mockCreateSession).toHaveBeenCalled();
 
@@ -941,7 +952,7 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
     // so the event listener is registered before we fire the result event.
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, WAIT);
 
     expect(mockCreateSession).toHaveBeenCalled();
 
@@ -978,7 +989,7 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
     const promise = (orch as AnyOrch).runQaReview(pipeline);
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, WAIT);
 
     expect(mockCreateSession).toHaveBeenCalled();
 
@@ -1024,7 +1035,7 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
       let promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'FAIL',
@@ -1050,7 +1061,7 @@ describe('runQaReview — Gap 5b: snapshot qa_report.json on QA FAIL bounce', ()
       promise = (orch as AnyOrch).runQaReview(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       writeFileSync(join(project.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'FAIL',
@@ -1135,7 +1146,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // qa_report.json should now exist (restored from snapshot)
       const reportPath = join(project.taskDir, 'qa_report.json');
@@ -1187,7 +1198,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // qa_report.json should now exist (restored from bounce snapshot)
       const reportPath = join(project.taskDir, 'qa_report.json');
@@ -1226,7 +1237,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // qa_report.json should NOT have been created
       expect(existsSync(join(project.taskDir, 'qa_report.json'))).toBe(false);
@@ -1270,7 +1281,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // qa_report.json should still contain the original PASS content (not overwritten)
       const reportPath = join(project.taskDir, 'qa_report.json');
@@ -1308,7 +1319,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // The implement subtask should still be started (guard didn't block)
       expect(mockCreateSession).toHaveBeenCalled();
@@ -1359,7 +1370,7 @@ describe('runImplement — Gap 4b: restore qa_report.json from snapshot', () => 
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       const reportPath = join(project.taskDir, 'qa_report.json');
       expect(existsSync(reportPath)).toBe(true);
@@ -1477,7 +1488,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       expect(mockCreateSession).toHaveBeenCalled();
 
@@ -1541,7 +1552,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
         // so the event listener is registered before we fire the result event.
         await vi.waitFor(() => {
           expect(mockSendMessage).toHaveBeenCalled();
-        });
+        }, WAIT);
 
         // ── Assert Phase 2 results ──
         // qa_report.json should be restored from the bounce snapshot
@@ -1603,7 +1614,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       const originalReport = {
         overall: 'FAIL',
@@ -1643,7 +1654,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
         // so the event listener is registered before we fire the result event.
         await vi.waitFor(() => {
           expect(mockSendMessage).toHaveBeenCalled();
-        });
+        }, WAIT);
 
         // The existing qa_report.json should be UNCHANGED (not overwritten by snapshot)
         const existing = JSON.parse(readFileSync(reportPath, 'utf-8'));
@@ -1725,7 +1736,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
         // so the event listener is registered before we fire the result event.
         await vi.waitFor(() => {
           expect(mockSendMessage).toHaveBeenCalled();
-        });
+        }, WAIT);
 
         // qa_report.json restored from Gap 1 bounce snapshot
         expect(existsSync(reportPath)).toBe(true);
@@ -1833,7 +1844,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // qa_report.json restored with locked:true preserved
       const reportPath = join(project.taskDir, 'qa_report.json');
@@ -1920,7 +1931,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       expect(mockCreateSession).toHaveBeenCalled();
 
@@ -1993,7 +2004,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
         // so the event listener is registered before we fire the result event.
         await vi.waitFor(() => {
           expect(mockSendMessage).toHaveBeenCalled();
-        });
+        }, WAIT);
 
         // Resolve all 3 flagged subtasks sequentially (groups loop is sequential)
         fireEvent('event', { sessionId: 'sess-e2e-impl-2', event: { type: 'result' } });
@@ -2058,7 +2069,7 @@ describe('E2E — QA→implement bounce→restore full cycle', () => {
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       expect(mockCreateSession).toHaveBeenCalled(); // QA ran again
 
@@ -2094,6 +2105,8 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date());
     vi.clearAllMocks();
+    mockDetectGitPlatform.mockReset().mockResolvedValue('github');
+    mockCheckExistingPRViaCLI.mockReset().mockResolvedValue(null);
     onHandlers.clear();
     project = setupProject();
     orch = new Orchestrator(project.root);
@@ -2152,7 +2165,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       // The implement subtask should have been started
       expect(mockCreateSession).toHaveBeenCalled();
@@ -2213,7 +2226,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     // so the event listener is registered before we fire the result event.
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, { timeout: 10_000 });
 
     // Fire event to resolve the implement subtask
     fireEvent('event', { sessionId: 'sess-impl-pushfail', event: { type: 'result' } });
@@ -2272,7 +2285,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     // so the event listener is registered before we fire the result event.
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, { timeout: 10_000 });
 
     fireEvent('event', { sessionId: 'sess-impl-divergent', event: { type: 'result' } });
     await vi.advanceTimersByTimeAsync(50);
@@ -2293,11 +2306,8 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     // advancing to qa-review instead of failed.
     const existingPrUrl = 'https://github.com/shopforge/demo/pull/162';
 
-    mockExecFileSync.mockImplementation((cmd: string, args?: string[]) => {
-      if (cmd === 'gh' && Array.isArray(args) && args[0] === 'pr' && args[1] === 'list') {
-        // gh pr list returns the existing PR URL
-        return existingPrUrl + '\n';
-      }
+    mockCheckExistingPRViaCLI.mockResolvedValue(existingPrUrl);
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (Array.isArray(args)) {
         if (args[0] === 'push') throw new Error('src refspec feat/robustness-test does not match any');
         if (args[0] === 'pull') return '';
@@ -2319,7 +2329,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
 
       // Resolve the implement subtask
       fireEvent('event', { sessionId: 'sess-impl-pr-exists', event: { type: 'result' } });
@@ -2328,6 +2338,8 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
       // Should NOT be failed — PR exists, push failure is non-fatal
       expect(pipeline.phase).not.toBe('failed');
       expect(pipeline.phase).toBe('qa-review');
+      expect(mockExecFileSync.mock.calls.some(c => c[0] === 'gh' && Array.isArray(c[1]) && c[1][0] === 'pr')).toBe(false);
+      expect(mockCheckExistingPRViaCLI).toHaveBeenCalledWith('github', 'feat/robustness-test', project.root);
 
       // No FAIL report should have been written — the PR-exists path logs a
       // warning and continues, it does not write a qa_report.json at all.
@@ -2343,13 +2355,46 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     }
   });
 
+  it('fails the task once when remote verification rejects and no PR exists', async () => {
+    const advanceSpy = vi.spyOn(orch as AnyOrch, 'advancePhase');
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args)) {
+        if (args[0] === 'rev-parse' && args[1] === 'origin/feat/robustness-test') throw new Error('unknown revision origin/feat/robustness-test');
+        if (args[0] === 'rev-parse') return 'abc123\n';
+        if (args[0] === 'diff') return 'src/test.ts\n';
+        if (args[0] === 'rev-list') return '0\n';
+      }
+      return '';
+    });
+    mockCreateSession.mockResolvedValue('sess-impl-verify-reject');
+
+    const pipeline = makePipeline(project.taskId, project.taskDir, {
+      phase: 'implement',
+      qaAttempt: 0,
+      worktreePath: join(project.root, 'worktrees', 'test-task'),
+    });
+
+    const promise = (orch as AnyOrch).runImplement(pipeline);
+    await vi.waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalled();
+    }, { timeout: 10_000 });
+    fireEvent('event', { sessionId: 'sess-impl-verify-reject', event: { type: 'result' } });
+    await vi.advanceTimersByTimeAsync(50);
+    await promise;
+
+    expect(pipeline.phase).toBe('failed');
+    expect(advanceSpy.mock.calls.filter(c => c[1] === 'failed')).toHaveLength(1);
+    const report = JSON.parse(readFileSync(join(project.taskDir, 'qa_report.json'), 'utf-8'));
+    expect(report.overall).toBe('FAIL');
+    expect(report.criteria[0].name).toBe('Git push verification');
+    expect(mockCheckExistingPRViaCLI).toHaveBeenCalled();
+  }, 30_000);
+
   it('still fails when push fails AND no PR exists for the branch', async () => {
     // Scenario: push fails AND gh pr list returns empty (no PR exists).
     // This is the normal failure case — push should be treated as fatal.
-    mockExecFileSync.mockImplementation((cmd: string, args?: string[]) => {
-      if (cmd === 'gh' && Array.isArray(args) && args[0] === 'pr' && args[1] === 'list') {
-        return ''; // empty — no PR exists
-      }
+    mockCheckExistingPRViaCLI.mockResolvedValue(null); // no PR exists
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (Array.isArray(args)) {
         if (args[0] === 'push') throw new Error('remote: Permission denied');
         if (args[0] === 'pull') return '';
@@ -2368,7 +2413,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     const promise = (orch as AnyOrch).runImplement(pipeline);
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, { timeout: 10_000 });
 
     fireEvent('event', { sessionId: 'sess-impl-no-pr', event: { type: 'result' } });
     await vi.advanceTimersByTimeAsync(50);
@@ -2411,7 +2456,7 @@ describe('runImplement — Gap 2: mandatory git push before QA', () => {
     const promise = (orch as AnyOrch).runImplement(pipeline);
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, { timeout: 10_000 });
 
     fireEvent('event', { sessionId: 'sess-impl-no-gh', event: { type: 'result' } });
     await vi.advanceTimersByTimeAsync(50);
@@ -2521,7 +2566,7 @@ describe('runImplement — safety-net commit excludes .teamai/ (Bug 1)', () => {
       // Wait for both coder sessions to start (sendMessage called for each)
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalledTimes(2);
-      });
+      }, WAIT);
 
       // Resolve both coder sessions so the groups loop can complete
       fireEvent('event', { sessionId: 'sess-safety-net-st1', event: { type: 'result' } });
@@ -2631,7 +2676,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // Only ONE subtask should be run (subtask 2 — the flagged one)
       expect(mockCreateSession).toHaveBeenCalledTimes(1);
@@ -2698,7 +2743,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // Resolve subtask 1 so the loop can proceed to subtask 2
       fireEvent('event', { sessionId: 'sess-full-1', event: { type: 'result' } });
@@ -2759,7 +2804,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // The prompt must have built successfully (no crash) with an empty
       // Files: line rather than throwing on undefined.join().
@@ -2808,7 +2853,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // Only ONE session should be created — the synthetic rework subtask
       expect(mockCreateSession).toHaveBeenCalledTimes(1);
@@ -2889,7 +2934,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // Fresh synthesis must run — not a no-op skip because 9999 already exists
       expect(mockCreateSession).toHaveBeenCalledTimes(1);
@@ -2958,7 +3003,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       // and the orchestrator hasn't reached waitForCompletion yet.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // Now it's safe — the orchestrator is in waitForCompletion
       fireEvent('event', { sessionId: 'sess-cleanup', event: { type: 'result' } });
@@ -3022,7 +3067,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // Resolve both subtasks so the groups loop can complete
       fireEvent('event', { sessionId: 'sess-multi-1', event: { type: 'result' } });
@@ -3127,7 +3172,7 @@ describe('runImplement — targeted re-run: only QA-flagged subtasks on bounce-b
       // so the event listener is registered before we fire the result event.
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // Only ONE subtask should run — the flagged one (subtask 1).
       // SubTask 2 is in the same parallel_group but not flagged — skip it.
@@ -3245,7 +3290,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // No deliverable files created in the worktree — will fail verification
       expect(existsSync(join(project.root, 'output/report.json'))).toBe(false);
@@ -3293,7 +3338,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // The prompt should contain the re-verification header
       const prompt = mockSendMessage.mock.calls[0][1];
@@ -3334,7 +3379,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
     const promise = (orch as AnyOrch).runImplement(pipeline);
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, WAIT);
 
     fireEvent('event', { sessionId: 'sess-deliverable-broken', event: { type: 'result' } });
     await vi.advanceTimersByTimeAsync(50);
@@ -3383,7 +3428,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // Create the deliverable file BEFORE firing the result event
       mkdirSync(join(project.root, "worktrees", "test-task"), { recursive: true });
@@ -3448,7 +3493,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // THIS session reschedules — job is still running, writes a fresh wakeup file.
       writeFileSync(join(project.taskDir, 'subtask_wakeup-st5.json'), JSON.stringify({
@@ -3495,7 +3540,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       // Create only 1 of 3 files
       mkdirSync(join(project.root, "worktrees", "test-task"), { recursive: true });
@@ -3543,7 +3588,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       const prompt = mockSendMessage.mock.calls[0][1];
       // Should list ALL files from files_to_create
@@ -3585,7 +3630,7 @@ describe('runImplement — deliverable verification circuit breaker (ADR 005)', 
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
 
       const prompt = mockSendMessage.mock.calls[0][1];
       expect(prompt).not.toContain('DELIVERABLE RE-VERIFICATION');
@@ -3672,7 +3717,7 @@ describe('runImplement — stall-detector-kill recovery', () => {
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalledTimes(1);
-      });
+      }, WAIT);
 
       // First attempt's prompt carries no recovery header.
       expect(mockSendMessage.mock.calls[0][1]).not.toContain('SESSION RECOVERED AFTER STALL-KILL');
@@ -3685,7 +3730,7 @@ describe('runImplement — stall-detector-kill recovery', () => {
       await vi.waitFor(() => {
         expect(mockCreateSession).toHaveBeenCalledTimes(2);
         expect(mockSendMessage).toHaveBeenCalledTimes(2);
-      });
+      }, WAIT);
       const retryPrompt = mockSendMessage.mock.calls[1][1];
       expect(retryPrompt).toContain('SESSION RECOVERED AFTER STALL-KILL (attempt 1/3)');
       expect(retryPrompt).toContain('Your own change caused a genuine hang');
@@ -3746,7 +3791,7 @@ describe('runImplement — stall-detector-kill recovery', () => {
       const promise = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalledTimes(1);
-      });
+      }, WAIT);
 
       fireEvent('exit', { sessionId: 'sess-idle-stalled', code: null, signal: 'SIGTERM' });
       await vi.advanceTimersByTimeAsync(30);
@@ -3754,7 +3799,7 @@ describe('runImplement — stall-detector-kill recovery', () => {
       await vi.waitFor(() => {
         expect(mockCreateSession).toHaveBeenCalledTimes(2);
         expect(mockSendMessage).toHaveBeenCalledTimes(2);
-      });
+      }, WAIT);
       const retryPrompt = mockSendMessage.mock.calls[1][1];
       expect(retryPrompt).toContain('SESSION RECOVERED AFTER STALL-KILL (attempt 1/3)');
       expect(retryPrompt).toContain('over 15 minutes while IDLE');
@@ -3808,7 +3853,7 @@ describe('runImplement — stall-detector-kill recovery', () => {
     const promise = (orch as AnyOrch).runImplement(pipeline);
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    });
+    }, WAIT);
 
     // maxStallRecoveries: 1 — the first kill already brings attemptCount to
     // 1, which meets the cap, so this fails immediately with no retry session.
@@ -3859,7 +3904,7 @@ describe('runImplement — stall-detector-kill recovery', () => {
     promise.catch(() => { /* best-effort */ });
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    });
+    }, WAIT);
 
     fireEvent('exit', { sessionId: 'sess-stopped', code: null, signal: 'SIGTERM' });
     await vi.advanceTimersByTimeAsync(50);
@@ -4111,7 +4156,7 @@ describe('pipeline-state — persistence of ADR 005 fields', () => {
       const promise1 = (orch as AnyOrch).runImplement(pipeline);
       await vi.waitFor(() => {
         expect(mockSendMessage).toHaveBeenCalled();
-      });
+      }, WAIT);
       fireEvent('event', { sessionId: 'sess-crash-verify', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
 
@@ -4209,7 +4254,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), JSON.stringify({
         subtask_id: 1,
@@ -4269,7 +4314,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       writeFileSync(join(project.taskDir, 'subtask_wakeup-st2.json'), JSON.stringify({
         subtask_id: 2,
@@ -4308,7 +4353,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), 'not valid json {{{');
 
@@ -4346,7 +4391,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       writeFileSync(join(project.taskDir, 'subtask_wakeup-st4.json'), JSON.stringify({
         subtask_id: 4,
@@ -4410,7 +4455,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       // Session ends with NO wakeup file present yet — the first scan must
       // find nothing, same as a genuinely-missed race.
@@ -4477,7 +4522,7 @@ describe('runImplement — wakeup file detection (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       // Subtask 8's session, discovering Subtask 7 is what's actually
       // blocked, schedules 7's wakeup instead of its own.
@@ -4609,7 +4654,7 @@ describe('runImplement — wakeup subtask isolation (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       expect(mockCreateSession).toHaveBeenCalledTimes(1);
       const prompt = mockSendMessage.mock.calls[0][1];
@@ -4664,7 +4709,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       const prompt = mockSendMessage.mock.calls[0][1];
       expect(prompt).toContain('WAKEUP RE-ENTRY');
@@ -4713,7 +4758,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       // No fresh wakeup file written this session, and the expected
       // deliverable was never produced.
@@ -4779,7 +4824,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       // No fresh wakeup file this session, and the evidence file's mtime is
       // unchanged from when the wakeup was scheduled — nothing was produced.
@@ -4870,7 +4915,7 @@ describe('runImplement — wakeup re-entry prompt (ADR 002)', () => {
       completedIds, scopeViolations, sessionMapLock,
     );
 
-    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
     // No fresh wakeup file this session — the subtask completes now.
     fireEvent('event', { sessionId: 'sess-wakeup-complete', event: { type: 'result' } });
@@ -4952,7 +4997,7 @@ describe('runImplement — scope check honors files_to_create', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       // The deliverable is actually produced before the session ends.
       mkdirSync(join(worktreePath, 'scripts/job_logs'), { recursive: true });
@@ -5009,7 +5054,7 @@ describe('runImplement — scope check honors files_to_create', () => {
       false, false, join(project.taskDir, 'human_feedback.md'),
       completedIds, scopeViolations, { current: Promise.resolve() },
     );
-    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
     mkdirSync(join(worktreePath, 'scripts/job_logs'), { recursive: true });
     writeFileSync(join(worktreePath, 'scripts/job_logs/evidence.txt'), 'evidence');
@@ -5062,7 +5107,7 @@ describe('runImplement — scope check honors files_to_create', () => {
       false, false, join(project.taskDir, 'human_feedback.md'),
       [], new Set<number>(), { current: Promise.resolve() },
     );
-    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+    await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
     writeFileSync(join(project.taskDir, 'subtask_wakeup-st4.json'), JSON.stringify({
       subtask_id: 4, wakeup_at: '2026-07-04T12:00:00Z',
@@ -5110,7 +5155,7 @@ describe('runImplement — scope check honors files_to_create', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       fireEvent('event', { sessionId: 'sess-noop', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
@@ -5173,7 +5218,7 @@ describe('runImplement — scope check honors files_to_create', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       mkdirSync(join(worktreePath, 'scripts/job_logs'), { recursive: true });
       writeFileSync(join(worktreePath, 'scripts/job_logs/evidence.txt'), 'evidence');
@@ -5272,7 +5317,7 @@ describe('runImplement — commit guard for sequential subtasks', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       fireEvent('event', { sessionId: 'sess-commit-guard', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
@@ -5355,7 +5400,7 @@ describe('runImplement — depends_on gates dispatch across groups', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       fireEvent('event', { sessionId: 'sess-dep-1', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
@@ -5410,7 +5455,7 @@ describe('runImplement — depends_on gates dispatch across groups', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       fireEvent('event', { sessionId: 'sess-undeclared-dep', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
@@ -5465,10 +5510,10 @@ describe('runImplement — depends_on gates dispatch across groups', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
       fireEvent('event', { sessionId: 'sess-dep-a', event: { type: 'result' } });
 
-      await vi.waitFor(() => { expect(mockCreateSession).toHaveBeenCalledTimes(2); });
+      await vi.waitFor(() => { expect(mockCreateSession).toHaveBeenCalledTimes(2); }, WAIT);
       fireEvent('event', { sessionId: 'sess-dep-b', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
       await promise;
@@ -5537,7 +5582,7 @@ describe('runImplement — implement completeness gate', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
       fireEvent('event', { sessionId: 'sess-gate-retry', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
       await promise;
@@ -5578,7 +5623,7 @@ describe('runImplement — implement completeness gate', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
       fireEvent('event', { sessionId: 'sess-gate-cap', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
       await promise;
@@ -5632,7 +5677,7 @@ describe('runImplement — implement completeness gate', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
       fireEvent('event', { sessionId: 'sess-gate-complete', event: { type: 'result' } });
       await vi.advanceTimersByTimeAsync(50);
       await promise;
@@ -5690,7 +5735,7 @@ describe('runImplement — implement completeness gate', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       mkdirSync(join(worktreePath, 'out'), { recursive: true });
       writeFileSync(join(worktreePath, 'out', 'evidence.txt'), 'evidence');
@@ -5757,7 +5802,7 @@ describe('runImplement — implement completeness gate', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       // Subtask 1 was never named by qa_feedback.md, so criterion-matching
       // flags nothing real and synthesizes 9999 instead — the only session
@@ -6061,7 +6106,7 @@ describe('runImplement — wakeup inside a multi-subtask group defers only the p
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockCreateSession).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockCreateSession).toHaveBeenCalled(); }, WAIT);
 
       // The resumed session must run in the preserved isolated worktree —
       // not fall back to the main pipeline worktree, where the job's
@@ -6236,7 +6281,7 @@ describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), JSON.stringify({
         subtask_id: 1, wakeup_at: '2026-07-04T12:00:00Z', background_command: 'npm run benchmark', expected_artifact: 'results/bench.json',
@@ -6269,7 +6314,7 @@ describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       // Engineer writes a 3rd wakeup file — pushes counter 2→3
       // wakeupDetected=true prevents wakeup completion, so post-groups circuit breaker fires
@@ -6314,7 +6359,7 @@ describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       // Engineer relaunches under a DIFFERENT command after fixing a blocker.
       writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), JSON.stringify({
@@ -6350,7 +6395,7 @@ describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       writeFileSync(join(project.taskDir, 'subtask_wakeup.json'), JSON.stringify({
         subtask_id: 1, wakeup_at: '2026-07-05T00:00:00Z',
@@ -6382,7 +6427,7 @@ describe('runImplement — wakeup circuit breaker (ADR 002)', () => {
 
     try {
       const promise = (orch as AnyOrch).runImplement(pipeline);
-      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); });
+      await vi.waitFor(() => { expect(mockSendMessage).toHaveBeenCalled(); }, WAIT);
 
       expect(mockSendMessage.mock.calls[0][1]).toContain('WAKEUP RE-ENTRY');
 
@@ -6742,7 +6787,7 @@ describe('sweepAbandonedWorktreeRelocations', () => {
     project.clean();
   });
 
-  it('deletes an abandoned relocation directory that is not registered as a live worktree', () => {
+  it('deletes an abandoned relocation directory that is not registered as a live worktree', async () => {
     const activePath = join(worktreeBase, 'my-task');
     const abandonedPath = join(worktreeBase, 'my-task-r2');
     mkdirSync(abandonedPath);
@@ -6753,12 +6798,12 @@ describe('sweepAbandonedWorktreeRelocations', () => {
     const pipeline = minimalImplPipeline({ worktreePath: activePath });
     const deps = { projectRoot: project.root } as unknown as ImplementDeps;
 
-    sweepAbandonedWorktreeRelocations(pipeline, deps);
+    await sweepAbandonedWorktreeRelocations(pipeline, deps);
 
     expect(existsSync(abandonedPath)).toBe(false);
   });
 
-  it('never deletes the currently active worktreePath, even if it is itself a relocated path', () => {
+  it('never deletes the currently active worktreePath, even if it is itself a relocated path', async () => {
     const activePath = join(worktreeBase, 'my-task-r2');
     mkdirSync(activePath);
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
@@ -6768,12 +6813,12 @@ describe('sweepAbandonedWorktreeRelocations', () => {
     const pipeline = minimalImplPipeline({ worktreePath: activePath });
     const deps = { projectRoot: project.root } as unknown as ImplementDeps;
 
-    sweepAbandonedWorktreeRelocations(pipeline, deps);
+    await sweepAbandonedWorktreeRelocations(pipeline, deps);
 
     expect(existsSync(activePath)).toBe(true);
   });
 
-  it('does not delete a relocation directory that is still registered as a live git worktree', () => {
+  it('does not delete a relocation directory that is still registered as a live git worktree', async () => {
     const activePath = join(worktreeBase, 'my-task');
     const liveOtherPath = join(worktreeBase, 'my-task-r2'); // e.g. a concurrently-running pipeline
     mkdirSync(liveOtherPath);
@@ -6784,12 +6829,12 @@ describe('sweepAbandonedWorktreeRelocations', () => {
     const pipeline = minimalImplPipeline({ worktreePath: activePath });
     const deps = { projectRoot: project.root } as unknown as ImplementDeps;
 
-    sweepAbandonedWorktreeRelocations(pipeline, deps);
+    await sweepAbandonedWorktreeRelocations(pipeline, deps);
 
     expect(existsSync(liveOtherPath)).toBe(true);
   });
 
-  it('ignores directories that do not match the -rN relocation naming pattern', () => {
+  it('ignores directories that do not match the -rN relocation naming pattern', async () => {
     const activePath = join(worktreeBase, 'my-task');
     const unrelatedPath = join(worktreeBase, 'my-task-staging');
     mkdirSync(unrelatedPath);
@@ -6800,12 +6845,12 @@ describe('sweepAbandonedWorktreeRelocations', () => {
     const pipeline = minimalImplPipeline({ worktreePath: activePath });
     const deps = { projectRoot: project.root } as unknown as ImplementDeps;
 
-    sweepAbandonedWorktreeRelocations(pipeline, deps);
+    await sweepAbandonedWorktreeRelocations(pipeline, deps);
 
     expect(existsSync(unrelatedPath)).toBe(true);
   });
 
-  it('is a no-op when git worktree list fails — never risks deleting something possibly in use', () => {
+  it('is a no-op when git worktree list fails — never risks deleting something possibly in use', async () => {
     const activePath = join(worktreeBase, 'my-task');
     const abandonedPath = join(worktreeBase, 'my-task-r2');
     mkdirSync(abandonedPath);
@@ -6813,7 +6858,7 @@ describe('sweepAbandonedWorktreeRelocations', () => {
     const pipeline = minimalImplPipeline({ worktreePath: activePath });
     const deps = { projectRoot: project.root } as unknown as ImplementDeps;
 
-    expect(() => sweepAbandonedWorktreeRelocations(pipeline, deps)).not.toThrow();
+    await expect(sweepAbandonedWorktreeRelocations(pipeline, deps)).resolves.toBeUndefined();
     expect(existsSync(abandonedPath)).toBe(true);
   });
 });
@@ -6931,7 +6976,7 @@ describe('Defect 3 — tryCherryPickWithRecovery (error routing)', () => {
     // Wait for the merger agent to be spawned
     await vi.waitFor(() => {
       expect(mockSendMessage).toHaveBeenCalled();
-    });
+    }, WAIT);
 
     // Infra retry path was NOT entered (CHERRY_PICK_HEAD existed, so the
     // guard "!checkCherryPickInProgress && isInfraError" was false)

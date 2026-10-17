@@ -1,11 +1,10 @@
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, rmSync } from 'fs';
 import path from 'path';
-import { execFileSync } from 'child_process';
 import { processManager } from './process-manager';
 import { readContainerConfig, containerManager, hostToContainerPath, checkDockerAvailable } from './container-manager';
 import { TaskStore } from './task-store';
 import { slugify } from './utils';
-import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit, execGitCapture } from './orchestrator/worktree-utils';
+import { isWorktreeHealthy, restoreWorktreeGitFileToHostPaths, patchWorktreeGitFile, worktreeGitEnv, execGit, execGitCapture, execGitQueued } from './orchestrator/worktree-utils';
 import { rotateOutputLog, persistAndEmitPhase, savePipelineState, restorePipelineState, pipelineAdvancePhase } from './orchestrator/pipeline-state';
 import { writeQaFeedback, writeCompletionSummary } from './orchestrator/qa-feedback';
 import { runSpecPhase, runPlanPhase, runMergePhase, runCreatePRPhase } from './orchestrator/phase-runners';
@@ -967,9 +966,7 @@ export class Orchestrator {
       // Only multi-group subtasks with an isolated branch need reconciliation.
       let stBranchExists = false;
       try {
-        execFileSync('git', ['rev-parse', '--verify', stBranch], {
-          cwd: this.projectRoot, encoding: 'utf-8', stdio: 'pipe',
-        });
+        await execGitQueued(['rev-parse', '--verify', stBranch], this.projectRoot, this.projectRoot);
         stBranchExists = true;
       } catch { /* no st-branch → non-multi-group, completed: true is durable */ }
 

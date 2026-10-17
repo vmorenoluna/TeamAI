@@ -91,6 +91,11 @@ import { renderCommand } from '../../src/lib/command-templates';
 
 const fireEvent = createFireEvent(onHandlers);
 
+/** Resolves once the pipeline has created `sessionId` and sent it its prompt (a listener is then registered). */
+const waitForSent = (sessionId: string) => vi.waitFor(() => {
+  expect(mockSendMessage.mock.calls.some((c: unknown[]) => c[0] === sessionId)).toBe(true);
+}, { timeout: 10_000 });
+
 // ── Tests ──
 
 describe('Orchestrator', () => {
@@ -669,7 +674,6 @@ describe('Orchestrator', () => {
 
       // Fire events to let the pipeline complete
       fireEvent('event', { sessionId: 'sess-reject', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
       await promise;
     });
 
@@ -692,7 +696,7 @@ describe('Orchestrator', () => {
       await expect(orch.rejectTask(testData.taskId, 'again', 'coder')).rejects.toThrow(/already running/i);
 
       fireEvent('event', { sessionId: 'sess-active', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      await vi.waitFor(() => { expect(orch.isTaskActive(testData.taskId)).toBe(false); }, { timeout: 10_000 });
     });
 
     it('moves the task to failed and logs the error when the detached rework run throws', async () => {
@@ -710,7 +714,7 @@ describe('Orchestrator', () => {
 
       // Resolves without waiting for the rework run, which fails afterwards.
       await orch.rejectTask(testData.taskId, 'Fix the tests', 'coder');
-      await new Promise(r => setTimeout(r, 50));
+      await vi.waitFor(() => { expect(pipeline.phase).toBe('failed'); }, { timeout: 10_000 });
 
       expect(pipeline.phase).toBe('failed');
       // Same lifecycle as a runTask run: lock and pipeline released once it ends.
@@ -2385,7 +2389,7 @@ describe('Orchestrator', () => {
       // resetsAt = 0 → fires immediately
       (orch as AnyOrch).handleRateLimit(pipeline, 0);
 
-      await new Promise(r => setTimeout(r, 50));
+      await vi.waitFor(() => { expect((orch as AnyOrch).pipelines.has(testData.taskId)).toBe(false); }, { timeout: 10_000 });
 
       // Verify the task was NOT resumed — pipeline cleaned up, rateLimitedUntil cleared
       expect(failedCalled).toBe(false);
@@ -2446,7 +2450,7 @@ describe('Orchestrator', () => {
 
       // Wait for setTimeout to fire and executePhase to run 
       // which calls runSpec → waitForCompletion
-      await new Promise(r => setTimeout(r, 30));
+      await waitForSent('retry-sess');
 
       // Now waitForCompletion should be listening — fire rate limit events
       // This makes waitForCompletion reject with RateLimitError
@@ -2460,7 +2464,7 @@ describe('Orchestrator', () => {
       });
 
       // Give microtasks time to process the rejection chain
-      await new Promise(r => setTimeout(r, 30));
+      await vi.waitFor(() => { expect(rateLimitCalls).toBe(2); }, { timeout: 10_000 });
 
       // Restore original methods
       delete (orch as AnyOrch).handleRateLimit;
@@ -2497,7 +2501,7 @@ describe('Orchestrator', () => {
 
       taskStore.update(testData.taskId, { phase: 'backlog' });
 
-      await new Promise(r => setTimeout(r, 30));
+      await vi.waitFor(() => { expect((orch as AnyOrch).pipelines.has(testData.taskId)).toBe(false); }, { timeout: 10_000 });
 
       delete (orch as AnyOrch).advancePhase;
 
@@ -2537,7 +2541,7 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).pipelines.set(testData.taskId, pipelineB);
 
       // Wait for the setTimeout callback to fire
-      await new Promise(r => setTimeout(r, 30));
+      await vi.waitFor(() => { expect(taskStore.getById(testData.taskId).rateLimitedUntil).toBeFalsy(); }, { timeout: 10_000 });
 
       delete (orch as AnyOrch).advancePhase;
 
@@ -2562,11 +2566,10 @@ describe('Orchestrator', () => {
       const orch = makeOrch(testData.root, getOrchestrator);
       mockCreateSession.mockResolvedValue('sess-rl-runTask');
       const runPromise = orch.runTask(testData.taskId, 'test task', 'spec').catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-rl-runTask');
       const future = Math.floor(Date.now() / 1000) + 9999;
       fireEvent('event', { sessionId: 'sess-rl-runTask', event: { type: 'rate_limit_event', rate_limit_info: { status: 'limited', resetsAt: future } } });
       fireEvent('event', { sessionId: 'sess-rl-runTask', event: { type: 'result', is_error: true } });
-      await new Promise(r => setTimeout(r, 30));
       await runPromise;
       expect((orch as AnyOrch).pipelines.has(testData.taskId)).toBe(true);
       expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(true);
@@ -2588,13 +2591,13 @@ describe('Orchestrator', () => {
       const executePromise = new Promise<void>(r => { resolveExecute = r; });
       (orch as AnyOrch).executePhase = async (_p: any) => { executePhaseCalled = true; return executePromise; };
       (orch as AnyOrch).handleRateLimit(pipeline, 0);
-      await new Promise(r => setTimeout(r, 30));
+      await vi.waitFor(() => { expect(executePhaseCalled).toBe(true); }, { timeout: 10_000 });
       // executePhase was called, but hasn't resolved yet — pipeline should still be in maps
       expect(executePhaseCalled).toBe(true);
       expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(true);
       // Now resolve and let the finally block clean up
       resolveExecute();
-      await new Promise(r => setTimeout(r, 10));
+      await vi.waitFor(() => { expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(false); }, { timeout: 10_000 });
       delete (orch as AnyOrch).executePhase;
       // finally block has run — clean up our manual additions
       (orch as AnyOrch).pipelines.delete(testData.taskId);
@@ -2628,7 +2631,7 @@ describe('Orchestrator', () => {
 
       // Give microtasks time: runSpec awaits createSession → resolves → 
       // sends message → awaits waitForCompletion
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('spec-sess-1');
 
       // Should have called createSession (spec phase)
       expect(mockCreateSession).toHaveBeenCalled();
@@ -2645,7 +2648,6 @@ describe('Orchestrator', () => {
       fireEvent('event', { sessionId: 'spec-sess-1', event: { type: 'result' } });
 
       // Let the promise chain complete (spec finishes, advances to plan, plan fails)
-      await new Promise(r => setTimeout(r, 50));
       await promise;
 
       // Spec phase should have killed the session
@@ -2673,7 +2675,7 @@ describe('Orchestrator', () => {
       });
 
       const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('spec-sess-v1');
 
       expect(mockCreateSession).toHaveBeenCalled();
       expect(mockSendMessage).toHaveBeenCalledWith('spec-sess-v1', expect.stringContaining('/spec'));
@@ -2684,7 +2686,6 @@ describe('Orchestrator', () => {
 
       // Fire result event to resolve waitForCompletion
       fireEvent('event', { sessionId: 'spec-sess-v1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
       await promise;
 
       // No snapshot copy — the live spec.md is the one and only version.
@@ -2720,7 +2721,7 @@ describe('Orchestrator', () => {
       });
 
       const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('spec-sess-rev');
 
       // Should be in revision mode — renders the spec-revise command, not spec
       expect(mockSendMessage).toHaveBeenCalledWith('spec-sess-rev', expect.stringMatching(/^<!-- \.claude\/commands\/spec-revise\.md -->/));
@@ -2729,7 +2730,6 @@ describe('Orchestrator', () => {
       writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec v2 — Revised');
 
       fireEvent('event', { sessionId: 'spec-sess-rev', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
       await promise;
 
       // spec_v1.md still contains the original content (not overwritten)
@@ -2928,7 +2928,7 @@ describe('Orchestrator', () => {
       });
 
       const promise = (orch as AnyOrch).runMerge(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-merge-rebase');
 
       // Merger session should have been created for rebase conflict
       expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', renderCommand('merge', 'origin/main'));
@@ -2986,7 +2986,7 @@ describe('Orchestrator', () => {
       });
 
       const promise = (orch as AnyOrch).runMerge(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-merge-rebase');
 
       // Merger session was created
       expect(mockSendMessage).toHaveBeenCalledWith('sess-merge-rebase', renderCommand('merge', 'origin/main'));
@@ -3035,7 +3035,7 @@ describe('Orchestrator', () => {
       });
 
       const promise = (orch as AnyOrch).runMerge(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-merge-conflict');
 
       // Merger session created for merge conflict
       expect(mockCreateSession).toHaveBeenCalledTimes(1);
@@ -3371,7 +3371,7 @@ describe('Orchestrator', () => {
       });
 
       const promise = (orch as AnyOrch).runCreatePR(pipeline);
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-merger');
 
       expect(rebaseCalled).toBe(true);
 
@@ -3436,10 +3436,10 @@ describe('Orchestrator', () => {
       });
 
       const promise = (orch as AnyOrch).runCreatePR(pipeline);
-      await new Promise(r => setTimeout(r, 20));
 
       // Merger session was created      expect(mockSendMessage).toHaveBeenCalledWith('sess-merger', renderCommand('merge', 'origin/main'));
       // Simulate merger failure — exit with non-zero code
+      await waitForSent('sess-merger');
       fireEvent('exit', { sessionId: 'sess-merger', code: 1 });
       await promise;
 
@@ -4482,13 +4482,13 @@ describe('Orchestrator', () => {
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-1');
 
       expect(mockCreateSession).toHaveBeenCalled();
       // The ensureWorktree Docker gate is only applied when !containerCfg.explicit.
 
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 10));
+      await promise;
 
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'PASS',
@@ -4526,7 +4526,7 @@ describe('Orchestrator', () => {
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++callCount}`));
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-1');
 
       const gitCalls = mockExecFileSync.mock.calls.filter(
         (call: any[]) => call[0] === 'git' && (call[1] as string[]).includes('worktree')
@@ -4534,7 +4534,7 @@ describe('Orchestrator', () => {
       expect(gitCalls.length).toBeGreaterThanOrEqual(1);
 
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 10));
+      await promise;
 
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'PASS',
@@ -4577,12 +4577,12 @@ describe('Orchestrator', () => {
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++callCount}`));
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-1');
 
       expect(gitWorktreeAttemptCount).toBe(2);
 
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 10));
+      await promise;
 
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'PASS',
@@ -4625,7 +4625,7 @@ describe('Orchestrator', () => {
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-1');
 
       // Verify the coder got both feedbacks
       const sendCalls = mockSendMessage.mock.calls.filter(
@@ -4640,7 +4640,7 @@ describe('Orchestrator', () => {
 
       // Fire events to complete implement -> QA -> done
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 10));
+      await promise;
 
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'PASS',
@@ -4680,7 +4680,7 @@ describe('Orchestrator', () => {
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-1');
 
       const sendCalls = mockSendMessage.mock.calls.filter(
         (call: any[]) => call[0] === 'sess-1'
@@ -4692,7 +4692,7 @@ describe('Orchestrator', () => {
       expect(promptText).not.toContain('Also fix the header alignment');
 
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 10));
+      await promise;
 
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'PASS',
@@ -4727,7 +4727,7 @@ describe('Orchestrator', () => {
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-1');
 
       const sendCalls = mockSendMessage.mock.calls.filter(
         (call: any[]) => call[0] === 'sess-1'
@@ -4737,7 +4737,7 @@ describe('Orchestrator', () => {
       expect(promptText).toContain('Subtask 1: ');
 
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 10));
+      await promise;
 
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'PASS',
@@ -4774,7 +4774,7 @@ describe('Orchestrator', () => {
       mockExecFileSync.mockReturnValue('');
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-subtask');
 
     // No merger spawned on fast path
       const sendCalls = mockSendMessage.mock.calls;
@@ -4790,7 +4790,7 @@ describe('Orchestrator', () => {
 
     // Complete subtask -> push -> QA -> done
       fireEvent('event', { sessionId: 'sess-subtask', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-subtask');
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
       overall: 'PASS',
       criteria: [],
@@ -4840,21 +4840,21 @@ describe('Orchestrator', () => {
     });
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-impl-rebase');
 
     // Merger session spawns first
       expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', renderCommand('merge', 'origin/main'));
 
     // Complete merger
       fireEvent('event', { sessionId: 'sess-impl-rebase', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-subtask');
 
     // After rebase resolves, implement proceeds to subtask
       expect(mockSendMessage).toHaveBeenCalledWith('sess-subtask', expect.stringContaining('Subtask 1: '));
 
     // Complete subtask -> push -> QA -> done
       fireEvent('event', { sessionId: 'sess-subtask', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 10));
+      await promise;
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
       overall: 'PASS',
       criteria: [],
@@ -4904,21 +4904,21 @@ describe('Orchestrator', () => {
     });
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-impl-rebase');
 
     // Merger was spawned
       expect(mockSendMessage).toHaveBeenCalledWith('sess-impl-rebase', renderCommand('merge', 'origin/main'));
 
     // Simulate merger failure
       fireEvent('exit', { sessionId: 'sess-impl-rebase', code: 1 });
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-subtask-after');
 
     // Even though merger failed, implement continues (unlike merge which throws)
       expect(mockSendMessage).toHaveBeenCalledWith('sess-subtask-after', expect.stringContaining('Subtask 1: '));
 
     // Complete subtask -> push -> QA -> done
       fireEvent('event', { sessionId: 'sess-subtask-after', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 10));
+      await promise;
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
       overall: 'PASS',
       criteria: [],
@@ -4947,7 +4947,7 @@ describe('Orchestrator', () => {
       }));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-qa');
       fireEvent('event', { sessionId: 'sess-qa', event: { type: 'result' } });
       await promise;
 
@@ -4991,7 +4991,7 @@ describe('Orchestrator', () => {
       }));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-qa');
       fireEvent('event', { sessionId: 'sess-qa', event: { type: 'result' } });
       await promise;
 
@@ -5021,7 +5021,7 @@ describe('Orchestrator', () => {
       }));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-qa');
 
       const sendCalls = mockSendMessage.mock.calls.filter((c: any[]) => c[0] === 'sess-qa');
       expect(sendCalls.length).toBeGreaterThanOrEqual(1);
@@ -5053,7 +5053,7 @@ describe('Orchestrator', () => {
       }));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-qa');
       fireEvent('event', { sessionId: 'sess-qa', event: { type: 'result' } });
       await promise;
 
@@ -5106,11 +5106,11 @@ describe('Orchestrator', () => {
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-qa-incomplete');
       fireEvent('event', { sessionId: 'sess-qa-incomplete', event: { type: 'result' } });
       // Give the incomplete-report branch's recursive executePhase() call a
       // tick to spawn the retry session before the retry's report is written.
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-qa-retry');
 
       // The retry actually finishes verification this time.
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
@@ -5150,7 +5150,7 @@ describe('Orchestrator', () => {
       }));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-qa-incomplete-exhausted');
       fireEvent('event', { sessionId: 'sess-qa-incomplete-exhausted', event: { type: 'result' } });
       await promise;
 
@@ -5204,7 +5204,7 @@ describe('Orchestrator', () => {
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       const caught = promise.catch(() => { /* best-effort */ }); // attach handler before cascade microtasks fire
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-qa-spec');
       fireEvent('event', { sessionId: 'sess-qa-spec', event: { type: 'result' } });
       // Wait for auto-revision cascade to complete (including the abort)
       await caught;
@@ -5255,7 +5255,7 @@ describe('Orchestrator', () => {
 
       const promise = (orch as AnyOrch).runQaReview(pipeline);
       const caught = promise.catch(() => { /* best-effort */ }); // attach handler before cascade microtasks fire
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-qa-pass-spec');
       fireEvent('event', { sessionId: 'sess-qa-pass-spec', event: { type: 'result' } });
       await caught;
 
@@ -5296,9 +5296,8 @@ describe('Orchestrator', () => {
       }));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-qa-fail');
       fireEvent('event', { sessionId: 'sess-qa-fail', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
       await promise;
 
       // Standard FAIL without spec_concerns should bounce to implement
@@ -5332,9 +5331,8 @@ describe('Orchestrator', () => {
       }));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-qa-empty');
       fireEvent('event', { sessionId: 'sess-qa-empty', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
       await promise;
 
       // Empty spec_concerns should follow normal FAIL path → bounce to implement
@@ -5373,7 +5371,7 @@ describe('Orchestrator', () => {
       }));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 10));
+      await waitForSent('sess-qa-max-rev');
       fireEvent('event', { sessionId: 'sess-qa-max-rev', event: { type: 'result' } });
       await promise;
 
@@ -5627,7 +5625,7 @@ describe('Orchestrator', () => {
       });
 
       const promise = (orch as AnyOrch).runPlan(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-replan');
 
       const sendCalls = mockSendMessage.mock.calls.filter(
         (call: any[]) => call[0] === 'sess-replan'
@@ -5644,7 +5642,6 @@ describe('Orchestrator', () => {
       expect(request).not.toContain('Keep completed subtasks');
 
       fireEvent('event', { sessionId: 'sess-replan', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
       await promise;
     });
   });
@@ -5672,7 +5669,7 @@ describe('Orchestrator', () => {
       });
 
       const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-spec-rev');
 
       // Should have rendered the spec-revise command, not spec
       const sendCalls = mockSendMessage.mock.calls.filter(
@@ -5688,7 +5685,6 @@ describe('Orchestrator', () => {
 
       // Fire completion
       fireEvent('event', { sessionId: 'sess-spec-rev', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
       await promise;
     });
 
@@ -5712,13 +5708,12 @@ describe('Orchestrator', () => {
       });
 
       const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-spec-cleanup');
 
       // File should still exist during spec execution
       expect(existsSync(join(testData.taskDir, 'spec_revision_feedback.md'))).toBe(true);
 
       fireEvent('event', { sessionId: 'sess-spec-cleanup', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
       await promise;
 
       // After spec completes, revision feedback should be cleaned up
@@ -5744,7 +5739,7 @@ describe('Orchestrator', () => {
       });
 
       const promise = (orch as AnyOrch).runSpec(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSent('sess-spec-normal');
 
       const sendCalls = mockSendMessage.mock.calls.filter(
         (call: any[]) => call[0] === 'sess-spec-normal'
@@ -5755,7 +5750,6 @@ describe('Orchestrator', () => {
       expect(prompt).not.toContain('REVISION:');
 
       fireEvent('event', { sessionId: 'sess-spec-normal', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
       await promise;
     });
   });
@@ -5824,7 +5818,7 @@ describe('Orchestrator', () => {
         // Wait for sendMessage — means the subtask session was created and prompt sent
         await vi.waitFor(() => {
           expect(mockSendMessage).toHaveBeenCalled();
-        });
+        }, { timeout: 10_000 });
 
         expect(mockCreateSession).toHaveBeenCalled();
 
@@ -5883,7 +5877,7 @@ describe('Orchestrator', () => {
 
         await vi.waitFor(() => {
           expect(mockSendMessage).toHaveBeenCalled();
-        });
+        }, { timeout: 10_000 });
 
         fireEvent('event', { sessionId: 'sess-impl-sp2', event: { type: 'result' } });
         await vi.advanceTimersByTimeAsync(50);
@@ -5928,7 +5922,7 @@ describe('Orchestrator', () => {
 
         await vi.waitFor(() => {
           expect(mockSendMessage).toHaveBeenCalled();
-        });
+        }, { timeout: 10_000 });
 
         fireEvent('event', { sessionId: 'sess-impl-sp3', event: { type: 'result' } });
         await vi.advanceTimersByTimeAsync(50);
