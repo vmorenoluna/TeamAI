@@ -29,4 +29,12 @@ describe('buildWakeupReentryHeader', () => {
   it('omits it when the SHAs match', () => {
     expect(buildWakeupReentryHeader({ ...base, headAtSchedule: A, currentHead: A })).not.toContain('HEAD moved');
   });
+
+  it('points to the WAKEUP RE-ENTRY steps in the command instead of inlining them (AC3)', () => {
+    const out = buildWakeupReentryHeader({ unitLabel: 'this subtask', wakeupFilename: 'subtask_wakeup-st3.json', command: 'x', artifact: 'y' });
+    expect(out).toContain('Follow the WAKEUP RE-ENTRY steps in your instructions below');
+    expect(out).toContain('subtask_wakeup-st3.json');
+    expect(out).not.toContain('Report the failure immediately');
+    expect(out).not.toContain('do NOT write another wakeup');
+  });
 });
