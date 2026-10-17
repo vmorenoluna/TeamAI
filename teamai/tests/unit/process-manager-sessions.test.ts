@@ -12,7 +12,7 @@ import { EventEmitter } from 'events';
 
 // ── Module-level mocks (must be before any imports from the file under test) ──
 
-const { mockSpawn, mockExecFileSync, mockPtySpawn, mockAppendFileSync, mockWriteFileSync, mockUnlinkSync, mockReadFileSync, mockExistsSync, mockWarn, mockLog } = vi.hoisted(() => ({
+const { mockSpawn, mockExecFileSync, mockPtySpawn, mockAppendFileSync, mockWriteFileSync, mockUnlinkSync, mockReadFileSync, mockExistsSync, mockWarn, mockLog, mockReadCommandTemplate } = vi.hoisted(() => ({
   mockSpawn: vi.fn(),
   mockExecFileSync: vi.fn(),
   mockPtySpawn: vi.fn(),
@@ -23,6 +23,11 @@ const { mockSpawn, mockExecFileSync, mockPtySpawn, mockAppendFileSync, mockWrite
   mockExistsSync: vi.fn(),
   mockWarn: vi.fn(),
   mockLog: vi.fn(),
+  mockReadCommandTemplate: vi.fn(),
+}));
+
+vi.mock('../../src/lib/command-templates', () => ({
+  readCommandTemplate: mockReadCommandTemplate,
 }));
 
 vi.mock('../../src/lib/logger', () => ({
@@ -660,10 +665,14 @@ describe('ProcessManager — Full Coverage', () => {
 
   describe('createTerminalSession', () => {
     const originalPlatform = process.platform;
+    const TEMPLATE =
+      'Use the CLI with --depends-on <id> for dependencies.\n\nWhen filing several related tickets, file them in order.';
 
     beforeEach(() => {
       // Default: findExecutable returns 'claude'
       mockExecFileSync.mockReturnValue('claude');
+      mockReadCommandTemplate.mockReset();
+      mockReadCommandTemplate.mockReturnValue(TEMPLATE);
       // Default: no role file exists
       mockExistsSync.mockReturnValue(false);
       // Default: pty spawn returns a mock
@@ -729,23 +738,48 @@ describe('ProcessManager — Full Coverage', () => {
     });
 
     // Regression: every terminal session must be able to file a kanban
-    // ticket via create-task-cli.mjs, regardless of role — this instruction
-    // is injected unconditionally, not left to each role's own prose (only
-    // "analyst" ever mentioned ticket creation, so coder/planner/qa-reviewer/
-    // merger terminal sessions had no way to know how).
-    it('always includes --append-system-prompt with the ticket-creation instruction, even when role file is missing', () => {
-      mockExistsSync.mockReturnValue(false);
+    // ticket, regardless of role — the create-task command is rendered into the
+    // system prompt unconditionally, not left to each role's own prose.
+    describe('create-task command in the system prompt', () => {
+      it('starts with role content and contains the create-task template verbatim', () => {
+        mockExistsSync.mockReturnValue(true);
+        mockReadFileSync.mockReturnValue('You are a coding expert.');
 
-      pm.createTerminalSession({
-        projectPath: '/test/project',
-        role: 'coder.md',
+        pm.createTerminalSession({ projectPath: '/test/project', role: 'coder.md' });
+
+        const prompt = mockPtySpawn.mock.calls[0][1][mockPtySpawn.mock.calls[0][1].indexOf('--append-system-prompt') + 1];
+        expect(mockReadCommandTemplate).toHaveBeenCalledWith('create-task');
+        expect(prompt.startsWith('You are a coding expert.')).toBe(true);
+        expect(prompt).toContain(TEMPLATE);
+        expect(prompt).toContain('--depends-on');
+        expect(prompt).toContain('When filing several related tickets');
+        expect(prompt).not.toContain('phase: backlog, no spec, no plan');
       });
 
-      const callArgs = mockPtySpawn.mock.calls[0];
-      expect(callArgs[1]).toContain('--append-system-prompt');
-      expect(callArgs[1][1]).toContain('create-task-cli.mjs');
-      expect(callArgs[1][1]).toContain('--project "/test/project"');
-      expect(callArgs[1][1]).toContain('phase: backlog, no spec, no plan');
+      it('includes the template even when the role file is missing', () => {
+        mockExistsSync.mockReturnValue(false);
+
+        pm.createTerminalSession({ projectPath: '/test/project', role: 'coder.md' });
+
+        const callArgs = mockPtySpawn.mock.calls[0];
+        expect(callArgs[1]).toContain('--append-system-prompt');
+        expect(callArgs[1][1]).toContain(TEMPLATE);
+      });
+
+      it('throws without spawning or writing a prompt file when the template cannot be read', () => {
+        mockExistsSync.mockReturnValue(false);
+        mockReadCommandTemplate.mockImplementation(() => {
+          throw new Error('Command template not found: create-task');
+        });
+        mockPtySpawn.mockClear();
+        mockWriteFileSync.mockClear();
+
+        expect(() => pm.createTerminalSession({ projectPath: '/test/project', role: 'coder.md' })).toThrow(
+          /create-task/,
+        );
+        expect(mockPtySpawn).not.toHaveBeenCalled();
+        expect(mockWriteFileSync).not.toHaveBeenCalled();
+      });
     });
 
     it('passes model option to PTY', () => {
@@ -885,7 +919,7 @@ describe('ProcessManager — Full Coverage', () => {
         const [writtenPath, content] = mockWriteFileSync.mock.calls[0];
         expect(writtenPath).toBe(args[7]);
         expect(content).toContain('You are a coding expert.\nSecond line');
-        expect(content).toContain('create-task-cli.mjs');
+        expect(content).toContain(TEMPLATE);
       });
 
       it('deletes the temp prompt file when the PTY exits', () => {

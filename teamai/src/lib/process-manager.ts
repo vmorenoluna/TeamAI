@@ -8,6 +8,7 @@ import { readFileSync, existsSync, appendFileSync, writeFileSync, unlinkSync } f
 import { containerManager, readContainerConfig, readContainerRemoteUser, hostToContainerPath } from './container-manager';
 import { getToolPath } from './tool-checker';
 import { log, warn } from './logger';
+import { readCommandTemplate } from './command-templates';
 
 
 export interface TerminalSession {
@@ -550,25 +551,16 @@ export class ProcessManager extends EventEmitter {
 
     // Every terminal session — regardless of role, and regardless of whether
     // the target project customizes its role files — can file a kanban
-    // ticket. Injected here (not left to each role's own prose) so it
-    // applies uniformly instead of depending on whichever roles happen to
-    // mention ticket creation. create-task-cli.mjs is the same primitive
-    // TaskStore.create() backs for the UI's "Add Task" button: a bare
-    // backlog ticket (title + description only, no spec, no plan) that
-    // goes through the normal pipeline once started.
+    // ticket. The instructions are the create-task command itself, rendered
+    // from TeamAI's defaults, so the .md stays the single source of truth.
+    // Rendered before anything is spawned or written: a failure here leaves
+    // no half-started session behind.
     const createTaskCliPath = join(process.cwd(), 'defaults', 'create-task-cli.mjs');
-    const ticketInstruction =
+    const ticketSection =
       '## Creating kanban tickets\n\n' +
-      'Before filing, list the open tickets and check the new one against each (already covered, ' +
-      "makes one obsolete, changes one's premise, depends on one); report any overlap to the user " +
-      'and wait for their decision:\n' +
-      `  node "${createTaskCliPath}" --project "${opts.projectPath}" --list\n\n` +
-      'Then file it with the fingerprint that --list printed:\n' +
-      `  node "${createTaskCliPath}" --project "${opts.projectPath}" --board "<fingerprint>" --title "<short title>" --description "<one-sentence description>"\n\n` +
-      'Exit code 3 means tickets were added since --list: check the new one against them and retry with the new fingerprint. ' +
-      'This creates a bare ticket (phase: backlog, no spec, no plan) that goes through the normal ' +
-      'spec -> plan -> implement -> QA pipeline once started. Do not hand-write task.json yourself.';
-    const systemPrompt = roleContent ? `${roleContent}\n\n${ticketInstruction}` : ticketInstruction;
+      'When you file a kanban ticket, follow these instructions (the same ones `/create-task` runs):\n\n' +
+      readCommandTemplate('create-task');
+    const systemPrompt = roleContent ? `${roleContent}\n\n${ticketSection}` : ticketSection;
 
     // `--model` goes first so it can never be lost behind the (large) prompt.
     const args: string[] = [];
@@ -596,10 +588,10 @@ export class ProcessManager extends EventEmitter {
       cols: 120,
       rows: 40,
       cwd: opts.projectPath,
-      // TEAMAI_CREATE_TASK_CLI lets the /create-task slash command (a static
-      // template with no per-session path substitution) shell out to the
-      // same script named in ticketInstruction above, without hard-coding
-      // TeamAI's install location into a file that ships with every project.
+      // TEAMAI_CREATE_TASK_CLI is what the rendered create-task command reads
+      // to find the CLI (the template has no per-session path substitution),
+      // without hard-coding TeamAI's install location into a file that ships
+      // with every project.
       env: { ...process.env, TEAMAI_CREATE_TASK_CLI: createTaskCliPath } as Record<string, string>,
     });
 
