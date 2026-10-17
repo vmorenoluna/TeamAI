@@ -28,6 +28,11 @@ vi.mock('child_process', () => ({
     const done = typeof opts === "function" ? opts as (...a: unknown[]) => void : cb;
     try {
       const out = mockExecFileSync(cmd, args, opts);
+      // A thenable result keeps the call pending until it settles (async-ness tests).
+      if (out && typeof out.then === "function") {
+        out.then((v: unknown) => done?.(null, { stdout: v == null ? "" : String(v), stderr: "" }), (e: unknown) => done?.(e));
+        return;
+      }
       done?.(null, { stdout: out == null ? "" : String(out), stderr: "" });
     } catch (e) {
       done?.(e);
@@ -88,6 +93,30 @@ import { readContainerConfig, containerManager, hostToContainerPath, checkDocker
 
 const fireEvent = createFireEvent(onHandlers);
 
+const WAIT = { timeout: 10_000 };
+const TEST_TIMEOUT = 30_000;
+
+/** Resolves once the session has been sent its message and an event listener is registered. */
+const waitForSessionReady = (sessionId: string) => vi.waitFor(() => {
+  expect(mockSendMessage.mock.calls.some(([sid]: [string, ...any[]]) => sid === sessionId)).toBe(true);
+  expect((onHandlers.get('event') ?? []).length).toBeGreaterThan(0);
+}, WAIT);
+
+/** Completes every session the pipeline spawns (once each) until `promise` settles. */
+async function driveSessionsUntilSettled(promise: Promise<unknown>, alreadyFired: string[] = []) {
+  let settled = false;
+  void promise.finally(() => { settled = true; });
+  const fired = new Set(alreadyFired);
+  await vi.waitFor(() => {
+    for (const [sid] of mockSendMessage.mock.calls as Array<[string, ...any[]]>) {
+      if (fired.has(sid) || (onHandlers.get('event') ?? []).length === 0) continue;
+      fired.add(sid);
+      fireEvent('event', { sessionId: sid, event: { type: 'result' } });
+    }
+    expect(settled).toBe(true);
+  }, WAIT);
+}
+
 describe('Workflow Improvements', () => {
   let testData: ReturnType<typeof setupTestProject>;
 
@@ -138,7 +167,7 @@ describe('Workflow Improvements', () => {
       mockCreateSession.mockResolvedValue('sess-qa-sha');
 
       const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSessionReady('sess-qa-sha');
 
       // Write a valid QA report before the session completes (so it parses)
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
@@ -147,7 +176,6 @@ describe('Workflow Improvements', () => {
       }));
 
       fireEvent('event', { sessionId: 'sess-qa-sha', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
       await promise;
 
       // Verify head_at_review was stamped into qa_report.json
@@ -155,7 +183,91 @@ describe('Workflow Improvements', () => {
       expect(report.head_at_review).toBe('abc123def456');
 
       try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-    });
+    }, TEST_TIMEOUT);
+
+    it('stamps head_at_review from an async rev-parse that resolves with a trailing newline', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Test', description: 'Test', files: [], acceptance_criteria: ['ac1'], completed: true }],
+      }));
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        worktreePath: join(testData.root, '..', 'worktrees', 'test-slug'),
+        phase: 'qa-review',
+      });
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'rev-parse' && args[1] === 'HEAD') {
+          return new Promise(resolve => setTimeout(() => resolve('abc123def456\n'), 5));
+        }
+        return '';
+      });
+      mockCreateSession.mockResolvedValue('sess-qa-sha-nl');
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
+      await waitForSessionReady('sess-qa-sha-nl');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [{ criterion: 'Test criterion', status: 'PASS', evidence: 'ok' }],
+      }));
+      fireEvent('event', { sessionId: 'sess-qa-sha-nl', event: { type: 'result' } });
+      await promise;
+
+      const report = JSON.parse(readFileSync(join(testData.taskDir, 'qa_report.json'), 'utf-8'));
+      expect(report.head_at_review).toBe('abc123def456');
+
+      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }, TEST_TIMEOUT);
+
+    it('does not block the event loop (or start QA) while the pre-QA git fetch is pending', async () => {
+      testData = setupTestProject();
+      const orch = makeOrch(testData.root, getOrchestrator);
+
+      writeFileSync(join(testData.taskDir, 'spec.md'), '# Spec');
+      writeFileSync(join(testData.taskDir, 'plan.json'), JSON.stringify({
+        subtasks: [{ id: 1, title: 'Test', description: 'Test', files: [], acceptance_criteria: ['ac1'], completed: true }],
+      }));
+      const pipeline = makePipeline({
+        taskId: testData.taskId,
+        specPath: testData.taskDir,
+        worktreePath: join(testData.root, '..', 'worktrees', 'test-slug'),
+        phase: 'qa-review',
+      });
+      mkdirSync(pipeline.worktreePath, { recursive: true });
+
+      let releaseFetch!: () => void;
+      const fetchGate = new Promise<string>(resolve => { releaseFetch = () => resolve(''); });
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'git' && args[0] === 'fetch') return fetchGate;
+        return '';
+      });
+      mockCreateSession.mockResolvedValue('sess-qa-fetch');
+
+      const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
+      await vi.waitFor(() => {
+        expect(mockExecFileSync.mock.calls.some(([c, a]: [string, string[]]) => c === 'git' && a[0] === 'fetch')).toBe(true);
+      }, WAIT);
+
+      // The event loop keeps turning while the fetch is pending, and QA has not started.
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(mockCreateSession).not.toHaveBeenCalled();
+
+      releaseFetch();
+      await waitForSessionReady('sess-qa-fetch');
+      writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
+        overall: 'PASS',
+        criteria: [{ criterion: 'Test criterion', status: 'PASS', evidence: 'ok' }],
+      }));
+      fireEvent('event', { sessionId: 'sess-qa-fetch', event: { type: 'result' } });
+      await promise;
+
+      try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }, TEST_TIMEOUT);
   });
 
   // ── Improvement 4: FAIL-type router ─────────────────────────────
@@ -188,7 +300,7 @@ describe('Workflow Improvements', () => {
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-qa-${++sessionCounter}`));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSessionReady('sess-qa-1');
 
       // Write a QA report with fail_type: cleanup
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
@@ -201,14 +313,8 @@ describe('Workflow Improvements', () => {
       }));
 
       fireEvent('event', { sessionId: 'sess-qa-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
-      // Hook to check if pipeline bounced to implement and created coder sessions
-      // Fire result for any coder sessions to complete the cascade
-      for (let i = 2; i <= sessionCounter; i++) {
-        fireEvent('event', { sessionId: `sess-qa-${i}`, event: { type: 'result' } });
-        await new Promise(r => setTimeout(r, 10));
-      }
-      await promise;
+      // Complete any coder sessions the bounce to implement creates
+      await driveSessionsUntilSettled(promise, ['sess-qa-1']);
 
       // Verify the cleanup router logged the requirements
       const logFile = join(testData.taskDir, 'output.log');
@@ -218,7 +324,7 @@ describe('Workflow Improvements', () => {
       expect(logContent).toContain('git rm unused.txt');
 
       try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-    });
+    }, TEST_TIMEOUT);
 
     it('routes artifact-cleanup failures and includes fail_type in qa_feedback.md', async () => {
       testData = setupTestProject();
@@ -247,7 +353,7 @@ describe('Workflow Improvements', () => {
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-qa-${++sessionCounter}`));
 
       const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSessionReady('sess-qa-1');
 
       // Write a QA report with fail_type: cleanup — artifact scenario (coder substituted math for benchmark output)
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
@@ -259,22 +365,17 @@ describe('Workflow Improvements', () => {
       }));
 
       fireEvent('event', { sessionId: 'sess-qa-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
+      const feedbackPath = join(testData.taskDir, 'qa_feedback.md');
+      await vi.waitFor(() => { expect(existsSync(feedbackPath)).toBe(true); }, WAIT);
 
       // Read qa_feedback.md now — _writeQaFeedback wrote it synchronously,
       // and runImplement won't delete it until after all coder sessions complete
-      const feedbackPath = join(testData.taskDir, 'qa_feedback.md');
-      expect(existsSync(feedbackPath)).toBe(true);
       const feedbackContent = readFileSync(feedbackPath, 'utf-8');
       expect(feedbackContent).toContain('**fail_type**: cleanup');
       expect(feedbackContent).toContain('run ./scripts/benchmark.sh and commit output/');
 
       // Now let the implement cascade complete
-      for (let i = 2; i <= sessionCounter; i++) {
-        fireEvent('event', { sessionId: `sess-qa-${i}`, event: { type: 'result' } });
-        await new Promise(r => setTimeout(r, 10));
-      }
-      await promise;
+      await driveSessionsUntilSettled(promise, ['sess-qa-1']);
 
       // Verify the cleanup router logged the artifact requirements
       const logFile = join(testData.taskDir, 'output.log');
@@ -285,7 +386,7 @@ describe('Workflow Improvements', () => {
       expect(logContent).toContain('run ./scripts/benchmark.sh');
 
       try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-    });
+    }, TEST_TIMEOUT);
   });
 
   // ── Improvement 6: QA timeout ────────────────────────────────────
@@ -318,7 +419,7 @@ describe('Workflow Improvements', () => {
       mockCreateSession.mockResolvedValue('sess-qa-ratelimit');
 
       const promise = (orch as AnyOrch).runQaReview(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 20));
+      await waitForSessionReady('sess-qa-ratelimit');
 
       // Fire rate limit events — should bubble up as RateLimitError, NOT trigger timeout
       fireEvent('event', {
@@ -330,7 +431,6 @@ describe('Workflow Improvements', () => {
         event: { type: 'result', is_error: true },
       });
 
-      await new Promise(r => setTimeout(r, 50));
       await promise;
 
       // RateLimitError was re-thrown — no timeout report should be written
@@ -344,7 +444,7 @@ describe('Workflow Improvements', () => {
       }
 
       try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-    });
+    }, TEST_TIMEOUT);
   });
 
   // ── Verification script subtask ─────────────────────────────────
@@ -385,7 +485,7 @@ describe('Workflow Improvements', () => {
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-${++sessionCounter}`));
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 50));
+      await waitForSessionReady('sess-1');
 
       // Verify the coder prompt includes the script-run instruction from the plan subtask
       const coderCalls = mockSendMessage.mock.calls.filter(
@@ -401,22 +501,17 @@ describe('Workflow Improvements', () => {
 
       // Complete the pipeline cascade: implement → qa-review → awaiting-review
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
 
-      // Write a PASS QA report so the QA cascade succeeds cleanly
+      // Write a PASS QA report so the QA cascade (if the pipeline reaches it) succeeds cleanly
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
         overall: 'PASS',
         criteria: [{ criterion: 'Test', status: 'PASS', evidence: 'ok' }],
       }));
 
-      if (sessionCounter >= 2) {
-        fireEvent('event', { sessionId: 'sess-2', event: { type: 'result' } });
-      }
-      await new Promise(r => setTimeout(r, 50));
-      await promise;
+      await driveSessionsUntilSettled(promise, ['sess-1']);
 
       try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-    });
+    }, TEST_TIMEOUT);
   });
 
   // ── Sensor gate ─────────────────────────────────────────────────
@@ -468,16 +563,15 @@ describe('Workflow Improvements', () => {
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-sg-${++sessionCounter}`));
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 50));
+      await waitForSessionReady('sess-sg-1');
 
       // Complete the coder session (subtask 1)
       fireEvent('event', { sessionId: 'sess-sg-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 50));
+      const feedbackPath = join(testData.taskDir, 'qa_feedback.md');
+      await vi.waitFor(() => { expect(existsSync(feedbackPath)).toBe(true); }, WAIT);
 
       // After the session completes and the group loop finishes, the sensor gate
       // should have read sensor_report-st1.json and written qa_feedback.md.
-      const feedbackPath = join(testData.taskDir, 'qa_feedback.md');
-      expect(existsSync(feedbackPath)).toBe(true);
       const feedback = readFileSync(feedbackPath, 'utf-8');
       expect(feedback).toContain('**fail_type**: cleanup');
       expect(feedback).toContain('Sensor: Add feature');
@@ -495,11 +589,7 @@ describe('Workflow Improvements', () => {
 
       // The gate bounced to implement — complete the implement cascade by firing
       // result events for any additional sessions created in QA rework mode.
-      for (let i = 2; i <= sessionCounter; i++) {
-        fireEvent('event', { sessionId: `sess-sg-${i}`, event: { type: 'result' } });
-        await new Promise(r => setTimeout(r, 10));
-      }
-      await promise;
+      await driveSessionsUntilSettled(promise, ['sess-sg-1']);
 
       // Verify the gate message is still in the log (not overwritten by the bounce)
       const finalLog = readFileSync(logFile, 'utf-8');
@@ -507,7 +597,7 @@ describe('Workflow Improvements', () => {
       expect(finalLog).toContain('post_subtask sensors failed');
 
       try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-    });
+    }, TEST_TIMEOUT);
 
     it('proceeds to qa-review when no sensor_report files exist', async () => {
       testData = setupTestProject();
@@ -542,19 +632,10 @@ describe('Workflow Improvements', () => {
       mockCreateSession.mockImplementation(() => Promise.resolve(`sess-sg-${++sessionCounter}`));
 
       const promise = (orch as AnyOrch).runImplement(pipeline).catch(() => { /* best-effort */ });
-      await new Promise(r => setTimeout(r, 50));
+      await waitForSessionReady('sess-sg-1');
 
-      // Complete the coder session
+      // Complete the coder session; the QA session being sent its message proves the gate has run
       fireEvent('event', { sessionId: 'sess-sg-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 30));
-
-      // Verify no sensor gate log entry was written (no failures to report)
-      const logFile = join(testData.taskDir, 'output.log');
-      const log = readFileSync(logFile, 'utf-8');
-      expect(log).not.toContain('[SENSOR-GATE]');
-
-      // Verify no qa_feedback.md was created (gate didn't fire)
-      expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
 
       // Let the QA cascade complete — write a PASS report and fire session events
       writeFileSync(join(testData.taskDir, 'qa_report.json'), JSON.stringify({
@@ -562,13 +643,17 @@ describe('Workflow Improvements', () => {
         criteria: [{ criterion: 'Test', status: 'PASS', evidence: 'ok' }],
       }));
 
-      if (sessionCounter >= 2) {
-        fireEvent('event', { sessionId: 'sess-sg-2', event: { type: 'result' } });
-      }
-      await new Promise(r => setTimeout(r, 50));
-      await promise;
+      await driveSessionsUntilSettled(promise, ['sess-sg-1']);
+
+      // Once the pipeline has run to completion: no sensor gate log entry (no failures to report)
+      const logFile = join(testData.taskDir, 'output.log');
+      const log = readFileSync(logFile, 'utf-8');
+      expect(log).not.toContain('[SENSOR-GATE]');
+
+      // Verify no qa_feedback.md was created (gate didn't fire)
+      expect(existsSync(join(testData.taskDir, 'qa_feedback.md'))).toBe(false);
 
       try { rmSync(pipeline.worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
-    });
+    }, TEST_TIMEOUT);
   });
 });

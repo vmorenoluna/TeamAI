@@ -5,9 +5,9 @@
  * check, session timeout, spec-concern routing, FAIL-type routing,
  * and bounce-back to implement.
  */
-import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { updateSessionMap, logToOutput } from './helpers';
+import { execGitQueued } from './worktree-utils';
 import { humanDirectiveFor, consumeFeedbackIfDue } from './human-feedback';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
@@ -163,7 +163,7 @@ async function reconcileDivergedBranch(
   }
 
   try {
-    execFileSync('git', ['rebase', targetRef], { cwd: pipeline.worktreePath, stdio: 'pipe' });
+    await deps.execGit(['rebase', targetRef], pipeline.worktreePath);
     logToOutput(pipeline.specPath, `[QA-PRECHECK] Rebased onto ${targetRef}\n`);
     return 'rebased';
   } catch (rebaseErr) {
@@ -179,7 +179,7 @@ async function reconcileDivergedBranch(
     try {
       unmergedFiles = (await deps.execGitCapture(['diff', '--name-only', '--diff-filter=U'], pipeline.worktreePath)).trim();
     } catch { /* best-effort — treat as unknown, fall through to the conflict path below */ }
-    try { execFileSync('git', ['rebase', '--abort'], { cwd: pipeline.worktreePath, stdio: 'pipe' }); } catch { /* ignore */ }
+    try { await deps.execGit(['rebase', '--abort'], pipeline.worktreePath); } catch { /* ignore */ }
 
     if (!unmergedFiles) {
       const rebaseMsg = rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr);
@@ -424,14 +424,14 @@ async function runQaReviewRound(
 
   // Gap 1: Verify worktree state matches remote
   try {
-    execFileSync('git', ['fetch', 'origin', pipeline.branch], { cwd: deps.projectRoot, stdio: 'pipe' });
+    await execGitQueued(['fetch', 'origin', pipeline.branch], deps.projectRoot, deps.projectRoot);
   } catch { /* branch doesn't exist on remote yet */ }
 
   let hasUnpushed = false;
   try {
-    const unpushed = execFileSync('git', ['log', `origin/${pipeline.branch}..${pipeline.branch}`, '--oneline'], {
-      cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
-    }).trim();
+    const unpushed = (await execGitQueued(
+      ['log', `origin/${pipeline.branch}..${pipeline.branch}`, '--oneline'], deps.projectRoot, deps.projectRoot,
+    )).trim();
     hasUnpushed = unpushed.length > 0;
     if (hasUnpushed) {
       logToOutput(pipeline.specPath, `\n[QA-PRECHECK] Unpushed commits detected on ${pipeline.branch}:\n${unpushed}\n`);
@@ -615,9 +615,7 @@ async function runQaReviewRound(
   // Stamp HEAD sha and spec version so every QA report explicitly
   // identifies which spec revision it was produced against.
   try {
-    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: pipeline.worktreePath, encoding: 'utf-8', stdio: 'pipe',
-    }).trim();
+    const headSha = (await deps.execGitCapture(['rev-parse', 'HEAD'], pipeline.worktreePath)).trim();
     report.head_at_review = headSha;
     report.spec_revision = pipeline.specRevision;
     writeFileSync(reportPath, JSON.stringify(report, null, 2));

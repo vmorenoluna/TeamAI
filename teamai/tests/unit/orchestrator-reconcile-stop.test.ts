@@ -13,23 +13,23 @@ import { randomUUID } from 'crypto';
 
 // ── Hoisted mocks ──
 
-const { mockExecFileSync, mockWarn, mockWriteFileSync, mockAppendFileSync } = vi.hoisted(() => ({
-  mockExecFileSync: vi.fn(),
+const { mockGit, mockWarn, mockWriteFileSync, mockAppendFileSync } = vi.hoisted(() => ({
+  mockGit: vi.fn(),
   mockWarn: vi.fn(),
   mockWriteFileSync: vi.fn(),
   mockAppendFileSync: vi.fn(),
 }));
 
-// execFile calls back (and is promisify-aware) so the async git helpers resolve; it delegates to the sync stub so existing scripted responses apply.
+// Async execFile mock (promisify-aware); resetSafe so vi.clearAllMocks can't wipe it.
 const mockExecFile = await vi.hoisted(async () => {
   const { createExecFileMock } = await import('../utils/mock-child-process');
-  return createExecFileMock({ resetSafe: true, execFileSync: (...a) => mockExecFileSync(...a) });
+  return createExecFileMock({ resetSafe: true, handler: (file, args) => mockGit(file, args) });
 });
 
-vi.mock('child_process', () => ({
-  execFile: mockExecFile,
-  execFileSync: mockExecFileSync,
-}));
+vi.mock('child_process', async (orig) => {
+  const { buildChildProcessMock } = await import('../utils/mock-child-process');
+  return buildChildProcessMock(await orig(), mockExecFile);
+});
 
 vi.mock('../../src/lib/logger', () => ({
   log: vi.fn(),
@@ -85,6 +85,7 @@ vi.mock('fs', async (importOriginal) => {
 
 import { Orchestrator } from '../../src/lib/orchestrator';
 import { writeFileSync } from 'fs';
+import { execFileError } from '../utils/mock-child-process';
 
 // ── Helpers ──
 
@@ -137,7 +138,7 @@ describe('_reconcileSubtaskCompletionsOnStop — plan.json persistence', () => {
     const wtPath = orch.getWorktreePath(ctx.taskId)!;
     mkdirSync(wtPath, { recursive: true });
 
-    mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+    mockGit.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && args?.[0] === 'rev-parse') return 'abc\n';
       if (cmd === 'git' && args?.[0] === 'log') return 'abc unintegrated\n';
       if (cmd === 'git' && args?.[0] === 'cherry-pick' && args?.[1] !== '--abort') {
@@ -157,7 +158,7 @@ describe('_reconcileSubtaskCompletionsOnStop — plan.json persistence', () => {
     const wtPath = orch.getWorktreePath(ctx.taskId)!;
     mkdirSync(wtPath, { recursive: true });
 
-    mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+    mockGit.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && args?.[0] === 'rev-parse') return 'abc\n';
       if (cmd === 'git' && args?.[0] === 'log') return 'abc unintegrated\n';
       if (cmd === 'git' && args?.[0] === 'cherry-pick' && args?.[1] !== '--abort') {
@@ -180,10 +181,7 @@ describe('_reconcileSubtaskCompletionsOnStop — plan.json persistence', () => {
 
   it('guards the reconcile log write so a failure does not abort the reset', async () => {
     // No worktree dir → the "worktree missing" branch fires (no cherry-pick).
-    mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-      if (cmd === 'git' && args?.[0] === 'rev-parse') return 'abc\n';
-      return '';
-    });
+    mockGit.mockImplementation(() => '');
 
     // The next appendFileSync (the reconcile log line) throws.
     mockAppendFileSync.mockImplementationOnce(() => { throw new Error('disk full'); });
@@ -198,5 +196,23 @@ describe('_reconcileSubtaskCompletionsOnStop — plan.json persistence', () => {
       expect.stringContaining('Failed to write reconcile log'),
       expect.anything(),
     );
+  });
+
+  it('skips the subtask and keeps completed:true when async rev-parse --verify rejects', async () => {
+    const wtPath = orch.getWorktreePath(ctx.taskId)!;
+    mkdirSync(wtPath, { recursive: true });
+
+    mockGit.mockImplementation((cmd: string, args: string[]) => {
+      if (args?.[0] === 'rev-parse' && args?.[1] === '--verify') {
+        throw execFileError(cmd, args, 'fatal: Needed a single revision');
+      }
+      return '';
+    });
+
+    await orch.cleanupTaskArtifacts(ctx.taskId, 'implement');
+
+    const plan = JSON.parse(readFileSync(join(ctx.taskDir, 'plan.json'), 'utf-8'));
+    expect(plan.subtasks[0].completed).toBe(true);
+    expect(mockGit.mock.calls.some(([, a]) => (a as string[])[0] === 'cherry-pick')).toBe(false);
   });
 });

@@ -7,8 +7,6 @@
  *
  * Decomposed (T16) into six named helpers called in sequence by runImplement.
  */
-import { execFileSync } from 'child_process';
-import { getToolPath } from '../tool-checker';
 import { readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync, renameSync, rmSync, statSync } from 'fs';
 import { PipelineConfigError, WorktreeError, PushVerificationError, SessionKilledError } from './errors';
 import { readJsonFile } from '../json-io';
@@ -21,9 +19,9 @@ import { updateSessionMap, logToOutput } from './helpers';
 import { prepareBacklogCheck, runBacklogCheck, backlogCheckEnabled, evidenceProduced, evidenceWindowStart } from './backlog-check';
 import { humanDirectiveFor, readHumanFeedback } from './human-feedback';
 import { renderCommand } from '../command-templates';
-import { resolveBaseBranch } from '../git-platform';
+import { resolveBaseBranch, detectGitPlatform, checkExistingPRViaCLI } from '../git-platform';
 import { getUnpushedCommits } from './worktree-ops';
-import { removeStaleWorktreeRegistration, removeDirBestEffort } from './worktree-utils';
+import { removeStaleWorktreeRegistration, removeDirBestEffort, execGitQueued } from './worktree-utils';
 import { subtaskWorktreeBasePath, pickFreshSubtaskWorktreePath, nextFreeRelocationPath, recordSubtaskWorktree, resolveSubtaskWorktreePath } from './subtask-worktree-paths';
 import { warn } from '../logger';
 import {
@@ -61,7 +59,7 @@ export interface ImplementDeps {
   execGit: (args: string[], hostCwd: string) => Promise<void>;
   /** Same routing as execGit, but returns captured stdout — needed to read
    *  `git status --porcelain` etc. against a worktree that may be
-   *  container-patched and thus unresolvable via a plain host execFileSync. */
+   *  container-patched and thus unresolvable via a plain host-side git call. */
   execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
   patchWorktreeGitFile: (hostWorktreePath: string, containerWorkspace: string) => void;
@@ -218,7 +216,7 @@ export function relocateStuckWorktree(pipeline: ImplementPipeline, deps: Impleme
  * concurrently-running pipeline elsewhere). Silent on failure throughout —
  * this is opportunistic tidying, never load-bearing for the current run.
  */
-export function sweepAbandonedWorktreeRelocations(pipeline: ImplementPipeline, deps: ImplementDeps): void {
+export async function sweepAbandonedWorktreeRelocations(pipeline: ImplementPipeline, deps: ImplementDeps): Promise<void> {
   try {
     const worktreeBase = path.dirname(pipeline.worktreePath);
     const activeDirName = path.basename(pipeline.worktreePath);
@@ -227,7 +225,7 @@ export function sweepAbandonedWorktreeRelocations(pipeline: ImplementPipeline, d
 
     let registered: Set<string>;
     try {
-      const list = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe' });
+      const list = await execGitQueued(['worktree', 'list', '--porcelain'], deps.projectRoot, deps.projectRoot);
       registered = new Set(
         list.split('\n')
           .filter(l => l.startsWith('worktree '))
@@ -284,7 +282,7 @@ export async function ensureWorktree(
 
   // Opportunistically reclaim disk space from earlier relocations of this
   // task (see relocateStuckWorktree) — never load-bearing for this run.
-  sweepAbandonedWorktreeRelocations(pipeline, deps);
+  await sweepAbandonedWorktreeRelocations(pipeline, deps);
 
   // Ensure worktree exists and is healthy
   if (!existsSync(pipeline.worktreePath) || !deps.isWorktreeHealthy(pipeline.worktreePath)) {
@@ -2213,7 +2211,7 @@ export async function integrateGroup(
     await repairStuckCherryPick(pipeline, deps);
 
     // Pre-cherry-pick: auto-commit any uncommitted changes in the main worktree.
-    // Must go through deps.execGit/execGitCapture, not a raw execFileSync —
+    // Must go through deps.execGit/execGitCapture, not a raw host-side git call —
     // the main worktree is routinely container-patched (its .git file and
     // the admin back-reference point at container-only /workspaces/... paths)
     // while a pipeline run is active, and a raw host-side `git status` against
@@ -2290,7 +2288,7 @@ export async function integrateGroup(
         await removeStaleWorktreeRegistration(deps.projectRoot, stWorktreePath);
       }
       if (!heldIds.has(id)) {
-        try { execFileSync('git', ['branch', '-D', pipeline.branch + '-st' + id], { cwd: deps.projectRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+        try { await execGitQueued(['branch', '-D', pipeline.branch + '-st' + id], deps.projectRoot, deps.projectRoot); } catch { /* best-effort */ }
       }
       cleanedCount++;
     }
@@ -2323,12 +2321,8 @@ export async function pushAndVerify(
 
     // Verify remote HEAD
     try {
-      const localHead = execFileSync('git', ['rev-parse', pipeline.branch], {
-        cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
-      }).trim();
-      const remoteHead = execFileSync('git', ['rev-parse', 'origin/' + pipeline.branch], {
-        cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
-      }).trim();
+      const localHead = (await execGitQueued(['rev-parse', pipeline.branch], deps.projectRoot, deps.projectRoot)).trim();
+      const remoteHead = (await execGitQueued(['rev-parse', 'origin/' + pipeline.branch], deps.projectRoot, deps.projectRoot)).trim();
       if (localHead !== remoteHead) {
         throw new PushVerificationError('Push succeeded but HEADs differ — local=' + localHead + ' remote=' + remoteHead, 'HEAD_MISMATCH');
       }
@@ -2344,9 +2338,7 @@ export async function pushAndVerify(
 
     let prExists = false;
     try {
-      const prCheck = execFileSync(getToolPath('gh'), ['pr', 'list', '--head', pipeline.branch, '--json', 'url', '--jq', '.[0].url'], {
-        cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000,
-      }).trim();
+      const prCheck = await checkExistingPRViaCLI(await detectGitPlatform(deps.projectRoot), pipeline.branch, deps.projectRoot);
       if (prCheck) {
         prExists = true;
         logToOutput(pipeline.specPath, '[PUSH] PR already exists for branch ' + pipeline.branch + ': ' + prCheck + ' — push failure is non-fatal\n');
@@ -2558,7 +2550,7 @@ export async function runImplement(
         }
 
         if (canRecreate) {
-          try { execFileSync('git', ['branch', '-D', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' }); }
+          try { await execGitQueued(['branch', '-D', stBranch], deps.projectRoot, deps.projectRoot); }
           catch (err) {
             logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to delete branch ${stBranch}: ${err instanceof Error ? err.message : String(err)}\n`);
           }
@@ -2572,7 +2564,7 @@ export async function runImplement(
           // best-effort catch on worktree removal swallowed the real reason.
           let branchStillExists = true;
           try {
-            execFileSync('git', ['rev-parse', '--verify', stBranch], { cwd: deps.projectRoot, stdio: 'pipe' });
+            await execGitQueued(['rev-parse', '--verify', stBranch], deps.projectRoot, deps.projectRoot);
           } catch {
             branchStillExists = false; // branch doesn't exist — expected and correct
           }
@@ -2968,9 +2960,7 @@ export async function _recoverStBranchCommits(
   // Check if the branch exists
   let branchExists = false;
   try {
-    execFileSync('git', ['rev-parse', '--verify', stBranch], {
-      cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe',
-    });
+    await execGitQueued(['rev-parse', '--verify', stBranch], projectRoot, projectRoot);
     branchExists = true;
   } catch { /* branch doesn't exist — nothing to recover */ }
   if (!branchExists) return none;
@@ -2978,9 +2968,7 @@ export async function _recoverStBranchCommits(
   // Check for unintegrated commits on the st-branch
   let logOutput = '';
   try {
-    logOutput = execFileSync('git', [
-      'log', pipelineBranch + '..' + stBranch, '--oneline',
-    ], { cwd: projectRoot, encoding: 'utf-8', stdio: 'pipe' }).trim();
+    logOutput = (await execGitQueued(['log', pipelineBranch + '..' + stBranch, '--oneline'], projectRoot, projectRoot)).trim();
   } catch {
     // Can't verify — assume recovery is not possible so caller can decide fallback
     return { recovered: false, commits: [] };
@@ -3219,9 +3207,7 @@ export async function tryCherryPickWithRecovery(
   // mode. If the check itself fails, fall through and let the real
   // cherry-pick attempt surface the actual error.
   try {
-    const log = execFileSync('git', ['log', pipeline.branch + '..' + stBranch, '--oneline'], {
-      cwd: deps.projectRoot, encoding: 'utf-8', stdio: 'pipe',
-    }).trim();
+    const log = (await execGitQueued(['log', pipeline.branch + '..' + stBranch, '--oneline'], deps.projectRoot, deps.projectRoot)).trim();
     if (!log) {
       logToOutput(pipeline.specPath, '\n[WORKTREE] Subtask ' + subtaskId + ' branch ' + stBranch + ' has no new commits — nothing to cherry-pick\n');
       return true;

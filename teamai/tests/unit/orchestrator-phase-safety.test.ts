@@ -545,6 +545,11 @@ describe('triggerEarlyWakeup — end a pending wakeup wait immediately', () => {
 
 import { rebaseOntoLatestDefault, runPlanPhase, syncPhaseBaseline } from '../../src/lib/orchestrator/phase-runners';
 
+// rev-list is read through deps.execGitCapture (the skip-check); every other
+// capture (status, unmerged files) falls through to `other`.
+const capture = (revList: string, other: () => string = () => '') =>
+  vi.fn(async (args: string[]) => (args[0] === 'rev-list' ? revList : other()));
+
 describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
   let project: ReturnType<typeof setupProject>;
 
@@ -562,16 +567,12 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const logFile = join(project.taskDir, 'output.log');
     const worktreePath = join(project.root, 'worktrees', 'test-task');
 
-    // Mock: git fetch succeeds, rev-list returns "0" (no new commits)
-    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-      if (Array.isArray(args) && args[0] === 'rev-list') return '0\n';
-      return '';
-    });
+    const revListCount = '0\n';
 
     const deps = {
       projectRoot: project.root,
       execGit: vi.fn(async () => undefined),
-      execGitCapture: vi.fn(async () => ''),
+      execGitCapture: capture(revListCount),
       gitPush: vi.fn(),
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
@@ -589,6 +590,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       (c: any[]) => c[0] && c[0][0] === 'rebase' && c[0][1] !== '--abort',
     );
     expect(rebaseCalls.length).toBe(0);
+    expect((deps.execGit as any).mock.calls.some((c: any[]) => c[0]?.[0] === 'rebase' && c[0]?.[1] === 'origin/master')).toBe(false);
     // No-op skip means nothing to push either.
     expect(deps.gitPush).not.toHaveBeenCalled();
     // Log should indicate skip
@@ -597,21 +599,45 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     expect(logContent).toContain('skipping rebase');
   });
 
-  it('proceeds with rebase when origin/base has advanced (rev-list count > 0), then pushes the result', async () => {
+  it('logs a warning and continues when the fetch rejects', async () => {
     const logFile = join(project.taskDir, 'output.log');
     const worktreePath = join(project.root, 'worktrees', 'test-task');
 
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
+      if (Array.isArray(args) && args[0] === 'fetch') throw new Error('network down');
       return '';
     });
+
+    const execGit = vi.fn(async () => undefined);
+    const deps = {
+      projectRoot: project.root,
+      execGit,
+      execGitCapture: capture('3\n'),
+      gitPush: vi.fn(),
+      sessionOpts: vi.fn(),
+      waitForCompletion: vi.fn(),
+      baseBranch: 'master',
+    };
+
+    const result = await rebaseOntoLatestDefault(worktreePath, project.taskId, 'feat/test', logFile, deps);
+
+    expect(result).toBe(true);
+    expect(readFileSync(logFile, 'utf-8')).toContain('[WARN] Could not fetch origin/master');
+    expect(execGit.mock.calls.some((c: any[]) => c[0]?.[0] === 'rebase' && c[0]?.[1] !== '--abort')).toBe(true);
+  }, 30_000);
+
+  it('proceeds with rebase when origin/base has advanced (rev-list count > 0), then pushes the result', async () => {
+    const logFile = join(project.taskDir, 'output.log');
+    const worktreePath = join(project.root, 'worktrees', 'test-task');
+
+    const revListCount = '3\n';
 
     const execGit = vi.fn(async () => undefined);
     const gitPush = vi.fn();
     const deps = {
       projectRoot: project.root,
       execGit,
-      execGitCapture: vi.fn(async () => ''),
+      execGitCapture: capture(revListCount),
       gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
@@ -638,15 +664,12 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const logFile = join(project.taskDir, 'output.log');
     const worktreePath = join(project.root, 'worktrees', 'test-task');
 
-    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
-      return '';
-    });
+    const revListCount = '3\n';
 
     const deps = {
       projectRoot: project.root,
       execGit: vi.fn(async () => undefined),
-      execGitCapture: vi.fn(async () => ''),
+      execGitCapture: capture(revListCount),
       gitPush: vi.fn(async (args: string[]) => {
         if (args[0] === 'push') throw new Error('offline');
       }),
@@ -666,10 +689,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const logFile = join(project.taskDir, 'output.log');
     const worktreePath = join(project.root, 'worktrees', 'test-task');
 
-    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
-      return '';
-    });
+    const revListCount = '3\n';
 
     const gitPush = vi.fn();
     let mergerDone = false;
@@ -682,7 +702,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       // merger-spawn path to trigger at all (see rebaseOntoLatestDefault's
       // unmerged-file check, which skips the merger for a non-conflict
       // rebase failure). Reported once; the merger session then resolves it.
-      execGitCapture: vi.fn(async () => (mergerDone ? '' : 'src/conflicted-file.ts\n')),
+      execGitCapture: capture(revListCount, () => (mergerDone ? '' : 'src/conflicted-file.ts\n')),
       gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(async () => { mergerDone = true; }),
@@ -708,10 +728,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const logFile = join(project.taskDir, 'output.log');
     const worktreePath = join(project.root, 'worktrees', 'test-task');
 
-    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
-      return '';
-    });
+    const revListCount = '3\n';
 
     const gitPush = vi.fn();
     const sessionOpts = vi.fn();
@@ -722,7 +739,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       }),
       // No unmerged files — the rebase failed for a reason other than a
       // real conflict.
-      execGitCapture: vi.fn(async () => ''),
+      execGitCapture: capture(revListCount),
       gitPush,
       sessionOpts,
       waitForCompletion: vi.fn(async () => undefined),
@@ -751,10 +768,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const logFile = join(project.taskDir, 'output.log');
     const worktreePath = join(project.root, 'worktrees', 'test-task');
 
-    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
-      return '';
-    });
+    const revListCount = '3\n';
 
     const execGit = vi.fn(async (_args: string[], _cwd: string): Promise<void> => undefined);
     const gitPush = vi.fn();
@@ -763,7 +777,7 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
       execGit,
       // Dirty on the first check (before the guard's commit), clean after —
       // mirrors a real `git status --porcelain` going empty once committed.
-      execGitCapture: vi.fn(async () => 'M src/feature.ts\n'),
+      execGitCapture: capture(revListCount, () => 'M src/feature.ts\n'),
       gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
@@ -801,17 +815,14 @@ describe('rebaseOntoLatestDefault — skip no-op rebases', () => {
     const logFile = join(project.taskDir, 'output.log');
     const worktreePath = join(project.root, 'worktrees', 'test-task');
 
-    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
-      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n';
-      return '';
-    });
+    const revListCount = '3\n';
 
     const execGit = vi.fn(async () => undefined);
     const gitPush = vi.fn();
     const deps = {
       projectRoot: project.root,
       execGit,
-      execGitCapture: vi.fn(async () => ''),
+      execGitCapture: capture(revListCount),
       gitPush,
       sessionOpts: vi.fn(),
       waitForCompletion: vi.fn(),
@@ -842,10 +853,9 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
     project = setupProject();
 
     // resolveBaseBranch → detectDefaultBranch reads refs/remotes/origin/HEAD;
-    // rebaseOntoLatestDefault's own skip-check reads rev-list --count.
+    // rebaseOntoLatestDefault's skip-check goes through the capture dep.
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
       if (Array.isArray(args) && args[0] === 'symbolic-ref') return 'refs/remotes/origin/master\n';
-      if (Array.isArray(args) && args[0] === 'rev-list') return '3\n'; // base has advanced
       return '';
     });
   });
@@ -861,7 +871,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
 
     const gitPush = vi.fn();
     const execGit = vi.fn(async () => undefined);
-    const execGitCapture = vi.fn(async () => '');
+    const execGitCapture = capture('3\n');
     const deps = { projectRoot: project.root, gitPush, execGit, execGitCapture, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
 
     await syncPhaseBaseline(pipeline, deps);
@@ -880,7 +890,7 @@ describe('syncPhaseBaseline — pre-phase freshness sync', () => {
 
     const gitPush = vi.fn();
     const execGit = vi.fn(async () => undefined);
-    const execGitCapture = vi.fn(async () => '');
+    const execGitCapture = capture('3\n');
     const deps = { projectRoot: project.root, gitPush, execGit, execGitCapture, sessionOpts: vi.fn(), waitForCompletion: vi.fn() };
 
     await syncPhaseBaseline(pipeline, deps);
