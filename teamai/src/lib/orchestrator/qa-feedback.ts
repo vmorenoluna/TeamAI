@@ -91,9 +91,7 @@ export function writeQaFeedback(
       .map(([name, count]) => ({ name, count }));
     if (escalated.length > 0) {
       content += `## ⚠️ PERSISTED FAILURES — RESOLVE THESE FIRST ⚠️\n\n`;
-      content += `The following criteria have failed **identically** across multiple consecutive QA cycles. `;
-      content += `They MUST be resolved before addressing anything else below. `;
-      content += `Do NOT deprioritize a persisted failure in favor of another issue.\n\n`;
+      content += `The following criteria have failed **identically** across multiple consecutive QA cycles.\n\n`;
       for (const { name, count } of escalated) {
         content += `> **"${name}"** — this exact criterion has failed **${count} times in a row**.\n`;
         content += `> Before considering it resolved, enumerate every case, verify each assertion direction (not comments/labels), and confirm the count meets the requirement.\n\n`;
