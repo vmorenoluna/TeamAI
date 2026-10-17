@@ -327,7 +327,8 @@ describe('plan phase routing', () => {
     expect(s.cwd).toBe(ctx.root);
     expect(s.request).toContain(`${ctx.specPath}/plan.json`);
     expect(s.request).toContain(`${ctx.specPath}/spec.md`);
-    expect(s.request).toContain('PRESERVING');
+    expect(s.request).toContain('IMPORTANT: Write the updated plan');
+    expect(s.request).not.toContain('PRESERVING');
   });
 
   it('scoped replan (planner directive with Subtasks:) → plan-revise mode carrying the override and its scope', async () => {
@@ -489,8 +490,21 @@ describe('implement routing', () => {
     expect(s.request).toContain('## ⚠️ QA FEEDBACK — FIX THESE FIRST ⚠️');
     expect(s.request).toContain('handle the empty input');
     expect(s.request).toContain('QA issues to fix:');
-    expect(s.request).toContain('Only fix the QA issues listed above');
+    expect(s.request).not.toContain('Only fix the QA issues listed above');
+    expect(s.request).not.toContain('FULL test suite');
     expect(s.request).toContain('Subtask 2: Add feature');
+  });
+
+  it.each(['code', 'cleanup'])('QA rework (fail_type %s) request carries no inline trailer, still implement-fix', async (failType) => {
+    writeFileSync(join(ctx.specPath, 'qa_report.json'), JSON.stringify({ overall: 'FAIL', fail_type: failType, criteria: [] }));
+    const st = subtask({ acceptance_criteria: ['Feature works', '[QA CORRECTION: handle the empty input]'] });
+
+    await runSubtask({}, st, true);
+
+    const s = sent();
+    expect(promptMode(s.message)).toBe('implement-fix');
+    expect(s.request).not.toContain('FULL test suite');
+    expect(s.request).not.toContain('Only fix the QA issues listed above');
   });
 
   it('QA-fallback rework subtask 9999 → implement-fix mode with the targeted-rework description', async () => {
@@ -526,6 +540,16 @@ describe('implement routing', () => {
     const s = sent();
     expect(s.request).toContain('subtask_wakeup-st2.json');
     expect(s.request).toContain('Do not wait on the job in this session');
+  });
+
+  it('deliverable re-verification points to subtask_blocked when the files cannot be created (AC4)', async () => {
+    const st = subtask({ files_to_create: ['docs/evidence.log'] });
+
+    await runSubtask({ deliverableFailCounts: { 2: 1 } }, st, false);
+
+    const s = sent();
+    expect(s.request).toContain('subtask_blocked-st2.json');
+    expect(s.request).not.toContain('the orchestrator will advance the task to failed');
   });
 
   it('wakeup re-entry → implement mode with the re-entry header for this subtask\'s wakeup file', async () => {

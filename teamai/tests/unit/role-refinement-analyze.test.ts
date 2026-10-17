@@ -9,7 +9,21 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync, readFileSyn
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-const { mockEmit } = vi.hoisted(() => ({ mockEmit: vi.fn() }));
+const { mockEmit, renderFailure } = vi.hoisted(() => ({
+  mockEmit: vi.fn(),
+  renderFailure: { error: null as Error | null },
+}));
+
+vi.mock('../../src/lib/command-templates', async () => {
+  const actual = await vi.importActual<typeof import('../../src/lib/command-templates')>('../../src/lib/command-templates');
+  return {
+    ...actual,
+    renderCommand: (...args: Parameters<typeof actual.renderCommand>) => {
+      if (renderFailure.error) throw renderFailure.error;
+      return actual.renderCommand(...args);
+    },
+  };
+});
 
 vi.mock('../../src/lib/logger', () => ({
   log: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(),
@@ -31,12 +45,14 @@ import {
   type RoleRefinementAnalyzeDeps,
 } from '../../src/lib/role-refinement';
 import { join as joinPath } from 'path';
+import { renderCommand } from '../../src/lib/command-templates';
 
 let root: string;
 let taskStore: TaskStore;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  renderFailure.error = null;
   root = mkdtempSync(join(tmpdir(), 'role-refine-analyze-'));
   taskStore = new TaskStore(root);
 });
@@ -123,12 +139,12 @@ describe('analyzeFailure', () => {
     // The message invokes the internal command and hands the artifacts + role
     // files as paths; the classification instructions live in the command file.
     const prompt = sentPrompt()!;
-    expect(prompt).toContain(`/${ROLE_REFINEMENT_ANALYSIS_COMMAND}`);
+    expect(prompt.startsWith('/')).toBe(false);
     expect(prompt).toContain('qa_report.json');
     expect(prompt).toContain(joinPath(root, '.claude', 'roles', 'planner.md'));
     expect(prompt).toContain('OUTPUT_FILE:');
     expect(prompt).toContain('FAILURE_ARTIFACTS:');
-    expect(prompt).not.toContain('isRolePromptGap'); // instructions live in the command template
+    expect(prompt).toContain('ROLE_FILES:');
 
     // A refinement-update event fires so open panels refresh.
     expect(mockEmit).toHaveBeenCalledWith('refinement-update', { taskId, projectRoot: root });
@@ -297,12 +313,29 @@ describe('parseAnalysisOutput', () => {
   });
 });
 
+describe('analyzeFailure render failure', () => {
+  it('spawns no session and resolves the record to no-gap when the command fails to render', async () => {
+    const taskId = seedTask();
+    const { deps, createSpy } = fakeDeps({});
+    renderFailure.error = new Error('template missing');
+
+    const id = await analyzeFailure(root, taskId, 'manual', deps);
+
+    expect(createSpy).not.toHaveBeenCalled();
+    const record = getSuggestion(root, id)!;
+    expect(record.status).toBe('no-gap');
+    expect(record.diagnosis).toContain('template missing');
+    expect(taskStore.getById(taskId)?.refinementStatus).toBe('no-gap');
+  });
+});
+
 describe('buildAnalysisCommand', () => {
-  it('invokes the internal command with existing artifacts and role files as path args', () => {
+  it('renders the internal command with existing artifacts and role files as path args', () => {
     seedTask();
     const dir = taskStore.getDirById('task-1');
     const command = buildAnalysisCommand(root, [dir], join(root, '.teamai', 'role-refinements', 'x.analysis.json'));
-    expect(command.startsWith(`/${ROLE_REFINEMENT_ANALYSIS_COMMAND}`)).toBe(true);
+    expect(command.startsWith('/')).toBe(false);
+    expect(command).toContain(renderCommand(ROLE_REFINEMENT_ANALYSIS_COMMAND, '').trimEnd().split('\n')[0]);
     expect(command).toContain(join(dir, 'qa_report.json'));
     expect(command).toContain(join(dir, 'completion_summary.md'));
     expect(command).not.toContain('output-plan.log'); // does not exist

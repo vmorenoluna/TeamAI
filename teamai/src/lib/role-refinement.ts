@@ -26,6 +26,7 @@ import { TaskStore } from './task-store';
 import { writeRoleFile } from './role-files';
 import { resolveProvider, providerToSessionOpts } from './providers';
 import { processManager } from './process-manager';
+import { renderCommand } from './command-templates';
 import { waitForCompletion } from './orchestrator/rate-limit';
 import { parseSessionLimitReset } from './orchestrator/helpers';
 import { log as logInfo, warn as logWarn } from './logger';
@@ -449,7 +450,7 @@ const ANALYSIS_ARTIFACTS = [
 /** Name of the internal analysis command synced to `.claude/commands/`. */
 export const ROLE_REFINEMENT_ANALYSIS_COMMAND = 'role-refinement-analysis';
 
-/** Build the analysis session's first message — a slash-command invocation.
+/** Build the analysis session's first message — the rendered command template.
  *  The classification instructions + JSON output contract live in the internal
  *  command template `defaults/commands/role-refinement-analysis.md` (force-synced
  *  into `.claude/commands/`, not user-customisable); `$ARGUMENTS` carries the
@@ -468,9 +469,7 @@ export function buildAnalysisCommand(projectRoot: string, taskDirs: string[], an
     .map(r => join(projectRoot, '.claude', 'roles', `${r}.md`))
     .filter(p => existsSync(p));
 
-  return [
-    `/${ROLE_REFINEMENT_ANALYSIS_COMMAND}`,
-    '',
+  const args = [
     `OUTPUT_FILE: ${analysisPath}`,
     'FAILURE_ARTIFACTS:',
     ...artifactPaths.map(p => `- ${p}`),
@@ -478,6 +477,7 @@ export function buildAnalysisCommand(projectRoot: string, taskDirs: string[], an
     'ROLE_FILES:',
     ...rolePaths.map(p => `- ${p}`),
   ].join('\n');
+  return renderCommand(ROLE_REFINEMENT_ANALYSIS_COMMAND, args);
 }
 
 /** Defensively parse the analyst's `.analysis.json` output into a suggestion-shaped object. */
@@ -594,10 +594,12 @@ export async function analyzeFailure(
   taskStore.update(taskId, { refinementStatus: 'analyzing', refinementSuggestionId: id, refinementEscalated: false });
 
   const analysisPath = join(refinementsDir(projectRoot), `${id}.analysis.json`);
-  const command = buildAnalysisCommand(projectRoot, sourceTasks.map(tid => taskStore.getDirById(tid)), analysisPath);
 
   let sessionId: string | undefined;
   try {
+    // Render before createSession: a template failure spawns nothing and
+    // resolves the record via the catch below.
+    const command = buildAnalysisCommand(projectRoot, sourceTasks.map(tid => taskStore.getDirById(tid)), analysisPath);
     // The analysis agent is NOT a pipeline role: `general` gets no role persona
     // injected, and the model comes from the Role Refinements settings (default
     // sonnet), not the `analyst` role's provider override. Provider/env still

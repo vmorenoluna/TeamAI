@@ -1028,9 +1028,8 @@ export function buildDeliverableReverificationHeader(
     'will not finish within this session. Then confirm the job is still running, write\n' +
     '`subtask_wakeup-st' + subtask.id + '.json` as your instructions describe, and end the\n' +
     'session: the orchestrator pauses this subtask instead of counting it as missing.\n' +
-    'Do not wait on the job in this session. If you cannot create them at all (e.g.,\n' +
-    'the task is impossible with the current spec), explain why and the orchestrator\n' +
-    'will advance the task to failed.\n\n';
+    'Do not wait on the job in this session. ' +
+    'If you cannot create them at all, write `subtask_blocked-st' + subtask.id + '.json` as your instructions describe (see "When you\'ve root-caused a defect"); explaining it in your summary alone does not stop the retries.\n\n';
 }
 
 /**
@@ -1150,11 +1149,7 @@ export async function buildSubtaskRequest(
     subtask.description + '\n\n' +
     'Files: ' + subtask.files.join(', ') + '\n\n' +
     criteriaLine + '\n' +
-    'PROJECT_ROOT=' + deps.projectRoot + '\n\n' +
-    (hasQaFeedback
-      ? '⚠️ Only fix the QA issues listed above. Do NOT re-validate criteria that QA already passed.\n' +
-        'After fixing all issues, run the FULL test suite to verify no regressions.\n'
-      : '');
+    'PROJECT_ROOT=' + deps.projectRoot + '\n\n';
 
   return { command, request, wasWakeupReentry };
 }
@@ -3335,9 +3330,8 @@ export async function tryCherryPickWithRecovery(
 export function buildSyntheticReworkDescription(qaContent: string): string {
   return (
     '⚠️ ALL PLAN SUBTASKS ARE DONE — THIS IS TARGETED REWORK, NOT FRESH IMPLEMENTATION.\n\n' +
-    'QA found failures that could not be automatically mapped to specific plan subtasks. ' +
-    'The original plan subtasks are already implemented — do NOT re-read or re-implement them. ' +
-    'Do NOT re-read the spec. Your ONLY job is to fix the QA issues listed below.\n\n' +
+    'QA found failures that could not be mapped to a specific plan subtask. ' +
+    'Follow "When All Subtasks Are Already Completed" in your instructions.\n\n' +
     '**QA feedback (source of truth):**\n\n' + qaContent
   );
 }

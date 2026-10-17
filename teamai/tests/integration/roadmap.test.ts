@@ -15,9 +15,11 @@ import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
+import { renderCommand } from '@/lib/command-templates';
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
 
+const renderFailure = vi.hoisted(() => ({ error: null as Error | null }));
 const mockGetActiveProjectPath = vi.fn();
 
 vi.mock('@/app/actions/projects', () => ({
@@ -28,6 +30,17 @@ vi.mock('@/app/actions/projects', () => ({
 const mockCreateSession = vi.fn();
 const mockSendMessage = vi.fn();
 const mockGetSession = vi.fn();
+
+vi.mock('@/lib/command-templates', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/command-templates')>('@/lib/command-templates');
+  return {
+    ...actual,
+    renderCommand: (...args: Parameters<typeof actual.renderCommand>) => {
+      if (renderFailure.error) throw renderFailure.error;
+      return actual.renderCommand(...args);
+    },
+  };
+});
 
 // Mock next/cache so revalidatePath is a no-op (no Next.js context in tests)
 vi.mock('next/cache', () => ({
@@ -148,6 +161,7 @@ function flatItemsReport(items: number, usePhaseField = false) {
 
 describe('Roadmap Integration', () => {
   beforeEach(() => {
+    renderFailure.error = null;
     vi.clearAllMocks();
     initProject();
   });
@@ -569,8 +583,10 @@ describe('Roadmap Integration', () => {
   });
 
   describe('startRoadmapGeneration (with mocked processManager)', () => {
-    it('creates a session and sends the /roadmap command', async () => {
+    it('creates a session and sends the rendered roadmap command', async () => {
       mockCreateSession.mockResolvedValue('sess-1');
+      mkdirSync(join(projectDir, '.teamai', 'ideation'), { recursive: true });
+      writeFileSync(join(projectDir, '.teamai', 'ideation', 'ideation-2026-01-01.json'), '{}');
 
       const { startRoadmapGeneration } = await import('@/app/actions/roadmap');
       const sessionId = await startRoadmapGeneration(true); // skipCompetitors=true
@@ -579,7 +595,17 @@ describe('Roadmap Integration', () => {
         expect.objectContaining({ projectRoot: projectDir, permissionMode: 'bypassPermissions' }),
       );
       expect(sessionId).toBe('sess-1');
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-1', expect.stringContaining('/roadmap'));
+      const expected = renderCommand('roadmap', '--skip-competitors --ideation-report .teamai/ideation/ideation-2026-01-01.json');
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-1', expected);
+      expect(mockSendMessage.mock.calls[0][1].startsWith('/')).toBe(false);
+    });
+
+    it('rejects without creating a session when the command fails to render', async () => {
+      renderFailure.error = new Error('template missing');
+
+      const { startRoadmapGeneration } = await import('@/app/actions/roadmap');
+      await expect(startRoadmapGeneration(true)).rejects.toThrow('template missing');
+      expect(mockCreateSession).not.toHaveBeenCalled();
     });
 
     it('passes skip-competitors flag when requested', async () => {
@@ -588,7 +614,7 @@ describe('Roadmap Integration', () => {
       const { startRoadmapGeneration } = await import('@/app/actions/roadmap');
       await startRoadmapGeneration(true);
 
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-2', expect.stringContaining('--skip-competitors'));
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-2', renderCommand('roadmap', '--skip-competitors'));
     });
 
     it('does not pass skip-competitors flag by default', async () => {
@@ -597,8 +623,8 @@ describe('Roadmap Integration', () => {
       const { startRoadmapGeneration } = await import('@/app/actions/roadmap');
       await startRoadmapGeneration(false);
 
-      const message = mockSendMessage.mock.calls[0][1];
-      expect(message).not.toContain('--skip-competitors');
+      // The template text itself documents the flag, so compare whole messages.
+      expect(mockSendMessage).toHaveBeenCalledWith('sess-3', renderCommand('roadmap', ''));
     });
   });
 

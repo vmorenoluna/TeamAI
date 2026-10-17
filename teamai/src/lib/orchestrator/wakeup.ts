@@ -404,14 +404,7 @@ export function buildWakeupReentryHeader(opts: WakeupReentryHeaderOptions): stri
         'exercise the wrong code and produce meaningless results.\n\n'
       : '') +
     buildHeadMovedNote(opts.headAtSchedule, opts.currentHead) +
-    'Check if the artifact exists and is complete. If it is: verify it and finish your\n' +
-    'normal end-of-session work (commit, write the required file, etc). If it is missing\n' +
-    'or incomplete, first check whether the background process is still running:\n' +
-    '- If the process is still running: estimate remaining time, write an updated\n' +
-    '  ' + opts.wakeupFilename + ' with a new wakeup_at, and end.\n' +
-    '- If the process has crashed or exited with an error: do NOT write another wakeup\n' +
-    '  file. Report the failure immediately so the task can advance to failed without\n' +
-    '  wasting the remaining wakeup attempts.\n\n';
+    'Follow the WAKEUP RE-ENTRY steps in your instructions below to verify the artifact, reschedule a job that is still running, or handle one that crashed. Wakeup file for this unit: ' + opts.wakeupFilename + '\n\n';
 }
 
 // ── Single-session phase detection (spec / plan / qa-review) ────────────

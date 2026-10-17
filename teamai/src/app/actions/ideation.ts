@@ -3,6 +3,7 @@
 import { processManager, containerSessionOpts } from '@/lib/process-manager';
 import { getActiveProjectPath } from './projects';
 import { getProvidersConfig } from './providers';
+import { renderCommand } from '@/lib/command-templates';
 import { readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
@@ -19,6 +20,8 @@ export async function startIdeationScan(): Promise<string> {
   // Default to Sonnet (not the CLI default) so a mechanical scan never
   // silently runs an expensive model.
   const explorationModel = providersConfig.exploration?.model || providersConfig.default.model;
+  // Render before createSession so a template failure spawns nothing.
+  const message = renderCommand('ideation', '');
   const sessionId = await processManager.createSession({
     taskId: `ideation::${projectPath}`,
     role: 'general',
@@ -27,7 +30,7 @@ export async function startIdeationScan(): Promise<string> {
     ...containerSessionOpts(projectPath),
   });
   sessions.set(projectPath, sessionId);
-  processManager.sendMessage(sessionId, '/ideation');
+  processManager.sendMessage(sessionId, message);
   return sessionId;
 }
 

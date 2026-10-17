@@ -155,8 +155,7 @@ describe('buildSubtaskScopeNote', () => {
     expect(note).toContain('re-plan ONLY these, do not regenerate or alter any other subtask');
     expect(note).toContain('#2: Fix auth module');
     expect(note).toContain('#4: Add rate limiting');
-    expect(note).toContain('Every subtask NOT listed above must be preserved byte-for-byte');
-    expect(note).toContain('acceptance_criteria');
+    expect(note).toContain('Every subtask NOT listed above is on the preserve-list: apply the **Scoped re-plan (human preserve-list)** rule in your instructions.');
   });
 
   it('keeps the coder note wording for the default rework mode', () => {
@@ -205,9 +204,20 @@ describe('humanDirectiveFor', () => {
     expect(block).toContain('OVERRIDES EVERYTHING');
     expect(block).toContain('re-plan ONLY these');
     expect(block).toContain('#2: Fix auth module');
-    expect(block).toContain('byte-for-byte');
+    expect(block).toContain('🧑 HUMAN DIRECTIVE');
+    expect(block).toContain('Re-plan only the migration');
+    expect(block).toContain('Scoped re-plan (human preserve-list)');
+    expect(block).not.toContain('takes precedence over the');
     // The planner note must NOT use the coder's rework wording.
     expect(block).not.toContain('rework ONLY these');
+  });
+
+  it('returns the context note for a directive aimed at another agent', () => {
+    writeHumanFeedback(dir, 'coder', 'Use the new client');
+    const block = humanDirectiveFor(dir, 'qa-reviewer');
+    expect(block).toContain('ℹ️ HUMAN DIRECTIVE CONTEXT');
+    expect(block).toContain('Use the new client');
+    expect(block).toContain('Human directive override');
   });
 
   it('omits the scope note when plan.json is missing or no ids are selected', () => {

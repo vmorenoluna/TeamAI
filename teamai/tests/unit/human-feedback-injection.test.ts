@@ -217,7 +217,7 @@ describe('runPlanPhase — human directive injection', () => {
 
     const prompt = mockSendMessage.mock.calls[0][1] as string;
     expect(prompt.startsWith('<!-- .claude/commands/plan-revise.md -->')).toBe(true);
-    expect(prompt).toContain('PRESERVING');
+    expect(prompt).toContain('IMPORTANT: Write the updated plan');
   });
 
   it('enforces the preserve-list: restores unselected subtasks a scoped replan clobbered, and clears the persisted snapshot', async () => {
@@ -279,7 +279,7 @@ describe('runPlanPhase — human directive injection', () => {
     // The directive must carry the preserve-list note.
     const prompt = mockSendMessage.mock.calls[0][1] as string;
     expect(prompt).toContain('re-plan ONLY these');
-    expect(prompt).toContain('byte-for-byte');
+    expect(prompt).toContain('Scoped re-plan (human preserve-list)');
 
     // The guardrail restored the preserved subtasks byte-for-byte.
     const plan = JSON.parse(readFileSync(join(ctx.specPath, 'plan.json'), 'utf-8'));

@@ -422,6 +422,28 @@ describe('_writeQaFeedback', () => {
       ac.includes('[QA ISSUE:')
     )).toBe(true);
   });
+
+  it('AC8: persisted failures block keeps heading and count lines without the duplicated rule', () => {
+    const report = {
+      overall: 'FAIL',
+      criteria: [
+        { criterion: 'Error handling', status: 'FAIL', notes: 'Missing try/catch' },
+        { criterion: 'Performance', status: 'FAIL', notes: 'Slow' },
+      ],
+    };
+
+    (orch as AnyOrch)._ctx.writeQaFeedback(
+      { ...pipeline(project.taskId, project.taskDir), persistedCriterionFailCounts: { 'Error handling': 3, 'Performance': 2 } },
+      report,
+    );
+
+    const content = readFileSync(join(project.taskDir, 'qa_feedback.md'), 'utf-8');
+    expect(content).toContain('⚠️ PERSISTED FAILURES — RESOLVE THESE FIRST ⚠️');
+    expect(content).toContain('**"Error handling"** — this exact criterion has failed **3 times in a row**.');
+    expect(content).toContain('**"Performance"** — this exact criterion has failed **2 times in a row**.');
+    expect(content).not.toContain('Do NOT deprioritize');
+    expect(content).not.toContain('resolved before addressing');
+  });
 });
 
 describe('_writeCompletionSummary', () => {
