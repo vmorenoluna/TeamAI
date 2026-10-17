@@ -2528,8 +2528,12 @@ export async function runImplement(
         catch (err) {
           // Log rather than swallow: a failed worktree removal is the root
           // cause of the "branch still checked out" failures downstream, and
-          // previously it was invisible.
-          logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to remove per-subtask worktree ${stCanonicalPath}: ${err instanceof Error ? err.message : String(err)}\n`);
+          // previously it was invisible. A path git doesn't know is the normal
+          // first-run case (nothing to remove), not a failure worth logging.
+          const message = err instanceof Error ? err.message : String(err);
+          if (!/is not a working tree/.test(message)) {
+            logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to remove per-subtask worktree ${stCanonicalPath}: ${message}\n`);
+          }
         }
         if (existsSync(stCanonicalPath)) {
           logToOutput(pipeline.specPath, '\n[WORKTREE] Per-subtask worktree at ' + stCanonicalPath + ' still exists after git-level removal — falling back to rmSync\n');
@@ -2552,7 +2556,11 @@ export async function runImplement(
         if (canRecreate) {
           try { await execGitQueued(['branch', '-D', stBranch], deps.projectRoot, deps.projectRoot); }
           catch (err) {
-            logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to delete branch ${stBranch}: ${err instanceof Error ? err.message : String(err)}\n`);
+            // A missing branch is the normal first-run case, not a failure.
+            const message = err instanceof Error ? err.message : String(err);
+            if (!/branch '.*' not found/.test(message)) {
+              logToOutput(pipeline.specPath, `\n[WORKTREE] Failed to delete branch ${stBranch}: ${message}\n`);
+            }
           }
 
           // Verify the branch is actually gone before attempting -b creation.
