@@ -74,10 +74,10 @@ vi.mock('child_process', () => ({
 vi.mock('../../src/lib/container-manager', () => ({
   readContainerConfig: vi.fn(() => ({ enabled: false, explicit: false })),
   readContainerRemoteUser: vi.fn(() => 'node'),
-  containerManager: { ensureContainer: vi.fn(), getRunningContainer: vi.fn(() => null) },
+  containerManager: { ensureContainer: vi.fn(), getRunningContainer: vi.fn(async () => null) },
   hostToContainerPath: vi.fn((p: string) => p),
-  dockerAvailable: vi.fn(() => true),
-  _resetDockerAvailableCache: vi.fn(),
+  checkDockerAvailable: vi.fn(async () => true),
+  getCachedDockerAvailable: vi.fn(() => true),
 }));
 
 import { runSpecPhase, runPlanPhase, runMergePhase, rebaseOntoLatestDefault } from '../../src/lib/orchestrator/phase-runners';
@@ -135,7 +135,7 @@ function cascadeDeps(ctx: Ctx, overrides: Record<string, unknown> = {}) {
     rotateOutputLog: vi.fn(),
     phaseHeader: vi.fn(),
     savePipelineState: vi.fn(),
-    toAgentPath: (p: string) => p,
+    toAgentPath: async (p: string) => p,
     executePhase: vi.fn(async () => undefined),
     gitPush: vi.fn(),
     execGit: vi.fn(async () => undefined),

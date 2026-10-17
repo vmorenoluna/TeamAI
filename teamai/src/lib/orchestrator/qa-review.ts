@@ -103,7 +103,7 @@ export interface QaReviewDeps {
   writeQaFeedback: (pipeline: TaskPipeline, report: QaReport) => void;
   writeCompletionSummary: (pipeline: TaskPipeline, reason: FailureReason, detail?: string) => void;
   phaseHeader: (logFile: string, phase: string) => void;
-  toAgentPath: (hostPath: string) => string;
+  toAgentPath: (hostPath: string) => Promise<string>;
   autoReviseSpec: (pipeline: TaskPipeline) => Promise<void>;
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
@@ -524,7 +524,7 @@ async function runQaReviewRound(
   // missing an upstream fix its own prior failure depended on.
   await syncPhaseBaseline(pipeline, deps);
 
-  const agentSpecPath = deps.toAgentPath(pipeline.specPath);
+  const agentSpecPath = await deps.toAgentPath(pipeline.specPath);
   const wakeupHeader = isWakeupReentry
     ? buildWakeupReentryHeader({
         unitLabel: 'the QA review',

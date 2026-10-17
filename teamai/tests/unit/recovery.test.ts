@@ -62,8 +62,8 @@ vi.mock('../../src/lib/container-manager', () => ({
     getRunningContainer: () => null,
   },
   hostToContainerPath: (p: string) => p,
-  dockerAvailable: () => false,
-  _resetDockerAvailableCache: vi.fn(),
+  checkDockerAvailable: async () => false,
+  getCachedDockerAvailable: () => false,
 }));
 
 const mockRestoreWorktreeGitFileToHostPaths = vi.fn();

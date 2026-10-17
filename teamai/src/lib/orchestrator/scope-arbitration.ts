@@ -56,7 +56,7 @@ export interface ScopeArbitrationDeps {
   sessionOpts: (role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) => SessionOptsResult;
   /** Waits for the planner session to finish (injectable so tests can write the verdicts file). */
   waitForCompletion: (sessionId: string) => Promise<void>;
-  toAgentPath: (hostPath: string) => string;
+  toAgentPath: (hostPath: string) => Promise<string>;
   planWriteLock: { current: Promise<void> };
   savePipelineState: (pipeline: ScopePipeline) => void;
   execGit: (args: string[], hostCwd: string) => Promise<void>;
@@ -376,17 +376,17 @@ export type ScopeArbitrationResult =
   | ScopeExhausted & { actionStarted: boolean }
   | { status: 'applied'; actionStarted: true; apply: ScopeApplyResult; reports: ScopeReport[] };
 
-function buildHeader(deps: ScopeArbitrationDeps, pipeline: ScopePipeline, reports: ScopeReport[]): string {
-  const lines = reports.map(r => `- ${deps.toAgentPath(scopeReportPath(pipeline.specPath, r.subtask_id))}`);
+async function buildHeader(deps: ScopeArbitrationDeps, pipeline: ScopePipeline, reports: ScopeReport[]): Promise<string> {
+  const lines = await Promise.all(reports.map(async r => `- ${await deps.toAgentPath(scopeReportPath(pipeline.specPath, r.subtask_id))}`));
   return 'ℹ️ SCOPE ARBITRATION — coder sessions changed files outside their subtask `files`; their commits are held.\n' +
     'Scope reports:\n' + lines.join('\n') + '\n' +
-    `Write your verdicts to ${deps.toAgentPath(path.join(pipeline.specPath, 'scope_verdicts.json'))}\n\n`;
+    `Write your verdicts to ${await deps.toAgentPath(path.join(pipeline.specPath, 'scope_verdicts.json'))}\n\n`;
 }
 
 async function runPlannerSession(deps: ScopeArbitrationDeps, pipeline: ScopePipeline, reports: ScopeReport[]): Promise<void> {
   const logFile = path.join(pipeline.specPath, 'output-scope-replan.log');
   const message = renderCommand('plan-revise',
-    buildHeader(deps, pipeline, reports) +
+    await buildHeader(deps, pipeline, reports) +
     'This session writes only scope_verdicts.json — do not edit plan.json or any other file.');
   const sessionId = await processManager.createSession(deps.sessionOpts('planner', deps.projectRoot, pipeline.taskId, logFile));
   updateSessionMap(pipeline.specPath, 'scope-replan', sessionId);

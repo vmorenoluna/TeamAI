@@ -42,10 +42,10 @@ vi.mock('child_process', () => ({
 vi.mock('../../src/lib/container-manager', () => ({
   readContainerConfig: vi.fn(() => ({ enabled: false, explicit: false })),
   readContainerRemoteUser: vi.fn(() => 'node'),
-  containerManager: { ensureContainer: vi.fn(), getRunningContainer: vi.fn(() => null) },
+  containerManager: { ensureContainer: vi.fn(), getRunningContainer: vi.fn(async () => null) },
   hostToContainerPath: vi.fn((p: string) => p),
-  dockerAvailable: vi.fn(() => true),
-  _resetDockerAvailableCache: vi.fn(),
+  checkDockerAvailable: vi.fn(async () => true),
+  getCachedDockerAvailable: vi.fn(() => true),
 }));
 vi.mock('../../src/lib/command-templates', () => ({
   renderCommand: vi.fn(() => { throw new Error('Command include "_shared/x.md" not found'); }),
@@ -83,7 +83,7 @@ const deps = () => ({
   savePipelineState: vi.fn(), executePhase: vi.fn(), writeCompletionSummary: vi.fn(), scheduleWakeup: vi.fn(),
   sessionOpts: (role: string, cwd: string, taskId: string) => ({ role, cwd, taskId }),
   waitForCompletion: vi.fn(async () => undefined),
-  toAgentPath: (p: string) => p,
+  toAgentPath: async (p: string) => p,
   gitPush: vi.fn(),
   execGit: vi.fn((args: string[]) => { if (args[0] === 'merge' && args[1] !== '--abort') throw new Error('CONFLICT'); }),
   execGitCapture: vi.fn(async () => ''),

@@ -62,7 +62,7 @@ function makeDeps(): ScopeArbitrationDeps {
       // The planner's own plan.json edits must be ignored
       writeFileSync(path.join(spec, 'plan.json'), JSON.stringify({ subtasks: [] }));
     },
-    toAgentPath: p => p,
+    toAgentPath: async p => p,
     planWriteLock: { current: Promise.resolve() },
     savePipelineState: vi.fn(),
     execGit: async (args, cwd) => { execFileSync('git', args, { cwd, stdio: 'pipe' }); },

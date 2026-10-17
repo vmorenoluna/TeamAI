@@ -312,7 +312,7 @@ export function execGit(args: string[], hostCwd: string, projectRoot: string): P
 
 async function execGitUnqueued(args: string[], hostCwd: string, projectRoot: string): Promise<string> {
   if (readContainerConfig(projectRoot).enabled && args[0] !== 'worktree') {
-    const info = containerManager.getRunningContainer(projectRoot);
+    const info = await containerManager.getRunningContainer(projectRoot);
     if (info) {
       const containerCwd = hostToContainerPath(hostCwd, projectRoot, info.remoteWorkspaceFolder);
       const mappedArgs = args.map(a =>

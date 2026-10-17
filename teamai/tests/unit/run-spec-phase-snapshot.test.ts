@@ -119,7 +119,7 @@ function makeCtx() {
     rotateOutputLog: vi.fn(),
     phaseHeader: vi.fn(),
     savePipelineState: vi.fn(),
-    toAgentPath: (p: string) => p,
+    toAgentPath: async (p: string) => p,
     executePhase: vi.fn(async () => undefined),
     gitPush: vi.fn(),
     execGit: vi.fn(async () => undefined),

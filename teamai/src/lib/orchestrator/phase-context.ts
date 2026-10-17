@@ -57,7 +57,7 @@ export interface PhaseContext {
   phaseHeader: (logFile: string, phase: string) => void;
 
   // ── Container / worktree ──
-  toAgentPath: (hostPath: string) => string;
+  toAgentPath: (hostPath: string) => Promise<string>;
   patchWorktreeGitFile: (hostWorktreePath: string, containerWorkspace: string) => void;
   /** Restore host-side paths in a worktree .git file (used by tests + artifact-commit). */
   restoreWorktreeGitFileToHostPaths: (hostWorktreePath: string) => void;

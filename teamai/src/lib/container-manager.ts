@@ -1,4 +1,4 @@
-import { spawn, execFile, execFileSync, ChildProcess } from 'child_process';
+import { spawn, execFile, ChildProcess } from 'child_process';
 import crossSpawn from 'cross-spawn';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { EventEmitter } from 'events';
@@ -7,9 +7,9 @@ import { warn as logWarn, log } from './logger';
 import { getToolPath } from './tool-checker';
 import { logToOutput } from './orchestrator/helpers';
 
-const execFileAsync = (file: string, args: string[]) =>
+const execFileAsync = (file: string, args: string[], opts: { timeout?: number } = {}) =>
   new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    execFile(file, args, { encoding: 'utf-8', timeout: 300_000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(file, args, { encoding: 'utf-8', timeout: opts.timeout ?? 300_000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) reject(Object.assign(err, { stdout, stderr })); else resolve({ stdout, stderr });
     });
   });
@@ -66,39 +66,77 @@ function devcontainerBin(): string {
 // Negative results expire after 60s — Docker Desktop may not have finished
 // starting when the server boots (common after a machine reboot). Without
 // TTL, a single failed check at startup permanently disables container mode.
+// The probe is async so `docker info` (up to 2s) never blocks the shared Node
+// event loop; the cache lives on `global` so every module instance shares it.
 const DOCKER_AVAILABLE_NEGATIVE_TTL_MS = 60_000;
-let _dockerAvailable: boolean | null = null;
-let _dockerAvailableCheckedAt: number = 0;
+
+interface DockerAvailabilityCache {
+  value: boolean | null;
+  checkedAt: number;
+  inFlight: Promise<boolean> | null;
+}
+
+function dockerCache(): DockerAvailabilityCache {
+  return global.__dockerAvailability ??= { value: null, checkedAt: 0, inFlight: null };
+}
 
 /** @internal Reset the docker-available cache (used in tests) */
 export function _resetDockerAvailableCache(): void {
-  _dockerAvailable = null;
-  _dockerAvailableCheckedAt = 0;
+  const cache = dockerCache();
+  cache.value = null;
+  cache.checkedAt = 0;
+  cache.inFlight = null;
 }
 
-export function dockerAvailable(): boolean {
-  const now = Date.now();
-  if (_dockerAvailable === true) return true;
-  if (_dockerAvailable === false && (now - _dockerAvailableCheckedAt) < DOCKER_AVAILABLE_NEGATIVE_TTL_MS) {
-    return false;
-  }
-  const wasCachedNegative = _dockerAvailable === false;
-  try {
-    execFileSync(getToolPath('docker'), ['info'], { stdio: 'ignore', timeout: 2000 });
-    _dockerAvailable = true;
-    _dockerAvailableCheckedAt = 0;
-    if (wasCachedNegative) {
-      log('container', 'Docker is now available — container mode re-enabled');
+function probeDocker(cache: DockerAvailabilityCache): Promise<boolean> {
+  const wasCachedNegative = cache.value === false;
+  const self: { probe?: Promise<boolean> } = {};
+  const probe = (async () => {
+    let available: boolean;
+    try {
+      await execFileAsync(getToolPath('docker'), ['info'], { timeout: 2000 });
+      available = true;
+    } catch (err) {
+      available = false;
+      // Only log on first failure to avoid spamming every 60s on retry
+      if (!wasCachedNegative) logWarn('container', 'docker info check failed', err);
     }
-  } catch (err) {
-    _dockerAvailable = false;
-    _dockerAvailableCheckedAt = now;
-    // Only log on first failure to avoid spamming every 60s on retry
-    if (!wasCachedNegative) {
-      logWarn('container', 'docker info check failed', err);
+    // A reset while the probe was running orphans it — don't repopulate the cache.
+    if (cache.inFlight === self.probe) {
+      cache.value = available;
+      cache.checkedAt = available ? 0 : Date.now();
+      if (available && wasCachedNegative) log('container', 'Docker is now available — container mode re-enabled');
     }
+    return available;
+  })().finally(() => {
+    if (cache.inFlight === self.probe) cache.inFlight = null;
+  });
+  self.probe = probe;
+  cache.inFlight = probe;
+  return probe;
+}
+
+/** Whether Docker is available. Never rejects; concurrent callers share one probe. */
+export async function checkDockerAvailable(opts: { force?: boolean } = {}): Promise<boolean> {
+  const cache = dockerCache();
+  if (!opts.force) {
+    if (cache.value === true) return true;
+    if (cache.value === false && (Date.now() - cache.checkedAt) < DOCKER_AVAILABLE_NEGATIVE_TTL_MS) return false;
   }
-  return _dockerAvailable;
+  return cache.inFlight ?? probeDocker(cache);
+}
+
+/**
+ * Synchronous view of the availability cache. Returns false while nothing is
+ * cached and starts a background probe (when empty, or negative and expired) so
+ * a later call sees the result.
+ */
+export function getCachedDockerAvailable(): boolean {
+  const cache = dockerCache();
+  if (cache.value === true) return true;
+  if (cache.value === false && (Date.now() - cache.checkedAt) < DOCKER_AVAILABLE_NEGATIVE_TTL_MS) return false;
+  void checkDockerAvailable();
+  return false;
 }
 
 export function readContainerConfig(projectRoot: string): { enabled: boolean; explicit: boolean } {
@@ -107,7 +145,7 @@ export function readContainerConfig(projectRoot: string): { enabled: boolean; ex
     try { return { ...JSON.parse(readFileSync(cfgPath, 'utf-8')), explicit: true }; } catch (err) { logWarn('container', 'Failed to parse container config, using defaults', err); }
   }
   // Default: auto-enable when Docker is available, opt-out otherwise
-  return { enabled: dockerAvailable(), explicit: false };
+  return { enabled: getCachedDockerAvailable(), explicit: false };
 }
 
 /**
@@ -171,21 +209,11 @@ export class ContainerManager extends EventEmitter {
     let record = this.records.get(projectRoot);
 
     if (!record || record.state === 'stopped') {
-      // Before running devcontainer up, check if the container is already running
-      // (e.g. after a server restart that cleared the in-memory record)
-      const existing = this._findRunningContainerSync(projectRoot);
-      if (existing) {
-        record = this._newRecord(projectRoot, 'running');
-        record.containerId = existing.containerId;
-        record.remoteWorkspaceFolder = existing.remoteWorkspaceFolder;
-        this.records.set(projectRoot, record);
-        this._watchEvents(record);
-      } else {
-        record = this._newRecord(projectRoot, 'starting');
-        this.records.set(projectRoot, record);
-        this._emit(record, 'starting');
-        record.startPromise = this._doStart(record, logFile);
-      }
+      // Register the record (with its startPromise) before the first await so
+      // concurrent callers join it instead of starting a second scan/devcontainer up.
+      record = this._newRecord(projectRoot, 'starting');
+      this.records.set(projectRoot, record);
+      record.startPromise = this._scanAndStart(record, logFile);
     }
 
     if (record.state === 'starting' || record.state === 'restarting') {
@@ -202,14 +230,32 @@ export class ContainerManager extends EventEmitter {
     // the flag. Record trust now; a failure throws and leaves the flag unset,
     // so every later call retries instead of handing out an untrusted container.
     if (!record.trusted) {
-      this._trustWorkspaceInContainer(record.containerId, record.projectRoot, record.remoteWorkspaceFolder, logFile);
+      await this._trustWorkspaceInContainer(record.containerId, record.projectRoot, record.remoteWorkspaceFolder, logFile);
       record.trusted = true;
     }
 
     return { containerId: record.containerId, remoteWorkspaceFolder: record.remoteWorkspaceFolder };
   }
 
-  getState(projectRoot: string): ContainerState {
+  /**
+   * Before running devcontainer up, check if the container is already running
+   * (e.g. after a server restart that cleared the in-memory record) and adopt it.
+   */
+  private async _scanAndStart(record: ContainerRecord, logFile?: string): Promise<void> {
+    const existing = await this._findRunningContainer(record.projectRoot);
+    if (existing) {
+      record.containerId = existing.containerId;
+      record.remoteWorkspaceFolder = existing.remoteWorkspaceFolder;
+      record.state = 'running';
+      record.startPromise = null;
+      this._watchEvents(record);
+      return;
+    }
+    this._emit(record, 'starting');
+    await this._doStart(record, logFile);
+  }
+
+  async getState(projectRoot: string): Promise<ContainerState> {
     const existing = this.records.get(projectRoot);
     if (existing) return existing.state;
     // No in-memory record — check Docker directly for an existing devcontainer
@@ -218,12 +264,12 @@ export class ContainerManager extends EventEmitter {
       // (e.g. cookie has "C:\..." but devcontainer label is "c:\...")
       const normalized = projectRoot.replace(/^([A-Z]):/, (_, d) => `${d.toLowerCase()}:`);
       const label = `devcontainer.local_folder=${normalized}`;
-      // Use execFileSync to bypass shell quoting (backslashes in Windows paths break execSync's shell)
-      const out = execFileSync(getToolPath('docker'), [
+      // Use execFile to bypass shell quoting (backslashes in Windows paths break a shell-based exec)
+      const out = (await execFileAsync(getToolPath('docker'), [
         'ps', '-a',
         '--filter', `label=${label}`,
         '--format', '{{.Status}}',
-      ], { encoding: 'utf-8', timeout: 10000 }).trim();
+      ], { timeout: 10000 })).stdout.trim();
       if (out.includes('Up')) return 'running';   // container is up
       // Any other output (Exited, Created, etc.) means it's not running — treat as stoppable
       if (out) return 'stopped';
@@ -231,20 +277,20 @@ export class ContainerManager extends EventEmitter {
     return 'stopped';
   }
 
-  // Synchronously find a running devcontainer via Docker labels — used as fallback
+  // Find a running devcontainer via Docker labels — used as fallback
   // when the in-memory record was lost (e.g. after a server restart).
-  private _findRunningContainerSync(projectRoot: string): ContainerInfo | null {
+  private async _findRunningContainer(projectRoot: string): Promise<ContainerInfo | null> {
     try {
       const normalized = projectRoot.replace(/^([A-Z]):/, (_, d) => `${d.toLowerCase()}:`);
       const label = `devcontainer.local_folder=${normalized}`;
-      const containerId = execFileSync(getToolPath('docker'), [
+      const containerId = (await execFileAsync(getToolPath('docker'), [
         'ps', '--filter', `label=${label}`, '--format', '{{.ID}}',
-      ], { encoding: 'utf-8', timeout: 5000 }).trim();
+      ], { timeout: 5000 })).stdout.trim();
       if (!containerId) return null;
 
-      const mountsJson = execFileSync(getToolPath('docker'), [
+      const mountsJson = (await execFileAsync(getToolPath('docker'), [
         'inspect', containerId, '--format', '{{json .Mounts}}',
-      ], { encoding: 'utf-8', timeout: 5000 }).trim();
+      ], { timeout: 5000 })).stdout.trim();
       const mounts: Array<{ Source: string; Destination: string }> = JSON.parse(mountsJson);
 
       const normalizedRoot = projectRoot.replace(/\\/g, '/').toLowerCase();
@@ -257,47 +303,56 @@ export class ContainerManager extends EventEmitter {
     } catch { return null; }
   }
 
-  // Returns the running container info synchronously — for use in orchestrator git commands.
+  // Returns the running container info — for use in orchestrator git commands.
   // Falls back to a Docker label scan when the in-memory record is absent (e.g. server restart).
   // Before trusting a cached 'running' record, performs a cheap liveness check to detect
   // containers that died without the event watcher noticing (e.g. Docker Desktop restart, OOM).
-  getRunningContainer(projectRoot: string): ContainerInfo | null {
+  async getRunningContainer(projectRoot: string): Promise<ContainerInfo | null> {
     const r = this.records.get(projectRoot);
     if (r?.state === 'running' && r.containerId && r.remoteWorkspaceFolder) {
+      const { containerId, remoteWorkspaceFolder } = r;
       // Liveness check: verify the container is actually still running.
       // docker inspect is a cheap local call (sub-100ms) — well worth avoiding
       // the misdiagnosis of infra failures as git problems downstream.
-      if (this._isContainerAlive(r.containerId)) {
-        return { containerId: r.containerId, remoteWorkspaceFolder: r.remoteWorkspaceFolder };
+      if (await this._isContainerAlive(containerId)) {
+        return { containerId, remoteWorkspaceFolder };
       }
-      // Container died without the event watcher catching it — transition to stopped
-      // and fall through to the scan below. ensureContainer() will handle the restart.
-      log('container', `Container for ${projectRoot} is not actually running (stale record) — marking stopped`);
-      r.state = 'stopped';
-      r.containerId = null;
-      r.remoteWorkspaceFolder = null;
-      r.eventWatcher?.kill();
-      r.eventWatcher = null;
-      this._emit(r, 'stopped');
+      // The check awaited Docker: only act on the record we checked, and only if
+      // nothing replaced it or restarted its container in the meantime.
+      if (this.records.get(projectRoot) === r && r.containerId === containerId) {
+        // Container died without the event watcher catching it — transition to stopped
+        // and fall through to the scan below. ensureContainer() will handle the restart.
+        log('container', `Container for ${projectRoot} is not actually running (stale record) — marking stopped`);
+        r.state = 'stopped';
+        r.containerId = null;
+        r.remoteWorkspaceFolder = null;
+        r.eventWatcher?.kill();
+        r.eventWatcher = null;
+        this._emit(r, 'stopped');
+      }
     }
-    const info = this._findRunningContainerSync(projectRoot);
+    const info = await this._findRunningContainer(projectRoot);
     if (info) {
-      // Populate the record so subsequent calls skip the Docker scan
-      const record = this._newRecord(projectRoot, 'running');
-      record.containerId = info.containerId;
-      record.remoteWorkspaceFolder = info.remoteWorkspaceFolder;
-      this.records.set(projectRoot, record);
+      // Populate the record so subsequent calls skip the Docker scan — but never
+      // overwrite a record created while the scan ran (e.g. by ensureContainer).
+      const current = this.records.get(projectRoot);
+      if (!current || current.state === 'stopped') {
+        const record = this._newRecord(projectRoot, 'running');
+        record.containerId = info.containerId;
+        record.remoteWorkspaceFolder = info.remoteWorkspaceFolder;
+        this.records.set(projectRoot, record);
+      }
     }
     return info;
   }
 
   /** Check whether a container is actually running via docker inspect. */
-  private _isContainerAlive(containerId: string): boolean {
+  private async _isContainerAlive(containerId: string): Promise<boolean> {
     try {
-      const result = execFileSync(getToolPath('docker'), [
+      const { stdout } = await execFileAsync(getToolPath('docker'), [
         'inspect', '--format', '{{.State.Running}}', containerId,
-      ], { encoding: 'utf-8', timeout: 5000 }).trim();
-      return result === 'true';
+      ], { timeout: 5000 });
+      return stdout.trim() === 'true';
     } catch {
       return false;
     }
@@ -316,12 +371,15 @@ export class ContainerManager extends EventEmitter {
       const { containerId, remoteWorkspaceFolder } = await this._spawnDevcontainerUp(args, record.projectRoot, logFile);
       record.containerId = containerId;
       record.remoteWorkspaceFolder = remoteWorkspaceFolder;
+      log('container', `Started — id=${containerId} workspace=${remoteWorkspaceFolder}`);
+      await this._logContainerClaudeVersion(containerId, record.projectRoot, logFile);
+      // The record stays in its starting/restarting state until trust is recorded,
+      // so concurrent callers keep waiting on startPromise instead of seeing an
+      // untrusted 'running' container.
+      await this._trustWorkspaceInContainer(containerId, record.projectRoot, remoteWorkspaceFolder, logFile);
+      record.trusted = true;
       record.state = 'running';
       record.startPromise = null;
-      log('container', `Started — id=${containerId} workspace=${remoteWorkspaceFolder}`);
-      this._logContainerClaudeVersion(containerId, record.projectRoot, logFile);
-      this._trustWorkspaceInContainer(containerId, record.projectRoot, remoteWorkspaceFolder, logFile);
-      record.trusted = true;
       this._emit(record, 'running');
       this._watchEvents(record);
     } catch (err) {
@@ -351,11 +409,11 @@ export class ContainerManager extends EventEmitter {
    *
    * Best-effort: never throws, never blocks/fails container startup.
    */
-  private _logContainerClaudeVersion(containerId: string, projectRoot: string, logFile?: string): void {
+  private async _logContainerClaudeVersion(containerId: string, projectRoot: string, logFile?: string): Promise<void> {
     try {
-      const version = execFileSync(getToolPath('docker'), [
+      const version = (await execFileAsync(getToolPath('docker'), [
         'exec', containerId, 'claude', '--version',
-      ], { encoding: 'utf-8', timeout: 5000 }).trim();
+      ], { timeout: 5000 })).stdout.trim();
       const message = `◆ Container claude-code: ${version}\n`;
       if (logFile) logToOutput(path.dirname(logFile), message);
       this.emit('container-log', { projectRoot, message: message.trim() });
@@ -387,7 +445,7 @@ export class ContainerManager extends EventEmitter {
    * missing `~/.claude.json` is created; an unreadable or invalid one is an
    * error, never silently overwritten.
    */
-  private _trustWorkspaceInContainer(containerId: string, projectRoot: string, workspaceFolder: string, logFile?: string): void {
+  private async _trustWorkspaceInContainer(containerId: string, projectRoot: string, workspaceFolder: string, logFile?: string): Promise<void> {
     const script =
       'const fs=require("fs"),p=require("os").homedir()+"/.claude.json";' +
       'let j={};' +
@@ -396,9 +454,9 @@ export class ContainerManager extends EventEmitter {
       'const w=process.argv[1];j.projects[w]=Object.assign({},j.projects[w],{hasTrustDialogAccepted:true});' +
       'fs.writeFileSync(p,JSON.stringify(j,null,2))';
     try {
-      execFileSync(getToolPath('docker'), [
+      await execFileAsync(getToolPath('docker'), [
         'exec', '-u', readContainerRemoteUser(projectRoot), containerId, 'node', '-e', script, workspaceFolder,
-      ], { encoding: 'utf-8', timeout: 10000 });
+      ], { timeout: 10000 });
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       const message = `✗ Could not record workspace trust for ${workspaceFolder} in the container: ${detail}\n`;
@@ -740,6 +798,7 @@ export class ContainerManager extends EventEmitter {
 
 declare global {
   var __containerManager: ContainerManager | undefined;
+  var __dockerAvailability: DockerAvailabilityCache | undefined;
 }
 
 export const containerManager: ContainerManager =

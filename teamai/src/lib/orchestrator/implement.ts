@@ -14,7 +14,7 @@ import { PipelineConfigError, WorktreeError, PushVerificationError, SessionKille
 import { readJsonFile } from '../json-io';
 import path from 'path';
 import { processManager, type AgentSession } from '../process-manager';
-import { readContainerConfig, containerManager, dockerAvailable, _resetDockerAvailableCache } from '../container-manager';
+import { readContainerConfig, containerManager, checkDockerAvailable } from '../container-manager';
 import { runSensors, sensorRunSummary, type SensorsConfig } from '../sensors';
 import { rebaseOntoLatestDefault } from './phase-runners';
 import { updateSessionMap, logToOutput } from './helpers';
@@ -77,7 +77,7 @@ export interface ImplementDeps {
   writeCompletionSummary: (pipeline: ImplementPipeline, reason: FailureReason, detail?: string) => void;
   getPipelineConfig: () => { maxQaAttempts: number; parallelSubtasks: boolean; sensors?: SensorsConfig; maxImplementRetries: number; maxStallRecoveries: number; idleStallMinutes: number; toolStallMinutes: number; wakeupScanRetryDelayMs?: number; backlogCheck?: boolean; backlogCheckEvidencePaths?: string[]; maxScopeStall?: number; maxScopeReplans?: number };
   /** Maps a host path to the path the agent sees (container mode). */
-  toAgentPath?: (hostPath: string) => string;
+  toAgentPath?: (hostPath: string) => Promise<string>;
   phaseHeader: (logFile: string, phase: string) => void;
   /** Mutable reference to the plan-write serialization lock. */
   planWriteLock: { current: Promise<void> };
@@ -267,8 +267,7 @@ export async function ensureWorktree(
   // Fail fast if Docker is not available
   const containerCfg = readContainerConfig(deps.projectRoot);
   if (containerCfg.enabled && !containerCfg.explicit) {
-    _resetDockerAvailableCache();
-    if (!dockerAvailable()) {
+    if (!(await checkDockerAvailable({ force: true }))) {
       throw new PipelineConfigError('Docker is not running. Start Docker Desktop and move the task back to In Progress to retry.');
     }
   }
@@ -1585,7 +1584,7 @@ export function scopeArbitrationDeps(deps: ImplementDeps): ScopeArbitrationDeps 
     projectRoot: deps.projectRoot,
     sessionOpts: deps.sessionOpts,
     waitForCompletion: deps.waitForCompletion,
-    toAgentPath: deps.toAgentPath ?? ((hostPath: string) => hostPath),
+    toAgentPath: deps.toAgentPath ?? (async (hostPath: string) => hostPath),
     planWriteLock: deps.planWriteLock,
     savePipelineState: (p) => deps.savePipelineState(p as ImplementPipeline),
     execGit: deps.execGit,
@@ -2515,7 +2514,7 @@ export async function runImplement(
     const subtaskWorktrees = new Map<number, string>();
     let containerWorkspace: string | undefined;
     if (readContainerConfig(deps.projectRoot).enabled) {
-      const info = containerManager.getRunningContainer(deps.projectRoot);
+      const info = await containerManager.getRunningContainer(deps.projectRoot);
       containerWorkspace = info?.remoteWorkspaceFolder || undefined;
     }
 

@@ -36,7 +36,7 @@ vi.mock('../../src/lib/container-manager', () => ({
   readContainerConfig: vi.fn(() => ({ enabled: false })),
   readContainerRemoteUser: vi.fn(() => 'node'),
   containerManager: {
-    getRunningContainer: vi.fn(() => null),
+    getRunningContainer: vi.fn(async () => null),
   },
   hostToContainerPath: vi.fn((p: string) => p),
 }));

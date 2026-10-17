@@ -60,11 +60,11 @@ vi.mock('../../src/lib/container-manager', () => ({
   readContainerRemoteUser: vi.fn(() => 'node'),
   containerManager: {
     ensureContainer: vi.fn(),
-    getRunningContainer: vi.fn(() => null),
+    getRunningContainer: vi.fn(async () => null),
   },
   hostToContainerPath: vi.fn((p: string) => p),
-  dockerAvailable: vi.fn(() => true),
-  _resetDockerAvailableCache: vi.fn(),
+  checkDockerAvailable: vi.fn(async () => true),
+  getCachedDockerAvailable: vi.fn(() => true),
 }));
 
 // Override only writeFileSync with a controllable mock that defaults to the
