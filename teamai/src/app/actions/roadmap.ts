@@ -9,6 +9,7 @@ import { TaskStore } from '@/lib/task-store';
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { generateChangelogFile } from '@/lib/changelog';
+import { renderCommand } from '@/lib/command-templates';
 
 // ── Global session tracking (shared across Next.js module contexts) ──────────
 declare global {
@@ -72,6 +73,10 @@ export async function startRoadmapGeneration(skipCompetitors: boolean = false): 
     }
   }
 
+  const skipFlag = skipCompetitors ? ' --skip-competitors' : '';
+  // Render before createSession so a template failure spawns nothing.
+  const cmd = renderCommand('roadmap', (skipFlag + ideationArg).trim());
+
   const providersConfig = await getProvidersConfig();
   // Default to Sonnet (not the CLI default) so roadmap generation never
   // silently runs an expensive model.
@@ -85,8 +90,6 @@ export async function startRoadmapGeneration(skipCompetitors: boolean = false): 
   });
   const key = `roadmap::${projectPath}`;
   sessions.set(key, sessionId);
-  const skipFlag = skipCompetitors ? ' --skip-competitors' : '';
-  const cmd = `/roadmap${skipFlag}${ideationArg}`;
   processManager.sendMessage(sessionId, cmd);
   return sessionId;
 }

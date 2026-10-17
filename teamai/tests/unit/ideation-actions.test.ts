@@ -12,6 +12,7 @@ import { join } from 'path';
 
 // ── Hoisted mocks ───────────────────────────────────────────────────────────
 
+const renderFailure = vi.hoisted(() => ({ error: null as Error | null }));
 const mockCreateSession = vi.fn();
 const mockSendMessage = vi.fn();
 
@@ -23,6 +24,17 @@ vi.mock('@/lib/process-manager', () => ({
   containerSessionOpts: (projectRoot: string) => ({ projectRoot, permissionMode: 'bypassPermissions' as const }),
 }));
 
+vi.mock('@/lib/command-templates', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/command-templates')>('@/lib/command-templates');
+  return {
+    ...actual,
+    renderCommand: (...args: Parameters<typeof actual.renderCommand>) => {
+      if (renderFailure.error) throw renderFailure.error;
+      return actual.renderCommand(...args);
+    },
+  };
+});
+
 const mockGetActiveProjectPath = vi.fn();
 
 vi.mock('@/app/actions/projects', () => ({
@@ -32,6 +44,7 @@ vi.mock('@/app/actions/projects', () => ({
 // ── Imports (must be after mocks) ───────────────────────────────────────────
 
 import { createTestProject } from '../utils/test-project';
+import { renderCommand } from '@/lib/command-templates';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -52,6 +65,7 @@ describe('ideation server actions', () => {
     mkdirSync(join(root, '.teamai'), { recursive: true });
     mockGetActiveProjectPath.mockResolvedValue(root);
     resetGlobalSessions();
+    renderFailure.error = null;
   });
 
   afterEach(() => {
@@ -64,7 +78,7 @@ describe('ideation server actions', () => {
   // ── startIdeationScan ────────────────────────────────────────────────
 
   describe('startIdeationScan', () => {
-    it('creates a session and sends the /ideation command', async () => {
+    it('creates a session and sends the rendered ideation command', async () => {
       mockCreateSession.mockResolvedValue('session-ideation');
 
       const { startIdeationScan } = await import('@/app/actions/ideation');
@@ -81,7 +95,17 @@ describe('ideation server actions', () => {
         projectRoot: root,
         permissionMode: 'bypassPermissions',
       });
-      expect(mockSendMessage).toHaveBeenCalledWith('session-ideation', '/ideation');
+      expect(mockSendMessage).toHaveBeenCalledWith('session-ideation', renderCommand('ideation', ''));
+      expect(mockSendMessage.mock.calls[0][1].startsWith('/')).toBe(false);
+    });
+
+    it('rejects without creating a session when the command fails to render', async () => {
+      renderFailure.error = new Error('template missing');
+
+      const { startIdeationScan } = await import('@/app/actions/ideation');
+      await expect(startIdeationScan()).rejects.toThrow('template missing');
+      expect(mockCreateSession).not.toHaveBeenCalled();
+      expect(mockSendMessage).not.toHaveBeenCalled();
     });
 
     it('stores the session in the global sessions map', async () => {
