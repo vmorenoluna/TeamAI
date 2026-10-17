@@ -97,7 +97,7 @@ export interface QaReviewDeps {
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
   sessionOpts: (role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) => SessionOptsResult;
   waitForCompletion: (sessionId: string) => Promise<void>;
-  gitPush: (pushArgs: string[], logFile: string) => void;
+  gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
   execGit: (args: string[], hostCwd: string) => Promise<void>;
   execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   writeQaFeedback: (pipeline: TaskPipeline, report: QaReport) => void;
@@ -436,7 +436,7 @@ async function runQaReviewRound(
     if (hasUnpushed) {
       logToOutput(pipeline.specPath, `\n[QA-PRECHECK] Unpushed commits detected on ${pipeline.branch}:\n${unpushed}\n`);
       try {
-        deps.gitPush(['push', 'origin', pipeline.branch], logFile);
+        await deps.gitPush(['push', 'origin', pipeline.branch], logFile);
         logToOutput(pipeline.specPath, '[QA-PRECHECK] Pushed unpushed commits successfully — remote matches worktree\n');
         hasUnpushed = false;
       } catch (pushErr) {
@@ -463,7 +463,7 @@ async function runQaReviewRound(
           if (reconcileOutcome === 'rebased') {
             // A plain rebase doesn't push on its own — push it ourselves.
             try {
-              deps.gitPush(['push', 'origin', pipeline.branch], logFile);
+              await deps.gitPush(['push', 'origin', pipeline.branch], logFile);
               logToOutput(pipeline.specPath, '[QA-PRECHECK] Pushed after reconciling with origin — remote matches worktree\n');
               hasUnpushed = false;
             } catch (retryErr) {
@@ -476,7 +476,7 @@ async function runQaReviewRound(
             // container and have no GitHub credentials to push with). Push
             // its result ourselves, same as the 'rebased' branch above.
             try {
-              deps.gitPush(['push', 'origin', pipeline.branch], logFile);
+              await deps.gitPush(['push', 'origin', pipeline.branch], logFile);
               logToOutput(pipeline.specPath, '[QA-PRECHECK] Pushed the reconciled branch after merger resolution — remote matches worktree\n');
               hasUnpushed = false;
             } catch (pushErr) {

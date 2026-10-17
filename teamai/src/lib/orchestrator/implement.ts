@@ -63,7 +63,7 @@ export interface ImplementDeps {
    *  `git status --porcelain` etc. against a worktree that may be
    *  container-patched and thus unresolvable via a plain host execFileSync. */
   execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
-  gitPush: (pushArgs: string[], logFile: string) => void;
+  gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
   patchWorktreeGitFile: (hostWorktreePath: string, containerWorkspace: string) => void;
   isWorktreeHealthy: (worktreePath: string) => boolean;
   cleanStaleSubtaskWorktrees: (pipeline: ImplementPipeline) => Promise<void>;
@@ -279,7 +279,7 @@ export async function ensureWorktree(
   // Pull latest default branch (token-authed)
   const baseBranch = await resolveBaseBranch(deps.projectRoot);
   try {
-    deps.gitPush(['pull', '--ff-only', 'origin', baseBranch], path.join(pipeline.specPath, 'output.log'));
+    await deps.gitPush(['pull', '--ff-only', 'origin', baseBranch], path.join(pipeline.specPath, 'output.log'));
   } catch { /* non-fast-forward or offline */ }
 
   // Opportunistically reclaim disk space from earlier relocations of this
@@ -306,7 +306,7 @@ export async function ensureWorktree(
             `[WORKTREE] Attempting to push before teardown...\n`
           );
           try {
-            deps.gitPush(['push', 'origin', pipeline.branch], path.join(pipeline.specPath, 'output.log'));
+            await deps.gitPush(['push', 'origin', pipeline.branch], path.join(pipeline.specPath, 'output.log'));
             logToOutput(pipeline.specPath, '[WORKTREE] Pushed unpushed commits successfully\n');
           } catch (pushErr) {
             const pushMsg = pushErr instanceof Error ? pushErr.message : String(pushErr);
@@ -2316,14 +2316,14 @@ export async function integrateGroup(
  * On push failure, checks whether a PR already exists (non-fatal) or
  * advances the pipeline to failed.
  */
-export function pushAndVerify(
+export async function pushAndVerify(
   pipeline: ImplementPipeline,
   deps: ImplementDeps,
   logFile: string,
-): void {
+): Promise<void> {
   deps.phaseHeader(logFile, 'implement — push to remote');
   try {
-    deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
+    await deps.gitPush(['push', '-u', '--force', 'origin', pipeline.branch], logFile);
     logToOutput(pipeline.specPath, '[PUSH] Successfully pushed ' + pipeline.branch + ' to origin\n');
 
     // Verify remote HEAD
@@ -2904,7 +2904,7 @@ export async function runImplement(
   }
 
   // Mandatory git push before QA
-  pushAndVerify(pipeline, deps, logFile);
+  await pushAndVerify(pipeline, deps, logFile);
   if (pipeline.phase === 'failed') return;
 
   // Sensor gate: check per-subtask sensor reports

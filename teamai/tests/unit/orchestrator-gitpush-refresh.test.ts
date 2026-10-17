@@ -10,7 +10,7 @@
  * refs/remotes/origin/* after a successful push.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -146,7 +146,7 @@ describe('_gitPush auto-refresh', () => {
   // ── Scenario 1: Token available, first attempt succeeds ───────────
 
   describe('token available, first attempt succeeds', () => {
-    it('does not call gh auth refresh', () => {
+    it('does not call gh auth refresh', async () => {
       // _getToken → returns FAKE_TOKEN
       // git remote get-url → returns MOCK_REMOTE_URL
       // _exec git call → succeeds (no throw)
@@ -155,9 +155,7 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => MOCK_REMOTE_URL)  // git remote get-url
         .mockImplementationOnce(() => '');              // git push succeeds
 
-      expect(() =>
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
-      ).not.toThrow();
+      await expect(orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile)).resolves.toBeUndefined();
 
       // gh auth token called once
       expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -184,7 +182,7 @@ describe('_gitPush auto-refresh', () => {
   // ── Scenario 2: Auth failure → refresh succeeds → retry succeeds ─
 
   describe('auth failure triggers refresh and retry', () => {
-    it('refreshes token and retries once on "Invalid username or token"', () => {
+    it('refreshes token and retries once on "Invalid username or token"', async () => {
       // _getToken → FAKE_TOKEN
       // git remote get-url → MOCK_REMOTE_URL
       // first git push → throws AUTH_ERROR
@@ -199,9 +197,7 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => FRESH_TOKEN)           // gh auth token (retry)
         .mockImplementationOnce(() => '');                   // git push (retry succeeds)
 
-      expect(() =>
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
-      ).not.toThrow();
+      await expect(orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile)).resolves.toBeUndefined();
 
       // gh auth token called twice (original + retry)
       expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -224,7 +220,7 @@ describe('_gitPush auto-refresh', () => {
       expect(headerArg).toBeDefined();
     });
 
-    it('refreshes token and retries once on "Authentication failed"', () => {
+    it('refreshes token and retries once on "Authentication failed"', async () => {
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)                  // gh auth token
         .mockImplementationOnce(() => MOCK_REMOTE_URL)             // git remote get-url
@@ -233,9 +229,7 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => FRESH_TOKEN)                  // gh auth token (retry)
         .mockImplementationOnce(() => '');                          // git push (retry)
 
-      expect(() =>
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
-      ).not.toThrow();
+      await expect(orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile)).resolves.toBeUndefined();
 
       // gh auth refresh was called
       const refreshCalls = mockExecFileSync.mock.calls.filter(
@@ -244,7 +238,7 @@ describe('_gitPush auto-refresh', () => {
       expect(refreshCalls.length).toBe(1);
     });
 
-    it('refreshes token and retries once on HTTP 401 error', () => {
+    it('refreshes token and retries once on HTTP 401 error', async () => {
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)                  // gh auth token
         .mockImplementationOnce(() => MOCK_REMOTE_URL)             // git remote get-url
@@ -253,9 +247,7 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => FRESH_TOKEN)                  // gh auth token (retry)
         .mockImplementationOnce(() => '');                          // git push (retry)
 
-      expect(() =>
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
-      ).not.toThrow();
+      await expect(orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile)).resolves.toBeUndefined();
 
       const refreshCalls = mockExecFileSync.mock.calls.filter(
         (call: any[]) => call[0] === 'gh' && (call[1] as string[]).includes('refresh'),
@@ -267,7 +259,7 @@ describe('_gitPush auto-refresh', () => {
   // ── Scenario 3: Auth failure → refresh fails → original error ────
 
   describe('refresh fails, throws original error', () => {
-    it('throws the redacted original error when refresh fails', () => {
+    it('throws the redacted original error when refresh fails', async () => {
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)               // gh auth token
         .mockImplementationOnce(() => MOCK_REMOTE_URL)          // git remote get-url
@@ -280,7 +272,7 @@ describe('_gitPush auto-refresh', () => {
         });
 
       try {
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile);
+        await orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile);
         expect.fail('should have thrown');
       } catch (e: any) {
         expect(e.message).toContain('no auth helper available');
@@ -291,7 +283,7 @@ describe('_gitPush auto-refresh', () => {
   // ── Scenario 3b: Refresh succeeds → retry fails → Tier 2 fallback ─
 
   describe('refresh succeeds, retry fails, Tier 2 credential helper fallback', () => {
-    it('does not retry more than once', () => {
+    it('does not retry more than once', async () => {
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)
         .mockImplementationOnce(() => MOCK_REMOTE_URL)          // git remote get-url
@@ -304,9 +296,7 @@ describe('_gitPush auto-refresh', () => {
           throw new Error('credential helper fallback failed');
         });
 
-      expect(() =>
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
-      ).toThrow('credential helper fallback failed');
+      await expect(orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile)).rejects.toThrow('credential helper fallback failed');
 
       // gh auth refresh called exactly once (only on first failure, not Tier 2)
       const refreshCalls = mockExecFileSync.mock.calls.filter(
@@ -315,7 +305,7 @@ describe('_gitPush auto-refresh', () => {
       expect(refreshCalls.length).toBe(1);
     });
 
-    it('Tier 2 fires in correct scope (attempt=1) when retry fails with auth', () => {
+    it('Tier 2 fires in correct scope (attempt=1) when retry fails with auth', async () => {
       // Verifies the fix: Tier 2 falls back to credential helper from attempt=1
       // (not attempt=0, which was the bug before narrowing the try/catch).
       mockExecFileSync
@@ -330,7 +320,7 @@ describe('_gitPush auto-refresh', () => {
         });
 
       try {
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile);
+        await orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile);
         expect.fail('should have thrown');
       } catch (e: any) {
         // Tier 2 error propagates — no token in the message since _exec('', 2) has no token
@@ -356,7 +346,7 @@ describe('_gitPush auto-refresh', () => {
       expect(tier2Args.every((a: string) => !a.includes('Authorization'))).toBe(true);
     });
 
-    it('Tier 2 credential helper succeeds — push completes without gh token', () => {
+    it('Tier 2 credential helper succeeds — push completes without gh token', async () => {
       // Happy path: gh token rejected, refresh succeeds, retry still rejected,
       // but the system credential helper (Windows Credential Manager / macOS
       // Keychain) has valid credentials — push succeeds without any gh token.
@@ -369,9 +359,7 @@ describe('_gitPush auto-refresh', () => {
         .mockImplementationOnce(() => { throw AUTH_ERROR; }) // retry fails — Tier 2 at attempt=1
         .mockImplementationOnce(() => '');                   // Tier 2: credential helper succeeds
 
-      expect(() =>
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
-      ).not.toThrow();
+      await expect(orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile)).resolves.toBeUndefined();
 
       // gh auth refresh called exactly once (only during Tier 1)
       const refreshCalls = mockExecFileSync.mock.calls.filter(
@@ -395,15 +383,13 @@ describe('_gitPush auto-refresh', () => {
   // ── Scenario 4: Non-auth error → no refresh, error thrown ───────
 
   describe('non-auth error does not trigger refresh', () => {
-    it('throws the error directly without calling gh auth refresh', () => {
+    it('throws the error directly without calling gh auth refresh', async () => {
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)                  // gh auth token
         .mockImplementationOnce(() => MOCK_REMOTE_URL)             // git remote get-url
         .mockImplementationOnce(() => { throw NON_AUTH_ERROR; });   // git push (non-auth error)
 
-      expect(() =>
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
-      ).toThrow(/non-fast-forward/);
+      await expect(orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile)).rejects.toThrow(/non-fast-forward/);
 
       // gh auth refresh should NOT have been called
       const refreshCalls = mockExecFileSync.mock.calls.filter(
@@ -416,7 +402,7 @@ describe('_gitPush auto-refresh', () => {
   // ── Scenario 5: No gh installed — fallback path ─────────────────
 
   describe('no gh installed — fallback to default credential helper', () => {
-    it('runs git without token injection when gh auth token fails', () => {
+    it('runs git without token injection when gh auth token fails', async () => {
       mockExecFileSync
         .mockImplementationOnce(() => {                        // gh auth token fails
           throw new Error('gh: command not found');
@@ -425,9 +411,7 @@ describe('_gitPush auto-refresh', () => {
           throw new Error('git push failed: no auth');
         });
 
-      expect(() =>
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
-      ).toThrow('git push failed: no auth');
+      await expect(orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile)).rejects.toThrow('git push failed: no auth');
 
       // git should have been called with the remote name (no extraheader, no token)
       const gitCalls = mockExecFileSync.mock.calls.filter(
@@ -439,7 +423,7 @@ describe('_gitPush auto-refresh', () => {
       expect(gitArgs.every((a: string) => !a.includes('Authorization'))).toBe(true);
     });
 
-    it('does not attempt gh auth refresh when no token available', () => {
+    it('does not attempt gh auth refresh when no token available', async () => {
       // Use a non-auth error to verify it doesn't trigger refresh even with a refreshable error
       const NO_GH_AUTH_ERROR = new Error(`
 Command failed: git push origin feat/test
@@ -451,9 +435,7 @@ fatal: Authentication failed for 'https://github.com/user/repo.git/'
         .mockImplementationOnce(() => { throw new Error('gh: command not found'); })
         .mockImplementationOnce(() => { throw NO_GH_AUTH_ERROR; });
 
-      expect(() =>
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile),
-      ).toThrow(/Invalid username or token/);
+      await expect(orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile)).rejects.toThrow(/Invalid username or token/);
 
       // gh auth refresh should NOT have been called (no token to refresh)
       const refreshCalls = mockExecFileSync.mock.calls.filter(
@@ -466,7 +448,7 @@ fatal: Authentication failed for 'https://github.com/user/repo.git/'
   // ── Scenario 6: Token redaction in retry path ───────────────────
 
   describe('token redaction', () => {
-    it('does not expose the fresh token in the error on retry failure', () => {
+    it('does not expose the fresh token in the error on retry failure', async () => {
       expect.hasAssertions();
       mockExecFileSync
         .mockImplementationOnce(() => FAKE_TOKEN)               // gh auth token
@@ -480,12 +462,90 @@ fatal: Authentication failed for 'https://github.com/user/repo.git/'
         });
 
       try {
-        orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile);
+        await orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile);
       } catch (e: any) {
         // The token is Base64-encoded in the extraheader — the plain token value never
         // appears in the error message (encoding is sufficient, replaceAll is a no-op).
         expect(e.message).not.toContain(FRESH_TOKEN);
       }
+    });
+  });
+
+  // ── Async behaviour, timeouts and redaction on rejection ────────
+
+  describe('async git calls', () => {
+    it('AC5: gh auth token carries a 10s timeout and failure logs the fallback line', async () => {
+      mockExecFileSync
+        .mockImplementationOnce(() => { throw new Error('gh: timed out'); }) // gh auth token
+        .mockImplementationOnce(() => '');                                   // git push
+
+      await orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile);
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'gh', ['auth', 'token'], expect.objectContaining({ timeout: 10_000 }),
+      );
+      expect(readFileSync(testData.logFile, 'utf-8')).toContain(
+        '[GIT] gh token not available — falling back to default credential helper',
+      );
+    });
+
+    it('uses the documented timeouts, maxBuffer and env for each call', async () => {
+      mockExecFileSync
+        .mockImplementationOnce(() => FAKE_TOKEN)
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)
+        .mockImplementationOnce(() => { throw AUTH_ERROR; })
+        .mockImplementationOnce(() => '')
+        .mockImplementationOnce(() => FRESH_TOKEN)
+        .mockImplementationOnce(() => '');
+
+      await orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile);
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'git', ['remote', 'get-url', 'origin'], expect.objectContaining({ timeout: 5_000 }),
+      );
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'gh', ['auth', 'refresh', '-s', 'repo', '--hostname', 'github.com'],
+        expect.objectContaining({ timeout: 30_000 }),
+      );
+      const pushCall = mockExecFileSync.mock.calls.find(
+        (c: any[]) => c[0] === 'git' && (c[1] as string[]).includes('push'),
+      )!;
+      expect(pushCall[2]).toEqual(expect.objectContaining({
+        maxBuffer: 32 * 1024 * 1024,
+        env: expect.objectContaining({ GIT_TERMINAL_PROMPT: '0' }),
+      }));
+      expect(pushCall[2]).not.toHaveProperty('timeout');
+    });
+
+    it('AC4: redacts the token from a rejection message', async () => {
+      mockExecFileSync
+        .mockImplementationOnce(() => FAKE_TOKEN)
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)
+        .mockImplementationOnce(() => { throw new Error(`push failed for token ${FAKE_TOKEN} (non-fast-forward)`); });
+
+      const err = await orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile)
+        .then(() => null, (e: Error) => e);
+
+      expect(err).toBeInstanceOf(Error);
+      expect(err!.message).toContain('[REDACTED]');
+      expect(err!.message).not.toContain(FAKE_TOKEN);
+    });
+
+    it('AC1: the event loop keeps running while the push subprocess is in flight', async () => {
+      mockExecFileSync
+        .mockImplementationOnce(() => FAKE_TOKEN)
+        .mockImplementationOnce(() => MOCK_REMOTE_URL)
+        .mockImplementationOnce(() => new Promise<string>(resolve => setTimeout(() => resolve(''), 50)));
+
+      let settled = false;
+      const push = orch._ctx.gitPush(['push', 'origin', 'feat/test'], testData.logFile)
+        .finally(() => { settled = true; });
+      const immediateRanBeforeSettle = await new Promise<boolean>(resolve =>
+        setImmediate(() => resolve(!settled)));
+
+      expect(immediateRanBeforeSettle).toBe(true);
+      await push;
+      expect(settled).toBe(true);
     });
   });
 });

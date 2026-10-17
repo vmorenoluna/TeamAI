@@ -200,7 +200,7 @@ describe('runQaReview — stall counter and hard cap', () => {
   it('AC10: an unpushed-commits precheck round counts as no progress and is not added to history', async () => {
     const pipeline = makePipeline({ maxQaAttempts: 3, qaStallCount: 1 });
     mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => (args?.[0] === 'log' ? 'abc1234 wip\n' : ''));
-    deps.gitPush = vi.fn(() => { throw new Error('auth failed'); });
+    deps.gitPush = vi.fn(async () => { throw new Error('auth failed'); });
     await runQaReview(pipeline, deps);
     expect(pipeline.qaStallCount).toBe(2);
     expect(pipeline.qaRoundHistory).toEqual([]);

@@ -7,16 +7,35 @@
  * folder itself is never committed — it stays local and is deleted when the
  * task reaches done.
  *
- * Uses execFileSync directly (not through _execGit) because the messages and
+ * Uses promise-based execFile directly (not through _execGit) because the messages and
  * git state are handled host-side by the Node.js process — no docker exec
  * needed for these git commands.
  */
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import path from 'path';
 import { truncate } from '../utils';
 import { warn } from '../logger';
 import type { TaskPipeline, QaReport } from './types';
+
+const execFileAsync = promisify(execFile);
+
+/** Git output cap (bytes) — generous so a large `status --porcelain` can't overflow. */
+const GIT_MAX_BUFFER = 32 * 1024 * 1024;
+
+type GitOpts = { cwd: string; env?: NodeJS.ProcessEnv };
+
+/**
+ * Run git asynchronously and resolve with its stdout. stdin is closed so a
+ * hook or prompt can never wait on it. No timeout: commit hooks run.
+ */
+async function runGit(args: string[], opts: GitOpts): Promise<string> {
+  const p = execFileAsync('git', args, { ...opts, encoding: 'utf-8', maxBuffer: GIT_MAX_BUFFER });
+  p.child?.stdin?.end();
+  const { stdout } = await p;
+  return stdout;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -237,25 +256,25 @@ export function buildTicketMessageForPipeline(
  * Fails open (returns true) on any git error, or if either `rev-parse` or
  * `merge-base` comes back blank — a real git success never returns an empty
  * SHA, so a blank result means the caller couldn't actually resolve one
- * (e.g. an unrelated test double stubbing every `execFileSync` call with
+ * (e.g. an unrelated test double stubbing every `execFile` call with
  * `''`), not a genuine "identical to base" answer. If we can't tell whether
  * there's anything to merge, don't silently mark the task done; let the
  * normal squash/PR/merge path run and surface its own error instead.
  */
-export function hasCommitsBeyondBase(
+export async function hasCommitsBeyondBase(
   worktreePath: string,
   baseBranch: string,
   deps: CommitArtifactsDeps,
-): boolean {
+): Promise<boolean> {
   if (!existsSync(worktreePath)) return true;
   deps.restoreWorktreeGitFileToHostPaths(worktreePath);
   const gitEnv = deps.worktreeGitEnv(worktreePath);
-  const gitOpts = Object.keys(gitEnv).length
-    ? { cwd: worktreePath, env: { ...process.env, ...gitEnv }, stdio: 'pipe' as const }
-    : { cwd: worktreePath, stdio: 'pipe' as const };
+  const gitOpts: GitOpts = Object.keys(gitEnv).length
+    ? { cwd: worktreePath, env: { ...process.env, ...gitEnv } }
+    : { cwd: worktreePath };
   try {
-    const mergeBase = execFileSync('git', ['merge-base', 'HEAD', `origin/${baseBranch}`], gitOpts).toString().trim();
-    const head = execFileSync('git', ['rev-parse', 'HEAD'], gitOpts).toString().trim();
+    const mergeBase = (await runGit(['merge-base', 'HEAD', `origin/${baseBranch}`], gitOpts)).trim();
+    const head = (await runGit(['rev-parse', 'HEAD'], gitOpts)).trim();
     if (!mergeBase || !head) return true;
     return head !== mergeBase;
   } catch (err) {
@@ -280,21 +299,21 @@ export function hasCommitsBeyondBase(
  * nothing to collapse (no worktree, no branch commits beyond the base) or
  * the git operations failed.
  */
-export function squashWithMessage(
+export async function squashWithMessage(
   worktreePath: string,
   message: string,
   baseBranch: string,
   specPath: string,
   deps: CommitArtifactsDeps,
-): boolean {
+): Promise<boolean> {
   if (!existsSync(worktreePath)) return false;
 
   // Restore host-side .git file paths first so host git works on the worktree.
   deps.restoreWorktreeGitFileToHostPaths(worktreePath);
   const gitEnv = deps.worktreeGitEnv(worktreePath);
-  const gitOpts = Object.keys(gitEnv).length
-    ? { cwd: worktreePath, env: { ...process.env, ...gitEnv }, stdio: 'pipe' as const }
-    : { cwd: worktreePath, stdio: 'pipe' as const };
+  const gitOpts: GitOpts = Object.keys(gitEnv).length
+    ? { cwd: worktreePath, env: { ...process.env, ...gitEnv } }
+    : { cwd: worktreePath };
 
   // Last-resort safety net: `git reset --soft` below only restages the tree
   // of the commit it resets to — it does not touch the working directory, so
@@ -306,10 +325,10 @@ export function squashWithMessage(
   // again immediately before the reset so nothing is ever silently dropped
   // at the one point in the pipeline that would otherwise do exactly that.
   try {
-    const status = execFileSync('git', ['status', '--porcelain'], gitOpts).toString();
+    const status = await runGit(['status', '--porcelain'], gitOpts);
     if (status.trim()) {
-      execFileSync('git', ['add', '-A', '--', '.', ':!.teamai'], gitOpts);
-      execFileSync('git', ['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before squash'], gitOpts);
+      await runGit(['add', '-A', '--', '.', ':!.teamai'], gitOpts);
+      await runGit(['commit', '--no-verify', '-m', 'WIP: auto-commit uncommitted changes before squash'], gitOpts);
       warn('artifacts', `squashWithMessage: worktree ${worktreePath} had uncommitted changes — auto-committed before squashing`);
     }
   } catch (err) {
@@ -319,10 +338,7 @@ export function squashWithMessage(
   // Find the merge-base with the base branch — the point the branch diverged.
   let mergeBase: string;
   try {
-    mergeBase = execFileSync(
-      'git', ['merge-base', 'HEAD', `origin/${baseBranch}`],
-      gitOpts,
-    ).toString().trim();
+    mergeBase = (await runGit(['merge-base', 'HEAD', `origin/${baseBranch}`], gitOpts)).trim();
   } catch (err) {
     warn('artifacts', `squashWithMessage: could not resolve merge-base in ${worktreePath}`, err);
     return false;
@@ -331,7 +347,7 @@ export function squashWithMessage(
   // Nothing to collapse — the branch has no commits beyond the base.
   let head: string;
   try {
-    head = execFileSync('git', ['rev-parse', 'HEAD'], gitOpts).toString().trim();
+    head = (await runGit(['rev-parse', 'HEAD'], gitOpts)).trim();
   } catch (err) {
     warn('artifacts', `squashWithMessage: could not resolve HEAD in ${worktreePath}`, err);
     return false;
@@ -344,7 +360,7 @@ export function squashWithMessage(
   const msgFile = path.join(specPath, 'commit-msg.txt');
   writeFileSync(msgFile, message, 'utf-8');
   try {
-    execFileSync('git', ['reset', '--soft', mergeBase], gitOpts);
+    await runGit(['reset', '--soft', mergeBase], gitOpts);
     // --allow-empty: a verification-only task's sole commit can legitimately
     // have an empty tree (e.g. a deliberate `git commit --allow-empty` the
     // coder made to carry evidence in its message — see implement.md's
@@ -355,7 +371,7 @@ export function squashWithMessage(
     // log the failure, not undo it. That silently destroyed the very commit
     // a verification-only task depends on to still open a PR instead of
     // falling back to hasCommitsBeyondBase's done-directly path below.
-    execFileSync('git', ['commit', '--allow-empty', '-F', msgFile], gitOpts);
+    await runGit(['commit', '--allow-empty', '-F', msgFile], gitOpts);
     return true;
   } catch (err) {
     warn('artifacts', `squashWithMessage failed in ${worktreePath}`, err);
@@ -364,7 +380,7 @@ export function squashWithMessage(
     // "no commits beyond the base" (the PR then fails with "No commits
     // between <base> and <branch>"). Put HEAD back where it was.
     try {
-      execFileSync('git', ['reset', '--soft', head], gitOpts);
+      await runGit(['reset', '--soft', head], gitOpts);
     } catch (restoreErr) {
       warn('artifacts', `squashWithMessage: could not restore HEAD ${head} in ${worktreePath}`, restoreErr);
     }

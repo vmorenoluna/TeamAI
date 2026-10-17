@@ -278,7 +278,7 @@ describe('buildTicketMessageForPipeline', () => {
 // pre-cherry-pick safety net) immediately before the reset, so a dirty
 // worktree can never reach it.
 
-describe('squashWithMessage', () => {
+describe('squashWithMessage', { timeout: 20_000 }, () => {
   let originDir: string;
   let worktreePath: string;
   let specPath: string;
@@ -317,7 +317,7 @@ describe('squashWithMessage', () => {
     try { rmSync(specPath, { recursive: true, force: true }); } catch { /* best-effort */ }
   });
 
-  it('does not silently drop an uncommitted edit when squashing', () => {
+  it('does not silently drop an uncommitted edit when squashing', async () => {
     // A committed change on the feature branch.
     writeFileSync(join(worktreePath, 'feature.txt'), 'feature work\n');
     git(['add', '.'], worktreePath);
@@ -327,7 +327,7 @@ describe('squashWithMessage', () => {
     // never ran git add/commit before ending.
     writeFileSync(join(worktreePath, 'feature.txt'), 'feature work + the actual fix\n');
 
-    const result = squashWithMessage(worktreePath, 'feat: test squash\n\nTask-ID: t\n', 'master', specPath, noopDeps);
+    const result = await squashWithMessage(worktreePath, 'feat: test squash\n\nTask-ID: t\n', 'master', specPath, noopDeps);
 
     expect(result).toBe(true);
     // Nothing left uncommitted afterward.
@@ -341,12 +341,12 @@ describe('squashWithMessage', () => {
     expect(committedContent).toBe('feature work + the actual fix\n');
   });
 
-  it('returns false and leaves history untouched when there is nothing beyond the base', () => {
-    const result = squashWithMessage(worktreePath, 'feat: test squash\n', 'master', specPath, noopDeps);
+  it('returns false and leaves history untouched when there is nothing beyond the base', async () => {
+    const result = await squashWithMessage(worktreePath, 'feat: test squash\n', 'master', specPath, noopDeps);
     expect(result).toBe(false);
   });
 
-  it('preserves a deliberately-empty verification commit instead of destroying it (regression: bare `git commit` without --allow-empty)', () => {
+  it('preserves a deliberately-empty verification commit instead of destroying it (regression: bare `git commit` without --allow-empty)', async () => {
     // A verification-only subtask's marker commit per implement.md's
     // guidance — no code diff, but a real commit carrying evidence in its
     // message (e.g. "git commit --allow-empty -m '...' "). Without
@@ -357,7 +357,7 @@ describe('squashWithMessage', () => {
     // attach to.
     git(['commit', '--allow-empty', '-m', 'test: verified, no code changes'], worktreePath);
 
-    const result = squashWithMessage(worktreePath, 'feat: test squash\n\nTask-ID: t\n', 'master', specPath, noopDeps);
+    const result = await squashWithMessage(worktreePath, 'feat: test squash\n\nTask-ID: t\n', 'master', specPath, noopDeps);
 
     expect(result).toBe(true);
     // Still exactly one commit ahead of the base -- collapsed, not lost.
@@ -372,7 +372,7 @@ describe('squashWithMessage', () => {
     expect(git(['diff', 'master', 'HEAD'], worktreePath).trim()).toBe('');
   });
 
-  it('restores HEAD when the squash commit fails, so the branch is not left at the base with its work staged', () => {
+  it('restores HEAD when the squash commit fails, so the branch is not left at the base with its work staged', async () => {
     // Regression: a rejecting pre-commit hook made the post-reset `git commit`
     // fail after `git reset --soft <merge-base>` had already moved HEAD. The
     // work stayed staged on top of the base, so the branch looked empty and
@@ -385,7 +385,7 @@ describe('squashWithMessage', () => {
     const hook = join(worktreePath, '.git', 'hooks', 'pre-commit');
     writeFileSync(hook, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 
-    const result = squashWithMessage(worktreePath, 'feat: test squash\n\nTask-ID: t\n', 'master', specPath, noopDeps);
+    const result = await squashWithMessage(worktreePath, 'feat: test squash\n\nTask-ID: t\n', 'master', specPath, noopDeps);
 
     expect(result).toBe(false);
     expect(git(['rev-parse', 'HEAD'], worktreePath).trim()).toBe(headBefore);
@@ -404,7 +404,7 @@ describe('squashWithMessage', () => {
 // rejects with "No commits between <base> and <branch>". Callers now check
 // this independently, before attempting to squash/push/PR/merge at all.
 
-describe('hasCommitsBeyondBase', () => {
+describe('hasCommitsBeyondBase', { timeout: 20_000 }, () => {
   let originDir: string;
   let worktreePath: string;
   const noopDeps = {
@@ -439,24 +439,24 @@ describe('hasCommitsBeyondBase', () => {
     try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* best-effort */ }
   });
 
-  it('returns false when the branch is identical to the base (pure verification ticket)', () => {
+  it('returns false when the branch is identical to the base (pure verification ticket)', async () => {
     // No commits beyond master at all — exactly what a task whose own
     // acceptance criteria mandate an empty src/ diff leaves behind.
-    expect(hasCommitsBeyondBase(worktreePath, 'master', noopDeps)).toBe(false);
+    expect(await hasCommitsBeyondBase(worktreePath, 'master', noopDeps)).toBe(false);
   });
 
-  it('returns true when the branch has a real commit beyond the base', () => {
+  it('returns true when the branch has a real commit beyond the base', async () => {
     writeFileSync(join(worktreePath, 'feature.txt'), 'feature work\n');
     git(['add', '.'], worktreePath);
     git(['commit', '-m', 'feature work'], worktreePath);
-    expect(hasCommitsBeyondBase(worktreePath, 'master', noopDeps)).toBe(true);
+    expect(await hasCommitsBeyondBase(worktreePath, 'master', noopDeps)).toBe(true);
   });
 
-  it('fails open (returns true) when the worktree does not exist', () => {
-    expect(hasCommitsBeyondBase(join(tmpdir(), 'does-not-exist'), 'master', noopDeps)).toBe(true);
+  it('fails open (returns true) when the worktree does not exist', async () => {
+    expect(await hasCommitsBeyondBase(join(tmpdir(), 'does-not-exist'), 'master', noopDeps)).toBe(true);
   });
 
-  it('fails open (returns true) when merge-base/rev-parse cannot be resolved (e.g. an unrelated base branch)', () => {
-    expect(hasCommitsBeyondBase(worktreePath, 'no-such-branch', noopDeps)).toBe(true);
+  it('fails open (returns true) when merge-base/rev-parse cannot be resolved (e.g. an unrelated base branch)', async () => {
+    expect(await hasCommitsBeyondBase(worktreePath, 'no-such-branch', noopDeps)).toBe(true);
   });
 });
