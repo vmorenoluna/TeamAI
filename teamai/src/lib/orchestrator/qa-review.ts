@@ -97,7 +97,7 @@ export interface QaReviewDeps {
   executePhase: (pipeline: TaskPipeline) => Promise<void>;
   sessionOpts: (role: AgentSession['role'], cwd: string, taskId: string, logFile?: string) => SessionOptsResult;
   waitForCompletion: (sessionId: string) => Promise<void>;
-  gitPush: (pushArgs: string[], logFile: string) => void;
+  gitPush: (pushArgs: string[], logFile: string) => Promise<void>;
   execGit: (args: string[], hostCwd: string) => Promise<void>;
   execGitCapture: (args: string[], hostCwd: string) => Promise<string>;
   writeQaFeedback: (pipeline: TaskPipeline, report: QaReport) => void;
