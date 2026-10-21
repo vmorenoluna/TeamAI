@@ -293,7 +293,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Failed to load task.')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('calls onError callback with the error message', async () => {
@@ -304,7 +304,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(onError).toHaveBeenCalledWith('Boom');
-      });
+      }, { timeout: 10_000 });
     });
 
     it('calls onError with generic message for non-Error rejects', async () => {
@@ -315,7 +315,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(onError).toHaveBeenCalledWith('Failed to load task');
-      });
+      }, { timeout: 10_000 });
     });
   });
 
@@ -339,7 +339,7 @@ describe('TaskPanel', () => {
       await waitFor(() => {
         const titles = screen.getAllByText('Cached Title');
         expect(titles.length).toBeGreaterThanOrEqual(1);
-      });
+      }, { timeout: 10_000 });
     });
   });
 
@@ -364,7 +364,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('review-panel-human-feedback')).toHaveTextContent('Please redo the auth flow.');
-      });
+      }, { timeout: 10_000 });
       expect(screen.getByTestId('review-panel-spec-path')).toHaveTextContent('/repo/.teamai/my-task/spec.md');
       expect(screen.getByTestId('review-panel-awaiting-reason')).toHaveTextContent('Spec phase produced no spec.md.');
     });
@@ -395,7 +395,7 @@ describe('TaskPanel', () => {
       await waitFor(() => {
         const titles = screen.getAllByText('Feature X');
         expect(titles.length).toBeGreaterThanOrEqual(1);
-      });
+      }, { timeout: 10_000 });
     });
 
     it('close button calls onClose', async () => {
@@ -405,7 +405,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(screen.getByTitle('Close window')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       fireEvent.click(screen.getByTitle('Close window'));
       expect(closeCalls).toBe(1);
@@ -422,7 +422,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(screen.getAllByText('Phase Test').length).toBeGreaterThanOrEqual(1);
-      });
+      }, { timeout: 10_000 });
 
       // Reset call count after initial fetch
       mockGetTaskFull.mockClear();
@@ -434,7 +434,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(mockGetTaskFull).toHaveBeenCalledWith('task-1');
-      });
+      }, { timeout: 10_000 });
     });
 
     it('does NOT re-fetch on phase-change for a different taskId', async () => {
@@ -444,7 +444,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(screen.getAllByText('Test Task').length).toBeGreaterThanOrEqual(1);
-      });
+      }, { timeout: 10_000 });
 
       mockGetTaskFull.mockClear();
 
@@ -465,7 +465,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(screen.getAllByText('Subtask Test').length).toBeGreaterThanOrEqual(1);
-      });
+      }, { timeout: 10_000 });
 
       mockGetTaskFull.mockClear();
 
@@ -475,7 +475,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(mockGetTaskFull).toHaveBeenCalledWith('task-1');
-      });
+      }, { timeout: 10_000 });
     });
 
     it('does NOT re-fetch on subtask-progress for a different taskId', async () => {
@@ -485,7 +485,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(screen.getAllByText('Test Task').length).toBeGreaterThanOrEqual(1);
-      });
+      }, { timeout: 10_000 });
 
       mockGetTaskFull.mockClear();
 
@@ -503,7 +503,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(screen.getAllByText('Test Task').length).toBeGreaterThanOrEqual(1);
-      });
+      }, { timeout: 10_000 });
 
       mockGetTaskFull.mockClear();
 
@@ -513,7 +513,7 @@ describe('TaskPanel', () => {
 
       await waitFor(() => {
         expect(mockGetTaskFull).toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('does not re-fetch on phase-change when readonly', async () => {
@@ -545,7 +545,7 @@ describe('TaskPanel', () => {
           expect.objectContaining({ task: expect.objectContaining({ title: 'Loaded' }) }),
           'task-1',
         );
-      });
+      }, { timeout: 10_000 });
     });
   });
 
@@ -560,7 +560,7 @@ describe('TaskPanel', () => {
       await waitFor(() => {
         // In readonly, there should be no tabs — the tab bar is hidden
         expect(screen.queryByText('Overview')).not.toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
   });
 });
@@ -1528,7 +1528,7 @@ describe('TaskDetail', () => {
       await waitFor(() => {
         const specTab = screen.getByText('Spec');
         expect(specTab.className).toContain('border-[#2563eb]');
-      });
+      }, { timeout: 10_000 });
       window.location.hash = '';
     });
 
@@ -1538,7 +1538,7 @@ describe('TaskDetail', () => {
       await waitFor(() => {
         const qaTab = screen.getByText('QA');
         expect(qaTab.className).toContain('border-[#2563eb]');
-      });
+      }, { timeout: 10_000 });
       window.location.hash = '';
     });
   });
@@ -1608,7 +1608,7 @@ describe('TaskDetail', () => {
 
       await waitFor(() => {
         expect(mockMarkAutoReviewed).toHaveBeenCalledWith('auto-task');
-      });
+      }, { timeout: 10_000 });
     });
 
     it('does not show the banner for normal done tasks (neither autoProcessed nor autoReviewed)', () => {

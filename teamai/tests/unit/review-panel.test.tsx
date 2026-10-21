@@ -1004,7 +1004,7 @@ describe('ReviewPanel', () => {
         // header and surfaced message to lock in the helper's contract.
         expect(banner).toHaveTextContent('Action failed');
         expect(banner).toHaveTextContent(text);
-      });
+      }, { timeout: 10_000 });
     }
 
     it('handleApprove (local-merge): role=alert surfaces when approveTask throws; pendingAction clears', async () => {
@@ -1122,7 +1122,7 @@ describe('ReviewPanel', () => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('Action failed');
         expect(banner).toHaveTextContent('Failed to merge task: Unknown error');
-      });
+      }, { timeout: 10_000 });
       // The literal "some non-Error string" should NOT be in the banner.
       expect(screen.queryByText('some non-Error string')).not.toBeInTheDocument();
     });

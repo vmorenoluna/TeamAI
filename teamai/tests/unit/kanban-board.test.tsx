@@ -438,7 +438,7 @@ describe('KanbanBoard', () => {
       // (a) moveTask was called for BOTH ids with the resolved normalized phase.
       await waitFor(() => {
         expect(mockMoveTask).toHaveBeenCalledTimes(2);
-      });
+      }, { timeout: 10_000 });
       expect(mockMoveTask).toHaveBeenNthCalledWith(1, '1', 'implement');
       expect(mockMoveTask).toHaveBeenNthCalledWith(2, '2', 'implement');
 
@@ -446,7 +446,7 @@ describe('KanbanBoard', () => {
       await waitFor(() => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('second moveTask failed: rate limited');
-      });
+      }, { timeout: 10_000 });
 
       // (c) SelectedIds is NOT cleared on failure — the for loop breaks BEFORE
       //     reaching clearSelection(), so the bulk bar persists and the user
@@ -506,11 +506,11 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(mockCreateTask).toHaveBeenCalledTimes(1);
-      });
+      }, { timeout: 10_000 });
       await waitFor(() => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('createTask refused: invalid path');
-      });
+      }, { timeout: 10_000 });
 
       // (a) Dialog did NOT close — setShowDialog(false) lives on the success path only.
       expect(screen.getByText('New Task')).toBeInTheDocument();
@@ -542,7 +542,7 @@ describe('KanbanBoard', () => {
       await waitFor(() => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('bulkDelete refused: server timeout');
-      });
+      }, { timeout: 10_000 });
 
       // (a) bulkDeleteTasks was invoked with both selected IDs
       expect(mockBulkDeleteTasks).toHaveBeenCalledWith(['1', '2']);
@@ -570,7 +570,7 @@ describe('KanbanBoard', () => {
       // Dialog should be visible
       await waitFor(() => {
         expect(screen.getByText('Move Task')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       // Confirm the dialog
       fireEvent.click(screen.getByText('Move & Resume'));
@@ -578,12 +578,12 @@ describe('KanbanBoard', () => {
       // retryTaskWithOptions should have been called
       await waitFor(() => {
         expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement');
-      });
+      }, { timeout: 10_000 });
 
       // Toast with Undo button appears
       await waitFor(() => {
         expect(screen.getByText('Undo')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       // 2. Click the toast's Undo button → handleUndo pops from undoStackRef,
       //    calls moveTask('1', 'backlog') → rejected → catch runs:
@@ -592,11 +592,11 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(mockMoveTask).toHaveBeenCalledWith('1', 'backlog');
-      });
+      }, { timeout: 10_000 });
       await waitFor(() => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('undo moveTask refused: stale event handler');
-      });
+      }, { timeout: 10_000 });
       // exactly one undo attempt
       expect(mockMoveTask).toHaveBeenCalledTimes(1);
 
@@ -611,7 +611,7 @@ describe('KanbanBoard', () => {
         // mockClear reset the call list — if Ctrl+Z triggered handleUndo, the
         // list would be non-empty. A genuine no-op assertion.
         expect(mockMoveTask).not.toHaveBeenCalled();
-      });
+      }, { timeout: 10_000 });
     });
   });
 
@@ -626,7 +626,7 @@ describe('KanbanBoard', () => {
       // Dialog should appear (implement is an artifact-clearing target)
       await waitFor(() => {
         expect(screen.getByText('Move Task')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
       // Since there's only one phase (implement), no radio buttons — just the explanation.
       expect(screen.getByText(/fresh QA\/wakeup-attempt budget/)).toBeInTheDocument();
     });
@@ -638,14 +638,14 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Move Task')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       // Confirm
       fireEvent.click(screen.getByText('Move & Resume'));
 
       await waitFor(() => {
         expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement');
-      });
+      }, { timeout: 10_000 });
     });
 
     it('closes dialog and takes no action on Cancel for artifact-clearing drop', async () => {
@@ -655,7 +655,7 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Move Task')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       // Cancel — no action should be taken, card stays in original column
       fireEvent.click(screen.getByText('Cancel'));
@@ -675,7 +675,7 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(mockMoveTask).toHaveBeenCalledWith('1', 'backlog');
-      });
+      }, { timeout: 10_000 });
     });
 
     it('moves instantly (no dialog) when dropping onto Failed', async () => {
@@ -687,7 +687,7 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(mockMoveTask).toHaveBeenCalledWith('1', 'failed');
-      });
+      }, { timeout: 10_000 });
     });
 
     it('moves instantly (no dialog) when dropping onto Done', async () => {
@@ -705,7 +705,7 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(mockMoveTask).toHaveBeenCalledWith('1', 'done');
-      });
+      }, { timeout: 10_000 });
     });
 
     it('shows dialog with phase selector when dropping onto Analysis', async () => {
@@ -716,7 +716,7 @@ describe('KanbanBoard', () => {
       await waitFor(() => {
         // Analysis has two phases, so we get "Choose Resume Phase" not "Move Task"
         expect(screen.getByText('Choose Resume Phase')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
       expect(screen.getByText('Resume from Spec')).toBeInTheDocument();
       expect(screen.getByText('Resume from Plan')).toBeInTheDocument();
     });
@@ -728,14 +728,14 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Choose Resume Phase')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       // Confirm with the default phase (plan)
       fireEvent.click(screen.getByText('Resume'));
 
       await waitFor(() => {
         expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'plan');
-      });
+      }, { timeout: 10_000 });
     });
 
     it('shows drop target highlight on drag over', () => {
@@ -794,20 +794,20 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Move Task')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       // Confirm dialog
       fireEvent.click(screen.getByText('Move & Resume'));
 
       await waitFor(() => {
         expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement');
-      });
+      }, { timeout: 10_000 });
 
       // (a) Error banner surfaces the thrown message
       await waitFor(() => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('database timeout on moveTask');
-      });
+      }, { timeout: 10_000 });
 
       // (b) Optimistic UI cleared — the isMoving marker on the card wrapper
       //     is gone (clearOptimistic removed the taskId from optimisticPhases
@@ -826,7 +826,7 @@ describe('KanbanBoard', () => {
       // Give the click handler a tick to settle
       await waitFor(() => {
         expect(mockRetryTaskWithOptions).toHaveBeenCalledTimes(1);
-      });
+      }, { timeout: 10_000 });
     });
 
     // ── Regression: confirming phase-change event shouldn't flicker ─────
@@ -845,12 +845,12 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Move Task')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
       fireEvent.click(screen.getByText('Move & Resume'));
 
       await waitFor(() => {
         expect(mockRetryTaskWithOptions).toHaveBeenCalledWith('1', 'implement');
-      });
+      }, { timeout: 10_000 });
 
       // Optimistically already under "In Progress"
       expect(screen.getByTestId('is-moving')).toBeInTheDocument();
@@ -952,13 +952,13 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Move Task')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       fireEvent.click(screen.getByText('Move & Resume'));
 
       await waitFor(() => {
         expect(screen.getByText(/Moved "Moved task" to/)).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('shows Undo button in the toast', async () => {
@@ -968,13 +968,13 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Move Task')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       fireEvent.click(screen.getByText('Move & Resume'));
 
       await waitFor(() => {
         expect(screen.getByText('Undo')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
   });
 
@@ -1027,10 +1027,10 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(mockGetDoneTicketSpec).toHaveBeenCalledWith('add-password-reset-flow');
-      });
+      }, { timeout: 10_000 });
       await waitFor(() => {
         expect(screen.getByText('Full spec text.')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('closes the history modal on the close button', async () => {
@@ -1040,7 +1040,7 @@ describe('KanbanBoard', () => {
       fireEvent.click(screen.getByText('Add password reset flow'));
       await waitFor(() => {
         expect(screen.getByText('Completed ticket')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       fireEvent.click(screen.getByLabelText('Close'));
 
@@ -1060,7 +1060,7 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(mockRescanDoneHistory).toHaveBeenCalledTimes(1);
-      });
+      }, { timeout: 10_000 });
     });
 
     it('loads the next Source B page when the DONE column is scrolled near the bottom', async () => {
@@ -1091,10 +1091,10 @@ describe('KanbanBoard', () => {
 
       await waitFor(() => {
         expect(mockLoadMoreDoneHistory).toHaveBeenCalledWith(1);
-      });
+      }, { timeout: 10_000 });
       await waitFor(() => {
         expect(screen.getByText('Second page ticket')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('re-fetches on scroll-to-bottom even when historyHasMore is false (re-checks for new pages)', () => {

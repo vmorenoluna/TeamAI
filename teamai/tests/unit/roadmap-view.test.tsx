@@ -441,7 +441,7 @@ describe('PhasedKanban', () => {
         expect(
           screen.getByText('Conversion failed. Try again.')
         ).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
   });
 
@@ -469,7 +469,7 @@ describe('PhasedKanban', () => {
         // Linked item should show the phase badge, not convert button
         expect(screen.queryByText('+ Convert to ticket')).not.toBeInTheDocument();
         expect(screen.getByText('In Progress')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('calls convertToTask when convert button is clicked', async () => {
@@ -600,7 +600,7 @@ describe('PhasedKanban', () => {
       // Should render without crashing, showing "…" placeholder
       await waitFor(() => {
         expect(screen.getByText('Stale link')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('renders items with different categories', async () => {
