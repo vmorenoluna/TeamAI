@@ -30,7 +30,7 @@ export async function markAutoReviewed(taskId: string): Promise<void> {
 
   const projectPath = await getActiveProjectPath();
   const taskStore = new TaskStore(projectPath);
-  const task = taskStore.getById(taskId);
+  const task = await taskStore.getByIdAsync(taskId);
   if (!task) {
     // Completed tasks have had their workspace deleted. Their DONE card is
     // reconstructed from git history, so acknowledge it in the durable
