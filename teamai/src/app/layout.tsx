@@ -8,6 +8,7 @@ import { DefaultsUpdater } from '@/components/defaults-updater';
 import { UpdateBanner } from '@/components/update-banner';
 import { MissingToolsBanner } from '@/components/missing-tools-banner';
 import { GitattributesRenormalizeBanner } from '@/components/gitattributes-renormalize-banner';
+import { BackgroundActionFailureBanner } from '@/components/background-action-failure-banner';
 import { AutoModeButton } from '@/components/auto-mode-button';
 import { ContainerDockerMissingDialog } from '@/components/container-docker-missing-dialog';
 import { getAutoModeState } from '@/lib/auto-mode-state';
@@ -105,6 +106,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         </div>
       {/* Global dialog: shown when container mode is enabled but Docker is not running */}
       <ContainerDockerMissingDialog projectPath={activeProject?.path ?? null} />
+      <BackgroundActionFailureBanner projectPath={activeProject?.path ?? null} />
       {footerVersion && (
         <AppVersionFooter initialVersion={footerVersion} initialSha={footerSha} />
       )}

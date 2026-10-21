@@ -656,6 +656,23 @@ describe('usePhaseSync', () => {
       vi.useRealTimers();
     });
 
+    it('AC17: action-result triggers a debounced router.refresh()', () => {
+      vi.useFakeTimers();
+      renderHook(() => usePhaseSync({}));
+
+      act(() => {
+        gOnMessage!({ type: 'action-result', operationId: 'op-1', ok: true });
+        gOnMessage!({ type: 'action-result', operationId: 'op-2', ok: false, error: 'boom' });
+      });
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(mockRouterRefresh).toHaveBeenCalledOnce();
+      vi.useRealTimers();
+    });
+
     it('does not throw when onConnectionChange is not provided', () => {
       const onPhaseChange = vi.fn();
       renderHook(() => usePhaseSync({ onPhaseChange }));
