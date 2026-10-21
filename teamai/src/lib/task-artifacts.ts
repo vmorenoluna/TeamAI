@@ -1,9 +1,9 @@
-import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { detectDefaultBranch } from '@/lib/orchestrator';
 import type { QAReportData } from '@/lib/stream-types';
+import { readTextIfExists } from '@/lib/fs-async';
 
 const execFileAsync = promisify(execFile);
 
@@ -14,10 +14,10 @@ export interface CommonArtifacts {
   diff: string | null;
 }
 
-function readHumanFeedback(dir: string): string | null {
-  const path = join(dir, 'human_feedback.md');
-  if (!existsSync(path)) return null;
-  const raw = readFileSync(path, 'utf-8').replace(/^# Human Review Feedback\n\n/, '').trim();
+async function readHumanFeedback(dir: string): Promise<string | null> {
+  const text = await readTextIfExists(join(dir, 'human_feedback.md'));
+  if (text === null) return null;
+  const raw = text.replace(/^# Human Review Feedback\n\n/, '').trim();
   return raw || null;
 }
 
@@ -36,22 +36,21 @@ export async function readCommonArtifacts(
 ): Promise<CommonArtifacts> {
   // ── spec ──
   const specPath = join(dir, 'spec.md');
-  const spec = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
+  const spec = await readTextIfExists(specPath);
 
   // ── qa_report ──
   const qaPath = join(dir, 'qa_report.json');
   let qaReport: QAReportData | null = null;
-  if (existsSync(qaPath)) {
-    try {
-      qaReport = JSON.parse(readFileSync(qaPath, 'utf-8'));
-    } catch {
-      // invalid JSON — return null and warn so operators can spot QA agent corruption
-      console.warn(`[task-artifacts] Invalid JSON in ${qaPath} — QA agent may have produced corrupt output`);
-    }
+  try {
+    const qaRaw = await readTextIfExists(qaPath);
+    if (qaRaw !== null) qaReport = JSON.parse(qaRaw);
+  } catch {
+    // invalid JSON — return null and warn so operators can spot QA agent corruption
+    console.warn(`[task-artifacts] Invalid JSON in ${qaPath} — QA agent may have produced corrupt output`);
   }
 
   // ── human_feedback ──
-  const humanFeedback = readHumanFeedback(dir);
+  const humanFeedback = await readHumanFeedback(dir);
 
   // ── git diff ──
   let diff: string | null = null;
@@ -71,8 +70,7 @@ export async function readCommonArtifacts(
   }
   // Fallback: pre-canned diff.txt for demo / mocked tasks
   if (!diff) {
-    const diffPath = join(dir, 'diff.txt');
-    if (existsSync(diffPath)) diff = readFileSync(diffPath, 'utf-8');
+    diff = await readTextIfExists(join(dir, 'diff.txt'));
   }
 
   return { spec, qaReport, humanFeedback, diff };

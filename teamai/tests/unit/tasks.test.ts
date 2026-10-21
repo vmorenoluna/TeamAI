@@ -17,6 +17,21 @@ vi.mock('fs', async () => {
   };
 });
 
+// task-artifacts reads through fs/promises (via fs-async); route it to the same
+// existsSync/readFileSync mocks so each test keeps describing its files the same way.
+vi.mock('fs/promises', async () => {
+  const actual = await vi.importActual<typeof import('fs/promises')>('fs/promises');
+  return {
+    ...actual,
+    readFile: async (path: string) => {
+      if (!mockExistsSync(path)) {
+        throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+      }
+      return mockReadFileSync(path);
+    },
+  };
+});
+
 vi.mock('path', () => ({
   join: (...args: string[]) => args.join('/'),
 }));
