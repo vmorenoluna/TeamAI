@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { trackOperation, untrackOperation, type TrackedResult } from '@/lib/background-action-client';
 
 /** What a background-capable server action returns: the operation id, or an immediate failure. */
-export type BackgroundActionStart =
-  | { success: true; operationId: string }
-  | { success: false; error?: string };
+export interface BackgroundActionStart {
+  success: boolean;
+  error?: string;
+  operationId?: string;
+}
 
 export type BackgroundActionOutcome = TrackedResult;
 

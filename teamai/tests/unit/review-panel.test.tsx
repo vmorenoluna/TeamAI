@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { ReviewPanel } from '@/components/review-panel';
+import { deliverActionResult } from '@/lib/background-action-client';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 
@@ -16,9 +17,19 @@ vi.mock('next/navigation', () => ({
   }),
 }));
 
-const mockApproveTask = vi.fn().mockResolvedValue(undefined);
+// approveTask / markTaskDone return as soon as the work is started; the outcome
+// arrives later as an `action-result` delivered through the client registry.
+function startedAndSettled(outcome: { ok: boolean; error?: string } = { ok: true }) {
+  return (...args: unknown[]) => {
+    const operationId = args[args.length - 1] as string;
+    setTimeout(() => deliverActionResult({ operationId, ...outcome }), 0);
+    return Promise.resolve<{ success: boolean; operationId?: string }>({ success: true, operationId });
+  };
+}
+
+const mockApproveTask = vi.fn(startedAndSettled());
 const mockRejectTask = vi.fn().mockResolvedValue(undefined);
-const mockMarkTaskDone = vi.fn().mockResolvedValue(undefined);
+const mockMarkTaskDone = vi.fn(startedAndSettled());
 
 vi.mock('@/app/actions/tasks', () => ({
   approveTask: (...args: unknown[]) => mockApproveTask(...args),
@@ -65,6 +76,8 @@ const QA_REPORT_WITH_SPEC_CONCERNS = {
 describe('ReviewPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockApproveTask.mockReset().mockImplementation(startedAndSettled());
+    mockMarkTaskDone.mockReset().mockImplementation(startedAndSettled());
   });
 
   // ── pr-open phase ───────────────────────────────────────────────────
@@ -167,8 +180,8 @@ describe('ReviewPanel', () => {
         fireEvent.click(screen.getByText('Mark as Done'));
       });
 
-      expect(mockMarkTaskDone).toHaveBeenCalledWith('task-1');
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockMarkTaskDone).toHaveBeenCalledWith('task-1', expect.any(String));
+      await waitFor(() => expect(mockRouterRefresh).toHaveBeenCalled());
     });
 
     it('opens feedback textarea when "Request Changes" is clicked, and closes on Cancel', async () => {
@@ -372,8 +385,8 @@ describe('ReviewPanel', () => {
         fireEvent.click(screen.getByText('Merge Locally'));
       });
 
-      expect(mockApproveTask).toHaveBeenCalledWith('task-2', 'local-merge');
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockApproveTask).toHaveBeenCalledWith('task-2', 'local-merge', expect.any(String));
+      await waitFor(() => expect(mockRouterRefresh).toHaveBeenCalled());
     });
 
     it('calls approveTask with pull-request when "Open Pull Request" is clicked', async () => {
@@ -392,8 +405,8 @@ describe('ReviewPanel', () => {
         fireEvent.click(screen.getByText('Open Pull Request'));
       });
 
-      expect(mockApproveTask).toHaveBeenCalledWith('task-2', 'pull-request');
-      expect(mockRouterRefresh).toHaveBeenCalled();
+      expect(mockApproveTask).toHaveBeenCalledWith('task-2', 'pull-request', expect.any(String));
+      await waitFor(() => expect(mockRouterRefresh).toHaveBeenCalled());
     });
 
     it('calls rejectTask when feedback is submitted from awaiting-review phase', async () => {
@@ -644,8 +657,9 @@ describe('ReviewPanel', () => {
 
   describe('disabled state during transition', () => {
     it('disables action buttons and shows per-action loading text while pending', async () => {
-      // Use a never-resolving promise to keep the action pending
-      mockApproveTask.mockImplementation(() => new Promise(() => {}));
+      // The action returns (started) but no action-result is delivered, so the operation stays pending
+      mockApproveTask.mockImplementation((...a: unknown[]) =>
+        Promise.resolve({ success: true, operationId: a[a.length - 1] as string }));
 
       render(
         <ReviewPanel
@@ -1008,7 +1022,7 @@ describe('ReviewPanel', () => {
     }
 
     it('handleApprove (local-merge): role=alert surfaces when approveTask throws; pendingAction clears', async () => {
-      mockApproveTask.mockRejectedValueOnce(new Error('merge raw throw: rebase conflict'));
+      mockApproveTask.mockImplementationOnce(startedAndSettled({ ok: false, error: 'merge raw throw: rebase conflict' }));
 
       setupAwaitingReview();
 
@@ -1016,7 +1030,7 @@ describe('ReviewPanel', () => {
         fireEvent.click(screen.getByText('Merge Locally'));
       });
 
-      expect(mockApproveTask).toHaveBeenCalledWith('task-r1', 'local-merge');
+      expect(mockApproveTask).toHaveBeenCalledWith('task-r1', 'local-merge', expect.any(String));
       await assertErrorBannerWith('merge raw throw: rebase conflict');
       // runAction's `finally` cleared pendingAction — button reverts from
       // "Merging…" loading text back to "Merge Locally".
@@ -1026,7 +1040,7 @@ describe('ReviewPanel', () => {
     });
 
     it('handleApprove (pull-request): role=alert surfaces when approveTask throws', async () => {
-      mockApproveTask.mockRejectedValueOnce(new Error('pr raw throw: gh auth expired'));
+      mockApproveTask.mockImplementationOnce(startedAndSettled({ ok: false, error: 'pr raw throw: gh auth expired' }));
 
       setupAwaitingReview();
 
@@ -1034,14 +1048,14 @@ describe('ReviewPanel', () => {
         fireEvent.click(screen.getByText('Open Pull Request'));
       });
 
-      expect(mockApproveTask).toHaveBeenCalledWith('task-r1', 'pull-request');
+      expect(mockApproveTask).toHaveBeenCalledWith('task-r1', 'pull-request', expect.any(String));
       await assertErrorBannerWith('pr raw throw: gh auth expired');
       expect(screen.getByText('Open Pull Request')).toBeInTheDocument();
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
     it('handleMarkDone: role=alert surfaces when markTaskDone throws', async () => {
-      mockMarkTaskDone.mockRejectedValueOnce(new Error('markDone raw throw: gh merge conflict'));
+      mockMarkTaskDone.mockImplementationOnce(startedAndSettled({ ok: false, error: 'markDone raw throw: gh merge conflict' }));
 
       render(
         <ReviewPanel
@@ -1058,9 +1072,55 @@ describe('ReviewPanel', () => {
         fireEvent.click(screen.getByText('Mark as Done'));
       });
 
-      expect(mockMarkTaskDone).toHaveBeenCalledWith('task-r1');
+      expect(mockMarkTaskDone).toHaveBeenCalledWith('task-r1', expect.any(String));
       await assertErrorBannerWith('markDone raw throw: gh merge conflict');
       expect(screen.getByText('Mark as Done')).toBeInTheDocument();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('AC16: pending label stays until the action-result is delivered, then clears', async () => {
+      let operationId = '';
+      mockApproveTask.mockImplementationOnce((...a: unknown[]) => {
+        operationId = a[a.length - 1] as string;
+        return Promise.resolve({ success: true, operationId });
+      });
+
+      setupAwaitingReview();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Open Pull Request'));
+      });
+
+      // Action has returned, but the operation has not settled.
+      expect(screen.getByText('Creating PR…')).toBeDisabled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+
+      await act(async () => {
+        deliverActionResult({ operationId, ok: true });
+      });
+
+      await waitFor(() => expect(screen.getByText('Open Pull Request')).not.toBeDisabled());
+      expect(mockRouterRefresh).toHaveBeenCalled();
+    });
+
+    it('AC16: a delivered failure shows the formatted banner containing gh: HTTP 502', async () => {
+      let operationId = '';
+      mockApproveTask.mockImplementationOnce((...a: unknown[]) => {
+        operationId = a[a.length - 1] as string;
+        return Promise.resolve({ success: true, operationId });
+      });
+
+      setupAwaitingReview();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Open Pull Request'));
+      });
+      await act(async () => {
+        deliverActionResult({ operationId, ok: false, error: 'gh: HTTP 502' });
+      });
+
+      await assertErrorBannerWith('Failed to create pull request: gh: HTTP 502');
+      expect(screen.getByText('Open Pull Request')).not.toBeDisabled();
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
@@ -1103,14 +1163,12 @@ describe('ReviewPanel', () => {
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
-    it('fallback message: when rejection is not an Error<string>, runAction uses fallbackMessage', async () => {
-      // Promise.reject('plain string') — the rejection value isn't an Error,
-      // so `err instanceof Error && err.message` is false → fallbackMessage
+    it('fallback message: an immediate failure without an error string still surfaces a banner', async () => {
       // When the rejection is a non-Error string, formatActionError falls back
       // to 'Unknown error' — so the banner surfaces the full prefixed template
-      // 'Failed to merge task: Unknown error' (the bare 'Failed to merge task'
+      // 'Failed to merge task: Action failed' (the bare 'Failed to merge task'
       // fallbackMessage that predates the formatActionError refactor is gone).
-      mockApproveTask.mockRejectedValueOnce('some non-Error string');
+      mockApproveTask.mockImplementationOnce(() => Promise.resolve({ success: false }));
 
       setupAwaitingReview();
 
@@ -1121,10 +1179,8 @@ describe('ReviewPanel', () => {
       await waitFor(() => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('Action failed');
-        expect(banner).toHaveTextContent('Failed to merge task: Unknown error');
+        expect(banner).toHaveTextContent('Failed to merge task: Action failed');
       }, { timeout: 10_000 });
-      // The literal "some non-Error string" should NOT be in the banner.
-      expect(screen.queryByText('some non-Error string')).not.toBeInTheDocument();
     });
   });
 });
