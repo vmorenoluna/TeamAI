@@ -23,6 +23,7 @@ import { checkAllTools } from './src/lib/tool-checker';
 import { projectStore } from './src/lib/project-store';
 import { sweepAbandonedWorktreeRemnants } from './src/lib/orchestrator/worktree-ops';
 import { prewarmModelsCache } from './src/app/actions/providers';
+import { buildActionResultMessage, type ActionResultEvent } from './src/lib/action-result-message';
 
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
 const handle = app.getRequestHandler();
@@ -107,6 +108,11 @@ void app.prepare().then(async () => {
   processManager.on('phase-change', (data: { taskId: string; phase: string; projectRoot?: string; prUrl?: string; platform?: string }) => {
     const msg = JSON.stringify({ type: 'phase-change', taskId: data.taskId, phase: data.phase, prUrl: data.prUrl, platform: data.platform });
     broadcastToProject(data, msg);
+  });
+
+  // Deliver the outcome of a server action that returned before its work finished
+  processManager.on('action-result', (data: ActionResultEvent) => {
+    broadcastToProject(data, buildActionResultMessage(data));
   });
 
   // Broadcast role-refinement events so open task panels / the /task page
