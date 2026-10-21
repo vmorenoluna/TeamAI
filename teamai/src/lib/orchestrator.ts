@@ -458,7 +458,7 @@ export class Orchestrator {
    * defines how a run ends — runTask awaits it, and detached runs (the rework
    * after a human reject) go through _startRunDetached.
    */
-  private async _runPipeline(pipeline: TaskPipeline): Promise<void> {
+  private async _runPipeline(pipeline: TaskPipeline, opts: { rethrow?: boolean } = {}): Promise<void> {
     const taskId = pipeline.taskId;
     let rateLimited = false;
     try {
@@ -467,6 +467,9 @@ export class Orchestrator {
       const outcome = this._handleRunFailure(pipeline, e);
       if (outcome === 'superseded') return;
       if (outcome === 'rate-limited') rateLimited = true;
+      // The caller (approveTask) reports a genuine failure to its own caller
+      // after the task has been moved to `failed`.
+      else if (opts.rethrow) throw e;
     } finally {
       // Release lock after pipeline completes or fails.
       // For rate-limited or wakeup-paused tasks the lock is re-acquired
@@ -494,7 +497,16 @@ export class Orchestrator {
   }
 
   async approveTask(taskId: string, strategy: MergeStrategy): Promise<void> {
-    await approveTaskFn(taskId, strategy, this._ctx);
+    if (this.activeTasks.has(taskId)) throw new TaskAlreadyRunningError(taskId);
+    // The approved phase runs through the shared run lifecycle: registered as
+    // active, failure → `failed` with a summary (then re-thrown), lock released.
+    await approveTaskFn(taskId, strategy, {
+      ...this._ctx,
+      executePhase: (p) => {
+        this.activeTasks.add(p.taskId);
+        return this._runPipeline(p, { rethrow: true });
+      },
+    });
   }
 
   async rejectTask(taskId: string, feedback: string, target: FeedbackTarget, subtaskIds?: number[]): Promise<void> {

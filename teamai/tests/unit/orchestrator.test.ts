@@ -3789,7 +3789,7 @@ describe('Orchestrator', () => {
       expect(liveTaskJson.prUrl).toBe('https://github.com/owner/repo/pull/42');
     });
 
-    it('throws rollback to awaiting-review on error', async () => {
+    it('throws and moves the task to failed (no rollback to awaiting-review) on error', async () => {
       testData = setupTestProject();
       const orch = makeOrch(testData.root, getOrchestrator);
 
@@ -3800,9 +3800,13 @@ describe('Orchestrator', () => {
         branch: testData.branchName,
       });
       (orch as AnyOrch).pipelines.set(testData.taskId, pipeline);
+      // approveTask validates against the task store, not the pipeline
+      (orch as AnyOrch).taskStore.update(testData.taskId, { phase: 'awaiting-review' });
 
       await expect(orch.approveTask(testData.taskId, 'pull-request')).rejects.toThrow();
-      expect(pipeline.phase).toBe('awaiting-review');
+      expect((orch as AnyOrch).taskStore.getById(testData.taskId).phase).toBe('failed');
+      expect(pipeline.phase).toBe('failed');
+      expect((orch as AnyOrch).activeTasks.has(testData.taskId)).toBe(false);
     });
   });
 
