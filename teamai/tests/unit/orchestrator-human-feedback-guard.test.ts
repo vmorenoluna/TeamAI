@@ -65,6 +65,10 @@ vi.mock('@/lib/task-store', () => {
   TaskStore.prototype.getAll = vi.fn(() => []);
   TaskStore.prototype.getEvents = vi.fn(() => []);
   TaskStore.prototype.clearArtifacts = vi.fn();
+  // Async twins delegate to the sync mocks so tests keep configuring the sync ones.
+  TaskStore.prototype.getByIdAsync = vi.fn(async function (this: any, id: string) { return this.getById(id); });
+  TaskStore.prototype.getDirByIdAsync = vi.fn(async function (this: any, id: string) { return this.getDirById(id); });
+  TaskStore.prototype.getEventsAsync = vi.fn(async function (this: any, id: string) { return this.getEvents(id); });
   return { TaskStore };
 });
 

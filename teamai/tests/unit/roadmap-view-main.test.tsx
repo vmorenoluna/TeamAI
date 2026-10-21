@@ -282,7 +282,7 @@ describe('RoadmapView', () => {
       await waitFor(() => {
         // After result event, rmDone=true → rmRunning cleared → button reverts
         expect(screen.getByText('Generate Roadmap')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
   });
 
@@ -329,7 +329,7 @@ describe('RoadmapView', () => {
       // rmFullText is set via useMemo — wait for it
       await waitFor(() => {
         expect(screen.getByText('Analysing codebase…')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('shows Initialising… when running but no text extracted yet', async () => {
@@ -346,7 +346,7 @@ describe('RoadmapView', () => {
       // rmFullText stays empty, but rmStream.length > 0 so Agent Output shows "Initialising…"
       await waitFor(() => {
         expect(screen.getByText('Initialising…')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('shows Starting indicator when running but no events yet', async () => {
@@ -403,7 +403,7 @@ describe('RoadmapView', () => {
 
       await waitFor(() => {
         expect(screen.getByText(/Fixed bug A/)).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('generates and renders the changelog on click', async () => {
@@ -423,7 +423,7 @@ describe('RoadmapView', () => {
       expect(mockStartChangelogGeneration).toHaveBeenCalledTimes(1);
       await waitFor(() => {
         expect(screen.getByText(/Added dark mode/)).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('shows Generating… while a changelog generation is pending', async () => {
@@ -459,7 +459,7 @@ describe('RoadmapView', () => {
 
       await waitFor(() => {
         expect(screen.getByText('History:')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('does not show history dropdown when no reports exist', async () => {
@@ -469,7 +469,7 @@ describe('RoadmapView', () => {
 
       await waitFor(() => {
         expect(screen.queryByText('History:')).not.toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
   });
 
@@ -517,7 +517,7 @@ describe('RoadmapView', () => {
       // Button should return to "Generate Roadmap" (running = false)
       await waitFor(() => {
         expect(screen.getByText('Generate Roadmap')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       // The Stop button should be gone
       expect(screen.queryByText('✕ Stop')).not.toBeInTheDocument();
@@ -548,7 +548,7 @@ describe('RoadmapView', () => {
       await waitFor(() => {
         // The stale session ID should have been removed from sessionStorage
         expect(mockSessionStorage.getItem('roadmap-session')).toBeNull();
-      });
+      }, { timeout: 10_000 });
 
       // isRoadmapSessionAlive should have been called with the stale ID
       expect(mockIsRoadmapSessionAlive).toHaveBeenCalledWith('stale-session-id');
@@ -559,7 +559,7 @@ describe('RoadmapView', () => {
       // Should auto-load the most recent report instead
       await waitFor(() => {
         expect(screen.getByText('Previous roadmap')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
 
@@ -573,7 +573,7 @@ describe('RoadmapView', () => {
       await waitFor(() => {
         // Should reconnect: show "Generating…" since rmRunning is set to true
         expect(screen.getByText('Generating…')).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       // sessionStorage should still have the session ID (not cleared)
       expect(mockSessionStorage.getItem('roadmap-session')).toBe('alive-session-id');

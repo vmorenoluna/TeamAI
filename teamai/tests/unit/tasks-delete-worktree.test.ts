@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
   removeStale: vi.fn(),
   rmSync: vi.fn(),
   update: vi.fn(),
+  getByIdAsync: vi.fn(async () => ({ id: 't1', branch: 'feat/x' })),
 }));
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
@@ -18,7 +19,7 @@ vi.mock('@/lib/auto-mode', () => ({ retryAutoMerge: vi.fn() }));
 vi.mock('../../src/app/actions/projects', () => ({ getActiveProjectPath: vi.fn(async () => '/test/project') }));
 vi.mock('@/lib/task-store', () => ({
   TaskStore: class {
-    getById() { return { id: 't1', branch: 'feat/x' }; }
+    getByIdAsync = h.getByIdAsync;
     update = h.update;
   },
 }));
@@ -40,6 +41,13 @@ describe('deleteTaskWorktree', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     h.removeStale.mockResolvedValue(undefined);
+    h.getByIdAsync.mockImplementation(async () => ({ id: 't1', branch: 'feat/x' }));
+  });
+
+  it('resolves { success: false, error } when the task read rejects', async () => {
+    h.getByIdAsync.mockRejectedValueOnce(new Error('EIO: read failed'));
+    expect(await deleteTaskWorktree('t1')).toEqual({ success: false, error: 'EIO: read failed' });
+    expect(h.execGitQueued).not.toHaveBeenCalled();
   });
 
   it('succeeds with a normal remove', async () => {

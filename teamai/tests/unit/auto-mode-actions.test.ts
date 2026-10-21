@@ -39,7 +39,7 @@ vi.mock('@/lib/task-store', () => ({
       this.projectPath = projectPath;
     }
     update = mockTaskStoreUpdate;
-    getById = mockTaskStoreGetById;
+    getByIdAsync = async (id: string) => mockTaskStoreGetById(id);
     getAll = vi.fn();
     updatePhase = vi.fn();
     getDirById = vi.fn((id: string) => join(this.projectPath, '.teamai', id));
@@ -222,6 +222,13 @@ describe('auto-mode server actions', () => {
 
       const { markAutoReviewed } = await import('@/app/actions/auto-mode');
       await expect(markAutoReviewed('gone-task')).rejects.toThrow('Task gone-task not found');
+    });
+
+    it('propagates a rejected TaskStore read', async () => {
+      mockTaskStoreGetById.mockImplementation(() => { throw new Error('EIO: read failed'); });
+
+      const { markAutoReviewed } = await import('@/app/actions/auto-mode');
+      await expect(markAutoReviewed('task-x')).rejects.toThrow('EIO: read failed');
     });
 
     it('propagates error when TaskStore.update throws', async () => {

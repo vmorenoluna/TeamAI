@@ -712,3 +712,126 @@ describe('retryTask — one retry entry point', () => {
     expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'qa-review');
   });
 });
+
+describe('retryTask — rejected TaskStore reads', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockMoveTaskToPhase.mockResolvedValue(undefined);
+    mockProjectPath = TEST_DIR;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it('resolves { success: false, error } and does not move the task when the task read rejects', async () => {
+    const { taskId } = seedFailedTask(TEST_DIR, 'read-rejects');
+    const { TaskStore } = await import('@/lib/task-store');
+    vi.spyOn(TaskStore.prototype, 'getByIdAsync').mockRejectedValue(new Error('EIO: task read failed'));
+
+    const { retryTask } = await import('@/app/actions/tasks');
+    const result = await retryTask(taskId);
+
+    expect(result).toEqual({ success: false, error: 'EIO: task read failed' });
+    expect(mockMoveTaskToPhase).not.toHaveBeenCalled();
+  }, 20_000);
+
+  it('resolves { success: false, error } and does not move the task when the task dir lookup rejects', async () => {
+    const { taskId } = seedFailedTask(TEST_DIR, 'dir-rejects');
+    const { TaskStore } = await import('@/lib/task-store');
+    vi.spyOn(TaskStore.prototype, 'getDirByIdAsync').mockRejectedValue(new Error('EIO: dir read failed'));
+
+    const { retryTask } = await import('@/app/actions/tasks');
+    const result = await retryTask(taskId);
+
+    expect(result).toEqual({ success: false, error: 'EIO: dir read failed' });
+    expect(mockClearPipelineStateFile).not.toHaveBeenCalled();
+    expect(mockMoveTaskToPhase).not.toHaveBeenCalled();
+  }, 20_000);
+
+  it('still falls back to qa-review when only the events read rejects', async () => {
+    const { taskId } = seedFailedTask(TEST_DIR, 'events-reject');
+    const { TaskStore } = await import('@/lib/task-store');
+    vi.spyOn(TaskStore.prototype, 'getEventsAsync').mockRejectedValue(new Error('EIO'));
+
+    const { retryTask } = await import('@/app/actions/tasks');
+    const result = await retryTask(taskId);
+
+    expect(result.success).toBe(true);
+    expect(mockMoveTaskToPhase).toHaveBeenCalledWith(taskId, 'qa-review');
+  }, 20_000);
+});
+
+describe('read actions — async TaskStore reads', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockMoveTaskToPhase.mockResolvedValue(undefined);
+    mockProjectPath = TEST_DIR;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it('getTaskFull throws TaskNotFoundError for a missing task', async () => {
+    mkdirSync(join(TEST_DIR, '.teamai'), { recursive: true });
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const { TaskNotFoundError } = await import('@/lib/orchestrator/errors');
+
+    const err = await getTaskFull('does-not-exist').catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(TaskNotFoundError);
+    expect((err as Error).message).toBe('Task does-not-exist not found');
+  }, 20_000);
+
+  it('getTaskFull rejects with the underlying error when a task read rejects', async () => {
+    const { taskId } = seedFailedTask(TEST_DIR, 'full-read-rejects');
+    const { TaskStore } = await import('@/lib/task-store');
+    vi.spyOn(TaskStore.prototype, 'getByIdAsync').mockRejectedValue(new Error('EIO: task read failed'));
+    const { getTaskFull } = await import('@/app/actions/tasks');
+    const { TaskNotFoundError } = await import('@/lib/orchestrator/errors');
+
+    const err = await getTaskFull(taskId).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(TaskNotFoundError);
+    expect((err as Error).message).toBe('EIO: task read failed');
+  }, 20_000);
+
+  it('getTaskFull returns the seeded task with null artifacts and empty role files', async () => {
+    const { taskId } = seedFailedTask(TEST_DIR, 'full-ok');
+    const { getTaskFull } = await import('@/app/actions/tasks');
+
+    const full = await getTaskFull(taskId);
+
+    expect(full.task.id).toBe(taskId);
+    expect(full.plan).toBeNull();
+    expect(full.agentOutput).toBeNull();
+    expect(full.sessionMap).toEqual({});
+    expect(full.roleFiles).toEqual({});
+  }, 20_000);
+
+  it('pauseTask resolves { success: false, error } when the task read rejects', async () => {
+    const { taskId } = seedFailedTask(TEST_DIR, 'pause-read-rejects');
+    const { TaskStore } = await import('@/lib/task-store');
+    vi.spyOn(TaskStore.prototype, 'getByIdAsync').mockRejectedValue(new Error('EIO: task read failed'));
+    const { pauseTask, resumeTask, stopTask, playTask, restartCurrentPhase, retryTaskWithOptions } =
+      await import('@/app/actions/tasks');
+
+    for (const result of [
+      await pauseTask(taskId),
+      await resumeTask(taskId),
+      await stopTask(taskId),
+      await playTask(taskId),
+      await restartCurrentPhase(taskId),
+      await retryTaskWithOptions(taskId, 'plan'),
+    ]) {
+      expect(result).toEqual({ success: false, error: 'EIO: task read failed' });
+    }
+    expect(mockMoveTaskToPhase).not.toHaveBeenCalled();
+  }, 20_000);
+});

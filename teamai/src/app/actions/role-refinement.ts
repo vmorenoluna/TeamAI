@@ -28,7 +28,12 @@ export async function analyzeFailedTask(taskId: string): Promise<{ success: bool
     return { success: false, error: 'Role refinement is disabled for this project (Settings → Role Refinements)' };
   }
   const taskStore = new TaskStore(projectPath);
-  const task = taskStore.getById(taskId);
+  let task;
+  try {
+    task = await taskStore.getByIdAsync(taskId);
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to read task' };
+  }
   if (!task) return { success: false, error: 'Task not found' };
   if (task.phase !== 'failed') {
     return { success: false, error: `Task is in phase "${task.phase}", not "failed"` };
@@ -102,7 +107,7 @@ export async function applyAndRetryRefinementAction(
   if (retry.success) {
     try {
       const taskStore = new TaskStore(projectPath);
-      const task = taskStore.getById(taskId);
+      const task = await taskStore.getByIdAsync(taskId);
       if (task) {
         taskStore.update(taskId, { refinementRetryCount: (task.refinementRetryCount ?? 0) + 1 });
       }

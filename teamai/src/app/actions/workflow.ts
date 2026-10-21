@@ -17,11 +17,11 @@ export interface WorkflowTask {
 export async function getWorkflowTasks(): Promise<WorkflowTask[]> {
   const projectPath = await getActiveProjectPath();
   const taskStore = new TaskStore(projectPath);
-  const tasks = taskStore.getAll();
+  const tasks = await taskStore.getAllAsync();
   const orchestrator = getOrchestrator(projectPath);
 
-  return tasks.map(task => {
-    const events = taskStore.getEvents(task.id);
+  return Promise.all(tasks.map(async task => {
+    const events = await taskStore.getEventsAsync(task.id);
 
     // Count QA bounces: number of times the task entered qa-review phase
     const qaBounces = events.filter(e => e.phase === 'qa-review').length;
@@ -33,5 +33,5 @@ export async function getWorkflowTasks(): Promise<WorkflowTask[]> {
       : null;
 
     return { task, qaBounces, enteredPhaseAt, isActive: orchestrator.isTaskActive(task.id) };
-  });
+  }));
 }

@@ -1,10 +1,13 @@
+import type { Dirent } from 'fs';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, rmSync, unlinkSync, renameSync, statSync } from 'fs';
 
 export function isRetryableError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'code' in err
     && ((err as { code: string }).code === 'EPERM' || (err as { code: string }).code === 'EBUSY');
 }
+import { readdir, stat } from 'fs/promises';
 import { join } from 'path';
+import { isMissing, readTextIfExists } from './fs-async';
 import { slugify } from './utils';
 import { warn as logWarn } from './logger';
 import { PHASE_ARTIFACTS } from './orchestrator/artifacts';
@@ -209,6 +212,55 @@ export class TaskStore {
     return index;
   }
 
+  /**
+   * Async twin of _ensureIndex, sharing the same cache. The specs-dir mtime is
+   * sampled BEFORE readdir and the index is built into a local Map that is only
+   * assigned once complete, so a sync reader never sees a half-built index and
+   * a change during the build is caught by the next lookup's mtime check.
+   * Missing entries are skipped; any other fs failure rejects.
+   */
+  private async _ensureIndexAsync(): Promise<Map<string, string>> {
+    let mtimeMs = -1;
+    try {
+      mtimeMs = (await stat(this.specsDir)).mtimeMs;
+    } catch (err) {
+      if (!isMissing(err)) throw err;
+    }
+    if (this._dirIndex && mtimeMs === this._dirIndexMtimeMs) return this._dirIndex;
+
+    const index = new Map<string, string>();
+    let entries: Dirent[];
+    try {
+      entries = await readdir(this.specsDir, { withFileTypes: true });
+    } catch (err) {
+      if (!isMissing(err)) throw err;
+      entries = [];
+    }
+    for (const d of entries) {
+      if (!d.isDirectory()) continue;
+      const raw = await readTextIfExists(join(this.specsDir, d.name, 'task.json'));
+      if (raw === null) continue;
+      try {
+        const task = JSON.parse(raw);
+        if (task?.id) index.set(task.id, join(this.specsDir, d.name));
+      } catch { /* unparseable task.json — skip */ }
+    }
+    this._dirIndex = index;
+    this._dirIndexMtimeMs = mtimeMs;
+    return index;
+  }
+
+  /** Async twin of _readTaskAt: null if missing/unparseable, rejects on other read failures. */
+  private async _readTaskAtAsync(dir: string): Promise<Task | null> {
+    const raw = await readTextIfExists(join(dir, 'task.json'));
+    if (raw === null) return null;
+    try {
+      return JSON.parse(raw) as Task;
+    } catch {
+      return null;
+    }
+  }
+
   /** Read a task.json from an indexed dir; null if missing/unparseable. */
   private _readTaskAt(dir: string): Task | null {
     try {
@@ -328,6 +380,27 @@ export class TaskStore {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
   }
 
+  async getAllAsync(): Promise<Task[]> {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(this.specsDir, { withFileTypes: true });
+    } catch (err) {
+      if (isMissing(err)) return [];
+      throw err;
+    }
+    const tasks = await Promise.all(
+      entries
+        .filter(d => d.isDirectory())
+        .map(async d => {
+          const raw = await readTextIfExists(join(this.specsDir, d.name, 'task.json'));
+          return raw === null ? null : JSON.parse(raw) as Task;
+        }),
+    );
+    return tasks
+      .filter((t): t is Task => t !== null)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+  }
+
   getById(id: string): Task | null {
     const dir = this._dirIndex ? this._ensureIndex().get(id) : undefined;
     if (dir) {
@@ -338,6 +411,27 @@ export class TaskStore {
     this._invalidateIndex();
     const freshDir = this._ensureIndex().get(id);
     return freshDir ? this._readTaskAt(freshDir) : null;
+  }
+
+  async getByIdAsync(id: string): Promise<Task | null> {
+    const dir = this._dirIndex ? (await this._ensureIndexAsync()).get(id) : undefined;
+    if (dir) {
+      const task = await this._readTaskAtAsync(dir);
+      if (task?.id === id) return task;
+      // Stale entry (task.json deleted/rewritten in place) — rebuild once.
+    }
+    this._invalidateIndex();
+    const freshDir = (await this._ensureIndexAsync()).get(id);
+    return freshDir ? this._readTaskAtAsync(freshDir) : null;
+  }
+
+  async getDirByIdAsync(id: string): Promise<string> {
+    const dir = this._dirIndex ? (await this._ensureIndexAsync()).get(id) : undefined;
+    if (dir && (await this._readTaskAtAsync(dir))?.id === id) return dir;
+    this._invalidateIndex();
+    const freshDir = (await this._ensureIndexAsync()).get(id);
+    if (freshDir) return freshDir;
+    throw new Error(`Task directory not found for id ${id}`);
   }
 
   getDirById(id: string): string {
@@ -430,6 +524,16 @@ export class TaskStore {
     const eventsPath = join(dir, 'events.jsonl');
     if (!existsSync(eventsPath)) return [];
     return readFileSync(eventsPath, 'utf-8')
+      .split('\n')
+      .filter(line => line.trim())
+      .map(line => JSON.parse(line));
+  }
+
+  async getEventsAsync(taskId: string): Promise<Array<{ phase: string; timestamp: string; [key: string]: unknown }>> {
+    const dir = await this.getDirByIdAsync(taskId);
+    const raw = await readTextIfExists(join(dir, 'events.jsonl'));
+    if (raw === null) return [];
+    return raw
       .split('\n')
       .filter(line => line.trim())
       .map(line => JSON.parse(line));

@@ -261,6 +261,10 @@ async function setupAutoMode(): Promise<any> {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+// beforeEach re-imports the orchestrator after vi.resetModules(); that import
+// exceeds the default 10s hook timeout when the full suite loads the machine.
+vi.setConfig({ hookTimeout: 60_000 });
+
 describe('Auto Mode Integration', () => {
   describe('Tick loop — task selection', () => {
     let autoMode: any;

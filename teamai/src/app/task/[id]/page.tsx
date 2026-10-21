@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { getTaskFull } from '@/app/actions/tasks';
 import { getActiveProject } from '@/app/actions/projects';
 import { TaskDetail } from '@/components/task-detail';
+import { TaskNotFoundError } from '@/lib/orchestrator/errors';
 
 export default async function TaskPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -11,9 +12,10 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
     return <div className="p-6 text-sm text-slate-400">No active project selected.</div>;
   }
 
-  const full = await getTaskFull(id).catch(() => null);
-
-  if (!full) notFound();
+  const full = await getTaskFull(id).catch((err: unknown) => {
+    if (err instanceof TaskNotFoundError || (err as { code?: unknown } | null)?.code === 'TASK_NOT_FOUND') notFound();
+    throw err;
+  });
 
   return (
     <TaskDetail

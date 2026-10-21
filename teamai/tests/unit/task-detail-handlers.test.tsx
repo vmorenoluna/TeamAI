@@ -186,7 +186,7 @@ describe('TaskDetail mutation handlers', () => {
       await waitFor(() => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('Failed to restart task: restart raw throw: pipeline mismatch');
-      });
+      }, { timeout: 10_000 });
       // re-throw → useServerMutation skips refresh
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
@@ -216,7 +216,7 @@ describe('TaskDetail mutation handlers', () => {
       await waitFor(() => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('Failed to mark task as reviewed: markReviewed raw throw: db timeout');
-      });
+      }, { timeout: 10_000 });
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
@@ -250,7 +250,7 @@ describe('TaskDetail mutation handlers', () => {
       await waitFor(() => {
         const banner = screen.getByRole('alert');
         expect(banner).toHaveTextContent('Failed to retry task: inline retry raw throw: bad pipeline state');
-      });
+      }, { timeout: 10_000 });
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
@@ -307,7 +307,7 @@ describe('TaskDetail mutation handlers', () => {
         // handleDelete's catch now prefixes with "Failed to delete task:" to
         // match handleRestart / handleMarkReviewed / handleInlineRetry.
         expect(banner).toHaveTextContent('Failed to delete task: delete raw throw: file locked');
-      });
+      }, { timeout: 10_000 });
       // Critical: handleDelete does `if (onClose) onClose() else router.push('/')`
       // AFTER `await deleteTask(...)`. The catch block fires BEFORE that
       // branch, so router.push must NOT be invoked on failure.

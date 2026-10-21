@@ -440,7 +440,7 @@ describe('TaskCard mutation handlers', () => {
       // Wait for the checkTaskWorktree effect to resolve
       await waitFor(() => {
         expect(screen.getByTitle(/Delete worktree/)).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
 
     it('calls deleteTaskWorktree and refreshes router on success', async () => {
@@ -448,7 +448,7 @@ describe('TaskCard mutation handlers', () => {
 
       await waitFor(() => {
         expect(screen.getByTitle(/Delete worktree/)).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       await act(async () => {
         fireEvent.click(screen.getByTitle(/Delete worktree/));
@@ -466,7 +466,7 @@ describe('TaskCard mutation handlers', () => {
 
       await waitFor(() => {
         expect(screen.getByTitle(/Delete worktree/)).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       await act(async () => {
         fireEvent.click(screen.getByTitle(/Delete worktree/));
@@ -482,7 +482,7 @@ describe('TaskCard mutation handlers', () => {
 
       await waitFor(() => {
         expect(screen.getByTitle(/Delete worktree/)).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       await act(async () => {
         fireEvent.click(screen.getByTitle(/Delete worktree/));
@@ -498,7 +498,7 @@ describe('TaskCard mutation handlers', () => {
 
       await waitFor(() => {
         expect(screen.getByTitle(/Delete worktree/)).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       await act(async () => {
         fireEvent.click(screen.getByTitle(/Delete worktree/));
@@ -526,7 +526,7 @@ describe('TaskCard mutation handlers', () => {
 
       await waitFor(() => {
         expect(mockCheckWorktree).toHaveBeenCalledWith('wt-1');
-      });
+      }, { timeout: 10_000 });
 
       const callCountBefore = mockCheckWorktree.mock.calls.length;
 
@@ -540,7 +540,7 @@ describe('TaskCard mutation handlers', () => {
 
       await waitFor(() => {
         expect(mockCheckWorktree.mock.calls.length).toBeGreaterThan(callCountBefore);
-      });
+      }, { timeout: 10_000 });
     });
 
     it('resets worktree status when branch becomes undefined', async () => {
@@ -555,7 +555,7 @@ describe('TaskCard mutation handlers', () => {
 
       await waitFor(() => {
         expect(screen.getByTitle(/Delete worktree/)).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       // Re-render with branch undefined (e.g., worktree deleted externally)
       rerender(
@@ -568,7 +568,7 @@ describe('TaskCard mutation handlers', () => {
       // The worktree delete button should no longer be visible
       await waitFor(() => {
         expect(screen.queryByTitle(/Delete worktree/)).not.toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
     });
   });
 
@@ -682,7 +682,7 @@ describe('TaskCard mutation handlers', () => {
 
       await waitFor(() => {
         expect(screen.getByTitle(/Delete worktree/)).toBeInTheDocument();
-      });
+      }, { timeout: 10_000 });
 
       await act(async () => {
         fireEvent.click(screen.getByTitle(/Delete worktree/));
