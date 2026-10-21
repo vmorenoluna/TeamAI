@@ -469,7 +469,7 @@ export async function getLinkedTaskStatuses(
   const taskStore = new TaskStore(projectPath);
   const result: Record<string, { phase: string; title: string } | null> = {};
   for (const id of linkedTaskIds) {
-    const task = taskStore.getById(id);
+    const task = await taskStore.getByIdAsync(id);
     result[id] = task ? { phase: task.phase, title: task.title } : null;
   }
   return result;

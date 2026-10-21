@@ -1,16 +1,18 @@
 'use server';
 
-import { mkdirSync, writeFileSync, readdirSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync } from 'fs';
+import { readdir } from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { join, extname } from 'path';
 import { revalidatePath } from 'next/cache';
 import { getActiveProjectPath } from './projects';
 import { TaskStore } from '@/lib/task-store';
+import { pathExists } from '@/lib/fs-async';
 
 export async function uploadTaskReference(taskId: string, formData: FormData): Promise<string> {
   const projectPath = await getActiveProjectPath();
   const taskStore = new TaskStore(projectPath);
-  const dir = join(taskStore.getDirById(taskId), 'references');
+  const dir = join(await taskStore.getDirByIdAsync(taskId), 'references');
   mkdirSync(dir, { recursive: true });
 
   const file = formData.get('file') as File | null;
@@ -30,9 +32,9 @@ export async function getTaskReferences(taskId: string): Promise<string[]> {
   const projectPath = await getActiveProjectPath();
   const taskStore = new TaskStore(projectPath);
   try {
-    const dir = join(taskStore.getDirById(taskId), 'references');
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir).filter(f => /\.(png|jpg|jpeg|webp|gif)$/i.test(f)).sort();
+    const dir = join(await taskStore.getDirByIdAsync(taskId), 'references');
+    if (!(await pathExists(dir))) return [];
+    return (await readdir(dir)).filter(f => /\.(png|jpg|jpeg|webp|gif)$/i.test(f)).sort();
   } catch {
     return [];
   }

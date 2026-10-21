@@ -2,7 +2,7 @@
 
 import { TaskStore } from '@/lib/task-store';
 import { getActiveProjectPath } from './projects';
-import { existsSync, readFileSync } from 'fs';
+import { readTextIfExists } from '@/lib/fs-async';
 import { join } from 'path';
 import type { QAReportData } from '@/lib/stream-types';
 
@@ -71,7 +71,7 @@ function getWeekStart(date: Date): string {
 export async function getAnalytics(): Promise<AnalyticsData> {
   const projectPath = await getActiveProjectPath();
   const taskStore = new TaskStore(projectPath);
-  const tasks = taskStore.getAll();
+  const tasks = await taskStore.getAllAsync();
 
   // Phase distribution
   const phaseDistribution: Record<string, number> = {};
@@ -84,7 +84,7 @@ export async function getAnalytics(): Promise<AnalyticsData> {
   for (const t of tasks) {
     let events: Array<{ phase: string; timestamp: string }> = [];
     try {
-      events = taskStore.getEvents(t.id);
+      events = await taskStore.getEventsAsync(t.id);
     } catch {
       continue; // skip tasks with malformed events.jsonl
     }
@@ -123,10 +123,10 @@ export async function getAnalytics(): Promise<AnalyticsData> {
 
   for (const t of tasks) {
     try {
-      const dir = taskStore.getDirById(t.id);
-      const qaPath = join(dir, 'qa_report.json');
-      if (!existsSync(qaPath)) continue;
-      const qa: QAReportData = JSON.parse(readFileSync(qaPath, 'utf-8'));
+      const dir = await taskStore.getDirByIdAsync(t.id);
+      const raw = await readTextIfExists(join(dir, 'qa_report.json'));
+      if (raw === null) continue;
+      const qa: QAReportData = JSON.parse(raw);
       totalQaRuns++;
       if (qa.overall === 'PASS') passCount++;
       else failCount++;

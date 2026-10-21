@@ -281,7 +281,7 @@ describe('getAnalytics', () => {
 
       // Should not crash — malformed events.jsonl is caught and skipped.
       // The JSON parse throws on the non-JSON line; the try/catch in
-      // getAnalytics wraps taskStore.getEvents(), so the task is skipped.
+      // getAnalytics wraps taskStore.getEventsAsync(), so the task is skipped.
       expect(data.phaseTimings).toEqual([]);
     });
   });

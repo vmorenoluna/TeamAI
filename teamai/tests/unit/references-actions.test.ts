@@ -28,7 +28,7 @@ vi.mock('@/lib/task-store', () => ({
     constructor(projectPath: string) {
       this.projectPath = projectPath;
     }
-    getDirById = vi.fn((id: string) => join(this.projectPath, '.teamai', id));
+    getDirByIdAsync = vi.fn(async (id: string) => join(this.projectPath, '.teamai', id));
   },
 }));
 
