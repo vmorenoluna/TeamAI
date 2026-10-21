@@ -4,6 +4,7 @@ import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest';
 import { TaskCard } from '@/components/task-card';
 import type { Task } from '@/lib/task-store';
+import { deliverActionResult } from '@/lib/background-action-client';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 
@@ -35,6 +36,14 @@ vi.mock('@/app/actions/tasks', () => ({
   checkTaskWorktree: (...args: unknown[]) => mockCheckWorktree(...args),
 }));
 
+/** Stub for a background-capable action: returns the operation id now, delivers the outcome via the registry. */
+function backgroundStub(outcome: { ok: boolean; error?: string }) {
+  return (_taskId: string, operationId: string) => {
+    setTimeout(() => deliverActionResult({ operationId, ok: outcome.ok, error: outcome.error }), 0);
+    return Promise.resolve({ success: true, operationId });
+  };
+}
+
 // ── Fixtures ───────────────────────────────────────────────────────────
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -62,11 +71,11 @@ describe('TaskCard mutation handlers', () => {
     window.confirm = vi.fn().mockReturnValue(true);
     window.alert = vi.fn();
     mockRetryTaskWithOptions.mockResolvedValue({ success: true, error: '' });
-    mockStopTask.mockResolvedValue({ success: true, error: '' });
+    mockStopTask.mockImplementation(backgroundStub({ ok: true }));
     mockPauseTask.mockResolvedValue({ success: true, error: '' });
     mockResumeTask.mockResolvedValue({ success: true, error: '' });
     mockPlayTask.mockResolvedValue({ success: true, error: '' });
-    mockDeleteWorktree.mockResolvedValue({ success: true, error: '' });
+    mockDeleteWorktree.mockImplementation(backgroundStub({ ok: true }));
     mockCheckWorktree.mockResolvedValue({ exists: false, path: null });
   });
 
@@ -302,7 +311,7 @@ describe('TaskCard mutation handlers', () => {
     }
 
     it('calls stopTask and refreshes router on success', async () => {
-      mockStopTask.mockResolvedValue({ success: true, error: '' });
+      mockStopTask.mockImplementation(backgroundStub({ ok: true }));
       renderActiveTask();
 
       const stopBtn = screen.getByTitle('Stop task — cancel, clean up artifacts, and move back to Backlog');
@@ -310,13 +319,13 @@ describe('TaskCard mutation handlers', () => {
         fireEvent.click(stopBtn);
       });
 
-      expect(mockStopTask).toHaveBeenCalledWith('active-1');
+      expect(mockStopTask).toHaveBeenCalledWith('active-1', expect.any(String));
       expect(mockRouterRefresh).toHaveBeenCalled();
       expect(window.alert).not.toHaveBeenCalled();
     });
 
     it('shows alert and skips router refresh on failure', async () => {
-      mockStopTask.mockResolvedValue({ success: false, error: 'Task locked' });
+      mockStopTask.mockImplementation(backgroundStub({ ok: false, error: 'Task locked' }));
       renderActiveTask();
 
       await act(async () => {
@@ -324,6 +333,28 @@ describe('TaskCard mutation handlers', () => {
       });
 
       expect(window.alert).toHaveBeenCalledWith('Failed to stop task: Task locked');
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('keeps stop pending until the result is delivered, then alerts on a delivered failure', async () => {
+      let opId = '';
+      mockStopTask.mockImplementation((_id: string, operationId: string) => {
+        opId = operationId;
+        return Promise.resolve({ success: true, operationId });
+      });
+      renderActiveTask();
+      const title = 'Stop task — cancel, clean up artifacts, and move back to Backlog';
+
+      await act(async () => {
+        fireEvent.click(screen.getByTitle(title));
+      });
+      expect(window.alert).not.toHaveBeenCalled();
+      expect(mockRouterRefresh).not.toHaveBeenCalled();
+
+      await act(async () => {
+        deliverActionResult({ operationId: opId, ok: false, error: 'git failed' });
+      });
+      expect(window.alert).toHaveBeenCalledWith('Failed to stop task: git failed');
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
@@ -455,13 +486,14 @@ describe('TaskCard mutation handlers', () => {
       });
 
       expect(window.confirm).toHaveBeenCalled();
-      expect(mockDeleteWorktree).toHaveBeenCalledWith('wt-1');
+      expect(mockDeleteWorktree).toHaveBeenCalledWith('wt-1', expect.any(String));
+      await waitFor(() => expect(screen.queryByTitle(/Delete worktree/)).not.toBeInTheDocument());
       expect(mockRouterRefresh).toHaveBeenCalled();
       expect(window.alert).not.toHaveBeenCalled();
     });
 
     it('shows alert and skips router refresh on failure', async () => {
-      mockDeleteWorktree.mockResolvedValue({ success: false, error: 'Worktree locked' });
+      mockDeleteWorktree.mockImplementation(backgroundStub({ ok: false, error: 'Worktree locked' }));
       renderWithWorktree();
 
       await waitFor(() => {
@@ -472,7 +504,8 @@ describe('TaskCard mutation handlers', () => {
         fireEvent.click(screen.getByTitle(/Delete worktree/));
       });
 
-      expect(window.alert).toHaveBeenCalledWith('Failed to delete worktree: Worktree locked');
+      await waitFor(() => expect(window.alert).toHaveBeenCalledWith('Failed to delete worktree: Worktree locked'));
+      expect(screen.getByTitle(/Delete worktree/)).toBeInTheDocument();
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
 
@@ -490,6 +523,34 @@ describe('TaskCard mutation handlers', () => {
 
       expect(mockDeleteWorktree).not.toHaveBeenCalled();
       expect(mockRouterRefresh).not.toHaveBeenCalled();
+    });
+
+    it('keeps the spinner after the action returns until the result is delivered, then hides the control', async () => {
+      let opId = '';
+      mockDeleteWorktree.mockImplementation((_id: string, operationId: string) => {
+        opId = operationId;
+        return Promise.resolve({ success: true, operationId });
+      });
+      renderWithWorktree();
+
+      await waitFor(() => {
+        expect(screen.getByTitle(/Delete worktree/)).toBeInTheDocument();
+      }, { timeout: 10_000 });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTitle(/Delete worktree/));
+      });
+
+      // Action has returned, but nothing delivered: still spinning
+      expect(screen.getByTitle(/Delete worktree/)).toBeDisabled();
+      expect(screen.getByTitle(/Delete worktree/).textContent).toContain('⌛');
+      expect(window.alert).not.toHaveBeenCalled();
+
+      await act(async () => {
+        deliverActionResult({ operationId: opId, ok: true });
+      });
+      await waitFor(() => expect(screen.queryByTitle(/Delete worktree/)).not.toBeInTheDocument());
+      expect(window.alert).not.toHaveBeenCalled();
     });
 
     it('shows loading indicator while deleting', async () => {
@@ -689,7 +750,7 @@ describe('TaskCard mutation handlers', () => {
       });
 
       expect(window.confirm).toHaveBeenCalled();
-      expect(mockDeleteWorktree).toHaveBeenCalledWith('wt-r');
+      expect(mockDeleteWorktree).toHaveBeenCalledWith('wt-r', expect.any(String));
       expect(window.alert).toHaveBeenCalledWith('Failed to delete worktree: git worktree lock');
       expect(mockRouterRefresh).not.toHaveBeenCalled();
     });
