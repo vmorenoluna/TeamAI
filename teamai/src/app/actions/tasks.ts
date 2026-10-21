@@ -1,6 +1,8 @@
 'use server';
 
 import { TaskStore } from '@/lib/task-store';
+import { pathExists, readTextIfExists } from '@/lib/fs-async';
+import { TaskNotFoundError } from '@/lib/orchestrator/errors';
 import { getOrchestrator } from '@/lib/orchestrator';
 import { MAX_REVISION_SNAPSHOTS, RESUME_AUTO } from '@/lib/orchestrator/artifacts';
 import { retryAutoMerge } from '@/lib/auto-mode';
@@ -14,12 +16,27 @@ import { existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { getResumePhaseForFailedTask, getAwaitingReviewReason } from '@/lib/task-utils';
 import { getRoleRefinementConfig, suggestionsForTask, type RoleRefinementMode, type RoleRefinementSuggestion } from '@/lib/role-refinement';
 import { join, resolve } from 'path';
-import { readdirSync } from 'fs';
+import { readdir, readFile } from 'fs/promises';
 import { NO_STOP_PHASES, RESTARTABLE_PHASES } from '@/constants/phases';
 import { execGitQueued, removeStaleWorktreeRegistration } from '@/lib/orchestrator/worktree-utils';
 import { isFeedbackTarget, type FeedbackTarget } from '@/lib/orchestrator/feedback-target';
 import { error as logError } from '@/lib/logger';
 import { preRestoreFailedTask, taskHasSpecConcerns } from '@/lib/task-retry';
+
+/**
+ * Read a task for an action that reports failures as `{ success: false, error }`:
+ * a rejected TaskStore read becomes an `error` instead of a rejected action.
+ */
+async function readTaskForAction(
+  taskStore: TaskStore,
+  taskId: string,
+): Promise<{ task: Awaited<ReturnType<TaskStore['getByIdAsync']>>; error?: undefined } | { task?: undefined; error: string }> {
+  try {
+    return { task: await taskStore.getByIdAsync(taskId) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 async function getStores() {
   const projectPath = await getActiveProjectPath();
@@ -67,7 +84,9 @@ export async function bulkDeleteTasks(taskIds: string[]) {
 
 export async function retryTask(taskId: string): Promise<{ success: boolean; error?: string }> {
   const { taskStore, orchestrator, projectPath } = await getStores();
-  const task = taskStore.getById(taskId);
+  const read = await readTaskForAction(taskStore, taskId);
+  if (read.error !== undefined) return { success: false, error: read.error };
+  const task = read.task;
   if (!task) return { success: false, error: 'Task not found' };
   // Auto mode gave up merging a green PR: the task is still pr-open, and
   // "retry" means handing it back to the CI poller.
@@ -85,7 +104,7 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
   // Determine the phase the task was in when it failed — read from events
   let resumePhase = 'qa-review'; // default for failed tasks (most common failure point)
   try {
-    const events = taskStore.getEvents(taskId);
+    const events = await taskStore.getEventsAsync(taskId);
     resumePhase = getResumePhaseForFailedTask(events, task.failureReason, taskHasSpecConcerns(taskStore, taskId));
   } catch { /* fall back to default */ }
 
@@ -97,7 +116,13 @@ export async function retryTask(taskId: string): Promise<{ success: boolean; err
   // subtask that already burned its wakeup budget on the failed run gets
   // killed almost instantly on the very next wakeup, even if the underlying
   // work (e.g. a long-running script) is legitimately healthy and about to finish.
-  orchestrator.clearPipelineStateFile(taskStore.getDirById(taskId));
+  let taskDir: string;
+  try {
+    taskDir = await taskStore.getDirByIdAsync(taskId);
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  orchestrator.clearPipelineStateFile(taskDir);
 
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
   orchestrator.moveTaskToPhase(taskId, resumePhase).catch(err => logError('tasks', `retryTask ${taskId} failed`, err));
@@ -126,7 +151,9 @@ export async function retryTaskWithOptions(
   if (phase === RESUME_AUTO) return retryTask(taskId);
 
   const { taskStore, orchestrator } = await getStores();
-  const task = taskStore.getById(taskId);
+  const read = await readTaskForAction(taskStore, taskId);
+  if (read.error !== undefined) return { success: false, error: read.error };
+  const task = read.task;
   if (!task) return { success: false, error: 'Task not found' };
 
   // ── Pre-restore work (only for failed tasks) ──
@@ -135,7 +162,13 @@ export async function retryTaskWithOptions(
   }
 
   // ── Budget reset (always, independent of phase choice) ──
-  orchestrator.clearPipelineStateFile(taskStore.getDirById(taskId));
+  let taskDir: string;
+  try {
+    taskDir = await taskStore.getDirByIdAsync(taskId);
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  orchestrator.clearPipelineStateFile(taskDir);
 
   // Fire-and-forget — pipeline runs async, phase changes broadcast via WebSocket
   orchestrator.moveTaskToPhase(taskId, phase).catch(err => logError('tasks', `stopTask ${taskId} failed`, err));
@@ -145,7 +178,9 @@ export async function retryTaskWithOptions(
 
 export async function pauseTask(taskId: string): Promise<{ success: boolean; error?: string }> {
   const { taskStore, orchestrator, projectPath } = await getStores();
-  const task = taskStore.getById(taskId);
+  const read = await readTaskForAction(taskStore, taskId);
+  if (read.error !== undefined) return { success: false, error: read.error };
+  const task = read.task;
   if (!task) return { success: false, error: 'Task not found' };
 
   if (NO_STOP_PHASES.has(task.phase)) return { success: false, error: `Cannot pause task in "${task.phase}" phase` };
@@ -167,7 +202,9 @@ export async function pauseTask(taskId: string): Promise<{ success: boolean; err
 
 export async function resumeTask(taskId: string): Promise<{ success: boolean; error?: string }> {
   const { taskStore, orchestrator } = await getStores();
-  const task = taskStore.getById(taskId);
+  const read = await readTaskForAction(taskStore, taskId);
+  if (read.error !== undefined) return { success: false, error: read.error };
+  const task = read.task;
   if (!task) return { success: false, error: 'Task not found' };
 
   if (!task.isPaused) return { success: false, error: 'Task is not paused' };
@@ -187,7 +224,9 @@ export async function resumeTask(taskId: string): Promise<{ success: boolean; er
 
 export async function stopTask(taskId: string): Promise<{ success: boolean; error?: string }> {
   const { taskStore, orchestrator, projectPath } = await getStores();
-  const task = taskStore.getById(taskId);
+  const read = await readTaskForAction(taskStore, taskId);
+  if (read.error !== undefined) return { success: false, error: read.error };
+  const task = read.task;
   if (!task) return { success: false, error: 'Task not found' };
 
   if (NO_STOP_PHASES.has(task.phase)) return { success: false, error: `Cannot stop task in "${task.phase}" phase` };
@@ -214,7 +253,9 @@ export async function stopTask(taskId: string): Promise<{ success: boolean; erro
 
 export async function playTask(taskId: string): Promise<{ success: boolean; error?: string }> {
   const { taskStore, orchestrator } = await getStores();
-  const task = taskStore.getById(taskId);
+  const read = await readTaskForAction(taskStore, taskId);
+  if (read.error !== undefined) return { success: false, error: read.error };
+  const task = read.task;
   if (!task) return { success: false, error: 'Task not found' };
 
   if (task.phase !== 'backlog') return { success: false, error: `Task is in "${task.phase}" phase, not "backlog"` };
@@ -227,7 +268,9 @@ export async function playTask(taskId: string): Promise<{ success: boolean; erro
 
 export async function restartCurrentPhase(taskId: string): Promise<{ success: boolean; error?: string }> {
   const { taskStore, orchestrator } = await getStores();
-  const task = taskStore.getById(taskId);
+  const read = await readTaskForAction(taskStore, taskId);
+  if (read.error !== undefined) return { success: false, error: read.error };
+  const task = read.task;
   if (!task) return { success: false, error: 'Task not found' };
 
   if (!RESTARTABLE_PHASES.has(task.phase)) {
@@ -255,7 +298,12 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
     //
     // cancelPipeline first — see the qa-review branch above for why.
     orchestrator.cancelPipeline(taskId);
-    const dir = taskStore.getDirById(taskId);
+    let dir: string;
+    try {
+      dir = await taskStore.getDirByIdAsync(taskId);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
     const planPath = join(dir, 'plan.json');
     if (existsSync(planPath)) {
       try {
@@ -281,7 +329,7 @@ export async function restartCurrentPhase(taskId: string): Promise<{ success: bo
 
 export async function runTask(taskId: string) {
   const { taskStore, orchestrator } = await getStores();
-  const task = taskStore.getById(taskId);
+  const task = await taskStore.getByIdAsync(taskId);
   if (!task) throw new Error(`Task ${taskId} not found`);
   // orchestrator.runTask reaches persistAndEmitPhase (the authoritative
   // phase-change write) synchronously before any I/O-bound await, so the UI
@@ -315,15 +363,15 @@ export async function rejectTask(taskId: string, feedback: string, target: strin
 export async function getTasks() {
   const { taskStore } = await getStores();
   await getActiveProjectPath();
-  const tasks = taskStore.getAll();
+  const tasks = await taskStore.getAllAsync();
 
   // Enrich each task with subtask progress from plan.json
   for (const task of tasks) {
-    const dir = taskStore.getDirById(task.id);
-    const planPath = join(dir, 'plan.json');
-    if (existsSync(planPath)) {
+    const dir = await taskStore.getDirByIdAsync(task.id);
+    const planText = await readTextIfExists(join(dir, 'plan.json'));
+    if (planText !== null) {
       try {
-        const plan = JSON.parse(readFileSync(planPath, 'utf-8'));
+        const plan = JSON.parse(planText);
         const subtasks = plan.subtasks ?? [];
         const completed = subtasks.filter((s: { completed: boolean }) => s.completed).length;
         task.subtaskProgress = { completed, total: subtasks.length };
@@ -338,21 +386,21 @@ export async function getTasks() {
 
 export async function getTask(id: string) {
   const { taskStore } = await getStores();
-  return taskStore.getById(id);
+  return taskStore.getByIdAsync(id);
 }
 
 export async function getTaskEvents(taskId: string) {
   const { taskStore } = await getStores();
-  return taskStore.getEvents(taskId);
+  return taskStore.getEventsAsync(taskId);
 }
 
 export async function getTaskArtifacts(taskId: string) {
   const { taskStore } = await getStores();
   const projectPath = await getActiveProjectPath();
-  const task = taskStore.getById(taskId);
+  const task = await taskStore.getByIdAsync(taskId);
   if (!task) throw new Error(`Task ${taskId} not found`);
 
-  const dir = taskStore.getDirById(taskId);
+  const dir = await taskStore.getDirByIdAsync(taskId);
   return await readCommonArtifacts(dir, projectPath, task.branch);
 }
 
@@ -360,14 +408,14 @@ export async function getTaskFull(taskId: string) {
   const { taskStore } = await getStores();
   const projectPath = await getActiveProjectPath();
 
-  const task = taskStore.getById(taskId);
-  if (!task) throw new Error(`Task ${taskId} not found`);
+  const task = await taskStore.getByIdAsync(taskId);
+  if (!task) throw new TaskNotFoundError(taskId);
 
-  const allTasks = taskStore.getAll();
+  const allTasks = await taskStore.getAllAsync();
   const dependencies = allTasks.filter(t => task.dependencies?.includes(t.id));
   const dependents = allTasks.filter(t => t.dependencies?.includes(taskId));
 
-  const dir = taskStore.getDirById(taskId);
+  const dir = await taskStore.getDirByIdAsync(taskId);
 
   // ── Common artifacts (spec, qa, feedback, diff) ──
   const { spec, qaReport, humanFeedback, diff } = await readCommonArtifacts(
@@ -376,38 +424,33 @@ export async function getTaskFull(taskId: string) {
     task.branch,
   );
 
-  const planPath = join(dir, 'plan.json');
+  const planText = await readTextIfExists(join(dir, 'plan.json'));
   let plan: PlanData | null = null;
-  if (existsSync(planPath)) {
-    try { plan = JSON.parse(readFileSync(planPath, 'utf-8')); } catch { /* skip */ }
+  if (planText !== null) {
+    try { plan = JSON.parse(planText); } catch { /* skip */ }
   }
 
-  const outputPath = join(dir, 'output.log');
-  const agentOutput = existsSync(outputPath) ? readFileSync(outputPath, 'utf-8') : null;
+  const agentOutput = await readTextIfExists(join(dir, 'output.log'));
 
   // Read per-subtask log files for the expandable terminal list
   const subtaskTerminals: { id: number; title: string; log: string | null }[] = [];
   if (plan?.subtasks) {
     for (const s of plan.subtasks) {
-      const stLogPath = join(dir, `output-st${s.id}.log`);
-      if (existsSync(stLogPath)) {
-        subtaskTerminals.push({ id: Number(s.id), title: s.title, log: readFileSync(stLogPath, 'utf-8') });
+      const log = await readTextIfExists(join(dir, `output-st${s.id}.log`));
+      if (log !== null) {
+        subtaskTerminals.push({ id: Number(s.id), title: s.title, log });
       }
     }
   }
   subtaskTerminals.sort((a, b) => a.id - b.id);
 
   // Read QA log (accumulates across QA retries)
-  const qaLogPath = join(dir, 'output-qa.log');
-  const qaLog = existsSync(qaLogPath) ? readFileSync(qaLogPath, 'utf-8') : null;
+  const qaLog = await readTextIfExists(join(dir, 'output-qa.log'));
 
   // Read per-role log files
-  const specLogPath = join(dir, 'output-spec.log');
-  const specLog = existsSync(specLogPath) ? readFileSync(specLogPath, 'utf-8') : null;
-  const planLogPath = join(dir, 'output-plan.log');
-  const planLog = existsSync(planLogPath) ? readFileSync(planLogPath, 'utf-8') : null;
-  const mergeLogPath = join(dir, 'output-merge.log');
-  const mergeLog = existsSync(mergeLogPath) ? readFileSync(mergeLogPath, 'utf-8') : null;
+  const specLog = await readTextIfExists(join(dir, 'output-spec.log'));
+  const planLog = await readTextIfExists(join(dir, 'output-plan.log'));
+  const mergeLog = await readTextIfExists(join(dir, 'output-merge.log'));
 
   // Load spec versions for the comparison UI. Under the rename-at-revision
   // scheme the on-disk layout is: spec_v{1..N}.md are archived versions and
@@ -418,14 +461,13 @@ export async function getTaskFull(taskId: string) {
   // that entry instead of double-counting it.
   const specVersions: Record<string, string> = {};
   for (let version = 1; version <= MAX_REVISION_SNAPSHOTS; version++) {
-    const vPath = join(dir, `spec_v${version}.md`);
-    if (existsSync(vPath)) {
-      specVersions[`v${version}`] = readFileSync(vPath, 'utf-8');
+    const snapshot = await readTextIfExists(join(dir, `spec_v${version}.md`));
+    if (snapshot !== null) {
+      specVersions[`v${version}`] = snapshot;
     }
   }
-  const liveSpecPath = join(dir, 'spec.md');
-  if (existsSync(liveSpecPath)) {
-    const liveContent = readFileSync(liveSpecPath, 'utf-8');
+  const liveContent = await readTextIfExists(join(dir, 'spec.md'));
+  if (liveContent !== null) {
     const snapshotNums = Object.keys(specVersions)
       .map(k => parseInt(k.slice(1), 10))
       .sort((a, b) => a - b);
@@ -440,9 +482,9 @@ export async function getTaskFull(taskId: string) {
 
   // Read session map for live streaming per terminal
   let sessionMap: Record<string, string> = {};
-  const sessionMapPath = join(dir, 'session_map.json');
-  if (existsSync(sessionMapPath)) {
-    try { sessionMap = JSON.parse(readFileSync(sessionMapPath, 'utf-8')); } catch { /* skip */ }
+  const sessionMapText = await readTextIfExists(join(dir, 'session_map.json'));
+  if (sessionMapText !== null) {
+    try { sessionMap = JSON.parse(sessionMapText); } catch { /* skip */ }
   }
 
   const specPath = join(dir, 'spec.md');
@@ -459,7 +501,7 @@ export async function getTaskFull(taskId: string) {
   let awaitingReviewReason: string | null = task.awaitingReviewReason ?? null;
   if (!awaitingReviewReason) {
     try {
-      awaitingReviewReason = getAwaitingReviewReason(taskStore.getEvents(taskId));
+      awaitingReviewReason = getAwaitingReviewReason(await taskStore.getEventsAsync(taskId));
     } catch { /* best-effort */ }
   }
 
@@ -481,8 +523,8 @@ export async function getTaskFull(taskId: string) {
   const roleFiles: Record<string, string> = {};
   try {
     const rolesDir = join(projectPath, '.claude', 'roles');
-    for (const f of readdirSync(rolesDir).filter(f => f.endsWith('.md'))) {
-      roleFiles[f] = readFileSync(join(rolesDir, f), 'utf-8');
+    for (const f of (await readdir(rolesDir)).filter(f => f.endsWith('.md'))) {
+      roleFiles[f] = await readFile(join(rolesDir, f), 'utf-8');
     }
   } catch { /* roles dir missing — empty map is fine */ }
 
@@ -491,7 +533,7 @@ export async function getTaskFull(taskId: string) {
 
 export async function addDependency(taskId: string, depId: string): Promise<void> {
   const { taskStore } = await getStores();
-  const task = taskStore.getById(taskId);
+  const task = await taskStore.getByIdAsync(taskId);
   if (!task) return;
   const deps = task.dependencies ?? [];
   if (!deps.includes(depId)) taskStore.update(taskId, { dependencies: [...deps, depId] });
@@ -502,7 +544,7 @@ export async function addDependency(taskId: string, depId: string): Promise<void
 
 export async function removeDependency(taskId: string, depId: string): Promise<void> {
   const { taskStore } = await getStores();
-  const task = taskStore.getById(taskId);
+  const task = await taskStore.getByIdAsync(taskId);
   if (!task) return;
   taskStore.update(taskId, { dependencies: (task.dependencies ?? []).filter(id => id !== depId) });
   revalidatePath(`/task/${taskId}`);
@@ -513,7 +555,7 @@ export async function removeDependency(taskId: string, depId: string): Promise<v
 // "This task blocks blockedTaskId" — add thisTaskId to the other task's dependencies
 export async function addBlock(thisTaskId: string, blockedTaskId: string): Promise<void> {
   const { taskStore } = await getStores();
-  const blocked = taskStore.getById(blockedTaskId);
+  const blocked = await taskStore.getByIdAsync(blockedTaskId);
   if (!blocked) return;
   const deps = blocked.dependencies ?? [];
   if (!deps.includes(thisTaskId)) taskStore.update(blockedTaskId, { dependencies: [...deps, thisTaskId] });
@@ -524,7 +566,7 @@ export async function addBlock(thisTaskId: string, blockedTaskId: string): Promi
 
 export async function removeBlock(thisTaskId: string, blockedTaskId: string): Promise<void> {
   const { taskStore } = await getStores();
-  const blocked = taskStore.getById(blockedTaskId);
+  const blocked = await taskStore.getByIdAsync(blockedTaskId);
   if (!blocked) return;
   taskStore.update(blockedTaskId, { dependencies: (blocked.dependencies ?? []).filter(id => id !== thisTaskId) });
   revalidatePath(`/task/${thisTaskId}`);
@@ -533,34 +575,35 @@ export async function removeBlock(thisTaskId: string, blockedTaskId: string): Pr
 }
 
 export async function checkBulkTaskWorktrees(taskIds: string[]): Promise<Record<string, boolean>> {
-  const { taskStore } = await getStores();
+  const { taskStore, orchestrator } = await getStores();
   const result: Record<string, boolean> = {};
   for (const id of taskIds) {
-    const task = taskStore.getById(id);
+    const task = await taskStore.getByIdAsync(id);
     if (!task || !task.branch) {
       result[id] = false;
       continue;
     }
-    const { orchestrator } = await getStores();
     const wtPath = orchestrator.getWorktreePath(id);
-    result[id] = wtPath ? existsSync(wtPath) : false;
+    result[id] = wtPath ? await pathExists(wtPath) : false;
   }
   return result;
 }
 
 export async function checkTaskWorktree(taskId: string): Promise<{ exists: boolean; path: string | null }> {
   const { taskStore, orchestrator } = await getStores();
-  const task = taskStore.getById(taskId);
+  const task = await taskStore.getByIdAsync(taskId);
   if (!task || !task.branch) return { exists: false, path: null };
   const wtPath = orchestrator.getWorktreePath(taskId);
   if (!wtPath) return { exists: false, path: null };
-  return { exists: existsSync(wtPath), path: wtPath };
+  return { exists: await pathExists(wtPath), path: wtPath };
 }
 
 export async function deleteTaskWorktree(taskId: string): Promise<{ success: boolean; error?: string }> {
   const { taskStore, orchestrator } = await getStores();
   const projectPath = await getActiveProjectPath();
-  const task = taskStore.getById(taskId);
+  const read = await readTaskForAction(taskStore, taskId);
+  if (read.error !== undefined) return { success: false, error: read.error };
+  const task = read.task;
   if (!task || !task.branch) return { success: false, error: 'No branch found for this task' };
   const wtPath = orchestrator.getWorktreePath(taskId);
   if (!wtPath || !existsSync(wtPath)) return { success: false, error: 'Worktree directory not found on disk' };

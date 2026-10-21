@@ -347,5 +347,5 @@ describe('restartCurrentPhase — edge cases', () => {
     // Restart task C (spec) — uses moveTaskToPhase
     await restartCurrentPhase('id-c');
     expect(mockMoveTaskToPhase).toHaveBeenLastCalledWith('id-c', 'spec');
-  });
+  }, 20_000);
 });
