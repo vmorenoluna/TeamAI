@@ -201,6 +201,10 @@ function makePipeline(overrides: Record<string, any> = {}): any {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+// beforeEach re-imports the orchestrator after vi.resetModules(); that import
+// exceeds the default 10s hook timeout when the full suite loads the machine.
+vi.setConfig({ hookTimeout: 60_000 });
+
 describe('Rate Limit Integration', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -331,18 +335,19 @@ describe('Rate Limit Integration', () => {
 
       orch.handleRateLimit(pipeline, 0);
 
-      await new Promise(r => setTimeout(r, 50));
-
       // Spec session created
-      expect(mockCreateSession).toHaveBeenCalledTimes(1);
-      expect(mockSendMessage).toHaveBeenCalledWith('sess-1', expect.stringContaining('/spec'));
+      await vi.waitFor(() => {
+        expect(mockCreateSession).toHaveBeenCalledTimes(1);
+        expect(mockSendMessage).toHaveBeenCalledWith('sess-1', expect.stringContaining('/spec'));
+      }, { timeout: 10_000 });
 
       // Complete spec session
       fireEvent('event', { sessionId: 'sess-1', event: { type: 'result' } });
-      await new Promise(r => setTimeout(r, 100));
 
       // Phase advanced to plan; plan is now running (waiting for its result event)
-      expect(mockCreateSession).toHaveBeenCalledTimes(2);
+      await vi.waitFor(() => {
+        expect(mockCreateSession).toHaveBeenCalledTimes(2);
+      }, { timeout: 10_000 });
       expect(pipeline.phase).toBe('plan'); // spec completed, plan started
 
       // Clean up
