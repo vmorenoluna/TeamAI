@@ -51,7 +51,7 @@ describe('analyzeFailedTask TaskStore read failures', () => {
 
   it('succeeds and starts the analysis when the task is failed', async () => {
     mockGetByIdAsync.mockResolvedValue({ id: 't1', phase: 'failed' });
-    await expect(analyzeFailedTask('t1')).resolves.toEqual({ success: true });
+    await expect(analyzeFailedTask('t1')).resolves.toEqual({ success: true, operationId: expect.any(String) });
     expect(mockUpdate).toHaveBeenCalledWith('t1', { refinementStatus: 'analyzing' });
   });
 });
