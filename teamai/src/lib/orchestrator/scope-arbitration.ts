@@ -14,6 +14,7 @@ import { processManager } from '../process-manager';
 import { renderCommand } from '../command-templates';
 import { updateSessionMap, logToOutput } from './helpers';
 import { WorktreeError } from './errors';
+import { RateLimitError } from './rate-limit';
 import { ORCHESTRATOR_FAIL_TYPE } from './types';
 import type { TaskPipeline, PlanSubtask, ScopeRoundRecord, SessionOptsResult } from './types';
 import type { AgentSession } from '../process-manager';
@@ -411,6 +412,11 @@ function budgetCheck(
  * One scope-arbitration action over all pending reports: assess progress, check the budgets,
  * run the planner session and apply its verdicts. An invalid verdict file costs every action
  * subtask one stall and, budget permitting, starts another session for the same reports.
+ *
+ * Rate-limited rounds are free: a RateLimitError from the planner session means no verdict was
+ * ever produced, so the round's bookkeeping is undone before the error propagates. Without that,
+ * the re-entry after the limit resets sees the same unlisted files as a "repeated failure set"
+ * and burns the stall budget without the planner having run.
  */
 export async function runScopeArbitration(
   pipeline: ScopePipeline, deps: ScopeArbitrationDeps, cfg: ScopeBudgetConfig,
@@ -425,6 +431,8 @@ export async function runScopeArbitration(
 
   pipeline.scopeStallCounts ??= {};
   pipeline.scopeRoundHistory ??= {};
+  const stallBefore = Object.fromEntries(actionIds.map(id => [id, pipeline.scopeStallCounts?.[id] ?? 0]));
+  const replanBefore = pipeline.scopeReplanCount ?? 0;
   const records: Record<number, ScopeRoundRecord> = {};
   for (const r of reports) {
     const history = pipeline.scopeRoundHistory[r.subtask_id] ?? [];
@@ -460,7 +468,22 @@ export async function runScopeArbitration(
     deps.savePipelineState(pipeline);
     actionStarted = true;
 
-    await runPlannerSession(deps, pipeline, reports);
+    try {
+      await runPlannerSession(deps, pipeline, reports);
+    } catch (err) {
+      if (err instanceof RateLimitError) {
+        // No verdict was produced: restore the budgets as they were on entry so the re-entry
+        // after the limit resets assesses this action afresh instead of as a repeated round.
+        pipeline.scopeReplanCount = replanBefore;
+        for (const id of actionIds) {
+          pipeline.scopeRoundHistory[id] = (pipeline.scopeRoundHistory[id] ?? []).filter(r => r !== records[id]);
+          pipeline.scopeStallCounts[id] = stallBefore[id];
+        }
+        deps.savePipelineState(pipeline);
+        logToOutput(specPath, '[SCOPE-BUDGET] Planner session was rate-limited — round not counted against the budgets\n');
+      }
+      throw err;
+    }
     const apply = await validateAndApplyVerdicts(pipeline, deps, reports, plan);
     if (apply.valid) {
       for (const id of actionIds) {
