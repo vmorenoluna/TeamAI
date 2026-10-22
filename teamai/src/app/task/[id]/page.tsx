@@ -38,6 +38,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
       sessionMap={full.sessionMap}
       specPath={full.specPath}
       awaitingReviewReason={full.awaitingReviewReason}
+      project={activeProject.path}
       refinementSuggestion={full.refinementSuggestion}
       refinementSuggestions={full.refinementSuggestions}
       refinementMode={full.refinementMode}

@@ -74,6 +74,8 @@ interface Props {
   project?: string;
   onClose?: () => void;
   readonly?: boolean;
+  /** Rendered inside TaskPanel, which owns its own WebSocket — skip mounting PhaseSyncer. */
+  embedded?: boolean;
   /** Role Refinement Assistant — the latest suggestion for this task and the
    *  current role-file contents (props-over-async-fetch, so the diff renders
    *  without a client fetch). */
@@ -87,7 +89,7 @@ interface Props {
 
 const VALID_TABS: Tab[] = ['overview', 'terminal', 'spec', 'plan', 'qa'];
 
-export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, awaitingReviewReason, project, onClose, readonly = false, refinementSuggestion, refinementSuggestions = [], refinementMode = 'manual', roleFiles = {}, onRefinementChanged }: Props) {
+export function TaskDetail({ task, allTasks, dependencies, dependents, spec, specVersions, plan, qaReport, humanFeedback, diff, agentOutput, subtaskTerminals, qaLog, specLog, planLog, mergeLog, sessionMap, specPath, awaitingReviewReason, project, onClose, readonly = false, embedded = false, refinementSuggestion, refinementSuggestions = [], refinementMode = 'manual', roleFiles = {}, onRefinementChanged }: Props) {
   const router = useRouter();
   const { run, isPending } = useServerMutation();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -288,7 +290,7 @@ export function TaskDetail({ task, allTasks, dependencies, dependents, spec, spe
   return (
     <>
     <div id="task-detail-root" className="flex flex-col h-full">
-      {!readonly && <PhaseSyncer />}
+      {!readonly && !embedded && <PhaseSyncer projectPath={project} />}
 
       {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 

@@ -64,9 +64,21 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
     }
   };
 
+  // Re-sync after a reconnect: events dropped while the socket was down would
+  // otherwise leave the panel stale. The first open is the initial load's job.
+  const hasOpenedRef = useRef(false);
+  const onConnectionChangeRef = useRef<(connected: boolean) => void>(undefined);
+  // eslint-disable-next-line react-hooks/refs
+  onConnectionChangeRef.current = (connected) => {
+    if (!connected) return;
+    if (!hasOpenedRef.current) { hasOpenedRef.current = true; return; }
+    if (!readonly) refresh(true);
+  };
+
   useWebSocket({
     project: projectPath,
     onMessage: (msg) => onMessageRef.current?.(msg),
+    onConnectionChange: (connected) => onConnectionChangeRef.current?.(connected),
   });
 
   return (
@@ -121,6 +133,7 @@ export function TaskPanel({ taskId, onClose, readonly = false, onError, cachedDa
             project={projectPath}
             onClose={onClose}
             readonly={readonly}
+            embedded
             refinementSuggestion={data.refinementSuggestion}
             refinementSuggestions={data.refinementSuggestions}
             refinementMode={data.refinementMode}

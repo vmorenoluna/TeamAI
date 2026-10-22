@@ -67,8 +67,13 @@ vi.mock('@/components/review-panel', () => ({
   ReviewPanel: () => <div data-component="review-panel" />,
 }));
 
+const mockPhaseSyncer = vi.hoisted(() => vi.fn());
+
 vi.mock('@/components/phase-syncer', () => ({
-  PhaseSyncer: () => null,
+  PhaseSyncer: (props: { projectPath?: string }) => {
+    mockPhaseSyncer(props);
+    return null;
+  },
 }));
 
 // ── Fixtures ────────────────────────────────────────────────────────────
@@ -110,7 +115,7 @@ describe('TaskDetail mutation handlers', () => {
     window.confirm = originalConfirm;
   });
 
-  function renderDetail(task: Task, extraTasks: Task[] = [], qaReport: unknown = null) {
+  function renderDetail(task: Task, extraTasks: Task[] = [], qaReport: unknown = null, extraProps: { project?: string; embedded?: boolean; readonly?: boolean } = {}) {
     return render(
       <TaskDetail
         task={task}
@@ -127,9 +132,23 @@ describe('TaskDetail mutation handlers', () => {
         planLog={null}
         mergeLog={null}
         sessionMap={{}}
+        {...extraProps}
       />,
     );
   }
+
+  describe('PhaseSyncer mounting', () => {
+    it('standalone with a project mounts PhaseSyncer with that projectPath', () => {
+      renderDetail(makeTask(), [], null, { project: '/p' });
+      expect(mockPhaseSyncer).toHaveBeenCalledWith({ projectPath: '/p' });
+    });
+
+    it('does not mount PhaseSyncer when embedded or readonly', () => {
+      renderDetail(makeTask(), [], null, { project: '/p', embedded: true });
+      renderDetail(makeTask(), [], null, { project: '/p', readonly: true });
+      expect(mockPhaseSyncer).not.toHaveBeenCalled();
+    });
+  });
 
   // ── Raw-throw path (regression) ────────────────────────────────────
   // Each handler below wraps its Server Action in try/catch. The catch
