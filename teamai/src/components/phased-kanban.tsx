@@ -131,24 +131,24 @@ export function PhasedKanban({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allLinkedIds.join(',')]);
 
-  // Real-time sync: re-fetch all linked statuses when any linked task's
-  // phase changes — ensures title and other fields stay current, not just phase.
-  // Uses a request-ID counter to ignore stale responses when overlapping
-  // fetches complete out of order.
+  // Real-time sync: re-fetch all linked statuses when any linked task changes
+  // (or after a WebSocket reconnect, `null`) — ensures title and other fields
+  // stay current, not just phase.  Uses a request-ID counter to ignore stale
+  // responses when overlapping fetches complete out of order.
   const statusReqIdRef = useRef(0);
   usePhaseSync({
     project: projectPath,
-    onPhaseChange: (taskId) => {
-      if (allLinkedIds.includes(taskId)) {
-        const reqId = ++statusReqIdRef.current;
-        getLinkedTaskStatuses(allLinkedIds)
-          .then(result => {
-            if (reqId === statusReqIdRef.current) {
-              setLinkedStatuses(prev => ({ ...prev, ...result }));
-            }
-          })
-          .catch(() => { /* best-effort — existing data stays */ });
-      }
+    onResync: (changedTaskIds) => {
+      if (allLinkedIds.length === 0) return;
+      if (changedTaskIds && !changedTaskIds.some(id => allLinkedIds.includes(id))) return;
+      const reqId = ++statusReqIdRef.current;
+      getLinkedTaskStatuses(allLinkedIds)
+        .then(result => {
+          if (reqId === statusReqIdRef.current) {
+            setLinkedStatuses(prev => ({ ...prev, ...result }));
+          }
+        })
+        .catch(() => { /* best-effort — existing data stays */ });
     },
   });
 
