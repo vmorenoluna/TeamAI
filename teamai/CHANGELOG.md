@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- A scope-arbitration planner session that hits a usage or rate limit no longer counts against the scope stall and round budgets. Previously the round was recorded before the session ran, so when the task resumed after the limit reset it saw the same unlisted files as a repeated failure and failed the ticket without the planner ever producing a verdict. The budgets are now restored to their state on entry, as QA review already does
+
 ## [0.3.0] — 2026-10-14
 
 - **Subtask `files` no longer fail a ticket when a coder touches other files.** Previously a subtask that changed files outside its plan `files` was rejected. Now the subtask's commits are held on their own branch and the planner decides, once per implement pass, whether to approve or reject each extra file (optionally serializing the subtask against others). Approved work is integrated without a re-run; if files were rejected, the subtask re-runs once with the rejected paths shown to the coder. This is bounded by two new pipeline settings, `maxScopeStall` (default 2) and `maxScopeReplans` (default 6); exhausting either fails the task. A session that touched none of its assigned files is still rejected as a no-op

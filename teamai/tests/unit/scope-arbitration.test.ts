@@ -21,6 +21,7 @@ import {
   integrateHeldSubtasks, writeScopeBudgetFailReport, scopeReportPath,
   type ScopeArbitrationDeps, type ScopeReport,
 } from '../../src/lib/orchestrator/scope-arbitration';
+import { RateLimitError } from '../../src/lib/orchestrator/rate-limit';
 import type { TaskPipeline } from '../../src/lib/orchestrator/types';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
@@ -277,6 +278,40 @@ describe('runScopeArbitration', () => {
     const p2 = makePipeline();
     expect((await runScopeArbitration(p2, makeDeps(), cfg)).status).toBe('exhausted');
     expect(sessions).toBe(1);
+  });
+
+  it('a rate-limited planner session is free: budgets are restored and the re-entry is not a repeated round', async () => {
+    await setupHeld();
+    const pipeline = makePipeline();
+    const limited = { ...makeDeps(), waitForCompletion: async () => { throw new RateLimitError(Math.floor(Date.now() / 1000) + 60); } };
+    await expect(runScopeArbitration(pipeline, limited, cfg)).rejects.toBeInstanceOf(RateLimitError);
+    expect(pipeline.scopeReplanCount).toBe(0);
+    expect(pipeline.scopeStallCounts).toEqual({ 1: 0 });
+    expect(pipeline.scopeRoundHistory![1]).toEqual([]);
+    expect(log()).toContain('rate-limited');
+
+    verdictsToWrite = verdicts([ap(1, 'b.ts')]);
+    const res = await runScopeArbitration(pipeline, makeDeps(), cfg);
+    expect(res.status).toBe('applied');
+    expect(sessions).toBe(1);
+    expect(pipeline.scopeReplanCount).toBe(1);
+  });
+
+  it('a rate limit after an invalid verdict file also restores the entry budgets', async () => {
+    await setupHeld();
+    const pipeline = makePipeline();
+    let n = 0;
+    const deps = {
+      ...makeDeps(),
+      waitForCompletion: async () => {
+        if (++n === 1) return; // invalid: no verdicts file written
+        throw new RateLimitError(Math.floor(Date.now() / 1000) + 60);
+      },
+    };
+    await expect(runScopeArbitration(pipeline, deps, { maxScopeStall: 3, maxScopeReplans: 6 })).rejects.toBeInstanceOf(RateLimitError);
+    expect(pipeline.scopeReplanCount).toBe(0);
+    expect(pipeline.scopeStallCounts).toEqual({ 1: 0 });
+    expect(pipeline.scopeRoundHistory![1]).toEqual([]);
   });
 
   it('exhausts on a repeating report (stall) without starting a session, and on the rounds cap', async () => {
